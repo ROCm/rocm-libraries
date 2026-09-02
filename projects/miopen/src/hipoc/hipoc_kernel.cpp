@@ -58,11 +58,30 @@ static std::string DimToFormattedString(const size_t* dims, size_t count)
     return ss.str();
 }
 
+// Rationale and the exact failure modes are documented on the declaration in
+// miopen/hipoc_kernel.hpp.
+void ValidateGlobalWorkSize(const std::array<size_t, 3>& gdims, const std::string& name)
+{
+    constexpr size_t max_global_work_size = 1ULL << 32;
+
+    for(size_t i = 0; i < gdims.size(); ++i)
+    {
+        if(gdims[i] >= max_global_work_size)
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "Kernel " + name + ": global work size " +
+                             DimToFormattedString(gdims.data(), gdims.size()) + " exceeds the " +
+                             "32-bit limit in dimension " + std::to_string(i) +
+                             "; the launch would silently truncate to a wrong grid");
+    }
+}
+
 void HIPOCKernelInvoke::run(void* args, std::size_t size) const
 {
     MIOPEN_LOG_I2("kernel_name = "
                   << GetName() << ", global_work_dim = " << DimToFormattedString(gdims.data(), 3)
                   << ", local_work_dim = " << DimToFormattedString(ldims.data(), 3));
+
+    ValidateGlobalWorkSize(gdims, GetName());
 
     HipEventPtr start = nullptr;
     HipEventPtr stop  = nullptr;
@@ -157,9 +176,10 @@ void HIPOCKernelInvoke::run_cooperative(void** kern_args) const
     }
 
 #if WORKAROUND_SWDEV_448157
-    if(gdims[0] >= (1ULL << 32) || gdims[1] >= (1ULL << 32) || gdims[2] >= (1ULL << 32))
-        MIOPEN_THROW("gridDim x blockDim >= 2^32");
+    ValidateGlobalWorkSize(gdims, GetName());
 
+    // Unlike run(), this path passes the workgroup count rather than the work-item
+    // count, so the division below must be exact or the remainder is silently dropped.
     if(gdims[0] % ldims[0] != 0 || gdims[1] % ldims[1] != 0 || gdims[2] % ldims[2] != 0)
         MIOPEN_THROW(miopenStatusInternalError);
 

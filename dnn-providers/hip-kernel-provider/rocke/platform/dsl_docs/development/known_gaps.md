@@ -26,9 +26,9 @@ gate is fully green. They fall into three kinds:
    would *diverge* from Python and break byte-identity. They are intentionally
    left as-is and are *not* listed here.
 2. **Unreachable / dead branches in this codegen-only library** — code paths
-   whose producers (HIP runtime, device tensors, RDNA-only or gfx1250-only
-   backends) do not exist in the C engine's current scope, so the branch can
-   never be hit by a supported build. These are documented as named gaps below.
+   whose producers (HIP runtime, device tensors) do not exist in the C engine's
+   current scope, so the branch can never be hit by a supported build. These are
+   documented as named gaps below.
 3. **Host-orchestration not yet ported** — the fused-MoE end-to-end forward
    path, which depends on a HIP runtime that this codegen-only engine does not
    carry. This is the **largest single gap** and is described first.
@@ -66,22 +66,38 @@ fabricate device behavior** in the codegen library.
 
 ---
 
-## 2. LLVM lowering — gfx1250 WMMA op-id families
+## 2. gfx1250 instance builders (the ISA backend is ported; the builders are not)
 
-**Subsystem:** `core/lower_llvm/`
+**Subsystem:** `cpp/instances/`
 
-| File | What's missing | Why blocked |
-|---|---|---|
-| `core/lower_llvm/mma.cpp` | The C `WMMA_SPECS` / `WMMA_INT_SPECS` tables omit the Python `_GFX1250_WMMA` (16x16x32 f16/bf16) and `_GFX1250_WMMA_FP8` (16x16x64 fp8/bf8) op-id families. The WMMA op-id fallthrough currently rejects them as "unsupported RDNA WMMA op". |
+The gfx1250 **ISA backend is ported** — `LL_BACKEND_GFX1250` in
+`core/lower_llvm/core.cpp` carries the split wait counters, the async-LDS
+counter, the element-typed `ds_load_tr16_b128` opcodes and the K=32 / K=64 WMMA
+atoms, and the differential lane (`ROCKE_BACKEND=both`) holds every gfx1250
+kernel to byte-identity. `CPP_UNPORTED_ARCHES` is empty as a result.
 
-**Why blocked:** there is no gfx1250 entry in the C backend resolver
-(`rocke_ll_backend_for`). A gfx1250 build is rejected up front with `ROCKE_ERR_KEY`,
-so these op-ids are unreachable through the C lowerer. The rejection is faithful
-for the supported RDNA3/RDNA4 set.
+What remains is a different axis: there is no `cpp/instances/gfx1250/` to mirror
+`python/rocke/instances/gfx1250/` (wmma_gemm, block_scaled_gemm,
+fused_moe_mega_wmma, the Qwen3 day-0 kernels). So gfx1250 kernels are authored in
+Python and lowered by the C++ engine, rather than being built by C++ instance
+builders the way gfx1151 / gfx1201 / gfx942 / gfx950 kernels can be.
 
-**What unblocks it:** porting the gfx1250 ISA backend (split wait-counters +
-57-bit SRD word3) into `rocke_ll_backend_for`, then adding the two op-id families
-to the WMMA spec tables.
+**Consequence:** gfx1250 has no *instance-builder* family in the byte-identity
+gate, because those families compare a C++ builder against its Python twin and
+there is no C++ builder to compare. The gfx1250 **lowerer** is in the gate
+regardless: the `gfx1250_lowering` family
+(`tests/instances/parity/gfx1250_lowering_emit.{c,py}`) builds the same kernel
+from each language's IR builder and byte-compares the lowered `.ll`, one config
+per place `Gfx1250Backend` diverges from its parent, each paired with its gfx950
+twin so a lowering that ignored the backend fails on one side of the pair.
+
+**What unblocks it:** porting the gfx1250 instance builders, then registering the
+families in `cpp/bindings/prove_parity_binding.py`.
+
+**Still inherited placeholders in the ISA backend:** the buffer SRD word3 and the
+gfx11 `s_waitcnt` *layout*, exactly as in Python's `Gfx1250Backend`. The gfx1250
+57-bit SRD is deferred; the waitcnt layout is unreachable because
+`emits_legacy_s_waitcnt` is false. Both are faithful mirrors, not C++-side debt.
 
 ---
 

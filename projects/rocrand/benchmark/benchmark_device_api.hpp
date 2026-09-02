@@ -30,8 +30,34 @@
 
 #include <optional>
 
+// This file provides benchmark runners for device API-based benchmarks.
+//
+// It is organized into multiple layers of abstraction:
+// - device_api_benchmark: provides the primbench infrastructure.
+// - runner: provides infrastructure to set up an RNG engine and launch a generator.
+// - generator: executes the sampling logic and draws values from the requested distribution.
+// - gpu_rand: provides a shared interface to access the C-style device API.
+// - generate_kernel: the actual device kernel being benchmarked.
+//
+// A benchmark is triggered by an API call as follows:
+// 1. `device_api_benchmark<...>` is instantiated in `benchmark_device_api.cpp`.
+// 2. `device_api_benchmark::run` creates a `runner` and a `generator`.
+// 3. The runner uses the generator to produce values.
+//    (This step primarily handles host-side orchestration.)
+// 4. The generator uses `gpu_rand` to invoke the device API.
+//    The call may be vectorized (e.g., `rocrand4`).
+//    Vectorization size is determined by `get_vectorization`.
+// 5. The vectorized output is unrolled via the `unrolled` utility type.
+
 /// The default maximum number of threads per block.
-#define RAND_DEFAULT_MAX_BLOCK_SIZE 256
+///
+/// Default maximum thread count for most generators. Higher values (like 1024)
+/// typically cause register pressure and slowdowns in state-heavy generators
+/// like Sobol.
+#define RAND_DEFAULT_MAX_BLOCK_SIZE 512
+
+/// Specifically for Threefry which requests higher amount of threads.
+#define RAND_THREEFRY_DEFAULT_MAX_BLOCK_SIZE 1024
 
 #ifdef __HIP__
 using rand_state_mrg32k3a_t          = rocrand_state_mrg32k3a;
@@ -81,8 +107,111 @@ constexpr size_t next_power2(size_t x)
     return power;
 }
 
+struct config
+{
+    int block_size;
+    int grid_size;
+    int occupancy;
+
+    /// Returns a configuration that returns the kernel with
+    /// the highest possible occupancy.
+    template<typename Kernel>
+    static config from_kernel_with_max_occupancy(Kernel kernel,
+                                                 int    max_block_size,
+                                                 int    req_grid_size  = 0,
+                                                 int    req_block_size = 0)
+    {
+        config result{0, 0, 0};
+        int    dev_id;
+        int    mp_count;
+
+        PRIMBENCH_CHECK(gpu_get_device(&dev_id));
+        PRIMBENCH_CHECK(gpu_get_mp_count(&mp_count, dev_id));
+
+        gpu_func_attributes_t attr;
+        PRIMBENCH_CHECK(gpu_get_attributes(&attr, (const void*)kernel));
+        int kernel_max_threads    = attr.maxThreadsPerBlock;
+        int actual_max_block_size = std::min(max_block_size, kernel_max_threads);
+
+        if(req_block_size > 0)
+        {
+            // If a block size is requested, use that.
+            int safe_req_block_size = std::min(req_block_size, kernel_max_threads);
+
+            int  occupancy = 0;
+            auto error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
+                                                                (const void*)kernel,
+                                                                safe_req_block_size);
+
+            result.block_size = safe_req_block_size;
+            result.occupancy  = (error == 0) ? occupancy : 1;
+        }
+        else
+        {
+            // Otherwise, sweep options to find the best occupancy configuration
+            for(int block_size = 32; block_size <= actual_max_block_size; block_size *= 2)
+            {
+                if(block_size > max_block_size)
+                {
+                    continue;
+                }
+
+                int  occupancy = 0;
+                auto error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
+                                                                    (const void*)kernel,
+                                                                    block_size);
+                if(error != 0)
+                {
+                    continue;
+                }
+
+                // Higher threads are preferred if occupancy stays the same
+                if(occupancy > result.occupancy
+                   || (occupancy == result.occupancy && block_size > result.block_size))
+                {
+                    result.block_size = block_size;
+                    result.occupancy  = occupancy;
+                }
+            }
+        }
+
+        // Respect user input if provided via cmd
+        result.grid_size = req_grid_size > 0 ? req_grid_size : (result.occupancy * mp_count);
+
+        // Fallback safety guards to avoid zero-sized kernel grid launches
+        if(result.grid_size <= 0)
+        {
+            result.grid_size = 1;
+        }
+        if(result.block_size <= 0)
+        {
+            result.block_size = 256;
+        }
+
+        return result;
+    }
+};
+
+// Helper to provide a block size with respect to generator type
+// Used later in the launch bounds of the generalized kernels.
 template<typename EngineState>
-__global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
+constexpr int get_max_block_size()
+{
+#ifdef __HIP__
+    constexpr bool is_threefry = std::is_same_v<EngineState, rocrand_state_threefry2x32_20>
+                                 || std::is_same_v<EngineState, rocrand_state_threefry2x64_20>
+                                 || std::is_same_v<EngineState, rocrand_state_threefry4x32_20>
+                                 || std::is_same_v<EngineState, rocrand_state_threefry4x64_20>;
+    if constexpr(is_threefry)
+    {
+        return RAND_THREEFRY_DEFAULT_MAX_BLOCK_SIZE;
+    }
+#endif
+    return RAND_DEFAULT_MAX_BLOCK_SIZE;
+}
+
+template<typename EngineState>
+__global__ __launch_bounds__(get_max_block_size<EngineState>())
 void init_kernel(EngineState*             states,
                  const unsigned long long seed,
                  const unsigned long long offset)
@@ -93,18 +222,130 @@ void init_kernel(EngineState*             states,
     states[state_id] = state;
 }
 
+/// Return how many elements an engine can emit in one iteration.
+template<typename EngineState, distribution D, typename T>
+constexpr int get_vectorization()
+{
+    // Sobol doesn't support vectorization.
+    // Mtgp32 does support box-muller, but is not implemented in benchmarks.
+    constexpr bool is_sobol = std::is_same_v<EngineState, rand_state_sobol32_t>
+                              || std::is_same_v<EngineState, rand_state_sobol64_t>
+                              || std::is_same_v<EngineState, rand_state_scrambled_sobol32_t>
+                              || std::is_same_v<EngineState, rand_state_scrambled_sobol64_t>;
+    constexpr bool is_mtgp32 = std::is_same_v<EngineState, rand_state_mtgp32_t>;
+    if constexpr(is_sobol || is_mtgp32)
+    {
+        return 1;
+    }
+
+    // Philox4x supports all vectorized distributions.
+    constexpr bool is_philox4x32_10 = std::is_same_v<EngineState, rand_state_philox4x32_10_t>;
+    if constexpr(is_philox4x32_10)
+    {
+#ifdef __HIP__
+        // rocrand_poisson4 is slow!
+        if constexpr(D == DISTRIBUTION_POISSON)
+        {
+            return 1;
+        }
+#else
+        // curand_uniform4_double(philox4x32) is slow!
+        if constexpr(D == DISTRIBUTION_UNIFORM && std::is_same_v<T, double>)
+        {
+            return 2;
+        }
+#endif
+        return 4;
+    }
+
+    // We can use box-muller for vectorization.
+    if constexpr(D == DISTRIBUTION_NORMAL || D == DISTRIBUTION_LOG_NORMAL)
+    {
+        return 2;
+    }
+
+#ifdef __HIP__
+    constexpr bool is_threefry2x32_20 = std::is_same_v<EngineState, rocrand_state_threefry2x32_20>;
+    constexpr bool is_threefry2x64_20 = std::is_same_v<EngineState, rocrand_state_threefry2x64_20>;
+    constexpr bool is_threefry4x32_20 = std::is_same_v<EngineState, rocrand_state_threefry4x32_20>;
+    constexpr bool is_threefry4x64_20 = std::is_same_v<EngineState, rocrand_state_threefry4x64_20>;
+
+    // Threefry generators can generate more raw values.
+    if constexpr(D == DISTRIBUTION_UNIFORM && std::is_integral_v<T>)
+    {
+        if constexpr(is_threefry4x32_20 || is_threefry4x64_20)
+        {
+            return 4;
+        }
+
+        if constexpr(is_threefry2x32_20 || is_threefry2x64_20)
+        {
+            return 2;
+        }
+    }
+#endif
+
+    // All other generators and distributions have no vectorization!
+    return 1;
+}
+
+template<typename EngineState, distribution D, typename T>
+constexpr int vectorization = get_vectorization<EngineState, D, T>();
+
+/// This struct unrolls a device generator. It automatically
+/// checks if the generator can be vectorized. The operator
+/// will write `n` items to a given `ptr`.
+template<typename Generator, typename T, typename EngineState>
+struct unrolled
+{
+    /// Number of elements in generated vector.
+    static constexpr int n = Generator::n;
+
+    __device__
+    unrolled(Generator& gen)
+        : gen(gen)
+    {}
+    Generator& gen;
+
+    __device__
+    void       operator()(EngineState* state, T* ptr) const
+    {
+        static_assert(n == 1 || n == 2 || n == 4, "Generator must produce 1, 2, or 4 element(s)!");
+        const auto v = gen(state);
+        if constexpr(n == 1)
+        {
+            ptr[0] = v;
+        }
+        else if constexpr(n == 2)
+        {
+            // HIP supports indexing vectorized types via operator[].
+            // CUDA 12.x does not.
+            ptr[0] = v.x;
+            ptr[1] = v.y;
+        }
+        else if constexpr(n == 4)
+        {
+            ptr[0] = v.x;
+            ptr[1] = v.y;
+            ptr[2] = v.z;
+            ptr[3] = v.w;
+        }
+    }
+};
+
 template<typename EngineState, typename T, typename Generator>
-__global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
+__global__ __launch_bounds__(get_max_block_size<EngineState>())
 void generate_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
-    const unsigned int state_id = blockIdx.x * blockDim.x + threadIdx.x;
-    const unsigned int stride   = gridDim.x * blockDim.x;
+    const auto         f        = unrolled<Generator, T, EngineState>(generator);
+    const unsigned int state_id = (blockIdx.x * blockDim.x) + threadIdx.x;
+    const unsigned int stride   = (gridDim.x * blockDim.x) * f.n;
 
     EngineState  state = states[state_id];
-    unsigned int index = state_id;
+    unsigned int index = state_id * f.n;
     while(index < size)
     {
-        data[index] = generator(&state);
+        f(&state, data + index);
         index += stride;
     }
     states[state_id] = state;
@@ -151,6 +392,8 @@ template<typename T, typename Generator>
 __global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_kernel(rand_state_mtgp32_t* states, T* data, const size_t size, Generator generator)
 {
+    const auto f = unrolled<Generator, T, rand_state_mtgp32_t>(generator);
+    static_assert(f.n == 1, "mtgp32 does not support vectorized generation!");
     const unsigned int  state_id  = blockIdx.x;
     const unsigned int  thread_id = threadIdx.x;
     unsigned int        index     = blockIdx.x * blockDim.x + thread_id;
@@ -172,14 +415,17 @@ void generate_kernel(rand_state_mtgp32_t* states, T* data, const size_t size, Ge
     const size_t size_rounded_up   = r == 0 ? size : size_rounded_down + blockDim.x;
     while(index < size_rounded_down)
     {
-        data[index] = generator(&state);
+        f(&state, data + index);
         index += stride;
     }
     while(index < size_rounded_up)
     {
-        auto value = generator(&state);
+        T value;
+        f(&state, &value);
         if(index < size)
+        {
             data[index] = value;
+        }
         index += stride;
     }
 
@@ -333,6 +579,8 @@ template<typename EngineState, typename T, typename Generator>
 __global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_sobol_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
+    const auto f = unrolled<Generator, T, EngineState>(generator);
+    static_assert(f.n == 1, "sobol does not support vectorized generation!");
     const unsigned int dimension = blockIdx.y;
     const unsigned int state_id  = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int stride    = gridDim.x * blockDim.x;
@@ -342,7 +590,7 @@ void generate_sobol_kernel(EngineState* states, T* data, const size_t size, Gene
     unsigned int index  = state_id;
     while(index < size)
     {
-        data[offset + index] = generator(&state);
+        f(&state, data + offset + index);
         skipahead(stride - 1, &state);
         index += stride;
     }
@@ -362,13 +610,14 @@ struct runner<rand_state_sobol32_t>
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
+        : dimensions(dimensions)
     {
-        this->dimensions = dimensions;
 
         direction_vectors32_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors32(&h_directions, RAND_DIRECTION_VECTORS_32_JOEKUO6));
 
-        const size_t states_size = blocks * threads * dimensions;
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_sobol32_t)));
 
         unsigned int* directions;
@@ -376,7 +625,6 @@ struct runner<rand_state_sobol32_t>
         PRIMBENCH_CHECK(gpu_malloc(&directions, size));
         PRIMBENCH_CHECK(gpu_memcpy(directions, h_directions, size, MEMCPY_HOST_TO_DEVICE));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
             states,
             directions,
@@ -421,9 +669,8 @@ struct runner<rand_state_scrambled_sobol32_t>
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
+        : dimensions(dimensions)
     {
-        this->dimensions = dimensions;
-
         direction_vectors32_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors32(&h_directions,
                                                 RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6));
@@ -431,7 +678,8 @@ struct runner<rand_state_scrambled_sobol32_t>
         const unsigned int* h_constants;
         RAND_CHECK(rand_get_scramble_constants32(&h_constants));
 
-        const size_t states_size = blocks * threads * dimensions;
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_scrambled_sobol32_t)));
 
         unsigned int* directions;
@@ -446,7 +694,6 @@ struct runner<rand_state_scrambled_sobol32_t>
         PRIMBENCH_CHECK(
             gpu_memcpy(scramble_constants, h_constants, constants_size, MEMCPY_HOST_TO_DEVICE));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_scrambled_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
             states,
             directions,
@@ -493,13 +740,13 @@ struct runner<rand_state_sobol64_t>
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
+        : dimensions(dimensions)
     {
-        this->dimensions = dimensions;
-
         direction_vectors64_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors64(&h_directions, RAND_DIRECTION_VECTORS_64_JOEKUO6));
 
-        const size_t states_size = blocks * threads * dimensions;
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_sobol64_t)));
 
         unsigned long long int* directions;
@@ -507,7 +754,6 @@ struct runner<rand_state_sobol64_t>
         PRIMBENCH_CHECK(gpu_malloc(&directions, size));
         PRIMBENCH_CHECK(gpu_memcpy(directions, h_directions, size, MEMCPY_HOST_TO_DEVICE));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(states,
                                                                          directions,
                                                                          offset);
@@ -551,9 +797,8 @@ struct runner<rand_state_scrambled_sobol64_t>
            const size_t threads,
            const unsigned long long /* seed */,
            const unsigned long long offset)
+        : dimensions(dimensions)
     {
-        this->dimensions = dimensions;
-
         direction_vectors64_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors64(&h_directions,
                                                 RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6));
@@ -561,7 +806,8 @@ struct runner<rand_state_scrambled_sobol64_t>
         const unsigned long long* h_constants;
         RAND_CHECK(rand_get_scramble_constants64(&h_constants));
 
-        const size_t states_size = blocks * threads * dimensions;
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_scrambled_sobol64_t)));
 
         unsigned long long int* directions;
@@ -576,7 +822,6 @@ struct runner<rand_state_scrambled_sobol64_t>
         PRIMBENCH_CHECK(
             gpu_memcpy(scramble_constants, h_constants, constants_size, MEMCPY_HOST_TO_DEVICE));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_scrambled_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
             states,
             directions,
@@ -620,124 +865,55 @@ struct generator_type
     static void destroy() {}
 };
 
-template<typename Engine>
-struct generator_uint : public generator_type
+/// Benchmarkable generators.
+template<distribution Distribution, typename T, typename Engine>
+struct generator : public generator_type
 {
-    typedef unsigned int data_type;
+    static constexpr int n = vectorization<Engine, Distribution, T>;
+    using device_api       = wrappers::gpu_rand<Distribution, n, T>;
 
     __device__
-    data_type            operator()(Engine* state) const
+    auto operator()(Engine* state) const
     {
-        return gpu_rand(state);
+        return device_api{}(state);
     }
 };
 
-template<typename Engine>
-struct generator_ullong : public generator_type
+template<typename T, typename Engine>
+struct generator<DISTRIBUTION_LOG_NORMAL, T, Engine> : public generator_type
 {
-    typedef unsigned long long int data_type;
+    static constexpr int n = vectorization<Engine, DISTRIBUTION_LOG_NORMAL, T>;
+    using device_api       = wrappers::gpu_rand<DISTRIBUTION_LOG_NORMAL, n, T>;
 
     __device__
-    data_type                      operator()(Engine* state) const
+    auto operator()(Engine* state) const
     {
-        return gpu_rand(state);
+        return device_api{}(state, 0.f, 1.f);
     }
 };
 
-template<typename Engine>
-struct generator_uniform : public generator_type
+template<typename T, typename Engine>
+struct generator<DISTRIBUTION_POISSON, T, Engine> : public generator_type
 {
-    typedef float data_type;
-
-    __device__
-    data_type     operator()(Engine* state) const
-    {
-        return gpu_rand_uniform(state);
-    }
-};
-
-template<typename Engine>
-struct generator_uniform_double : public generator_type
-{
-    typedef double data_type;
-
-    __device__
-    data_type      operator()(Engine* state) const
-    {
-        return gpu_rand_uniform_double(state);
-    }
-};
-
-template<typename Engine>
-struct generator_normal : public generator_type
-{
-    typedef float data_type;
-
-    __device__
-    data_type     operator()(Engine* state) const
-    {
-        return gpu_rand_normal(state);
-    }
-};
-
-template<typename Engine>
-struct generator_normal_double : public generator_type
-{
-    typedef double data_type;
-
-    __device__
-    data_type      operator()(Engine* state) const
-    {
-        return gpu_rand_normal_double(state);
-    }
-};
-
-template<typename Engine>
-struct generator_log_normal : public generator_type
-{
-    typedef float data_type;
-
-    __device__
-    data_type     operator()(Engine* state) const
-    {
-        return gpu_rand_log_normal(state, 0.f, 1.f);
-    }
-};
-
-template<typename Engine>
-struct generator_log_normal_double : public generator_type
-{
-    typedef double data_type;
-
-    __device__
-    data_type      operator()(Engine* state) const
-    {
-        return gpu_rand_log_normal_double(state, 0., 1.);
-    }
-};
-
-template<typename Engine>
-struct generator_poisson : public generator_type
-{
-    generator_poisson(double l) : lambda(l) {}
-
-    typedef unsigned int data_type;
-
-    __device__
-    data_type            operator()(Engine* state) const
-    {
-        return gpu_rand_poisson(state, lambda);
-    }
-
+    generator(double l) : lambda(l) {}
     double lambda;
+
+    static constexpr int n = vectorization<Engine, DISTRIBUTION_POISSON, T>;
+    using device_api       = wrappers::gpu_rand<DISTRIBUTION_POISSON, n, T>;
+
+    __device__
+    auto operator()(Engine* state) const
+    {
+        return device_api{}(state, lambda);
+    }
 };
 
-template<typename Engine>
-struct generator_discrete_poisson : public generator_type
+template<typename T, typename Engine>
+struct generator<DISTRIBUTION_DISCRETE_POISSON, T, Engine> : public generator_type
 {
-    generator_discrete_poisson(double l) : lambda(l) {}
-
-    typedef unsigned int data_type;
+    generator(double l) : lambda(l) {}
+    rand_discrete_distribution_t discrete_distribution;
+    double                       lambda;
 
     void create()
     {
@@ -749,21 +925,21 @@ struct generator_discrete_poisson : public generator_type
         RAND_CHECK(rand_destroy_discrete_distribution(discrete_distribution));
     }
 
-    __device__
-    data_type operator()(Engine* state) const
-    {
-        return rand_discrete(state, discrete_distribution);
-    }
+    static constexpr int n = vectorization<Engine, DISTRIBUTION_DISCRETE_POISSON, T>;
+    using device_api       = wrappers::gpu_rand<DISTRIBUTION_DISCRETE_POISSON, n, T>;
 
-    rand_discrete_distribution_t discrete_distribution;
-    double                       lambda;
+    __device__
+    auto operator()(Engine* state) const
+    {
+        return device_api{}(state, discrete_distribution);
+    }
 };
 
 #ifdef __HIP__
-template<typename Engine>
-struct generator_discrete_custom : public generator_type
+template<typename T, typename Engine>
+struct generator<DISTRIBUTION_DISCRETE_CUSTOM, T, Engine> : public generator_type
 {
-    typedef unsigned int data_type;
+    rand_discrete_distribution_t discrete_distribution;
 
     void create()
     {
@@ -786,13 +962,14 @@ struct generator_discrete_custom : public generator_type
         RAND_CHECK(rand_destroy_discrete_distribution(discrete_distribution));
     }
 
-    __device__
-    data_type operator()(Engine* state) const
-    {
-        return rand_discrete(state, discrete_distribution);
-    }
+    static constexpr int n = vectorization<Engine, DISTRIBUTION_DISCRETE_CUSTOM, T>;
+    using device_api       = wrappers::gpu_rand<DISTRIBUTION_DISCRETE_CUSTOM, n, T>;
 
-    rand_discrete_distribution_t discrete_distribution;
+    __device__
+    auto operator()(Engine* state) const
+    {
+        return device_api{}(state, discrete_distribution);
+    }
 };
 #endif
 
@@ -813,17 +990,28 @@ struct device_api_benchmark : public primbench::benchmark_interface
         , m_dimensions(dimensions)
         , m_offset(offset)
         , m_poisson_lambda(poisson_lambda)
-    {}
+    {
+        // Calculate and overwrite block/grid configs if not provided by the user, using occupancy helper.
+        auto cfg = config::from_kernel_with_max_occupancy(
+            generate_kernel<State, T, Generator>,
+            get_max_block_size<State>(), // max threads per block
+            static_cast<int>(blocks),
+            static_cast<int>(threads));
+
+        m_blocks  = cfg.grid_size;
+        m_threads = cfg.block_size;
+    }
 
     primbench::json meta() const override
     {
-        auto json
-            = primbench::json{}
-                  .add("algo", "device_api")
-                  .add("engine", engine_name(m_engine))
-                  .add("type", primbench::name<T>())
-                  .add("distribution", distribution_name(Distribution))
-                  .add("cfg", primbench::json{}.add("blocks", m_blocks).add("threads", m_threads));
+        // Even though we know the config, we do not tell primbench about it.
+        // This is because we want to make comparisons per algo, engine, and type.
+        // The configuration itself is not relevant for performance.
+        auto json = primbench::json{}
+                        .add("algo", "device_api")
+                        .add("engine", engine_name(m_engine))
+                        .add("type", primbench::name<T>())
+                        .add("distribution", distribution_name(Distribution));
 
         if constexpr(Distribution == DISTRIBUTION_POISSON
                      || Distribution == DISTRIBUTION_DISCRETE_POISSON)
@@ -836,7 +1024,8 @@ struct device_api_benchmark : public primbench::benchmark_interface
     {
         const auto& stream = state.stream;
 
-        const size_t items = state.size;
+        // Pad items s.t. it is always divisible by 4 to account for vectorization.
+        const size_t items = (state.size + 0b11) & ~size_t(0b11);
 
         primbench::log("Creating generator");
         m_generator.create();

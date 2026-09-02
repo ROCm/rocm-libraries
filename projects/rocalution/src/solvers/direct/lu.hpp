@@ -32,10 +32,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class LU
-  * \brief LU Decomposition
-  * \details
-  * Lower-Upper Decomposition factors a given square matrix into lower and upper
-  * triangular matrix, such that \f$A = LU\f$.
+  * \brief LU decomposition direct solver.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

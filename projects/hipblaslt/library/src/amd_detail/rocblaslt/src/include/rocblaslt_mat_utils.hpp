@@ -151,6 +151,10 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
                                            int64_t                       batch_stride_b = 0,
                                            int64_t                       batch_stride_c = 0,
                                            int64_t                       batch_stride_d = 0,
+                                           int64_t                       batch_offset_a = 0,
+                                           int64_t                       batch_offset_b = 0,
+                                           int64_t                       batch_offset_c = 0,
+                                           int64_t                       batch_offset_d = 0,
                                            const rocblaslt_pointer_mode& pointermode
                                            = rocblaslt_pointer_mode_host)
 {
@@ -211,17 +215,30 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
     if(batch_stride_a < 0 || batch_stride_b < 0 || batch_stride_c < 0 || batch_stride_d < 0)
     {
 #ifndef CODE_COVERAGE
-        std::cerr << "matrix and stride size must be positive" << std::endl;
+        std::cerr << "matrix and stride size must be zero or positive" << std::endl;
 #endif
         return rocblaslt_status_invalid_size;
     }
 
-    // number of batches of matrics A,B,C,D must be the same and negative
+    // Batch offsets are expressed in elements and converted to bytes; sub-byte
+    // (MX) data types are not byte-addressable, so a nonzero offset is unsupported.
+    if((batch_offset_a != 0 && hip_datatype_is_mxtype(type_a))
+       || (batch_offset_b != 0 && hip_datatype_is_mxtype(type_b))
+       || (batch_offset_c != 0 && hip_datatype_is_mxtype(type_c))
+       || (batch_offset_d != 0 && hip_datatype_is_mxtype(type_d)))
+    {
+#ifndef CODE_COVERAGE
+        std::cerr << "matrix offset is not supported for sub-byte (MX) data types" << std::endl;
+#endif
+        return rocblaslt_status_not_implemented;
+    }
+
+    // number of batches of matrics A,B,C,D must be the same and positive
     if(num_batches_a != num_batches_b || num_batches_a != num_batches_c
        || num_batches_a != num_batches_d || num_batches_a < 1)
     {
 #ifndef CODE_COVERAGE
-        std::cerr << " number of batches of matrics A,B,C,D must be the same and negative"
+        std::cerr << " number of batches of matrics A,B,C,D must be the same and positive"
                   << std::endl;
 #endif
         return rocblaslt_status_invalid_size;
@@ -329,15 +346,19 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                                     hipDataType&                a_type,
                                                     int64_t&                    lda,
                                                     int64_t&                    batch_stride_a,
+                                                    int64_t&                    batch_offset_a,
                                                     hipDataType&                b_type,
                                                     int64_t&                    ldb,
                                                     int64_t&                    batch_stride_b,
+                                                    int64_t&                    batch_offset_b,
                                                     hipDataType&                c_type,
                                                     int64_t&                    ldc,
                                                     int64_t&                    batch_stride_c,
+                                                    int64_t&                    batch_offset_c,
                                                     hipDataType&                d_type,
                                                     int64_t&                    ldd,
                                                     int64_t&                    batch_stride_d,
+                                                    int64_t&                    batch_offset_d,
                                                     int64_t&                    lde,
                                                     int64_t&                    batch_stride_e,
                                                     void*&                      bias,
@@ -367,18 +388,21 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
     a_type                = matA->type;
     lda                   = matA->ld;
     batch_stride_a        = matA->batch_stride;
+    batch_offset_a        = matA->batch_offset;
 
     // matrix B
     int num_batches_b = matB->batch_count;
     b_type            = matB->type;
     ldb               = matB->ld;
     batch_stride_b    = matB->batch_stride;
+    batch_offset_b    = matB->batch_offset;
 
     // matrix C
     int num_batches_c = matC->batch_count;
     c_type            = matC->type;
     ldc               = matC->ld;
     batch_stride_c    = matC->batch_stride;
+    batch_offset_c    = matC->batch_offset;
 
     // matrix D
     int64_t num_rows_d    = matD->m;
@@ -387,12 +411,39 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
     d_type                = matD->type;
     ldd                   = matD->ld;
     batch_stride_d        = matD->batch_stride;
+    batch_offset_d        = matD->batch_offset;
 
     compute_type = matmul_descr->compute_type;
 
     m = num_rows_d;
     n = num_cols_d;
     k = (opA == HIPBLAS_OP_N) ? num_cols_a : num_rows_a;
+
+    // Validate: batch offsets are only valid with POINTER_ARRAY mode (general batched)
+    bool hasNonZeroOffset = (batch_offset_a != 0) || (batch_offset_b != 0)
+                         || (batch_offset_c != 0) || (batch_offset_d != 0);
+
+    if(hasNonZeroOffset)
+    {
+        // Check that all matrices are using POINTER_ARRAY mode
+        if(matA->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+           || matB->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+           || matC->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+           || matD->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+        {
+            log_error(__func__,
+                      "Batch offsets require all matrices to use batch_mode=POINTER_ARRAY. ",
+                      "Current modes: A=", matA->batch_mode,
+                      ", B=", matB->batch_mode,
+                      ", C=", matC->batch_mode,
+                      ", D=", matD->batch_mode,
+                      ". Offsets: A=", batch_offset_a,
+                      ", B=", batch_offset_b,
+                      ", C=", batch_offset_c,
+                      ", D=", batch_offset_d);
+            return rocblaslt_status_invalid_value;
+        }
+    }
 
     auto matmul_status = validateMatmulArgs(m,
                                             n,
@@ -418,6 +469,10 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                             batch_stride_b,
                                             batch_stride_c,
                                             batch_stride_d,
+                                            batch_offset_a,
+                                            batch_offset_b,
+                                            batch_offset_c,
+                                            batch_offset_d,
                                             matmul_descr->pointermode);
 
     const void* alphaVecPtr     = matmul_descr->pointermode ? alpha : nullptr;

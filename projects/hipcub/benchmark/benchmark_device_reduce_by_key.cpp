@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,222 +26,146 @@
     #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-#include "common_benchmark_header.hpp"
+#include "benchmark_utils.hpp"
 
-// HIP API
 #include <hipcub/device/device_reduce.hpp>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
-#endif
-
-const unsigned int batch_size  = 10;
-const unsigned int warmup_size = 5;
-
-template<class Key, class Value, class BinaryFunction>
-void run_benchmark(benchmark::State& state,
-                   size_t            max_length,
-                   hipStream_t       stream,
-                   size_t            size,
-                   BinaryFunction    reduce_op)
+template<class Key, class Value, size_t MaxLength, class BinaryFunction>
+class reduce_by_key_benchmark : public primbench::benchmark_interface
 {
-    using key_type   = Key;
-    using value_type = Value;
+    static constexpr bool is_sum = std::is_same_v<BinaryFunction, hipcub::Sum>;
+    static constexpr bool is_min = std::is_same_v<BinaryFunction, hipcub::Min>;
+    static_assert(is_sum || is_min, "unknown binary function");
 
-    // Generate data
-    std::vector<key_type> keys_input(size);
-
-    unsigned int        unique_count = 0;
-    std::vector<size_t> key_counts
-        = benchmark_utils::get_random_data<size_t>(100000, 1, max_length);
-    size_t offset = 0;
-    while(offset < size)
+    primbench::json meta() const override
     {
-        const size_t key_count = key_counts[unique_count % key_counts.size()];
-        const size_t end       = _HIPCUB_STD::min(size, offset + key_count);
-        for(size_t i = offset; i < end; i++)
+        return primbench::json{}
+            .add("algo", "device_reduce_by_key")
+            .add("lvl", "device")
+            .add("key_data_type", primbench::name<Key>())
+            .add("value_data_type", primbench::name<Value>())
+            .add("random_number_range", "[1, " + std::to_string(MaxLength) + "]")
+            .add("reduce_op", is_sum ? "sum" : (is_min ? "min" : "unknown"));
+    }
+
+    void run(primbench::state& state) override
+    {
+        const size_t items  = state.size;
+        const auto&  stream = state.stream;
+
+        // Generate data
+        std::vector<Key> keys_input(items);
+
+        unsigned int        unique_count = 0;
+        std::vector<size_t> key_counts
+            = benchmark_utils::get_random_data<size_t>(100000, 1, MaxLength);
+        size_t offset = 0;
+        while(offset < items)
         {
-            keys_input[i] = unique_count;
+            const size_t key_count = key_counts[unique_count % key_counts.size()];
+            const size_t end       = std::min(items, offset + key_count);
+            for(size_t i = offset; i < end; i++)
+            {
+                keys_input[i] = unique_count;
+            }
+
+            unique_count++;
+            offset += key_count;
         }
 
-        unique_count++;
-        offset += key_count;
-    }
+        std::vector<Value> values_input(items);
+        std::iota(values_input.begin(), values_input.end(), 0);
 
-    std::vector<value_type> values_input(size);
-    std::iota(values_input.begin(), values_input.end(), 0);
+        Key* d_keys_input;
+        HIP_CHECK(hipMalloc(&d_keys_input, items * sizeof(Key)));
+        HIP_CHECK(
+            hipMemcpy(d_keys_input, keys_input.data(), items * sizeof(Key), hipMemcpyHostToDevice));
 
-    key_type* d_keys_input;
-    HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-    HIP_CHECK(
-        hipMemcpy(d_keys_input, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
+        Value* d_values_input;
+        HIP_CHECK(hipMalloc(&d_values_input, items * sizeof(Value)));
+        HIP_CHECK(hipMemcpy(d_values_input,
+                            values_input.data(),
+                            items * sizeof(Value),
+                            hipMemcpyHostToDevice));
 
-    value_type* d_values_input;
-    HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-    HIP_CHECK(hipMemcpy(d_values_input,
-                        values_input.data(),
-                        size * sizeof(value_type),
-                        hipMemcpyHostToDevice));
+        Key*          d_unique_output;
+        Value*        d_aggregates_output;
+        unsigned int* d_unique_count_output;
+        HIP_CHECK(hipMalloc(&d_unique_output, unique_count * sizeof(Key)));
+        HIP_CHECK(hipMalloc(&d_aggregates_output, unique_count * sizeof(Value)));
+        HIP_CHECK(hipMalloc(&d_unique_count_output, sizeof(unsigned int)));
 
-    key_type*     d_unique_output;
-    value_type*   d_aggregates_output;
-    unsigned int* d_unique_count_output;
-    HIP_CHECK(hipMalloc(&d_unique_output, unique_count * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_aggregates_output, unique_count * sizeof(value_type)));
-    HIP_CHECK(hipMalloc(&d_unique_count_output, sizeof(unsigned int)));
+        void*  d_temp_storage = nullptr;
+        size_t temp_storage_bytes;
 
-    void*  d_temporary_storage     = nullptr;
-    size_t temporary_storage_bytes = 0;
+        BinaryFunction reduce_op{};
 
-    HIP_CHECK(hipcub::DeviceReduce::ReduceByKey(nullptr,
-                                                temporary_storage_bytes,
-                                                d_keys_input,
-                                                d_unique_output,
-                                                d_values_input,
-                                                d_aggregates_output,
-                                                d_unique_count_output,
-                                                reduce_op,
-                                                size,
-                                                stream));
-
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
-    {
-        HIP_CHECK(hipcub::DeviceReduce::ReduceByKey(d_temporary_storage,
-                                                    temporary_storage_bytes,
-                                                    d_keys_input,
-                                                    d_unique_output,
-                                                    d_values_input,
-                                                    d_aggregates_output,
-                                                    d_unique_count_output,
-                                                    reduce_op,
-                                                    size,
-                                                    stream));
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    for(auto _ : state)
-    {
-        auto start = std::chrono::high_resolution_clock::now();
-
-        for(size_t i = 0; i < batch_size; i++)
+        const auto launch = [&]
         {
-            HIP_CHECK(hipcub::DeviceReduce::ReduceByKey(d_temporary_storage,
-                                                        temporary_storage_bytes,
+            HIP_CHECK(hipcub::DeviceReduce::ReduceByKey(d_temp_storage,
+                                                        temp_storage_bytes,
                                                         d_keys_input,
                                                         d_unique_output,
                                                         d_values_input,
                                                         d_aggregates_output,
                                                         d_unique_count_output,
                                                         reduce_op,
-                                                        size,
+                                                        items,
                                                         stream));
-        }
-        HIP_CHECK(hipStreamSynchronize(stream));
+        };
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        launch();
+
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        state.set_items(items);
+        state.add_writes<Key>(items);
+        state.add_writes<Value>(items);
+
+        state.run(launch);
+
+        HIP_CHECK(hipFree(d_temp_storage));
+        HIP_CHECK(hipFree(d_keys_input));
+        HIP_CHECK(hipFree(d_values_input));
+        HIP_CHECK(hipFree(d_unique_output));
+        HIP_CHECK(hipFree(d_aggregates_output));
+        HIP_CHECK(hipFree(d_unique_count_output));
     }
-    state.SetBytesProcessed(state.iterations() * batch_size * size
-                            * (sizeof(key_type) + sizeof(value_type)));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
+};
 
-    HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_keys_input));
-    HIP_CHECK(hipFree(d_values_input));
-    HIP_CHECK(hipFree(d_unique_output));
-    HIP_CHECK(hipFree(d_aggregates_output));
-    HIP_CHECK(hipFree(d_unique_count_output));
-}
+#define CREATE_BENCHMARK(Key, Value, REDUCE_OP) \
+    executor.queue<reduce_by_key_benchmark<Key, Value, MaxLength, REDUCE_OP>>()
 
-#define CREATE_BENCHMARK(Key, Value, REDUCE_OP)                                                \
-    benchmark::RegisterBenchmark(std::string("device_reduce_by_key"                            \
-                                             "<key_data_type:" #Key ",value_data_type:" #Value \
-                                             ",reduce_op:" #REDUCE_OP ">."                     \
-                                             "(random_number_range:[1, "                       \
-                                             + std::to_string(max_length) + "])")              \
-                                     .c_str(),                                                 \
-                                 &run_benchmark<Key, Value, REDUCE_OP>,                        \
-                                 max_length,                                                   \
-                                 stream,                                                       \
-                                 size,                                                         \
-                                 REDUCE_OP())
+#define CREATE_BENCHMARKS(REDUCE_OP)                  \
+    CREATE_BENCHMARK(int, float, REDUCE_OP);          \
+    CREATE_BENCHMARK(int, double, REDUCE_OP);         \
+    CREATE_BENCHMARK(int, custom_double2, REDUCE_OP); \
+    CREATE_BENCHMARK(int8_t, int8_t, REDUCE_OP);      \
+    CREATE_BENCHMARK(int64_t, float, REDUCE_OP);    \
+    CREATE_BENCHMARK(int64_t, double, REDUCE_OP)
 
-#define CREATE_BENCHMARKS(REDUCE_OP)                                                   \
-    CREATE_BENCHMARK(int, float, REDUCE_OP), CREATE_BENCHMARK(int, double, REDUCE_OP), \
-        CREATE_BENCHMARK(int, custom_double2, REDUCE_OP),                              \
-        CREATE_BENCHMARK(int8_t, int8_t, REDUCE_OP),                                   \
-        CREATE_BENCHMARK(long long, float, REDUCE_OP),                                 \
-        CREATE_BENCHMARK(long long, double, REDUCE_OP)
-
-void add_benchmarks(size_t                                        max_length,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    hipStream_t                                   stream,
-                    size_t                                        size)
+template<size_t MaxLength>
+void add_benchmarks(primbench::executor& executor)
 {
-    using custom_double2 = benchmark_utils::custom_type<double, double>;
-
-    std::vector<benchmark::internal::Benchmark*> bs = {
-        CREATE_BENCHMARKS(benchmark_utils::plus),
-        CREATE_BENCHMARK(long long, custom_double2, benchmark_utils::plus),
-        CREATE_BENCHMARKS(benchmark_utils::minimum),
+    CREATE_BENCHMARKS(hipcub::Sum);
+    CREATE_BENCHMARK(int64_t, custom_double2, hipcub::Sum);
+    CREATE_BENCHMARKS(hipcub::Min);
 #ifdef HIPCUB_ROCPRIM_API
-        CREATE_BENCHMARK(long long, custom_double2, benchmark_utils::minimum),
+    CREATE_BENCHMARK(int64_t, custom_double2, hipcub::Min);
 #endif
-    };
-
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.run_and_exit_if_error();
+    primbench::settings settings;
+    settings.size                 = 32 * primbench::MiB; // In items
+    settings.min_gpu_ms_per_batch = 100;
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
+    primbench::executor executor(argc, argv, settings);
 
-    std::cout << "benchmark_device_reduce_by_key" << std::endl;
+    add_benchmarks<1000>(executor);
+    add_benchmarks<10>(executor);
 
-    // HIP
-    hipStream_t     stream = 0; // default
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(1000, benchmarks, stream, size);
-    add_benchmarks(10, benchmarks, stream, size);
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

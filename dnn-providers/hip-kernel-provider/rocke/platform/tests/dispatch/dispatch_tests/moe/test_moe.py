@@ -62,7 +62,7 @@ class TestMoeDispatch(unittest.TestCase):
 
     def test_candidates_dtype_exclusive(self):
         req = _moe(dtype="fp8")
-        supported = [c for c in moe_candidates() if c.supports(req)[0]]
+        supported = [c for c in moe_candidates() if c.admits(req)[0]]
         self.assertEqual([c.spec_id for c in supported], ["mega_fp8"])
 
     def test_unique_candidate_names(self):

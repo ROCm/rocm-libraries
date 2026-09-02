@@ -1,0 +1,45 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=s --RegisterAllocationPass=allocator=greedy-compact,classes=s,apply --print-output
+#
+# gfx1250's SmemSelfOverlapUnderXnackReplay rule, end to end.
+#
+# A multi-DWORD scalar load can return some DWORDs and XNACK on others. Replay
+# re-reads the address, so a load whose destination covers its own address has
+# nothing left to replay from, and Gfx1250HazardPass asserts when it sees one.
+#
+# This is not hypothetical. s[0:1] is a live-in that dies at the load, and the
+# load's destination is defined there, so half-open ranges let them share a
+# register. Compaction takes that offer: without this rule the same input
+# colours as
+#
+#     s[0:1] = "st.s_load_b64"(s[0:1])
+#
+# which is precisely the unrepairable case. The rule makes the destination
+# overlap the sources dying at the load, so PhysRegMatrix refuses to share and
+# the destination is pushed clear of the address.
+#
+# No `rules=` override: the rule is Active for gfx1250 whenever XNACK replay is
+# enabled, which stinkytofu-opt stands in for. So this exercises the shipped
+# configuration rather than a forced one.
+#
+# CHECK-LABEL: @allocation_rule_smem_self_overlap
+# CHECK: ^entry:
+#
+# The address keeps s[0:1]: it is a function live-in, so it cannot move at all.
+# The destination is what relocates, and it must not touch s0 or s1.
+# CHECK-NEXT: s[2:3] = "st.s_load_b64"(s[0:1])
+#
+# The consumer follows the destination to its new registers. s0 is free again by
+# this point -- the address is dead -- so compaction still packs the sum low.
+# CHECK-NEXT: s0 = "st.s_add_u32"(s2, s3)
+#
+# The load must never write the register pair it reads.
+# CHECK-NOT: s[0:1] = "st.s_load_b64"(s[0:1])
+#
+# Applying the colouring clears the attached SSA.
+# CHECK-NOT: %
+
+st.func @allocation_rule_smem_self_overlap() {
+^entry:
+  s[4:5] = "st.s_load_b64"(s[0:1])
+  s6 = "st.s_add_u32"(s4, s5)
+}

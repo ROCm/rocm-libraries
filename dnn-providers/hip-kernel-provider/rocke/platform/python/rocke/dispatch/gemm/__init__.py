@@ -7,7 +7,7 @@ The package is organized by case so future GEMM variants can reuse common
 request/shape helpers without growing one monolithic module:
 
 * ``common.py``: GEMM-family request and validation helpers (dtype/layout
-  generic), including the arch-family gate shared by every case.
+  generic), including the dimension vocabulary capabilities constrain.
 * ``fp16_rcr.py``: UniversalGemm FP16 RCR candidates (the first case).
 * ``bf16_rcr.py``: UniversalGemm BF16 RCR candidates (the worked template for
   adding further dtypes/layouts).

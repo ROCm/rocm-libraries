@@ -123,8 +123,17 @@ endif()
 
 if( NOT "${ROCFFT_LINKED_VERSION}" STREQUAL ""
     AND NOT ROCFFT_LINKED_VERSION VERSION_LESS ROCFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION )
-  list( APPEND rocfft-test_source rocfft_c.c )
-  set( ROCFFT_ENABLE_C_API_COMPILE_TEST ON )
+  add_executable( rocfft_c rocfft_c.c )
+  # Use BEFORE so that the repository's public header takes priority over
+  # any system-installed rocfft header added by directory-level
+  # include_directories() (e.g. from HIP_INCLUDE_DIRS).
+  target_include_directories( rocfft_c BEFORE PRIVATE
+    $<TARGET_PROPERTY:roc::rocfft,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+  target_link_libraries( rocfft_c
+    PRIVATE
+    roc::rocfft
+    )
 else()
   message( STATUS
     "Skipping rocfft_c.c: linked rocFFT version '${ROCFFT_LINKED_VERSION}' is older than ${ROCFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION}." )
@@ -132,37 +141,8 @@ endif()
 
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
 
-if( NOT ROCFFT_ENABLE_C_API_COMPILE_TEST )
-  target_compile_definitions( rocfft-test PRIVATE SKIP_ROCFFT_C_TEST )
-endif()
-
-# Standalone clients builds can pick up /opt/rocm headers from transitive
-# dependencies; force the resolved rocFFT package include path to the front.
-set( ROCFFT_PACKAGE_INCLUDE_DIRS "" )
-if( TARGET roc::rocfft )
-  get_target_property( ROCFFT_PACKAGE_INCLUDE_DIRS roc::rocfft INTERFACE_INCLUDE_DIRECTORIES )
-endif()
-if( NOT ROCFFT_PACKAGE_INCLUDE_DIRS )
-  if( DEFINED rocfft_INCLUDE_DIRS )
-    set( ROCFFT_PACKAGE_INCLUDE_DIRS ${rocfft_INCLUDE_DIRS} )
-  elseif( DEFINED ROCFFT_INCLUDE_DIRS )
-    set( ROCFFT_PACKAGE_INCLUDE_DIRS ${ROCFFT_INCLUDE_DIRS} )
-  endif()
-endif()
-if( ROCFFT_PACKAGE_INCLUDE_DIRS )
-  list( REMOVE_DUPLICATES ROCFFT_PACKAGE_INCLUDE_DIRS )
-  target_include_directories( rocfft-test BEFORE PRIVATE ${ROCFFT_PACKAGE_INCLUDE_DIRS} )
-endif()
-
-# rocFFT device code builds with -O3 by default.  rocfft-test
-# contains device code for callback functions, so ensure the device
-# code is built with the same optimization level to minimize chance
-# of a mismatch.
-# rocfft_c.c is plain C and must not receive HIP device flags.
-target_compile_options( rocfft-test PRIVATE
-  $<$<NOT:$<COMPILE_LANGUAGE:C>>:-Xarch_device -O3> )
-
 option( BUILD_FFTW "Download and build FFTW" OFF )
+
 
 # look for installed FFTW if we weren't asked to build it
 if( NOT BUILD_FFTW )
@@ -425,6 +405,16 @@ set_target_properties(rocfft-test
                       RUNTIME_OUTPUT_DIRECTORY 
                       ${TESTS_OUT_DIR})
 
+# On Linux, always include amdgcnspirv target so the clients work
+# on an architecture that the runtime supports but was not
+# specified a build time
+# TODO: amdgcnspirv is not compatible with ASAN.
+get_target_property(test_opts rocfft-test COMPILE_OPTIONS)
+if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+  target_compile_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
+  target_link_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
+endif()
+
 rocm_install(TARGETS rocfft-test COMPONENT tests)
 
 #Ctest based Test Filter Standardization using test_categories.yaml
@@ -552,6 +542,15 @@ if( ROCFFT_MPI_ENABLE )
                           ${TESTS_OUT_DIR})
     rocm_install(TARGETS ${worker} COMPONENT tests)
 
+    # On Linux, always include amdgcnspirv target so the clients work
+    # on an architecture that the runtime supports but was not
+    # specified a build time
+    # TODO: amdgcnspirv is not compatible with ASAN.
+    get_target_property(worker_opts ${worker} COMPILE_OPTIONS)
+    if( NOT WIN32 AND NOT worker_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+      target_compile_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
+      target_link_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
+    endif()
   endforeach()
 
   # link normal MPI worker against rocFFT

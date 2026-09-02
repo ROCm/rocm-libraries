@@ -157,7 +157,7 @@ else()
                 message("-- ${Yellow}${PROJECT_NAME} Warning: Python3 not found — executables will be built but Python test scripts cannot run${ColourReset}")
             endif()
 
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DGPU_SUPPORT=1 -DRPP_BACKEND_HIP=1")
+            add_definitions(-DGPU_SUPPORT=1 -DRPP_BACKEND_HIP=1)
 
             # include and link directories
             include_directories(${ROCM_PATH}/include ${ROCM_PATH}/include/rpp /usr/local/include)
@@ -169,7 +169,6 @@ else()
             endif()
 
             if(OpenMP_CXX_FOUND)
-                set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
                 set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} OpenMP::OpenMP_CXX)
                 message("-- ${Green}${PROJECT_NAME} All Tensor HIP tests set to build with OpenMP${ColourReset}")
 
@@ -208,13 +207,13 @@ else()
 
                 # HIP test set 3 - RPP Tensor-Audio HIP test suite
                 if(rpp_AUDIO_AUGMENTATIONS_SUPPORT)
-                    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DAUDIO_SUPPORT=1")
                     message("-- ${Green}${PROJECT_NAME} Tensor-Audio HIP tests set to build with RPP_AUDIO_SUPPORT set to ON${ColourReset}")
                     if(libsnd_LIBS)
                         include_directories(${SndFile_INCLUDE_DIRS})
                         link_directories(${SndFile_LIBRARIES_DIR} /usr/local/lib/)
                         message("-- ${Green}${PROJECT_NAME} Tensor-Audio HIP tests set to build with libsnd${ColourReset}")
                         add_executable(Tensor_audio_hip Tensor_audio_hip.cpp)
+                        target_compile_definitions(Tensor_audio_hip PRIVATE AUDIO_SUPPORT=1)
                         target_link_libraries(Tensor_audio_hip ${LINK_LIBRARY_LIST} ${libsnd_LIBS} -lsndfile)
                         message("-- ${White}Tensor_audio_hip -- Link Libraries: ${LINK_LIBRARY_LIST}${ColourReset}")
                     else()

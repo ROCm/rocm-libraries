@@ -43,6 +43,12 @@ class GemmRequest(OperatorRequest):
         d["spec_id"] = normalize_selector(self.spec_id)
         return d
 
+    def dims(self) -> dict[str, int]:
+        return {"M": int(self.M), "N": int(self.N), "K": int(self.K)}
+
+
+GEMM_DIM_VOCABULARY = ("M", "N", "K")
+
 
 def normalize_dtype(dtype: str) -> str:
     d = dtype.lower()
@@ -92,24 +98,6 @@ def rcr_request_errors(req: OperatorRequest, *, dtype: str) -> list[str]:
     if req.trans_a or not req.trans_b:
         errors.append("RCR expects A row-major and B logically transposed")
     return errors
-
-
-def arch_family_supported(req: GemmRequest, arch_family: str) -> Tuple[bool, str]:
-    """Gate a GEMM candidate to its intended arch family (``cdna`` or ``rdna``).
-
-    ``ArchTarget.family`` is the SSOT split (``cdna`` for gfx90a/gfx942/gfx950,
-    ``rdna`` for gfx11xx/gfx12xx). Candidates are tuned for one micro-arch family
-    only; this predicate keeps an RDNA candidate from matching a CDNA request
-    just because the rebuilt spec happens to satisfy the generic config checks
-    (and vice versa).
-    """
-    target = ArchTarget.from_gfx(req.arch)
-    if target.family != arch_family:
-        return False, (
-            f"{arch_family!r}-family candidate does not support "
-            f"{target.family!r}-family arch {req.arch}"
-        )
-    return True, "ok"
 
 
 def apply_split_k(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpec:

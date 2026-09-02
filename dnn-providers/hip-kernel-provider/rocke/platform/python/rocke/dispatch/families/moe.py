@@ -42,9 +42,16 @@ from dataclasses import asdict, dataclass
 from typing import Sequence, Tuple
 
 from ...core.arch import ArchTarget
-from ...instances.common.moe_fused_mega import FusedMegaKernelSpec
-from ...instances.common.moe_fused_mega_fp8 import FusedMegaKernelSpecFp8
+from ...instances.common.moe_fused_mega import (
+    FusedMegaKernelSpec,
+    build_moe_fused_mega_gemm,
+)
+from ...instances.common.moe_fused_mega_fp8 import (
+    FusedMegaKernelSpecFp8,
+    build_moe_fused_mega_gemm_fp8,
+)
 from ..core import (
+    Capability,
     CandidateRegistry,
     DispatchResult,
     KernelCandidate,
@@ -81,6 +88,24 @@ class MoeRequest(OperatorRequest):
         d["dtype"] = _moe_dtype(self.dtype)
         return d
 
+    def dims(self) -> dict[str, int]:
+        return {
+            "num_tokens": int(self.num_tokens),
+            "hidden": int(self.hidden),
+            "intermediate": int(self.intermediate),
+            "num_experts": int(self.num_experts),
+            "top_k": int(self.top_k),
+        }
+
+
+MOE_DIM_VOCABULARY = (
+    "num_tokens",
+    "hidden",
+    "intermediate",
+    "num_experts",
+    "top_k",
+)
+
 
 def _moe_dtype(dtype: str) -> str:
     d = dtype.lower()
@@ -116,20 +141,6 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
-def _arch_supported(req: MoeRequest) -> Tuple[bool, str]:
-    target = ArchTarget.from_gfx(req.arch)
-    if target.family != "cdna":
-        return False, (
-            f"MoE mega-kernel is CDNA-only; {req.arch} is {target.family}-family"
-        )
-    if req.arch not in _SUPPORTED_ARCHES:
-        return False, (
-            f"MoE mega-kernel is tuned for {_SUPPORTED_ARCHES} only (got {req.arch}); "
-            "the 16x16x32 / 16x16x128 atoms are gfx950-specific"
-        )
-    return True, "ok"
-
-
 def _selector_matches(req: MoeRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
     algorithm = req.algorithm.strip().lower()
     spec_id = req.spec_id.strip().lower()
@@ -149,19 +160,24 @@ def _spec_fp8(req: MoeRequest):
     return FusedMegaKernelSpecFp8(name="moe_fp8")
 
 
+def _build(spec, arch: str):
+    """Route to the builder that matches the spec ``select_spec`` produced.
+
+    The family carries two spec types, so the fp8/f16 split that ``_struct``
+    already makes for identity has to be made here too. Keyed on the spec type
+    rather than on the request dtype, so the two can never disagree.
+    """
+    if isinstance(spec, FusedMegaKernelSpecFp8):
+        return build_moe_fused_mega_gemm_fp8(spec, arch)
+    return build_moe_fused_mega_gemm(spec, arch)
+
+
 def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, MoeRequest)
-        if _moe_dtype(req.dtype) not in dtypes:
-            return False, (
-                f"candidate {name} supports {dtypes}, not {_moe_dtype(req.dtype)!r}"
-            )
-        ok, why = _arch_supported(req)
-        if not ok:
-            return False, why
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -183,7 +199,7 @@ def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandid
         return True, "ok"
 
     def select(req: OperatorRequest):
-        ok, why = support(req)
+        ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, MoeRequest)
@@ -196,17 +212,23 @@ def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandid
         spec_id=spec_id,
         abi_version=MOE_ABI_VERSION,
         priority=priority,
-        supports=support,
+        # Both mega configs are gfx950-tuned: the 16x16x32 / 16x16x128 atoms
+        # they are built around are gfx950-specific.
+        capability=Capability(arches=_SUPPORTED_ARCHES, dtypes=dtypes),
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),  # grid is runtime (num_m_blocks, inter)
         block=lambda spec: (int(spec.block_size), 1, 1),
-        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=_build,
     )
     return candidate
 
 
-MOE_REGISTRY = CandidateRegistry(_FAMILY)
+MOE_REGISTRY = CandidateRegistry(
+    _FAMILY, dim_vocabulary=MOE_DIM_VOCABULARY, require_build=True
+)
 MOE_REGISTRY.extend(
     (
         _make_candidate(

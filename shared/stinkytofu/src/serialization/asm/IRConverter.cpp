@@ -72,9 +72,14 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
         if (hasName) {
             d->name = inst->srcRegs[0].literalValue;
             if (d->name == ".set") d->kind = AsmDirectiveKind::SET;
+            if (d->name == ".align") d->kind = AsmDirectiveKind::ALIGN;
         }
         if (hasPayload) {
             d->symbol = inst->srcRegs[1].literalValue;
+        }
+        if (d->kind == AsmDirectiveKind::ALIGN) {
+            const std::string& n = !d->symbol.empty() ? d->symbol : d->value;
+            if (!n.empty()) d->intValue = std::strtoll(n.c_str(), nullptr, 10);
         }
         // RawAsmParser packs ".set" as srcRegs = {".set", symbol, value}.
         // The SET emitter branch concatenates "name symbol, value", so the

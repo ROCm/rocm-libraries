@@ -27,28 +27,48 @@
  ******************************************************************************/
 
 // Benchmark utils
-#include "../../bench_utils/bench_utils.hpp"
+#include "bench_utils.hpp"
 
 // rocThrust
-#include <thrust/copy.h>
-#include <thrust/count.h>
-#include <thrust/detail/config/namespace.h>
-#include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
+#include <thrust/detail/functional/address_stability.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
+#include <thrust/fill.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/transform.h>
 #include <thrust/zip_function.h>
 
-// Google Benchmark
-#include <benchmark/benchmark.h>
-
-// STL
-#include <cstddef>
+#include <cstdint>
 #include <string>
-#include <vector>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <utility>
+
+/*magic numbers used in Thrust*/
+#define M0 0
+#define M1 42
+
+template <typename T>
+inline bool is_valid(const size_t size)
+{
+  try
+  {
+    thrust::device_vector<T> in = bench_utils::generate(size, 123, M0, T{M0}, T{M1});
+    thrust::device_vector<uint32_t> out(size);
+    return true;
+  }
+  catch (const ::thrust::system::detail::bad_alloc& e)
+  {
+    return false;
+  }
+}
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// CCCL 3.0 has moved 'proclaim_copyable_arguments' to libcudacxx.
+#  include _THRUST_LIBCXX_INCLUDE(functional)
+// TODO: realize instances of this macros once the CCCL 2.x branch is removed.
+#  define _THRUST_PROCLAIM_COPYABLE_ARGUMENTS _THRUST_PROCLAIM_COPYABLE_ARGUMENTS
+#else
+// TODO: remove this branch once we have remove CCCL 2.x support as this include will be removed!
+#  include <thrust/functional.h>
+#  define _THRUST_PROCLAIM_COPYABLE_ARGUMENTS thrust::detail::proclaim_copyable_arguments
 #endif
 
 template <class InT, class OutT>
@@ -82,95 +102,58 @@ struct fib_t
   }
 };
 
-template <typename... Args>
-float64_t bench_transform(Args&&... args)
+template <typename T>
+struct transform_benchmark : public primbench::benchmark_interface
 {
-  bench_utils::caching_allocator_t alloc{}; // transform shouldn't allocate, but let's be consistent
-  thrust::detail::device_t policy{};
-  thrust::transform(policy(alloc), _THRUST_STD::forward<Args>(args)...); // warmup (queries and caches occupancy)
+  transform_benchmark(size_t items)
+      : m_items(items)
+  {}
 
-  bench_utils::gpu_timer d_timer;
-  d_timer.start(0);
-  thrust::transform(policy(alloc), _THRUST_STD::forward<Args>(args)...);
-  d_timer.stop(0);
-
-  return d_timer.get_duration();
-}
-
-struct basic
-{
-  template <typename T>
-  float64_t run(thrust::device_vector<T>& input, thrust::device_vector<T>& output)
+  primbench::json meta() const override
   {
-    fib_t<T, uint32_t> op{};
-    return bench_transform(input.cbegin(), input.cend(), output.begin(), op);
+    return primbench::json{}
+      .add("algo", "transform")
+      .add("subalgo", "basic")
+      .add("input_type", primbench::name<T>())
+      .add("elements", m_items);
   }
+
+  void run(primbench::state& state) override
+  {
+    bench_utils::caching_allocator_t alloc{};
+    thrust::detail::device_t policy{};
+
+    thrust::device_vector<T> in = bench_utils::generate(m_items, state.seed, M0, T{M0}, T{M1});
+    thrust::device_vector<uint32_t> out(m_items);
+
+    fib_t<T, uint32_t> op{};
+
+    state.set_items(m_items);
+    state.add_reads<T>(m_items);
+    state.add_writes<uint32_t>(m_items);
+
+    state.run([&] {
+      thrust::transform(policy(alloc).on(state.stream), in.cbegin(), in.cend(), out.begin(), op);
+    });
+  }
+
+private:
+  size_t m_items;
 };
 
-template <class Benchmark, class T>
-void run_benchmark(benchmark::State& state, const std::size_t elements, const std::string seed_type)
-{
-  // Benchmark object
-  Benchmark benchmark{};
-
-  // GPU times
-  std::vector<double> gpu_times;
-
-  // Generate input
-  thrust::device_vector<T> input = bench_utils::generate(
-    elements,
-    seed_type,
-    0 /*entropy 1.000*/,
-    T{0} /*magic number used in Thrust*/,
-    T{42} /*magic number used in Thrust*/);
-  thrust::device_vector<T> output(elements);
-
-  for (auto _ : state)
-  {
-    float64_t duration = benchmark.template run<T>(input, output);
-    state.SetIterationTime(duration);
-    gpu_times.push_back(duration);
+#define QUEUE(T)                                        \
+  for (size_t size : bench_utils::sizes(2 * sizeof(T))) \
+  {                                                     \
+    if (!is_valid<T>(size))                             \
+      continue;                                         \
+    executor.queue<transform_benchmark<T>>(size);       \
   }
 
-  // BytesProcessed include read and written bytes, so when the BytesProcessed/s are reported
-  // it will actually be the global memory bandwidth gotten.
-  state.SetBytesProcessed(state.iterations() * elements * (sizeof(T) + sizeof(uint32_t)));
-  state.SetItemsProcessed(state.iterations() * elements);
-
-  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-  state.counters["gpu_noise"] = gpu_cv;
-}
-
-#define CREATE_BENCHMARK(T, Elements)                                                                            \
-  benchmark::RegisterBenchmark(                                                                                  \
-    bench_utils::bench_naming::format_name(                                                                      \
-      "{algo:transform,subalgo:" + name + ",input_type:" #T + ",elements:" + bench_utils::format_pow2(Elements)) \
-      .c_str(),                                                                                                  \
-    run_benchmark<Benchmark, T>,                                                                                 \
-    Elements,                                                                                                    \
-    seed_type)
-
-#define BENCHMARK_TYPE(type)                                               \
-  for (size_t size : bench_utils::sizes)                                   \
-  {                                                                        \
-    if (sizeof(type) * size <= bench_utils::system.devProp.totalGlobalMem) \
-      bs.push_back(CREATE_BENCHMARK(type, size));                          \
-  }
-
-template <class Benchmark>
-void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
-{
-  std::vector<benchmark::Benchmark*> bs;
-  BENCHMARK_TYPE(uint32_t)
-  BENCHMARK_TYPE(uint64_t)
-  benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
+// babelstream: BabelStream-inspired transform benchmarks
+// https://github.com/UoB-HPC/BabelStream/blob/main/src/thrust/ThrustStream.cu
 
 namespace babelstream
 {
-// The benchmarks in this namespace are inspired by the BabelStream thrust version:
-// https://github.com/UoB-HPC/BabelStream/blob/main/src/thrust/ThrustStream.cu
-
 // Modified from BabelStream to also work for integers
 constexpr auto startA      = 1;
 constexpr auto startB      = 2;
@@ -179,33 +162,37 @@ constexpr auto startScalar = 4;
 
 struct mul
 {
+  static constexpr const char* name       = "mul";
   static constexpr size_t reads_per_item  = 1;
   static constexpr size_t writes_per_item = 1;
 
-  template <typename T>
-  static float64_t run(thrust::device_vector<T>, thrust::device_vector<T> b, thrust::device_vector<T> c)
+  template <typename Policy, typename T>
+  static void run(Policy policy, thrust::device_vector<T>&, thrust::device_vector<T>& b, thrust::device_vector<T>& c)
   {
     const T scalar = startScalar;
-    return bench_transform(
-      c.begin(), c.end(), b.begin(), ::internal::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ci) {
+    thrust::transform(
+      policy, c.begin(), c.end(), b.begin(), _THRUST_PROCLAIM_COPYABLE_ARGUMENTS([=] __device__(const T& ci) {
         return ci * scalar;
       }));
   }
 };
+
 struct add
 {
+  static constexpr const char* name       = "add";
   static constexpr size_t reads_per_item  = 2;
   static constexpr size_t writes_per_item = 1;
 
-  template <typename T>
-  static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
+  template <typename Policy, typename T>
+  static void run(Policy policy, thrust::device_vector<T>& a, thrust::device_vector<T>& b, thrust::device_vector<T>& c)
   {
-    return bench_transform(
+    thrust::transform(
+      policy,
       a.begin(),
       a.end(),
       b.begin(),
       c.begin(),
-      ::internal::proclaim_copyable_arguments([] THRUST_DEVICE(const T& ai, const T& bi) -> T {
+      _THRUST_PROCLAIM_COPYABLE_ARGUMENTS([] __device__(const T& ai, const T& bi) -> T {
         return ai + bi;
       }));
   }
@@ -213,19 +200,21 @@ struct add
 
 struct triad
 {
+  static constexpr const char* name       = "triad";
   static constexpr size_t reads_per_item  = 2;
   static constexpr size_t writes_per_item = 1;
 
-  template <typename T>
-  static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
+  template <typename Policy, typename T>
+  static void run(Policy policy, thrust::device_vector<T>& a, thrust::device_vector<T>& b, thrust::device_vector<T>& c)
   {
     const T scalar = startScalar;
-    return bench_transform(
+    thrust::transform(
+      policy,
       b.begin(),
       b.end(),
       c.begin(),
       a.begin(),
-      ::internal::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& bi, const T& ci) {
+      _THRUST_PROCLAIM_COPYABLE_ARGUMENTS([=] __device__(const T& bi, const T& ci) {
         return bi + scalar * ci;
       }));
   }
@@ -233,19 +222,21 @@ struct triad
 
 struct nstream
 {
+  static constexpr const char* name       = "nstream";
   static constexpr size_t reads_per_item  = 3;
   static constexpr size_t writes_per_item = 1;
 
-  template <typename T>
-  static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
+  template <typename Policy, typename T>
+  static void run(Policy policy, thrust::device_vector<T>& a, thrust::device_vector<T>& b, thrust::device_vector<T>& c)
   {
     const T scalar = startScalar;
-    return bench_transform(
+    thrust::transform(
+      policy,
       thrust::make_zip_iterator(a.begin(), b.begin(), c.begin()),
       thrust::make_zip_iterator(a.end(), b.end(), c.end()),
       a.begin(),
       thrust::make_zip_function(
-        ::internal::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ai, const T& bi, const T& ci) {
+        _THRUST_PROCLAIM_COPYABLE_ARGUMENTS([=] __device__(const T& ai, const T& bi, const T& ci) {
           return ai + bi + scalar * ci;
         })));
   }
@@ -253,146 +244,102 @@ struct nstream
 
 struct nstream_stable
 {
+  static constexpr const char* name       = "nstream_stable";
   static constexpr size_t reads_per_item  = 3;
   static constexpr size_t writes_per_item = 1;
 
-  template <typename T>
-  static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
+  template <typename Policy, typename T>
+  static void run(Policy policy, thrust::device_vector<T>& a, thrust::device_vector<T>& b, thrust::device_vector<T>& c)
   {
     const T* a_start = thrust::raw_pointer_cast(a.data());
     const T* b_start = thrust::raw_pointer_cast(b.data());
     const T* c_start = thrust::raw_pointer_cast(c.data());
     const T scalar   = startScalar;
-    return bench_transform(a.begin(), a.end(), a.begin(), [=] THRUST_DEVICE(const T& ai) {
+    thrust::transform(policy, a.begin(), a.end(), a.begin(), [=] __device__(const T& ai) {
       const auto i = &ai - a_start;
       return ai + b_start[i] + scalar * c_start[i];
     });
   }
 };
+} // namespace babelstream
 
-template <typename Benchmark, class T>
-void run_babelstream(benchmark::State& state, const std::size_t n)
+template <typename T, class OpT>
+struct transform_babel_benchmark : public primbench::benchmark_interface
 {
-  thrust::device_vector<T> a, b, c;
-  try
+  transform_babel_benchmark(size_t items)
+      : m_items(items)
+  {}
+
+  primbench::json meta() const override
   {
-    a = thrust::device_vector<T>(n);
-    b = thrust::device_vector<T>(n);
-    c = thrust::device_vector<T>(n);
+    return primbench::json{}
+      .add("algo", "transform")
+      .add("subalgo", std::string("babelstream.") + OpT::name)
+      .add("input_type", primbench::name<T>())
+      .add("elements", m_items);
   }
-  catch (const THRUST_NS_QUALIFIER::system::detail::bad_alloc& e)
+
+  void run(primbench::state& state) override
   {
-    (void) hipGetLastError();
-    state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
-    return;
+    bench_utils::caching_allocator_t alloc{};
+    thrust::detail::device_t policy{};
+
+    thrust::device_vector<T> a(m_items);
+    thrust::device_vector<T> b(m_items);
+    thrust::device_vector<T> c(m_items);
+
+    thrust::fill(a.begin(), a.end(), T{babelstream::startA});
+    thrust::fill(b.begin(), b.end(), T{babelstream::startB});
+    thrust::fill(c.begin(), c.end(), T{babelstream::startC});
+
+    state.set_items(m_items);
+    state.add_reads<T>(m_items * OpT::reads_per_item);
+    state.add_writes<T>(m_items * OpT::writes_per_item);
+
+    state.run([&] {
+      OpT::run(policy(alloc).on(state.stream), a, b, c);
+    });
   }
 
-  std::vector<double> gpu_times;
-  for (auto _ : state)
-  {
-    thrust::fill(a.begin(), a.end(), startA);
-    thrust::fill(b.begin(), b.end(), startB);
-    thrust::fill(c.begin(), c.end(), startC);
+private:
+  size_t m_items;
+};
 
-    float64_t duration;
-    try
-    {
-      duration = Benchmark::template run<T>(a, b, c);
-    }
-    catch (const THRUST_NS_QUALIFIER::system::detail::bad_alloc& e)
-    {
-      (void) hipGetLastError();
-      state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
-      return;
-    }
-    state.SetIterationTime(duration);
-    gpu_times.push_back(duration);
-  }
-  size_t transfers_per_item = Benchmark::reads_per_item + Benchmark::writes_per_item;
-  state.SetBytesProcessed(state.iterations() * n * sizeof(T) * transfers_per_item);
-  state.SetItemsProcessed(state.iterations() * n);
-
-  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-  state.counters["gpu_noise"] = gpu_cv;
-}
-
-#define CREATE_BABELSTREAM_BENCHMARK(T, Elements, Benchmark)                                             \
-  benchmark::RegisterBenchmark(                                                                          \
-    bench_utils::bench_naming::format_name(                                                              \
-      "{algo:transform,subalgo:" + name + "." + #Benchmark + ",input_type:" #T + ",elements:" + bench_utils::format_pow2(Elements)) \
-      .c_str(),                                                                                          \
-    run_babelstream<Benchmark, T>,                                                                       \
-    Elements)
-
-// Different benchmarks use a different number of buffers. H200/B200 can fit 2^31 elements for all benchmarks and types.
-// Upstream BabelStream uses 2^25. Allocation failure just skips the benchmark
-#define BENCHMARK_BABELSTREAM_TYPE(type)                                          \
-  if (sizeof(type) * (1u << 25) <= bench_utils::system.devProp.totalGlobalMem)    \
-  {                                                                               \
-    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 25), mul));            \
-    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 25), add));            \
-    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 25), triad));          \
-    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 25), nstream));        \
-    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 25), nstream_stable)); \
-  }                                                                               \
-  if (sizeof(type) * (1u << 31) <= bench_utils::system.devProp.totalGlobalMem)    \
-  {                                                                               \
-    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 31), mul));            \
-    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 31), add));            \
-    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 31), triad));          \
-    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 31), nstream));        \
-    bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 31), nstream_stable)); \
+#define QUEUE_BABEL_OP(T, S, OpT)                                        \
+  {                                                                      \
+    if (is_valid<T>(S))                                                  \
+      executor.queue<transform_babel_benchmark<T, babelstream::OpT>>(S); \
   }
 
-void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks)
-{
-  std::vector<benchmark::Benchmark*> bs;
-  BENCHMARK_BABELSTREAM_TYPE(int8_t)
-  BENCHMARK_BABELSTREAM_TYPE(int16_t)
-  BENCHMARK_BABELSTREAM_TYPE(float)
-  BENCHMARK_BABELSTREAM_TYPE(double)
-#if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
-  BENCHMARK_BABELSTREAM_TYPE(int128_t)
-#endif
-  benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
-#undef CREATE_BABELSTREAM_BENCHMARK
-#undef BENCHMARK_BABELSTREAM_TYPE
-}; // namespace babelstream
+#define QUEUE_BABEL_SIZE(T, S)  \
+  QUEUE_BABEL_OP(T, S, mul)     \
+  QUEUE_BABEL_OP(T, S, add)     \
+  QUEUE_BABEL_OP(T, S, triad)   \
+  QUEUE_BABEL_OP(T, S, nstream) \
+  QUEUE_BABEL_OP(T, S, nstream_stable)
+
+#define QUEUE_BABEL(T)          \
+  QUEUE_BABEL_SIZE(T, 1u << 25) \
+  QUEUE_BABEL_SIZE(T, 1u << 31)
 
 int main(int argc, char* argv[])
 {
-  cli::Parser parser(argc, argv);
-  parser.set_optional<std::string>("name_format", "name_format", "human", "either: json,human,txt");
-  parser.set_optional<std::string>("seed", "seed", "random", bench_utils::get_seed_message());
-  parser.run_and_exit_if_error();
+  primbench::settings settings;
+  settings.size                 = 1; // bench_utils::sizes() calculates it later.
+  settings.min_gpu_ms_per_batch = 300;
+  settings.batch_window_size    = 5;
+  primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
-  // Parse argv
-  benchmark::Initialize(&argc, argv);
-  bench_utils::bench_naming::set_format(parser.get<std::string>("name_format")); /* either: json,human,txt */
-  const std::string seed_type = parser.get<std::string>("seed");
+  QUEUE(uint32_t)
+  QUEUE(uint64_t)
 
-  // Benchmark info
-  bench_utils::add_common_benchmark_info();
-  benchmark::AddCustomContext("seed", seed_type);
+  QUEUE_BABEL(int8_t)
+  QUEUE_BABEL(int16_t)
+  QUEUE_BABEL(float)
+  QUEUE_BABEL(double)
+#ifndef _MSC_VER
+  QUEUE_BABEL(int128_t)
+#endif
 
-  // Add benchmarks
-  std::vector<benchmark::Benchmark*> benchmarks;
-  add_benchmarks<basic>("basic", benchmarks, seed_type);
-  babelstream::add_benchmarks("babelstream", benchmarks);
-
-  // Use manual timing
-  for (auto& b : benchmarks)
-  {
-    b->UseManualTime();
-    b->Unit(benchmark::kMicrosecond);
-    b->MinTime(0.2); // in seconds
-  }
-
-  // Run benchmarks
-  benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
-
-  // Finish
-  benchmark::Shutdown();
-  return 0;
+  executor.run();
 }

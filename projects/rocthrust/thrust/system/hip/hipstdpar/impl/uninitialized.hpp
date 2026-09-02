@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,6 @@
 
 #if defined(__HIPSTDPAR__)
 
-#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/for_each.h>
 #  include <thrust/uninitialized_copy.h>
@@ -61,7 +60,7 @@ inline O uninitialized_copy(execution::parallel_unsequenced_policy, I fi, I li, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::uninitialized_copy(THRUST_NS_QUALIFIER::device, fi, li, fo);
+  return ::thrust::uninitialized_copy(::thrust::device, fi, li, fo);
 }
 
 template <typename I, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -81,7 +80,7 @@ inline O uninitialized_copy_n(execution::parallel_unsequenced_policy, I fi, N n,
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::uninitialized_copy_n(THRUST_NS_QUALIFIER::device, fi, n, fo);
+  return ::thrust::uninitialized_copy_n(::thrust::device, fi, n, fo);
 }
 
 template <typename I, typename N, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -101,7 +100,7 @@ inline void uninitialized_fill(execution::parallel_unsequenced_policy, I f, I l,
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::uninitialized_fill(THRUST_NS_QUALIFIER::device, f, l, x);
+  return ::thrust::uninitialized_fill(::thrust::device, f, l, x);
 }
 
 template <typename I, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -120,7 +119,7 @@ inline void uninitialized_fill(execution::parallel_unsequenced_policy, I f, N n,
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::uninitialized_fill_n(THRUST_NS_QUALIFIER::device, f, n, x);
+  return ::thrust::uninitialized_fill_n(::thrust::device, f, n, x);
 }
 
 template <typename I, typename N, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -139,8 +138,7 @@ inline O uninitialized_move(execution::parallel_unsequenced_policy, I fi, I li, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::uninitialized_copy(
-    THRUST_NS_QUALIFIER::device, make_move_iterator(fi), make_move_iterator(li), fo);
+  return ::thrust::uninitialized_copy(::thrust::device, make_move_iterator(fi), make_move_iterator(li), fo);
 }
 
 template <typename I, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -160,7 +158,7 @@ inline O uninitialized_move_n(execution::parallel_unsequenced_policy, I fi, N n,
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::uninitialized_copy_n(THRUST_NS_QUALIFIER::device, make_move_iterator(fi), n, fo);
+  return ::thrust::uninitialized_copy_n(::thrust::device, make_move_iterator(fi), n, fo);
 }
 
 template <typename I, typename N, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -180,7 +178,7 @@ inline void uninitialized_default_construct(execution::parallel_unsequenced_poli
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  THRUST_NS_QUALIFIER::for_each(THRUST_NS_QUALIFIER::device, f, l, [](auto& x) {
+  ::thrust::for_each(::thrust::device, f, l, [](auto& x) {
     auto p = const_cast<void*>(static_cast<const volatile void*>((addressof(x))));
     ::new (p) typename iterator_traits<I>::value_type;
   });
@@ -202,7 +200,7 @@ inline void uninitialized_default_construct_n(execution::parallel_unsequenced_po
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  THRUST_NS_QUALIFIER::for_each_n(THRUST_NS_QUALIFIER::device, f, n, [](auto& x) {
+  ::thrust::for_each_n(::thrust::device, f, n, [](auto& x) {
     auto p = const_cast<void*>(static_cast<const volatile void*>((addressof(x))));
     ::new (p) typename iterator_traits<I>::value_type;
   });
@@ -224,7 +222,7 @@ inline void uninitialized_value_construct(execution::parallel_unsequenced_policy
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  THRUST_NS_QUALIFIER::for_each(THRUST_NS_QUALIFIER::device, f, l, [](auto& x) {
+  ::thrust::for_each(::thrust::device, f, l, [](auto& x) {
     auto p = const_cast<void*>(static_cast<const volatile void*>((addressof(x))));
     ::new (p) typename iterator_traits<I>::value_type{};
   });
@@ -246,7 +244,7 @@ inline void uninitialized_value_construct_n(execution::parallel_unsequenced_poli
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  THRUST_NS_QUALIFIER::for_each_n(THRUST_NS_QUALIFIER::device, f, n, [](auto& x) {
+  ::thrust::for_each_n(::thrust::device, f, n, [](auto& x) {
     auto p = const_cast<void*>(static_cast<const volatile void*>((addressof(x))));
     ::new (p) typename iterator_traits<I>::value_type{};
   });
@@ -268,7 +266,7 @@ inline void destroy(execution::parallel_unsequenced_policy, I f, I l)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  THRUST_NS_QUALIFIER::for_each(f, l, [](auto& x) {
+  ::thrust::for_each(f, l, [](auto& x) {
     destroy_at(addressof(x));
   });
 }
@@ -289,7 +287,7 @@ inline void destroy_n(execution::parallel_unsequenced_policy, I f, N n)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  THRUST_NS_QUALIFIER::for_each_n(f, n, [](auto& x) {
+  ::thrust::for_each_n(f, n, [](auto& x) {
     destroy_at(addressof(x));
   });
 }

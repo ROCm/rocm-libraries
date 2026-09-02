@@ -32,14 +32,12 @@ def test_calculate_granularities_and_mfma_parameters() -> None:
         GSU=1,
         wave=[2, 2],
     )
-    assert len(out) == 9
-    assert out[0] == 2.0
-    assert out[1] == 2.0
+    assert out.NumTile0 == 2.0
+    assert out.NumTile1 == 2.0
 
-    mi = [16, 16, 16, 1, 1, 2, 2, 2, 2]
+    mi = mid.MFMA(M=16, N=16, K=16, B=1, MIBlockM=1, waveTileM=2, waveTileN=2, waveM=2, waveN=2)
     params = mid.MIDesign.calculate_mfma_parameters(mi)
-    assert len(params) == 7
-    assert params[0] > 0 and params[1] > 0
+    assert params.MT0 > 0 and params.MT1 > 0
 
 
 def test_generate_all_mfmas_uses_override(tmp_path: Path) -> None:
@@ -54,8 +52,8 @@ def test_generate_all_mfmas_uses_override(tmp_path: Path) -> None:
 def test_sort_and_remove_gsu_duplicates_and_log_path(tmp_path: Path) -> None:
     d = mid.MIDesign(tmp_path, _config())
     entries = [
-        (0.8, 2.2, (16, 16, 16, 1, 1, 1, 1, 2, 2), 0, 0, 0, 0, 0, 0, 0, 2, 1, 64, 64, 1, 1, 16, 16, 1),
-        (0.9, 2.2, (16, 16, 16, 1, 1, 1, 1, 2, 2), 0, 0, 0, 0, 0, 0, 0, 3, 1, 64, 64, 1, 1, 16, 16, 1),
+        mid.MFMACandidate(totalGranularity=0.8, TilesPerCU=2.2, mfma=mid.MFMA(16, 16, 16, 1, 1, 1, 1, 2, 2), NumTile0=0, NumTile1=0, Tile0Granularity=0, Tile1Granularity=0, TotalTiles=0, CUGranularity=0, waveGranularity=0, GSU=2, LSU=1, MT0=64, MT1=64, TT0=1, TT1=1, WG0=16, WG1=16, MIBlockM=1),
+        mid.MFMACandidate(totalGranularity=0.9, TilesPerCU=2.2, mfma=mid.MFMA(16, 16, 16, 1, 1, 1, 1, 2, 2), NumTile0=0, NumTile1=0, Tile0Granularity=0, Tile1Granularity=0, TotalTiles=0, CUGranularity=0, waveGranularity=0, GSU=3, LSU=1, MT0=64, MT1=64, TT0=1, TT1=1, WG0=16, WG1=16, MIBlockM=1),
     ]
     sorted_entries = d._sort_mfmas(entries[:])
     assert len(sorted_entries) == 2
@@ -70,8 +68,8 @@ def test_to_group_dimension_and_generate_for_size_streamk(monkeypatch, tmp_path:
     d = mid.MIDesign(tmp_path, cfg)
 
     fake_mfma = [
-        (1.0, 2.0, (16, 16, 16, 1, 1, 1, 1, 2, 2), 1, 1, 1, 1, 1, 1, 1, 1, 1, 64, 64, 1, 1, 16, 16, 1),
-        (1.0, 2.0, (16, 16, 16, 1, 1, 1, 1, 2, 2), 1, 1, 1, 1, 1, 1, 1, 4, 1, 64, 64, 1, 1, 16, 16, 1),
+        mid.MFMACandidate(totalGranularity=1.0, TilesPerCU=2.0, mfma=mid.MFMA(16, 16, 16, 1, 1, 1, 1, 2, 2), NumTile0=1, NumTile1=1, Tile0Granularity=1, Tile1Granularity=1, TotalTiles=1, CUGranularity=1, waveGranularity=1, GSU=1, LSU=1, MT0=64, MT1=64, TT0=1, TT1=1, WG0=16, WG1=16, MIBlockM=1),
+        mid.MFMACandidate(totalGranularity=1.0, TilesPerCU=2.0, mfma=mid.MFMA(16, 16, 16, 1, 1, 1, 1, 2, 2), NumTile0=1, NumTile1=1, Tile0Granularity=1, Tile1Granularity=1, TotalTiles=1, CUGranularity=1, waveGranularity=1, GSU=4, LSU=1, MT0=64, MT1=64, TT0=1, TT1=1, WG0=16, WG1=16, MIBlockM=1),
     ]
 
     monkeypatch.setattr(d, "_find_mi_for_size", lambda *_a, **_k: (fake_mfma, 2.0))
@@ -92,9 +90,13 @@ def test_find_mi_for_size_refine_filter_level2(monkeypatch, tmp_path: Path) -> N
     # Force deterministic MT/WG properties for two candidate MIs so refine filtering runs.
     def _calc_mfma(MI, waveFrontSize=64):
         mi = MI
-        if mi[0] == 16:
-            return (64, 64, 2, 2, 8, 8, 1)
-        return (128, 128, 1, 1, 4, 4, 1)
+        if isinstance(mi, mid.MFMA):
+          m_val = mi.M
+        else:
+          m_val = mi[0]
+        if m_val == 16:
+            return mid.MFMAParameters(MT0=64, MT1=64, TT0=2, TT1=2, WG0=8, WG1=8, MIBlockM=1)
+        return mid.MFMAParameters(MT0=128, MT1=128, TT0=1, TT1=1, WG0=4, WG1=4, MIBlockM=1)
 
     monkeypatch.setattr(mid.MIDesign, "calculate_mfma_parameters", staticmethod(_calc_mfma))
 
@@ -105,23 +107,23 @@ def test_find_mi_for_size_refine_filter_level2(monkeypatch, tmp_path: Path) -> N
         total_tiles = max(1, (M // max(MT0, 1)) * (N // max(MT1, 1)) * batch_count * GSU * LSU)
         tiles_per_cu = total_tiles / CUs
         gran = 1.0 if (MT0, MT1) == (64, 64) else 0.35
-        return (
-            M / MT0,
-            N / MT1,
-            1.0,
-            1.0,
-            total_tiles,
-            tiles_per_cu,
-            min(1.0, tiles_per_cu),
-            1.0,
-            gran,
+        return mid.GranularityMetrics(
+            NumTile0=M / MT0,
+            NumTile1=N / MT1,
+            Tile0Granularity=1.0,
+            Tile1Granularity=1.0,
+            TotalTiles=total_tiles,
+            TilesPerCU=tiles_per_cu,
+            CUGranularity=min(1.0, tiles_per_cu),
+            waveGranularity=1.0,
+            totalGranularity=gran,
         )
 
     monkeypatch.setattr(mid.MIDesign, "calculate_granularities", staticmethod(_calc_gran))
 
     valid_mfmas = [
-        [16, 16, 16, 1, 1, 1, 1, 2, 2],
-        [32, 32, 16, 1, 1, 1, 1, 2, 2],
+        mid.MFMA(16, 16, 16, 1, 1, 1, 1, 2, 2),
+        mid.MFMA(32, 32, 16, 1, 1, 1, 1, 2, 2),
     ]
 
     mfma_list, max_tiles = d._find_mi_for_size(valid_mfmas, 16, 16, (512, 512, 1, 2048))

@@ -33,6 +33,14 @@
 
 namespace Tensile
 {
+    /**
+     * Solution index reported for an override entry which could not be parsed. Zero is
+     * not a usable index in the one based numbering of the override file, nor in the
+     * remapped numbering that clients such as rocBLAS use, so it is unambiguous even
+     * though negative indices are valid entries.
+     */
+    constexpr int InvalidOverrideSolutionIndex = -1;
+
     template <typename MyProblem>
     class ProblemOverride
     {

@@ -6,7 +6,6 @@
 #include "engines/asm_sdpa_engine/plans/SdpaFwdLaunchParams.hpp"
 
 using asm_sdpa_engine::computeFwdLaunchParams;
-using asm_sdpa_engine::SdpaFwdLaunchParams;
 using asm_sdpa_engine::SdpaFwdParams;
 using asm_sdpa_engine::plan_utils::MaskType;
 
@@ -100,14 +99,14 @@ TEST(TestSdpaFwdPlanGridMath, BottomRightCausalAlsoHalvesGridDimX)
     EXPECT_EQ(lp.gridDimX, 4U);
 }
 
-TEST(TestSdpaFwdPlanGridMath, CausalOddTileCountTruncates)
+TEST(TestSdpaFwdPlanGridMath, CausalOddTileCountRoundsUp)
 {
     auto p = makeHd128Params();
     p.maskType = MaskType::TOP_LEFT_CAUSAL;
     p.seqLenQ = 768U;
-    // ceil(768/256) = 3, 3/2 = 1 (integer truncation)
+    // ceil(768/256) = 3 tiles; ceiling-halved: (3 + 1) / 2 = 2
     auto lp = computeFwdLaunchParams(p);
-    EXPECT_EQ(lp.gridDimX, 1U);
+    EXPECT_EQ(lp.gridDimX, 2U);
 }
 
 TEST(TestSdpaFwdPlanGridMath, WindowGenericMaskAlsoHalvesGridDimX)
@@ -130,15 +129,48 @@ TEST(TestSdpaFwdPlanGridMath, Hd192x128SwapsGridDimXY)
     EXPECT_EQ(lp.blockDimX, 256U);
 }
 
-TEST(TestSdpaFwdPlanGridMath, Hd192x128CausalHalvesThenSwaps)
+TEST(TestSdpaFwdPlanGridMath, Hd192x128CausalKeepsFullTileCount)
 {
     auto p = makeHd192x128Params();
     p.maskType = MaskType::TOP_LEFT_CAUSAL;
-    // tiles = 2048/128 = 16, halved to 8, then swap X/Y
+    // hd192x128/gfx942 launches one workgroup per Q-tile (no tg_div halving);
+    // tiles = 2048/128 = 16, then swap X/Y.
     auto lp = computeFwdLaunchParams(p);
-    // After swap: X=numHeadsQ=16, Y=8 (halved tiles)
-    EXPECT_EQ(lp.gridDimX, 16U);
-    EXPECT_EQ(lp.gridDimY, 8U);
+    EXPECT_EQ(lp.gridDimX, 16U); // numHeadsQ
+    EXPECT_EQ(lp.gridDimY, 16U); // full tile count
+}
+
+// Regression: a single causal Q-tile must ceiling-halve to 1, not truncate to 0.
+TEST(TestSdpaFwdPlanGridMath, CausalSingleTileDoesNotZeroGridDimX)
+{
+    auto p = makeHd128Params();
+    p.maskType = MaskType::BOTTOM_RIGHT_CAUSAL;
+    p.numHeadsQ = 4U;
+    p.batchSize = 2U;
+    p.seqLenQ = 256U;
+    p.tileSizeQo = 256U;
+    // ceil(256/256) = 1 tile; ceiling-halved: (1 + 1) / 2 = 1
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.gridDimX, 1U);
+    EXPECT_EQ(lp.gridDimY, 4U);
+    EXPECT_EQ(lp.gridDimZ, 2U);
+}
+
+// Regression: hd192x128/gfx942 causal must cover every Q-tile (no halving).
+TEST(TestSdpaFwdPlanGridMath, Hd192x128CausalSmallSeqCoversAllTiles)
+{
+    auto p = makeHd192x128Params();
+    p.maskType = MaskType::BOTTOM_RIGHT_CAUSAL;
+    p.numHeadsQ = 4U;
+    p.batchSize = 2U;
+    p.seqLenQ = 256U;
+    p.tileSizeQo = 128U;
+    // ceil(256/128) = 2 tiles, no halving, then swap X/Y.
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.gridDimX, 4U); // numHeadsQ
+    EXPECT_EQ(lp.gridDimY, 2U); // full tile count
+    EXPECT_EQ(lp.gridDimZ, 2U);
+    EXPECT_EQ(lp.blockDimX, 256U);
 }
 
 // =============================================================================

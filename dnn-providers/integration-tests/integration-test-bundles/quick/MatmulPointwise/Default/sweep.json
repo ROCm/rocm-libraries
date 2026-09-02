@@ -1,0 +1,2531 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "3_16_128_bfp16_ncl_b8425e",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasBf16.Correctness/0",
+        "operation": "Smoke/IntegrationGpuMatmulBiasBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasBf16.Correctness_0"
+      }
+    },
+    {
+      "id": "3_16_128_bfp16_ncl_1cb7f2",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              1,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasBf16.Correctness/1",
+        "operation": "Smoke/IntegrationGpuMatmulBiasBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasBf16.Correctness_1"
+      }
+    },
+    {
+      "id": "3_16_128_bfp16_ncl_4d70b1",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              1,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasBf16.Correctness/2",
+        "operation": "Smoke/IntegrationGpuMatmulBiasBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasBf16.Correctness_2"
+      }
+    },
+    {
+      "id": "3_16_128_bfp16_ncl_2193d8",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              1,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              1,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasBf16.Correctness/3",
+        "operation": "Smoke/IntegrationGpuMatmulBiasBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasBf16.Correctness_3"
+      }
+    },
+    {
+      "id": "2_3_16_128_bfp16_nchw_1c496e",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              32,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              12288,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasBf16.Correctness/4",
+        "operation": "Smoke/IntegrationGpuMatmulBiasBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasBf16.Correctness_4"
+      }
+    },
+    {
+      "id": "2_3_16_128_bfp16_nchw_4831c9",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              1536,
+              512,
+              32,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasBf16.Correctness/5",
+        "operation": "Smoke/IntegrationGpuMatmulBiasBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasBf16.Correctness_5"
+      }
+    },
+    {
+      "id": "2_3_16_128_bfp16_nchw_ebe6f3",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              1,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              12288,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasBf16.Correctness/6",
+        "operation": "Smoke/IntegrationGpuMatmulBiasBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasBf16.Correctness_6"
+      }
+    },
+    {
+      "id": "2_3_16_128_bfp16_nchw_d9a8d3",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              32,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              12288,
+              4096,
+              1,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasBf16.Correctness/7",
+        "operation": "Smoke/IntegrationGpuMatmulBiasBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasBf16.Correctness_7"
+      }
+    },
+    {
+      "id": "2_3_16_128_bfp16_nchw_a63448",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              1536,
+              512,
+              1,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              4096,
+              1,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasBf16.Correctness/8",
+        "operation": "Smoke/IntegrationGpuMatmulBiasBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasBf16.Correctness_8"
+      }
+    },
+    {
+      "id": "3_16_128_fp16_ncl_853885",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp16.Correctness/0",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp16.Correctness_0"
+      }
+    },
+    {
+      "id": "3_16_128_fp16_ncl_ca2b85",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              1,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp16.Correctness/1",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp16.Correctness_1"
+      }
+    },
+    {
+      "id": "3_16_128_fp16_ncl_6d6a1c",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              1,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp16.Correctness/2",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp16.Correctness_2"
+      }
+    },
+    {
+      "id": "3_16_128_fp16_ncl_a3ae90",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              1,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              1,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp16.Correctness/3",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp16.Correctness_3"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp16_nchw_f6a485",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              12288,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp16.Correctness/4",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp16.Correctness_4"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp16_nchw_46afb8",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              1536,
+              512,
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp16.Correctness/5",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp16.Correctness_5"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp16_nchw_5a1fba",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              1,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              12288,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp16.Correctness/6",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp16.Correctness_6"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp16_nchw_e437b4",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              12288,
+              4096,
+              1,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp16.Correctness/7",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp16.Correctness_7"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp16_nchw_c638fb",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              1536,
+              512,
+              1,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              4096,
+              1,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp16.Correctness/8",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp16.Correctness_8"
+      }
+    },
+    {
+      "id": "3_16_128_fp32_ncl_bb88ea",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp32.Correctness/0",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp32.Correctness_0"
+      }
+    },
+    {
+      "id": "3_16_128_fp32_ncl_41ed66",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              1,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp32.Correctness/1",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp32.Correctness_1"
+      }
+    },
+    {
+      "id": "3_16_128_fp32_ncl_c935f1",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp32.Correctness/2",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp32.Correctness_2"
+      }
+    },
+    {
+      "id": "3_16_128_fp32_ncl_dabc7b",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              1,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp32.Correctness/3",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp32.Correctness_3"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp32_nchw_855f3d",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              12288,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp32.Correctness/4",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp32.Correctness_4"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp32_nchw_0f16a4",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              1536,
+              512,
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp32.Correctness/5",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp32.Correctness_5"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp32_nchw_73608a",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              1,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              12288,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp32.Correctness/6",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp32.Correctness_6"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp32_nchw_86ab1a",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              12288,
+              4096,
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp32.Correctness/7",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp32.Correctness_7"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp32_nchw_a308d4",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              1536,
+              512,
+              1,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              4096,
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              1,
+              1,
+              128
+            ],
+            "strides": [
+              128,
+              128,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulBiasFp32.Correctness/8",
+        "operation": "Smoke/IntegrationGpuMatmulBiasFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulBiasFp32.Correctness_8"
+      }
+    }
+  ]
+}

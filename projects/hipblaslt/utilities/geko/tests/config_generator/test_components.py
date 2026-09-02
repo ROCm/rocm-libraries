@@ -42,7 +42,8 @@ def _base_template() -> dict:
         "ComputeDataType": "S",
         "ARCH": "gfx950",
         "StreamK": True,
-        "GA": False,
+        "backend": "tensile",
+        "search_space": "heuristic",
         "MACROTILE_OPT": False,
         "SIZE_OPTION": 0,
         "ONE_SIZE_PER_CONFIG": True,
@@ -59,25 +60,25 @@ def _base_template() -> dict:
 
 @pytest.mark.cg_components
 @pytest.mark.parametrize(
-    "arch,ga,transa,transb,size",
+    "arch,search_space,transa,transb,size",
     [
-        ("gfx950", False, "N", "N", (128, 128, 1, 128)),
-        ("gfx950", True, "N", "N", (256, 256, 1, 256)),
-        ("gfx942", False, "N", "T", (128, 256, 1, 128)),
-        ("gfx942", True, "T", "N", (64, 64, 1, 64)),
+        ("gfx950", "heuristic", "N", "N", (128, 128, 1, 128)),
+        ("gfx950", "generic", "N", "N", (256, 256, 1, 256)),
+        ("gfx942", "heuristic", "N", "T", (128, 256, 1, 128)),
+        ("gfx942", "generic", "T", "N", (64, 64, 1, 64)),
         # M and N both < 8 (tiny tiles)
-        ("gfx950", False, "N", "N", (4, 4, 1, 128)),
-        ("gfx950", True, "N", "N", (1, 7, 1, 128)),
-        ("gfx942", False, "N", "T", (2, 6, 1, 128)),
+        ("gfx950", "heuristic", "N", "N", (4, 4, 1, 128)),
+        ("gfx950", "generic", "N", "N", (1, 7, 1, 128)),
+        ("gfx942", "heuristic", "N", "T", (2, 6, 1, 128)),
         # M and N both >= 8192 (large problems)
-        ("gfx950", False, "N", "N", (8192, 8192, 1, 4096)),
-        ("gfx950", True, "N", "N", (12288, 8192, 1, 2048)),
-        ("gfx942", False, "N", "T", (8192, 16384, 1, 1024)),
+        ("gfx950", "heuristic", "N", "N", (8192, 8192, 1, 4096)),
+        ("gfx950", "generic", "N", "N", (12288, 8192, 1, 2048)),
+        ("gfx942", "heuristic", "N", "T", (8192, 16384, 1, 1024)),
     ],
 )
 def test_mi_opt_fork_pipeline_non_empty(
     arch: str,
-    ga: bool,
+    search_space: str,
     transa: str,
     transb: str,
     size: tuple[int, int, int, int],
@@ -91,7 +92,7 @@ def test_mi_opt_fork_pipeline_non_empty(
 
     cfg = _base_template()
     cfg["ARCH"] = arch
-    cfg["GA"] = ga
+    cfg["search_space"] = search_space
     cfg["TRANSA"] = transa
     cfg["TRANSB"] = transb
     cfg["Sizes"] = [list(size)]

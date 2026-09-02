@@ -41,7 +41,16 @@ struct rocrand_kernel_mrg : public ::testing::Test
 
 typedef ::testing::Types<rocrand_state_mrg31k3p, rocrand_state_mrg32k3a> rocrand_kernel_mrg_types;
 
-TYPED_TEST_SUITE(rocrand_kernel_mrg, rocrand_kernel_mrg_types);
+struct rocrand_kernel_mrg_test_name
+{
+    template<class T>
+    static std::string GetName(int)
+    {
+        return std::is_same<T, rocrand_state_mrg31k3p>::value ? "Mrg31k3p" : "Mrg32k3a";
+    }
+};
+
+TYPED_TEST_SUITE(rocrand_kernel_mrg, rocrand_kernel_mrg_types, rocrand_kernel_mrg_test_name);
 
 template<class GeneratorState>
 __global__

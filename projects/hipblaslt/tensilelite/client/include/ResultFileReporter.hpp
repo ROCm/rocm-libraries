@@ -81,6 +81,7 @@ namespace TensileLite
             int64_t     m_winnerSolutionIdx       = -1;
             double      m_fastestGflops           = -1.0;
             double      m_fasterTimeUS            = -1.0;
+            double      m_fastestBandwidthGbps    = -1.0;
             double      m_fastestTilesPerCu       = -1.0;
             double      m_fastestTotalGranularity = -1.0;
             // for merge rows

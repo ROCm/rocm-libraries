@@ -1,3 +1,4 @@
+{% from "macros.j2" import assign_frontend_data_field %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 #include <gtest/gtest.h>
@@ -13,6 +14,8 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
+// NOLINTBEGIN(misc-const-correctness)
+
 // --- Helper: create fully configured attributes for a valid node ---
 namespace
 {
@@ -24,25 +27,31 @@ namespace
 {% for tensor in op.frontend.all_tensors %}
 {% if tensor.required %}
 {% set tc = op.test_data.tensor_configs.get(tensor.name) %}
-    auto {{ tensor.name }}Tensor = std::make_shared<TensorAttributes>();
+    auto {{ tensor.camel_name }}Tensor = std::make_shared<TensorAttributes>();
 {% if tc %}
-    {{ tensor.name }}Tensor->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }});
-    {{ tensor.name }}Tensor->set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    {{ tensor.camel_name }}Tensor->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }});
+    {{ tensor.camel_name }}Tensor->set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    {{ tensor.camel_name }}Tensor->set_data_type(DataType::{{ tc.data_type }});
 {% endif %}
-    attrs.{{ tensor.effective_setter_name }}({{ tensor.name }}Tensor);
+    attrs.{{ tensor.effective_setter_name }}({{ tensor.camel_name }}Tensor);
 {% endif %}
 {% endfor %}
 
 {% for df in op.data_fields %}
 {% if df.required %}
 {% if df.is_vector %}
-    attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% elif df.is_mode or df.is_enum %}
 {% if df.effective_frontend_type and df.test_enum_value %}
-    attrs.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% else %}
     // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
 {% endif %}
+{% elif df.is_scalar %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -56,8 +65,8 @@ namespace
 
 TEST(Test{{ op.frontend.node_class }}, GetNodeTypeReturns{{ op.frontend.node_type_enum | replace('NodeType::', '') | replace('_', ' ') | title | replace(' ', '') }})
 {
-    GraphAttributes graphAttrs;
-    {{ op.frontend.node_class }} node({{ op.frontend.attributes_class }}{}, graphAttrs);
+    const GraphAttributes graphAttrs;
+    const {{ op.frontend.node_class }} node({{ op.frontend.attributes_class }}{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), {{ op.frontend.node_type_enum }});
 }
 
@@ -67,8 +76,8 @@ TEST(Test{{ op.frontend.node_class }}, PreValidateNode)
 {
     auto attrs = createValidAttributes();
 
-    GraphAttributes graphAttributes;
-    {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
@@ -85,32 +94,38 @@ TEST(Test{{ op.frontend.node_class }}, PreValidateNodeMissing{{ tensor.name | re
 {% for other in op.frontend.all_tensors %}
 {% if other.required and other.name != tensor.name %}
 {% set tc = op.test_data.tensor_configs.get(other.name) %}
-    auto {{ other.name }}Tensor = std::make_shared<TensorAttributes>();
+    auto {{ other.camel_name }}Tensor = std::make_shared<TensorAttributes>();
 {% if tc %}
-    {{ other.name }}Tensor->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }});
-    {{ other.name }}Tensor->set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    {{ other.camel_name }}Tensor->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }});
+    {{ other.camel_name }}Tensor->set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    {{ other.camel_name }}Tensor->set_data_type(DataType::{{ tc.data_type }});
 {% endif %}
-    attrs.{{ other.effective_setter_name }}({{ other.name }}Tensor);
+    attrs.{{ other.effective_setter_name }}({{ other.camel_name }}Tensor);
 {% endif %}
 {% endfor %}
 
 {% for df in op.data_fields %}
 {% if df.required %}
 {% if df.is_vector %}
-    attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% elif df.is_mode or df.is_enum %}
 {% if df.effective_frontend_type and df.test_enum_value %}
-    attrs.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% else %}
     // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
 {% endif %}
+{% elif df.is_scalar %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% endif %}
 {% endif %}
 {% endfor %}
 
     // {{ tensor.name }} tensor is missing
-    GraphAttributes graphAttributes;
-    {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
@@ -126,18 +141,19 @@ TEST(Test{{ op.frontend.node_class }}, PreValidateNodeMissingParameters)
 {% for tensor in op.frontend.all_tensors %}
 {% if tensor.required %}
 {% set tc = op.test_data.tensor_configs.get(tensor.name) %}
-    auto {{ tensor.name }}Tensor = std::make_shared<TensorAttributes>();
+    auto {{ tensor.camel_name }}Tensor = std::make_shared<TensorAttributes>();
 {% if tc %}
-    {{ tensor.name }}Tensor->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }});
-    {{ tensor.name }}Tensor->set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    {{ tensor.camel_name }}Tensor->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }});
+    {{ tensor.camel_name }}Tensor->set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    {{ tensor.camel_name }}Tensor->set_data_type(DataType::{{ tc.data_type }});
 {% endif %}
-    attrs.{{ tensor.effective_setter_name }}({{ tensor.name }}Tensor);
+    attrs.{{ tensor.effective_setter_name }}({{ tensor.camel_name }}Tensor);
 {% endif %}
 {% endfor %}
 
     // Required parameters are missing
-    GraphAttributes graphAttributes;
-    {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
@@ -148,8 +164,8 @@ TEST(Test{{ op.frontend.node_class }}, PreValidateNodeAllValuesSet)
 {
     auto attrs = createValidAttributes();
 
-    GraphAttributes graphAttributes;
-    {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
@@ -161,7 +177,7 @@ TEST(Test{{ op.frontend.node_class }}, InferPropertiesNode)
 {
     auto attrs = createValidAttributes();
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -181,28 +197,33 @@ TEST(Test{{ op.frontend.node_class }}, GatherHipdnnTensor)
 
 {% for tensor in op.frontend.all_tensors %}
 {% if tensor.required %}
-    auto {{ tensor.name }}Tensor = std::make_shared<TensorAttributes>();
-    {{ tensor.name }}Tensor->set_uid({{ op.test_data.tensor_uids.get(tensor.name, loop.index) }}).set_name("{{ tensor.name | replace('_', ' ') | title | replace(' ', '') }}Tensor");
-    attrs.{{ tensor.effective_setter_name }}({{ tensor.name }}Tensor);
+    auto {{ tensor.camel_name }}Tensor = std::make_shared<TensorAttributes>();
+    {{ tensor.camel_name }}Tensor->set_uid({{ op.test_data.tensor_uids.get(tensor.name, loop.index) }}).set_name("{{ tensor.name | replace('_', ' ') | title | replace(' ', '') }}Tensor");
+    attrs.{{ tensor.effective_setter_name }}({{ tensor.camel_name }}Tensor);
 {% endif %}
 {% endfor %}
 
 {% for df in op.data_fields %}
 {% if df.required %}
 {% if df.is_vector %}
-    attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% elif df.is_mode or df.is_enum %}
 {% if df.effective_frontend_type and df.test_enum_value %}
-    attrs.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% else %}
     // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
 {% endif %}
+{% elif df.is_scalar %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% endif %}
 {% endif %}
 {% endfor %}
 
-    GraphAttributes graphAttributes;
-    {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const {{ op.frontend.node_class }} node(std::move(attrs), graphAttributes);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
@@ -210,8 +231,10 @@ TEST(Test{{ op.frontend.node_class }}, GatherHipdnnTensor)
 
 {% for tensor in op.frontend.all_tensors %}
 {% if tensor.required %}
-    EXPECT_TRUE(allTensors.find({{ tensor.name }}Tensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find({{ tensor.camel_name }}Tensor) != allTensors.end());
 {% endif %}
 {% endfor %}
     EXPECT_EQ(allTensors.size(), {{ op.frontend.all_tensors | selectattr('required') | list | length }}u);
 }
+
+// NOLINTEND(misc-const-correctness)

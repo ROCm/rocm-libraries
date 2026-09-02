@@ -737,6 +737,20 @@ namespace TensileLite
             counter += sizeof(value);
         }
 
+        void alignTo(size_t alignment)
+        {
+            size_t extraElements = counter % alignment;
+            size_t padding       = (alignment - extraElements) % alignment;
+            counter += padding;
+        }
+
+        template <typename T>
+        inline void appendAligned(std::string const& name, T value)
+        {
+            alignTo(alignof(T));
+            append(name, value);
+        }
+
         template <typename T>
         inline void appendUnbound(std::string const& name)
         {

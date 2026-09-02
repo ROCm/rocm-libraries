@@ -23,7 +23,7 @@ Requires a GPU host (both runs exercise GPU-plugin execution).
 Usage::
 
     diff_coverage.py --cpp /tmp/cpp.json --bundle /tmp/bundle.json \\
-        [--bundle-dir integration_test_bundles/]
+        [--bundle-dir integration-test-bundles/]
 """
 
 import argparse

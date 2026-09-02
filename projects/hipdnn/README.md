@@ -35,7 +35,7 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 
 ### User Guides
 - **[Building](./docs/Building.md)** - Prerequisites, build configurations, and platform-specific instructions
-- **[Consumer Quick Start](./docs/ConsumerQuickStart.md)** - Using an installed hipDNN in your CMake project
+- **[Add hipDNN to your project](https://rocm.docs.amd.com/projects/hipdnn/en/latest/install/add-project.html)** - Using an installed hipDNN in your CMake project (published documentation)
 - **[How-To](./docs/HowTo.md)** - Using hipDNN components and extending the framework
 - **[Environment Configuration](./docs/Environment.md)** - Runtime configuration and logging setup
 - **[Operation Support](./docs/OperationSupport.md)** - Currently supported operations and their status

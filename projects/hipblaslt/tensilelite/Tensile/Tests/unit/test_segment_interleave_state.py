@@ -25,13 +25,14 @@ def _resolve_lsi(state):
     res = evaluate(state)
     _lsiBufWillResolve = _lsiOneLdsBufAtEval == -1 and res["reason"] == "needs 1LDSBuffer==0"
     if not _lsiBufWillResolve:
+        # 1 = applied (split or bcontig alike), 0 = not.
         return (1 if res["applicable"] else 0, _lsiRequested == 1 and not res["applicable"])
     # Deferred: 1LDSBuffer resolves to 0 (the case that suppressed the reject); LDSSegmentInterleave
     # is kept at _lsiRequested (not forced to 0) so the re-eval oracle does not short-circuit on mode==0.
     s2 = dict(state); s2["1LDSBuffer"] = 0
     res2 = evaluate(s2)
     if res2["applicable"] and not res2["aligned"]:
-        return 1, False                       # tight is a pure reorder -> size-safe to apply post-hoc
+        return 1, False                       # tight/bcontig are pure reorders -> size-safe to apply post-hoc
     return 0, (_lsiRequested == 1)            # aligned (LDS unreserved) or genuinely inapplicable -> reject if forced
 
 
@@ -72,8 +73,18 @@ def test_resolved_1ldsbuffer_forceon_conflict_still_rejects():
 
 
 def test_unrelated_disqualifier_rejects_even_with_unresolved_buffer():
-    # An unresolved 1LDSBuffer (-1) defers ONLY when it is the (short-circuit) disqualifier. A
-    # reason that fires earlier in the oracle (e.g. TDMSplit) does not defer, so force-on rejects.
+    # A disqualifier that fires before the 1LDSBuffer short-circuit rejects (does not defer).
     from Tensile.Tests.unit.test_segment_interleave import _vw8_state
-    assert _resolve_lsi(_vw8_state(**{"TDMSplit": 1, "1LDSBuffer": -1,
+    assert _resolve_lsi(_vw8_state(**{"UseSubtileImpl": 1, "1LDSBuffer": -1,
                                       "LDSSegmentInterleave": 1})) == (0, True)
+
+def test_bcontig_resolves_to_1():
+    # bcontig (unsplittable B) applies and resolves to 1, like split.
+    from Tensile.Tests.unit.test_segment_interleave import _vw8_state
+    assert _resolve_lsi(_vw8_state(MacroTile1=224, VectorWidthB=1)) == (1, False)
+
+
+def test_deferred_1ldsbuffer_bcontig_resolves_to_1():
+    # Same bcontig case, blocked only by 1LDSBuffer(-1): still resolves to 1 after the deferred re-eval.
+    from Tensile.Tests.unit.test_segment_interleave import _vw8_state
+    assert _resolve_lsi(_vw8_state(MacroTile1=224, VectorWidthB=1, **{"1LDSBuffer": -1})) == (1, False)

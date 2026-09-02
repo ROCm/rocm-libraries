@@ -33,12 +33,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class AIChebyshev
-  * \brief Approximate Inverse - Chebyshev Preconditioner
-  * \details
-  * The Approximate Inverse - Chebyshev Preconditioner is an inverse matrix
-  * preconditioner with values from a linear combination of matrix-valued
-  * Chebyshev polynomials.
-  * \cite chebpoly
+  * \brief Approximate inverse Chebyshev polynomial preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
@@ -78,18 +73,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class FSAI
-  * \brief Factorized Approximate Inverse Preconditioner
-  * \details
-  * The Factorized Sparse Approximate Inverse preconditioner computes a direct
-  * approximation of \f$M^{-1}\f$ by minimizing the Frobenius norm \f$||I - GL||_{F}\f$,
-  * where \f$L\f$ denotes the exact lower triangular part of \f$A\f$ and \f$G:=M^{-1}\f$.
-  * The FSAI preconditioner is initialized by \f$q\f$, based on the sparsity pattern of
-  * \f$|A^{q}|\f$. However, it is also possible to supply external sparsity patterns in form
-  * of the LocalMatrix class.
-  * \cite kolotilina
-  *
-  * \note
-  * The FSAI preconditioner is only suited for symmetric positive definite matrices.
+  * \brief Factorized Sparse Approximate Inverse preconditioner for SPD systems.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
@@ -149,13 +133,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class SPAI
-  * \brief SParse Approximate Inverse Preconditioner
-  * \details
-  * The SParse Approximate Inverse algorithm is an explicitly computed preconditioner for
-  * general sparse linear systems. In its current implementation, only the sparsity
-  * pattern of the system matrix is supported. The SPAI computation is based on the
-  * minimization of the Frobenius norm \f$||AM - I||_{F}\f$.
-  * \cite grote
+  * \brief Sparse Approximate Inverse preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
@@ -200,16 +178,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class TNS
-  * \brief Truncated Neumann Series Preconditioner
-  * \details
-  * The Truncated Neumann Series (TNS) preconditioner is based on
-  * \f$M^{-1} = K^{T} D^{-1} K\f$, where \f$K=(I-LD^{-1}+(LD^{-1})^{2})\f$, with the
-  * diagonal \f$D\f$ of \f$A\f$ and the strictly lower triangular part \f$L\f$ of
-  * \f$A\f$. The preconditioner can be computed in two forms - explicitly and implicitly.
-  * In the explicit form, the full construction of \f$M\f$ is performed via matrix-matrix
-  * operations, whereas in the implicit from, the application of the preconditioner is
-  * based on matrix-vector operations only. The matrix format for the stored matrices can
-  * be specified.
+  * \brief Truncated Neumann Series preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

@@ -5,10 +5,11 @@
 ### Key characteristics
 
 - **SSA def-use dependencies** via `buildUseDefChain(includePseudo=true)` — memtoken pseudo-registers become first-class edges, so `inst->getSources()` lists the memops a consumer depends on (including through PHIs at CFG joins)
-- **Four counter types**: DS (`dlcnt`), buffer/load (`vlcnt`), scalar memory (`kmcnt`), tensor (`tlcnt`), tracked as `CounterKind` in `WaitDataflow`
+- **Four counter types**: DS (`dlcnt`), vector load (`vlcnt`), scalar memory (`kmcnt`), tensor (`tlcnt`), tracked as `CounterKind` in `WaitDataflow`
 - **Per-predecessor queues** — each counter keeps separate in-flight FIFOs tagged by CFG predecessor edge, so join consumers see each path's depth instead of a collapsed union queue
-- **Tensor loop policy** — by default, the `CK_Tensor` slice of dataflow state is frozen after the first solver sweep so tensor tokens do not propagate around loop back-edges; a conservative option restores normal tensor fixed-point iteration
+- **Tensor loop policy** — TensileLite promises tagged tensor-token deps are correct without propagating `CK_Tensor` through loop back-edges, so by default exact `CK_Tensor` queues are frozen after the first solver sweep; blocks with untagged tensor anchors keep their live tensor queues because those anchors are fences, and `loopCarriedTokenDepsEnabled` restores normal tensor fixed-point iteration when conservative propagation is needed
 - **Anti-dependency scans** for hazards the SSA RAW chain does not capture (WAR-on-LDS, barrier ordering, untagged conservative fallbacks)
+- **Existing waits are credited** — an `s_wait_*` already in the input drains the model like one the pass plans, so no duplicate is emitted; see "Existing waits in the input"
 - **Analyze → Optimize → Finalize** — dataflow solve, then `ShallowPredPromotion`, then `finalizePlan()` to align the plan with post-optimizer FIFO simulation
 - **Selective IR mutation**: `buildUseDefChain` and `WaitDataflow::solve()` run over every basic block so skipped preds still contribute in-flight state; `PassContext::shouldProcessBasicBlock` gates `emitWaits` and `removePHIs` only
 
@@ -16,26 +17,53 @@
 
 ## Hardware background
 
-Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_load_to_lds`) retire out of order. The hardware exposes one FIFO counter per kind of async memop. Before a consumer reads a result, the compiler must insert the matching `s_wait_*` to drain the producer.
+Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_load_to_lds`, scalar `s_load_*`) complete long after they issue. The hardware exposes one counter per kind of async memop, and before a consumer reads a result the compiler must insert the matching `s_wait_*` to drain the producer. Most of these counters retire in issue order, so a wait can name a producer while leaving newer ops in flight; `kmcnt` cannot.
 
-| `CounterKind` | Covers | Wait instruction | Modifier field |
-|---------------|--------|------------------|----------------|
-| `CK_DS` | `ds_read` / `ds_write` / `ds_atomic` | `s_wait_dscnt N` | `SWaitCntData.dlcnt` |
-| `CK_Buffer` | global/buffer load + store, returning MUBUF/FLAT/GLOBAL atomic | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` |
-| `CK_KM` | scalar memory loads (`s_load_*`) | `s_wait_kmcnt N` | `SWaitCntData.kmcnt` |
-| `CK_Tensor` | `tensor_load_to_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` |
+| `CounterKind` | Covers | Wait instruction | Modifier field | Completion order |
+|---------------|--------|------------------|----------------|------------------|
+| `CK_DS` | `ds_read` / `ds_write` / `ds_atomic` | `s_wait_dscnt N` | `SWaitCntData.dlcnt` | in order |
+| `CK_Load` | global/buffer/flat **load**, returning MUBUF/FLAT/GLOBAL atomic | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` | in order |
+| `CK_KM` | scalar memory loads (`s_load_*`) | `s_wait_kmcnt 0` | `SWaitCntData.kmcnt` | **out of order** |
+| `CK_Tensor` | `tensor_load_to_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` | in order |
 
-`s_wait_*cnt N` blocks until **at most `N`** ops of that kind remain outstanding (it keeps the `N` most-recently-issued in flight and drains everything older).
+`s_wait_*cnt N` blocks until the counter has dropped to **at most `N`**. On the in-order counters each op contributes exactly 1, so `N` is an op count and it identifies precisely which ops completed: the `N` most-recently-issued stay in flight and everything older has landed. `kmcnt` is neither in order nor one-per-op (see below).
+
+A counter's FIFO must therefore hold **exactly** the ops that hardware counts on it, no more. Vector stores are excluded from `CK_Load` for this reason: per the ISA's *Memory Dependency Counters* section (5.7.1 in the public gfx1250 doc) they increment `STOREcnt`, not `LOADcnt`. Counting them in the loadcnt FIFO caused two distinct hazards:
+
+1. **Inflated immediate.** A store between a load and its consumer pushed the load one position further from the tail, so `countFrom - 1` came out one too high. For `buffer_load; buffer_store; consumer` the pass emitted `s_wait_loadcnt 1` when hardware `LOADcnt` was already 1 — the wait retired immediately and the consumer read an unloaded register.
+2. **Dropped wait.** `creditObservedWait` trims the queue to an observed immediate. Against a mixed queue `[load, store, store]`, an incoming `s_wait_loadcnt 2` kept the two stores and evicted the load, so the consumer saw nothing pending and got **no wait at all**.
+
+Both are pinned by `waitcnt_insertion_store_not_on_loadcnt_test.stir`. `STOREcnt` is not modelled today: there is no `CounterKind` for it and the pass emits no `s_wait_storecnt`. Incoming store waits are therefore **preserved** rather than stripped — see "The reconstruction contract" below.
 
 ### Wait arithmetic
 
-If producer `D` sits at index `i` (0 = oldest) in a counter FIFO of size `n`, the wait immediate that drains `D` is:
+If producer `D` sits at index `i` (0 = oldest) in an in-order counter FIFO of size `n`, the wait immediate that drains `D` is:
 
 ```
 w(D) = n - i - 1
 ```
 
-`PerPredQueue::countFrom(D)` returns the number of ops from `D` (inclusive) to the tail. The emitted wait is `countFrom(D) - 1`. When multiple deps constrain the same counter, the pass takes the **min** of their wait values (the most permissive value that still drains the oldest needed dep on every constrained path).
+`PerPredQueue::countFrom(D)` returns the number of ops from `D` (inclusive) to the tail, so `w(D) = countFrom(D) - 1`. When multiple deps constrain the same counter, the pass takes the **min** of their wait values (the most permissive value that still drains the oldest needed dep on every constrained path).
+
+`waitToDrain(counter, countFrom)` is the **only** place a queue position is turned into a wait immediate, because the formula above is not valid on every counter.
+
+### Out-of-order counters
+
+Two independent hardware facts make a nonzero `kmcnt` immediate unusable:
+
+- **It is not a count of instructions.** Per the ISA spec, `kmcnt` increments by 1 for a single-DWORD fetch (or a cache invalidate) and by 2 for a fetch of two or more DWORDs, decrementing by the same amount when the instruction completes. A queue index therefore does not convert to an immediate at all.
+- **Completion order is unspecified.** Scalar loads may return in any order relative to how they were issued, and a load crossing two cache lines can return its halves at different times.
+
+Either one alone breaks the wait arithmetic above. Concretely, `s_wait_kmcnt 1` after two `s_load`s is satisfied by the second load returning first, leaving the first load's destination stale — so only `s_wait_kmcnt 0` ("everything issued so far has landed") has a well-defined meaning for a consumer.
+
+`CK_KM` is consequently marked `CounterOrder::OutOfOrder` in `CounterPolicy`, and `waitToDrain` returns `0` for it whenever a dependency is in flight. Consequences that follow automatically:
+
+- Every emitted `s_wait_kmcnt` has immediate `0`; the wait is a full drain.
+- `trimQueues(queues[CK_KM], 0)` empties the queue, so consumers after the drain need no further wait — a run of scalar-load consumers with no interleaved `s_load` collapses to one wait.
+- `ShallowPredPromotion` cannot relax a KM wait: every per-pred value it computes is already `0`.
+- The `kMaxInFlight` saturation diagnostic is suppressed for out-of-order counters; a saturated queue cannot cause an under-deep wait when the wait is always a full drain.
+
+Marking a counter out-of-order is a one-line policy change if hardware behaviour requires it for another counter.
 
 `classifyMemOp` maps an instruction to its counter; an instruction that is not a tracked memop returns `CK_Count` (no counter).
 
@@ -178,7 +206,7 @@ Loop-carried tensor-token dependencies are controlled separately:
 df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 ```
 
-By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during solver sweep 0, then freezes only the tensor slice of `DataflowState` on later sweeps. This prevents tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
+By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (`s_barrier`, DS read/write, or DS atomic). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
 
 When `enableLoopCarriedTokenDeps` is **enabled**, `CK_Tensor` participates in the normal fixed-point iteration just like the other counters. This is the conservative mode and can reintroduce loop-header tensor waits when a back-edge carries tensor token state.
 
@@ -235,7 +263,7 @@ Per-pred queues are kept separate at block exit (not collapsed) so successors pr
 
 ### DataflowResult
 
-Converged per-block `entryState` and `exitState`. Optimizers read `exitState[pred]` for per-path queue depths; `finalizePlan` reads `entryState`. In default mode, the `CK_Tensor` slice of these states is the frozen post-sweep-0 tensor snapshot, while the other counters are fully converged.
+Converged per-block `entryState` and `exitState`. Optimizers read `exitState[pred]` for per-path queue depths; `finalizePlan` reads `entryState`. In default mode, exact `CK_Tensor` queues and tensor PHI waits are the frozen post-sweep-0 tensor snapshot except for blocks with untagged tensor anchors, where live tensor queues continue to iterate through the normal dataflow state. The other counters are fully converged.
 
 ### WaitCountSpec / WaitInsertionPlan
 
@@ -244,7 +272,8 @@ Converged per-block `entryState` and `exitState`. Optimizers read `exitState[pre
 |         WaitCountSpec          |
 +--------------------------------+
 | dsCount:     int  (dlcnt)      |  or kUnused (-1)
-| bufferCount: int  (vlcnt)      |
+| loadCount:   int  (vlcnt)      |
+| kmCount:     int  (kmcnt)      |
 | tensorCount: int  (tlcnt)      |
 +--------------------------------+
 
@@ -279,7 +308,7 @@ Intuition: after emitting `s_wait N`, at most `N` old ops remain; each new op is
 
 1. Seed every block with empty state (lattice bottom).
 2. Each iteration: for each block, `mergeFromPredecessors` builds entry state, then `transferBlock` walks instructions and mutates state.
-3. In default mode, after sweep 0, restore the `CK_Tensor` slice of each block's entry/exit state from the frozen sweep-0 snapshot. DS, buffer, and KM continue normal fixed-point iteration.
+3. In default mode, after sweep 0, call `restoreTensorState` on each block's entry and exit state. It restores exact `CK_Tensor` queues and tensor PHI waits from the frozen sweep-0 snapshot, unless `hasUntaggedTensorAnchor(bb)` is true. DS, buffer, and KM continue normal fixed-point iteration.
 4. Convergence = full RPO sweep with no exit-state change.
 5. On convergence, report any counter that exceeded `kMaxInFlight` as a non-fatal diagnostic.
 
@@ -293,7 +322,7 @@ At block entry:
 
 1. **Seed per-pred queues** — copy each predecessor's exit queues, retagging `pred`. Self-predecessors (back-edges) are included; at fixed point the back-edge's exit is the loop body's true exit. Identical `(pred, ops)` queues are deduplicated so loop bodies converge (without dedup, back-edges would re-copy the same queue each iteration and the state would never stabilize).
 2. **Forward PHI summaries** from all preds; collisions keep the strictest (min) wait per counter.
-3. **Build PHI summaries** — for each PHI at the top of the block, compute per-counter wait as the **min** of `countFrom(src) - 1` over constrained incoming paths. Nested PHIs chain through the predecessor's already-computed summary.
+3. **Build PHI summaries** — for each PHI at the top of the block, compute per-counter wait as the **min** of `waitToDrain(c, countFrom(src))` over constrained incoming paths. Nested PHIs chain through the predecessor's already-computed summary.
 
 Queues are **copied, not merged** — a join holds one queue per (predecessor, original-queue) so per-path depth survives. The old "collapse to union queue at exit" design was deliberately removed; collapsing would lose per-pred position info and force over-deep waits.
 
@@ -301,12 +330,34 @@ Queues are **copied, not merged** — a join holds one queue per (predecessor, o
 
 For each non-PHI instruction in program order:
 
-1. **`computeRequiredWaits`** — determine `required[CK_Count]` (see below).
-2. **Emit decision** — for each counter with a required wait, apply redundancy elision; record `(anchor, WaitCountSpec)` in `emitPlan`.
-3. **`trimQueues`** — model the hardware drain on all per-pred queues for that counter.
-4. **Record producer** — append the instruction to its counter queue *after* the wait decision (so the wait's snapshot excludes its own consumer).
+1. **Credit existing waits** — if the instruction is itself an `s_wait_*` (see below), apply its drain and move on; it is neither a consumer nor a producer.
+2. **`computeRequiredWaits`** — determine `required[CK_Count]` (see below).
+3. **Emit decision** — for each counter with a required wait, apply redundancy elision; record `(anchor, WaitCountSpec)` in `emitPlan`.
+4. **`trimQueues`** — model the hardware drain on all per-pred queues for that counter.
+5. **Record producer** — append the instruction to its counter queue *after* the wait decision (so the wait's snapshot excludes its own consumer).
 
 Per-pred queues are **not** collapsed at block exit.
+
+### The reconstruction contract
+
+Removing a wait is **legal** only when some pass regenerates it; otherwise the hazard it guarded goes unguarded. `waitcnt::waitReconstruction()` is the single source of truth for that, and lives with this dataflow — the thing that does the regenerating — so the two cannot drift. `StinkyRemoveWaitCntPass` decides legality first and has no code path that removes a `None`. An unrecognised wait opcode classifies as `None`, so a newly added one is preserved by default rather than silently dropped.
+
+| Classification | Opcodes | Rebuilt by |
+|----------------|---------|------------|
+| `WaitCntInsertion` | `s_wait_dscnt`, `s_wait_loadcnt`, `s_wait_kmcnt`, `s_wait_tensorcnt`, `s_wait_asynccnt`, `s_wait_loadcnt_dscnt` | `emitOneSpec`, one field of `WaitCountSpec` each (the packed form splits into two) |
+| `HazardPass` | `s_wait_xcnt` | `Gfx1250HazardPass`, from its own XNACK replay-group rules |
+| `None` | `s_wait_storecnt`, `s_wait_storecnt_dscnt`, legacy `s_waitcnt` | nothing — all three can name `STOREcnt` |
+
+`RemoveWaitCntOptions` then applies **policy** to what is legal: `s_wait_kmcnt` is kept because insertion is region-scoped, `s_wait_xcnt` because its regenerator places drains by different criteria, and `s_wait_tensorcnt` when the insertion pass should reuse the incoming ones. Blocks the strip pass skipped keep everything regardless.
+
+### Existing waits in the input
+
+Because of the above, the pass never sees a fully clean slate. A wait already in the stream drains the hardware exactly like one the pass plans, so `observedWaitDrains` decodes it and `creditObservedWait` applies it: `trimQueues` on that counter plus `CounterEmitState::recordEmittedWait`, which is what stops a duplicate from being planned. A credited wait that is *too weak* for a later consumer does not suppress that consumer's wait, because `needsNewWait` compares against the required value.
+
+Decoding takes the counter from the **opcode** and the value from the **literal source operand**. `SWaitCntData` is not authoritative per instruction: `legalizeWaitCnt` splits one `s_waitcnt` into several `s_wait_*` and attaches the whole pre-split spec to the last member of the group and none to the others. The modifier is a fallback for the opcode's own counter only, used for hand-written IR that carries no literal. Two deliberate gaps:
+
+- **Out-of-order counters** — a nonzero existing `s_wait_kmcnt` is *not* credited, for the same reason `waitToDrain` never produces one: it names no particular load. Only a full drain counts.
+- **Undecodable waits** — `s_wait_storecnt`, `s_wait_xcnt`, the legacy packed `s_waitcnt`, and the storecnt half of `s_wait_storecnt_dscnt` credit nothing, since no tracked counter can be attributed. The failure mode is a redundant wait, never a missing one. Note this is why the `None` group above is safe to preserve: an uncredited wait costs at most a duplicate drain.
 
 ---
 
@@ -316,7 +367,7 @@ Per-pred queues are **not** collapsed at block exit.
 
 RAW dependencies come from `inst->getSources()` after `buildUseDefChain(includePseudo=true)`:
 
-- Concrete memop sources: `classifyMemOp(*src)` maps to a counter; `countFrom(src) - 1` from each per-pred queue contributes via `tightenRequired` (min across hits).
+- Concrete memop sources: `classifyMemOp(*src)` maps to a counter; `waitToDrain(c, countFrom(src))` from each per-pred queue contributes via `tightenRequired` (min across hits).
 - PHI sources: `phiCurrentQueueWait` recurses through PHI inputs and scans **live** per-pred queues (not stored PHI summaries alone), so intervening in-block ops are counted.
 
 ```
@@ -363,7 +414,7 @@ Anchor helpers:
 | LDS writer | Writer lacks `MemTokenData`, any DS op in flight, writer is not `ds_write` | `required[CK_DS] = 0` |
 | Barrier | Any in-flight DS op and (barrier untagged OR any pending DS op untagged) | `required[CK_DS] = 0` |
 
-These widen waits, never narrow them.
+These widen waits, never narrow them. In default tensor-freeze mode, blocks with untagged tensor anchors keep live tensor queues specifically so the tensor-anchor fallback can still see loop-carried tensor loads.
 
 ---
 
@@ -400,23 +451,23 @@ After `materializePlan()`, `WaitPlanOptimizer::rewrite` may relax the plan. `Sha
 
 After optimizers, `WaitDataflow::finalizePlan()` replays blocks where the solver's queue simulation may disagree with the final plan.
 
-### When a block is replayed
+### Replay scope
 
-`blockNeedsFinalize` returns true when the block has any entry in `plan.anchorWaits` **or** ≥2 wait-anchor candidates (any instruction where `rawNeedsWait` is true for any counter).
+`finalizePlan()` replays every block in RPO order against recomputed predecessor exits. Back-edges start at bottom and tighten over iterations, just like `solve()`. The replay rebuilds `newAnchors` from scratch each sweep using the optimizer's plan as the floor.
 
 ### Per-block replay algorithm
 
-For each replayed block in RPO order:
+For each block in RPO order:
 
 1. **`adjustedEntry`** — start from converged `entryState[bb]`. For each predecessor with a `TailDrain` in the plan, virtually trim only that pred's per-pred queues by the tail-drain wait values. Tail drains execute on the predecessor **before** control enters the successor; converged `entryState` does not include them.
-2. **Tensor freeze restore** — in default mode and after replay sweep 0, restore only the `CK_Tensor` slice of the block entry from the frozen replay entry snapshot.
+2. **Tensor freeze restore** — in default mode and after replay sweep 0, call `restoreTensorState` on the replay entry. It restores exact `CK_Tensor` queues and tensor PHI waits from the frozen replay entry snapshot, unless `hasUntaggedTensorAnchor(bb)` is true.
 3. **Program-order walk** — for each non-PHI instruction:
    - `computed = computeRequiredWaits(inst, state, rawNeedsWait)`
    - `applySpec = mergePlanAndComputed(plan, inst, computed, emitState)`
    - Trim queues with applied wait values (never with pre-optimizer solver values)
    - Update `plan.anchorWaits[inst]` — add, update, or erase redundant fields
    - Append producers to counter queues after the wait decision
-4. **Tensor exit restore** — in default mode and after replay sweep 0, restore only the `CK_Tensor` slice of the block exit from the frozen replay exit snapshot before convergence comparison.
+4. **Tensor exit restore** — in default mode and after replay sweep 0, call `restoreTensorState` on the replay exit before convergence comparison, with the same untagged-anchor exception.
 
 When `enableLoopCarriedTokenDeps` is true, both tensor restore steps are skipped and all counters are replayed to a fixed point.
 
@@ -523,7 +574,8 @@ Each non-`kUnused` field in `WaitCountSpec` produces one instruction:
 | WaitCountSpec field | Emitted instruction | Modifier |
 |---------------------|---------------------|----------|
 | `dsCount` | `s_wait_dscnt <N>` | `SWaitCntData.dlcnt` |
-| `bufferCount` | `s_wait_loadcnt <N>` | `SWaitCntData.vlcnt` |
+| `loadCount` | `s_wait_loadcnt <N>` | `SWaitCntData.vlcnt` |
+| `kmCount` | `s_wait_kmcnt <N>` | `SWaitCntData.kmcnt` |
 | `tensorCount` | `s_wait_tensorcnt <N>` | `SWaitTensorCntData.tlcnt` |
 
 ### removePHIs

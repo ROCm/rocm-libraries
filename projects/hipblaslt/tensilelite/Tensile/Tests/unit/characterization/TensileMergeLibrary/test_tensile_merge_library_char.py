@@ -98,40 +98,38 @@ def test_add_kernel_new():
 # sanitizeSolutions
 # ---------------------------------------------------------------------------
 def test_sanitize_zero_stagger():
-    sols = [{"StaggerU": 0}]
-    M.sanitizeSolutions(sols)
-    assert sols[0]["StaggerUMapping"] == 0
-    assert sols[0]["_staggerStrideShift"] == 0
+    data = {"Solutions": [{"StaggerU": 0}]}
+    M.sanitizeSolutions(data)
+    assert data["Solutions"][0]["StaggerUMapping"] == 0
+    assert data["Solutions"][0]["_staggerStrideShift"] == 0
 
 
 def test_sanitize_nonzero_stagger_untouched():
-    sols = [{"StaggerU": 4}]
-    M.sanitizeSolutions(sols)
-    assert "StaggerUMapping" not in sols[0]
+    data = {"Solutions": [{"StaggerU": 4}]}
+    M.sanitizeSolutions(data)
+    assert "StaggerUMapping" not in data["Solutions"][0]
 
 
 # ---------------------------------------------------------------------------
 # removeUnusedSolutions
 # ---------------------------------------------------------------------------
 def test_remove_unused_solutions():
-    data = [None] * 8
-    data[5] = [_sol(0, "used"), _sol(1, "unused")]
-    data[7] = [[[1, 2, 3, 4], [0, 0.5]]]  # only solution 0 in use
+    data = {
+        "Solutions": [_sol(0, "used"), _sol(1, "unused")],
+        "ExactLogic": [[[1, 2, 3, 4], [0, 0.5]]],
+    }
     out, removed = M.removeUnusedSolutions(data)
     assert removed == 1
-    assert len(out[5]) == 1
-    assert out[5][0]["SolutionIndex"] == 0
-    assert out[7][0][1][0] == 0
+    assert len(out["Solutions"]) == 1
+    assert out["Solutions"][0]["SolutionIndex"] == 0
+    assert out["ExactLogic"][0][1][0] == 0
 
 
-# ---------------------------------------------------------------------------
-# removeDuplicatedSolutions
-# ---------------------------------------------------------------------------
 def test_remove_duplicated_solutions():
-    data = [None] * 8
-    # two solutions share SolutionNameMin -> deduped to one
-    data[5] = [_sol(0, "dup", "k0"), _sol(1, "dup", "k0"), _sol(2, "uniq", "k1")]
-    data[7] = [[[1], [0, 0.5]], [[2], [1, 0.6]], [[3], [2, 0.7]]]
+    data = {
+        "Solutions": [_sol(0, "dup", "k0"), _sol(1, "dup", "k0"), _sol(2, "uniq", "k1")],
+        "ExactLogic": [[[1], [0, 0.5]], [[2], [1, 0.6]], [[3], [2, 0.7]]],
+    }
     out, numRemoved, numSols, numKernels = M.removeDuplicatedSolutions(data)
     assert numRemoved == 1
     assert numSols == 2
@@ -170,9 +168,7 @@ def test_find_solution_with_index():
 # compareDestFolderToYaml
 # ---------------------------------------------------------------------------
 def _logic_attr(attr):
-    d = [None] * 12
-    d[11] = attr
-    return d
+    return {"LibraryType": attr}
 
 
 def test_compare_dest_folder_ok():

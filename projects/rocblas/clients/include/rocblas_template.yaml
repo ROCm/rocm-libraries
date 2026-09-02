@@ -551,6 +551,12 @@ Functions:
   rocblas_cgemm_batched: { function: gemm_batched, <<: *single_precision_complex }
   rocblas_zgemm_batched: { function: gemm_batched, <<: *double_precision_complex }
 
+  rocblas_sgemm_grouped_batched: { function: gemm_grouped_batched, <<: *single_precision }
+  rocblas_dgemm_grouped_batched: { function: gemm_grouped_batched, <<: *double_precision }
+
+  rocblas_gemm_grouped_batched_ex: { function: gemm_grouped_batched_ex, <<: *single_precision }
+  rocblas_gemm_grouped_batched_ex_64: { function: gemm_grouped_batched_ex, <<: *single_precision, api: C_64 }
+
   rocblas_hgemm_strided_batched: { function: gemm_strided_batched, <<: *half_precision }
   rocblas_sgemm_strided_batched: { function: gemm_strided_batched, <<: *single_precision }
   rocblas_dgemm_strided_batched: { function: gemm_strided_batched, <<: *double_precision }

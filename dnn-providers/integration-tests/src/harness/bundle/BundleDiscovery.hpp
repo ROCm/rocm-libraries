@@ -123,7 +123,7 @@ inline std::vector<std::filesystem::path> findLeafDirectories(const std::filesys
 // list.
 inline const std::set<std::string>& companionKinds()
 {
-    static const std::set<std::string> s_kinds = {"meta"};
+    static const std::set<std::string> s_kinds = {"meta", "support"};
     return s_kinds;
 }
 
@@ -188,9 +188,9 @@ inline std::string sanitizeForGtest(const std::string& input)
 }
 
 // Builds the GTest suite from the bundle path relative to the data root by
-// sanitizing each segment and joining with '_'. Sweep roots must live below the
-// data root; direct bundles have a compatibility exception in deriveTestName()
-// for --golden-data-dir pointing directly at a bundle folder.
+// sanitizing each segment and joining with '_'. The first segment is the tier
+// directory (e.g. "quick", "standard", "full") and passes through as-is so
+// bundle suite names match the on-disk folder structure directly.
 inline std::string deriveSuiteName(const std::filesystem::path& relativeDir,
                                    const std::filesystem::path& sourcePath)
 {
@@ -221,6 +221,10 @@ inline std::string deriveSuiteName(const std::filesystem::path& relativeDir,
 // structure. Discovery imposes no semantic folder schema so "drop a folder, it
 // runs" works for ad-hoc bundles; structural validation belongs to the bundle
 // verifier, not registration.
+//
+// Op family is the second path segment by convention (tier/OpFamily/…), not
+// stored as bundle metadata. Consumers that need it (e.g. the offline support
+// matrix renderer) derive it from the canonical directory layout.
 inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
                                       const std::filesystem::path& bundleDir)
 {

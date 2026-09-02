@@ -497,6 +497,9 @@ _defaultProblemType = {
     "ActivationNoGuard": False,
     # AmaxD
     "OutputAmaxD": False,
+    # PUSHes the first AM feature columns to remote peer recv slots from the
+    # GEMM epilogue; the remaining columns store locally.
+    "FusedGemmA2A": False,
     # For kernels putting arguments in workspaces instead of kernel arguments, they can choose to support user arguments input instead.
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
@@ -1344,6 +1347,8 @@ class ProblemType(Mapping):
         name.append(f"Aux{self['DataTypeE'].toChar()}")
     if self["OutputAmaxD"]:
       name.append("AmaxD")
+    if self["FusedGemmA2A"]:
+      name.append("FusedA2A")
     if self["Sparse"]:
       if self["Sparse"] == 2:
         name.append("SPBML%d"%(self["MetadataLayout"]))
@@ -1438,8 +1443,7 @@ def getGateResidualDataTypeListDefault(problem: ProblemType) -> List[DataType]:
   gList = []
   for d in ["DataType", "ComputeDataType"]:
     dtype = DataType(problem[d])
-    if dtype.numBytes() > 1:
-      gList.append(dtype)
+    gList.append(dtype)
 
   gateResidualDataTypeList = list(set(gList))
   gateResidualDataTypeList.sort() # Make name unique

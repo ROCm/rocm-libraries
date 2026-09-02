@@ -500,7 +500,7 @@ rocsparse::bsric0_kernel_launch_t rocsparse::find_bsric0_kernel_general_launch(
     rocsparse_handle handle, rocsparse_bsric0_info bsric0_info, rocsparse_const_spmat_descr A)
 {
     const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
-    const bool sleep = (gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2);
+    const bool sleep = (gcn_arch_name == rocsparse_arch_names::gfx908 && handle->asic_rev < 2);
     if(sleep)
     {
         return rocsparse::transform_t_type<true, 64, 64>(A->data_type, A->row_type, A->col_type);

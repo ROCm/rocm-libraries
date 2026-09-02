@@ -87,6 +87,15 @@ function(create_hiptensor_shared_library)
     # Create alias for users
     add_library(hiptensor::hiptensor ALIAS hiptensor)
 
+    # Embed Windows version resource so hiptensor.dll exposes file metadata
+    # (description, version, product name, copyright) in Explorer properties.
+    if(WIN32)
+        target_sources(hiptensor PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+        # Adding a .rc source can lead CMake to infer RC as the linker language;
+        # pin it to CXX so the link step is correct.
+        set_target_properties(hiptensor PROPERTIES LINKER_LANGUAGE CXX)
+    endif()
+
     # Add driver mode to both cxx and link flags
     target_compile_options(hiptensor PRIVATE ${CMAKE_CXX_FLAGS} ${CLANG_DRIVER_MODE})
     target_link_options(hiptensor PRIVATE ${CLANG_DRIVER_MODE})

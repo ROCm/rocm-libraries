@@ -30,6 +30,10 @@ add_executable(example_hipsparse_sparse_to_dense_cpp)
 target_sources(example_hipsparse_sparse_to_dense_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_sparse_to_dense_cpp.cpp")
 target_link_libraries(example_hipsparse_sparse_to_dense_cpp PRIVATE hipsparse::samples-common)
 
+add_executable(example_hipsparse_spgeam_cpp)
+target_sources(example_hipsparse_spgeam_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_spgeam_cpp.cpp")
+target_link_libraries(example_hipsparse_spgeam_cpp PRIVATE hipsparse::samples-common)
+
 add_executable(example_hipsparse_spgemm_cpp)
 target_sources(example_hipsparse_spgemm_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_spgemm_cpp.cpp")
 target_link_libraries(example_hipsparse_spgemm_cpp PRIVATE hipsparse::samples-common)

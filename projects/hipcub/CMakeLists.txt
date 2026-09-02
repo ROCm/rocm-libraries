@@ -35,15 +35,15 @@ endif()
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "5.0.0")
+set(VERSION_STRING "4.6.0")
 # Set the CCCL-compatible version.
-set(HIPCUB_CCCL_VERSION_MAJOR 3)
-set(HIPCUB_CCCL_VERSION_MINOR 0)
-set(HIPCUB_CCCL_VERSION_PATCH 3)
+set(HIPCUB_CCCL_VERSION_MAJOR 2)
+set(HIPCUB_CCCL_VERSION_MINOR 8)
+set(HIPCUB_CCCL_VERSION_PATCH 2)
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocPRIM
-set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.14" CACHE STRING "Download branch for ROCm dependencies")
+set(ROCM_DEP_RELEASE_BRANCH "release/therock-10.0" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
 
 # Install prefix
@@ -59,8 +59,10 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++17 are supported")
+if (CMAKE_CXX_STANDARD EQUAL 14)
+  message(WARNING "C++14 will be deprecated in the next major release")
+elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++14 and C++17 are supported")
 endif()
 
 # Set HIP flags
@@ -195,13 +197,28 @@ endif()
 
 include(CheckCXXCompilerFlag)
 
-if(BUILD_OFFLOAD_COMPRESS)
-  # We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP.
-  check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-  if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
+# Function that checks if a HIP compiler function exists.
+function(hip_check_compiler_flag _flag _var)
+  if(USE_HIPCXX)
+    cmake_check_compiler_flag(HIP "${_flag}" ${_var})
   else()
-    message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
+    check_cxx_compiler_flag("-xhip ${_flag}" ${_var})
+  endif()
+endfunction(hip_check_compiler_flag)
+
+# Enable offload compress.
+if(BUILD_OFFLOAD_COMPRESS)
+  # Except on SPIR-V!
+  if ("amdgcnspirv" IN_LIST HIP_ARCHITECTURES)
+    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
+  endif()
+
+  # Detect capability and add flag.
+  hip_check_compiler_flag("--offload-compress" HIP_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+  if(HIP_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+    add_compile_options($<$<COMPILE_LANGUAGE:HIP>:--offload-compress>)
+  else()
+    message(WARNING "BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
   endif()
 endif()
 
@@ -244,11 +261,6 @@ if(HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
   set(CMAKE_CURRENT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR_OLD})
 else()
   add_subdirectory(hipcub)
-endif()
-
-if(BUILD_CODE_COVERAGE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -fprofile-instr-generate -fcoverage-mapping" )
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-instr-generate")
 endif()
 
 if(BUILD_TEST OR (BUILD_BENCHMARK AND NOT ONLY_INSTALL))

@@ -52,14 +52,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class BaseAMG
-  * \brief Base class for all algebraic multigrid solvers
-  * \details
-  * The Algebraic MultiGrid solver is based on the BaseMultiGrid class. The coarsening
-  * is obtained by different aggregation techniques. The smoothers can be constructed
-  * inside or outside of the class.
-  *
-  * All parameters in the Algebraic MultiGrid class can be set externally, including
-  * smoothers and coarse grid solver.
+  * \brief Base class for algebraic multigrid solvers.
   *
   * \tparam OperatorType - can be LocalMatrix or GlobalMatrix
   * \tparam VectorType - can be LocalVector or GlobalVector

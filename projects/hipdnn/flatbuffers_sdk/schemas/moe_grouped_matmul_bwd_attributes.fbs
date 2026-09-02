@@ -1,0 +1,17 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+table MoeGroupedMatmulBwdAttributes {
+    // Required input tensor UIDs
+    doutput_tensor_uid:            long (cache_uid);
+    token_tensor_uid:              long (cache_uid);
+    first_token_offset_tensor_uid: long (cache_uid);
+
+    // Required output tensor UID
+    dweight_tensor_uid:            long (cache_uid);
+}

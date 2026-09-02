@@ -37,6 +37,8 @@ namespace rocsparse
                                                  int64_t                   n,
                                                  int64_t                   k,
                                                  int64_t                   nnz,
+                                                 int64_t                   batch_count,
+                                                 int64_t                   offsets_batch_stride_A,
                                                  const rocsparse_mat_descr descr,
                                                  const void*               csr_val,
                                                  const void*               csr_row_ptr,
@@ -164,6 +166,8 @@ rocsparse_status rocsparse::csrmm_analysis(rocsparse_handle          handle,
                                            int64_t                   n,
                                            int64_t                   k,
                                            int64_t                   nnz,
+                                           int64_t                   batch_count,
+                                           int64_t                   offsets_batch_stride_A,
                                            const rocsparse_mat_descr descr,
                                            rocsparse_datatype        csr_val_datatype,
                                            const void*               csr_val,
@@ -195,7 +199,19 @@ rocsparse_status rocsparse::csrmm_analysis(rocsparse_handle          handle,
     rocsparse::csrmm_analysis_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_analysis_find(
         &f, csr_row_ptr_indextype, csr_col_ind_indextype, csr_val_datatype));
-    RETURN_IF_ROCSPARSE_ERROR(f(
-        handle, trans_A, alg, m, n, k, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(f(handle,
+                                trans_A,
+                                alg,
+                                m,
+                                n,
+                                k,
+                                nnz,
+                                batch_count,
+                                offsets_batch_stride_A,
+                                descr,
+                                csr_val,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                temp_buffer));
     return rocsparse_status_success;
 }

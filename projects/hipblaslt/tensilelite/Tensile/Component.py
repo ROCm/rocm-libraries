@@ -243,7 +243,14 @@ class LocalRead(Component):
 
     def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, ldsByteOffset=None, bothHalves=False, comment=""):
         ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP, ldsByteOffset, bothHalves)
-        fullComment = "%s sync LDS%u" % (comment, ldsMemTokenIdx) if comment else "sync LDS%u" % ldsMemTokenIdx
+        tokenList = list(getattr(ldsMemToken, "tokens", []))
+        if len(tokenList) == 1:
+            syncComment = "sync LDS%u" % tokenList[0]
+        elif len(tokenList) > 1:
+            syncComment = ", ".join(["sync LDS%u" % tok for tok in tokenList])
+        else:
+            syncComment = "sync LDS%u" % ldsMemTokenIdx
+        fullComment = "%s %s" % (comment, syncComment) if comment else syncComment
         inst = LocalReadX(dst=dst, src=src, ds=ds, comment=fullComment)
         inst.setMemToken(ldsMemToken)
         module.add(inst)
@@ -310,6 +317,11 @@ class TensorDataMover(Component):
 class GL2Prefetch(Component):
     """
     GL2 Prefetch
+    """
+
+class ClusterLoad(Component):
+    """
+    Cluster (multicast) TDM load: multicast-mask compute + descriptor attach.
     """
 
 # Importing here allows auto-registry of components in the Components directory.

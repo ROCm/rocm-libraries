@@ -1231,17 +1231,17 @@ class LocalReadMFMA(LocalRead):
                                     # interleaving the swap with residual/TF32_2 packing operations.
                                     if multiGroupXF32 and rIdx == numReadsPerUnroll - 1:
                                         halfGroup = 4
-                                        for i in range(halfGroup):
-                                            swapIdx1 = outerBaseValuiIdx + halfGroup + i
-                                            swapIdx2 = outerBaseValuiIdx + halfGroup * 2 + i
-                                            swapVgpr1 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx1))
-                                            swapVgpr2 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx2))
-                                            commentStr = "XF32 pack rearrange %s: swap [%d] <-> [%d]"%(tc, swapIdx1, swapIdx2)
-                                            # Tag the last swap with __TF32_2 so _packItemsConditional treats the swap block as a proper boundary,
-                                            # preventing _interleavePackAB from displacing swaps into the next group.
-                                            if i == halfGroup - 1:
-                                                commentStr += " __TF32_2_%s_%d_swap"%(tc, outerBaseValuiIdx // (halfGroup * 2))
-                                            packCodeT.add(VSwapB32(dst=swapVgpr1, src=swapVgpr2, comment=commentStr))
+                                        for sb in range(lrvwTile):
+                                            subBase = outerBaseValuiIdx + sb * numReadsPerUnroll
+                                            for i in range(halfGroup):
+                                                swapIdx1 = subBase + halfGroup + i
+                                                swapIdx2 = subBase + halfGroup * 2 + i
+                                                swapVgpr1 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx1))
+                                                swapVgpr2 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx2))
+                                                commentStr = "XF32 pack rearrange %s: swap [%d] <-> [%d]"%(tc, swapIdx1, swapIdx2)
+                                                if i == halfGroup - 1:
+                                                    commentStr += " __TF32_2_%s_%d_swap"%(tc, subBase // (halfGroup * 2))
+                                                packCodeT.add(VSwapB32(dst=swapVgpr1, src=swapVgpr2, comment=commentStr))
 
                                 if kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]):
                                     if tP["bpe"] == 2 and tP["bpeDS"] == 4:
@@ -1651,15 +1651,43 @@ class LocalReadMFMA(LocalRead):
                                 # boundary. Split it into within-component (vCols) + component jump
                                 # (segCompByteOff, added post-pad below).
                                 segCompByteOff = 0
-                                vCols = (vIdx * numOffsets + oIdx) * MIWaveGroupShape[tile01]
-                                if (kernel.get("LDSSegmentInterleave") == 1
-                                        and kernel["LDSSegInterleaveOffsets"].get("footprintPacked")
-                                        and tc in ("A", "B")):
-                                    numComp  = kernel["NumWaves"] // 2
-                                    compCols = kernel["MacroTile%u" % tile01] // numComp
-                                    if compCols > 0 and MIWaveGroupShape[tile01] > 0:
-                                        segCompByteOff = (vCols // compCols) * kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
-                                        vCols = vCols % compCols
+                                # port-split with VW==WaveTile/2: the per-vIdx column stride carries the
+                                # within-port offset. With VW==WaveTile (numVectorsPerTile==1) the whole
+                                # segment jump is on the wave axis (LraTileAssignment), so it takes the
+                                # normal per-vIdx path below (its segCompByteOff stays 0 within a wave).
+                                _portSplit = (kernel.get("LDSSegmentInterleave") == 1
+                                              and ((tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False))
+                                                or (tc == "B" and kernel["LDSSegInterleaveOffsets"].get("portSplitB", False)))
+                                              and numVectorsPerTile > 1)
+                                _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+                                _componentSplit = (_segOff.get("componentSplit", False)
+                                             and _segOff.get("activeTC") == tc
+                                             and numVectorsPerTile > 1)
+                                if _portSplit:
+                                    # Drop the wave-group factor from the per-vIdx column stride so the
+                                    # two vIdx stay within this port's segment; the A0->A1 segment jump
+                                    # is on the wave stride, not here.
+                                    _shape = MIWaveGroupShape[tile01] // kernel["MIWaveGroup"][tile01]
+                                    vCols = (vIdx * numOffsets + oIdx) * _shape
+                                elif _componentSplit:
+                                    # Divide the per-vIdx stride by wavesPerComp to match the write
+                                    # boundary (tdmSplitLdsBoundary); the match needs numOffsets==1, bpeGR==bpeDS.
+                                    assert numOffsets == 1
+                                    assert tP["bpeGR"] == tP["bpeDS"]
+                                    _wavesPerComp = max(1, kernel["MIWaveGroup"][tile01] // (kernel["NumWaves"] // 2))
+                                    vCols = (vIdx * numOffsets + oIdx) * (MIWaveGroupShape[tile01] // _wavesPerComp)
+                                else:
+                                    vCols = (vIdx * numOffsets + oIdx) * MIWaveGroupShape[tile01]
+                                    _segActiveLR = (kernel.get("LDSSegmentInterleave") == 1
+                                        and ((tc == "A" and not kernel["LDSSegInterleaveOffsets"].get("aBaseline", False))
+                                          or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False))))
+                                    if (_segActiveLR
+                                            and kernel["LDSSegInterleaveOffsets"].get("footprintPacked")):
+                                        numComp  = kernel["NumWaves"] // 2
+                                        compCols = kernel["MacroTile%u" % tile01] // numComp
+                                        if compCols > 0 and MIWaveGroupShape[tile01] > 0:
+                                            segCompByteOff = (vCols // compCols) * kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
+                                            vCols = vCols % compCols
                                 if perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0:
                                     permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
                                     perpStrideInv = permBlock // perpStride

@@ -73,8 +73,10 @@ def parseCurrentLibrary(libPath, sizePath):
     fields = LibraryIO.parseLibraryLogicData(copy.deepcopy(libYaml), libPath)
     (_, _, problemType, solutions, exactLogic, _, _) = fields
 
-    # get performance metric
-    if len(libYaml) > 10:
+    # get performance metric from list or dict logic formats
+    if isinstance(libYaml, dict):
+        globalParameters["PerformanceMetric"] = libYaml.get("PerfMetric")
+    elif len(libYaml) > 10:
         globalParameters["PerformanceMetric"] = libYaml[10]
 
     # process exactLogic into ProblemSizes
@@ -204,12 +206,20 @@ def TensileRetuneLibrary(userArgs):
 
     if remake:
         # write library logic file
+        if isinstance(rawYaml, dict):
+            logicHeader = {
+                "ScheduleName": rawYaml.get("ScheduleName"),
+                "ArchitectureName": rawYaml.get("ArchitectureName"),
+                "DeviceNames": rawYaml.get("DeviceNames"),
+            }
+        else:
+            logicHeader = {
+                "ScheduleName": rawYaml[1],
+                "ArchitectureName": rawYaml[2],
+                "DeviceNames": rawYaml[3],
+            }
         LibraryLogic.main(
-           {
-              "ScheduleName": rawYaml[1],
-              "ArchitectureName": rawYaml[2],
-              "DeviceNames": rawYaml[3]
-            },
+            logicHeader,
             cxxCompiler,
             outputPath
         )
@@ -221,7 +231,10 @@ def TensileRetuneLibrary(userArgs):
         print1("# Reading update file from Benchmarking Client")
         updateFile = os.path.join(outputPath, "Data", "update.yaml")
         updateLogic = LibraryIO.read(updateFile)
-        rawYaml[7] = updateLogic
+        if isinstance(rawYaml, dict):
+            rawYaml["ExactLogic"] = updateLogic
+        else:
+            rawYaml[7] = updateLogic
 
         # write updated library logic (does not overwrite original)
         libName = os.path.basename(libPath)

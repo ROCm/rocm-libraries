@@ -23,6 +23,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <deque>
 
 namespace stinkytofu {
@@ -40,6 +41,10 @@ class InFlightQueue {
 
     void advance(int cycles) {
         currentTime_ += cycles;
+    }
+
+    void setThrottleInterval(double issueInterval) {
+        throttleInterval_ = issueInterval;
     }
 
     void push(int drainLatency) {
@@ -69,12 +74,33 @@ class InFlightQueue {
     void clear() {
         expiries_.clear();
         currentTime_ = 0;
+        nextIssueTick_ = -1.0;
     }
 
     // Seed with `count` entries each expiring `residual` cycles from now.
     void seed(int count, int residual) {
         expiries_.clear();
         for (int i = 0; i < count; ++i) expiries_.push_back(currentTime_ + residual);
+        nextIssueTick_ = -1.0;
+    }
+
+    // Wait cycles to satisfy a saturated-queue issue pacing interval.
+    // Returns 0 when queue is not full or interval is invalid.
+    int throttleWait() const {
+        if (!full() || throttleInterval_ <= 0.0) return 0;
+        const double now = (double)currentTime_;
+        const double nextTick = (nextIssueTick_ < 0.0) ? now : nextIssueTick_;
+        return (int)std::max(0.0, std::ceil((nextTick - now) - 1e-9));
+    }
+
+    // Push one entry and update saturation pacing state.
+    void pushWithThrottle(int drainLatency) {
+        push(drainLatency);
+        const double now = (double)currentTime_;
+        if (full() && throttleInterval_ > 0.0)
+            nextIssueTick_ = std::max(nextIssueTick_, now) + throttleInterval_;
+        else
+            nextIssueTick_ = now;
     }
 
     // Remaining cycles until the oldest in-flight entry expires.
@@ -98,6 +124,8 @@ class InFlightQueue {
 
     int depth_ = 0;
     int currentTime_ = 0;
+    double throttleInterval_ = 0.0;
+    double nextIssueTick_ = -1.0;
     mutable std::deque<int> expiries_;
 };
 

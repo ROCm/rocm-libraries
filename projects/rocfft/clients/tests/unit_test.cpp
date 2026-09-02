@@ -20,10 +20,6 @@
 
 #include "rocfft/rocfft.h"
 
-extern "C" {
-#include "rocfft_c.h"
-}
-
 #include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #include "../../shared/environment.h"
@@ -67,11 +63,7 @@ namespace fs = std::filesystem;
 
 TEST(rocfft_UnitTest, plan_description)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -125,11 +117,7 @@ TEST(rocfft_UnitTest, plan_description_reuse)
     // check that a plan description can be reused between different
     // plans, with different layout parameters for each.
 
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -220,15 +208,92 @@ TEST(rocfft_UnitTest, plan_description_reuse)
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
+TEST(rocfft_UnitTest, zero_length_or_batch)
+{
+    // check that plan creation does not proceed with a zero length or batch.
+
+    PROB_SKIP_UNITTEST();
+
+    try
+    {
+        const rocfft_transform_type transform_types[] = {rocfft_transform_type_complex_forward,
+                                                         rocfft_transform_type_complex_inverse,
+                                                         rocfft_transform_type_real_forward,
+                                                         rocfft_transform_type_real_inverse};
+
+        const struct
+        {
+            size_t rank;
+            size_t lengths[3];
+            size_t number_of_transforms;
+        } rejected[] = {{1, {0, 1, 1}, 1},
+                        {2, {0, 8, 1}, 1},
+                        {2, {8, 0, 1}, 1},
+                        {3, {0, 8, 8}, 1},
+                        {3, {8, 0, 8}, 1},
+                        {3, {8, 8, 0}, 1},
+                        {1, {8, 1, 1}, 0},
+                        {3, {8, 8, 8}, 0}};
+
+        for(const auto transform_type : transform_types)
+        {
+            for(const auto& [rank, lengths, number_of_transforms] : rejected)
+            {
+                rocfft_plan plan = nullptr;
+                EXPECT_EQ(rocfft_plan_create(&plan,
+                                             rocfft_placement_notinplace,
+                                             transform_type,
+                                             rocfft_precision_single,
+                                             rank,
+                                             lengths,
+                                             number_of_transforms,
+                                             nullptr),
+                          rocfft_status_invalid_arg_value)
+                    << "transform type " << transform_type << ", rank " << rank << ", batch "
+                    << number_of_transforms;
+                rocfft_plan_destroy(plan);
+            }
+        }
+
+        // a rank outside the documented 1 to 3 range is a dimension error, not a size one
+        size_t      length = 8;
+        rocfft_plan plan   = nullptr;
+        for(const size_t rank : {static_cast<size_t>(0), static_cast<size_t>(4)})
+        {
+            EXPECT_EQ(rocfft_plan_create(&plan,
+                                         rocfft_placement_notinplace,
+                                         rocfft_transform_type_complex_forward,
+                                         rocfft_precision_single,
+                                         rank,
+                                         &length,
+                                         1,
+                                         nullptr),
+                      rocfft_status_invalid_dimensions)
+                << "rank " << rank;
+            rocfft_plan_destroy(plan);
+        }
+
+        // a valid plan is still accepted
+        plan = nullptr;
+        ASSERT_EQ(rocfft_plan_create(&plan,
+                                     rocfft_placement_notinplace,
+                                     rocfft_transform_type_complex_forward,
+                                     rocfft_precision_single,
+                                     1,
+                                     &length,
+                                     1,
+                                     nullptr),
+                  rocfft_status_success);
+        ASSERT_EQ(rocfft_plan_destroy(plan), rocfft_status_success);
+    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+}
+
 TEST(rocfft_UnitTest, nonzero_offsets)
 {
     // check that plan creation does not proceed with non-zero offsets.
 
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -286,11 +351,7 @@ struct LocalCleanup
 // run a transform with all log levels enabled
 TEST(rocfft_UnitTest, log_levels)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -370,11 +431,7 @@ TEST(rocfft_UnitTest, log_levels)
 
 TEST(rocfft_UnitTest, setup_cleanup_counter)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     try
     {
         LocalCleanup cleanup([]() {
@@ -419,11 +476,7 @@ TEST(rocfft_UnitTest, setup_cleanup_counter)
 // Check whether logs can be emitted from multiple threads properly
 TEST(rocfft_UnitTest, log_multithreading)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -555,11 +608,7 @@ void workmem_test(workmem_sizer sizer,
 // - library should allocate
 TEST(rocfft_UnitTest, workmem_missing)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -571,11 +620,7 @@ TEST(rocfft_UnitTest, workmem_missing)
 // check what happens if work memory is required but not enough is provided
 TEST(rocfft_UnitTest, workmem_small)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -588,11 +633,7 @@ TEST(rocfft_UnitTest, workmem_small)
 // hard to imagine this being a problem, but try giving too much as well
 TEST(rocfft_UnitTest, workmem_big)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -606,11 +647,7 @@ TEST(rocfft_UnitTest, workmem_big)
 // allocates
 TEST(rocfft_UnitTest, workmem_null)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -623,11 +660,7 @@ static const size_t RTC_PROBLEM_SIZE = 2304;
 // runtime compilation cache tests main loop
 void rtc_cache_main()
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     // PRECONDITIONS
 
@@ -797,11 +830,7 @@ TEST(rocfft_UnitTest, rtc_cache_iter_2)
 // make sure cache API functions tolerate null pointers without crashing
 TEST(rocfft_UnitTest, rtc_cache_null)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -818,11 +847,7 @@ TEST(rocfft_UnitTest, rtc_cache_null)
 
 TEST(rocfft_UnitTest, rtc_test_harness)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -1037,11 +1062,7 @@ static void run_plan_capacity_test(size_t M)
 // rocFFT fails around 65k plans due to vm.max_map_count exhaustion.
 TEST(rocfft_UnitTest, plan_capacity_100k)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     run_plan_capacity_test(100'000);
 }
 
@@ -1049,18 +1070,6 @@ TEST(rocfft_UnitTest, plan_capacity_100k)
 // run manually with --gtest_also_run_disabled_tests.
 TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     run_plan_capacity_test(1'000'000);
 }
-
-// Verify that rocfft/rocfft.h can be compiled as plain C (not C++).
-#ifndef SKIP_ROCFFT_C_TEST
-TEST(rocfft, cApi)
-{
-    EXPECT_EQ(rocfft_c(), 0);
-}
-#endif

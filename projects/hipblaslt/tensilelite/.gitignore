@@ -8,6 +8,9 @@ mutmut-stats.json
 # coverage.py data files (incl. multiprocessing per-pid shards from mutmut stats)
 .coverage
 .coverage.*
+# per-suite data files the coverage-unit lane combines (characterization / unit)
+.cov_char
+.cov_unit
 
 # characterization: generated analysis docs / coverage dumps (the tests are the deliverable, not these)
 Tensile/Tests/unit/characterization/**/target.md
@@ -21,7 +24,11 @@ Tensile/Tests/unit/characterization/**/walkthrough.pdf
 
 # test / coverage run outputs
 coverage.xml
+coverage.json
+char.json
+unit.json
 unit_tests.xml
+char_tests.xml
 common_tests.xml
 MatchTable.yaml
 

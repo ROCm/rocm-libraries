@@ -48,7 +48,7 @@ protected:
 {% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
         TensorAttributesT {{ tf.camel_name }}Attrs;
         {{ tf.camel_name }}Attrs.uid = {{ uid_const }};
-        {{ tf.camel_name }}Attrs.data_type = DataType::FLOAT;
+        {{ tf.camel_name }}Attrs.data_type = DataType::{{ tc.data_type }};
         {{ tf.camel_name }}Attrs.dims = toVec({{ dims_const }});
         {{ tf.camel_name }}Attrs.strides = toVec({{ strides_const }});
 
@@ -185,6 +185,142 @@ TEST_F(Test{{ op.name }}OperationFromNode, PreservesComputeDataType)
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
 {% endif %}
+{% if op.mode_rules %}
+{% set tf_by_name = op.tensor_field_by_name %}
+{% set df_by_name = op.data_field_by_name %}
+{% set mode_field = op.mode_rule_mode_field %}
+{% for rule in op.mode_rules %}
+
+TEST_F(Test{{ op.name }}OperationFromNode, Preserves{{ rule.mode }}Mode)
+{
+    auto attrs = createStandard{{ op.name }}Attrs();
+    attrs.{{ mode_field.fbs_field }} = {{ mode_field.enum_short_type }}::{{ rule.mode }};
+{% for tf in op.optional_tensor_fields if tf.name not in rule.required_optional_tensors %}
+    attrs.{{ tf.uid_field }} = flatbuffers::nullopt;
+{% endfor %}
+{% for constraint in rule.scalar_constraints %}
+{% if constraint.equals is not none %}
+    attrs.{{ df_by_name[constraint.field].fbs_field }} = {{ constraint.equals }};
+{% endif %}
+{% endfor %}
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+    auto desc = {{ op.class_name }}::fromNode(node, _tensorMap);
+
+    ASSERT_EQ(desc->getData().{{ mode_field.fbs_field }},
+              {{ mode_field.enum_short_type }}::{{ rule.mode }});
+}
+{% for tf in op.optional_tensor_fields if tf.name in rule.required_optional_tensors %}
+
+TEST_F(Test{{ op.name }}OperationFromNode, RejectsMissing{{ tf.pascal_name }}In{{ rule.mode }}Mode)
+{
+    auto attrs = createStandard{{ op.name }}Attrs();
+    attrs.{{ mode_field.fbs_field }} = {{ mode_field.enum_short_type }}::{{ rule.mode }};
+    attrs.{{ tf.uid_field }} = flatbuffers::nullopt;
+{% for other_tf in op.optional_tensor_fields if other_tf.name not in rule.required_optional_tensors %}
+    attrs.{{ other_tf.uid_field }} = flatbuffers::nullopt;
+{% endfor %}
+{% for constraint in rule.scalar_constraints %}
+{% if constraint.equals is not none %}
+    attrs.{{ df_by_name[constraint.field].fbs_field }} = {{ constraint.equals }};
+{% endif %}
+{% endfor %}
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    ASSERT_THROW_HIPDNN_STATUS({{ op.class_name }}::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+{% endfor %}
+{% for tf in op.optional_tensor_fields if tf.name not in rule.required_optional_tensors %}
+
+TEST_F(Test{{ op.name }}OperationFromNode, Rejects{{ tf.pascal_name }}In{{ rule.mode }}Mode)
+{
+    auto attrs = createStandard{{ op.name }}Attrs();
+    attrs.{{ mode_field.fbs_field }} = {{ mode_field.enum_short_type }}::{{ rule.mode }};
+{% for other_tf in op.optional_tensor_fields if other_tf.name not in rule.required_optional_tensors and other_tf.name != tf.name %}
+    attrs.{{ other_tf.uid_field }} = flatbuffers::nullopt;
+{% endfor %}
+{% for constraint in rule.scalar_constraints %}
+{% if constraint.equals is not none %}
+    attrs.{{ df_by_name[constraint.field].fbs_field }} = {{ constraint.equals }};
+{% endif %}
+{% endfor %}
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    ASSERT_THROW_HIPDNN_STATUS({{ op.class_name }}::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+{% endfor %}
+{% for constraint in rule.scalar_constraints if constraint.equals is not none %}
+{% set field = df_by_name[constraint.field] %}
+
+TEST_F(Test{{ op.name }}OperationFromNode, RejectsNoncanonical{{ field.pascal_name }}In{{ rule.mode }}Mode)
+{
+    auto attrs = createStandard{{ op.name }}Attrs();
+    attrs.{{ mode_field.fbs_field }} = {{ mode_field.enum_short_type }}::{{ rule.mode }};
+{% for tf in op.optional_tensor_fields if tf.name not in rule.required_optional_tensors %}
+    attrs.{{ tf.uid_field }} = flatbuffers::nullopt;
+{% endfor %}
+    attrs.{{ field.fbs_field }} = {{ constraint.equals + 1 }};
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    ASSERT_THROW_HIPDNN_STATUS({{ op.class_name }}::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+{% endfor %}
+{% for constraint in rule.scalar_constraints if constraint.minimum is not none %}
+{% set field = df_by_name[constraint.field] %}
+
+TEST_F(Test{{ op.name }}OperationFromNode, RejectsBelowMinimum{{ field.pascal_name }}In{{ rule.mode }}Mode)
+{
+    auto attrs = createStandard{{ op.name }}Attrs();
+    attrs.{{ mode_field.fbs_field }} = {{ mode_field.enum_short_type }}::{{ rule.mode }};
+{% for tf in op.optional_tensor_fields if tf.name not in rule.required_optional_tensors %}
+    attrs.{{ tf.uid_field }} = flatbuffers::nullopt;
+{% endfor %}
+    attrs.{{ field.fbs_field }} = {{ constraint.minimum - 1 }};
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    ASSERT_THROW_HIPDNN_STATUS({{ op.class_name }}::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+{% endfor %}
+{% for constraint in rule.scalar_constraints if constraint.maximum_tensor %}
+{% set field = df_by_name[constraint.field] %}
+
+TEST_F(Test{{ op.name }}OperationFromNode, RejectsAboveMaximum{{ field.pascal_name }}In{{ rule.mode }}Mode)
+{
+    auto attrs = createStandard{{ op.name }}Attrs();
+    attrs.{{ mode_field.fbs_field }} = {{ mode_field.enum_short_type }}::{{ rule.mode }};
+{% for tf in op.optional_tensor_fields if tf.name not in rule.required_optional_tensors %}
+    attrs.{{ tf.uid_field }} = flatbuffers::nullopt;
+{% endfor %}
+    attrs.{{ field.fbs_field }} = {{ op.test_data.field_values.get(field.name, 0) + 1 }};
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    ASSERT_THROW_HIPDNN_STATUS({{ op.class_name }}::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+{% endfor %}
+{% endfor %}
+{% else %}
 {% for df in op.mode_fields %}
 {% set alt_value = df.test_alt_enum_value if df.test_alt_enum_value else df.test_enum_value %}
 
@@ -199,6 +335,7 @@ TEST_F(Test{{ op.name }}OperationFromNode, Preserves{{ df.enum_short_type }})
     ASSERT_EQ(desc->getData().{{ df.fbs_field }}, {{ df.enum_short_type }}::{{ alt_value }});
 }
 {% endfor %}
+{% endif %}
 {% if op.vector_fields %}
 
 TEST_F(Test{{ op.name }}OperationFromNode, PreservesDataFields)
@@ -270,7 +407,7 @@ TEST_F(Test{{ op.name }}OperationFromNode, SetsTensorReferencesWithFullValues)
     ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
 {% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
-    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().data_type, DataType::{{ tc.data_type }});
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().dims, (std::vector<int64_t>{{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}));
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().strides, (std::vector<int64_t>{{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }}));
 {% else %}
@@ -289,7 +426,7 @@ TEST_F(Test{{ op.name }}OperationFromNode, SetsTensorReferencesWithFullValues)
     ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
 {% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
-    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().data_type, DataType::{{ tc.data_type }});
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().dims, (std::vector<int64_t>{{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}));
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().strides, (std::vector<int64_t>{{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }}));
 {% else %}
@@ -303,18 +440,35 @@ TEST_F(Test{{ op.name }}OperationFromNode, SetsTensorReferencesWithFullValues)
 
 {% endfor %}
 }
-{% for tf in op.required_tensor_fields %}
 
-TEST_F(Test{{ op.name }}OperationFromNode, FailsWithMissing{{ tf.pascal_name }}Tensor)
+{% if op.required_tensor_fields %}
+// The parameter is the UID of the one required tensor to drop from the tensor map.
+class Test{{ op.name }}OperationFromNodeMissingTensor
+    : public Test{{ op.name }}OperationFromNode,
+      public ::testing::WithParamInterface<int64_t>
 {
-{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-    _tensorMap.erase({{ uid_const }});
+};
+
+TEST_P(Test{{ op.name }}OperationFromNodeMissingTensor, FailsWithMissingTensor)
+{
+    _tensorMap.erase(GetParam());
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS({{ op.class_name }}::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    RequiredTensors,
+    Test{{ op.name }}OperationFromNodeMissingTensor,
+    ::testing::Values(
+{% for tf in op.required_tensor_fields %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+        {{ uid_const }}{% if not loop.last %},{% endif %}
+
 {% endfor %}
+    ));
+{% endif %}
 {% if op.optional_tensor_fields %}
 
 TEST_F(Test{{ op.name }}OperationFromNode, SucceedsWithOnlyRequiredTensors)
@@ -323,6 +477,16 @@ TEST_F(Test{{ op.name }}OperationFromNode, SucceedsWithOnlyRequiredTensors)
 {% for tf in op.optional_tensor_fields %}
     attrs.{{ tf.uid_field }} = flatbuffers::nullopt;
 {% endfor %}
+{% if op.mode_rules %}
+{% set empty_rule = op.mode_rule_without_optional_tensors %}
+{% set mode_field = op.mode_rule_mode_field %}
+    attrs.{{ mode_field.fbs_field }} = {{ mode_field.enum_short_type }}::{{ empty_rule.mode }};
+{% for constraint in empty_rule.scalar_constraints %}
+{% if constraint.equals is not none %}
+    attrs.{{ op.data_field_by_name[constraint.field].fbs_field }} = {{ constraint.equals }};
+{% endif %}
+{% endfor %}
+{% endif %}
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
@@ -339,6 +503,12 @@ TEST_F(Test{{ op.name }}OperationFromNode, SucceedsWithOnlyRequiredTensors)
     // Optional tensor getters are null
 {% for tf in op.optional_tensor_fields %}
     EXPECT_EQ(desc->{{ tf.getter_name }}(), nullptr);
+{% endfor %}
+
+    const auto tensors = desc->getTensorDescriptors();
+    ASSERT_EQ(tensors.size(), {{ op.required_tensor_fields | length }}u);
+{% for tf in op.required_tensor_fields %}
+    EXPECT_EQ(tensors[{{ loop.index0 }}], desc->{{ tf.getter_name }}());
 {% endfor %}
 }
 {% for tf in op.optional_tensor_fields %}
@@ -531,7 +701,7 @@ TEST_F(Test{{ op.name }}OperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_EQ({{ tf.camel_name }}Count, 1);
     ASSERT_NE({{ tf.camel_name }}Scoped.get(), nullptr);
 {% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-    verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ uid_const }}, HIPDNN_DATA_FLOAT,
+    verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ uid_const }}, HIPDNN_DATA_{{ tc.data_type }},
                            {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
                            {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
 
@@ -566,7 +736,7 @@ TEST_F(Test{{ op.name }}OperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_EQ({{ tf.camel_name }}Count, 1);
     ASSERT_NE({{ tf.camel_name }}Scoped.get(), nullptr);
 {% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-    verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ uid_const }}, HIPDNN_DATA_FLOAT,
+    verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ uid_const }}, HIPDNN_DATA_{{ tc.data_type }},
                            {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
                            {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
 

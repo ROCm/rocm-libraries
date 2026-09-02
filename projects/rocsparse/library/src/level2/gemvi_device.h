@@ -80,17 +80,22 @@ namespace rocsparse
         // and wait for all threads to finish writing
         __syncthreads();
 
-        // clang-format off
-        // Accumulate row sums (from different wavefronts)
-        if(WFSIZE == 32)
+        // Accumulate the per-wavefront sub-row sums (one per wid) via a binary
+        // tree reduction in LDS. NWF is the number of wavefronts in the block
+        // and is a compile-time power of two, so the loop is fully unrolled and
+        // produces the exact same pairing/order as the previous hand-unrolled
+        // reduction (numerically identical), while now supporting any block
+        // size (not just the fixed 1024-thread block).
+        constexpr uint32_t NWF = BLOCKSIZE / WFSIZE;
+#pragma unroll
+        for(uint32_t s = NWF / 2; s > 0; s >>= 1)
         {
-            if(wid < 16) sdata[wid * WFSIZE + lid] += sdata[(wid + 16) * WFSIZE + lid]; __syncthreads();
+            if(wid < s)
+            {
+                sdata[wid * WFSIZE + lid] += sdata[(wid + s) * WFSIZE + lid];
+            }
+            __syncthreads();
         }
-        if(wid < 8) sdata[wid * WFSIZE + lid] += sdata[(wid + 8) * WFSIZE + lid]; __syncthreads();
-        if(wid < 4) sdata[wid * WFSIZE + lid] += sdata[(wid + 4) * WFSIZE + lid]; __syncthreads();
-        if(wid < 2) sdata[wid * WFSIZE + lid] += sdata[(wid + 2) * WFSIZE + lid]; __syncthreads();
-        if(wid < 1) sdata[wid * WFSIZE + lid] += sdata[(wid + 1) * WFSIZE + lid];
-        // clang-format on
 
         // Frist wavefront writes (accumulated) 64 row sums back to y
         if(wid == 0 && row < m)

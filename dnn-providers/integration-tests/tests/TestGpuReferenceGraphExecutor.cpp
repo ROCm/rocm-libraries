@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <unordered_map>
 #include <vector>
@@ -18,6 +19,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "ConvolutionFwdGraphTestUtils.hpp"
+#include "harness/ReferenceCapabilityError.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
 namespace
@@ -430,7 +432,78 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRuntimePassByValueGraph)
 
 TEST(TestGpuReferenceGraphExecutor, IsApplicableForBakedScalarGraph)
 {
-    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
+    const std::vector<int64_t> xDims{1, 1, 3, 3};
+    const std::vector<int64_t> wDims{1, 1, 1, 1};
+    const std::vector<int64_t> yDims{1, 1, 3, 3};
+    auto builder = createConvFwdGraph(1,
+                                      2,
+                                      3,
+                                      xDims,
+                                      wDims,
+                                      yDims,
+                                      generateStrides(xDims),
+                                      generateStrides(wDims),
+                                      generateStrides(yDims),
+                                      {0, 0},
+                                      {1, 1},
+                                      {1, 1},
+                                      DataType::FLOAT,
+                                      DataType::FLOAT);
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutor, IsApplicableWhenRuntimePassByValueTensorIsNotConsumed)
+{
+    const std::vector<int64_t> xDims{1, 1, 3, 3};
+    const std::vector<int64_t> wDims{1, 1, 1, 1};
+    const std::vector<int64_t> yDims{1, 1, 3, 3};
+    const auto xStrides = generateStrides(xDims);
+    const auto wStrides = generateStrides(wDims);
+    const auto yStrides = generateStrides(yDims);
+
+    flatbuffers::FlatBufferBuilder builder;
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 1, "x", DataType::FLOAT, &xStrides, &xDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 2, "w", DataType::FLOAT, &wStrides, &wDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 3, "y", DataType::FLOAT, &yStrides, &yDims));
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   999,
+                                                   "unconsumed_pbv",
+                                                   DataType::FLOAT,
+                                                   &xStrides,
+                                                   &xDims,
+                                                   /*virtual_=*/false,
+                                                   TensorValue::NONE,
+                                                   /*value=*/0,
+                                                   /*is_runtime_pass_by_value=*/true));
+
+    const std::vector<int64_t> padding{0, 0};
+    const std::vector<int64_t> convStride{1, 1};
+    const std::vector<int64_t> dilation{1, 1};
+    auto convAttrs = CreateConvolutionFwdAttributesDirect(
+        builder, 1, 2, 3, &padding, &padding, &convStride, &dilation, ConvMode::CROSS_CORRELATION);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "conv_fwd_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::ConvolutionFwdAttributes,
+                                     convAttrs.Union()));
+
+    auto graph = CreateGraphDirect(builder,
+                                   "ConvFwdWithUnconsumedPbv",
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   &tensors,
+                                   &nodes);
+    builder.Finish(graph);
+
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
@@ -456,22 +529,6 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableWhenSupportedOpOutputIsRuntim
                                               /*outputIsRuntimePassByValue=*/true);
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
-}
-
-TEST(TestGpuReferenceGraphExecutor, IsApplicableWhenRuntimePassByValueTensorIsNotConsumed)
-{
-    // A runtime-PBV tensor that no node consumes must NOT reject the graph:
-    // rejection is per node (only operands an op actually consumes), not a
-    // blanket graph-wide scan. The Pointwise node's own operands are PBV-free.
-    auto builder = createSimplePointwiseGraph(1,
-                                              2,
-                                              {4},
-                                              {1},
-                                              /*inputIsRuntimePassByValue=*/false,
-                                              /*outputIsRuntimePassByValue=*/false,
-                                              /*addUnconsumedPbvTensor=*/true);
-    GpuReferenceGraphExecutor executor;
-    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
 
 TEST(TestGpuReferenceGraphExecutor, IsNotApplicableWhenConvInputIsRuntimePassByValue)
@@ -522,65 +579,40 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
 TEST(TestGpuReferenceGraphExecutor, MissingVariantPackEntryThrows)
 {
     SKIP_IF_NO_DEVICES();
-    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
+
+    // Use a convolution graph (a real GPU plan) so execution reaches the
+    // variant-pack lookup; an empty pack must surface as std::out_of_range.
+    const std::vector<int64_t> xDims = {1, 1, 4, 4};
+    const std::vector<int64_t> wDims = {1, 1, 3, 3};
+    const std::vector<int64_t> yDims = {1, 1, 2, 2};
+    auto builder = createConvFwdGraph(10,
+                                      11,
+                                      12,
+                                      xDims,
+                                      wDims,
+                                      yDims,
+                                      generateStrides(xDims),
+                                      generateStrides(wDims),
+                                      generateStrides(yDims),
+                                      {0, 0},
+                                      {1, 1},
+                                      {1, 1},
+                                      DataType::FLOAT);
+
     const std::unordered_map<int64_t, void*> emptyPack;
     GpuReferenceGraphExecutor executor;
     EXPECT_THROW(executor.execute(builder.GetBufferPointer(), builder.GetSize(), emptyPack),
                  std::out_of_range);
 }
 
-TEST(TestGpuReferenceGraphExecutor, PointwiseDummyAddOneExecutes)
+TEST(TestGpuReferenceGraphExecutor, PointwiseIsApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    constexpr int64_t INPUT_UID = 1;
-    constexpr int64_t OUTPUT_UID = 2;
-    const std::vector<int64_t> dims = {4};
-    const std::vector<int64_t> strides = {1};
-
-    auto builder = createSimplePointwiseGraph(INPUT_UID, OUTPUT_UID, dims, strides);
-
-    std::array<float, 4> input = {2.0f, 3.0f, 5.0f, 7.0f};
-    std::array<float, 4> output = {};
-
-    std::unordered_map<int64_t, void*> variantPack;
-    variantPack[INPUT_UID] = input.data();
-    variantPack[OUTPUT_UID] = output.data();
+    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
 
     GpuReferenceGraphExecutor executor;
-    executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
-
-    EXPECT_FLOAT_EQ(output[0], 3.0f);
-    EXPECT_FLOAT_EQ(output[1], 4.0f);
-    EXPECT_FLOAT_EQ(output[2], 6.0f);
-    EXPECT_FLOAT_EQ(output[3], 8.0f);
-}
-
-TEST(TestGpuReferenceGraphExecutor, PointwiseDummyAddOneMultiDimensional)
-{
-    SKIP_IF_NO_DEVICES();
-
-    constexpr int64_t INPUT_UID = 1;
-    constexpr int64_t OUTPUT_UID = 2;
-    const std::vector<int64_t> dims = {2, 3};
-    const std::vector<int64_t> strides = {3, 1};
-
-    auto builder = createSimplePointwiseGraph(INPUT_UID, OUTPUT_UID, dims, strides);
-
-    std::array<float, 6> input = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
-    std::array<float, 6> output = {};
-
-    std::unordered_map<int64_t, void*> variantPack;
-    variantPack[INPUT_UID] = input.data();
-    variantPack[OUTPUT_UID] = output.data();
-
-    GpuReferenceGraphExecutor executor;
-    executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
-
-    for(size_t i = 0; i < input.size(); ++i)
-    {
-        EXPECT_FLOAT_EQ(output[i], input[i] + 1.0f) << "Mismatch at index " << i;
-    }
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
 
 TEST(TestGpuReferenceGraphExecutorFp32, ConvFwdBasicExecutes)
@@ -637,4 +669,322 @@ TEST(TestGpuReferenceGraphExecutorBfp16, ConvFwdExecutes)
                                                               {1, 1}, // dilation
                                                               DataType::BFLOAT16,
                                                               0.1);
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, PointwiseUnaryExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    constexpr int64_t IN_UID = 10;
+    constexpr int64_t OUT_UID = 11;
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   IN_UID,
+                                                   "in_0",
+                                                   DataType::FLOAT,
+                                                   &strides,
+                                                   &dims,
+                                                   /*virtual_=*/false,
+                                                   TensorValue::NONE,
+                                                   /*value=*/0,
+                                                   false));
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   OUT_UID,
+                                                   "out_0",
+                                                   DataType::FLOAT,
+                                                   &strides,
+                                                   &dims,
+                                                   /*virtual_=*/false,
+                                                   TensorValue::NONE,
+                                                   /*value=*/0,
+                                                   false));
+
+    // Create an ABS unary pointwise operation
+    auto pointwiseAttrs
+        = CreatePointwiseAttributes(builder,
+                                    PointwiseMode::ABS, // operation
+                                    flatbuffers::nullopt, // relu_lower_clip
+                                    flatbuffers::nullopt, // relu_upper_clip
+                                    flatbuffers::nullopt, // relu_lower_clip_slope
+                                    flatbuffers::nullopt, // axis_tensor_uid
+                                    IN_UID, // in_0_tensor_uid
+                                    flatbuffers::nullopt, // in_1_tensor_uid (unary, not needed)
+                                    flatbuffers::nullopt, // in_2_tensor_uid (not needed)
+                                    OUT_UID); // out_0_tensor_uid
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "pointwise_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::PointwiseAttributes,
+                                     pointwiseAttrs.Union()));
+
+    auto graph = CreateGraphDirect(
+        builder, "TestGraph", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+
+    builder.Finish(graph);
+
+    hipdnn_data_sdk::utilities::Tensor<float> inputTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> outputTensor(dims, strides);
+    inputTensor.fillWithRandomValues(-1.0f, 1.0f);
+    outputTensor.fillWithValue(0);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[IN_UID] = inputTensor.rawDeviceData();
+    variantPack[OUT_UID] = outputTensor.rawDeviceData();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    outputTensor.markDeviceModified();
+
+    for(size_t i = 0; i < outputTensor.elementCount(); ++i)
+    {
+        const float expected = std::fabs(static_cast<float*>(inputTensor.rawHostData())[i]);
+        EXPECT_EQ(expected, static_cast<float*>(outputTensor.rawHostData())[i])
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, PointwiseBinaryExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    constexpr int64_t IN_0_UID = 10;
+    constexpr int64_t IN_1_UID = 11;
+    constexpr int64_t OUT_UID = 12;
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   IN_0_UID,
+                                                   "in_0",
+                                                   DataType::FLOAT,
+                                                   &strides,
+                                                   &dims,
+                                                   /*virtual_=*/false,
+                                                   TensorValue::NONE,
+                                                   /*value=*/0,
+                                                   false));
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   IN_1_UID,
+                                                   "in_1",
+                                                   DataType::FLOAT,
+                                                   &strides,
+                                                   &dims,
+                                                   /*virtual_=*/false,
+                                                   TensorValue::NONE,
+                                                   /*value=*/0,
+                                                   false));
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   OUT_UID,
+                                                   "out_0",
+                                                   DataType::FLOAT,
+                                                   &strides,
+                                                   &dims,
+                                                   /*virtual_=*/false,
+                                                   TensorValue::NONE,
+                                                   /*value=*/0,
+                                                   false));
+
+    // Create an Add binary pointwise operation
+    auto pointwiseAttrs
+        = CreatePointwiseAttributes(builder,
+                                    PointwiseMode::ADD, // operation
+                                    flatbuffers::nullopt, // relu_lower_clip
+                                    flatbuffers::nullopt, // relu_upper_clip
+                                    flatbuffers::nullopt, // relu_lower_clip_slope
+                                    flatbuffers::nullopt, // axis_tensor_uid
+                                    IN_0_UID, // in_0_tensor_uid
+                                    IN_1_UID, // in_1_tensor_uid (unary, not needed)
+                                    flatbuffers::nullopt, // in_2_tensor_uid (not needed)
+                                    OUT_UID); // out_0_tensor_uid
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "pointwise_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::PointwiseAttributes,
+                                     pointwiseAttrs.Union()));
+
+    auto graph = CreateGraphDirect(
+        builder, "TestGraph", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+
+    builder.Finish(graph);
+
+    hipdnn_data_sdk::utilities::Tensor<float> input0Tensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> input1Tensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> outputTensor(dims, strides);
+    input0Tensor.fillWithRandomValues(-1.0f, 1.0f);
+    input1Tensor.fillWithRandomValues(-1.0f, 1.0f);
+    outputTensor.fillWithValue(0);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[IN_0_UID] = input0Tensor.rawDeviceData();
+    variantPack[IN_1_UID] = input1Tensor.rawDeviceData();
+    variantPack[OUT_UID] = outputTensor.rawDeviceData();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    outputTensor.markDeviceModified();
+
+    for(size_t i = 0; i < outputTensor.elementCount(); ++i)
+    {
+        const float expected = static_cast<float*>(input0Tensor.rawHostData())[i]
+                               + static_cast<float*>(input1Tensor.rawHostData())[i];
+        EXPECT_EQ(expected, static_cast<float*>(outputTensor.rawHostData())[i])
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(TestGpuReferenceGraphExecutor, RMSNormFwdIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, RMSNormFwdExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(strides, dims);
+
+    std::vector<int64_t> scaleDims(dims);
+    scaleDims[0] = 1;
+    auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(
+        scaleDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    hipdnn_data_sdk::utilities::Tensor<float> xTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> yTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> scaleTensor(scaleDims, scaleStrides);
+
+    xTensor.fillWithRandomValues(-1.0f, 1.0f);
+    scaleTensor.fillWithRandomValues(0.5f, 1.5f);
+    yTensor.fillWithValue(0);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = xTensor.rawDeviceData();
+    variantPack[2] = yTensor.rawDeviceData();
+    variantPack[3] = scaleTensor.rawDeviceData();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    yTensor.markDeviceModified();
+
+    // Validate against CPU reference implementation
+    hipdnn_data_sdk::utilities::Tensor<float> refYTensor(dims, strides);
+    hipdnn_test_sdk::utilities::CpuFpReferenceRMSNorm::forward(
+        xTensor, scaleTensor, refYTensor, 1e-5);
+
+    auto* yHost = static_cast<float*>(yTensor.rawHostData());
+    auto* refYHost = static_cast<float*>(refYTensor.rawHostData());
+    for(size_t i = 0; i < yTensor.elementCount(); ++i)
+    {
+        EXPECT_NEAR(
+            yHost[i], refYHost[i], hipdnn_test_sdk::utilities::rmsnorm::getTolerance<float>())
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(TestGpuReferenceGraphExecutor, RMSNormBwdIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, RMSNormBwdExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(strides, dims, true);
+
+    std::vector<int64_t> scaleDims(dims);
+    scaleDims[0] = 1;
+    auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(
+        scaleDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    std::vector<int64_t> statDims(dims.size(), 1);
+    statDims[0] = dims[0];
+    auto statStrides = hipdnn_data_sdk::utilities::generateStrides(
+        statDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    hipdnn_data_sdk::utilities::Tensor<float> dyTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> xTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> scaleTensor(scaleDims, scaleStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> dxTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> dscaleTensor(scaleDims, scaleStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> dbiasTensor(scaleDims, scaleStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> invRmsTensor(statDims, statStrides);
+
+    dyTensor.fillWithRandomValues(-1.0f, 1.0f);
+    xTensor.fillWithRandomValues(-1.0f, 1.0f);
+    scaleTensor.fillWithRandomValues(0.5f, 1.5f);
+    invRmsTensor.fillWithRandomValues(0.1f, 1.0f);
+    dxTensor.fillWithValue(0);
+    dscaleTensor.fillWithValue(0);
+    dbiasTensor.fillWithValue(0);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = dyTensor.rawDeviceData();
+    variantPack[2] = xTensor.rawDeviceData();
+    variantPack[3] = scaleTensor.rawDeviceData();
+    variantPack[4] = dxTensor.rawDeviceData();
+    variantPack[5] = dscaleTensor.rawDeviceData();
+    variantPack[6] = invRmsTensor.rawDeviceData();
+    variantPack[7] = dbiasTensor.rawDeviceData();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    dxTensor.markDeviceModified();
+    dscaleTensor.markDeviceModified();
+    dbiasTensor.markDeviceModified();
+
+    // Validate against CPU reference implementation
+    hipdnn_data_sdk::utilities::Tensor<float> refDxTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> refDscaleTensor(scaleDims, scaleStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> refDbiasTensor(scaleDims, scaleStrides);
+    hipdnn_test_sdk::utilities::CpuFpReferenceRMSNorm::backward(dyTensor,
+                                                                xTensor,
+                                                                scaleTensor,
+                                                                invRmsTensor,
+                                                                refDxTensor,
+                                                                refDscaleTensor,
+                                                                &refDbiasTensor);
+
+    auto* dxHost = static_cast<float*>(dxTensor.rawHostData());
+    auto* refDxHost = static_cast<float*>(refDxTensor.rawHostData());
+    const auto tolerance = hipdnn_test_sdk::utilities::rmsnorm::getTolerance<float>();
+    for(size_t i = 0; i < dxTensor.elementCount(); ++i)
+    {
+        EXPECT_NEAR(dxHost[i], refDxHost[i], tolerance) << "dx mismatch at index " << i;
+    }
+
+    auto* dscaleHost = static_cast<float*>(dscaleTensor.rawHostData());
+    auto* refDscaleHost = static_cast<float*>(refDscaleTensor.rawHostData());
+    auto* dbiasHost = static_cast<float*>(dbiasTensor.rawHostData());
+    auto* refDbiasHost = static_cast<float*>(refDbiasTensor.rawHostData());
+    for(size_t i = 0; i < dscaleTensor.elementCount(); ++i)
+    {
+        EXPECT_NEAR(dscaleHost[i], refDscaleHost[i], tolerance) << "dscale mismatch at index " << i;
+        EXPECT_NEAR(dbiasHost[i], refDbiasHost[i], tolerance) << "dbias mismatch at index " << i;
+    }
 }

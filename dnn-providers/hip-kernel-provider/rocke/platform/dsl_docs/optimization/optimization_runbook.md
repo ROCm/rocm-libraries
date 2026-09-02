@@ -1882,6 +1882,7 @@ stay direct (§9.3, §17.4 register-PV regression analogue).
 |---|---|---|---|
 | `lds_k_pad` | conv_implicit_gemm | None | K-pad to break bank conflicts (`+8` sync default; `0` async default) |
 | `lds_layout` | conv_implicit_gemm | None | Explicit `LdsLayout` (helpers/layouts.py) — padding, packed-async, transpose-reader |
+| `lds_k_group_pad` | `AttentionDenseSpec` (dense prefill, gfx950 + gfx942) | 8 | Per-K-row-group LDS pad (bytes); must be a multiple of 8 (`smem_load_vN` stamps align 16 unconditionally). Sweepable via `--lds-k-group-pad` on the dense prefill benchmark. See `library/builders/gfx950/attention/prefill/README.md §Tuning` for the full sweep methodology and decision record. |
 | `LdsLayout` swizzle | `helpers/layouts.py` | — | XOR swizzle (zero LDS waste, higher ALU cost) vs padding swizzle (small LDS waste, lower ALU). Architecture-specific rule §6.4a |
 | `TransposeLdsReader` | `helpers/layouts.py` | — | Use `ds_read_tr16_b{64,128}` for transposed BF16/F16 loads |
 | `pad_m` / `pad_n` / `pad_k` | GEMM `TraitSpec` | False | Pad operands to tile boundaries (avoids tail scalar path) |

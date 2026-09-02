@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-set(VERSION_STRING "0.1.1")
+set(VERSION_STRING "1.0.0")
 
 project(hipthreads VERSION ${VERSION_STRING} LANGUAGES CXX HIP)
 
@@ -45,14 +45,16 @@ option(HIPTHREADS_COPY_TO_BUILD
   "Copy source tree into build folder (set by TheRock; required for the tester pipeline)." OFF)
 
 if(HIPTHREADS_COPY_TO_BUILD)
-  file(COPY "${CMAKE_CURRENT_SOURCE_DIR}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+  file(COPY "${CMAKE_CURRENT_SOURCE_DIR}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}"
+    REGEX ".*(matrices\\.tgz|shallow_water1\\.mtx)$" EXCLUDE
+  )
 endif()
 
 add_subdirectory(src)
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   add_subdirectory(test)
 endif()
- 
+
 #-----------------------------------------------------------------------------
 # Installation and Packaging Rules
 #-----------------------------------------------------------------------------

@@ -18,8 +18,8 @@
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
-#include <miopen/miopen.h>
 
+#include "MiopenApi.hpp"
 #include "MiopenTensor.hpp"
 
 #define LOG_ON_MIOPEN_FAILURE(status)                                                           \
@@ -164,15 +164,16 @@ MiopenTensor createTensor(
         tensorMap,
     int64_t uid);
 
-/// @brief Creates a MiopenTensor with automatic 3D→4D padding for batchnorm.
+/// @brief Creates a MiopenTensor with automatic 3D→4D padding.
 ///
-/// If the tensor has 3 dimensions, it will be padded to 4D before creating
-/// the MIOpen descriptor. 4D and 5D tensors are passed through unchanged.
+/// MIOpen has no 1D operation API. A 3D (NCL or NLC) tensor is padded to 4D by
+/// appending a trailing size-1 dimension, which does not change the data layout.
+/// 4D and 5D tensors are passed through unchanged.
 ///
 /// @param tensorMap Map of tensor UIDs to TensorAttributes
 /// @param uid The tensor UID to look up
 /// @return MiopenTensor with potentially padded descriptor
-MiopenTensor createBatchnormTensor(
+MiopenTensor createPaddedTensor(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
@@ -180,11 +181,19 @@ MiopenTensor createBatchnormTensor(
 
 size_t getSpatialDimCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attr);
 
-/// @brief Returns the GPU architecture string (e.g., "gfx942") for the
-/// device backing the given HIP stream. Strips any feature suffix such
-/// as ":xnack+".
-/// @throws hipdnn_plugin_sdk::HipdnnPluginException on HIP failure.
-std::string getDeviceArch(hipStream_t stream);
+/// @brief Smallest spatial dimension count MIOpen accepts for a convolution.
+inline constexpr size_t MIOPEN_MIN_CONV_SPATIAL_DIM_COUNT = 2;
+
+/// @brief Returns the spatial dimension count to give MIOpen for a convolution.
+///
+/// A 1D convolution runs as a 2D convolution with a trailing size-1 spatial
+/// dimension. Zero padding, unit stride and unit dilation over that dimension
+/// leave the result unchanged.
+constexpr size_t paddedConvSpatialDimCount(size_t spatialDimCount)
+{
+    return spatialDimCount < MIOPEN_MIN_CONV_SPATIAL_DIM_COUNT ? MIOPEN_MIN_CONV_SPATIAL_DIM_COUNT
+                                                               : spatialDimCount;
+}
 
 using hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue;
 using hipdnn_flatbuffers_sdk::utilities::extractValueFromTensorValue;

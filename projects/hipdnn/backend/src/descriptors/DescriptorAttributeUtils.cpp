@@ -898,4 +898,47 @@ void getPaddingMode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode source,
     }
 }
 
+void setMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode& target,
+                             hipdnnBackendAttributeType_t attributeType,
+                             int64_t elementCount,
+                             const void* arrayOfElements,
+                             const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnMoeGroupedMatmulMode_t mode;
+    std::memcpy(&mode, arrayOfElements, sizeof(mode));
+    target = toSdkMoeGroupedMatmulMode(mode);
+}
+
+void getMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode source,
+                             hipdnnBackendAttributeType_t attributeType,
+                             int64_t requestedElementCount,
+                             int64_t* elementCount,
+                             void* arrayOfElements,
+                             const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    const auto mode = fromSdkMoeGroupedMatmulMode(source);
+    std::memcpy(arrayOfElements, &mode, sizeof(mode));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
 } // namespace hipdnn_backend

@@ -3,7 +3,7 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
-## rocRAND 5.0.0 for ROCm 10.0
+## rocRAND 5.0.0 for ROCm 10.0.0
 
 ### Removed
 
@@ -21,6 +21,12 @@ Documentation for rocRAND is available at
 
 * gfx1150,gfx1152 and gfx1153 support
 * rocrand.dll now contains embedded file version metadata.
+
+### Changed
+
+* Device API benchmark now utilize vectorized distributions if available.
+  * For example, philox will now be benchmarked via `rocrand4(...)` instead of `rocrand(...)`.
+* Device API benchmark now uses heuristics to pick a config that achieves the highest possible kernel occupancy.
 
 ### Resolved Issues
 

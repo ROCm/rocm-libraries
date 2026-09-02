@@ -15085,6 +15085,147 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZgemmBatched_64(hipblasHandle_t           
     \brief <b> BLAS Level 3 API </b>
 
     \details
+    The gemmGroupedBatched functions perform grouped batched matrix-matrix operations.
+    There are ``group_count`` groups. Within group ``i``, all problems share the same
+    ``transA``, ``transB``, ``m``, ``n``, ``k``, ``lda``, ``ldb``, ``ldc``, ``alpha``, and ``beta``.
+    Each group ``i`` contains ``group_size[i]`` problems. The total number of problems is
+    ``problem_count = sum(group_size[i])``.
+
+    For each problem ``j`` in group ``i``:
+
+        C_j = alpha_i*op( A_j )*op( B_j ) + beta_i*C_j,
+
+    where ``op( X )`` is one of
+
+        op( X ) = X      or
+        op( X ) = X**T   or
+        op( X ) = X**H.
+
+    ``Aarray``, ``Barray``, and ``Carray`` are device arrays of device pointers with length
+    ``problem_count``.
+
+    - Supported precisions in rocBLAS : ``s`` and ``d``.
+    - Supported precisions in cuBLAS  : not supported.
+
+    @param[in]
+    handle    [hipblasHandle_t]
+              handle to the hipBLAS library context queue.
+    @param[in]
+    transA_array [const hipblasOperation_t*]
+              host array of length ``group_count`` specifying ``op( A )`` for each group.
+    @param[in]
+    transB_array [const hipblasOperation_t*]
+              host array of length ``group_count`` specifying ``op( B )`` for each group.
+    @param[in]
+    m_array   [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    n_array   [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    k_array   [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    alpha_array device pointer or host pointer to an array of length ``group_count``.
+    @param[in]
+    Aarray    device array of device pointers storing each matrix ``A_j``.
+    @param[in]
+    lda_array [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    Barray    device array of device pointers storing each matrix ``B_j``.
+    @param[in]
+    ldb_array [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    beta_array device pointer or host pointer to an array of length ``group_count``.
+    @param[in, out]
+    Carray    device array of device pointers storing each matrix ``C_j``.
+    @param[in]
+    ldc_array [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    group_count [int]
+              number of groups.
+    @param[in]
+    group_size [const int*]
+              host array of length ``group_count`` with the number of problems in each group.
+
+    ********************************************************************/
+
+HIPBLAS_EXPORT hipblasStatus_t hipblasSgemmGroupedBatched(hipblasHandle_t           handle,
+                                                          const hipblasOperation_t* transA_array,
+                                                          const hipblasOperation_t* transB_array,
+                                                          const int*                m_array,
+                                                          const int*                n_array,
+                                                          const int*                k_array,
+                                                          const float*              alpha_array,
+                                                          const float* const        Aarray[],
+                                                          const int*                lda_array,
+                                                          const float* const        Barray[],
+                                                          const int*                ldb_array,
+                                                          const float*              beta_array,
+                                                          float* const              Carray[],
+                                                          const int*                ldc_array,
+                                                          int                       group_count,
+                                                          const int*                group_size);
+
+HIPBLAS_EXPORT hipblasStatus_t hipblasDgemmGroupedBatched(hipblasHandle_t           handle,
+                                                          const hipblasOperation_t* transA_array,
+                                                          const hipblasOperation_t* transB_array,
+                                                          const int*                m_array,
+                                                          const int*                n_array,
+                                                          const int*                k_array,
+                                                          const double*             alpha_array,
+                                                          const double* const       Aarray[],
+                                                          const int*                lda_array,
+                                                          const double* const       Barray[],
+                                                          const int*                ldb_array,
+                                                          const double*             beta_array,
+                                                          double* const             Carray[],
+                                                          const int*                ldc_array,
+                                                          int                       group_count,
+                                                          const int*                group_size);
+
+HIPBLAS_EXPORT hipblasStatus_t hipblasSgemmGroupedBatched_64(hipblasHandle_t           handle,
+                                                             const hipblasOperation_t* transA_array,
+                                                             const hipblasOperation_t* transB_array,
+                                                             const int64_t*            m_array,
+                                                             const int64_t*            n_array,
+                                                             const int64_t*            k_array,
+                                                             const float*              alpha_array,
+                                                             const float* const        Aarray[],
+                                                             const int64_t*            lda_array,
+                                                             const float* const        Barray[],
+                                                             const int64_t*            ldb_array,
+                                                             const float*              beta_array,
+                                                             float* const              Carray[],
+                                                             const int64_t*            ldc_array,
+                                                             int64_t                   group_count,
+                                                             const int64_t*            group_size);
+
+HIPBLAS_EXPORT hipblasStatus_t hipblasDgemmGroupedBatched_64(hipblasHandle_t           handle,
+                                                             const hipblasOperation_t* transA_array,
+                                                             const hipblasOperation_t* transB_array,
+                                                             const int64_t*            m_array,
+                                                             const int64_t*            n_array,
+                                                             const int64_t*            k_array,
+                                                             const double*             alpha_array,
+                                                             const double* const       Aarray[],
+                                                             const int64_t*            lda_array,
+                                                             const double* const       Barray[],
+                                                             const int64_t*            ldb_array,
+                                                             const double*             beta_array,
+                                                             double* const             Carray[],
+                                                             const int64_t*            ldc_array,
+                                                             int64_t                   group_count,
+                                                             const int64_t*            group_size);
+//! @}
+
+/*! @{
+    \brief <b> BLAS Level 3 API </b>
+
+    \details
     The gemmStridedBatched functions perform one of the strided batched matrix-matrix operations:
 
         C_i = alpha*op( A_i )*op( B_i ) + beta*C_i, for i = 1, ..., batchCount
@@ -24020,6 +24161,210 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasGemmBatchedExWithFlags_64(hipblasHandle_t 
                                                                 hipblasComputeType_t computeType,
                                                                 hipblasGemmAlgo_t    algo,
                                                                 hipblasGemmFlags_t   flags);
+
+/*! \brief  <b> BLAS EX API </b>
+
+    \details
+    The gemmGroupedBatchedEx functions perform grouped batched matrix-matrix operations
+    with mixed precision types. There are ``group_count`` groups. Within group ``i``, all
+    problems share the same ``transA``, ``transB``, ``m``, ``n``, ``k``, ``lda``, ``ldb``,
+    ``ldc``, ``ldd``, ``alpha``, and ``beta``. Each group ``i`` contains ``group_size[i]``
+    problems.
+
+    For each problem ``j`` in group ``i``:
+
+        D_j = alpha_i*op( A_j )*op( B_j ) + beta_i*C_j,
+
+    Supported types are as follows:
+        - HIP_R_32F = aType = bType = cType = dType = computeType
+        - HIP_R_64F = aType = bType = cType = dType = computeType
+        - HIP_R_16F = aType = bType = cType = dType = computeType
+        - HIP_R_16F = aType = bType = cType = dType; HIPBLAS_COMPUTE_32F = computeType
+        - HIP_R_16F = aType = bType; HIP_R_32F = cType = dType = computeType
+        - HIP_R_16BF = aType = bType = cType = dType; HIPBLAS_COMPUTE_32F = computeType
+        - HIP_R_16BF = aType = bType; HIP_R_32F = cType = dType = computeType
+        - HIP_R_8I = aType = bType; HIP_R_32I = cType = dType = computeType
+        - HIP_C_32F = aType = bType = cType = dType = computeType
+        - HIP_C_64F = aType = bType = cType = dType = computeType
+
+    ``hipblasGemmGroupedBatchedExWithFlags`` is also available. This is identical to
+    ``hipblasGemmGroupedBatchedEx`` with the addition of a ``flags`` parameter which controls
+    the flags used in Tensile to control gemm algorithms with the rocBLAS backend. When using
+    a cuBLAS backend, this function is not supported.
+
+    @param[in]
+    handle    [hipblasHandle_t]
+              handle to the hipBLAS library context queue.
+    @param[in]
+    transA_array [const hipblasOperation_t*]
+              host array of length ``group_count``.
+    @param[in]
+    transB_array [const hipblasOperation_t*]
+              host array of length ``group_count``.
+    @param[in]
+    m_array   [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    n_array   [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    k_array   [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    alpha_array device pointer or host pointer to an array of length ``group_count``.
+    @param[in]
+    Aarray    device array of device pointers storing each matrix ``A_j``.
+    @param[in]
+    aType     [hipDataType]
+              datatype of each matrix ``A_j``.
+    @param[in]
+    lda_array [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    Barray    device array of device pointers storing each matrix ``B_j``.
+    @param[in]
+    bType     [hipDataType]
+              datatype of each matrix ``B_j``.
+    @param[in]
+    ldb_array [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    beta_array device pointer or host pointer to an array of length ``group_count``.
+    @param[in]
+    Carray    device array of device pointers storing each matrix ``C_j``.
+    @param[in]
+    cType     [hipDataType]
+              datatype of each matrix ``C_j``.
+    @param[in]
+    ldc_array [const int*]
+              host array of length ``group_count``.
+    @param[in, out]
+    Darray    device array of device pointers storing each matrix ``D_j``.
+    @param[in]
+    dType     [hipDataType]
+              datatype of each matrix ``D_j``.
+    @param[in]
+    ldd_array [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    group_count [int]
+              number of groups.
+    @param[in]
+    group_size [const int*]
+              host array of length ``group_count``.
+    @param[in]
+    computeType [hipblasComputeType_t]
+              datatype of computation.
+    @param[in]
+    algo      [hipblasGemmAlgo_t]
+              enumerant specifying the algorithm type.
+
+    ********************************************************************/
+
+HIPBLAS_EXPORT hipblasStatus_t hipblasGemmGroupedBatchedEx(hipblasHandle_t           handle,
+                                                           const hipblasOperation_t* transA_array,
+                                                           const hipblasOperation_t* transB_array,
+                                                           const int*                m_array,
+                                                           const int*                n_array,
+                                                           const int*                k_array,
+                                                           const void*               alpha_array,
+                                                           const void* const         Aarray[],
+                                                           hipDataType               aType,
+                                                           const int*                lda_array,
+                                                           const void* const         Barray[],
+                                                           hipDataType               bType,
+                                                           const int*                ldb_array,
+                                                           const void*               beta_array,
+                                                           const void* const         Carray[],
+                                                           hipDataType               cType,
+                                                           const int*                ldc_array,
+                                                           void* const               Darray[],
+                                                           hipDataType               dType,
+                                                           const int*                ldd_array,
+                                                           int                       group_count,
+                                                           const int*                group_size,
+                                                           hipblasComputeType_t      computeType,
+                                                           hipblasGemmAlgo_t         algo);
+
+HIPBLAS_EXPORT hipblasStatus_t
+    hipblasGemmGroupedBatchedExWithFlags(hipblasHandle_t           handle,
+                                         const hipblasOperation_t* transA_array,
+                                         const hipblasOperation_t* transB_array,
+                                         const int*                m_array,
+                                         const int*                n_array,
+                                         const int*                k_array,
+                                         const void*               alpha_array,
+                                         const void* const         Aarray[],
+                                         hipDataType               aType,
+                                         const int*                lda_array,
+                                         const void* const         Barray[],
+                                         hipDataType               bType,
+                                         const int*                ldb_array,
+                                         const void*               beta_array,
+                                         const void* const         Carray[],
+                                         hipDataType               cType,
+                                         const int*                ldc_array,
+                                         void* const               Darray[],
+                                         hipDataType               dType,
+                                         const int*                ldd_array,
+                                         int                       group_count,
+                                         const int*                group_size,
+                                         hipblasComputeType_t      computeType,
+                                         hipblasGemmAlgo_t         algo,
+                                         hipblasGemmFlags_t        flags);
+
+HIPBLAS_EXPORT hipblasStatus_t
+    hipblasGemmGroupedBatchedEx_64(hipblasHandle_t           handle,
+                                   const hipblasOperation_t* transA_array,
+                                   const hipblasOperation_t* transB_array,
+                                   const int64_t*            m_array,
+                                   const int64_t*            n_array,
+                                   const int64_t*            k_array,
+                                   const void*               alpha_array,
+                                   const void* const         Aarray[],
+                                   hipDataType               aType,
+                                   const int64_t*            lda_array,
+                                   const void* const         Barray[],
+                                   hipDataType               bType,
+                                   const int64_t*            ldb_array,
+                                   const void*               beta_array,
+                                   const void* const         Carray[],
+                                   hipDataType               cType,
+                                   const int64_t*            ldc_array,
+                                   void* const               Darray[],
+                                   hipDataType               dType,
+                                   const int64_t*            ldd_array,
+                                   int64_t                   group_count,
+                                   const int64_t*            group_size,
+                                   hipblasComputeType_t      computeType,
+                                   hipblasGemmAlgo_t         algo);
+
+HIPBLAS_EXPORT hipblasStatus_t
+    hipblasGemmGroupedBatchedExWithFlags_64(hipblasHandle_t           handle,
+                                            const hipblasOperation_t* transA_array,
+                                            const hipblasOperation_t* transB_array,
+                                            const int64_t*            m_array,
+                                            const int64_t*            n_array,
+                                            const int64_t*            k_array,
+                                            const void*               alpha_array,
+                                            const void* const         Aarray[],
+                                            hipDataType               aType,
+                                            const int64_t*            lda_array,
+                                            const void* const         Barray[],
+                                            hipDataType               bType,
+                                            const int64_t*            ldb_array,
+                                            const void*               beta_array,
+                                            const void* const         Carray[],
+                                            hipDataType               cType,
+                                            const int64_t*            ldc_array,
+                                            void* const               Darray[],
+                                            hipDataType               dType,
+                                            const int64_t*            ldd_array,
+                                            int64_t                   group_count,
+                                            const int64_t*            group_size,
+                                            hipblasComputeType_t      computeType,
+                                            hipblasGemmAlgo_t         algo,
+                                            hipblasGemmFlags_t        flags);
 
 /*! \brief  <b> BLAS EX API </b>
 

@@ -38,7 +38,7 @@ import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
-DEFAULT_BUNDLE_DIR = SCRIPT_DIR.parent / "integration_test_bundles"
+DEFAULT_BUNDLE_DIR = SCRIPT_DIR.parent / "integration-test-bundles"
 
 
 def _uid_to_role(template):

@@ -20,7 +20,7 @@ Exit 0 on full reconciliation, 1 on any discrepancy.
 Usage::
 
     verify_migration.py --census census.json \\
-        --capture-dir /tmp/captured --bundle-dir integration_test_bundles
+        --capture-dir /tmp/captured --bundle-dir integration-test-bundles
 """
 
 import argparse

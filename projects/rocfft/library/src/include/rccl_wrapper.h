@@ -28,7 +28,9 @@
 
 #include <cstddef>
 #include <hip/hip_runtime.h>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <vector>
@@ -37,9 +39,9 @@
 #include <rocfft/rocfft.h>
 
 // thrown by rocfft_rccl_comm_t communication primitives when the
-// underlying RCCL call fails.  the distinct type lets callers
+// underlying RCCL call fails. The distinct type lets callers
 // recognize and handle RCCL failures specifically while still
-// being catchable via std::runtime_error / std::exception.  carries
+// being catchable via std::runtime_error / std::exception. Carries
 // the originating ncclResult_t and appends its string form to what()
 struct rocfft_rccl_exception_t : std::runtime_error
 {
@@ -62,6 +64,11 @@ private:
 
 // value-semantic handle to an RCCL communicator set for single-process
 // multi-GPU transfers.
+//
+// Thread safety: create()/reset_all() are internally synchronized. A given
+// comm is NOT safe for concurrent use (per NCCL: only one thread may
+// operate a comm at a time), so plans sharing a comm (same device set) must
+// be executed serially; concurrent use needs caller-side serialization.
 class rocfft_rccl_comm_t
 {
 public:
@@ -76,7 +83,7 @@ public:
     rocfft_rccl_comm_t(rocfft_rccl_comm_t&&)                 = default;
     rocfft_rccl_comm_t& operator=(rocfft_rccl_comm_t&&) = default;
 
-    // true iff this handle refers to an initialized RCCL communicator.
+    // true if this handle refers to an initialized RCCL communicator
     explicit operator bool() const
     {
         return static_cast<bool>(pimpl);
@@ -84,17 +91,22 @@ public:
 
     // return a populated handle for the specified devices, or an empty
     // handle if RCCL is disabled, fewer than two devices were given, or
-    // initialization failed.  Communicators are cached per device-set
+    // initialization failed. Communicators are cached per device-set
     // so different plans can use different GPU subsets concurrently.
     static rocfft_rccl_comm_t create(const std::set<int>& devices);
 
     // release all cached communicators (called at rocfft_cleanup()).
     static void reset_all();
 
-    // return the RCCL communicator for a specific device.  throws
+    // return the RCCL communicator for a specific device. Throws
     // std::invalid_argument if device_id is not part of this
     // communicator set.
     ncclComm_t get_comm(int device_id) const;
+
+    // communicator-owned stream for a device. RCCL requires a comm to
+    // always use the same stream, so the stream lives/dies with the comm;
+    // callers record their own event on it to sync.
+    hipStream_t get_stream(int device_id) const;
 
     // total number of ranks in this communicator
     size_t num_ranks() const;
@@ -107,49 +119,50 @@ public:
     // in a well-defined order matching the NCCL rank numbering.
     std::vector<int> get_devices() const;
 
-    // all-to-all with uniform counts across every rank.  the three
-    // per-rank vectors (sendbufs / recvbufs / streams) must each
-    // have size num_ranks() and be indexed by RCCL rank; the
-    // wrapper owns the ncclGroupStart/End scope and sets the
-    // current device per call internally, so callers cannot
-    // accidentally launch a partial collective.
-    //
-    // count is in elements of the logical rocFFT type described by
-    // (precision, array_type); the wrapper internally maps this to
-    // the matching ncclDataType_t and adjusts the element count for
-    // complex/planar layouts.
-    //
-    // throws std::invalid_argument if any vector size mismatches
-    // num_ranks(); throws rocfft_rccl_exception_t on RCCL failure.
+    // all-to-all with uniform counts. Sendbufs/recvbufs are sized
+    // num_ranks() and indexed by RCCL rank; the wrapper owns the
+    // group scope, per-call hipSetDevice, and launches on each comm's
+    // own stream. Count is in logical (precision, array_type) elements
+    // (mapped to ncclDataType_t / adjusted for complex/planar inside).
+    // Throws std::invalid_argument on size mismatch, rocfft_rccl_exception_t
+    // on RCCL failure.
     void alltoall(const std::vector<const void*>& sendbufs,
                   const std::vector<void*>&       recvbufs,
-                  const std::vector<hipStream_t>& streams,
                   size_t                          count,
                   rocfft_precision                precision,
                   rocfft_array_type               array_type) const;
 
-    // point-to-point send: endpoints are device ids (peer / local),
-    // throws rocfft_rccl_exception_t on RCCL failure.
+    // point-to-point send: endpoints are device ids; runs on the comm's
+    // own stream for device_id.
     void send(const void*       sendbuf,
               size_t            count,
               int               peer_device_id,
               int               device_id,
-              hipStream_t       stream,
               rocfft_precision  precision,
               rocfft_array_type array_type) const;
 
-    // point-to-point receive: endpoints are device ids (peer / local),
-    // throws rocfft_rccl_exception_t on RCCL failure.
+    // point-to-point receive: endpoints are device ids; runs on the comm's
+    // own stream for device_id. Throws rocfft_rccl_exception_t on failure.
     void recv(void*             recvbuf,
               size_t            count,
               int               peer_device_id,
               int               device_id,
-              hipStream_t       stream,
               rocfft_precision  precision,
               rocfft_array_type array_type) const;
 
 private:
     struct Impl;
+
+    // owning cache keyed by device set: the comm (and its streams) persists
+    // for reuse by later plans, amortizing ncclCommInitRank; freed at
+    // reset_all(). Reuse is safe because the comm owns its stream, keeping
+    // RCCL's fixed comm/stream pairing across sequential and overlapping plans.
+    // The mutex only makes looking up / creating a cached comm thread-safe;
+    // it does NOT make using a comm's collectives thread-safe (a comm still
+    // must be used by one thread at a time)
+    static std::map<std::set<int>, rocfft_rccl_comm_t> comm_cache;
+    static std::mutex                                  comm_cache_mutex;
+
     // shared so copies of the handle refer to the same RCCL state; the
     // Impl destructor (running exactly once when the last handle dies)
     // calls ncclCommFinalize/Destroy on the owned communicators.

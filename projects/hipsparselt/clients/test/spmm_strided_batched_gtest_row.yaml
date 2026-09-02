@@ -75,7 +75,7 @@ Tests:
 - name: spmm_strided_batched_small_stride
   category: quick
   function:
-    spmm_strided_batched: *hpa_half_precision
+    spmm_strided_batched: *real_precisions_2b
   matrix_size: *strided_batched_small_matrix_size_range
   alpha_beta: *alpha_beta_range
   transA_transB: *transA_transB_range
@@ -84,12 +84,13 @@ Tests:
   sparse_b: [ true, false]
   alpha_vector_scaling: [true]
   gate_residual: [true]
+  gate_type: [f16_r, bf16_r]
   stride_gate: [0, -1, 16384]
   orderA: [R]
   orderB: [R]
   orderC: [R]
   orderD: [R]
-  gpu_arch: '942'
+  gpu_arch: '9(42|50)'
 
 - name: spmm_strided_batched_small_stride_zero
   category: quick

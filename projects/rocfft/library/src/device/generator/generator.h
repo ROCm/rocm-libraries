@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,7 @@
 #include <variant>
 #include <vector>
 
+#include "../../include/load_store_ops.h"
 #include "../kernels/callback.h"
 
 //
@@ -752,61 +753,235 @@ public:
 class CallbackLoadDeclaration
 {
 public:
-    CallbackLoadDeclaration(const std::string& scalar_type, const std::string& cbtype)
-        : scalar_type(scalar_type)
-        , cbtype(cbtype){};
-    std::string scalar_type;
-    std::string cbtype;
-    // true if loading complex data through a real-valued callback
-    bool        r2c_callback = false;
+    CallbackLoadDeclaration() = default;
+
+    void set_scalar_type(const char* _scalar_type)
+    {
+        scalar_type = _scalar_type;
+    }
+    // Enable use of JIT or funcptr callbacks as necessary.
+    // r2c_callback means we call a real-valued callback twice to load
+    // a complex element.
+    void set_jit_or_funcptr_callback(const char* _jit_symbol,
+                                     bool        _funcptr_callback,
+                                     bool        _r2c_callback)
+    {
+        // jit symbol and funcptr callback are mutually exclusive
+        if(_jit_symbol && _funcptr_callback)
+            throw std::invalid_argument("jit symbol cannot be combined with funcptr callback");
+
+        jit_symbol       = _jit_symbol;
+        funcptr_callback = _funcptr_callback;
+        r2c_callback     = _r2c_callback;
+    }
+
     std::string render() const
     {
+        std::string ret;
         if(r2c_callback)
-            // declare a lambda that calls the real-valued callback
-            // twice to load one complex value
-            return R"lambda(
-    	    auto load_cb = [load_cb_fn](scalar_type* data, size_t offset, void* cbdata, void* sharedMem)
-    	    {
-                auto real_cb = reinterpret_cast<typename callback_type<real_type_t<scalar_type>>::load>(load_cb_fn);
-                return scalar_type
+        {
+            if(jit_symbol)
+            {
+                ret += "// declare a lambda that calls the real JIT callback twice to\n";
+                ret += "// load one complex element\n";
+                ret += "auto load_cb = [](" + scalar_type
+                       + " * data, size_t offset, void* cbdata, void* sharedMem)\n";
+                ret += "  {\n";
+                ret += "  return " + scalar_type + "\n";
+                ret += "    {\n";
+                ret += "        load_cb_jit_fn(reinterpret_cast<real_type_t<" + scalar_type
+                       + ">*>(data), offset * 2, cbdata, sharedMem),\n";
+                ret += "        load_cb_jit_fn(reinterpret_cast<real_type_t<" + scalar_type
+                       + ">*>(data), offset * 2 + 1, cbdata, sharedMem),\n";
+                ret += "    };\n";
+                ret += "  };\n";
+            }
+            else
+            {
+                if(funcptr_callback)
                 {
-                    real_cb(reinterpret_cast<real_type_t<scalar_type>*>(data), offset * 2, cbdata, sharedMem),
-                    real_cb(reinterpret_cast<real_type_t<scalar_type>*>(data), offset * 2 + 1, cbdata, sharedMem),
-                };
-            };
-            )lambda";
+                    ret += "// declare a lambda that calls the real funcptr callback twice to\n";
+                    ret += "// load one complex element\n";
+                    ret += "auto load_cb = [load_cb_fn](" + scalar_type
+                           + "* data, size_t offset, void* cbdata, void* sharedMem)\n";
+                    ret += "  {\n";
+                    ret += "      auto real_cb = reinterpret_cast<typename "
+                           "callback_type<real_type_t<"
+                           + scalar_type + ">>::load>(load_cb_fn);\n";
+                    ret += "      return " + scalar_type + "\n";
+                    ret += "      {\n";
+                    ret += "          real_cb(reinterpret_cast<real_type_t<" + scalar_type
+                           + ">*>(data), offset * 2, cbdata, sharedMem),\n";
+                    ret += "          real_cb(reinterpret_cast<real_type_t<" + scalar_type
+                           + ">*>(data), offset * 2 + 1, cbdata, sharedMem),\n";
+                    ret += "      };\n";
+                    ret += "  };\n";
+                }
+                else
+                {
+                    ret += "// declare a lambda that calls the default callback twice to\n";
+                    ret += "// load one complex element\n";
+                    ret += "auto load_cb = [](" + scalar_type
+                           + "* data, size_t offset, void* cbdata, void* sharedMem)\n";
+                    ret += "  {\n";
+                    ret += "      auto real_cb = load_cb_default<real_type_t<" + scalar_type
+                           + ">>;\n";
+                    ret += "      return " + scalar_type + "\n";
+                    ret += "      {\n";
+                    ret += "          real_cb(reinterpret_cast<real_type_t<" + scalar_type
+                           + ">*>(data), offset * 2, cbdata, sharedMem),\n";
+                    ret += "          real_cb(reinterpret_cast<real_type_t<" + scalar_type
+                           + ">*>(data), offset * 2 + 1, cbdata, sharedMem),\n";
+                    ret += "      };\n";
+                    ret += "  };\n";
+                }
+            }
+        }
         else
-            return "auto load_cb = get_load_cb<" + scalar_type + ", " + cbtype + ">(load_cb_fn);";
+        {
+            if(jit_symbol)
+            {
+                return "auto load_cb = load_cb_jit_fn;\n";
+            }
+            else
+            {
+                if(funcptr_callback)
+                {
+                    return "auto load_cb = reinterpret_cast<typename "
+                           "callback_type<"
+                           + scalar_type + ">::load>(load_cb_fn);\n";
+                }
+                else
+                {
+                    return "auto load_cb = load_cb_default<" + scalar_type + ">;\n";
+                }
+            }
+        }
+        return ret;
     }
+
+private:
+    // non-null if we're using a JIT callback for loading
+    const char* jit_symbol = nullptr;
+    // are we using a funcptr callback?
+    bool funcptr_callback = false;
+    // whether we are loading complex data through a real-typed callback
+    bool r2c_callback = false;
+    // the data type that the callback loads
+    std::string scalar_type = "scalar_type";
 };
 
 class CallbackStoreDeclaration
 {
 public:
-    CallbackStoreDeclaration(const std::string& scalar_type, const std::string& cbtype)
-        : scalar_type(scalar_type)
-        , cbtype(cbtype){};
-    std::string scalar_type;
-    std::string cbtype;
-    // true if storing complex data through a real-valued callback
-    bool        c2r_callback = false;
+    CallbackStoreDeclaration() = default;
+
+    void set_scalar_type(const char* _scalar_type)
+    {
+        scalar_type = _scalar_type;
+    }
+    // Enable use of JIT or funcptr callbacks as necessary.
+    // c2r_callback means we call a real-valued callback twice to store
+    // a complex element.
+    void set_jit_or_funcptr_callback(const char* _jit_symbol,
+                                     bool        _funcptr_callback,
+                                     bool        _c2r_callback)
+    {
+        // jit symbol and funcptr callback are mutually exclusive
+        if(_jit_symbol && _funcptr_callback)
+            throw std::invalid_argument("jit symbol cannot be combined with funcptr callback");
+
+        jit_symbol       = _jit_symbol;
+        funcptr_callback = _funcptr_callback;
+        c2r_callback     = _c2r_callback;
+    }
+
     std::string render() const
     {
+        std::string ret;
         if(c2r_callback)
-            // declare a lambda that calls the real-valued callback
-            // twice to store one complex value
-            return R"lambda(
-                auto store_cb = [store_cb_fn](scalar_type* data, size_t offset, scalar_type elem, void* cbdata, void* sharedMem)
+        {
+            if(jit_symbol)
+            {
+                ret += "// declare a lambda that calls the real JIT callback twice to\n";
+                ret += "// store one complex element\n";
+                ret += "auto store_cb = [](" + scalar_type + "* data, size_t offset, " + scalar_type
+                       + " elem, void* cbdata, void* sharedMem)\n";
+                ret += "  {\n";
+                ret += "    store_cb_jit_fn(reinterpret_cast<real_type_t<" + scalar_type
+                       + ">*>(data), offset * 2, elem.x, cbdata, sharedMem);\n";
+                ret += "    store_cb_jit_fn(reinterpret_cast<real_type_t<" + scalar_type
+                       + ">*>(data), offset * 2 + 1, elem.y, cbdata, sharedMem);\n";
+                ret += "  };\n";
+            }
+            else
+            {
+                if(funcptr_callback)
                 {
-                    auto real_cb = reinterpret_cast<typename callback_type<real_type_t<scalar_type>>::store>(store_cb_fn);
-                    real_cb(reinterpret_cast<real_type_t<scalar_type>*>(data), offset * 2, elem.x, cbdata, sharedMem);
-                    real_cb(reinterpret_cast<real_type_t<scalar_type>*>(data), offset * 2 + 1, elem.y, cbdata, sharedMem);
-                };
-            )lambda";
+                    ret += "// declare a lambda that calls the real funcptr callback twice to\n";
+                    ret += "// store one complex element\n";
+                    ret += "auto store_cb = [store_cb_fn](" + scalar_type
+                           + "* data, size_t offset, " + scalar_type
+                           + " elem, void* cbdata, void* sharedMem)\n";
+                    ret += "  {\n";
+                    ret += "      auto real_cb = reinterpret_cast<typename "
+                           "callback_type<real_type_t<"
+                           + scalar_type + ">>::store>(store_cb_fn);\n";
+                    ret += "      real_cb(reinterpret_cast<real_type_t<" + scalar_type
+                           + ">*>(data), offset * 2, elem.x, cbdata, sharedMem);\n";
+                    ret += "      real_cb(reinterpret_cast<real_type_t<" + scalar_type
+                           + ">*>(data), offset * 2 + 1, elem.y, cbdata, sharedMem);\n";
+                    ret += "  };\n";
+                }
+                else
+                {
+                    ret += "// declare a lambda that calls the default callback twice to\n";
+                    ret += "// store one complex element\n";
+                    ret += "auto store_cb = [](" + scalar_type + "* data, size_t offset, "
+                           + scalar_type + " elem, void* cbdata, void* sharedMem)\n";
+                    ret += "  {\n";
+                    ret += "      auto real_cb = store_cb_default<real_type_t<" + scalar_type
+                           + ">>;\n";
+                    ret += "      real_cb(reinterpret_cast<real_type_t<" + scalar_type
+                           + ">*>(data), offset * 2, elem.x, cbdata, sharedMem);\n";
+                    ret += "      real_cb(reinterpret_cast<real_type_t<" + scalar_type
+                           + ">*>(data), offset * 2 + 1, elem.y, cbdata, sharedMem);\n";
+                    ret += "  };\n";
+                }
+            }
+        }
         else
-            return "auto store_cb = get_store_cb<" + scalar_type + ", " + cbtype
-                   + ">(store_cb_fn);";
+        {
+            if(jit_symbol)
+            {
+                return "auto store_cb = store_cb_jit_fn;\n";
+            }
+            else
+            {
+                if(funcptr_callback)
+                {
+                    return "auto store_cb = reinterpret_cast<typename "
+                           "callback_type<"
+                           + scalar_type + ">::store>(store_cb_fn);\n";
+                }
+                else
+                {
+                    return "auto store_cb = store_cb_default<" + scalar_type + ">;\n";
+                }
+            }
+        }
+        return ret;
     }
+
+private:
+    // non-null if we're using a JIT callback for storing
+    const char* jit_symbol = nullptr;
+    // are we using a funcptr callback?
+    bool funcptr_callback = false;
+    // whether we are storing complex data through a real-typed callback
+    bool c2r_callback = false;
+    // the data type that the callback stores
+    std::string scalar_type = "scalar_type";
 };
 
 class ReturnExpr
@@ -1538,6 +1713,7 @@ struct BaseVisitor
         y.arguments     = visit_ArgumentList(x.arguments);
         y.templates     = visit_ArgumentList(x.templates);
         y.qualifier     = x.qualifier;
+        y.return_type   = x.return_type;
         y.launch_bounds = x.launch_bounds;
         return y;
     }
@@ -1903,40 +2079,51 @@ static Function make_rtc(const Function& f, const std::string& kernel_name)
 // Make callbacks compatible with real-complex even-length optimization
 struct MakeCallbackRealComplexVisitor : public BaseVisitor
 {
-    MakeCallbackRealComplexVisitor(CallbackType cbtype)
-        : cbtype(cbtype)
+    MakeCallbackRealComplexVisitor(const CallbackType cbtype,
+                                   const char*        load_cb_jit_symbol,
+                                   const char*        store_cb_jit_symbol)
+        : load_cb_jit_symbol(load_cb_jit_symbol)
+        , store_cb_jit_symbol(store_cb_jit_symbol)
     {
+        if(!load_cb_jit_symbol && !store_cb_jit_symbol && cbtype != CallbackType::NONE)
+            funcptr_callback = true;
+        r2c_callback = cbtype == CallbackType::USER_LOAD_STORE_R2C;
+        c2r_callback = cbtype == CallbackType::USER_LOAD_STORE_C2R;
     }
 
     StatementList visit_CallbackLoadDeclaration(const CallbackLoadDeclaration& x) override
     {
-        if(cbtype == CallbackType::USER_LOAD_STORE_R2C)
-        {
-            CallbackLoadDeclaration y{x};
-            y.r2c_callback = true;
-            return {y};
-        }
-        return {x};
+        CallbackLoadDeclaration y{x};
+        y.set_jit_or_funcptr_callback(load_cb_jit_symbol, funcptr_callback, r2c_callback);
+        return {y};
     }
 
     StatementList visit_CallbackStoreDeclaration(const CallbackStoreDeclaration& x) override
     {
-        if(cbtype == CallbackType::USER_LOAD_STORE_C2R)
-        {
-            CallbackStoreDeclaration y{x};
-            y.c2r_callback = true;
-            return {y};
-        }
-        return {x};
+        CallbackStoreDeclaration y{x};
+        y.set_jit_or_funcptr_callback(store_cb_jit_symbol, funcptr_callback, c2r_callback);
+        return {y};
     }
 
-    CallbackType cbtype;
+    bool funcptr_callback = false;
+    // Is the load callback (JIT or funcptr) reading real elements,
+    // while the kernel uses complex elements?
+    bool r2c_callback = false;
+    // Is the store callback (JIT or funcptr) writing real elements,
+    // while the kernel uses complex elements?
+    bool        c2r_callback        = false;
+    const char* load_cb_jit_symbol  = nullptr;
+    const char* store_cb_jit_symbol = nullptr;
 };
 
-static Function make_callback_realcomplex(const Function& f, CallbackType cbtype)
+static Function make_callback_realcomplex(const Function&                f,
+                                          CallbackType                   cbtype,
+                                          const std::optional<LoadOps>&  loadOps,
+                                          const std::optional<StoreOps>& storeOps)
 {
-    if(cbtype == CallbackType::NONE || cbtype == CallbackType::USER_LOAD_STORE)
-        return f;
-    auto visitor = MakeCallbackRealComplexVisitor(cbtype);
+    auto visitor = MakeCallbackRealComplexVisitor(
+        cbtype,
+        (loadOps && loadOps->has_spirv()) ? loadOps->spirv_cb.symbol_name.c_str() : nullptr,
+        (storeOps && storeOps->has_spirv()) ? storeOps->spirv_cb.symbol_name.c_str() : nullptr);
     return visitor(f);
 }

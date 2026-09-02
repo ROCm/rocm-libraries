@@ -36,6 +36,26 @@ inline std::vector<std::string> buildRMSNormFwdDefines(bool hasBias)
     return defines;
 }
 
+template <typename GradOutputDataType,
+          typename InputDataType,
+          typename ScaleDataType,
+          typename GradInputDataType,
+          typename ComputeDataType,
+          unsigned int localSize>
+inline std::vector<std::string> buildRMSNormBwdDefines()
+{
+    std::vector<std::string> defines;
+    defines.emplace_back(std::string("-DGRAD_OUTPUT_TYPE=")
+                         + HipRtcTypeName<GradOutputDataType>::VALUE);
+    defines.emplace_back(std::string("-DINPUT_TYPE=") + HipRtcTypeName<InputDataType>::VALUE);
+    defines.emplace_back(std::string("-DSCALE_TYPE=") + HipRtcTypeName<ScaleDataType>::VALUE);
+    defines.emplace_back(std::string("-DGRAD_INPUT_TYPE=")
+                         + HipRtcTypeName<GradInputDataType>::VALUE);
+    defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<ComputeDataType>::VALUE);
+    defines.emplace_back(std::string("-DLOCAL_SIZE=") + std::to_string(localSize));
+    return defines;
+}
+
 } // namespace detail
 
 class GpuFpReferenceRMSNorm
@@ -95,6 +115,61 @@ public:
         if(invRms != nullptr)
         {
             invRms->memory().markDeviceModified();
+        }
+    }
+
+    // --- Backward RMSNorm ---
+
+    template <class GradOutputDataType,
+              class InputDataType = GradOutputDataType,
+              class ScaleDataType = GradOutputDataType,
+              class GradInputDataType = GradOutputDataType,
+              class ComputeDataType = double>
+    static void bprop(hipdnn_data_sdk::utilities::TensorBase<GradOutputDataType>& gradOutput,
+                      hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
+                      hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& scale,
+                      hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>& invRms,
+                      hipdnn_data_sdk::utilities::TensorBase<GradInputDataType>& gradInput,
+                      hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& gradScale,
+                      hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* gradBias = nullptr)
+    {
+        validateBwdInput(gradOutput, input, scale, invRms, gradInput, gradScale, gradBias);
+
+        auto defines = detail::buildRMSNormBwdDefines<GradOutputDataType,
+                                                      InputDataType,
+                                                      ScaleDataType,
+                                                      GradInputDataType,
+                                                      ComputeDataType,
+                                                      BLOCK_SIZE>();
+
+        // Launch backward data kernel
+        launchDgrad(gradOutput.memory().deviceData(),
+                    input.memory().deviceData(),
+                    input.dims(),
+                    input.strides(),
+                    scale.memory().deviceData(),
+                    scale.dims(),
+                    invRms.memory().deviceData(),
+                    gradInput.memory().deviceData(),
+                    defines);
+
+        gradInput.memory().markDeviceModified();
+
+        // Launch backward weight/bias kernel
+        launchWgrad(gradOutput.memory().deviceData(),
+                    input.memory().deviceData(),
+                    input.dims(),
+                    input.strides(),
+                    scale.dims(),
+                    invRms.memory().deviceData(),
+                    gradScale.memory().deviceData(),
+                    defines,
+                    gradBias ? gradBias->memory().deviceData() : nullptr);
+
+        gradScale.memory().markDeviceModified();
+        if(gradBias != nullptr)
+        {
+            gradBias->memory().markDeviceModified();
         }
     }
 
@@ -312,15 +387,86 @@ private:
         validateConsistentLayouts(inputDims, input.strides(), otherTensorProps);
 
         // Validate data types
-        static_assert(IS_SUPPORTED_DATA_TYPE<InputDataType>,
-                      "RMSNorm forward supports only float, half, and bfloat16 input data types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<OutputDataType>,
-                      "RMSNorm forward supports only float, half, and bfloat16 output data types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<ScaleDataType>,
-                      "RMSNorm forward supports only float, half, and bfloat16 scale data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<InputDataType>,
+            "RMSNorm forward supports only double, float, half, and bfloat16 input data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<OutputDataType>,
+            "RMSNorm forward supports only double, float, half, and bfloat16 output data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<ScaleDataType>,
+            "RMSNorm forward supports only double, float, half, and bfloat16 scale data types.");
         static_assert(
             IS_SUPPORTED_DATA_TYPE<ComputeDataType>,
-            "RMSNorm forward supports only float, half, and bfloat16 compute data types.");
+            "RMSNorm forward supports only double, float, half, and bfloat16 compute data types.");
+    }
+
+    template <class GradOutputDataType,
+              class InputDataType = GradOutputDataType,
+              class ScaleDataType = GradOutputDataType,
+              class GradInputDataType = GradOutputDataType,
+              class ComputeDataType = double>
+    static void validateBwdInput(
+        const hipdnn_data_sdk::utilities::TensorBase<GradOutputDataType>& gradOutput,
+        const hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& scale,
+        const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>& invRms,
+        const hipdnn_data_sdk::utilities::TensorBase<GradInputDataType>& gradInput,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& gradScale,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* gradBias)
+    {
+        const auto& inputDims = input.dims();
+        const auto& scaleDims = scale.dims();
+        const auto& invRmsDims = invRms.dims();
+        const auto& gradOutputDims = gradOutput.dims();
+        const auto& gradInputDims = gradInput.dims();
+        const auto& gradScaleDims = gradScale.dims();
+        const auto* gradBiasDims = gradBias ? &gradBias->dims() : nullptr;
+
+        // Validate tensor dimensions
+        std::vector<TensorProps> otherIOTensorProps;
+        otherIOTensorProps.emplace_back("gradOutput", &gradOutputDims, &gradOutput.strides());
+        otherIOTensorProps.emplace_back("gradInput", &gradInputDims, &gradInput.strides());
+
+        std::vector<TensorProps> affineTensorProps;
+        affineTensorProps.emplace_back("scale", &scaleDims, &scale.strides());
+        affineTensorProps.emplace_back("gradScale", &gradScaleDims, &gradScale.strides());
+        if(gradBiasDims != nullptr)
+        {
+            affineTensorProps.emplace_back("gradBias", gradBiasDims, &gradBias->strides());
+        }
+
+        validateConsistentDimensions(inputDims, otherIOTensorProps, affineTensorProps, &invRmsDims);
+
+        // Validate tensor layouts
+        std::vector<TensorProps> otherTensorProps;
+        otherTensorProps.emplace_back("scale", &scaleDims, &scale.strides());
+        otherTensorProps.emplace_back("invRms", &invRmsDims, &invRms.strides());
+        otherTensorProps.emplace_back("gradOutput", &gradOutputDims, &gradOutput.strides());
+        otherTensorProps.emplace_back("gradInput", &gradInputDims, &gradInput.strides());
+        otherTensorProps.emplace_back("gradScale", &gradScaleDims, &gradScale.strides());
+        if(gradBiasDims != nullptr)
+        {
+            otherTensorProps.emplace_back("gradBias", gradBiasDims, &gradBias->strides());
+        }
+        validateConsistentLayouts(inputDims, input.strides(), otherTensorProps);
+
+        // Validate data types
+        static_assert(IS_SUPPORTED_DATA_TYPE<GradOutputDataType>,
+                      "RMSNorm backward supports only double, float, half, and bfloat16 gradOutput "
+                      "data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<InputDataType>,
+            "RMSNorm backward supports only double, float, half, and bfloat16 input data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<ScaleDataType>,
+            "RMSNorm backward supports only double, float, half, and bfloat16 scale data types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<GradInputDataType>,
+                      "RMSNorm backward supports only double, float, half, and bfloat16 gradInput "
+                      "data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<ComputeDataType>,
+            "RMSNorm backward supports only double, float, half, and bfloat16 compute data types.");
     }
 
     // --- Helpers ---
@@ -430,6 +576,26 @@ private:
                             void* invRmsPtr = nullptr,
                             const void* biasPtr = nullptr,
                             double epsilon = 1e-5);
+
+    static void launchDgrad(const void* gradOutputPtr,
+                            const void* inputPtr,
+                            const std::vector<int64_t>& inputDims,
+                            const std::vector<int64_t>& inputStrides,
+                            const void* scalePtr,
+                            const std::vector<int64_t>& scaleDims,
+                            const void* invRmsPtr,
+                            void* gradInputPtr,
+                            const std::vector<std::string>& defines);
+
+    static void launchWgrad(const void* gradOutputPtr,
+                            const void* inputPtr,
+                            const std::vector<int64_t>& inputDims,
+                            const std::vector<int64_t>& inputStrides,
+                            const std::vector<int64_t>& scaleDims,
+                            const void* invRmsPtr,
+                            void* gradScalePtr,
+                            const std::vector<std::string>& defines,
+                            void* gradBiasPtr = nullptr);
 };
 
 } // namespace hipdnn_gpu_ref

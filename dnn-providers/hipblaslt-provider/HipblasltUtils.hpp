@@ -101,4 +101,8 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensor
 
 bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
 
+bool isTypeFp6Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
+
+bool isTypeMxOcp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
+
 } // namespace hipblaslt_plugin::hipblaslt_utils

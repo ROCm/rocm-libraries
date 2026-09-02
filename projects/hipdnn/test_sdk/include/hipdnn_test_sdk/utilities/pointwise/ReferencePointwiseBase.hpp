@@ -76,6 +76,20 @@ public:
             operation, output, input1, input2);
     }
 
+    template <typename Input0Type,
+              typename Input1Type,
+              typename Input2Type,
+              typename ComputeType = double>
+    static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                 hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                 const hipdnn_data_sdk::utilities::TensorBase<Input0Type>& input0,
+                                 const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                                 const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2)
+    {
+        executeTernaryOperation<Input0Type, Input1Type, Input2Type, ComputeType>(
+            operation, output, input0, input1, input2);
+    }
+
     // Parameterized binary operations
     template <typename Input1Type,
               typename Input2Type,
@@ -197,6 +211,10 @@ private:
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL:
             policy.executeBinaryBroadcast(input1, input2, output, pointwise::Multiply{});
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GT:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::CompareGreater<ComputeType>{});
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::ReluBackward<ComputeType>{});
@@ -211,6 +229,30 @@ private:
             break;
         default:
             throw std::runtime_error("Unsupported binary pointwise operation: "
+                                     + std::to_string(static_cast<int>(operation)));
+        }
+
+        policy.markOutputModified(output);
+    }
+
+    template <typename Input0Type, typename Input1Type, typename Input2Type, typename ComputeType>
+    static void
+        executeTernaryOperation(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                const hipdnn_data_sdk::utilities::TensorBase<Input0Type>& input0,
+                                const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                                const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2)
+    {
+        DeviceExecutor policy;
+
+        switch(operation)
+        {
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::BINARY_SELECT:
+            policy.executeTernaryBroadcast(
+                input0, input1, input2, output, pointwise::BinarySelect<OutputType>{});
+            break;
+        default:
+            throw std::runtime_error("Unsupported ternary pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
         }
 

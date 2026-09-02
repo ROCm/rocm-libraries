@@ -259,9 +259,6 @@ globalParameters["DumpTensors"] = (
 # If PrintMax* is greater than the dimension, the middle elements will be replaced with "..."
 
 
-# device selection
-globalParameters["Platform"] = 0  # select opencl platform
-
 # shouldn't need to change
 globalParameters["ClientExecutionLockPath"] = (
     None  # Path for a file lock to ensure only one client is executed at once.  filelock module is required if this is enabled.
@@ -395,6 +392,11 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+# Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
+# When set, each kernel's StinkyTofu module writes its cost file here via
+# StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
+globalParameters["StinkyTofuCostOutputDir"] = ""
+
 globalParameters["DisableSTWaitCnt"] = True
 
 # Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
@@ -438,6 +440,10 @@ defaultInternalSupportParams = {
     # but WGM is not.
     "SupportCustomWGM": True,
     "SupportCustomStaggerU": True,
+    # Kernel distributes Stream-K extra iters within each tile when
+    # skGrid % skTiles == 0. Default False so older/custom kernels do not
+    # claim the capability; newly generated StreamK 3 / SK5 set it True.
+    "SupportStreamKPerTileExtraIters": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,
@@ -451,15 +457,15 @@ defaultBenchmarkCommonParameters = [
     {"LdsPadMXSA": [ -1 ] },
     {"LdsPadB": [-1]},
     {"LdsPadMXSB": [ -1 ] },
-    {"LdsPadMetadata": [0]},
+    {"LdsPadMetadata": [-1]},
     {"LdsBlockSizePerPadA": [-1]},
     {"LdsBlockSizePerPadMXSA": [ -1 ] },
     {"LdsBlockSizePerPadB": [-1]},
     {"LdsBlockSizePerPadMXSB": [ -1 ] },
-    {"LdsBlockSizePerPadMetadata": [0]},
+    {"LdsBlockSizePerPadMetadata": [-1]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
-    {"MaxOccupancy": [40]},
+    {"MaxOccupancy": [64]},
     {"MaxLDS": [-1]},
     {"VectorWidthA": [-1]},
     {"VectorWidthB": [-1]},
@@ -600,18 +606,23 @@ defaultBenchmarkCommonParameters = [
     {"SwapGlobalReadOrder": [0]},
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
+    {"TDMPlusLdsBuf": [0]},
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
     {"TDMSplit": [False]},
+    {"TDMLoadWaveSync": [False]},
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
-    # SwInstructionPrefetch — True: reserve one scratch SGPR so StinkyTofu can insert software
-    # instruction prefetch when the ISA supports it (SwPrefetchInsertionPass).
+    # SwInstructionPrefetch — StinkyTofu software instruction-prefetch mode (single integer):
+    # -1 Auto, 0 Off, 1 Relative (PC-relative), 2 Absolute (label-fixed base). Default 1 (Relative),
+    # preserving the legacy default kernel naming. Set -1 (Auto) to opt into Absolute on gfx1250
+    # non-Stream-K (Relative otherwise), or 2 for explicit Absolute.
     # Purpose: CP prefetch covers only a bounded window; very large kernels can see early kernel
     # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
-    # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
-    {"SwInstructionPrefetch": [True]},
+    # ahead of execution. Legacy booleans are accepted as a deprecated alias
+    # (True -> Relative, False -> Off) so shipped library-logic YAMLs keep loading.
+    {"SwInstructionPrefetch": [1]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
@@ -828,6 +839,14 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
 ]
 
 
+def validateRuntimeLanguage(runtimeLanguage):
+    if runtimeLanguage is not None and runtimeLanguage not in {"HIP", "HSA"}:
+        printExit(
+            f"Unsupported RuntimeLanguage {runtimeLanguage!r}. "
+            "Supported runtime languages are HIP and HSA."
+        )
+
+
 def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
     Assign Global Parameters
@@ -836,6 +855,8 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
 
     global globalParameters
+
+    validateRuntimeLanguage(config.get("RuntimeLanguage"))
 
     # Minimum Required Version
     if "MinimumRequiredVersion" in config:

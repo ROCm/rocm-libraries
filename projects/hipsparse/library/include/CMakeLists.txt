@@ -3,10 +3,11 @@
 
 include(GenerateExportHeader)
 
-# Configure version header. Build-time feature flags consumed by
-# #cmakedefine in hipsparse-version.h.in must be set (or unset) prior to
-# this configure_file() call.
+# Configure the version header (version numbers only) and the config header
+# (build-time feature flags). Variables consumed by #cmakedefine in the .h.in
+# templates must be set (or unset) prior to the configure_file() calls.
 set(HIPSPARSE_WITH_SPMV_BSR ${HIPSPARSE_ENABLE_SPMV_BSR})
+set(HIPSPARSE_WITH_SPGEAM ${HIPSPARSE_ENABLE_SPGEAM})
 set(HIPSPARSE_WITH_CSC_TRSV ${BUILD_WITH_CSC_TRSV})
 set(HIPSPARSE_WITH_CSC_TRSM ${BUILD_WITH_CSC_TRSM})
 
@@ -14,6 +15,20 @@ configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse-version.h.in"
     "${PROJECT_BINARY_DIR}/include/hipsparse/hipsparse-version.h"
     @ONLY
+)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse-config.h.in"
+    "${PROJECT_BINARY_DIR}/include/hipsparse/hipsparse-config.h"
+)
+
+# Guardrail: every feature flag that gates a public header must be registered in
+# the config template above (see cmake/CheckFeatureFlags.cmake).
+include(CheckFeatureFlags)
+check_config_header_flags(
+    PREFIX   HIPSPARSE_WITH_
+    TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse-config.h.in"
+    HEADERS  "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 # Copy public header
@@ -98,6 +113,7 @@ set(HEADER_FILES
     internal/generic/hipsparse_scatter.h
     internal/generic/hipsparse_sddmm.h
     internal/generic/hipsparse_sparse2dense.h
+    internal/generic/hipsparse_spgeam.h
     internal/generic/hipsparse_spgemm_reuse.h
     internal/generic/hipsparse_spgemm.h
     internal/generic/hipsparse_spmm.h

@@ -1,0 +1,98 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+- {MinimumRequiredVersion: 5.0.0}
+- gfx950
+- gfx950
+- [Device 75a8]
+- Activation: true
+  ActivationType: hipblaslt_all
+  AssignedDerivedParameters: true
+  Batched: true
+  ComputeDataType: 0
+  DataType: 15
+  DataTypeA: 15
+  DataTypeB: 15
+  DestDataType: 7
+  HighPrecisionAccumulate: true
+  Index0: 0
+  Index1: 1
+  IndexAssignmentsA: [3, 0, 2]
+  IndexAssignmentsB: [3, 1, 2]
+  IndexUnroll: 3
+  IndicesBatch: [2]
+  IndicesFree: [0, 1]
+  IndicesSummation: [3]
+  NumIndicesBatch: 1
+  NumIndicesC: 3
+  NumIndicesFree: 2
+  NumIndicesSummation: 1
+  OperationType: GEMM
+  StridedBatched: true
+  SupportUserArgs: true
+  TotalIndices: 4
+  TransposeA: true
+  TransposeB: false
+  UseBeta: true
+  UseBias: 1
+  UseScaleAB: Scalar
+- - 1LDSBuffer: 0
+    ActivationFused: true
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BaseName: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgNMVfVa0LuB8lRTcyOpGO2YH741LGRrePzbeHygp1IY8=
+    BufferLoad: true
+    BufferStore: true
+    DepthU: 128
+    GlobalSplitU: 0
+    ISA: [9, 5, 0]
+    Kernel: true
+    KernelLanguage: Assembly
+    KernelNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_MT160x192x128_Test0
+    MacroTile0: 160
+    MacroTile1: 192
+    NumThreads: 256
+    SolutionIndex: 0
+    SolutionNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_Test0
+    StaggerU: 0
+    StaggerUMapping: 0
+    StaggerUStride: 0
+    Valid: true
+    WavefrontSize: 64
+    WorkGroup: [16, 16, 1]
+    _staggerStrideShift: 0
+  - 1LDSBuffer: 0
+    ActivationFused: true
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BaseName: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgXzDbxA8LsiKAenzoLoqFOTbCc3GwRQe0GwhODFVZXaI=
+    BufferLoad: true
+    BufferStore: true
+    DepthU: 128
+    GlobalSplitU: 0
+    ISA: [9, 5, 0]
+    Kernel: true
+    KernelLanguage: Assembly
+    KernelNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_MT160x192x128_Test1
+    MacroTile0: 160
+    MacroTile1: 192
+    NumThreads: 256
+    SolutionIndex: 1
+    SolutionNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_Test1
+    StaggerU: 0
+    StaggerUMapping: 0
+    StaggerUStride: 0
+    Valid: true
+    WavefrontSize: 64
+    WorkGroup: [16, 16, 1]
+    _staggerStrideShift: 0
+- [2, 3, 0, 1]
+- - - [10240, 384, 1, 8192]
+    - [0, 0.0]
+  - - [10240, 336, 1, 8192]
+    - [1, 0.0]
+  - - [10240, 272, 1, 8192]
+    - [0, 0.0]
+- null
+- null
+- DeviceEfficiency
+- Equality

@@ -323,6 +323,8 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
 {
     const int pix_id = blockIdx.x * GROUP_SIZE_X + threadIdx.x;
     const int batch  = blockIdx.z * group_size_z + threadIdx.z;
+    if(pix_id >= MAP_SZ_4)
+        return;
     ReadType accum(0);
     ReadType bot_in2[KERNEL_SIZE];
     ReadType bot_in[KERNEL_SIZE];

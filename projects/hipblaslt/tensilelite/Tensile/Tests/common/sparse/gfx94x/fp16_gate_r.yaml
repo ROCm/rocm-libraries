@@ -73,6 +73,10 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 32] # classic format
           - Exact: [256, 256, 1, 64] # classic format
           - Exact: [256, 256, 1, 72] # classic format
+          - Exact: [264, 264, 1, 16] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 32] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 64] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 72] # partial tile (256+8): full + edge tiles in one launch
         - BiasTypeArgs: ['h']
         - GateTypeArgs: ['h']
         - FactorDimArgs: [0]
@@ -138,6 +142,10 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 32] # classic format
           - Exact: [256, 256, 1, 64] # classic format
           - Exact: [256, 256, 1, 72] # classic format
+          - Exact: [264, 264, 1, 16] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 32] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 64] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 72] # partial tile (256+8): full + edge tiles in one launch
         - BiasTypeArgs: ['h']
         - GateTypeArgs: ['h']
         - FactorDimArgs: [0]
@@ -203,6 +211,10 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 32] # classic format
           - Exact: [256, 256, 1, 64] # classic format
           - Exact: [256, 256, 1, 72] # classic format
+          - Exact: [264, 264, 1, 16] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 32] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 64] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 72] # partial tile (256+8): full + edge tiles in one launch
         - BiasTypeArgs: ['h']
         - GateTypeArgs: ['h']
         - FactorDimArgs: [0]
@@ -268,6 +280,10 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 32] # classic format
           - Exact: [256, 256, 1, 64] # classic format
           - Exact: [256, 256, 1, 72] # classic format
+          - Exact: [264, 264, 1, 16] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 32] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 64] # partial tile (256+8): full + edge tiles in one launch
+          - Exact: [264, 264, 1, 72] # partial tile (256+8): full + edge tiles in one launch
         - BiasTypeArgs: ['h']
         - GateTypeArgs: ['h']
         - FactorDimArgs: [0]

@@ -467,6 +467,93 @@ rocblas_status rocblas_gemm_ex_template_64(rocblas_handle    handle,
     return rocblas_status_success;
 }
 
+#include "blas_ex/rocblas_gemm_grouped_batched_ex.hpp"
+
+rocblas_status
+    rocblas_internal_gemm_grouped_batched_ex_template_64(rocblas_handle           handle,
+                                                         const rocblas_operation* transa_array,
+                                                         const rocblas_operation* transb_array,
+                                                         const int64_t*           m_array,
+                                                         const int64_t*           n_array,
+                                                         const int64_t*           k_array,
+                                                         const void*              alpha_array,
+                                                         const void* const*       Aarray,
+                                                         rocblas_datatype         a_type,
+                                                         const int64_t*           lda_array,
+                                                         const void* const*       Barray,
+                                                         rocblas_datatype         b_type,
+                                                         const int64_t*           ldb_array,
+                                                         const void*              beta_array,
+                                                         const void* const*       Carray,
+                                                         rocblas_datatype         c_type,
+                                                         const int64_t*           ldc_array,
+                                                         void* const*             Darray,
+                                                         rocblas_datatype         d_type,
+                                                         const int64_t*           ldd_array,
+                                                         int64_t                  group_count,
+                                                         const int64_t*           group_size,
+                                                         rocblas_datatype         compute_type,
+                                                         rocblas_gemm_algo        algo,
+                                                         int32_t                  solution_index,
+                                                         uint32_t                 flags)
+{
+    const size_t scalar_stride = rocblas_gemm_ex_compute_type_size(compute_type);
+    int64_t      idx           = 0;
+    for(int64_t g = 0; g < group_count; ++g)
+    {
+        const void* alpha_g
+            = static_cast<const char*>(alpha_array) + static_cast<size_t>(g) * scalar_stride;
+        const void* beta_g
+            = static_cast<const char*>(beta_array) + static_cast<size_t>(g) * scalar_stride;
+
+        auto stride_a = rocblas_stride(lda_array[g])
+                        * (transa_array[g] == rocblas_operation_none ? k_array[g] : m_array[g]);
+        auto stride_b = rocblas_stride(ldb_array[g])
+                        * (transb_array[g] == rocblas_operation_none ? n_array[g] : k_array[g]);
+        auto stride_c = rocblas_stride(ldc_array[g]) * n_array[g];
+        auto stride_d = rocblas_stride(ldd_array[g]) * n_array[g];
+
+        rocblas_status status = rocblas_gemm_ex_template_64<true>(
+            handle,
+            transa_array[g],
+            transb_array[g],
+            m_array[g],
+            n_array[g],
+            k_array[g],
+            alpha_g,
+            reinterpret_cast<const void*>(Aarray + idx),
+            a_type,
+            0,
+            lda_array[g],
+            stride_a,
+            reinterpret_cast<const void*>(Barray + idx),
+            b_type,
+            0,
+            ldb_array[g],
+            stride_b,
+            beta_g,
+            reinterpret_cast<const void*>(Carray + idx),
+            c_type,
+            0,
+            ldc_array[g],
+            stride_c,
+            const_cast<void*>(reinterpret_cast<const void*>(Darray + idx)),
+            d_type,
+            0,
+            ldd_array[g],
+            stride_d,
+            group_size[g],
+            compute_type,
+            algo,
+            solution_index,
+            flags);
+        if(status != rocblas_status_success)
+            return status;
+        idx += group_size[g];
+    }
+    return rocblas_status_success;
+}
+
 #ifdef INSTANTIATE_GEMM_EX_64_TEMPLATE
 #error INSTANTIATE_GEMM_EX_64_TEMPLATE already defined
 #endif

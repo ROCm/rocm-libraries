@@ -8,7 +8,11 @@
 
 #pragma once
 
+#include "GpuRefBatchnormArgs.h"
+#include "GpuRefCommonArgs.h"
 #include "GpuRefConvArgs.h"
+#include "GpuRefLayernormArgs.h"
+#include "GpuRefPointwiseArgs.h"
 #include "GpuRefRMSNormArgs.h"
 
 namespace gpu_ref

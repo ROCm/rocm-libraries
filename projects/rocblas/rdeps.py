@@ -38,7 +38,7 @@ OS_info = {}
 var_subs = {}
 
 vcpkg_script = ['tdir %IDIR%',
-                'git clone -b 2024.02.14 https://github.com/microsoft/vcpkg %IDIR%', 'cd %IDIR%', 'bootstrap-vcpkg.bat -disableMetrics' ]
+                'git clone -b 2026.06.24 https://github.com/microsoft/vcpkg %IDIR%', 'cd %IDIR%', 'bootstrap-vcpkg.bat -disableMetrics' ]
 
 xml_script = [ '%XML%' ]
 
@@ -78,15 +78,6 @@ def create_dir(dir_path):
         full_path = os.path.join( os.getcwd(), dir_path )
     return pathlib.Path(full_path).mkdir(parents=True, exist_ok=True)
 
-def delete_dir(dir_path) :
-    if (not os.path.exists(dir_path)):
-        return
-    if os.name == "nt":
-        return run_cmd( "RMDIR" , f"/S /Q {dir_path}")
-    else:
-        linux_path = pathlib.Path(dir_path).absolute()
-        return run_cmd( "rm" , f"-rf {linux_path}")
-
 def run_cmd(cmd):
     global args
     if (cmd.startswith('cd ')):
@@ -98,6 +89,14 @@ def run_cmd(cmd):
     proc = subprocess.run(cmdline, check=True, stderr=subprocess.STDOUT, shell=True)
     return proc.returncode
 
+def delete_dir(dir_path) :
+    if (not os.path.exists(dir_path)):
+        return
+    if os.name == "nt":
+        return run_cmd(f'RMDIR /S /Q "{dir_path}"')
+    else:
+        linux_path = pathlib.Path(dir_path).absolute()
+        return run_cmd(f'rm -rf "{linux_path}"')
 
 def install_deps( os_node ):
     global var_subs
@@ -213,7 +212,7 @@ def install_msgpack_from_source():
     msgpack_dir = build_dir / "deps" / "msgpack-c"
     
     # Check if already built successfully by verifying the config file exists
-    msgpack_config = msgpack_dir / "install" / "lib" / "cmake" / "msgpack-cxx" / "msgpack-cxx-config.cmake"
+    msgpack_config = msgpack_dir / "install" / "lib" / "cmake" / "msgpack" / "msgpack-config.cmake"
     if msgpack_config.exists():
         print(f"msgpack-c already installed at {msgpack_dir}")
         return 0
@@ -228,7 +227,12 @@ def install_msgpack_from_source():
     
     try:
         os.chdir(deps_dir)
-        
+
+        # Clean up any incomplete installation
+        if msgpack_dir.exists():
+            print(f"Removing incomplete msgpack-c directory...")
+            delete_dir(str(msgpack_dir))
+
         # Clone msgpack-c 3.0.1 (same version as Linux)
         print("Cloning msgpack-c 3.0.1...")
         run_cmd("git -c advice.detachedHead=false clone --quiet --depth 1 --branch cpp-3.0.1 https://github.com/msgpack/msgpack-c.git")

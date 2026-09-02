@@ -615,7 +615,6 @@ namespace rocsparse
         const rocsparse_datatype  y_data_type      = y->data_type;
         const void*               x_const_values   = x->const_values;
         void*                     y_values         = y->values;
-        const bool                analysed         = mat->analysed;
         const int64_t             block_dim        = mat->block_dim;
         const int64_t             ell_width        = mat->ell_width;
         const int64_t             sell_slice_size  = mat->sell_slice_size;
@@ -657,7 +656,11 @@ namespace rocsparse
                 rocsparse_coomv_alg coomv_alg;
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2coomv_alg(alg, coomv_alg)));
 
-                if(analysed == false)
+                // Run the analysis only if it has not been performed yet,
+                // detected via the cached coomv info object, instead of relying
+                // on the descriptor-wide mat->analysed flag.
+                rocsparse_coomv_info coomv_info = mat->info->get_coomv_info();
+                if(coomv_info == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_analysis(handle,
                                                                          operation,
@@ -671,8 +674,9 @@ namespace rocsparse
                                                                          row_type,
                                                                          const_row_data,
                                                                          col_type,
-                                                                         const_col_data)));
-                    mat->analysed = true;
+                                                                         const_col_data,
+                                                                         &coomv_info)));
+                    mat->info->set_coomv_info(coomv_info);
                 }
                 return rocsparse_status_success;
             }
@@ -846,6 +850,7 @@ namespace rocsparse
                                                             const_row_data,
                                                             col_type,
                                                             const_col_data,
+                                                            mat->info->get_coomv_info(),
                                                             x_data_type,
                                                             x_const_values,
                                                             compute_datatype,

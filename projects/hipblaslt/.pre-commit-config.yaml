@@ -16,3 +16,19 @@ repos:
         pass_filenames: false
         verbose: true
         stages: [pre-commit]
+
+      # Blocks any new unsafe yaml.load (arbitrary-object deserialization) from
+      # landing. See ROCM-26843 / SEC-00404. Bandit clears a load whose loader
+      # argument is named SafeLoader or CSafeLoader, so prefer that spelling over a
+      # suppression: a suppressed line stays green even if the loader is later
+      # dropped. Where the loader genuinely cannot be named that (StrictTypeLoader,
+      # DEFAULT_YAML_LOADER) use a bare "# nosec B506", and keep it bare, since
+      # bandit reads any trailing prose as more test ids and warns once per word.
+      - id: bandit-b506
+        name: bandit (unsafe yaml.load / B506)
+        entry: bandit
+        language: python
+        additional_dependencies: [bandit]
+        args: ["-t", "B506"]
+        types: [python]
+        stages: [pre-commit]

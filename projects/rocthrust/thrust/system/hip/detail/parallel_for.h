@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,11 +37,9 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_HAS_HIP_COMPILER()
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #  include <thrust/system/hip/config.h>
-
-#  include <rocprim/config.hpp>
 
 #  include <thrust/system/hip/detail/util.h>
 
@@ -73,7 +71,7 @@ ROCPRIM_KERNEL THRUST_HIP_LAUNCH_BOUNDS(BlockSize) void kernel(F f, Size num_ite
 
   if (items_in_tile == items_per_block)
   {
-    THRUST_PRAGMA_UNROLL_FULL()
+#  pragma unroll
     for (unsigned int i = 0; i < ItemsPerThread; i++)
     {
       unsigned int idx = BlockSize * i + threadIdx.x;
@@ -82,7 +80,7 @@ ROCPRIM_KERNEL THRUST_HIP_LAUNCH_BOUNDS(BlockSize) void kernel(F f, Size num_ite
   }
   else
   {
-    THRUST_PRAGMA_UNROLL_FULL()
+#  pragma unroll
     for (unsigned int i = 0; i < ItemsPerThread; i++)
     {
       unsigned int idx = BlockSize * i + threadIdx.x;
@@ -157,7 +155,7 @@ void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Siz
       status = hip_rocprim::synchronize_optional(policy);
       hip_rocprim::throw_on_error(status, "parallel_for: failed to synchronize");
     }
-#  if defined(__HIP_DEVICE_COMPILE__)
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static void seq(execution_policy<Derived>& policy, F f, Size count)
     {
       (void) policy;
@@ -170,7 +168,7 @@ void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Siz
   };
   // clang-format on
 
-#  if !defined(__HIP_DEVICE_COMPILE__)
+#  if __THRUST_HAS_HIPRT__
   workaround::par(policy, f, count);
 #  else
   workaround::seq(policy, f, count);

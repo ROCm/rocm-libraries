@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -28,19 +28,25 @@
 
 namespace rocsparse
 {
-    template <rocsparse_int BLOCK_SIZE, typename T>
-    ROCSPARSE_KERNEL(BLOCK_SIZE)
-    void abs_kernel(rocsparse_int m, rocsparse_int n, const T* A, int64_t lda, T* output)
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void abs_kernel(int64_t m, int64_t n, const T* A, int64_t lda, T* output)
     {
-        rocsparse_int thread_id = hipThreadIdx_x + hipBlockIdx_x * BLOCK_SIZE;
+        const int64_t gid_x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+        const int64_t gid_y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
-        if(thread_id >= m * n)
+        const int64_t grid_dim_x = hipGridDim_x * hipBlockDim_x;
+
+        // Map a 2D HIP grid to a 1D index
+        const int64_t gid = grid_dim_x * gid_y + gid_x;
+
+        if(gid >= m * n)
         {
             return;
         }
 
-        rocsparse_int row = thread_id % m;
-        rocsparse_int col = thread_id / m;
+        int64_t row = gid % m;
+        int64_t col = gid / m;
 
         output[m * col + row] = rocsparse::abs(A[lda * col + row]);
     }

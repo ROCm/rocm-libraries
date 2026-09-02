@@ -1489,6 +1489,8 @@
     'SwapGlobalReadOrder',
     'TDMInst',
     'TDMIterateMode',
+    'TDMLoadWaveSync',
+    'TDMPlusLdsBuf',
     'TDMSplit',
     'TailloopInNll',
     'TemporalHint',
@@ -2155,7 +2157,7 @@
         2,
         3,
       ]),
-      'len': 40,
+      'len': 64,
       'type': 'list',
     }),
     'MbskPrefetchMethod': dict({
@@ -2624,10 +2626,11 @@
     }),
     'SwInstructionPrefetch': dict({
       'head': list([
-        False,
-        True,
+        -1,
+        0,
+        1,
       ]),
-      'len': 2,
+      'len': 6,
       'type': 'list',
     }),
     'SwapGlobalReadOrder': dict({
@@ -2654,6 +2657,23 @@
         1,
       ]),
       'len': 5,
+      'type': 'list',
+    }),
+    'TDMLoadWaveSync': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'TDMPlusLdsBuf': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'TDMSplit': dict({

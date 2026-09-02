@@ -83,7 +83,7 @@ The following table shows example outputs of some ROCm Performance Primitives (R
 
 .. |rain| image:: ../data/doxygenOutputs/effects_augmentations_rain_img640x480.png
 
-.. |exposure| image:: ../data/doxygenOutputs/color_augmentations_contrast_img150x150.png
+.. |exposure| image:: ../data/doxygenOutputs/color_augmentations_exposure_img150x150.png
 
 .. |threshold| image:: ../data/doxygenOutputs/statistical_operations_threshold_img150x150.png
 

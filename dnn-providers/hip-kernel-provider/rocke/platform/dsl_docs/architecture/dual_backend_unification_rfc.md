@@ -329,7 +329,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 | #8320 gfx950 compv4 **schedule hints** | `gemm_universal.py` +76, `helpers/schedule.py` +178, `loads.py` +108 | mirror in C++ |
 | #8313 **fix backend drift llvm22** + #8293 ISA backend cracks | `core/lower_llvm.py`, `isa/backend.py`, `arch/target.py`, `arch_specs.json`, `ir.py` | reconcile C++ lowerer/isa |
 | #8486 verification improvements | verifier paths | reconcile with WS1 `verify.py` |
-| #8609 **gfx1250** (RDNA4) new arch | `instances/gfx1250/*` ~6k + examples + tests | **new** ckc gfx1250 backend + instances (large) |
+| #8609 **gfx1250** new arch | `instances/gfx1250/*` ~6k + examples + tests | **new** ckc gfx1250 backend + instances (large) |
 | attention/moe deltas | `attention_unified.py` +349, `moe_*`, `fused_moe_e2e.py` +124 | mirror in C++ |
 
 **Method.** Point the differential harness's **Python side at the target tree** (`PYTHONPATH=<target-worktree>/dnn-providers/hip-kernel-provider/rocke/platform/python`) against the current C++ engine → `run_diff` enumerates the **exact per-family C++ drift** = the authoritative work-list. Mirror each codegen change in C++; gate `run_diff` GREEN vs target-Python.

@@ -142,7 +142,12 @@ inline std::vector<BN2DTestCase> Network2DLarge()
         {69328, 1, 22, 22, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
         {69328, 1, 13, 79, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
         // Forward passes that should select variant 3 according to the current heuristic in common_spatial.hpp:DefaultConfigSpatialSingle and layout NCHW
-        {16, 1, 32, 32, miopen::batchnorm::Direction::ForwardTraining, 1, 1}
+        {16, 1, 32, 32, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        // NHWC with a non-power-of-2 C exercises the vector-size
+        // fallback in GetHeuristicsConfigTuningNHWC (which selects vectorsize 8).
+        // Verified end-to-end when run under tuning (MIOPEN_FIND_ENFORCE=SEARCH).
+        {8, 24, 56, 56, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        {8, 24, 56, 56, miopen::batchnorm::Direction::Backward, 0, 1}
         };
     // clang-format on
 }
@@ -179,6 +184,10 @@ inline std::vector<BN2DTestCase> Network2DSmall()
         // Edge cases - minimum valid dimensions for Spatial BN training (N*H*W > 1)
         {2, 256, 1, 1, miopen::batchnorm::Direction::ForwardTraining, 1, 0},  // N*H*W = 2 (min batch)
         {2, 256, 1, 1, miopen::batchnorm::Direction::Backward, 1, 0},         // N*H*W = 2 (min spatial)
+        // C=3 (NHWC) selects the variant-2 multi-kernel spatial path whose
+        // FinalMeanVariance stage indexes the 3-channel (12-byte) per-channel
+        // running/saved buffers at the channel boundary.
+        {2, 3, 8, 8, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
     };
     // clang-format on
 }

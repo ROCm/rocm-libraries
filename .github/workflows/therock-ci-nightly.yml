@@ -1,8 +1,6 @@
 name: TheRock CI Nightly
 
 on:
-  schedule:
-    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
   workflow_dispatch:
     inputs:
       projects:
@@ -10,7 +8,7 @@ on:
         description: "Insert space-separated list of projects to test or 'all' to test all projects. ex: 'projects/rocprim projects/hipcub'"
       therock_ref_override:
         type: string
-        description: "Optional explicit TheRock ref (branch/tag/SHA) to build against. Empty resolves the live tip of ROCm/TheRock@main."
+        description: "Optional explicit TheRock ref (branch/tag/SHA) to build against. Empty uses the pinned TheRock ref."
         default: ""
 
 permissions:
@@ -44,18 +42,17 @@ jobs:
         uses: ./.github/actions/ci-env
 
       # Resolve the TheRock ref to build against exactly once here. By default
-      # this is the live tip of ROCm/TheRock@main; the checkout records the
-      # concrete SHA as steps.checkout_therock.outputs.commit, which is what
-      # every downstream job consumes (via needs.setup.outputs.therock_ref) so
-      # no other job re-resolves main. Set the therock_ref_override input to
-      # pin an explicit ref instead.
+      # this uses the pinned TheRock ref; the checkout records the concrete SHA
+      # as steps.checkout_therock.outputs.commit, which is what every downstream
+      # job consumes. Set the therock_ref_override input to pin an explicit ref
+      # instead.
       - name: Checkout TheRock repository
         id: checkout_therock
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: ${{ inputs.therock_ref_override || 'main' }}
+          ref: ${{ inputs.therock_ref_override || 'b45a06045cbb29c85e221748e653ac2521c6e1bf' }}
 
       - name: Log locked TheRock ref
         run: |

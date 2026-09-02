@@ -26,164 +26,102 @@
  *
  ******************************************************************************/
 
-// Benchmark utils
-#include "../../bench_utils/bench_utils.hpp"
-
-// rocThrust
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/merge.h>
 #include <thrust/sort.h>
 
-// Google Benchmark
-#include <benchmark/benchmark.h>
-
-// STL
-#include <cstddef>
 #include <string>
-#include <vector>
 
-struct basic
+#include "bench_utils.hpp"
+
+template <typename T>
+struct merge_benchmark : public primbench::benchmark_interface
 {
-  template <typename T, typename Policy>
-  float64_t
-  run(thrust::device_vector<T>& in, thrust::device_vector<T>& out, const std::size_t elements_in_lhs, Policy policy)
+  merge_benchmark(size_t items, int entropy_reduction, size_t input_size_ratio)
+      : m_items(items)
+      , entropy_reduction(entropy_reduction)
+      , input_size_ratio(input_size_ratio)
+  {}
+
+  primbench::json meta() const override
   {
-    thrust::merge(
-      policy, in.cbegin(), in.cbegin() + elements_in_lhs, in.cbegin() + elements_in_lhs, in.cend(), out.begin());
-
-    bench_utils::gpu_timer d_timer;
-
-    d_timer.start(0);
-    thrust::merge(
-      policy, in.cbegin(), in.cbegin() + elements_in_lhs, in.cbegin() + elements_in_lhs, in.cend(), out.begin());
-    d_timer.stop(0);
-
-    return d_timer.get_duration();
+    return primbench::json{}
+      .add("algo", "merge")
+      .add("subalgo", "basic")
+      .add("input_type", primbench::name<T>())
+      .add("elements", m_items)
+      .add("entropy", std::to_string(bench_utils::get_entropy_percentage(entropy_reduction)))
+      .add("input_size_ratio", input_size_ratio);
   }
+
+  void run(primbench::state& state) override
+  {
+    bench_utils::caching_allocator_t alloc{};
+    thrust::detail::device_t policy{};
+
+    const auto entropy      = bench_utils::get_entropy_percentage(entropy_reduction) / 100.0f;
+    const auto items_in_lhs = static_cast<size_t>(static_cast<double>(input_size_ratio * m_items) / 100.0);
+
+    thrust::device_vector<T> in = bench_utils::generate(m_items, state.seed, entropy);
+    thrust::sort(in.begin(), in.begin() + items_in_lhs);
+    thrust::sort(in.begin() + items_in_lhs, in.end());
+
+    thrust::device_vector<T> out(m_items);
+
+    state.set_items(m_items);
+    state.add_reads<T>(m_items);
+    state.add_writes<T>(m_items);
+
+    state.run([&] {
+      thrust::merge(
+        policy(alloc).on(state.stream),
+        in.cbegin(),
+        in.cbegin() + items_in_lhs,
+        in.cbegin() + items_in_lhs,
+        in.cend(),
+        out.begin());
+    });
+  }
+
+private:
+  size_t m_items;
+  int entropy_reduction;
+  size_t input_size_ratio;
 };
 
-template <class Benchmark, class T>
-void run_benchmark(benchmark::State& state,
-                   const std::size_t elements,
-                   const std::string seed_type,
-                   const int entropy_reduction,
-                   const std::size_t input_size_ratio)
-{
-  // Benchmark object
-  Benchmark benchmark{};
-
-  // GPU times
-  std::vector<double> gpu_times;
-
-  // Generate input
-  const auto entropy         = bench_utils::get_entropy_percentage(entropy_reduction) / 100.0f;
-  const auto elements_in_lhs = static_cast<std::size_t>(static_cast<double>(input_size_ratio * elements) / 100.0);
-
-  thrust::device_vector<T> in = bench_utils::generate(elements, seed_type, entropy);
-
-  thrust::sort(in.begin(), in.begin() + elements_in_lhs);
-  thrust::sort(in.begin() + elements_in_lhs, in.end());
-
-  // Output
-  thrust::device_vector<T> out(elements);
-
-  bench_utils::caching_allocator_t alloc{};
-  thrust::detail::device_t policy{};
-
-  for (auto _ : state)
-  {
-    float64_t duration = benchmark.template run<T>(in, out, elements_in_lhs, policy(alloc));
-    state.SetIterationTime(duration);
-    gpu_times.push_back(duration);
-  }
-
-  // BytesProcessed include read and written bytes, so when the BytesProcessed/s are reported
-  // it will actually be the global memory bandwidth gotten.
-  state.SetBytesProcessed(state.iterations() * 2 * elements * sizeof(T));
-  state.SetItemsProcessed(state.iterations() * elements);
-
-  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-  state.counters["gpu_noise"] = gpu_cv;
-}
-
-#define CREATE_BENCHMARK(T, Elements, EntropyReduction, InputSizeRatio)                                     \
-  benchmark::RegisterBenchmark(                                                                             \
-    bench_utils::bench_naming::format_name(                                                                 \
-      "{algo:merge,subalgo:" + name + ",input_type:" #T + ",elements:" + bench_utils::format_pow2(Elements) \
-      + ",entropy:" + std::to_string(bench_utils::get_entropy_percentage(EntropyReduction))                 \
-      + ",input_size_ratio:" #InputSizeRatio)                                                               \
-      .c_str(),                                                                                             \
-    run_benchmark<Benchmark, T>,                                                                            \
-    Elements,                                                                                               \
-    seed_type,                                                                                              \
-    EntropyReduction,                                                                                       \
-    InputSizeRatio)
-
-#define BENCHMARK_ELEMENTS(type, elements, entropy)            \
-  bs.push_back(CREATE_BENCHMARK(type, elements, entropy, 25)); \
-  bs.push_back(CREATE_BENCHMARK(type, elements, entropy, 50)); \
-  bs.push_back(CREATE_BENCHMARK(type, elements, entropy, 75));
-
-#define BENCHMARK_TYPE_ENTROPY(type, entropy)                              \
-  for (size_t size : bench_utils::sizes)                                   \
-  {                                                                        \
-    if (sizeof(type) * size <= bench_utils::system.devProp.totalGlobalMem) \
-      BENCHMARK_ELEMENTS(type, size, entropy);                             \
-  }
-template <class Benchmark>
-void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
-{
-  constexpr int entropy_reductions[] = {0, 4}; // 1.000, 0.201;
-
-  for (int entropy_reduction : entropy_reductions)
-  {
-    std::vector<benchmark::Benchmark*> bs;
-    BENCHMARK_TYPE_ENTROPY(int8_t, entropy_reduction)
-    BENCHMARK_TYPE_ENTROPY(int16_t, entropy_reduction)
-    BENCHMARK_TYPE_ENTROPY(int32_t, entropy_reduction)
-    BENCHMARK_TYPE_ENTROPY(int64_t, entropy_reduction)
-#if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
-    BENCHMARK_TYPE_ENTROPY(int128_t, entropy_reduction)
-#endif
-    BENCHMARK_TYPE_ENTROPY(float, entropy_reduction)
-    BENCHMARK_TYPE_ENTROPY(double, entropy_reduction)
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-  }
-}
+#define QUEUE(T, E, I)                                  \
+  for (size_t size : bench_utils::sizes(2 * sizeof(T))) \
+    executor.queue<merge_benchmark<T>>(size, E, I);
 
 int main(int argc, char* argv[])
 {
-  cli::Parser parser(argc, argv);
-  parser.set_optional<std::string>("name_format", "name_format", "human", "either: json,human,txt");
-  parser.set_optional<std::string>("seed", "seed", "random", bench_utils::get_seed_message());
-  parser.run_and_exit_if_error();
+  primbench::settings settings;
+  settings.size                 = 1; // bench_utils::sizes() calculates it later.
+  settings.min_gpu_ms_per_batch = 100;
+  settings.batch_window_size    = 3;
+  primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
-  // Parse argv
-  benchmark::Initialize(&argc, argv);
-  bench_utils::bench_naming::set_format(parser.get<std::string>("name_format")); /* either: json,human,txt */
-  const std::string seed_type = parser.get<std::string>("seed");
+  constexpr int entropy_reductions[]   = {0, 4}; // 1.000, 0.201;
+  constexpr size_t input_size_ratios[] = {25, 50, 75};
 
-  // Benchmark info
-  bench_utils::add_common_benchmark_info();
-  benchmark::AddCustomContext("seed", seed_type);
-
-  // Add benchmark
-  std::vector<benchmark::Benchmark*> benchmarks;
-  add_benchmarks<basic>("basic", benchmarks, seed_type);
-
-  // Use manual timing
-  for (auto& b : benchmarks)
+  for (int e : entropy_reductions)
   {
-    b->UseManualTime();
-    b->Unit(benchmark::kMicrosecond);
-    b->MinTime(0.4); // in seconds
+    for (int i : input_size_ratios)
+    {
+      QUEUE(int8_t, e, i)
+      QUEUE(int16_t, e, i)
+      QUEUE(int32_t, e, i)
+      QUEUE(int64_t, e, i)
+
+#ifndef _MSC_VER
+      QUEUE(int128_t, e, i)
+#endif
+
+      QUEUE(float, e, i)
+      QUEUE(double, e, i)
+    }
   }
 
-  // Run benchmarks
-  benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
-
-  // Finish
-  benchmark::Shutdown();
-  return 0;
+  executor.run();
 }

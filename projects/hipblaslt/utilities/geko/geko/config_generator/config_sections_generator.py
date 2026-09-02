@@ -47,8 +47,8 @@ class ConfigSectionGenerator:
     def _use_epilogues(self) -> bool:
         """Whether to emit epilogue fields for this GEMM type."""
         gt = self._gt
-        is_dgemm = gt.data_type == "D" and gt.dest_data_type == "D"
-        return self.config["EPILOGUES"] and not is_dgemm
+        no_epilogue = (gt.data_type == "D" and gt.dest_data_type == "D") or gt.data_type in ("C", "Z")
+        return self.config["EPILOGUES"] and not no_epilogue
 
     def __init__(self, config: Dict[str, Any]) -> None:
         self.config = config
@@ -68,8 +68,8 @@ class ConfigSectionGenerator:
         if self._is_tf32(self._gt.data_type):
             val_HighPrecisionAccumulate = False
 
-        val_transA = "True" if self._gt.transA == "T" else "False"
-        val_transB = "True" if self._gt.transB == "T" else "False"
+        val_transA = "True" if self._gt.transA in ("T", "C") else "False"
+        val_transB = "True" if self._gt.transB in ("T", "C") else "False"
 
         pt = {}
         pt['OperationType'] = 'GEMM'
@@ -80,10 +80,15 @@ class ConfigSectionGenerator:
         pt['DestDataType'] = self._convert_type(self._gt.dest_data_type)
         pt['ComputeDataType'] = self._convert_type(self._gt.compute_data_type)
         pt['HighPrecisionAccumulate'] = val_HighPrecisionAccumulate
+        # fp4 inputs use MX block scaling (block size 32 on A and B).
+        if self._gt.data_type == "F4":
+            pt['MXBlockA'] = 32
+            pt['MXBlockB'] = 32
         pt['TransposeA'] = val_transA
         pt['TransposeB'] = val_transB
-        pt['#ComplexConjugateA'] = val_transA  # TODO: fix this
-        pt['#ComplexConjugateB'] = val_transB  # TODO: fix this
+        if self._gt.data_type in ("C", "Z"):
+            pt['ComplexConjugateA'] = "True" if self._gt.transA == "C" else "False"
+            pt['ComplexConjugateB'] = "True" if self._gt.transB == "C" else "False"
         pt['UseBeta'] = "True"
 
         epi_tag = "" if self._use_epilogues() else "#"
@@ -114,7 +119,8 @@ class ConfigSectionGenerator:
         so emitted YAML keeps stable key ordering before per-size overrides.
         """
         is_i8 = self._gt.data_type == 'I8'
-        return {
+        is_fp4 = self._gt.data_type == 'F4'
+        params = {
             'MinimumRequiredVersion': '5.0.0',
             'SleepPercent': 0,
             'EnqueuesPerSync': 0,
@@ -138,10 +144,17 @@ class ConfigSectionGenerator:
             'RotatingBufferSize': 1024,
             'UseEffLike': False,
         }
+        if is_fp4:
+            params['DataInitTypeMXSA'] = 3
+            params['DataInitTypeMXSB'] = 3
+            params['MXScaleFormat'] = 1
+        return params
 
     def _resolve_bias_type(self) -> Optional[str]:
         """Compute BiasTypeArgs string if epilogues are enabled, else None."""
         if not self._use_epilogues():
+            return None
+        if self._gt.data_type in ("C", "Z"):
             return None
         bias_type = self._convert_type(self._gt.data_type)
         if "8" in bias_type:
@@ -150,6 +163,9 @@ class ConfigSectionGenerator:
             bias_type = "S"
         if self._gt.data_type == "X1":
             bias_type = "S"
+        if self._gt.data_type == "F4":
+            # fp4 cannot be used as bias type.
+            bias_type = self._convert_type(self._gt.dest_data_type)
         return f"[{bias_type}]"
 
     # ------------------------------------------------------------------
@@ -167,7 +183,8 @@ class ConfigSectionGenerator:
 
         ds = dataSize[self._gt.data_type]
         mn_area = M_dim * N_dim * B_dim
-        threshold = LIST_OF_MT_MAX_SIZE[self._gt.data_type] * self.config['CUs'] * 10
+        mt_max = get_list_of_mt_max_size(self.config.get("search_space"))
+        threshold = mt_max[self._gt.data_type] * self.config['CUs'] * 10
 
         if ds == 1 and mn_area < threshold:
             val = math.ceil(val * 3.5)
@@ -189,15 +206,11 @@ class ConfigSectionGenerator:
         self,
         global_params: Dict[str, Any],
         sizes: Sequence[Sequence[int]],
-        is_ga: bool,
+        backend: str,
     ) -> None:
-        """Set ``EnqueuesPerSync``, ``NumWarmups``, and GA-only ``SleepPercent`` on *global_params*.
-
-        Non-GA mode uses enqueue heuristics only. GA scales warmups/enqueues with
-        :meth:`_calc_iters` and raises ``SleepPercent``.
-        """
+        """Set EnqueuesPerSync, NumWarmups, and (Ductile-only) SleepPercent."""
         enqueues = self._compute_enqueues(sizes)
-        if not is_ga:
+        if backend != "ductile":
             global_params['EnqueuesPerSync'] = enqueues
             global_params['NumWarmups'] = enqueues
         else:
@@ -215,9 +228,7 @@ class ConfigSectionGenerator:
         cms_priority: bool,
         soo: bool,
     ) -> Dict[str, Any]:
-        """Build the ductile section for GA tuning.
-
-        Computes GA sampling costs from MI groups and problem sizes.
+        """Build the ductile YAML section. Computes sampling costs from MI groups and problem sizes.
 
         Cost priority (lower is better):
         1) Lower ceil(TilesPerCU) bucket
@@ -228,18 +239,25 @@ class ConfigSectionGenerator:
         Group cost is averaged across sizes.
         """
 
-        val_profile = self.config.get("GA_VALIDATION_PROFILE", 1)
-        if val_profile not in GA_VALIDATION_PROFILE_MAP:
-            raise ValueError(f"Invalid GA_VALIDATION_PROFILE {val_profile}; must be one of {GA_VALIDATION_PROFILE_MAP.keys()}")
+        val_profile = self.config.get("DUCTILE_VALIDATION_PROFILE", 1)
+        if val_profile not in DUCTILE_VALIDATION_PROFILE_MAP:
+            raise ValueError(f"Invalid DUCTILE_VALIDATION_PROFILE {val_profile}; must be one of {DUCTILE_VALIDATION_PROFILE_MAP.keys()}")
 
-        n_elements_to_validate = GA_VALIDATION_PROFILE_MAP[val_profile]
+        n_elements_to_validate = DUCTILE_VALIDATION_PROFILE_MAP[val_profile]
         mi_groups = fork_params["Groups"].values[0]
 
         has_priority = lambda grp: "UseCustomMainLoopSchedule" in grp and int(grp["UseCustomMainLoopSchedule"].values[0]) and cms_priority
 
+        # pop_size must be <= SearchSpace.n_perms in Ductile GA.
+        n_perms = self._compute_n_perms(fork_params)
+        pop_size = self._safe_pop_size(n_perms)
+
         non_cms_mask = np.array([not has_priority(grp) for grp in mi_groups], dtype=bool)
         if non_cms_mask.sum() <= 1 or len(sizes) == 0:
-            return dict(soo=soo, n_elements_to_validate=n_elements_to_validate)
+            d = dict(soo=soo, n_elements_to_validate=n_elements_to_validate)
+            if pop_size:
+                d["pop_size"] = pop_size
+            return d
         
         gsu_values = [float(grp["MatrixInstruction"].metadata.get("GSU", 1)) for grp in mi_groups if not has_priority(grp)]
         gsu_min = min(gsu_values) if gsu_values else 1.0
@@ -260,13 +278,13 @@ class ConfigSectionGenerator:
             GSU = metadata.get("GSU", 1)
             wave = metadata["wave"]
 
-            _, _, _, _, _, TilesPerCU, _, _, totalGranularity = MIDesign.calculate_granularities(
+            granular_metrics = MIDesign.calculate_granularities(
                 MT0, MT1, size[0], size[1], size[2],
                 self.config['CUs'], LSU, GSU, wave)
 
-            ceil_tpcu = math.ceil(TilesPerCU)
-            tile_term = ceil_tpcu - TilesPerCU
-            gran_term = 1.0 - totalGranularity
+            ceil_tpcu = math.ceil(granular_metrics.TilesPerCU)
+            tile_term = ceil_tpcu - granular_metrics.TilesPerCU
+            gran_term = 1.0 - granular_metrics.totalGranularity
             # GSU term is normalized across groups to prevent scale issues with tile/granularity terms.
             gsu_term = 1.0 - (GSU - gsu_min) / gsu_span
 
@@ -284,11 +302,39 @@ class ConfigSectionGenerator:
         cost[non_cms_mask] = cost_matrix[:, non_cms_mask].mean(axis=0)
         cost[~non_cms_mask] = cost[non_cms_mask].min()
         
-        return dict(
+        d = dict(
             soo=soo,
             n_elements_to_validate=n_elements_to_validate,
             weights=[{"group_0": f"{cost.tolist()}"}],
         )
+        if pop_size:
+            d["pop_size"] = pop_size
+        return d
+
+    @staticmethod
+    def _compute_n_perms(fork_params: Dict[str, Any]) -> int:
+        """Approximate Ductile search-space permutations from active fork params."""
+        n_perms = 1
+        for name, fp in fork_params.items():
+            if not getattr(fp, "active", True):
+                continue
+            if name == "Groups":
+                for group_dim in fp.values:
+                    if len(group_dim) > 1:
+                        n_perms *= len(group_dim)
+                continue
+            if len(fp.values) > 1:
+                n_perms *= len(fp.values)
+        return n_perms
+
+    @staticmethod
+    def _safe_pop_size(n_perms: int, default: int = 512) -> int:
+        """Return a valid pop_size satisfying 2 < pop_size <= n_perms, else 0."""
+        if n_perms >= default:
+            return default
+        if n_perms < 3:
+            return 0
+        return min(n_perms, max(3, n_perms - 1))
 
     # ------------------------------------------------------------------
     # Public API
@@ -297,7 +343,7 @@ class ConfigSectionGenerator:
     def build_config(
         self,
         entry: ConfigEntry,
-        is_ga: bool = False,
+        backend: str = "tensile",
         cms_priority: bool = False,
         config_name: Optional[str] = None,
         soo: bool = False,
@@ -306,22 +352,28 @@ class ConfigSectionGenerator:
 
         Args:
             entry: ConfigEntry holding sizes, fork_params, nkernels, and mis_per_size.
-            is_ga: Whether GA (genetic algorithm) tuning is enabled.
-            config_name: Config name for log files (required when is_ga=True).
-            cms_priority: Whether to prioritize CMS tiles (GA only).
-            soo: Whether single-objective optimization is enabled (GA only).
+            backend: Tuning backend ("ductile" or "tensile").
+            config_name: Config name for log files (required for Ductile).
+            cms_priority: Whether to prioritize CMS tiles (Ductile only).
+            soo: Whether single-objective optimization is enabled (Ductile only).
 
         Returns:
             Complete config dict ready for YAML serialization.
         """
         sizes = entry.sizes
         fork_params = entry.fork_params
+        is_ductile = backend == "ductile"
 
         global_params = dict(self._global_params_base)
-        self._apply_enqueue_and_warmup_params(global_params, sizes, is_ga)
+        self._apply_enqueue_and_warmup_params(global_params, sizes, backend)
 
-        problem_sizes = [{"Exact": f'[ {M}, {N}, {batch}, {K} ]'}
-                         for M, N, batch, K in sizes]
+        # K is rounded up to a multiple of 32 only for MXFP4 (F4).
+        problem_sizes = []
+        is_mxfp4 = self._gt.data_type == "F4"
+        for M, N, batch, K in sizes:
+            if is_mxfp4:
+                K = ((K + 31) // 32) * 32
+            problem_sizes.append({"Exact": f'[ {M}, {N}, {batch}, {K} ]'})
 
         benchmark_final = [{"ProblemSizes": problem_sizes}]
         if self._bias_type_args:
@@ -340,10 +392,10 @@ class ConfigSectionGenerator:
             'BenchmarkProblems': [[self._problem_type, benchmark_common]],
             'LibraryLogic': self._library_logic,
             '#LibraryClient': '',
-            'Backend': {"Name": "Ductile"} if is_ga else {"Name": "Tensile"}
+            'Backend': {"Name": "Ductile"} if is_ductile else {"Name": "Tensile"}
         }
 
-        if is_ga:
+        if is_ductile:
             tuning_config['Backend']["Config"] = self._build_ductile(
                 fork_params, 
                 sizes, 

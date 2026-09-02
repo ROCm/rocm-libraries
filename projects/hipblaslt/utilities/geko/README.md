@@ -10,7 +10,7 @@ A comprehensive Python framework for optimizing General Matrix Multiply (GEMM) k
 - [Installation](#installation)
 - [CLI Reference](#cli-reference)
 - [Usage Guide](#usage-guide)
-  - [GA-based Optimization](#1-ga-based-optimization)
+  - [Ductile-based Optimization](#1-ductile-based-optimization)
   - [Dense Search (Offline Tuning)](#2-dense-search-offline-tuning)
   - [Benchmark](#3-benchmark)
 - [Module Reference](#module-reference)
@@ -49,7 +49,7 @@ Performs exhaustive search across existing solutions:
 
 Here is the sample command for gfx950:
 
-`./bin/geko --search --workload-log hipblaslt-log-mask64.yaml --devices=0,1,2,3,4,5,6,7`
+`./bin/geko --search --hipblaslt /path/to/rocm-libraries/projects/hipblaslt --workload-log hipblaslt-log-mask64.yaml --devices=0,1,2,3,4,5,6,7`
 
 This is the workflow:
 ```
@@ -64,7 +64,8 @@ hipBLASLt Logs → Search → Extract → Benchmark → Filter → Merge
 ### Benchmark Mode
 Runs hipblaslt-bench on a workload log without any tuning. Useful for measuring baseline performance or verifying results after integration.
 
-`./bin/geko --bench --workload-log hipblaslt-log-mask64.yaml --devices=0`
+`./bin/geko --bench --hipblaslt /path/to/rocm-libraries/projects/hipblaslt --workload-log hipblaslt-log-mask64.yaml --devices=0`
+
 ### Workload Input Options
 
 All three modes above accept exactly one of the following workload sources:
@@ -85,7 +86,7 @@ geko/
 │   ├── bench.py        # Core benchmark execution
 │   ├── log.py          # hipBLASLt log file parsing
 │   └── utils.py        # Benchmark parsing utilities
-├── optim/              # GA-based tensilelite configuration and execution
+├── optim/              # Ductile/Tensile tensilelite configuration and execution
 │   ├── optim.py        # Optimization and result analysis
 │   └── utils.py        # Progress tracking and device management
 ├── search.py           # Dense search workflow (offline tuning)
@@ -252,8 +253,6 @@ pip install -r requirements.txt
 invoke build --install-deps --clients --install-pkg --architecture gfx950 --skip-rocroller  # Replace gfx950 with your GPU architecture - If you need to work with MX datatypes, remove the rocroller flag - Remove the --install-pkg to build locally and to not sytem wide.
 ```
 
-> See the [hipBLASLt README](../../README.md) for full build prerequisites, supported architectures, and `install.sh` / `invoke build` options.
-
 ### 3. Install tensilelite dependencies
 ```bash
 cd rocm-libraries/projects/hipblaslt/tensilelite
@@ -262,21 +261,15 @@ pip install -r requirements-dev.txt
 
 ### 4. Install GEKO Framework
 
-GEKO ships inside the hipBLASLt checkout at `projects/hipblaslt/utilities/geko`
-(no separate clone needed — the sparse-checkout above already includes it). It
-uses a `pyproject.toml` build, `tox.ini` for test environments, and a
+GEKO uses a `pyproject.toml` build, `tox.ini` for test environments, and a
 `tasks.py` `invoke` runner. The `invoke` tasks require `invoke` (install it via
 `pip install invoke` or `pip install --group dev` if not already present).
 
 ```bash
 cd rocm-libraries/projects/hipblaslt/utilities/geko
 
-pip install .  # installs the geko console script + runtime deps (from requirements.txt)
+pip install .  # installs the geko console script + runtime deps (from requirements.txt); use pip install -e . for editable mode
 ```
-
-`pip install .` (non-editable) is recommended; developers who want live source edits can use `pip install -e .` (see developer setup below).
-
-> **hipBLASLt path** is auto-detected by the in-tree launchers (`./bin/geko`, `scripts/*.py`). To target a different build, pass `--hipblaslt PATH` on any entry point (see its `--help`) or set `GEKO_HIPBLASLT_PATH`; the installed `geko` command needs one of these.
 
 To set up a development environment (test runner, linters, `invoke`):
 
@@ -296,7 +289,7 @@ invoke format             # black + isort
 invoke build              # build sdist + wheel into dist/
 ```
 
-From the GEKO package root you can also run the driver without installing (same code path as the installed CLI; adds the package root to ``PYTHONPATH``):
+From the GEKO repo root you can also run the driver without installing (same code path as the installed CLI; adds the repo root to ``PYTHONPATH``):
 
 ```bash
 ./bin/geko --help
@@ -325,20 +318,6 @@ tox                           # in an isolated tox environment
 `tox` and `invoke test` forward extra arguments straight to pytest, e.g.
 `tox -- --skip-slow --skip-geko-bin` or `invoke test --skip-slow`.
 
-The plain `python3 -m pytest` / `invoke test` / `tox` paths assume you have already
-provisioned the environment by hand (steps 2–4, i.e. `tensilelite/requirements-dev.txt`
-which builds `rocisa`). To provision that environment automatically and run the suite
-inside it, use the `integration` tox env, which installs the tensilelite dependencies
-(`rocisa`) from the hipBLASLt checkout pointed at by `HIPBLASLT_PATH` before running pytest:
-
-```bash
-HIPBLASLT_PATH=~/rocm-libraries/projects/hipblaslt tox -e integration
-HIPBLASLT_PATH=~/rocm-libraries/projects/hipblaslt tox -e integration -- --skip-slow
-```
-
-Tests that require Tensile/`rocisa` are skipped (not errored) when `rocisa` is not
-importable, so the hermetic subset still runs in a bare environment.
-
 Integration tests need a hipBLASLt repo and (in some cases) a tuning config and/or a workload log. Pass these via custom pytest options:
 
 ```bash
@@ -359,6 +338,27 @@ Test markers and skip flags (registered in `tests/conftest.py`):
 python3 -m pytest tests/ --skip-slow --skip-geko-bin
 ```
 
+Coverage gate (local and CI):
+
+```bash
+# Full GEKO coverage with threshold enforcement (>=80%)
+tox -e coverage
+
+# Fast PR-like coverage (exclude slow + bin/geko subprocess tests)
+tox -e coverage -- --skip-slow --skip-geko-bin
+```
+
+The coverage environment writes:
+- `htmlcov/index.html`
+- `coverage.xml`
+- `coverage.json`
+- `geko_tests.xml` (JUnit)
+
+CI integration notes:
+- GEKO exposes category metadata in `test_categories.yaml` for external pytest category runners.
+- In CI lanes, run coverage from `projects/hipblaslt/utilities/geko` via `tox -e coverage`.
+- For Codecov status checks, upload GEKO coverage with the `GEKO` flag.
+
 See [`tests/README.md`](tests/README.md) for further details on the test layout.
 
 
@@ -371,7 +371,7 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 ### Mode (exactly one required)
 | Flag | Description |
 |------|-------------|
-| `--tune`   | GA workflow: configure then optimize. |
+| `--tune`   | Tuning workflow: configure then optimize. |
 | `--search` | Dense-search tuning workflow. |
 | `--bench`  | Benchmark GEMMs from the workload only (no tuning). |
 
@@ -385,6 +385,7 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 ### Common options (apply to all modes)
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--hipblaslt PATH` | _required_ | Path to a built hipBLASLt repository. |
 | `-d, --devices LIST` | _required_ | Comma-separated GPU device IDs (e.g. `0,1,2,3`). |
 | `--workdir PATH` | autogenerated `geko_<timestamp>/` | Output directory for all artifacts of this run. |
 | `--keep_thr FLOAT` | `0.0` (`0.1` for `--search`) | Drop GEMMs that contribute less than this fraction of total runtime. |
@@ -411,6 +412,7 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 | `--benchmark-duration SEC` | `0.5` | Target seconds per cold and per timed phase of `hipblaslt-bench`. |
 
 ### Validation rules (enforced by the parser)
+- `--hipblaslt` must point to an existing directory.
 - `--workload-log` and `--list` paths must exist.
 - `--inline` requires integer M, N, batch, K and `transA`/`transB` ∈ {`N`, `T`}.
 - `--arch` is required with `--tune`.
@@ -421,7 +423,7 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 
 | Feature | Best for | Speed |
 |---------|----------|-------|
-| [GA Optimization](#1-ga-based-optimization) | Maximum performance, custom kernel parameters | Slow (hours) |
+| [Ductile Optimization](#1-ductile-based-optimization) | Maximum performance, custom kernel parameters | Slow (hours) |
 | [Dense Search](#2-dense-search-offline-tuning) | Fast results, finding best existing kernels | Faster (minutes) |
 | [Benchmark](#3-benchmark) | Baseline measurement, result verification | Fast |
 
@@ -465,21 +467,23 @@ Sizes:
 Save it as e.g. `my_gemm_list.yaml` and pass it to any mode:
 
 ```bash
-./bin/geko --bench --list my_gemm_list.yaml --devices=0
+./bin/geko --bench --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
+  --list my_gemm_list.yaml --devices=0
 ```
 
-The full template (StreamK, GA, MI filtering, `SIZE_OPTION=1` grid mode, etc.) lives at `geko/config_generator/config.yaml`. Multiple sizes per GEMM type and multiple GEMM problems per file are supported. See [Workload Input Options](#workload-input-options) for the complete set of input flags.
+The full template (StreamK, search space, MI filtering, `SIZE_OPTION=1` grid mode, etc.) lives at `geko/config_generator/config.yaml`. Multiple sizes per GEMM type and multiple GEMM problems per file are supported. See [Workload Input Options](#workload-input-options) for the complete set of input flags.
 
 ---
 
-### 1. GA-based Optimization
+### 1. Ductile-based Optimization
 
 Tunes new kernel parameters using a Genetic Algorithm (via Ductile) or exhaustive Tensile grid search. Produces the highest performance gains but takes hours.
 
 #### Option A: Single CLI command
 
 ```bash
-./bin/geko --tune --workload-log hipblaslt-log-mask64.yaml --arch gfx950 --devices=0,1,2,3
+./bin/geko --tune --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
+  --workload-log hipblaslt-log-mask64.yaml --arch gfx950 --devices=0,1,2,3
 ```
 
 #### Option B: Two-step script control (recommended — lets you review configs before tuning)
@@ -492,13 +496,13 @@ Tunes new kernel parameters using a Genetic Algorithm (via Ductile) or exhaustiv
 | `-d, --device` | GPU device for baseline benchmarking | 0 |
 | `--keep_thr` | Filter threshold (% of total time) | 0 |
 | `-a, --architecture` | Target GPU architecture | gfx950 |
-| `-b, --backend` | Tuning backend: `ductile` (GA) or `tensile` (grid) | ductile |
+| `-b, --backend` | Tuning backend: `ductile` or `tensile` | ductile |
 | `-w, --workdir` | Working directory | workdir |
 | `-v, --verbose` | Logging verbosity (0=WARNING, 1=INFO, 2=DEBUG) | 1 |
 | `--bench-freq` | Enable `HIPBLASLT_BENCH_FREQ` during benchmark runs (only when `--keep_thr > 0`) | False |
 
 ```bash
-python scripts/configure.py hipblaslt-log-mask64.yaml \
+python scripts/configure.py /path/to/rocm-libraries/projects/hipblaslt/ hipblaslt-log-mask64.yaml \
   -a gfx950 --workdir my_optimization --keep_thr 0.05 --device 0
 ```
 
@@ -523,7 +527,7 @@ GEKO:INFO [configure:main] Generated 1 configuration files in 'my_optimization/o
 GEKO:INFO [configure:main] Configuration phase completed successfully!
 ```
 
-**Step 2 — Optimize** (`scripts/optimize.py`): run GA tuning across GPUs, merge, benchmark, and filter results.
+**Step 2 — Optimize** (`scripts/optimize.py`): run tuning across GPUs, merge, benchmark, and filter results.
 
 **Options:**
 | Option | Description | Default |
@@ -539,7 +543,8 @@ GEKO:INFO [configure:main] Configuration phase completed successfully!
 | `--bench-freq` | Enable `HIPBLASLT_BENCH_FREQ` during benchmark runs | False |
 
 ```bash
-python scripts/optimize.py --workdir my_optimization --devices=0,1,2,3 --up_thr 1.03
+python scripts/optimize.py /path/to/rocm-libraries/projects/hipblaslt/ \
+  --workdir my_optimization --devices=0,1,2,3 --up_thr 1.03
 ```
 
 Log:
@@ -595,14 +600,15 @@ sudo dpkg -i hipblaslt[-\_]*.deb
 
 ### 2. Dense Search (Offline Tuning)
 
-Benchmarks all existing hipBLASLt solutions exhaustively and picks the winner per GEMM — no new kernel parameters are tuned. Much faster than GA optimization.
+Benchmarks all existing hipBLASLt solutions exhaustively and picks the winner per GEMM — no new kernel parameters are tuned. Much faster than Ductile optimization.
 
 Both entry points below run the same `run_search` pipeline and produce the same `my_search/` layout.
 
 #### Option A: Single CLI command
 
 ```bash
-./bin/geko --search --workload-log hipblaslt-log-mask64.yaml \
+./bin/geko --search --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
+  --workload-log hipblaslt-log-mask64.yaml \
   --devices=0,1,2,3,4,5,6,7 --workdir my_search --keep_thr 0.1 --up_thr 1.03
 ```
 
@@ -622,7 +628,7 @@ Equivalent to Option A but takes the workload log as a positional argument and u
 | `--bench-freq` | Enable `HIPBLASLT_BENCH_FREQ` during benchmark runs | False |
 
 ```bash
-python scripts/search.py hipblaslt-log-mask64.yaml \
+python scripts/search.py /path/to/rocm-libraries/projects/hipblaslt/ hipblaslt-log-mask64.yaml \
   --devices=0,1,2,3,4,5,6,7 --workdir my_search --keep_thr 0.1 --up_thr 1.03
 ```
 
@@ -650,7 +656,7 @@ my_search/
 
 #### Integrate
 
-Same steps as GA Optimization — run `TensileMergeLibrary` then rebuild hipBLASLt with the contents of `my_search/final_libs`.
+Same steps as Ductile Optimization — run `TensileMergeLibrary` then rebuild hipBLASLt with the contents of `my_search/final_libs`.
 
 ---
 
@@ -660,13 +666,16 @@ Runs hipblaslt-bench on a workload without any tuning. Useful for measuring base
 
 ```bash
 # From a workload log
-./bin/geko --bench --workload-log hipblaslt-log-mask64.yaml --devices=0
+./bin/geko --bench --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
+  --workload-log hipblaslt-log-mask64.yaml --devices=0
 
 # From a single inline GEMM
-./bin/geko --bench --inline 1024 1024 1 1024 B B S N T --devices=0
+./bin/geko --bench --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
+  --inline 1024 1024 1 1024 B B S N T --devices=0
 
 # From a generator tuning YAML
-./bin/geko --bench --list my_gemm_config.yaml --devices=0
+./bin/geko --bench --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
+  --list my_gemm_config.yaml --devices=0
 ```
 ---
 
@@ -969,7 +978,7 @@ build_tensilelite_client(hipblaslt_path, build_dir)
 
 ## Common Usage Patterns
 
-### Pattern 1: Full GA-based Optimization Workflow
+### Pattern 1: Full Ductile-based Optimization Workflow
 
 ```python
 from pathlib import Path
@@ -1213,11 +1222,11 @@ If you encounter errors like "No solutions found":
 If `scripts/configure.py` produces no configuration files:
 ```bash
 # Lower the keep threshold to include more GEMMs
-python scripts/configure.py hipblaslt-log-mask64.yaml \
+python scripts/configure.py /path/to/hipblaslt hipblaslt-log-mask64.yaml \
   --keep_thr 0.01  # Include GEMMs contributing >= 0.01% of total time
 
 # Or set to 0 to include all GEMMs
-python scripts/configure.py hipblaslt-log-mask64.yaml --keep_thr 0
+python scripts/configure.py /path/to/hipblaslt hipblaslt-log-mask64.yaml --keep_thr 0
 ```
 
 #### 2. Optimization Failures 
@@ -1231,10 +1240,10 @@ Common causes:
 **Solutions:**
 ```bash
 # To not retry failed optimizations
-python scripts/optimize.py --workdir workdir --no_retry
+python scripts/optimize.py /path/to/hipblaslt --workdir workdir --no_retry
 
 # Use the appropriate devices or check if your GPUs are available (amd-smi command)
-python scripts/optimize.py --devices=0,1
+python scripts/optimize.py /path/to/hipblaslt --devices=0,1
 
 # Check individual logs for detailed errors
 cat workdir/optimizations/build_*/BBS_TN_0-tensilelite.log
@@ -1259,9 +1268,9 @@ pip install -e .
 Enable verbose logging:
 ```bash
 # Maximum verbosity
-python scripts/configure.py log.yaml -v 2
-python scripts/optimize.py -v 2
-python scripts/search.py log.yaml -v 2
+python scripts/configure.py /path/to/hipblaslt log.yaml -v 2
+python scripts/optimize.py /path/to/hipblaslt -v 2
+python scripts/search.py /path/to/hipblaslt log.yaml -v 2
 
 # Python script
 import logging

@@ -22,14 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/advance.h>
 #include <thrust/detail/function.h>
 #include <thrust/distance.h>
@@ -55,7 +47,7 @@ THRUST_HOST_DEVICE ForwardIterator lower_bound(
   // wrap comp
   thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp{comp};
 
-  using difference_type = thrust::detail::it_difference_t<ForwardIterator>;
+  using difference_type = typename thrust::iterator_difference<ForwardIterator>::type;
 
   difference_type len = thrust::distance(first, last);
 
@@ -93,7 +85,7 @@ THRUST_HOST_DEVICE ForwardIterator upper_bound(
   // wrap comp
   thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp{comp};
 
-  using difference_type = thrust::detail::it_difference_t<ForwardIterator>;
+  using difference_type = typename thrust::iterator_difference<ForwardIterator>::type;
 
   difference_type len = thrust::distance(first, last);
 

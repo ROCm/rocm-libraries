@@ -1,0 +1,32 @@
+# RUN: %stinkytofu-opt --arch gfx1250v0 %s --print-output
+#
+# Runtime selection of the Gfx1250v0 (v0) cost table via `--arch gfx1250v0`.
+#
+# v0 and v1 share the {12,5,0} ISA triple, so the triple alone cannot pick a
+# stepping; stinkytofu-opt must resolve the concrete identity name. This is the
+# v0 twin of coissue_matrix_fmt_override.stir: the SAME instruction, run under
+# --arch gfx1250v0, must show v0's DOUBLED costs rather than v1's:
+#   base  (FP8xFP8): latencyCycles 8  -> 16
+#   fp4   (FP4xFP4): cost override 4  -> 8
+# If --arch resolved to v1 (the first-match on the shared triple), these would
+# read 8 and 4 and the test would fail.
+#
+# CHECK-LABEL: @override
+#
+# FP4xFP4: v0 cost override -> latencyCycles = 8 (v1 would be 4)
+# CHECK: v_wmma_f32_16x16x128_f8f6f4
+# CHECK-SAME: latencyCycles = 8
+# CHECK-SAME: fmtA = "MATRIX_FMT_FP4"
+# CHECK-SAME: fmtB = "MATRIX_FMT_FP4"
+#
+# FP8xFP8: v0 base -> latencyCycles = 16 (v1 would be 8)
+# CHECK: v_wmma_f32_16x16x128_f8f6f4
+# CHECK-SAME: latencyCycles = 16
+# CHECK-SAME: fmtA = "MATRIX_FMT_FP8"
+# CHECK-SAME: fmtB = "MATRIX_FMT_FP8"
+
+st.func @override() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[20:35], v[30:45], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP4, fmtB = MATRIX_FMT_FP4 } }
+  v[8:15] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[20:35], v[30:45], v[8:15]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+}

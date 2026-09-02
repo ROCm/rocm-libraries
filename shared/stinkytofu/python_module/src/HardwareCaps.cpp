@@ -126,6 +126,7 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
     rv["v_pk_fmac_f16"] = tryAsm(isaName, ws, "v_pk_fma_f16 v47, v36, v34");
     rv["v_pk_add_f32"] = hasMnemonic(m, "v_pk_add_f32");
     rv["v_pk_mul_f32"] = hasMnemonic(m, "v_pk_mul_f32");
+    rv["v_pk_fma_f32"] = hasMnemonic(m, "v_pk_fma_f32");
     rv["v_mad_mix_f32"] = hasMnemonic(m, "v_mad_mix_f32");
     rv["v_fma_mix_f32"] = hasMnemonic(m, "v_fma_mix_f32");
     rv["v_dot2_f32_f16"] = hasMnemonic(m, "v_dot2_f32_f16");
@@ -308,6 +309,7 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
     rv["HasMXScaleSwizzle"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
     rv["HasInvWbDevFences"] = checkInList(v, {{12, 5, 0}});
     rv["RequiresXCntForVolatileVMEM"] = checkInList(v, {{12, 5, 0}});
+    rv["EnableXnackReplay"] = checkInList(v, {{12, 5, 0}});
     rv["DefaultScopeIsCULocal"] = checkInList(v, {{12, 5, 0}});
 
     rv["LDSBankCount"] = 64;

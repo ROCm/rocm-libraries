@@ -32,7 +32,8 @@ does NOT require live ``Solution`` construction:
   * ``rawLibraryLogic`` — positional unpack incl. trailing ``otherFields``.
   * ``createLibraryLogic`` — assembles the serialized tuple from a logicTuple;
     arch dict-vs-str branch (gfx942 + CUCount), exactLogic present/None,
-    tileSelection on/off. Round-tripped back through ``parseLibraryLogicList``.
+    tileSelection on/off. Round-tripped via ``parseLibraryLogicList`` (list
+    format) and ``prepareLibraryLogicDict`` (dict format).
   * ``getCUCount`` — the ``CU`` env path and the ``rocminfo`` subprocess path
     (subprocess.run monkeypatched), plus the failure -> ``printExit``.
 
@@ -149,6 +150,26 @@ def test_raw_library_logic_with_other_fields(snapshot):
     assert _norm(L.rawLibraryLogic(data)) == snapshot
 
 
+def test_raw_library_logic_dict_format(snapshot):
+    data = {
+        "MinimumRequiredVersion": "5.0.0",
+        "ScheduleName": "sched",
+        "ArchitectureName": "gfx942",
+        "CUCount": 228,
+        "DeviceNames": ["Device 0049"],
+        "ProblemType": {"OperationType": "GEMM"},
+        "Solutions": [{"SolutionIndex": 0}],
+        "IndexOrder": [0],
+        "ExactLogic": [["k", "v"]],
+        "RangeLogic": None,
+        "TileSelectionIndices": {"TileSelectionIndices": [3, 4]},
+        "PerfMetric": "perf",
+        "LibraryType": "GridBased",
+        "DefaultSolution": {"KernelLanguage": "Assembly"},
+    }
+    assert _norm(L.rawLibraryLogic(data)) == snapshot
+
+
 # ===========================================================================
 # createLibraryLogic — synthetic problemType/solutions, getCUCount controlled
 # ===========================================================================
@@ -254,12 +275,23 @@ def test_create_library_logic_with_metadata(monkeypatch, snapshot):
     assert _norm(data) == snapshot
 
 
-def test_create_library_logic_roundtrip(monkeypatch, snapshot):
-    # createLibraryLogic output is itself a valid matching-table list.
+def test_create_library_logic_roundtrip(snapshot):
+    # List-format roundtrip: a serialized matching-table list re-parses through
+    # parseLibraryLogicList (the list-format reader) into canonical dict shape.
+    assert _norm(L.parseLibraryLogicList(_logic_list(libraryType="Matching"),
+                                         "roundtrip.yaml")) == snapshot
+
+
+def test_create_library_logic_roundtrip_dict(monkeypatch, snapshot):
+    # Dict-format roundtrip: createLibraryLogic returns canonical dict-format
+    # data; feeding it through the dict parse path (prepareLibraryLogicDict)
+    # rewrites a tuning-mode LibraryType into the in-memory Matching + Library
+    # shape (the same normalisation parseLibraryLogicData applies to dict input).
     monkeypatch.setattr(L, "getCUCount", lambda: 304)
-    data = L.createLibraryLogic("aquavanjaram", "gfx942", ["Device 0049"], "Matching",
+    data = L.createLibraryLogic("aquavanjaram", "gfx942", ["Device 0049"], "GridBased",
                                 _logic_tuple({(1, 1, 1): [0, 1.0]}))
-    assert _norm(L.parseLibraryLogicList(data, "roundtrip.yaml")) == snapshot
+    L.prepareLibraryLogicDict(data)
+    assert _norm(data) == snapshot
 
 
 # ===========================================================================

@@ -51,7 +51,7 @@ MiopenTensor createTensor(
     return {tensorAttr};
 }
 
-MiopenTensor createBatchnormTensor(
+MiopenTensor createPaddedTensor(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
@@ -81,9 +81,9 @@ MiopenTensor createBatchnormTensor(
     std::vector<int64_t> dims(tensorAttr.dims()->begin(), tensorAttr.dims()->end());
     std::vector<int64_t> strides(tensorAttr.strides()->begin(), tensorAttr.strides()->end());
 
-    // MIOpen requires at least 4D tensors for batchnorm.
-    // Pad 3D to 4D by appending W=1 dimension.
-    // Stride for W: 1 for channels-first (NCL→NCHW), C for channels-last (NLC→NHWC).
+    // MIOpen requires at least 4D tensors. Pad 3D to 4D by appending a size-1
+    // trailing dimension. Stride for that dimension: 1 for channels-first
+    // (NCL→NCHW), C for channels-last (NLC→NHWC).
     dims.push_back(1);
 
     constexpr size_t C_IDX = 1;
@@ -189,27 +189,5 @@ ActivationParams mapPointwiseModeToMiopenActivation(
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "Unsupported activation operation");
     }
-}
-
-std::string getDeviceArch(hipStream_t stream)
-{
-    hipDevice_t deviceId = -1;
-    auto status = hipStreamGetDevice(stream, &deviceId);
-    if(status != hipSuccess)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "hipStreamGetDevice failed: "
-                                                           + std::to_string(status));
-    }
-    hipDeviceProp_t props;
-    status = hipGetDeviceProperties(&props, deviceId);
-    if(status != hipSuccess)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "hipGetDeviceProperties failed: "
-                                                           + std::to_string(status));
-    }
-    const std::string archStr(props.gcnArchName);
-    return archStr.substr(0, archStr.find(':'));
 }
 }

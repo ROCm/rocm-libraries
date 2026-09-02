@@ -41,7 +41,7 @@ Tests:
     batch_count: 2
     stride_scale: 1.0
     api: [ FORTRAN, C, FORTRAN_64, C_64 ]
-    with_flags: 1
+    with_flags: true
     flags: *gemm_flags
     backend_flags: AMD
 

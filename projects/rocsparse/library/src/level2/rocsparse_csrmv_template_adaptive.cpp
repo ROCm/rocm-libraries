@@ -26,6 +26,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrmv.hpp"
+#include "rocsparse_csrmv_adaptive_analysis.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "internal/generic/rocsparse_v2_spmv.h"
@@ -42,42 +43,28 @@
 
 namespace rocsparse
 {
-    __attribute__((unused)) static uint32_t flp2(uint32_t x)
-    {
-        x |= (x >> 1);
-        x |= (x >> 2);
-        x |= (x >> 4);
-        x |= (x >> 8);
-        x |= (x >> 16);
-        return x - (x >> 1);
-    }
+    // numThreadsForReduction() and flp2() were lifted (behavior-preserving) into
+    // library/src/include/rocsparse_csrmv_adaptive_analysis.hpp so they can be
+    // unit-tested without linking this device translation unit. The call sites
+    // below use the default wg_size argument, which equals WG_SIZE (256).
 
-    // Short rows in CSR-Adaptive are batched together into a single row block.
-    // If there are a relatively small number of these, then we choose to do
-    // a horizontal reduction (groups of threads all reduce the same row).
-    // If there are many threads (e.g. more threads than the maximum size
-    // of our workgroup) then we choose to have each thread serially reduce
-    // the row.
-    // This function calculates the number of threads that could team up
-    // to reduce these groups of rows. For instance, if you have a
-    // workgroup size of 256 and 4 rows, you could have 64 threads
-    // working on each row. If you have 5 rows, only 32 threads could
-    // reliably work on each row because our reduction assumes power-of-2.
-    static uint64_t numThreadsForReduction(uint64_t num_rows)
+    // Choose the general (non-symmetric) CSR-adaptive workgroup size from the
+    // average nnz/row. For dense rows a smaller workgroup lowers reduction/sync
+    // overhead and raises occupancy; short-row matrices keep the historical 256.
+    //
+    // The dense-row size is expressed in WAVEFRONTS rather than a fixed thread
+    // count, so it scales with the hardware wavefront width: 4 wavefronts is 128
+    // threads on wave32 and 256 threads on wave64. This keeps the tuned small
+    // workgroup on 32-wide parts while wide-wavefront (64) parts retain the
+    // original 256-thread workgroup instead of dropping to a half-occupancy 128.
+    //
+    // Unlike the pure-math flp2()/numThreadsForReduction() helpers, general_wg_size
+    // depends on the runtime handle (wavefront_size), so it stays in this device
+    // translation unit rather than the host-testable analysis header.
+    static inline uint32_t general_wg_size(rocsparse_handle handle, int64_t m, int64_t nnz)
     {
-#if defined(__INTEL_COMPILER)
-        return WG_SIZE >> (_bit_scan_reverse(num_rows - 1) + 1);
-#elif(defined(__clang__) && __has_builtin(__builtin_clz)) \
-    || !defined(__clang) && defined(__GNUG__)             \
-           && ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) > 30202)
-        return (WG_SIZE >> (8 * sizeof(int) - __builtin_clz(num_rows - 1)));
-#elif defined(_MSC_VER) && (_MSC_VER >= 1400)
-        uint64_t bit_returned;
-        _BitScanReverse(&bit_returned, (num_rows - 1));
-        return WG_SIZE >> (bit_returned + 1);
-#else
-        return flp2(WG_SIZE / num_rows);
-#endif
+        const bool dense = (m > 0 && (double)nnz >= 32.0 * (double)m);
+        return dense ? (4u * (uint32_t)handle->wavefront_size) : 256u;
     }
 
     template <typename I>
@@ -103,6 +90,7 @@ namespace rocsparse
                                         int64_t& last_row,
                                         const I* rowDelimiters,
                                         I        nRows,
+                                        uint32_t gen_wg_size,
                                         bool     allocate_row_blocks = true)
     {
         ROCSPARSE_ROUTINE_TRACE;
@@ -179,7 +167,7 @@ namespace rocsparse
                         // Fill in the low-order bits with the numThreadsForRed
                         if(((i - 1) - last_i) > static_cast<I>(ROWS_FOR_VECTOR))
                         {
-                            *(wgIds - 1) |= numThreadsForReduction((i - 1) - last_i);
+                            *(wgIds - 1) |= numThreadsForReduction((i - 1) - last_i, gen_wg_size);
                         }
 
                         ++rowBlocks;
@@ -200,7 +188,7 @@ namespace rocsparse
                     *rowBlocks = i - 1;
                     if(((i - 1) - last_i) > static_cast<I>(ROWS_FOR_VECTOR))
                     {
-                        *(wgIds - 1) |= numThreadsForReduction((i - 1) - last_i);
+                        *(wgIds - 1) |= numThreadsForReduction((i - 1) - last_i, gen_wg_size);
                     }
 
                     ++rowBlocks;
@@ -261,7 +249,7 @@ namespace rocsparse
                     *rowBlocks = i;
                     if((i - last_i) > static_cast<I>(ROWS_FOR_VECTOR))
                     {
-                        *(wgIds - 1) |= numThreadsForReduction(i - last_i);
+                        *(wgIds - 1) |= numThreadsForReduction(i - last_i, gen_wg_size);
                     }
 
                     ++rowBlocks;
@@ -281,7 +269,7 @@ namespace rocsparse
                     *rowBlocks = i;
                     if((i - last_i) > static_cast<I>(ROWS_FOR_VECTOR))
                     {
-                        *(wgIds - 1) |= numThreadsForReduction(i - last_i);
+                        *(wgIds - 1) |= numThreadsForReduction(i - last_i, gen_wg_size);
                     }
 
                     ++rowBlocks;
@@ -301,7 +289,7 @@ namespace rocsparse
             *rowBlocks = nRows;
             if((nRows - last_i) > static_cast<I>(ROWS_FOR_VECTOR))
             {
-                *(wgIds - 1) |= numThreadsForReduction(nRows - last_i);
+                *(wgIds - 1) |= numThreadsForReduction(nRows - last_i, gen_wg_size);
             }
 
             ++rowBlocks;
@@ -385,6 +373,12 @@ rocsparse_status
 
         // Wait for host transfer to finish
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+        // Choose the general-path workgroup size from avg nnz/row; wg_ids must be
+        // built with the same value the kernel is later launched with.
+        // Use nnz (not hptr[m] - hptr[0]) so the workgroup size baked into wg_ids
+        // here matches the value the kernel is launched with, which cannot diverge.
+        const uint32_t gen_wg = rocsparse::general_wg_size(handle, m, nnz);
+
         // Determine row blocks array size
         ComputeRowBlocks<I, J>((I*)NULL,
                                (J*)NULL,
@@ -393,6 +387,7 @@ rocsparse_status
                                csrmv_info->adaptive.last_row,
                                hptr.data(),
                                m,
+                               gen_wg,
                                false);
 
         // Create row blocks and workgroup data structures
@@ -406,6 +401,7 @@ rocsparse_status
                                csrmv_info->adaptive.last_row,
                                hptr.data(),
                                m,
+                               gen_wg,
                                true);
 
         if(descr->type == rocsparse_matrix_type_symmetric)
@@ -466,8 +462,8 @@ rocsparse_status
 
 namespace rocsparse
 {
-    template <typename J, typename Y, typename T>
-    ROCSPARSE_KERNEL(WG_SIZE)
+    template <uint32_t GEN_WG, typename J, typename Y, typename T>
+    ROCSPARSE_KERNEL(GEN_WG)
     void partial_scale_y_kernel(J m,
                                 J first_row,
                                 J last_row,
@@ -478,12 +474,19 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(beta != 1)
         {
-            rocsparse::partial_scale_y_device<WG_SIZE>(m, first_row, last_row, beta, y);
+            rocsparse::partial_scale_y_device<GEN_WG>(m, first_row, last_row, beta, y);
         }
     }
 
-    template <typename I, typename J, typename A, typename X, typename Y, typename Z, typename T>
-    ROCSPARSE_KERNEL(WG_SIZE)
+    template <uint32_t GEN_WG,
+              typename I,
+              typename J,
+              typename A,
+              typename X,
+              typename Y,
+              typename Z,
+              typename T>
+    ROCSPARSE_KERNEL(GEN_WG)
     void csrmvn_adaptive_kernel(bool conj,
                                 J    m,
                                 I    nnz,
@@ -508,7 +511,7 @@ namespace rocsparse
         if(alpha != 0 || beta != 1 || num_extra > 0)
         {
             rocsparse::
-                csrmvn_adaptive_device<BLOCK_SIZE, BLOCK_MULTIPLIER, ROWS_FOR_VECTOR, WG_SIZE>(
+                csrmvn_adaptive_device<BLOCK_SIZE, BLOCK_MULTIPLIER, ROWS_FOR_VECTOR, GEN_WG>(
                     conj,
                     m,
                     nnz,
@@ -715,33 +718,47 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
     if(descr->type == rocsparse_matrix_type_general
        || descr->type == rocsparse_matrix_type_triangular)
     {
+        // Matrix-adaptive general-path workgroup size (must match the value used
+        // to build wg_ids in analysis, which is derived the same way from m/nnz).
+        const uint32_t gen_wg = rocsparse::general_wg_size(handle, m, nnz);
+
         // Run different csrmv kernels
         dim3 csrmvn_blocks((info->adaptive.size) - 1);
-        dim3 csrmvn_threads(WG_SIZE);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrmvn_adaptive_kernel),
-            csrmvn_blocks,
-            csrmvn_threads,
-            0,
-            stream,
-            conj,
-            m,
-            nnz,
-            static_cast<I*>(info->adaptive.row_blocks),
-            info->adaptive.wg_flags,
-            static_cast<J*>(info->adaptive.wg_ids),
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val,
-            x,
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-            y,
-            num_extra,
-            gamma_device_array,
-            z_array,
-            descr->base,
-            handle->pointer_mode == rocsparse_pointer_mode_host);
+        dim3 csrmvn_threads(gen_wg);
+#define ROCSPARSE_LAUNCH_CSRMVN_ADAPTIVE(GEN_WG)                      \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
+        (rocsparse::csrmvn_adaptive_kernel<GEN_WG>),                  \
+        csrmvn_blocks,                                                \
+        csrmvn_threads,                                               \
+        0,                                                            \
+        stream,                                                       \
+        conj,                                                         \
+        m,                                                            \
+        nnz,                                                          \
+        static_cast<I*>(info->adaptive.row_blocks),                   \
+        info->adaptive.wg_flags,                                      \
+        static_cast<J*>(info->adaptive.wg_ids),                       \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+        csr_row_ptr,                                                  \
+        csr_col_ind,                                                  \
+        csr_val,                                                      \
+        x,                                                            \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
+        y,                                                            \
+        num_extra,                                                    \
+        gamma_device_array,                                           \
+        z_array,                                                      \
+        descr->base,                                                  \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
+        if(gen_wg == 128)
+        {
+            ROCSPARSE_LAUNCH_CSRMVN_ADAPTIVE(128);
+        }
+        else
+        {
+            ROCSPARSE_LAUNCH_CSRMVN_ADAPTIVE(256);
+        }
+#undef ROCSPARSE_LAUNCH_CSRMVN_ADAPTIVE
 
         if(info->adaptive.first_row > 0 || info->adaptive.last_row < m)
         {
@@ -750,20 +767,30 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
             J last_row         = info->adaptive.last_row;
             J required_threads = (first_row - 0) + (m - last_row);
 
-            dim3 csrmvn_blocks((required_threads - 1) / WG_SIZE + 1);
-            dim3 csrmvn_threads(WG_SIZE);
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::partial_scale_y_kernel),
-                csrmvn_blocks,
-                csrmvn_threads,
-                0,
-                stream,
-                m,
-                first_row,
-                last_row,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                y,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            dim3 scale_blocks((required_threads - 1) / gen_wg + 1);
+            dim3 scale_threads(gen_wg);
+#define ROCSPARSE_LAUNCH_PARTIAL_SCALE_Y(GEN_WG)                     \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                              \
+        (rocsparse::partial_scale_y_kernel<GEN_WG>),                 \
+        scale_blocks,                                                \
+        scale_threads,                                               \
+        0,                                                           \
+        stream,                                                      \
+        m,                                                           \
+        first_row,                                                   \
+        last_row,                                                    \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host), \
+        y,                                                           \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
+            if(gen_wg == 128)
+            {
+                ROCSPARSE_LAUNCH_PARTIAL_SCALE_Y(128);
+            }
+            else
+            {
+                ROCSPARSE_LAUNCH_PARTIAL_SCALE_Y(256);
+            }
+#undef ROCSPARSE_LAUNCH_PARTIAL_SCALE_Y
         }
     }
     else if(descr->type == rocsparse_matrix_type_symmetric)

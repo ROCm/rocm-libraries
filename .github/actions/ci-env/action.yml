@@ -4,10 +4,19 @@ description: "Single source of truth for shared CI constants (TheRock ref, Docke
 outputs:
   therock-ref:
     description: "TheRock commit hash to use"
-    value: "44146cd73e5e016e4e89bfdcb1322c83f24071bf" # 2026-07-22
+    value: "b45a06045cbb29c85e221748e653ac2521c6e1bf" # 2026-08-26
+  kpack-ref:
+    description: "rocm-systems commit whose shared/kpack provides the rocm_kpack packing tooling"
+    # Copied into dnn-providers/hip-kernel-provider/cmake/KpackPython.cmake and
+    # projects/hipdnn/dockerfiles/Dockerfile.ubuntu24, neither of which can read
+    # this action. The kpack-pin-sync pre-commit hook holds them equal.
+    value: "a022846cf553c2b135410a5168f97705f1b9c6ac" # 2026-08-22
+  baseline-run-id:
+    description: "TheRock workflow run ID for prebuilt stage artifacts"
+    value: "33012920661" # Updated by assistant-librarian[bot] on submodule bumps
   docker-image:
     description: "Docker container image for Linux builds"
-    value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2"
+    value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb"
   linux-runner:
     description: "GitHub Actions runner label for Linux jobs"
     value: "aws-linux-scale-rocm-prod"

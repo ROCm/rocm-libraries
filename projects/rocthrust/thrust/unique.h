@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/pair.h>
@@ -145,7 +138,7 @@ ForwardIterator unique(ForwardIterator first, ForwardIterator last);
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
  * Iterator</a>, and \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type is convertible to \p
- * BinaryPredicate's first argument type and to \p BinaryPredicate's second argument type. \tparam BinaryPredicate
+ * BinaryPredicate's \c first_argument_type and to \p BinaryPredicate's \c second_argument_type. \tparam BinaryPredicate
  * is a model of <a href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Binary Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p unique to
@@ -192,7 +185,7 @@ THRUST_HOST_DEVICE ForwardIterator unique(
  *
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
  * Iterator</a>, and \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type is convertible to \p
- * BinaryPredicate's first argument type and to \p BinaryPredicate's second argument type. \tparam BinaryPredicate
+ * BinaryPredicate's \c first_argument_type and to \p BinaryPredicate's \c second_argument_type. \tparam BinaryPredicate
  * is a model of <a href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Binary Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p unique to
@@ -938,9 +931,10 @@ thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
- * Iterator</a>, and \p ForwardIterator's \c value_type is convertible to \p BinaryPredicate's first argument type
- * and to \p BinaryPredicate's second argument type. \tparam BinaryPredicate is a model of <a
- * href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Binary Predicate</a>.
+ *  Iterator</a>, and \p ForwardIterator's \c value_type is convertible to \p BinaryPredicate's \c first_argument_type
+ *  and to \p BinaryPredicate's \c second_argument_type.
+ *  \tparam BinaryPredicate is a model of <a
+ *  href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Binary Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p unique_count to
  *  determine a number of runs of equal elements using the \p thrust::host execution policy
@@ -961,7 +955,7 @@ thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
  *  \see reduce_by_key_copy
  */
 template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count(
+THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type unique_count(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,
@@ -981,8 +975,8 @@ THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
- * Iterator</a>, and \p ForwardIterator's \c value_type is convertible to \p BinaryPredicate's first argument type
- * and to \p BinaryPredicate's second argument type. \tparam BinaryPredicate is a model of <a
+ * Iterator</a>, and \p ForwardIterator's \c value_type is convertible to \p BinaryPredicate's \c first_argument_type
+ * and to \p BinaryPredicate's \c second_argument_type. \tparam BinaryPredicate is a model of <a
  * href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Binary Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p unique_count to
@@ -1004,7 +998,7 @@ THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count
  *  \see reduce_by_key_copy
  */
 template <typename DerivedPolicy, typename ForwardIterator>
-THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count(
+THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type unique_count(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last);
 
 /*! \p unique_count counts runs of equal elements in the range <tt>[first, last)</tt>
@@ -1018,8 +1012,8 @@ THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count
  *  \return The number of runs of equal elements in <tt>[first, new_last)</tt>
  *
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
- *  Iterator</a>, and \p ForwardIterator's \c value_type is convertible to \p BinaryPredicate's first argument type
- *  and to \p BinaryPredicate's second argument type.
+ *  Iterator</a>, and \p ForwardIterator's \c value_type is convertible to \p BinaryPredicate's \c first_argument_type
+ *  and to \p BinaryPredicate's \c second_argument_type.
  *  \tparam BinaryPredicate is a model of <a
  *  href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Binary Predicate</a>.
  *
@@ -1041,7 +1035,7 @@ THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count
  *  \see reduce_by_key_copy
  */
 template <typename ForwardIterator, typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator>
+THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type
 unique_count(ForwardIterator first, ForwardIterator last, BinaryPredicate binary_pred);
 
 /*! \p unique_count counts runs of equal elements in the range <tt>[first, last)</tt>
@@ -1054,10 +1048,9 @@ unique_count(ForwardIterator first, ForwardIterator last, BinaryPredicate binary
  *  \return The number of runs of equal elements in <tt>[first, new_last)</tt>
  *
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
- *  Iterator</a>, and \p ForwardIterator's \c value_type is convertible to \p BinaryPredicate's first argument type
- *  and to \p BinaryPredicate's second argument type.
- *  \tparam BinaryPredicate is a model of <a
- *  href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Binary Predicate</a>.
+ * Iterator</a>, and \p ForwardIterator's \c value_type is convertible to \p BinaryPredicate's \c first_argument_type
+ * and to \p BinaryPredicate's \c second_argument_type. \tparam BinaryPredicate is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Binary Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p unique_count to
  *  determine the number of runs of equal elements:
@@ -1077,7 +1070,7 @@ unique_count(ForwardIterator first, ForwardIterator last, BinaryPredicate binary
  *  \see reduce_by_key_copy
  */
 template <typename ForwardIterator>
-THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator>
+THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type
 unique_count(ForwardIterator first, ForwardIterator last);
 
 /*! \} // end stream_compaction

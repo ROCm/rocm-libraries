@@ -20,11 +20,14 @@
 
 #pragma once
 
+#include <string_view>
+
 #include "primbench.hpp"
 
 #ifdef __HIP__
     #include <rocrand/rocrand_kernel.h>
 #elif defined(__CUDACC__)
+    #include <cuda.h>
     #include <curand_kernel.h>
 #endif
 
@@ -66,6 +69,7 @@ using rand_discrete_distribution_t = rocrand_discrete_distribution;
 using rand_direction_vector_set_t  = rocrand_direction_vector_set;
 using direction_vectors32_t        = const unsigned int;
 using direction_vectors64_t        = const unsigned long long;
+using gpu_func_attributes_t        = hipFuncAttributes;
 #elif defined(__CUDACC__)
 using stream_t                     = cudaStream_t;
 using rng_type_t                   = curandRngType;
@@ -76,6 +80,7 @@ using rand_discrete_distribution_t = curandDiscreteDistribution_t;
 using rand_direction_vector_set_t  = curandDirectionVectorSet_t;
 using direction_vectors32_t        = curandDirectionVectors32_t;
 using direction_vectors64_t        = curandDirectionVectors64_t;
+using gpu_func_attributes_t        = cudaFuncAttributes;
 #endif
 
 #ifdef __HIP__
@@ -110,7 +115,7 @@ constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = hipMemcpyDeviceToHost;
 constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = cudaMemcpyDeviceToHost;
 #endif
 
-inline std::string engine_name(const rng_type_t rng_type)
+constexpr std::string_view engine_name(const rng_type_t rng_type)
 {
     // The returned names have to be able to reproduce the rocrand_rng_type by prepending
     // `ROCRAND_RNG_{PSEUDO|QUASI}_` to the name written in all capital letters. The scripts in
@@ -231,61 +236,90 @@ inline auto gpu_memcpy(void* dst, const void* src, size_t count, memcpy_kind_t k
     return DISPATCH(hipMemcpy, cudaMemcpy)(dst, src, count, kind);
 }
 
-template<typename Engine>
-__forceinline__ __device__ __host__
-auto gpu_rand(Engine* state)
+inline auto gpu_occupancy_max_active_blocks_per_mp(int*        num_blocks,
+                                                   const void* f,
+                                                   int         block_size,
+                                                   size_t      dynamic_shared_memory = 0)
 {
-    return DISPATCH(rocrand, curand)(state);
+    return DISPATCH(hipOccupancyMaxActiveBlocksPerMultiprocessor,
+                    cudaOccupancyMaxActiveBlocksPerMultiprocessor)(num_blocks,
+                                                                   f,
+                                                                   block_size,
+                                                                   dynamic_shared_memory);
 }
 
-template<typename Engine>
-__forceinline__ __device__ __host__
-auto gpu_rand_log_normal(Engine* state, float mean, float stddev)
+inline auto gpu_get_device(int* device_id)
 {
-    return DISPATCH(rocrand_log_normal, curand_log_normal)(state, mean, stddev);
+    return DISPATCH(hipGetDevice, cudaGetDevice)(device_id);
 }
 
-template<typename Engine>
-__forceinline__ __device__ __host__
-auto gpu_rand_log_normal_double(Engine* state, double mean, double stddev)
+inline auto gpu_get_mp_count(int* mp_count, int device_id)
 {
-    return DISPATCH(rocrand_log_normal_double, curand_log_normal_double)(state, mean, stddev);
+    return DISPATCH(hipDeviceGetAttribute, cudaDeviceGetAttribute)(
+        mp_count,
+        DISPATCH(hipDeviceAttributeMultiprocessorCount, cudaDevAttrMultiProcessorCount),
+        device_id);
 }
 
-template<typename Engine>
-__forceinline__ __device__ __host__
-auto gpu_rand_normal(Engine* state)
+inline auto gpu_get_attributes(gpu_func_attributes_t* attr, const void* f)
 {
-    return DISPATCH(rocrand_normal, curand_normal)(state);
+    return DISPATCH(hipFuncGetAttributes, cudaFuncGetAttributes)(attr, f);
 }
 
-template<typename Engine>
-__forceinline__ __device__ __host__
-auto gpu_rand_normal_double(Engine* state)
-{
-    return DISPATCH(rocrand_normal_double, curand_normal_double)(state);
-}
+/// This exposes the C-style device API through template parameters.
+/// This does not check if a requested API is available for an engine.
+/// E.g. the type
+///   `gpu_rand<DISTRIBUTION_POISSON, 4, uint32_t>`
+/// is valid, but it will only compile `operator()(Engine*)` for the
+/// philox engine.
+template<distribution D, int N, typename T>
+struct gpu_rand
+{};
 
-template<typename Engine>
-__forceinline__ __device__ __host__
-auto gpu_rand_poisson(Engine* state, double lambda)
-{
-    return DISPATCH(rocrand_poisson, curand_poisson)(state, lambda);
-}
+// This macro generates the specialization.
+// * `template_*` is used to generate the template specialization.
+// * `name_*` is used to generate the C-style API call.
+// * `*_d` are distributions.
+// * `*_n` are vectorization widths.
+// * `*_t` are return types.
+#define MK_GPU_RAND_API(template_d, template_n, template_t, name_d, name_n, name_t) \
+    template<>                                                                      \
+    struct gpu_rand<template_d, template_n, template_t>                             \
+    {                                                                               \
+        static constexpr bool is_specialized = true;                                \
+        static constexpr int  n              = template_n;                          \
+        template<typename... Ts>                                                    \
+        __device__ auto operator()(Ts... args)                                      \
+        {                                                                           \
+            return DISPATCH(rocrand##name_d##name_t##name_n,                        \
+                            curand##name_d##name_n##name_t)(args...);               \
+        }                                                                           \
+    };
 
-template<typename Engine>
-__forceinline__ __device__ __host__
-auto gpu_rand_uniform(Engine* state)
-{
-    return DISPATCH(rocrand_uniform, curand_uniform)(state);
-}
+#define MK_GPU_RAND_API_1_2_4(dist, type, name, name_t) \
+    MK_GPU_RAND_API(dist, 1, type, name, , name_t)      \
+    MK_GPU_RAND_API(dist, 2, type, name, 2, name_t)     \
+    MK_GPU_RAND_API(dist, 4, type, name, 4, name_t)
 
-template<typename Engine>
-__forceinline__ __device__ __host__
-auto gpu_rand_uniform_double(Engine* state)
-{
-    return DISPATCH(rocrand_uniform_double, curand_uniform_double)(state);
-}
+// Stamp out all `gpu_rand` structs and specializations.
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, unsigned int, , )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, unsigned long long, , )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, float, _uniform, )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, double, _uniform, _double)
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_NORMAL, float, _normal, )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_NORMAL, double, _normal, _double)
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_LOG_NORMAL, float, _log_normal, )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_LOG_NORMAL, double, _log_normal, _double)
+
+MK_GPU_RAND_API(DISTRIBUTION_POISSON, 1, unsigned int, _poisson, , )
+MK_GPU_RAND_API(DISTRIBUTION_POISSON, 4, unsigned int, _poisson, 4, )
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_POISSON, 1, unsigned int, _discrete, , )
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_POISSON, 4, unsigned int, _discrete, 4, )
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_CUSTOM, 1, unsigned int, _discrete, , )
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_CUSTOM, 4, unsigned int, _discrete, 4, )
+
+#undef MK_GPU_RAND_API
+#undef MK_GPU_RAND_API_1_2_4
 
 inline auto rand_create_poisson_distribution(double                        lambda,
                                              rand_discrete_distribution_t* discrete_distribution)
@@ -298,13 +332,6 @@ inline auto rand_destroy_discrete_distribution(rand_discrete_distribution_t disc
 {
     return DISPATCH(rocrand_destroy_discrete_distribution,
                     curandDestroyDistribution)(discrete_distribution);
-}
-
-template<typename Engine>
-__forceinline__ __device__ __host__
-auto rand_discrete(Engine* state, const rand_discrete_distribution_t discrete_distribution)
-{
-    return DISPATCH(rocrand_discrete, curand_discrete)(state, discrete_distribution);
 }
 
 inline auto rand_get_direction_vectors32(direction_vectors32_t**     vectors,
