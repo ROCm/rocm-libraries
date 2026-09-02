@@ -20,6 +20,12 @@ namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
 
+#if MIOPEN_USE_GEMM && MIOPEN_USE_HIPBLASLT
+// Budget, not an exact size: hipBLASLt picks Stream-K only when offered scratch, and the amount
+// it needs scales with the tile it chooses.
+constexpr std::size_t wrw_gemm_stream_k_workspace = std::size_t{32} * 1024 * 1024; // 32 MiB
+#endif
+
 bool GemmWrwBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
 #if MIOPEN_USE_GEMM
@@ -188,12 +194,8 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
 static std::size_t NhwcWrwGemmWorkspace(const ProblemDescription& problem)
 {
 #if MIOPEN_USE_HIPBLASLT
-    // Budget, not an exact size: hipBLASLt picks Stream-K only when offered scratch, and the
-    // amount it needs scales with the tile it chooses.
-    constexpr std::size_t nhwc_wrw_gemm_workspace = std::size_t{32} << 20;
-
     if(problem.IsLayoutNHWC() && problem.GetConv().group_count == 1)
-        return nhwc_wrw_gemm_workspace;
+        return wrw_gemm_stream_k_workspace;
 #else
     std::ignore = problem;
 #endif
@@ -455,11 +457,7 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
     if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
     {
 #if MIOPEN_USE_HIPBLASLT
-        // Budget, not an exact size: hipBLASLt picks Stream-K only when offered scratch, and the
-        // amount it needs scales with the tile it chooses.
-        constexpr std::size_t point_output_wrw_gemm_workspace = std::size_t{32} << 20;
-
-        return point_output_wrw_gemm_workspace;
+        return wrw_gemm_stream_k_workspace;
 #else
         return 0;
 #endif
