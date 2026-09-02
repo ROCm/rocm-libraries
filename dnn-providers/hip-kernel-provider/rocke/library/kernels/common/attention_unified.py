@@ -2945,9 +2945,15 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             return min(segments, pre_bump)
     if arch == "gfx950" and problem.sliding_window == 0:
         # CONSERVATIVE gfx950 clamp: bound EVERY already-3D shape to the pre-bump
-        # (num_cus=120 -> target 480) baseline split. This guarantees the routing
-        # bump never over-splits an already-3D shape (byte-identical to the legacy
-        # split), capturing the 2D->3D reroute win with zero over-split regression.
+        # (num_cus=120 -> target 480) baseline split, capturing the 2D->3D reroute
+        # win with zero over-split regression.
+        #
+        # For DEFAULT callers -- num_cus resolved from the device -- this is
+        # exactly the shipped split, byte-identical. A caller that ALREADY passed
+        # an explicit num_cus > 120 is the one exception: that path was previously
+        # unclamped and is now capped, so it gets a coarser split than before.
+        # Pin the old behaviour with target_ctas, which supersedes num_cus here.
+        #
         # Cases proven on gfx950 silicon to benefit from a finer split are uncapped
         # later, each gated by its own measurement (not assumed from gfx942).
         pre_bump = _pre_bump_segments(problem)

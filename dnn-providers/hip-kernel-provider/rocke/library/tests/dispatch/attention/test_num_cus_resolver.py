@@ -321,6 +321,33 @@ def test_segment_clamp_keys_on_request_arch():
         p.restore()
 
 
+def test_every_auto_resolve_arch_clamps_the_split():
+    """Membership in _AUTO_RESOLVE_ARCHS grants an arch the num_cus bump; the
+    matching per-arch branch in ``_num_segments`` is what keeps that bump from
+    over-splitting already-3D shapes. The two live in different modules and are
+    kept in sync by hand, so pin the other half of the bargain here: an arch
+    added to the set without a clamp fails this test instead of silently
+    shipping an uncapped split.
+
+    The shape is chosen so the unclamped formula blows past the safe ceiling
+    (raw 128 vs pre-bump 64) AND so gfx942's head-size-specific branch also
+    fires -- D128 decode at kv <= 2048. A shape gfx942 deliberately leaves
+    uncapped (D256, or long-kv D128) would fail for a legitimate reason."""
+    shape = dict(nq=8, nk=8, D=128, kv=2048, batch=1)
+    for arch in sorted(AC._AUTO_RESOLVE_ARCHS):
+        prob = _prob(256, arch=arch, **shape)
+        raw = prob.select_3d()[0].NUM_SEGMENTS_PER_SEQ
+        ceiling = au._pre_bump_segments(prob)
+        assert raw > ceiling, (
+            f"test shape no longer exercises the clamp on {arch}: "
+            f"raw {raw} <= ceiling {ceiling}"
+        )
+        assert au._num_segments(prob) <= ceiling, (
+            f"{arch} is in _AUTO_RESOLVE_ARCHS but has no segment clamp: "
+            f"split {au._num_segments(prob)} exceeds the pre-bump ceiling {ceiling}"
+        )
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0
