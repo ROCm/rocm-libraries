@@ -38,43 +38,40 @@ endif()
 # auto-detection) the CHARACTER-argument routines it uses (e.g. zlange/clange/
 # dlange) pull in Flang runtime symbols (e.g. _FortranACharacterCompareScalar1)
 # that amdclang++ never links automatically, since Fortran isn't the link
-# driver for these C++/HIP targets. Find that runtime explicitly, matching the
-# approach used in hipsparselt's clients. Leave the working gfortran path
-# untouched.
+# driver for these C++/HIP targets. Probe for which on-disk name the runtime
+# uses (older split FortranRuntime+FortranDecimal vs. newer merged
+# flang_rt.runtime) using every root we can derive for the selected Flang
+# install (resolving symlinks, since invoke may hand us e.g.
+# /opt/rocm/bin/amdflang -> .../llvm/bin/flang-N), plus HIP_CLANG_ROOT.
+# Link the runtime by name rather than by the absolute path find_library
+# resolves: amdclang++ and flang share the same ROCm LLVM installation, so
+# amdclang++'s own default linker search already covers whichever root
+# actually has the file, even for a packaging layout our probe above didn't
+# find. This mirrors the approach used in hipsparselt's clients. Leave the
+# working gfortran path untouched.
 set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES)
 if(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
-    get_filename_component(_hipblaslt_fortran_bin_dir "${CMAKE_Fortran_COMPILER}" DIRECTORY)
+    get_filename_component(_hipblaslt_fortran_real "${CMAKE_Fortran_COMPILER}" REALPATH)
+    get_filename_component(_hipblaslt_fortran_bin_dir "${_hipblaslt_fortran_real}" DIRECTORY)
     get_filename_component(_hipblaslt_fortran_root_dir "${_hipblaslt_fortran_bin_dir}" DIRECTORY)
+    set(_hipblaslt_fortran_search_dirs "${_hipblaslt_fortran_root_dir}/lib")
+    if(HIP_CLANG_ROOT)
+        list(APPEND _hipblaslt_fortran_search_dirs "${HIP_CLANG_ROOT}/lib")
+    endif()
     find_library(HIPBLASLT_FORTRANRUNTIME_LIBRARY NAMES FortranRuntime
-        PATHS "${_hipblaslt_fortran_root_dir}/lib")
+        PATHS ${_hipblaslt_fortran_search_dirs} NO_DEFAULT_PATH)
     if(HIPBLASLT_FORTRANRUNTIME_LIBRARY)
-        find_library(HIPBLASLT_FORTRANDECIMAL_LIBRARY NAMES FortranDecimal
-            PATHS "${_hipblaslt_fortran_root_dir}/lib")
-        if(NOT HIPBLASLT_FORTRANDECIMAL_LIBRARY)
-            message(FATAL_ERROR
-                "Found FortranRuntime (${HIPBLASLT_FORTRANRUNTIME_LIBRARY}) but not its "
-                "companion FortranDecimal library under ${_hipblaslt_fortran_root_dir}/lib. "
-                "LAPACK's CHARACTER-argument routines (zlange/clange/dlange) need both to link "
-                "against LLVM Flang compiler ${CMAKE_Fortran_COMPILER}.")
-        endif()
-        set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES
-            ${HIPBLASLT_FORTRANRUNTIME_LIBRARY} ${HIPBLASLT_FORTRANDECIMAL_LIBRARY})
+        set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES -lFortranRuntime -lFortranDecimal)
     else()
         # Newer LLVM Flang releases merged FortranRuntime/FortranDecimal into
-        # a single flang_rt.runtime library.
-        find_library(HIPBLASLT_FLANGRT_LIBRARY NAMES flang_rt.runtime
-            PATHS "${_hipblaslt_fortran_root_dir}/lib")
-        if(NOT HIPBLASLT_FLANGRT_LIBRARY)
-            message(FATAL_ERROR
-                "Could not find the LLVM Flang runtime library (FortranRuntime+FortranDecimal, "
-                "or flang_rt.runtime) under ${_hipblaslt_fortran_root_dir}/lib for Fortran "
-                "compiler ${CMAKE_Fortran_COMPILER}. LAPACK's CHARACTER-argument routines "
-                "(zlange/clange/dlange) need it to link.")
-        endif()
-        set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES ${HIPBLASLT_FLANGRT_LIBRARY})
+        # a single flang_rt.runtime library; also the safe default when our
+        # probe above can't find either name (see comment above).
+        set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES -lflang_rt.runtime)
     endif()
+    unset(_hipblaslt_fortran_real)
     unset(_hipblaslt_fortran_bin_dir)
     unset(_hipblaslt_fortran_root_dir)
+    unset(_hipblaslt_fortran_search_dirs)
 endif()
 
 target_link_libraries(hipblaslt-clients-common
