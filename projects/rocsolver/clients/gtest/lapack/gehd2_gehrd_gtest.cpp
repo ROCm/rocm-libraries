@@ -37,7 +37,7 @@ typedef vector<int> gehrd_tuple;
 
 // each matrix_size_range is a {n, lda, ilo, ihi}
 
-// case when m = n = 0 will also execute the bad arguments test
+// case when n = 0 will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
 // for checkin_lapack tests
@@ -49,7 +49,9 @@ const vector<vector<int>> matrix_size_range = {
     {20, 5, 1, 1},
     {20, 20, 1, 21},
     {20, 20, 0, 20},
+    {10, 10, 5, 2},
     // normal (valid) samples
+    {1, 1, 1, 1},
     {5, 5, 1, 5},
     {50, 50, 1, 50},
     {70, 100, 6, 49},

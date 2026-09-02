@@ -90,9 +90,9 @@ try
         init_scalars(handle, (T*)scalars);
 
     // execution
-    return rocsolver_gehd2_template<T>(handle, n, ilo, ihi, A, shiftA, lda, strideA, tau, strideP,
-                                       batch_count, (T*)scalars, work_workArr, (T*)Abyx_norms,
-                                       (T*)diag);
+    return rocsolver_gehd2_template<true, false, T>(handle, n, ilo, ihi, A, shiftA, lda, strideA,
+                                                    tau, strideP, batch_count, (T*)scalars,
+                                                    work_workArr, (T*)Abyx_norms, (T*)diag);
 }
 catch(...)
 {

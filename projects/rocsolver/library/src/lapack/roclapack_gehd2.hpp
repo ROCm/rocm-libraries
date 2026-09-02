@@ -109,7 +109,7 @@ rocblas_status rocsolver_gehd2_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
-template <typename T, typename I, typename U, bool COMPLEX = rocblas_is_complex<T>>
+template <bool BATCHED, bool STRIDED, typename T, typename I, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_gehd2_template(rocblas_handle handle,
                                         const I n,
                                         const I ilo,

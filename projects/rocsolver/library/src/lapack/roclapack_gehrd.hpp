@@ -225,9 +225,9 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
 
     // if the active submatrix is small, use the unblocked algorithm directly
     if(dim <= GEHRD_GEHD2_SWITCHSIZE)
-        return rocsolver_gehd2_template<T>(handle, n, ilo, ihi, A, shiftA, lda, strideA, tau,
-                                           strideP, batch_count, scalars, work_workArr, norms_tmptr,
-                                           diag_beta);
+        return rocsolver_gehd2_template<BATCHED, STRIDED, T>(
+            handle, n, ilo, ihi, A, shiftA, lda, strideA, tau, strideP, batch_count, scalars,
+            work_workArr, norms_tmptr, diag_beta);
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -298,8 +298,9 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
 
     // reduce the remaining columns with the unblocked algorithm
     if(i < ihi - 1)
-        rocsolver_gehd2_template<T>(handle, n, i + 1, ihi, A, shiftA, lda, strideA, tau, strideP,
-                                    batch_count, scalars, work_workArr, norms_tmptr, diag_beta);
+        rocsolver_gehd2_template<BATCHED, STRIDED, T>(handle, n, i + 1, ihi, A, shiftA, lda,
+                                                      strideA, tau, strideP, batch_count, scalars,
+                                                      work_workArr, norms_tmptr, diag_beta);
 
     return rocblas_status_success;
 }
