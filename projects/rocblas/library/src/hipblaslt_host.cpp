@@ -236,40 +236,6 @@ namespace
     }                                                           \
     CATCH_AND_HANDLE_ERROR(RETURN_STATUS)
 
-    template <typename T>
-    __global__ void addOffsetKernel(T* dOutputPtr, T* dInputPtr, size_t offset, int size)
-    {
-        int i = blockIdx.x * blockDim.x + threadIdx.x;
-        if(i < size)
-        {
-            T** input  = reinterpret_cast<T**>(dInputPtr);
-            T** output = reinterpret_cast<T**>(dOutputPtr);
-            output[i]  = input[i] + offset;
-        }
-    }
-
-    template <typename T1>
-    rocblas_status addOffset(void*       input_device_pointer_array,
-                             T1*         output_device_pointer_array,
-                             int         batch_count,
-                             size_t      offset,
-                             hipStream_t stream)
-    {
-        rocblas_status status          = rocblas_status_success;
-        int            threadsPerBlock = 256;
-        int            blocksPerGrid   = (batch_count - 1) / threadsPerBlock + 1;
-        hipLaunchKernelGGL(addOffsetKernel,
-                           dim3(blocksPerGrid),
-                           dim3(threadsPerBlock),
-                           0,
-                           stream,
-                           output_device_pointer_array,
-                           static_cast<T1*>(input_device_pointer_array),
-                           offset,
-                           batch_count);
-        RETURN_IF_HIP_ERROR(hipGetLastError());
-        return status;
-    };
     /****************************************************************
      * Construct a HipBlasLT GEMM from a RocblasContractionProblem *
      ****************************************************************/
