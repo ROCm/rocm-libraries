@@ -86,6 +86,8 @@ _DTYPE_IR = {"bf16": BF16, "fp16": F16}
 #   _NBUF=2 double-buffer (NBUF=3 is a measured dead end: 256 VGPR + 58 spills).
 #   _LDS_PAD=8 bf16 elements of K-row padding (the +80% bank-conflict fix).
 _BLOCK_M = 256
+# Overridable via ROCKE_DENSE_NBUF purely to re-measure the depth sweep; the
+# shipped depth is 2 and anything else is an experiment.
 _NBUF = 2
 _LDS_PAD = 8
 # _LDS_PAD_V: bf16 elements of V-row padding for the transposed PV read
@@ -98,6 +100,7 @@ _LDS_PAD = 8
 import os as _os  # noqa: E402
 
 _LDS_PAD_V = int(_os.environ.get("ROCKE_DENSE_VPAD", "32"))
+_NBUF = int(_os.environ.get("ROCKE_DENSE_NBUF", str(_NBUF)))
 # Lazy-rescale re-anchor threshold in the log2 domain: skip the O/l rescale when
 # every lane's (tile_max - running_max) <= this. exp2(8)=256 bounds P safely.
 _LAZY_RESCALE_THRESHOLD = 8.0
