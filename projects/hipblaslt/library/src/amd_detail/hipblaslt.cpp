@@ -38,8 +38,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
-#include <unistd.h>
 #include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 #include "Debug.hpp"
 
@@ -317,28 +322,6 @@ namespace
     /****************************************************************************
      * Device communicator.
      ***************************************************************************/
-
-    // A channel's flag region: one uint32_t arrival counter per source rank,
-    // packed into the first line, then the outbound counter on a line of its
-    // own. Sized by the compile-time maximum world so every offset into a region
-    // is a constant - 128 bytes while that maximum is 8.
-    //
-    // Twinned with FUSED_A2A_LINE_BYTES, FUSED_A2A_OUTBOUND_OFFSET, and
-    // FUSED_A2A_FLAG_BLOCK_BYTES in the kernel's FusedA2AKernArg.hpp, which is
-    // what the arrival atomics and the drain barrier index against. A region
-    // smaller than the kernel's block is memory corruption rather than a wrong
-    // answer, so the two derivations must stay identical.
-    constexpr size_t kDeviceCommFlagLine = 64;
-
-    constexpr size_t align_device_comm_flag_line(size_t bytes)
-    {
-        return (bytes + kDeviceCommFlagLine - 1) / kDeviceCommFlagLine * kDeviceCommFlagLine;
-    }
-
-    constexpr size_t kDeviceCommFlagOutboundOffset
-        = align_device_comm_flag_line(HIPBLASLT_DEVICE_COMM_MAX_WORLD * sizeof(uint32_t));
-    constexpr size_t kDeviceCommFlagChannelSize
-        = align_device_comm_flag_line(kDeviceCommFlagOutboundOffset + sizeof(uint32_t));
 
     // What each rank contributes to the registration allgather. Opaque to the
     // caller, which must neither interpret nor reorder it. A peer in this process
@@ -973,8 +956,10 @@ try
         return HIPBLAS_STATUS_NOT_SUPPORTED;
     }
 
+    // The kernel owns the flag region's layout, so its size is asked for rather
+    // than recomputed here; that keeps one definition of it.
     void*        flags = nullptr;
-    const size_t bytes = (size_t)nChannels * kDeviceCommFlagChannelSize;
+    const size_t bytes = (size_t)nChannels * rocblaslt_device_comm_flag_block_bytes();
     // Fine-grained, because a peer's copy engine updates these lines.
     if(hipExtMallocWithFlags(&flags, bytes, hipDeviceMallocFinegrained) != hipSuccess
        || flags == nullptr)

@@ -15,6 +15,8 @@
 // The suite names carry the "pre_checkin" token on purpose: the ctest presets in
 // clients/tests/test_categories.yaml select by loose substring on a category
 // token, and a plain gtest suite has none, so it would be invisible to them.
+// One suite carries "multi_gpu" instead, which is the category that file gives a
+// two-device host; it skips rather than degrading to one device.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -563,19 +565,15 @@ namespace
                   HIPBLAS_STATUS_SUCCESS);
     }
 
-    // The one path a single process can drive all the way through: two ranks, two
-    // handles, each finding the other's flag region among the payloads. Where
-    // there are two devices the ranks take one each, so registration has to make
-    // the peer's region reachable rather than merely record its address. Both
-    // handles are then destroyed, which is where the three kinds of entry have to
-    // be told apart: a rank frees its own region and leaves its peer's alone.
-    TEST(FusedA2ACommPeers_pre_checkin, TwoRanksInOneProcessRegister)
+    // Two ranks rendezvous, each finding the other's flag region among the
+    // payloads; destroying both then frees a rank's own region and leaves its
+    // peer's. One shared device keeps this on the branch that needs no peer
+    // access - the cross-device one is the multi_gpu test below, split out
+    // because `rank % deviceCount` let a single-GPU host pass it unexecuted.
+    TEST(FusedA2ACommPeers_pre_checkin, TwoRanksOneDeviceRegister)
     {
         if(!gpuAvailable())
             GTEST_SKIP() << "No GPU available";
-
-        int deviceCount = 0;
-        ASSERT_EQ(hipGetDeviceCount(&deviceCount), hipSuccess);
 
         constexpr uint32_t kWorld = 2;
 
@@ -590,7 +588,7 @@ namespace
         for(uint32_t r = 0; r < kWorld; ++r)
         {
             ranks[r] = std::thread([&, r] {
-                if(hipSetDevice((int)r % deviceCount) != hipSuccess)
+                if(hipSetDevice(0) != hipSuccess)
                     return;
                 hipblasLtHandle_t handle = nullptr;
                 if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
@@ -605,6 +603,75 @@ namespace
 
         for(uint32_t r = 0; r < kWorld; ++r)
             EXPECT_EQ(status[r], HIPBLAS_STATUS_SUCCESS) << "rank " << r;
+    }
+
+    // The cross-device branch: rank r takes device r, so a peer's flag region
+    // must be reachable from another device - registration has to enable peer
+    // access, not just record the address. Nothing public reads those addresses
+    // back, so each rank disables access first and then asserts on the side
+    // effect: a request reporting already-enabled can only be registration's
+    // work, where pre-fix it reported plain success.
+    TEST(FusedA2ACommPeers_multi_gpu, TwoRanksTwoDevicesEnablePeerAccess)
+    {
+        int deviceCount = 0;
+        ASSERT_EQ(hipGetDeviceCount(&deviceCount), hipSuccess);
+        if(deviceCount < 2)
+            GTEST_SKIP() << "cross-device registration needs 2 devices, found " << deviceCount;
+
+        constexpr uint32_t kWorld = 2;
+
+        Rendezvous shared;
+        shared.world = kWorld;
+
+        RendezvousRank  args[kWorld] = {{&shared, 0}, {&shared, 1}};
+        hipblasStatus_t status[kWorld]
+            = {HIPBLAS_STATUS_NOT_INITIALIZED, HIPBLAS_STATUS_NOT_INITIALIZED};
+        // Seeded with a code neither call returns, so an entry no thread reached
+        // cannot read as a pass.
+        hipError_t  reEnable[kWorld] = {hipErrorUnknown, hipErrorUnknown};
+        std::thread ranks[kWorld];
+
+        for(uint32_t r = 0; r < kWorld; ++r)
+        {
+            ranks[r] = std::thread([&, r] {
+                const int peerDevice = (int)(kWorld - 1 - r);
+                if(hipSetDevice((int)r) != hipSuccess)
+                    return;
+                // Whether this returns success or hipErrorPeerAccessNotEnabled,
+                // access from this device to the peer's is disabled afterwards,
+                // which is all the assertion below needs.
+                (void)hipDeviceDisablePeerAccess(peerDevice);
+
+                hipblasLtHandle_t handle = nullptr;
+                if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
+                    return;
+                status[r]
+                    = hipblasLtSetDeviceComm(handle, r, kWorld, 1, rendezvousAllgather, &args[r]);
+                // Asked while this rank's device is still current and before the
+                // handle is destroyed: the direction under test is from device r
+                // to the peer's, and that is the one registration enabled.
+                if(status[r] == HIPBLAS_STATUS_SUCCESS)
+                    reEnable[r] = hipDeviceEnablePeerAccess(peerDevice, 0);
+                EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+            });
+        }
+        for(std::thread& rank : ranks)
+            rank.join();
+
+        // A host whose two devices cannot reach each other is a topology this
+        // test has nothing to say about, and NOT_SUPPORTED is registration
+        // answering correctly rather than failing.
+        for(uint32_t r = 0; r < kWorld; ++r)
+            if(status[r] == HIPBLAS_STATUS_NOT_SUPPORTED)
+                GTEST_SKIP() << "devices 0 and 1 cannot reach each other";
+
+        for(uint32_t r = 0; r < kWorld; ++r)
+        {
+            EXPECT_EQ(status[r], HIPBLAS_STATUS_SUCCESS) << "rank " << r;
+            EXPECT_EQ(reEnable[r], hipErrorPeerAccessAlreadyEnabled)
+                << "rank " << r << ": registration recorded the peer's region without making it "
+                << "reachable from this device";
+        }
     }
 
     /************************************************************************
