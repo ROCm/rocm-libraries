@@ -577,6 +577,25 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             {0},
             Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
 
+        // Second LSE box. When this instance does not prefetch, B is built at A's
+        // offset, so it aliases A and every phase selection collapses to the
+        // original single-buffer behaviour.
+        LSEDataType* lse_lds_ptr_b =
+            Policy::template UseQDOPrefetch<Problem>()
+                ? static_cast<LSEDataType*>(static_cast<void*>(
+                      static_cast<char*>(smem_ptr) +
+                      Policy::template GetLSEPrefetchSmemOffset<Problem>()))
+                : lse_lds_ptr;
+        auto lse_lds_b = make_tensor_view<address_space_enum::lds>(
+            lse_lds_ptr_b, Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
+        auto lse_lds_write_window_b =
+            make_tile_window(lse_lds_b, make_tuple(number<kM0>{}), {0});
+        auto lse_lds_read_window_b = make_tile_window(
+            lse_lds_b,
+            make_tuple(number<kM0>{}),
+            {0},
+            Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
+
         // D: HBM ->Reg
         auto d_dram_window = make_tile_window(
             d_dram_block_window_tmp.get_bottom_tensor_view(),
@@ -597,6 +616,22 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
         auto d_lds_read_window = make_tile_window(
             d_lds,
+            make_tuple(number<kM0>{}),
+            {0},
+            Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
+
+        DDataType* d_lds_ptr_b =
+            Policy::template UseQDOPrefetch<Problem>()
+                ? static_cast<DDataType*>(static_cast<void*>(
+                      static_cast<char*>(smem_ptr) +
+                      Policy::template GetDPrefetchSmemOffset<Problem>()))
+                : d_lds_ptr;
+        auto d_lds_b = make_tensor_view<address_space_enum::lds>(
+            d_lds_ptr_b, Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
+        auto d_lds_write_window_b =
+            make_tile_window(d_lds_b, make_tuple(number<kM0>{}), {0});
+        auto d_lds_read_window_b = make_tile_window(
+            d_lds_b,
             make_tuple(number<kM0>{}),
             {0},
             Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
@@ -711,6 +746,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             auto& dot_rd_cur = phase ? dot_lds_read_window_b : dot_lds_read_window;
             auto& q_wr_dst   = phase ? q_lds_window          : q_lds_window_b;
             auto& do_wr_dst  = phase ? do_lds_window         : do_lds_window_b;
+            auto& lse_wr_dst = phase ? lse_lds_write_window  : lse_lds_write_window_b;
+            auto& d_wr_dst   = phase ? d_lds_write_window    : d_lds_write_window_b;
+            auto& lse_rd_dst = phase ? lse_lds_read_window   : lse_lds_read_window_b;
+            auto& d_rd_dst   = phase ? d_lds_read_window     : d_lds_read_window_b;
             auto& q_rd_dst   = phase ? q_lds_read_window     : q_lds_read_window_b;
             auto& do_rd_dst  = phase ? do_lds_read_window    : do_lds_read_window_b;
 #else
@@ -869,18 +908,26 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             }
             dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
 
-            block_sync_lds();
+            // This barrier existed so TDM could not overwrite an LDS box that
+            // some wave was still reading. With Q/dO *and* LSE/D double
+            // buffered the TDM below writes the other buffer of each, so there
+            // is no hazard left to guard. It is a full LDS drain
+            // (s_wait_dscnt 0x0), which is what pins the four waves together.
+            if constexpr(!Policy::template UseQDOPrefetch<Problem>())
+            {
+                block_sync_lds();
+            }
 
             load_tile_tdm(tdm_config_q, q_wr_dst, q_dram_window);
             move_tile_window(q_dram_window, {kM0, 0});
 
-            load_tile_tdm(tdm_config_lse, lse_lds_write_window, lse_dram_window);
+            load_tile_tdm(tdm_config_lse, lse_wr_dst, lse_dram_window);
             move_tile_window(lse_dram_window, {kM0});
 
             load_tile_tdm(tdm_config_do, do_wr_dst, do_dram_window);
             move_tile_window(do_dram_window, {kM0, 0});
 
-            load_tile_tdm(tdm_config_d, d_lds_write_window, d_dram_window);
+            load_tile_tdm(tdm_config_d, d_wr_dst, d_dram_window);
             move_tile_window(d_dram_window, {kM0});
 #if !CK_TILE_FMHA_BWD_SINK_TDM_WAIT
             // same as the prologue: Q/dO are on TENSORcnt now
@@ -950,7 +997,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 #endif
             auto ds_reg_tensor      = load_tile_transpose(ds_lds_read_window);
             q_reg_tensor = load_tile(q_rd_dst);
-            lse          = load_tile(lse_lds_read_window);
+            lse          = load_tile(lse_rd_dst);
 
             HotLoopScheduler::template GemmStagedScheduler<3>();
             __builtin_amdgcn_sched_barrier(0);
@@ -971,7 +1018,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             });
 
             do_reg_tensor = load_tile(do_rd_dst);
-            d             = load_tile(d_lds_read_window);
+            d             = load_tile(d_rd_dst);
 
             HotLoopScheduler::template GemmStagedScheduler<4>();
 

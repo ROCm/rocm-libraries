@@ -784,7 +784,11 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr bool UseQDOPrefetch()
     {
-        return CK_TILE_FMHA_BWD_PREFETCH_QDO && !Problem::FmhaMask::IsMasking;
+        // Strict superset of `!IsMasking`: masked instances gain the second
+        // Q/dO pair too, except storerandval, which already sits at 994-998
+        // VGPR and spills into the 1024 ceiling if the buffers are added.
+        return CK_TILE_FMHA_BWD_PREFETCH_QDO &&
+               !(Problem::FmhaMask::IsMasking && Problem::FmhaDropout::IsStoreRandval);
     }
 
     // Base of the second Q/dO pair, used when the pipeline double-buffers them.
@@ -802,6 +806,20 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         return GetQPrefetchSmemOffset<Problem>() + GetSmemSizeQ<Problem>();
     }
 
+    // LSE and D are 256 B each; a second pair is the cheapest way to retire the
+    // WAR barrier in front of the hot-loop TDM issues.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLSEPrefetchSmemOffset()
+    {
+        return GetOGradPrefetchSmemOffset<Problem>() + GetSmemSizeOGrad<Problem>();
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetDPrefetchSmemOffset()
+    {
+        return GetLSEPrefetchSmemOffset<Problem>() + GetSmemSizeLSE<Problem>();
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
@@ -809,7 +827,8 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                                    GetSmemSizeKGradAcc<Problem>() +
                                    GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>();
         return single + (UseQDOPrefetch<Problem>()
-                             ? GetSmemSizeQ<Problem>() + GetSmemSizeOGrad<Problem>()
+                             ? GetSmemSizeQ<Problem>() + GetSmemSizeOGrad<Problem>() +
+                                   GetSmemSizeLSE<Problem>() + GetSmemSizeD<Problem>()
                              : 0);
     }
 };
