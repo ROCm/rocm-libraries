@@ -81,15 +81,6 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
     return nullptr;
 }
 
-/// @brief Whether @p adapterType is one this factory can build.
-///
-/// Lets a caller that handles extra kinds decide whether to delegate, without duplicating
-/// the list of names.
-inline bool isFactoryAdapterType(const std::string& adapterType)
-{
-    return adapterType == "tree_data" || adapterType == "table" || adapterType == "native";
-}
-
 } // namespace hipdnn_plugin_sdk::ingestor::uhd
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
