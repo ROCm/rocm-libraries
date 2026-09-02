@@ -923,21 +923,21 @@ int test_hipblaslt(hipDataType                 in_datatype,
                         cElements,
                         Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]}));
                     GemmOptions options;
-                    options.epilogue.alpha      = static_cast<double>(alpha[i]);
-                    options.epilogue.beta       = static_cast<double>(beta[i]);
-                    options.epilogue.activation = toHostNumericsActivation(actType[i]);
+                    options.alpha      = static_cast<double>(alpha[i]);
+                    options.beta       = static_cast<double>(beta[i]);
+                    options.activation = toHostNumericsActivation(actType[i]);
                     if(bias_ptr)
-                        options.epilogue.bias
+                        options.bias
                             = Tensor::copyNativeStorage<float>(
                                   Layout::contiguousLastDimensionFastest(Shape{size_t(m[i])}),
                                   std::span<const float>(bias_ptr, size_t(m[i])))
                                   .expandDims(1);
                     if(actType[i] == ActivationType::SWISH)
-                        options.epilogue.activationParameter0 = 1.0;
+                        options.activationParameter0 = 1.0;
                     else if(actType[i] == ActivationType::CLAMP)
                     {
-                        options.epilogue.activationParameter0 = -1.0;
-                        options.epilogue.activationParameter1 = 1.0;
+                        options.activationParameter0 = -1.0;
+                        options.activationParameter1 = 1.0;
                     }
                     referenceGemmInto(
                         std::move(a), std::move(b), std::move(c), referenceOutput, options);

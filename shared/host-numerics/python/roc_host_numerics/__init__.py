@@ -181,22 +181,22 @@ def _gemm_options(
     options.block_size_b = block_size_b
     options.conjugate_a = conjugate_a
     options.conjugate_b = conjugate_b
-    options.epilogue.alpha = alpha
-    options.epilogue.beta = beta
-    options.epilogue.scale_c = scale_c
-    options.epilogue.bias = bias
-    options.epilogue.scale_alpha = scale_alpha
-    options.epilogue.scale_a = (
+    options.alpha = alpha
+    options.beta = beta
+    options.scale_c = scale_c
+    options.bias = bias
+    options.scale_alpha = scale_alpha
+    options.scale_a = (
         None if scale_a is None else _as_default_vector_broadcast(scale_a, 1)
     )
-    options.epilogue.scale_b = (
+    options.scale_b = (
         None if scale_b is None else _as_default_vector_broadcast(scale_b, 0)
     )
-    options.epilogue.output_scale = output_scale
-    options.epilogue.output_conversion = output_conversion
-    options.epilogue.activation = activation
-    options.epilogue.activation_parameter0 = activation_parameter0
-    options.epilogue.activation_parameter1 = activation_parameter1
+    options.output_scale = output_scale
+    options.output_conversion = output_conversion
+    options.activation = activation
+    options.activation_parameter0 = activation_parameter0
+    options.activation_parameter1 = activation_parameter1
     options.output_selection = (
         OutputSelection.all()  # noqa: F405
         if output_selection is None

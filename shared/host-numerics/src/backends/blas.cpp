@@ -119,13 +119,13 @@ void validateCommon(const GemmInvocation& problem) {
         throw std::invalid_argument("BLAS backend does not support block scaling.");
     if (problem.mathMode != MathMode::Default)
         throw std::invalid_argument("BLAS backend supports only default operand math.");
-    if (problem.epilogue.bias || problem.epilogue.scaleAlpha || problem.epilogue.scaleA ||
-        problem.epilogue.scaleB || problem.epilogue.activation != Activation::None ||
-        detail::runtimeScalar<std::complex<double>>(problem.epilogue.scaleC, "C scale") !=
+    if (problem.bias || problem.scaleAlpha || problem.scaleA || problem.scaleB ||
+        problem.activation != Activation::None ||
+        detail::runtimeScalar<std::complex<double>>(problem.scaleC, "C scale") !=
             std::complex<double>(1.0, 0.0) ||
-        detail::runtimeScalar<std::complex<double>>(problem.epilogue.outputScale, "output scale") !=
+        detail::runtimeScalar<std::complex<double>>(problem.outputScale, "output scale") !=
             std::complex<double>(1.0, 0.0) ||
-        problem.epilogue.outputConversion != OutputConversion::Default)
+        problem.outputConversion != OutputConversion::Default)
         throw std::invalid_argument("BLAS backend does not support a fused epilogue.");
     if (!problem.outputSelection.selectsAll())
         throw std::invalid_argument("BLAS backend requires complete output selection.");
@@ -158,8 +158,8 @@ GemmExecutionInfo runReal(const GemmInvocation& problem) {
     const int n = static_cast<int>(problem.b.shape()[1]);
     const int k = static_cast<int>(problem.a.shape()[1]);
     const int ldc = static_cast<int>(problem.d.layout().strides()[1]);
-    const T alpha = detail::runtimeScalar<T>(problem.epilogue.alpha, "alpha");
-    const T beta = detail::runtimeScalar<T>(problem.epilogue.beta, "beta");
+    const T alpha = detail::runtimeScalar<T>(problem.alpha, "alpha");
+    const T beta = detail::runtimeScalar<T>(problem.beta, "beta");
     const T* a = typedData<T>(problem.a, "A");
     const T* b = typedData<T>(problem.b, "B");
     T* d = typedMutableData<T>(problem.d, "D");
@@ -187,8 +187,8 @@ GemmExecutionInfo runComplex(const GemmInvocation& problem) {
     const int n = static_cast<int>(problem.b.shape()[1]);
     const int k = static_cast<int>(problem.a.shape()[1]);
     const int ldc = static_cast<int>(problem.d.layout().strides()[1]);
-    const T alpha = detail::runtimeScalar<T>(problem.epilogue.alpha, "alpha");
-    const T beta = detail::runtimeScalar<T>(problem.epilogue.beta, "beta");
+    const T alpha = detail::runtimeScalar<T>(problem.alpha, "alpha");
+    const T beta = detail::runtimeScalar<T>(problem.beta, "beta");
     const T* a = typedData<T>(problem.a, "A");
     const T* b = typedData<T>(problem.b, "B");
     T* d = typedMutableData<T>(problem.d, "D");
@@ -235,9 +235,8 @@ void validateTransforming(const GemmInvocation& problem) {
     const auto hasNonScalarScale = [](const std::optional<Tensor>& scale) {
         return scale && scale->elementCount() != 1;
     };
-    if (problem.epilogue.bias || problem.epilogue.scaleAlpha ||
-        hasNonScalarScale(problem.epilogue.scaleA) || hasNonScalarScale(problem.epilogue.scaleB) ||
-        problem.epilogue.activation != Activation::None)
+    if (problem.bias || problem.scaleAlpha || hasNonScalarScale(problem.scaleA) ||
+        hasNonScalarScale(problem.scaleB) || problem.activation != Activation::None)
         throw std::invalid_argument(
             "Transforming BLAS backend supports operand transforms, scalar A/B scales, and "
             "output conversion, but not the general GEMM epilogue.");
@@ -368,8 +367,7 @@ GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
     }
 
     const RuntimeMatrixReader<Accumulator> stagedOutputReader(stagedOutput);
-    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d,
-                                                        problem.epilogue.outputConversion);
+    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d, problem.outputConversion);
     const size_t rows = problem.d.shape()[0];
     const size_t outputElementCount = problem.d.shape().elementCount();
     detail::forEachParallelIndex(

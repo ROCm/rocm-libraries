@@ -127,11 +127,10 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
     const RuntimeQuantizer<Accumulator> quantizeA(problem.computeTypeA);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.computeTypeB);
     const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
-    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d,
-                                                        problem.epilogue.outputConversion);
+    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d, problem.outputConversion);
     std::optional<RuntimeMatrixOutputWriter<Accumulator>> selectedOutputWriter;
     if (selectedOutput != nullptr)
-        selectedOutputWriter.emplace(*selectedOutput, problem.epilogue.outputConversion);
+        selectedOutputWriter.emplace(*selectedOutput, problem.outputConversion);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
     std::vector<RuntimeMatrixReader<Accumulator>> preScalesA;
