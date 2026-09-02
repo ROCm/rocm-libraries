@@ -115,7 +115,7 @@ def test_unknown_later_revision_keeps_only_target_capabilities() -> None:
         (None, None, "architecture is unavailable"),
         ("gfx1250", None, "ASIC revision is unavailable"),
         ("gfx1250", -1, "invalid gfx1250 ASIC revision"),
-        ("gfx950", 1, "no revision-specific capabilities are listed for gfx950"),
+        ("gfx950", 1, "no capabilities are listed for gfx950"),
     ],
 )
 def test_unknown_properties_reject_revision_specific_capabilities(
@@ -140,6 +140,28 @@ def test_unavailable_revision_preserves_target_level_capabilities(
     assert capabilities.check(DeviceCapability.WORKGROUP_CLUSTER_LAUNCH) == (
         True,
         "supported",
+    )
+
+
+def test_policy_registry_can_add_another_target() -> None:
+    policy = device_capabilities._CapabilityPolicy(
+        base=frozenset({DeviceCapability.TDM_MULTICAST}),
+        by_revision={
+            7: frozenset({DeviceCapability.MX_BLOCK16_CONVERSION}),
+        },
+    )
+
+    with mock.patch.dict(
+        device_capabilities._CAPABILITY_POLICIES,
+        {"test-arch": policy},
+    ):
+        capabilities = device_capabilities._capabilities_for_properties("test-arch", 7)
+
+    assert capabilities.supported == frozenset(
+        {
+            DeviceCapability.TDM_MULTICAST,
+            DeviceCapability.MX_BLOCK16_CONVERSION,
+        }
     )
 
 

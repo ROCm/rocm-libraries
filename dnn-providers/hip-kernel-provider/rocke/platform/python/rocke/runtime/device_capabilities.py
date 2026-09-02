@@ -5,7 +5,8 @@
 
 Keep revision checks in one place so dispatch and launch code do not compare
 ``asicRevision`` values directly. Features tied to an unknown revision are reported
-as unsupported. HIP still decides whether a launch succeeds.
+as unsupported. The current table covers gfx1250 and can be extended with other
+targets. HIP still decides whether a launch succeeds.
 """
 
 from __future__ import annotations
@@ -25,17 +26,28 @@ class DeviceCapability(str, Enum):
     MX_BLOCK16_CONVERSION = "mx_block16_conversion"
 
 
-_GFX1250_BASE_CAPABILITIES = frozenset({DeviceCapability.WORKGROUP_CLUSTER_LAUNCH})
+@dataclass(frozen=True)
+class _CapabilityPolicy:
+    """Capabilities shared by a target and added by each known revision."""
 
-_GFX1250_REVISION_CAPABILITIES = {
-    0: frozenset(),
-    1: frozenset(
-        {
-            DeviceCapability.TDM_MULTICAST,
-            DeviceCapability.MX_WMMA_FP4_32X16,
-            DeviceCapability.MX_BLOCK16_CONVERSION,
-        }
-    ),
+    base: frozenset[DeviceCapability]
+    by_revision: dict[int, frozenset[DeviceCapability]]
+
+
+_CAPABILITY_POLICIES = {
+    "gfx1250": _CapabilityPolicy(
+        base=frozenset({DeviceCapability.WORKGROUP_CLUSTER_LAUNCH}),
+        by_revision={
+            0: frozenset(),
+            1: frozenset(
+                {
+                    DeviceCapability.TDM_MULTICAST,
+                    DeviceCapability.MX_WMMA_FP4_32X16,
+                    DeviceCapability.MX_BLOCK16_CONVERSION,
+                }
+            ),
+        },
+    )
 }
 
 
@@ -63,20 +75,18 @@ class DeviceCapabilities:
             return True, "supported"
         if self.arch is None:
             return False, "device architecture is unavailable"
-        if self.arch != "gfx1250":
-            return (
-                False,
-                f"no revision-specific capabilities are listed for {self.arch}",
-            )
+        policy = _CAPABILITY_POLICIES.get(self.arch)
+        if policy is None:
+            return False, f"no capabilities are listed for {self.arch}"
         if self.asic_revision is None:
-            return False, "gfx1250 ASIC revision is unavailable"
+            return False, f"{self.arch} ASIC revision is unavailable"
         if self.asic_revision < 0:
-            return False, f"invalid gfx1250 ASIC revision {self.asic_revision}"
-        if self.asic_revision not in _GFX1250_REVISION_CAPABILITIES:
-            return False, f"unknown gfx1250 ASIC revision {self.asic_revision}"
+            return False, f"invalid {self.arch} ASIC revision {self.asic_revision}"
+        if self.asic_revision not in policy.by_revision:
+            return False, f"unknown {self.arch} ASIC revision {self.asic_revision}"
         return False, (
             f"{capability.value} is unavailable on "
-            f"gfx1250 ASIC revision {self.asic_revision}"
+            f"{self.arch} ASIC revision {self.asic_revision}"
         )
 
     def supports(self, capability: DeviceCapability) -> bool:
@@ -90,12 +100,11 @@ def _capabilities_for_properties(
 ) -> DeviceCapabilities:
     """Build a capability result from device properties already read from HIP."""
 
-    if arch == "gfx1250":
-        supported = _GFX1250_BASE_CAPABILITIES | (
-            _GFX1250_REVISION_CAPABILITIES.get(asic_revision, frozenset())
-        )
-    else:
+    policy = _CAPABILITY_POLICIES.get(arch)
+    if policy is None:
         supported = frozenset()
+    else:
+        supported = policy.base | policy.by_revision.get(asic_revision, frozenset())
     return DeviceCapabilities(
         arch=arch,
         asic_revision=asic_revision,
