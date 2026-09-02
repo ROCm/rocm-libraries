@@ -1000,4 +1000,118 @@ TEST(TestIngestorUhdKernelHeuristic, ADefaultStillCoversAnArchitectureNotNamedEx
     EXPECT_EQ(ranked.front().kernelId, testId(0x02)) << "the default model did not cover gfx1100";
 }
 
+/// RFC 0019 §5 defines what selection does when things go wrong, and §12 requires the trace to
+/// say *whether the model or a fallback decided*. Every degraded path is a legal ranking, so no
+/// assertion on the chosen kernel can tell them apart -- the implementation could be entirely
+/// broken and every functional test would still pass.
+///
+/// These are mock UHDs, one per condition, and they assert the provenance rather than the
+/// winner. That distinction is the point: a test that writes the model can make any kernel win,
+/// so "the winner is X" only proves the fixture works. "A model decided" is a claim the fixture
+/// cannot fake, because it is the runtime that reports it.
+struct SelectionCondition
+{
+    const char* name;
+    const char* expectedProvenance;
+};
+
+class TestIngestorUhdProvenance : public ::testing::TestWithParam<SelectionCondition>
+{
+};
+
+/// Builds the heuristic for one named condition. Each is a UHD that is well-formed except in the
+/// one way the condition describes, so the branch under test is the only difference.
+std::shared_ptr<IKernelHeuristic> heuristicForCondition(  // NOLINT(misc-use-internal-linkage)
+    const std::string& condition,
+    const std::filesystem::path& dir)
+{
+    if(condition == "healthy_model")
+    {
+        const auto fixture = writeFixture(dir, preferLargeTiles());
+        return makeKernelHeuristic(modelDescriptor(dir, fixture.uhdFileName), "e", KNOBS);
+    }
+    if(condition == "features_hash_disagrees")
+    {
+        // §6.3 check 1: the model was trained on a different signature than the one the
+        // extractor will produce.
+        const auto fixture
+            = writeFixture(dir, preferLargeTiles(), "max", "sha256:not_the_real_hash");
+        return makeKernelHeuristic(modelDescriptor(dir, fixture.uhdFileName), "e", KNOBS);
+    }
+    if(condition == "knobs_disagree_with_axes")
+    {
+        // §6.3 check 2: the UED advertises a knob the model has no axis for.
+        const auto fixture = writeFixture(dir, preferLargeTiles());
+        return makeKernelHeuristic(
+            modelDescriptor(dir, fixture.uhdFileName), "e", {"tile_m", "split_k"});
+    }
+    if(condition == "calibrated_and_minimising")
+    {
+        // §15.1: the one combination the loader refuses outright.
+        const auto fixture
+            = writeFixture(dir, preferLargeTiles(), "min", {}, /*calibrated=*/true);
+        return makeKernelHeuristic(modelDescriptor(dir, fixture.uhdFileName), "e", KNOBS);
+    }
+    if(condition == "no_uhd_at_all")
+    {
+        // §5 step 6: shipping no heuristic is valid and is the starting state.
+        return makeKernelHeuristic(std::nullopt, "e", KNOBS);
+    }
+    if(condition == "arch_not_covered")
+    {
+        // §8.3 third step: models exist, but none for this architecture and no default.
+        const auto fixture = writeFixture(dir, preferLargeTiles());
+        const std::map<std::string, HeuristicDescriptor> byArch{
+            {"gfx950", modelDescriptor(dir, fixture.uhdFileName)}};
+        return makeKernelHeuristic(std::nullopt, "e", KNOBS, byArch);
+    }
+    return nullptr;
+}
+
+TEST_P(TestIngestorUhdProvenance, TheRuntimeReportsWhichOfTheThreeDecided)
+{
+    const auto condition = GetParam();
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(std::string("uhd_prov_")
+                                                          + condition.name);
+
+    const auto heuristic = heuristicForCondition(condition.name, dir.path());
+    ASSERT_NE(heuristic, nullptr) << "unhandled condition: " << condition.name;
+
+    // Every condition still produces a usable ranking -- §5 step 7's "it never fails the
+    // request" -- and says which of the three produced it.
+    const testing::TestGraph graph;
+    auto properties = gfx942();
+    if(std::string(condition.name) == "arch_not_covered")
+    {
+        properties.gcnArchName = "gfx1100";
+    }
+    const MatchContext context{graph, 0, properties};
+
+    auto recorder = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(
+        HIPDNN_SEV_INFO);
+    const auto ranked = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    EXPECT_EQ(ranked.size(), 2U) << "a degraded ranking still has to answer";
+
+    // The logged trace, not the context-free accessor. Provenance is a fact about one ranking:
+    // an arch resolver decides by model on the architectures it names and by declared order on
+    // the ones it does not, so only the line emitted where the device is known can say which.
+    EXPECT_TRUE(recorder.hasLogContaining(std::string("decided_by=")
+                                          + condition.expectedProvenance))
+        << "the trace did not report " << condition.expectedProvenance;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SelectionConditions,
+    TestIngestorUhdProvenance,
+    ::testing::Values(SelectionCondition{"healthy_model", "model"},
+                      SelectionCondition{"features_hash_disagrees", "declared_order"},
+                      SelectionCondition{"knobs_disagree_with_axes", "declared_order"},
+                      SelectionCondition{"calibrated_and_minimising", "declared_order"},
+                      SelectionCondition{"no_uhd_at_all", "declared_order"},
+                      SelectionCondition{"arch_not_covered", "declared_order"}),
+    [](const ::testing::TestParamInfo<SelectionCondition>& info) {
+        return std::string(info.param.name);
+    });
+
 } // namespace hipdnn_plugin_sdk::ingestor

@@ -283,6 +283,19 @@ public:
         return _config.scoreCalibrated;
     }
 
+    /// RFC 0019 §12 asks which of the three decided. The base reports "native", which is right
+    /// for a scorer compiled into the engine and wrong for a loaded model -- and this class's
+    /// own trace line already said "model", so the two spellings disagreed. One source now.
+    std::string traceDecidedBy() const override
+    {
+        // What this object decides by *absent an architecture*, which is all a context-free
+        // accessor can honestly answer. A resolver built by makeArchResolver holds candidates
+        // and no model, so its default is declared order even though it will rank by model on
+        // the architectures it does name. The per-ranking answer is the trace line, which is
+        // emitted where the device is known -- and that is the one §12 actually specifies.
+        return _hasDefaultModel ? "model" : "declared_order";
+    }
+
     std::vector<ScoredKernel> rankScored(const Catalog& catalog,
                                          const MatchContext& context) const override
     {
@@ -304,6 +317,14 @@ public:
         // about this one, and using one of them anyway would rank this device on a model
         // trained for different hardware -- silently, since the ranking would look normal.
         reportNoModelForArchOnce(context.deviceProperties.gcnArchName);
+
+        // §12's trace, on this path too. Every other degraded path emits one; this branch was
+        // added without it, so a selection that fell through for want of an architecture was
+        // the one degradation the trace could not account for.
+        HIPDNN_PLUGIN_LOG_INFO("uhd trace: " << _describedBy << " decided_by=declared_order"
+                                             << " reason=no_model_for_arch"
+                                             << " arch=" << context.deviceProperties.gcnArchName
+                                             << " candidates=" << catalog.entries.size());
         return detail::asScored(detail::declaredOrder(catalog.entries));
     }
 
@@ -462,7 +483,11 @@ private:
             // RFC 0019 §12 wants the trace to say *whether the model or a fallback decided*,
             // so the degraded path is traced too. A trace that only ever appears on success
             // cannot answer the question it exists for.
-            HIPDNN_PLUGIN_LOG_INFO("uhd trace: " << _describedBy << " decided_by=fallback"
+            // "declared_order", the same word UnrankedKernelHeuristic reports, not a fourth
+            // synonym. A degraded ranking is a degraded ranking however it got there; `reason`
+            // carries the difference. Two spellings for one condition is what makes a trace
+            // unassertable, and unassertable observability is the thing §12 is trying to avoid.
+            HIPDNN_PLUGIN_LOG_INFO("uhd trace: " << _describedBy << " decided_by=declared_order"
                                                  << " reason=ranking_failed"
                                                  << " candidates=" << catalog.entries.size()
                                                  << " uhd=" << _config.uhdId
@@ -506,7 +531,7 @@ private:
         }
 
         HIPDNN_PLUGIN_LOG_INFO("uhd trace: "
-                               << _describedBy << " decided_by=model"
+                               << _describedBy << " decided_by=" << traceDecidedBy()
                                << " winner=" << toString(scored.front().entry->kernelId)
                                << " candidates=" << scored.size()
                                << " arch=" << context.deviceProperties.gcnArchName
