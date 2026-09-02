@@ -40,6 +40,94 @@ def _gfx950_dense_req(**kw) -> AttentionRequest:
     return AttentionRequest(**base)
 
 
+class TestDenseGqaPairWiring(unittest.TestCase):
+    """The measured Llama-3-8B target selects the balanced GQA-local decode."""
+
+    def test_exact_llama3_8b_prefill_auto_selects_gqa_pair(self):
+        req = _gfx950_dense_req(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="on",
+            dense_persist_decode="auto",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        self.assertIn("gqapair", spec.kernel_name())
+        self.assertEqual(spec.num_persistent, 256)
+
+    def test_nearby_shape_stays_on_existing_auto_policy(self):
+        req = _gfx950_dense_req(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=4096,
+            seqlen_k=4096,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="on",
+            dense_persist_decode="auto",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.resolved_persist_decode, "qb_major")
+        self.assertNotIn("gqapair", spec.kernel_name())
+
+    def test_exact_shape_with_sinks_keeps_gqa_pair(self):
+        req = _gfx950_dense_req(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="on",
+            use_sinks=True,
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        self.assertTrue(spec.use_sinks)
+
+    def test_sliding_window_falls_back_to_qb_major(self):
+        req = _gfx950_dense_req(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="on",
+            sliding_window=512,
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.resolved_persist_decode, "qb_major")
+
+    def test_mha_falls_back_to_qb_major(self):
+        req = _gfx950_dense_req(
+            batch=1,
+            nhead_q=32,
+            nhead_k=32,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="on",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.resolved_persist_decode, "qb_major")
+        self.assertNotIn("gqapair", spec.kernel_name())
+
+
 class TestDenseSlidingWindowWiring(unittest.TestCase):
     """Verify sliding_window passes through dispatch to the dense spec."""
 

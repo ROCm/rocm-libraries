@@ -4,22 +4,22 @@ Productized from the ``flash_dense_dualwave_swp`` experiment
 (``kernels/gfx950/experiments/flash_dense_dualwave_swp/``). This is the shippable
 step-1 pipeline with every WINNING lever baked in as always-on (no env gates):
 
-  * **CK-1 transposed PV** — P feeds the PV MFMA in its native QK-output layout via a
+  * **CK-1 transposed PV** ΓÇö P feeds the PV MFMA in its native QK-output layout via a
     half-local V load (``pv32_v_load_paired``); the cross-half P-relayout shuffle is
     gone (~96 ``ds_bpermute`` removed). +35% over the pre-CK-1 winner.
-  * **LDS bank-conflict padding on K** (``[NBUF, BN, D+8]``) — kills the 8-way conflict
+  * **LDS bank-conflict padding on K** (``[NBUF, BN, D+8]``) ΓÇö kills the 8-way conflict
     on the QK K-reads. The dominant base win (+80% over the naive baseline).
-  * **native exp2_fast** (``v_exp_f32``, no overflow guard — the softmax argument is
-    always <= 0) — +11.5%.
+  * **native exp2_fast** (``v_exp_f32``, no overflow guard ΓÇö the softmax argument is
+    always <= 0) ΓÇö +11.5%.
   * **full-population ``sched_group_barrier`` template** naming DS_READ/MFMA/VALU/TRANS
     per PV step.
-  * **diagonal-only causal masking** — a mask-free body loop over below-diagonal KV
+  * **diagonal-only causal masking** ΓÇö a mask-free body loop over below-diagonal KV
     tiles (~94% at Sq=8192) plus a masked diagonal tail.
   * **depth-1 cluster split** fusing exp2 into the PV MFMA loop for MFMA/VALU co-exec.
-  * **partial-vmcnt software prefetch** — the per-tile K/V DMA drain is a partial
+  * **partial-vmcnt software prefetch** ΓÇö the per-tile K/V DMA drain is a partial
     `vmcnt` (keeps the freshest V prefetch in flight across the barrier) instead of a
     full `vmcnt(0)` serialize; raises MfmaUtil, bit-identical.
-  * **PV-only `s_setprio`** — the PV MFMA cluster is bracketed at raised priority so
+  * **PV-only `s_setprio`** ΓÇö the PV MFMA cluster is bracketed at raised priority so
     it wins issue slots; paired with the prefetch this is a measured ~+3.5%.
   * **vectorized O store**.
 
@@ -62,7 +62,7 @@ Head-size / seqlen coverage:
     byte-identically when ``ragged=False`` (no TFLOPS impact).
 
 Experimental/negative levers from the sweep (step-2 8-cluster, K-staging, per-nsub
-staging, score truncation, PV V-prefetch) are intentionally NOT carried over — see
+staging, score truncation, PV V-prefetch) are intentionally NOT carried over ΓÇö see
 the experiment's ``plan.md`` for their measured results.
 """
 
@@ -79,15 +79,13 @@ from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_c
 LOG2E = 1.4426950408889634
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
 
-# Baked pipeline constants (NOT tunable knobs — these are load-bearing):
+# Baked pipeline constants (NOT tunable knobs ΓÇö these are load-bearing):
 #   _BLOCK_M: query rows per CTA. The causal mask + P relayout assume 256; the
 #             kernel FAULTS at other values until those hardcodes are lifted.
 #   num_waves = _BLOCK_M // 32 = 8 (block = 512 threads).
 #   _NBUF=2 double-buffer (NBUF=3 is a measured dead end: 256 VGPR + 58 spills).
 #   _LDS_PAD=8 bf16 elements of K-row padding (the +80% bank-conflict fix).
 _BLOCK_M = 256
-# Overridable via ROCKE_DENSE_NBUF purely to re-measure the depth sweep; the
-# shipped depth is 2 and anything else is an experiment.
 _NBUF = 2
 _LDS_PAD = 8
 # _LDS_PAD_V: bf16 elements of V-row padding for the transposed PV read
@@ -100,7 +98,6 @@ _LDS_PAD = 8
 import os as _os  # noqa: E402
 
 _LDS_PAD_V = int(_os.environ.get("ROCKE_DENSE_VPAD", "32"))
-_NBUF = int(_os.environ.get("ROCKE_DENSE_NBUF", str(_NBUF)))
 # Lazy-rescale re-anchor threshold in the log2 domain: skip the O/l rescale when
 # every lane's (tile_max - running_max) <= this. exp2(8)=256 bounds P safely.
 _LAZY_RESCALE_THRESHOLD = 8.0
@@ -111,7 +108,7 @@ class AttentionDenseSpec:
     """Compile-time spec for the dense flash-attention prefill kernel.
 
     Functional fields (batch / seqlen / heads / head_size / causal / dtype) are baked
-    into the kernel as constants — this is a dense, statically-sized ABI. ``block_n``
+    into the kernel as constants ΓÇö this is a dense, statically-sized ABI. ``block_n``
     and ``waves_per_eu`` are the only performance knobs; every algorithmic lever is
     always-on (see the module docstring).
     """
@@ -204,13 +201,11 @@ class AttentionDenseSpec:
     #     non-persistent grid). Only balances the causal triangle when each CTA
     #     grid-strides across BOTH halves of a kv-head, i.e. gqa*NQB*B >= 2*NP;
     #     otherwise each CTA gets a fixed qb (severe imbalance) -> slower.
-    #   "gqa_pair": for NP=NQB*Hkv*B, map two neighboring CTAs to one
-    #     (low-qb, high-qb, hkv, batch) group. Each CTA processes half the local
-    #     query heads at both complementary qbs. This gives same-CTA GQA K/V
-    #     reuse while keeping causal work exactly balanced.
-    #   "gqa_pair_hkv": the same balanced pairing, but place hkv above qb_pair
-    #     in the CTA ID so a contiguous CTA region shares one KV head and its
-    #     overlapping causal prefixes in L2.
+    #   "gqa_pair": when NP=NQB*Hkv*B, pair complementary low/high qbs and
+    #     split the local GQA heads across two neighboring CTAs. Each CTA gets
+    #     identical causal work while reusing one K/V head across consecutive
+    #     query heads. On Llama-3-8B fp16 prefill this raised L2 hit 32% -> 65%
+    #     and paired throughput 1.1596x on MI355X.
     #   "auto" (default): hkv_major when it is balance-safe AND GQA
     #     (gqa>1 and gqa*NQB*B >= 2*num_persistent), else qb_major. Strictly >=
     #     qb_major (falls back where hkv_major would lose).
@@ -238,59 +233,6 @@ class AttentionDenseSpec:
     # use_sinks: A per-query-head learned scalar logit that participates in the softmax
     # denominator but has no value vector, acting as a repository for unnecessary attention mass.
     use_sinks: bool = False
-    # q_reload: reload each Q MFMA pack from global memory inside the KV loop instead
-    #   of holding all K_STEPS packs in VGPR across the whole tile loop. Frees ~32
-    #   VGPR for deeper software pipelining; Q is L2-resident on prefill so reload is
-    #   cheap. Off by default (byte-identical to the resident-q path).
-    q_reload: bool = False
-    # qk_pipeline: depth-1 software pipeline over the QK cluster's K LDS reads --
-    #   issue step ks+1's ds_read before step ks's MFMA and name a DS_READ/MFMA
-    #   sched template, mirroring what the PV cluster already does. Off by
-    #   default (the unpipelined chain is byte-identical to the shipped kernel).
-    qk_pipeline: bool = False
-    # qk_interleave: interleave the independent N-subtile QK accumulator chains
-    #   at each K step, exposing LDS/MFMA latency-hiding ILP.
-    qk_interleave: bool = False
-    # qk_priority: s_setprio level around the QK MFMA burst (0 disables).
-    qk_priority: int = 0
-    # pv_interleave: traverse PV by K-step then output tile, alternating four
-    #   independent output-accumulator MFMA chains without adding storage.
-    pv_interleave: bool = False
-    # pv_exp_per_mfma: softmax exponentials emitted into each PV MFMA shadow.
-    pv_exp_per_mfma: int = 1
-    # k_prefetch_early: issue tile j+1's K DMA at the top of body j instead of at
-    #   the end, so it overlaps a full tile of compute. Legal at NBUF=2 because
-    #   only V's prefetch buffer aliases a buffer the body still reads.
-    #   MEASURED LOSER, kept for reproducibility: 684.6 vs 739.1 TFLOPS (-7.4%)
-    #   at Sq=8192 Hq=32 fp16 causal, +5 VGPR. The async DMA lands in LDS, so
-    #   issuing it early puts its writes in the same window as the QK/PV clusters'
-    #   LDS reads and the port contention costs more than the prefetch distance
-    #   gains. The end-of-body placement is deliberate: it keeps DMA writes out
-    #   of the compute window at the price of the vmcnt wait at the top.
-    k_prefetch_early: bool = False
-    # k_prefetch_after_qk: issue K(j+1) after current QK has finished its K LDS
-    #   reads, overlapping softmax/PV but not the QK LDS-read cluster.
-    k_prefetch_after_qk: bool = False
-    # kv_prefetch_epilogue: after PV consumes the old V buffer, issue K/V(j+1)
-    #   before the register-only rescale and P relayout. This leaves independent
-    #   epilogue work in front of the next iteration's DMA-drain barrier without
-    #   overlapping LDS writes with the QK/PV LDS-read clusters.
-    kv_prefetch_epilogue: bool = False
-    # outer_wait_elide: omit the persistent work-item boundary's vmcnt(0).
-    #   The previous item already drained all K/V DMA before final PV; only
-    #   independent O stores remain, and they can overlap the next item.
-    outer_wait_elide: bool = False
-    # rescale_after_prefetch: relayout P, rendezvous, and launch K/V(j+1)
-    #   before the optional O/l rescale, so wave-variable rescale work does not
-    #   inflate the overwrite barrier and can overlap the DMA.
-    rescale_after_prefetch: bool = False
-    # vmem_wait_keep: outstanding VMEM operations allowed at the loop-head
-    #   waitcnt. -1 selects the shipped formula; larger values leave more of the
-    #   newest V(j) DMA in flight while draining older K(j) and V(j-1).
-    vmem_wait_keep: int = -1
-    # tree_reductions: shorten the in-lane softmax max/sum dependency chains
-    #   with v_max3 and pairwise fadd trees.
-    tree_reductions: bool = False
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -349,16 +291,10 @@ class AttentionDenseSpec:
             raise ValueError(
                 f"num_persistent must be positive, got {self.num_persistent}"
             )
-        if self.persist_decode not in (
-            "qb_major",
-            "hkv_major",
-            "gqa_pair",
-            "gqa_pair_hkv",
-            "auto",
-        ):
+        if self.persist_decode not in ("qb_major", "hkv_major", "gqa_pair", "auto"):
             raise ValueError(
                 "persist_decode must be 'qb_major', 'hkv_major', 'gqa_pair', "
-                f"'gqa_pair_hkv', or 'auto', got {self.persist_decode}"
+                f"or 'auto', got {self.persist_decode}"
             )
         if self.sliding_window < 0:
             raise ValueError(f"sliding_window must be >= 0, got {self.sliding_window}")
@@ -447,67 +383,20 @@ class AttentionDenseSpec:
                 raise ValueError(
                     "paged not yet implemented for plain-causal (sliding_window>0 only)"
                 )
-        if self.persistent and self.q_reload and self.varlen:
-            raise ValueError("q_reload is not yet supported with varlen")
-        if self.persistent and self.q_reload and self.paged:
-            raise ValueError("q_reload is not yet supported with paged KV")
-        if self.qk_pipeline and not self.persistent:
-            raise ValueError("qk_pipeline is only implemented on the persistent path")
-        if self.qk_interleave and not self.persistent:
-            raise ValueError("qk_interleave is only implemented on the persistent path")
-        if self.qk_interleave and self.qk_pipeline:
-            raise ValueError("qk_interleave and qk_pipeline are mutually exclusive")
-        if self.qk_priority not in (0, 1, 2, 3):
-            raise ValueError("qk_priority must be in 0..3")
-        if self.pv_interleave and not self.persistent:
-            raise ValueError("pv_interleave is only implemented on the persistent path")
-        if self.pv_exp_per_mfma not in (1, 2):
-            raise ValueError("pv_exp_per_mfma must be 1 or 2")
-        if self.k_prefetch_early and not self.persistent:
-            raise ValueError(
-                "k_prefetch_early is only implemented on the persistent path"
-            )
-        if self.k_prefetch_early and self.paged:
-            raise ValueError("k_prefetch_early is not yet supported with paged KV")
-        if self.k_prefetch_after_qk and not self.persistent:
-            raise ValueError(
-                "k_prefetch_after_qk is only implemented on the persistent path"
-            )
-        if self.k_prefetch_after_qk and self.k_prefetch_early:
-            raise ValueError(
-                "k_prefetch_after_qk and k_prefetch_early are mutually exclusive"
-            )
-        if self.kv_prefetch_epilogue and not self.persistent:
-            raise ValueError(
-                "kv_prefetch_epilogue is only implemented on the persistent path"
-            )
-        if self.kv_prefetch_epilogue and self.k_prefetch_early:
-            raise ValueError(
-                "kv_prefetch_epilogue and k_prefetch_early are mutually exclusive"
-            )
-        if self.outer_wait_elide and not self.persistent:
-            raise ValueError("outer_wait_elide is only valid on the persistent path")
-        if self.rescale_after_prefetch and not self.persistent:
-            raise ValueError(
-                "rescale_after_prefetch is only valid on the persistent path"
-            )
-        if self.rescale_after_prefetch and (
-            self.k_prefetch_early
-            or self.k_prefetch_after_qk
-            or self.kv_prefetch_epilogue
-        ):
-            raise ValueError(
-                "rescale_after_prefetch is mutually exclusive with other "
-                "K/V prefetch experiments"
-            )
-        if self.vmem_wait_keep < -1:
-            raise ValueError("vmem_wait_keep must be -1 or non-negative")
-        if self.persist_decode in ("gqa_pair", "gqa_pair_hkv"):
+        if self.use_sinks and self.paged:
+            raise ValueError("use_sinks is not yet supported with paged KV")
+        if self.use_sinks and self.varlen:
+            raise ValueError("use_sinks is not yet supported with varlen")
+        if self.persist_decode == "gqa_pair":
             gqa = self.num_query_heads // self.num_kv_heads
             nqb = (self.seqlen_q + _BLOCK_M - 1) // _BLOCK_M
             expected_np = nqb * self.num_kv_heads * self.batch
             if not self.persistent or not self.causal:
                 raise ValueError("gqa_pair requires persistent causal attention")
+            if self.ragged or self.varlen or self.paged:
+                raise ValueError(
+                    "gqa_pair is validated only for aligned dense attention"
+                )
             if nqb % 2 or gqa % 2:
                 raise ValueError("gqa_pair requires even NQB and even GQA ratio")
             if self.num_persistent != expected_np:
@@ -515,10 +404,6 @@ class AttentionDenseSpec:
                     "gqa_pair requires num_persistent == NQB*Hkv*B "
                     f"({expected_np}), got {self.num_persistent}"
                 )
-        if self.use_sinks and self.paged:
-            raise ValueError("use_sinks is not yet supported with paged KV")
-        if self.use_sinks and self.varlen:
-            raise ValueError("use_sinks is not yet supported with varlen")
 
     @property
     def num_waves(self) -> int:
@@ -534,14 +419,29 @@ class AttentionDenseSpec:
 
     @property
     def resolved_persist_decode(self) -> str:
-        """Resolve persist_decode='auto' to 'hkv_major' (GQA L2-locality win,
-        when balance-safe) or 'qb_major'. hkv_major balances the causal triangle
-        only when each CTA grid-strides across both halves of a kv-head
-        (gqa*NQB*B >= 2*num_persistent) and there is GQA sharing (gqa>1)."""
+        """Resolve ``auto`` to a balance-safe GQA-local mapping or qb_major."""
         if self.persist_decode != "auto":
             return self.persist_decode
         gqa = self.num_query_heads // self.num_kv_heads
         nqb = (self.seqlen_q + _BLOCK_M - 1) // _BLOCK_M  # ceil (ragged partial)
+        # Narrow production gate for the measured Llama-3-8B target. The
+        # explicit gqa_pair mode remains available for controlled expansion.
+        if (
+            self.persistent
+            and self.batch == 1
+            and self.seqlen_q == 8192
+            and self.seqlen_kv == 8192
+            and self.num_query_heads == 32
+            and self.num_kv_heads == 8
+            and self.head_size == 128
+            and self.dtype == "fp16"
+            and self.causal
+            and not self.ragged
+            and self.sliding_window == 0
+            and self.block_n == 64
+            and self.num_persistent == 256
+        ):
+            return "gqa_pair"
         per_hkv = gqa * nqb * self.batch
         if gqa > 1 and per_hkv >= 2 * self.num_persistent:
             return "hkv_major"
@@ -556,10 +456,6 @@ class AttentionDenseSpec:
             f"bn{self.block_n}",
             self.dtype,
         ]
-        if _NBUF != 2:
-            # Experiment-only depth override must not alias the production
-            # symbol or launcher-cache entry.
-            parts.append(f"nbuf{_NBUF}")
         # The K group pad changes the emitted layout, so it has to be part of the
         # kernel identity or two kernels that differ only in pad share a symbol
         # name (and a launcher-cache entry). Only live on the packed path, so the
@@ -592,36 +488,8 @@ class AttentionDenseSpec:
                 parts.append("hkvmaj")
             elif self.resolved_persist_decode == "gqa_pair":
                 parts.append("gqapair")
-            elif self.resolved_persist_decode == "gqa_pair_hkv":
-                parts.append("gqapairhkv")
             if self.interleave:
                 parts.append("intl")
-            if self.q_reload:
-                parts.append("qreload")
-            if self.qk_pipeline:
-                parts.append("qkpipe")
-            if self.qk_interleave:
-                parts.append("qkintl")
-            if self.qk_priority:
-                parts.append(f"qkprio{self.qk_priority}")
-            if self.pv_interleave:
-                parts.append("pvintl")
-            if self.pv_exp_per_mfma != 1:
-                parts.append(f"pvexp{self.pv_exp_per_mfma}")
-            if self.k_prefetch_early:
-                parts.append("kpf")
-            if self.k_prefetch_after_qk:
-                parts.append("kpfqk")
-            if self.kv_prefetch_epilogue:
-                parts.append("kvepi")
-            if self.outer_wait_elide:
-                parts.append("owait0")
-            if self.rescale_after_prefetch:
-                parts.append("rsafterpf")
-            if self.vmem_wait_keep >= 0:
-                parts.append(f"vmkeep{self.vmem_wait_keep}")
-            if self.tree_reductions:
-                parts.append("treered")
         return kernel_name_join(*parts)
 
 
@@ -1376,7 +1244,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     differences are the outer work loop, the qb-major work decode (load-balances the
     causal triangle), the per-work-item state reset, and ``exp_per=1`` (keeps the
     extra loop-carried index math within 256 VGPR at 0 spill; numerically identical
-    to the default's ``exp_per=2`` — pure emission ordering)."""
+    to the default's ``exp_per=2`` ΓÇö pure emission ordering)."""
     B = spec.batch
     Sq = spec.seqlen_q
     Skv = spec.seqlen_kv
@@ -1416,18 +1284,6 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     SWt = SW // BN  # window length in KV tiles
     LAZY_RESCALE = spec.lazy_rescale
     use_sinks = spec.use_sinks
-    Q_RELOAD = spec.q_reload
-    QK_PIPELINE = spec.qk_pipeline
-    QK_INTERLEAVE = spec.qk_interleave
-    QK_PRIORITY = spec.qk_priority
-    PV_INTERLEAVE = spec.pv_interleave
-    PV_EXP_PER_MFMA = spec.pv_exp_per_mfma
-    K_PREFETCH_EARLY = spec.k_prefetch_early
-    K_PREFETCH_AFTER_QK = spec.k_prefetch_after_qk
-    KV_PREFETCH_EPILOGUE = spec.kv_prefetch_epilogue
-    OUTER_WAIT_ELIDE = spec.outer_wait_elide
-    RESCALE_AFTER_PREFETCH = spec.rescale_after_prefetch
-    TREE_REDUCTIONS = spec.tree_reductions
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -1498,9 +1354,6 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     )
     WAVE_BYTES = 64 * 16
     V_DMA_PASSES = (BN * D) // (WAVES * 64 * 8)
-    VMEM_WAIT_KEEP = (
-        V_DMA_PASSES if spec.vmem_wait_keep < 0 else spec.vmem_wait_keep
-    )
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
@@ -1517,29 +1370,21 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         # Cross-work-item LDS reuse safety: drain the previous item's trailing DMA
         # and barrier so all waves finished the previous epilogue reads before we
         # reissue into the shared K/V buffers.
-        if not OUTER_WAIT_ELIDE:
-            b.s_waitcnt(vmcnt=0)
+        b.s_waitcnt(vmcnt=0)
         b.s_barrier_bare()
 
-        if spec.resolved_persist_decode in ("gqa_pair", "gqa_pair_hkv"):
-            # Exactly NP=NQB*Hkv*B CTAs, grouped as:
-            #   cta = (((qb_pair * Hkv + hkv) * B + bt) * 2 + pair_lane)
-            # The gqa grid-stride phases are split equally between low/high
-            # complementary qbs. pair_lane 0/1 partitions the local query heads,
-            # so each CTA sees consecutive same-(qb,hkv) work before switching
-            # qbs, while total causal work is identical for every CTA.
+        if spec.resolved_persist_decode == "gqa_pair":
+            # NP=NQB*Hkv*B CTAs. Two neighboring CTAs cover one
+            # (qb_pair,hkv,bt) group; each handles half the local query heads
+            # at both complementary qbs. The low/high costs sum to a constant.
             cta = b.mod(wi, b.const_i32(NP))
             phase = b.div(wi, b.const_i32(NP))
             pair_lane = b.mod(cta, b.const_i32(2))
             rem = b.div(cta, b.const_i32(2))
             bt = b.mod(rem, b.const_i32(B))
             rem = b.div(rem, b.const_i32(B))
-            if spec.resolved_persist_decode == "gqa_pair_hkv":
-                qb_pair = b.mod(rem, b.const_i32(NQB // 2))
-                hkv = b.div(rem, b.const_i32(NQB // 2))
-            else:
-                hkv = b.mod(rem, b.const_i32(Hkv))
-                qb_pair = b.div(rem, b.const_i32(Hkv))
+            hkv = b.mod(rem, b.const_i32(Hkv))
+            qb_pair = b.div(rem, b.const_i32(Hkv))
             half_gqa = gqa // 2
             high = b.cmp_ge(phase, b.const_i32(half_gqa))
             phase_half = b.mod(phase, b.const_i32(half_gqa))
@@ -1601,27 +1446,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         )
 
         q_tok = b.add(q_tok0, lane_m)
-
-        def _load_q_pack(ks: int):
+        q_packs = []
+        for ks in range(K_STEPS):
             col = b.add(b.const_i32(ks * 16), d_base)
-            addr = b.add(
-                b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col
-            )
-            if Q_RELOAD:
-                # Empty tied-output asm is a value-preserving compiler barrier.
-                # Without it LLVM LICM hoists these invariant Q loads back above
-                # the KV loop: the original "q_reload" experiment therefore
-                # retained all eight Q packs (248 -> 249 VGPR) and reloaded
-                # nothing dynamically. Keeping the passthrough inside do_qk
-                # makes the intended L2-resident reload trade real.
-                addr = b.inline_asm(
-                    "",
-                    "=v,0",
-                    [addr],
-                    I32,
-                    sideeffect=True,
-                    result_name_hint="qaddr",
-                )
+            addr = b.add(b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col)
             if RAGGED:
                 raw = b.buffer_load_vN(
                     q_rsrc, b.mul(addr, b.const_i32(2)), b.const_i32(0), dtype, 8
@@ -1634,12 +1462,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 )
                 for j in range(8)
             ]
-            return b.vec_pack(elems, dtype)
-
-        q_packs = []
-        if not Q_RELOAD:
-            for ks in range(K_STEPS):
-                q_packs.append(_load_q_pack(ks))
+            q_packs.append(b.vec_pack(elems, dtype))
 
         def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
             """Async DMA one K/V tile (see default builder ``_async_load``).
@@ -1710,96 +1533,20 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             async_load_k(K_lds_addr, buf_val, tk0)
             async_load_v(V_lds_addr, buf_val, tk0)
 
-        def load_tile_k(buf_val, tile_idx):
-            async_load_k(K_lds_addr, buf_val, b.mul(tile_idx, b.const_i32(BN)))
-
-        def load_tile_v(buf_val, tile_idx):
-            async_load_v(V_lds_addr, buf_val, b.mul(tile_idx, b.const_i32(BN)))
-
         def do_qk(kbuf):
-            def krow_for(nsub):
-                if K_GROUP == 1:
-                    return b.add(b.const_i32(nsub * 32), lane_m)
-                return b.add(
-                    b.const_i32(nsub * (32 // K_GROUP)),
-                    k_lane_grp,
-                )
-
-            def k_col(ks):
-                col = b.add(b.const_i32(ks * 16), d_base)
-                return b.add(k_sub_col, col) if K_GROUP > 1 else col
-
-            def q_pack_for(ks):
-                return _load_q_pack(ks) if Q_RELOAD else q_packs[ks]
-
-            if QK_INTERLEAVE:
-                # Interleave the independent N-subtile accumulators instead of
-                # completing one 8-deep MFMA dependency chain before starting
-                # the next. All K operands for a K step are issued first, then
-                # the independent MFMAs can cover one another's LDS/MFMA latency.
-                accs = [b.zero_vec_f32(16) for _ in range(N_SUB)]
-                krows = [krow_for(nsub) for nsub in range(N_SUB)]
-                for ks in range(K_STEPS):
-                    k_packs = [
-                        b.smem_load_vN(
-                            K_lds,
-                            kbuf,
-                            krows[nsub],
-                            k_col(ks),
-                            dtype=dtype,
-                            n=8,
-                        )
-                        for nsub in range(N_SUB)
-                    ]
-                    q_pack = q_pack_for(ks)
-                    for nsub in range(N_SUB):
-                        accs[nsub] = mfma_32x32x16_for_dtype(
-                            b,
-                            dtype,
-                            k_packs[nsub],
-                            q_pack,
-                            accs[nsub],
-                        )
-                    b.sched_group_barrier(DS_READ, N_SUB, 0)
-                    b.sched_group_barrier(MFMA, N_SUB, 0)
-                return [
-                    [b.vec_extract(acc, i) for i in range(16)] for acc in accs
-                ]
-
             s_reg = []
             for nsub in range(N_SUB):
                 acc = b.zero_vec_f32(16)
-                krow = krow_for(nsub)
-                if QK_PIPELINE:
-                    # Depth-1 K prefetch. Unpipelined, each step reads its K pack
-                    # from LDS and immediately MFMAs on it down one acc chain, so
-                    # every MFMA waits on its own lgkmcnt: measured 21% of all
-                    # kernel stall cycles, the single largest site, versus ~0 for
-                    # the PV cluster which already names a sched template.
-                    # Issuing step ks+1's read ahead of step ks's MFMA puts that
-                    # latency in the MFMA's shadow, for one extra live pack.
-                    nxt = b.smem_load_vN(
-                        K_lds, kbuf, krow, k_col(0), dtype=dtype, n=8
-                    )
-                    for ks in range(K_STEPS):
-                        k_pack = nxt
-                        if ks + 1 < K_STEPS:
-                            nxt = b.smem_load_vN(
-                                K_lds, kbuf, krow, k_col(ks + 1), dtype=dtype, n=8
-                            )
-                        acc = mfma_32x32x16_for_dtype(
-                            b, dtype, k_pack, q_pack_for(ks), acc
-                        )
-                        b.sched_group_barrier(DS_READ, 1, 0)
-                        b.sched_group_barrier(MFMA, 1, 0)
+                if K_GROUP == 1:
+                    krow = b.add(b.const_i32(nsub * 32), lane_m)
                 else:
-                    for ks in range(K_STEPS):
-                        k_pack = b.smem_load_vN(
-                            K_lds, kbuf, krow, k_col(ks), dtype=dtype, n=8
-                        )
-                        acc = mfma_32x32x16_for_dtype(
-                            b, dtype, k_pack, q_pack_for(ks), acc
-                        )
+                    krow = b.add(b.const_i32(nsub * (32 // K_GROUP)), k_lane_grp)
+                for ks in range(K_STEPS):
+                    col = b.add(b.const_i32(ks * 16), d_base)
+                    if K_GROUP > 1:
+                        col = b.add(k_sub_col, col)
+                    k_pack = b.smem_load_vN(K_lds, kbuf, krow, col, dtype=dtype, n=8)
+                    acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
                 s_reg.append([b.vec_extract(acc, i) for i in range(16)])
             return s_reg
 
@@ -1836,42 +1583,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
         RAG_KBOUND = RAGGED and (not causal) and (Skv % BN != 0)
 
-        def reduce_sum_tree(values):
-            level = list(values)
-            while len(level) > 1:
-                nxt = []
-                for i in range(0, len(level), 2):
-                    if i + 1 < len(level):
-                        nxt.append(b.fadd(level[i], level[i + 1]))
-                    else:
-                        nxt.append(level[i])
-                level = nxt
-            return level[0]
-
-        def reduce_max_tree(values):
-            level = list(values)
-            while len(level) > 1:
-                nxt = []
-                for i in range(0, len(level), 3):
-                    if i + 2 < len(level):
-                        nxt.append(b.fmax3(level[i], level[i + 1], level[i + 2]))
-                    elif i + 1 < len(level):
-                        nxt.append(b.fmax(level[i], level[i + 1]))
-                    else:
-                        nxt.append(level[i])
-                level = nxt
-            return level[0]
-
         def softmax_max(s_reg, m_i):
-            if TREE_REDUCTIONS:
-                local_max = reduce_max_tree(
-                    s_reg[nsub][i] for nsub in range(N_SUB) for i in range(16)
-                )
-            else:
-                local_max = neg_inf
-                for nsub in range(N_SUB):
-                    for i in range(16):
-                        local_max = b.fmax(local_max, s_reg[nsub][i])
+            local_max = neg_inf
+            for nsub in range(N_SUB):
+                for i in range(16):
+                    local_max = b.fmax(local_max, s_reg[nsub][i])
             tile_max = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
             if LAZY_RESCALE:
                 # Lazy max: only re-anchor when some lane's tile_max exceeds the
@@ -1896,15 +1612,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 [_exp2(b.fsub(s_reg[nsub][i], m_new)) for i in range(16)]
                 for nsub in range(N_SUB)
             ]
-            if TREE_REDUCTIONS:
-                l_local = reduce_sum_tree(
-                    p[nsub][i] for nsub in range(N_SUB) for i in range(16)
-                )
-            else:
-                l_local = b.const_f32(0.0)
-                for nsub in range(N_SUB):
-                    for i in range(16):
-                        l_local = b.fadd(l_local, p[nsub][i])
+            l_local = b.const_f32(0.0)
+            for nsub in range(N_SUB):
+                for i in range(16):
+                    l_local = b.fadd(l_local, p[nsub][i])
             l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
             if use_sinks:
                 # Rescale l_i by alpha: when m_new > m_i, multiply by alpha to change
@@ -1940,19 +1651,6 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             )
 
         def do_pv(o_acc_in, p_packs, vbuf):
-            if PV_INTERLEAVE:
-                out = list(o_acc_in)
-                for kk_step in range(KK_STEPS):
-                    for dt in range(D_TILES):
-                        out[dt] = mfma_32x32x16_for_dtype(
-                            b,
-                            dtype,
-                            read_v(dt, kk_step, vbuf),
-                            p_packs[kk_step],
-                            out[dt],
-                        )
-                return out
-
             out = []
             for dt in range(D_TILES):
                 acc_o = o_acc_in[dt]
@@ -1973,63 +1671,39 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             ]
 
         def pv_fused_exp(o_acc_in, p_packs, vbuf, s_reg, m_new):
-            exp_per = 2 if Q_RELOAD else PV_EXP_PER_MFMA
+            exp_per = (
+                1  # one exp2 per PV-MFMA step -> 256 VGPR / 0 spill (see docstring)
+            )
             slots = [(nsub, i) for nsub in range(N_SUB) for i in range(16)]
             p_vals = [[None] * 16 for _ in range(N_SUB)]
             it = iter(slots)
-
-            def emit_exp_and_sched():
-                n_emit = 0
-                for _ in range(exp_per):
-                    slot = next(it, None)
-                    if slot is None:
-                        break
-                    nsub, i = slot
-                    p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
-                    n_emit += 1
-                b.sched_group_barrier(DS_READ, 2, 0)
-                b.sched_group_barrier(MFMA, 1, 0)
-                b.sched_group_barrier(VALU, max(1, n_emit), 0)
-                b.sched_group_barrier(TRANS, max(1, n_emit), 0)
-
-            if PV_INTERLEAVE:
-                out = list(o_acc_in)
+            out = []
+            for dt in range(D_TILES):
+                acc_o = o_acc_in[dt]
                 for kk_step in range(KK_STEPS):
-                    for dt in range(D_TILES):
-                        out[dt] = mfma_32x32x16_for_dtype(
-                            b,
-                            dtype,
-                            read_v(dt, kk_step, vbuf),
-                            p_packs[kk_step],
-                            out[dt],
-                        )
-                        emit_exp_and_sched()
-            else:
-                out = []
-                for dt in range(D_TILES):
-                    acc_o = o_acc_in[dt]
-                    for kk_step in range(KK_STEPS):
-                        acc_o = mfma_32x32x16_for_dtype(
-                            b,
-                            dtype,
-                            read_v(dt, kk_step, vbuf),
-                            p_packs[kk_step],
-                            acc_o,
-                        )
-                        emit_exp_and_sched()
-                    out.append(acc_o)
+                    acc_o = mfma_32x32x16_for_dtype(
+                        b, dtype, read_v(dt, kk_step, vbuf), p_packs[kk_step], acc_o
+                    )
+                    n_emit = 0
+                    for _ in range(exp_per):
+                        slot = next(it, None)
+                        if slot is None:
+                            break
+                        nsub, i = slot
+                        p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
+                        n_emit += 1
+                    b.sched_group_barrier(DS_READ, 2, 0)
+                    b.sched_group_barrier(MFMA, 1, 0)
+                    b.sched_group_barrier(VALU, max(1, n_emit), 0)
+                    b.sched_group_barrier(TRANS, max(1, n_emit), 0)
+                out.append(acc_o)
             for slot in it:
                 nsub, i = slot
                 p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
-            if TREE_REDUCTIONS:
-                l_local = reduce_sum_tree(
-                    p_vals[nsub][i] for nsub in range(N_SUB) for i in range(16)
-                )
-            else:
-                l_local = b.const_f32(0.0)
-                for nsub in range(N_SUB):
-                    for i in range(16):
-                        l_local = b.fadd(l_local, p_vals[nsub][i])
+            l_local = b.const_f32(0.0)
+            for nsub in range(N_SUB):
+                for i in range(16):
+                    l_local = b.fadd(l_local, p_vals[nsub][i])
             l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
             return out, p_vals, l_tile
 
@@ -2049,24 +1723,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             # PF (partial-vmcnt prefetch): keep the freshest V(j) DMA in flight
             # (drain only V(j-1)+K(j), both older) so DMA overlaps compute instead
             # of a full vmcnt(0) serialize. Bit-identical, raises MfmaUtil.
-            b.s_waitcnt(vmcnt=VMEM_WAIT_KEEP)
+            b.s_waitcnt(vmcnt=V_DMA_PASSES)
             b.s_barrier_bare()
-            if K_PREFETCH_EARLY:
-                # K's write buffer (j+1) never aliases the K this tile reads (j),
-                # so K(j+1)'s DMA can be issued here and land behind this tile's
-                # whole QK+softmax+PV cluster. Issuing it at the end of the body
-                # instead (see load_tile below) leaves it ~0 cycles to land, which
-                # is why the wait above is the kernel's costliest instruction.
-                # V cannot move: at NBUF=2 its write buffer IS the buffer the PV
-                # cluster is about to read, which is what pins V to the end.
-                load_tile_k(pbuf, b.add(j, b.const_i32(1)))
-            if QK_PRIORITY:
-                b.s_setprio(QK_PRIORITY)
             s = do_qk(kbuf)
-            if QK_PRIORITY:
-                b.s_setprio(0)
-            if K_PREFETCH_AFTER_QK:
-                load_tile_k(pbuf, b.add(j, b.const_i32(1)))
             if mask_lower or mask_upper:
                 do_mask(s, j, lower=mask_lower, upper=mask_upper)
             if mask_kbound:
@@ -2078,20 +1737,6 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             b.s_setprio(1)
             o_acc, p_vals, l_tile = pv_fused_exp(o_acc, p_prev, vbuf_prev, s, m_new)
             b.s_setprio(0)
-            if KV_PREFETCH_EPILOGUE:
-                # All V LDS reads have now fed their MFMAs, so the aliased V
-                # buffer is safe to overwrite. Start both DMAs before the
-                # register-only epilogue; that work is independent of K/V(j+1)
-                # and therefore sits in front of the next drain barrier.
-                b.s_barrier_bare()
-                load_tile(pbuf, b.add(j, b.const_i32(1)))
-            if RESCALE_AFTER_PREFETCH:
-                # P relayout has fixed work across waves. Put that before the
-                # rendezvous, then issue DMA and use the wave-variable rescale
-                # as independent latency-hiding work.
-                p_packs = relayout_p(p_vals)
-                b.s_barrier_bare()
-                load_tile(pbuf, b.add(j, b.const_i32(1)))
             if LAZY_RESCALE:
                 # Skip the O/l rescale via a wave-uniform 0/1-trip loop when the
                 # max didn't move (>threshold): 0 trips -> pass o_acc/l_i through
@@ -2113,14 +1758,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             else:
                 l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
                 o_acc = rescale_o(o_acc, alpha)
-            if not RESCALE_AFTER_PREFETCH:
-                p_packs = relayout_p(p_vals)
-            if not KV_PREFETCH_EPILOGUE and not RESCALE_AFTER_PREFETCH:
-                b.s_barrier_bare()
-                if K_PREFETCH_EARLY or K_PREFETCH_AFTER_QK:
-                    load_tile_v(pbuf, b.add(j, b.const_i32(1)))
-                else:
-                    load_tile(pbuf, b.add(j, b.const_i32(1)))
+            p_packs = relayout_p(p_vals)
+            b.s_barrier_bare()
+            load_tile(pbuf, b.add(j, b.const_i32(1)))
             b.scf_yield(m_new, l_new, *o_acc, *p_packs)
 
         if causal:
@@ -2149,11 +1789,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         load_tile(start_buf1, b.add(start_tile, b.const_i32(1)))
         b.s_waitcnt(vmcnt=0)
         b.s_barrier_bare()
-        if QK_PRIORITY:
-            b.s_setprio(QK_PRIORITY)
         s0 = do_qk(start_buf)
-        if QK_PRIORITY:
-            b.s_setprio(0)
         if causal and SW > 0:
             do_mask(s0, start_tile, lower=True, upper=True)
         else:
@@ -2254,17 +1890,14 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         # the KV loop (keeps the loop-carried live set minimal -> 0 spill). Must
         # mirror the work-item decode used at the top of the loop.
         rcp_l = b.rcp(l_i)
-        if spec.resolved_persist_decode in ("gqa_pair", "gqa_pair_hkv"):
+        if spec.resolved_persist_decode == "gqa_pair":
             cta_e = b.mod(wi, b.const_i32(NP))
             phase_e = b.div(wi, b.const_i32(NP))
             pair_lane_e = b.mod(cta_e, b.const_i32(2))
             rem_e = b.div(cta_e, b.const_i32(2))
             bt_e = b.mod(rem_e, b.const_i32(B))
             rem_e = b.div(rem_e, b.const_i32(B))
-            if spec.resolved_persist_decode == "gqa_pair_hkv":
-                hkv_e = b.div(rem_e, b.const_i32(NQB // 2))
-            else:
-                hkv_e = b.mod(rem_e, b.const_i32(Hkv))
+            hkv_e = b.mod(rem_e, b.const_i32(Hkv))
             phase_half_e = b.mod(phase_e, b.const_i32(gqa // 2))
             hql_e = b.add(
                 b.mul(pair_lane_e, b.const_i32(gqa // 2)),
@@ -2384,7 +2017,7 @@ def run_attention_dense_torch(
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
     tensors ([B, S, H, D] for q/out, [B, Skv, Hkv, D] for k/v); ``scale`` is the
     softmax scale (1/sqrt(D)). Returns ``out``. torch is imported lazily by the
-    launcher — this module stays torch-free at import time.
+    launcher ΓÇö this module stays torch-free at import time.
 
     Arbitrary (non-256-multiple) sequence lengths are served WITHOUT host
     padding by the in-kernel ragged path: build ``spec`` with ``ragged=True``
@@ -2396,7 +2029,7 @@ def run_attention_dense_torch(
     Varlen (``spec.varlen``): the kernel emits a 7-arg ABI (packed
     ``[total_tok, H, D]`` q/k/v/o + two int32 ``cu_seqlens`` [batch+1]); pass both
     ``cu_seqlens_q`` and ``cu_seqlens_kv`` or a ``ValueError`` is raised (they are
-    required — never silently launch the 5-arg ABI against a 7-arg kernel).
+    required ΓÇö never silently launch the 5-arg ABI against a 7-arg kernel).
 
     Paged (``spec.paged``): K/V are a PAGED CACHE, not dense tensors -- ``k``/``v``
     are ``[num_kv_blocks, block_size, Hkv, D]`` and are addressed through
