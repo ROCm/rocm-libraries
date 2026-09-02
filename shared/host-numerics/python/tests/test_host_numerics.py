@@ -626,9 +626,6 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(
             hv.to_numpy(tensor_scaled), np.float32(2.0) * x_values
         )
-        options = hv.GemmOptions(hv.ScalarType.Float32)
-        options.epilogue.alpha = scalar_coefficient
-        self.assertEqual(options.epilogue.alpha, complex(2.0, 0.0))
         with self.assertRaisesRegex(ValueError, "rank-zero"):
             hv.linear_combination(x=x, alpha=x)
 
@@ -1916,7 +1913,7 @@ class TensorAndGemmTests(unittest.TestCase):
             np.ones(observed.scales.shape, dtype=np.float32),
         )
 
-    def test_gemm_options_retain_owned_inputs_and_scaling(self):
+    def test_gemm_accepts_owned_inputs_and_scaling_tensors(self):
         a_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         b_values = np.asarray([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
         c_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
@@ -1926,24 +1923,6 @@ class TensorAndGemmTests(unittest.TestCase):
         scale_a = np.asarray([2.0, 3.0], dtype=np.float32)
         scale_b = np.asarray([4.0, 5.0], dtype=np.float32)
         bias = np.asarray([1.0, -2.0], dtype=np.float32)
-
-        def make_arguments():
-            operand_a = hv.from_numpy(a_values)
-            operand_b = hv.from_numpy(b_values)
-            options = hv.GemmOptions(hv.ScalarType.Float32)
-            options.pre_quantization_scales_a = [hv.from_numpy(pre_scale_a[:, None])]
-            options.pre_quantization_scales_b = [hv.from_numpy(pre_scale_b)]
-            options.epilogue.alpha = 0.5
-            options.epilogue.beta = -1.0
-            options.epilogue.scale_alpha = hv.from_numpy(scale_alpha[:, None])
-            options.epilogue.scale_a = hv.from_numpy(scale_a[:, None])
-            options.epilogue.scale_b = hv.from_numpy(scale_b)
-            options.epilogue.bias = hv.from_numpy(bias[:, None])
-            options.epilogue.output_scale = 0.25
-            return operand_a, operand_b, hv.from_numpy(c_values), options
-
-        operand_a, operand_b, c, options = make_arguments()
-        gc.collect()
 
         scaled_a = np.float32(a_values * pre_scale_a[:, None])
         scaled_b = np.float32(b_values * pre_scale_b[None, :])
@@ -1960,18 +1939,31 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         expected = np.float32(np.float32(combined + bias[:, None]) * np.float32(0.25))
 
-        result = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 2]))
-        hv.reference_gemm_into(
-            operand_a,
-            operand_b,
-            c,
-            result,
-            options,
-            hv.GemmBackend.Pointwise,
+        result = hv.reference_gemm(
+            hv.from_numpy(a_values),
+            hv.from_numpy(b_values),
+            hv.from_numpy(c_values),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            alpha=0.5,
+            beta=-1.0,
+            pre_quantization_scales_a=[hv.from_numpy(pre_scale_a[:, None])],
+            pre_quantization_scales_b=[hv.from_numpy(pre_scale_b)],
+            scale_alpha=hv.from_numpy(scale_alpha[:, None]),
+            scale_a=hv.from_numpy(scale_a[:, None]),
+            scale_b=hv.from_numpy(scale_b),
+            bias=hv.from_numpy(bias[:, None]),
+            output_scale=0.25,
+            backend=hv.GemmBackend.Pointwise,
         )
         np.testing.assert_array_equal(hv.to_numpy(result), expected)
 
     def test_gemm_api_requires_explicit_c(self):
+        self.assertFalse(hasattr(hv, "GemmOptions"))
+        self.assertFalse(hasattr(hv, "GemmEpilogue"))
+        self.assertFalse(hasattr(hv.GemmBackend, "Blas"))
+        self.assertFalse(hasattr(hv.GemmBackend, "Mixed"))
+
         a_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         b_values = np.asarray([[5.0], [6.0]], dtype=np.float32)
         operand_a = hv.from_numpy(a_values)
@@ -1995,31 +1987,24 @@ class TensorAndGemmTests(unittest.TestCase):
     def test_gemm_options_apply_operand_quantization_and_block_scales(self):
         operand_a = hv.from_numpy(np.full((1, 8), 1.5, dtype=np.float32))
         operand_b = hv.from_numpy(np.full((8, 1), 2.0, dtype=np.float32))
-        options = hv.GemmOptions(hv.ScalarType.Float32)
-        options.compute_type_a = hv.ScalarType.Float16
-        options.pre_quantization_scales_a = [
-            hv.from_numpy(np.asarray([2.0], dtype=np.float32))
-        ]
-        options.block_scale_a = hv.from_numpy(
-            np.asarray([[2.0, 4.0]], dtype=np.float32)
-        )
-        options.block_size_a = 4
-        options.compute_type_b = hv.ScalarType.BFloat16
-        options.pre_quantization_scales_b = [
-            hv.from_numpy(np.asarray([0.5], dtype=np.float32))
-        ]
-        options.block_scale_b = hv.from_numpy(
-            np.asarray([[3.0, 5.0]], dtype=np.float32)
-        )
-        options.block_size_b = 4
-        result = hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1]))
-
-        hv.reference_gemm_into(
+        result = hv.reference_gemm(
             operand_a,
             operand_b,
             hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1])),
-            result,
-            options,
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            compute_type_a=hv.ScalarType.Float16,
+            compute_type_b=hv.ScalarType.BFloat16,
+            pre_quantization_scales_a=[
+                hv.from_numpy(np.asarray([2.0], dtype=np.float32))
+            ],
+            pre_quantization_scales_b=[
+                hv.from_numpy(np.asarray([0.5], dtype=np.float32))
+            ],
+            block_scale_a=hv.from_numpy(np.asarray([[2.0, 4.0]], dtype=np.float32)),
+            block_scale_b=hv.from_numpy(np.asarray([[3.0, 5.0]], dtype=np.float32)),
+            block_size_a=4,
+            block_size_b=4,
         )
         np.testing.assert_array_equal(
             hv.to_numpy(result), np.asarray([[312.0]], dtype=np.float32)
@@ -2033,15 +2018,13 @@ class TensorAndGemmTests(unittest.TestCase):
         b_values = np.asarray([[2.0 - 1.0j], [0.5 + 2.0j]], dtype=np.complex64)
         operand_a = hv.from_numpy(a_values)
         operand_b = hv.from_numpy(b_values)
-        options = hv.GemmOptions(hv.ScalarType.ComplexFloat32)
-        options.conjugate_a = True
-        result = hv.Tensor(hv.ScalarType.ComplexFloat32, hv.Shape([2, 1]))
-        hv.reference_gemm_into(
+        result = hv.reference_gemm(
             operand_a,
             operand_b,
             hv.Tensor(hv.ScalarType.ComplexFloat32, hv.Shape([2, 1])),
-            result,
-            options,
+            hv.ScalarType.ComplexFloat32,
+            hv.ScalarType.ComplexFloat32,
+            conjugate_a=True,
         )
         np.testing.assert_allclose(
             hv.to_numpy(result),
@@ -2057,15 +2040,14 @@ class TensorAndGemmTests(unittest.TestCase):
         operand_a = hv.from_numpy(a_values)
         operand_b = hv.from_numpy(b_values)
         c = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3]))
-        options = hv.GemmOptions(hv.ScalarType.Float32)
         result = hv.Tensor(hv.ScalarType.Float32, output_layout)
         hv.reference_gemm_into(
             operand_a,
             operand_b,
             c,
             result,
-            options,
-            hv.GemmBackend.Blocked,
+            accumulator_type=hv.ScalarType.Float32,
+            backend=hv.GemmBackend.Blocked,
         )
         expected = a_values @ b_values
         np.testing.assert_array_equal(hv.to_numpy(result), expected)
@@ -2078,20 +2060,10 @@ class TensorAndGemmTests(unittest.TestCase):
             operand_b,
             c,
             automatic,
-            options,
-            hv.GemmBackend.Automatic,
+            accumulator_type=hv.ScalarType.Float32,
+            backend=hv.GemmBackend.Automatic,
         )
         np.testing.assert_array_equal(hv.to_numpy(automatic), expected)
-
-        with self.assertRaisesRegex(ValueError, "reporting-only"):
-            hv.reference_gemm_into(
-                operand_a,
-                operand_b,
-                c,
-                hv.Tensor(hv.ScalarType.Float32, output_layout),
-                options,
-                hv.GemmBackend.Mixed,
-            )
 
         storage = np.frombuffer(result.storage, dtype=np.float32)
         expected_storage = np.zeros(15, dtype=np.float32)
