@@ -566,6 +566,7 @@ Problem::FindSolutionsImpl(const Handle& handle,
 
     static solver::softmax::AttnSoftmax attnSoftmaxSolver;
     static solver::softmax::Softmax regularSoftmaxSolver;
+    static solver::softmax::SoftmaxNoncontiguous noncontiguousSoftmaxSolver;
 
     auto check_solver = [&]<typename Solver>(const Solver* solver) {
         if(ret.size() >= max_solutions)
@@ -597,6 +598,7 @@ Problem::FindSolutionsImpl(const Handle& handle,
 
     check_solver(&attnSoftmaxSolver);
     check_solver(&regularSoftmaxSolver);
+    check_solver(&noncontiguousSoftmaxSolver);
 
     return ret;
 }

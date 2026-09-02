@@ -39,7 +39,9 @@ struct InvokeParams : public miopen::InvokeParams
                  const TensorDescriptor& xDesc_,
                  ConstData_t x_,
                  const TensorDescriptor& yDesc_,
-                 Data_t y_)
+                 Data_t y_,
+                 int x_offset_ = 0,
+                 int y_offset_ = 0)
         : xdxDesc(xDesc_),
           x(x_),
           dx(nullptr),
@@ -48,7 +50,12 @@ struct InvokeParams : public miopen::InvokeParams
           forward_y(y_),
           backward_y(nullptr),
 
-          dy(nullptr)
+          dy(nullptr),
+
+          x_offset(x_offset_),
+          y_offset(y_offset_),
+          dx_offset(0),
+          dy_offset(0)
     {
         InitializeAlphaBeta(alpha_, beta_);
     }
@@ -60,7 +67,10 @@ struct InvokeParams : public miopen::InvokeParams
                  const TensorDescriptor& dyDesc_,
                  ConstData_t dy_,
                  const TensorDescriptor& dxDesc_,
-                 Data_t dx_)
+                 Data_t dx_,
+                 int y_offset_  = 0,
+                 int dx_offset_ = 0,
+                 int dy_offset_ = 0)
         : xdxDesc(dxDesc_),
           x(nullptr),
           dx(dx_),
@@ -70,7 +80,12 @@ struct InvokeParams : public miopen::InvokeParams
           backward_y(y_),
 
           dyDesc(dyDesc_),
-          dy(dy_)
+          dy(dy_),
+
+          x_offset(0),
+          y_offset(y_offset_),
+          dx_offset(dx_offset_),
+          dy_offset(dy_offset_)
     {
         InitializeAlphaBeta(alpha_, beta_);
     }
@@ -94,6 +109,11 @@ public:
     // backward specific part
     TensorDescriptor dyDesc;
     ConstData_t dy;
+
+    int x_offset;
+    int y_offset;
+    int dx_offset;
+    int dy_offset;
 
 private:
     void InitializeAlphaBeta(const void* alpha_, const void* beta_)

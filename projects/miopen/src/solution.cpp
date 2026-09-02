@@ -536,16 +536,30 @@ void Solution::RunImpl(const Handle& handle,
 
     solver::softmax::Softmax regularSoftmax;
     solver::softmax::AttnSoftmax attnSoftmax;
+    solver::softmax::SoftmaxNoncontiguous noncontiguousSoftmax;
 
     if(!kernels.empty())
     {
-        const auto ctx = ExecutionContext{&handle};
-        auto db_getter = MakeConvDbGetter(ctx);
-        const auto softmax_solution =
-            GetSolver() == regularSoftmax.SolverDbId()
-                ? solver::FindSolution(
-                      regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
-                : attnSoftmax.GetSolution(ctx, problem_description);
+        const auto ctx              = ExecutionContext{&handle};
+        auto db_getter              = MakeConvDbGetter(ctx);
+        const auto softmax_solution = [&]() {
+            const auto solverId = GetSolver();
+            if(solverId == regularSoftmax.SolverDbId())
+            {
+                return solver::FindSolution(
+                    regularSoftmax, ctx, problem_description, db_getter, invoke_ctx);
+            }
+            else if(solverId == attnSoftmax.SolverDbId())
+            {
+                return attnSoftmax.GetSolution(ctx, problem_description);
+            }
+            else if(solverId == noncontiguousSoftmax.SolverDbId())
+            {
+                return noncontiguousSoftmax.GetSolution(ctx, problem_description);
+            }
+            MIOPEN_THROW(miopenStatusInvalidValue,
+                         "Invalid softmax solver ID: " + solverId.ToString());
+        }();
         auto kernel_handles = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
 
         if(softmax_solution.invoker_factory.has_value())

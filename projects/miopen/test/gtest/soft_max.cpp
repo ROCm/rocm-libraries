@@ -683,79 +683,347 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 // real N/C/H/W strides into the kernel (with IS_*_CONTIGUOUS handling); the new
 // code assumes a packed layout, so a padded (non-packed) tensor is addressed
 // wrongly. Here the N stride is padded to 32 (packed would be 16).
-// Currently disabled as no kernel can pick up non-packed tensors at the moment, but it can still be
-// ran using
-//   ./bin/test_soft_max --gtest_also_run_disabled_tests --gtest_filter='*Softmax_NonContiguous*'
-struct GPU_Softmax_NonContiguous_FP32 : public testing::Test
+struct GPU_Softmax_NonContiguous_FP32
+    : public testing::TestWithParam<std::tuple<std::tuple<std::vector<size_t>, std::vector<size_t>>,
+                                               miopenSoftmaxAlgorithm_t,
+                                               miopenSoftmaxMode_t,
+                                               int,
+                                               int,
+                                               int>>
 {
-};
+    void RunForward()
+    {
+        auto&& handle                                                         = get_handle();
+        auto [tensorDimsStrides, algo, mode, xdx_offset, y_offset, dy_offset] = GetParam();
+        auto [dims, strides]                                                  = tensorDimsStrides;
 
-TEST_F(GPU_Softmax_NonContiguous_FP32, DISABLED_ChannelPaddedNStride)
-{
-    auto&& handle = get_handle();
+        auto in_host   = tensor<float>{dims, strides}.generate(tensor_elem_gen_integer{5});
+        size_t n_elems = dims[0] * strides[0];
 
-    const std::vector<size_t> dims    = {2, 4, 2, 2};  // N, C, H, W
-    const std::vector<size_t> strides = {32, 4, 2, 1}; // packed N stride would be 16
+        std::vector<float> xbuf(n_elems + xdx_offset, 1e30f);
+        std::vector<float> ybuf(n_elems + y_offset, -42.0f);
 
-    auto input  = tensor<float>{dims, strides};
-    auto output = tensor<float>{dims, strides};
+        // Poison every element (incl. the 16-element inter-batch padding), then set
+        // only the real elements. If the kernel assumes a packed layout it will read
+        // the poisoned padding and/or write batch 1 to the wrong offset.
+        auto off = [&](size_t n, size_t c, size_t h, size_t w) {
+            return n * strides[0] + c * strides[1] + h * strides[2] + w * strides[3];
+        };
+        for(size_t n = 0; n < dims[0]; ++n)
+            for(size_t c = 0; c < dims[1]; ++c)
+                for(size_t h = 0; h < dims[2]; ++h)
+                    for(size_t w = 0; w < dims[3]; ++w)
+                        xbuf[off(n, c, h, w) + xdx_offset] =
+                            static_cast<float>((n * 13 + c * 7 + h * 3 + w + 1) % 5);
 
-    // Poison every element (incl. the 16-element inter-batch padding), then set
-    // only the real elements. If the kernel assumes a packed layout it will read
-    // the poisoned padding and/or write batch 1 to the wrong offset.
-    std::fill(input.data.begin(), input.data.end(), 1e30f);
-    std::fill(output.data.begin(), output.data.end(), -42.0f);
-    for(size_t n = 0; n < dims[0]; ++n)
-        for(size_t c = 0; c < dims[1]; ++c)
-            for(size_t h = 0; h < dims[2]; ++h)
-                for(size_t w = 0; w < dims[3]; ++w)
-                    input(n, c, h, w) = static_cast<float>((n * 13 + c * 7 + h * 3 + w + 1) % 5);
+        const float alpha = 1.0f, beta = 0.0f;
+        auto in_dev  = handle.Write(xbuf);
+        auto out_dev = handle.Write(ybuf);
 
-    const float alpha = 1.0f, beta = 0.0f;
-    auto in_dev  = handle.Write(input.data);
-    auto out_dev = handle.Write(output.data);
+        miopen::SoftmaxForward(handle,
+                               &alpha,
+                               &beta,
+                               in_host.desc,
+                               in_dev.get(),
+                               in_host.desc,
+                               out_dev.get(),
+                               algo,
+                               mode,
+                               xdx_offset,
+                               y_offset);
+        auto res = handle.Read<float>(out_dev, ybuf.size());
 
-    miopen::SoftmaxForward(handle,
-                           &alpha,
-                           &beta,
-                           input.desc,
-                           in_dev.get(),
-                           output.desc,
-                           out_dev.get(),
-                           MIOPEN_SOFTMAX_ACCURATE,
-                           MIOPEN_SOFTMAX_MODE_CHANNEL);
-    auto res = handle.Read<float>(out_dev, output.data.size());
-
-    // CPU reference over the real strides: softmax over C for each (n,h,w).
-    auto off = [&](size_t n, size_t c, size_t h, size_t w) {
-        return n * strides[0] + c * strides[1] + h * strides[2] + w * strides[3];
-    };
-    double max_err = 0.0;
-    for(size_t n = 0; n < dims[0]; ++n)
-        for(size_t h = 0; h < dims[2]; ++h)
-            for(size_t w = 0; w < dims[3]; ++w)
+        // CPU reference over the real strides
+        double max_err = 0.0;
+        for(size_t n = 0; n < dims[0]; ++n)
+        {
+            if(mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
             {
-                float mx = std::numeric_limits<float>::lowest();
-                for(size_t c = 0; c < dims[1]; ++c)
-                    mx = std::max(mx, input(n, c, h, w));
-                double sum = 0.0;
-                for(size_t c = 0; c < dims[1]; ++c)
-                    sum += std::exp(input(n, c, h, w) - mx);
+                float mx = 0.0f;
+                if(algo != MIOPEN_SOFTMAX_FAST)
+                {
+                    mx = std::numeric_limits<float>::lowest();
+                    for(size_t c = 0; c < dims[1]; ++c)
+                    {
+                        for(size_t h = 0; h < dims[2]; ++h)
+                        {
+                            for(size_t w = 0; w < dims[3]; ++w)
+                            {
+                                mx = std::max(mx, xbuf[off(n, c, h, w) + xdx_offset]);
+                            }
+                        }
+                    }
+                }
+                double sum = algo == MIOPEN_SOFTMAX_LOG ? NEGATIVE_CUTOFF_VAL_FP32 : 0.0;
                 for(size_t c = 0; c < dims[1]; ++c)
                 {
-                    double ref = std::exp(input(n, c, h, w) - mx) / sum;
-                    max_err    = std::max(max_err, std::abs(ref - res[off(n, c, h, w)]));
+                    for(size_t h = 0; h < dims[2]; ++h)
+                    {
+                        for(size_t w = 0; w < dims[3]; ++w)
+                        {
+                            if(algo == MIOPEN_SOFTMAX_LOG)
+                            {
+                                sum = logaddexp<double>(sum,
+                                                        xbuf[off(n, c, h, w) + xdx_offset] - mx,
+                                                        NEGATIVE_CUTOFF_VAL_FP32);
+                            }
+                            else
+                            {
+                                sum += std::exp(xbuf[off(n, c, h, w) + xdx_offset] - mx);
+                            }
+                        }
+                    }
+                }
+                for(size_t c = 0; c < dims[1]; ++c)
+                {
+                    for(size_t h = 0; h < dims[2]; ++h)
+                    {
+                        for(size_t w = 0; w < dims[3]; ++w)
+                        {
+                            double ref =
+                                algo == MIOPEN_SOFTMAX_LOG
+                                    ? xbuf[off(n, c, h, w) + xdx_offset] - mx - sum
+                                    : std::exp(xbuf[off(n, c, h, w) + xdx_offset] - mx) / sum;
+                            double err = std::abs(ref - res[off(n, c, h, w) + y_offset]);
+                            if(ref != 0.0)
+                            {
+                                err = std::min(err, std::abs(err / ref));
+                            }
+                            max_err = std::max(max_err, err);
+                        }
+                    }
                 }
             }
-    EXPECT_LT(max_err, 1e-4) << "Non-packed tensor mis-addressed: GPU output does not "
-                                "match strided CPU reference (max abs err "
-                             << max_err << ").";
+            else
+            {
+                for(size_t h = 0; h < dims[2]; ++h)
+                {
+                    for(size_t w = 0; w < dims[3]; ++w)
+                    {
+                        float mx = 0.0f;
+                        if(algo != MIOPEN_SOFTMAX_FAST)
+                        {
+                            mx = std::numeric_limits<float>::lowest();
+                            for(size_t c = 0; c < dims[1]; ++c)
+                            {
+                                mx = std::max(mx, xbuf[off(n, c, h, w) + xdx_offset]);
+                            }
+                        }
+                        double sum = algo == MIOPEN_SOFTMAX_LOG ? NEGATIVE_CUTOFF_VAL_FP32 : 0.0;
+                        for(size_t c = 0; c < dims[1]; ++c)
+                        {
+                            if(algo == MIOPEN_SOFTMAX_LOG)
+                            {
+                                sum = logaddexp<double>(sum,
+                                                        xbuf[off(n, c, h, w) + xdx_offset] - mx,
+                                                        NEGATIVE_CUTOFF_VAL_FP32);
+                            }
+                            else
+                            {
+                                sum += std::exp(xbuf[off(n, c, h, w) + xdx_offset] - mx);
+                            }
+                        }
+                        for(size_t c = 0; c < dims[1]; ++c)
+                        {
+                            double ref =
+                                algo == MIOPEN_SOFTMAX_LOG
+                                    ? xbuf[off(n, c, h, w) + xdx_offset] - mx - sum
+                                    : std::exp(xbuf[off(n, c, h, w) + xdx_offset] - mx) / sum;
+                            double err = std::abs(ref - res[off(n, c, h, w) + y_offset]);
+                            if(ref != 0.0)
+                            {
+                                err = std::min(err, std::abs(err / ref));
+                            }
+                            max_err = std::max(max_err, err);
+                        }
+                    }
+                }
+            }
+        }
+        EXPECT_LT(max_err, 1e-4) << "Non-packed tensor mis-addressed: GPU output does not "
+                                    "match strided CPU reference (max abs err "
+                                 << max_err << ").";
+    }
+
+    void RunBackward()
+    {
+        auto&& handle                                                         = get_handle();
+        auto [tensorDimsStrides, algo, mode, xdx_offset, y_offset, dy_offset] = GetParam();
+        auto [dims, strides]                                                  = tensorDimsStrides;
+
+        auto in_host   = tensor<float>{dims, strides}.generate(tensor_elem_gen_integer{5});
+        size_t n_elems = dims[0] * strides[0];
+
+        std::vector<float> dybuf(n_elems + dy_offset, -42.0f);
+        std::vector<float> ybuf(n_elems + y_offset, 42.0f);
+        std::vector<float> dxbuf(n_elems + xdx_offset, 1e30f);
+
+        // Poison every element (incl. the 16-element inter-batch padding), then set
+        // only the real elements. If the kernel assumes a packed layout it will read
+        // the poisoned padding and/or write batch 1 to the wrong offset.
+        auto off = [&](size_t n, size_t c, size_t h, size_t w) {
+            return n * strides[0] + c * strides[1] + h * strides[2] + w * strides[3];
+        };
+        for(size_t n = 0; n < dims[0]; ++n)
+        {
+            for(size_t c = 0; c < dims[1]; ++c)
+            {
+                for(size_t h = 0; h < dims[2]; ++h)
+                {
+                    for(size_t w = 0; w < dims[3]; ++w)
+                    {
+                        dybuf[off(n, c, h, w) + dy_offset] =
+                            static_cast<float>((n * 13 + c * 7 + h * 3 + w + 1) % 5);
+                        ybuf[off(n, c, h, w) + y_offset] =
+                            static_cast<float>((n * 17 + c * 11 + h * 5 + w + 3) % 7);
+                    }
+                }
+            }
+        }
+
+        const float alpha = 1.0f, beta = 0.0f;
+        auto dy_dev = handle.Write(dybuf);
+        auto y_dev  = handle.Write(ybuf);
+        auto dx_dev = handle.Write(dxbuf);
+
+        miopen::SoftmaxBackward(handle,
+                                &alpha,
+                                in_host.desc,
+                                y_dev.get(),
+                                in_host.desc,
+                                dy_dev.get(),
+                                &beta,
+                                in_host.desc,
+                                dx_dev.get(),
+                                algo,
+                                mode,
+                                y_offset,
+                                dy_offset,
+                                xdx_offset);
+        auto res = handle.Read<float>(dx_dev, dxbuf.size());
+
+        // CPU reference over the real strides
+        double max_err = 0.0;
+        for(size_t n = 0; n < dims[0]; ++n)
+        {
+            if(mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
+            {
+                double channel_dot = 0.0;
+                for(size_t c = 0; c < dims[1]; ++c)
+                {
+                    for(size_t h = 0; h < dims[2]; ++h)
+                    {
+                        for(size_t w = 0; w < dims[3]; ++w)
+                        {
+                            float tmp = dybuf[off(n, c, h, w) + dy_offset];
+                            if(algo != MIOPEN_SOFTMAX_LOG)
+                            {
+                                tmp *= ybuf[off(n, c, h, w) + y_offset];
+                            }
+                            channel_dot += tmp;
+                        }
+                    }
+                }
+                for(size_t c = 0; c < dims[1]; ++c)
+                {
+                    for(size_t h = 0; h < dims[2]; ++h)
+                    {
+                        for(size_t w = 0; w < dims[3]; ++w)
+                        {
+                            double ref = dybuf[off(n, c, h, w) + dy_offset];
+                            if(algo == MIOPEN_SOFTMAX_LOG)
+                            {
+                                ref -= channel_dot * exp(ybuf[off(n, c, h, w) + y_offset]);
+                            }
+                            else
+                            {
+                                ref = (ref - channel_dot) * ybuf[off(n, c, h, w) + y_offset];
+                            }
+                            double err = std::abs(ref - res[off(n, c, h, w) + xdx_offset]);
+                            if(ref != 0.0)
+                            {
+                                err = std::min(err, std::abs(err / ref));
+                            }
+                            max_err = std::max(max_err, err);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                for(size_t h = 0; h < dims[2]; ++h)
+                {
+                    for(size_t w = 0; w < dims[3]; ++w)
+                    {
+                        double channel_dot = 0.0;
+                        for(size_t c = 0; c < dims[1]; ++c)
+                        {
+                            float tmp = dybuf[off(n, c, h, w) + dy_offset];
+                            if(algo != MIOPEN_SOFTMAX_LOG)
+                            {
+                                tmp *= ybuf[off(n, c, h, w) + y_offset];
+                            }
+                            channel_dot += tmp;
+                        }
+                        for(size_t c = 0; c < dims[1]; ++c)
+                        {
+                            double ref = dybuf[off(n, c, h, w) + dy_offset];
+                            if(algo == MIOPEN_SOFTMAX_LOG)
+                            {
+                                ref -= channel_dot * exp(ybuf[off(n, c, h, w) + y_offset]);
+                            }
+                            else
+                            {
+                                ref = (ref - channel_dot) * ybuf[off(n, c, h, w) + y_offset];
+                            }
+                            double err = std::abs(ref - res[off(n, c, h, w) + xdx_offset]);
+                            if(ref != 0.0)
+                            {
+                                err = std::min(err, std::abs(err / ref));
+                            }
+                            max_err = std::max(max_err, err);
+                        }
+                    }
+                }
+            }
+        }
+        EXPECT_LT(max_err, 1e-4) << "Non-packed tensor mis-addressed: GPU output does not "
+                                    "match strided CPU reference (max abs err "
+                                 << max_err << ").";
+    }
+};
+
+TEST_P(GPU_Softmax_NonContiguous_FP32, ForwardTest) { RunForward(); }
+TEST_P(GPU_Softmax_NonContiguous_FP32, BackwardTest) { RunBackward(); }
+
+namespace {
+
+std::vector<std::tuple<std::vector<size_t>, std::vector<size_t>>> nonContiguousTestCases()
+{
+    return {{{2, 4, 2, 2}, {32, 4, 2, 1}},
+            {{8, 2048, 5, 7}, {131072, 35, 7, 1}},
+            {{2, 4, 2, 2}, {32, 1, 8, 4}},
+            {{8, 2048, 5, 7}, {131072, 1, 14336, 2048}}};
 }
+
+} // namespace
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Softmax_NonContiguous_FP32,
+                         testing::Combine(testing::ValuesIn(nonContiguousTestCases()),
+                                          testing::Values(MIOPEN_SOFTMAX_FAST,
+                                                          MIOPEN_SOFTMAX_ACCURATE,
+                                                          MIOPEN_SOFTMAX_LOG),
+                                          testing::Values(MIOPEN_SOFTMAX_MODE_INSTANCE,
+                                                          MIOPEN_SOFTMAX_MODE_CHANNEL),
+                                          testing::Values(0, 11),
+                                          testing::Values(0, 13),
+                                          testing::Values(0, 17)));
 
 // --- Extra coverage: non-zero x/y offsets --
 // Findings from the tests below (both DISABLED -- see caveats):
 //   * The Softmax solver DOES honor offsets correctly.
-//   * But SoftmaxForward runs Find over {AttnSoftmax, Softmax}; AttnSoftmax
+//   * But SoftmaxForward runs Find over {AttnSoftmax, Softmax, SoftmaxNoncontiguous}; AttnSoftmax
 //     ignores the offsets and can
 //     win the Find race even for ordinary softmax shapes -> SoftmaxForward with
 //     a non-zero offset then writes to the un-offset location (wrong result).

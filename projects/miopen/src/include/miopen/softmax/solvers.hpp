@@ -153,6 +153,25 @@ struct AttnSoftmax final : SoftmaxSolver
     bool MayNeedWorkspace() const override { return false; }
 };
 
+struct SoftmaxNoncontiguous final : SoftmaxSolver
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<SoftmaxNoncontiguous>(); }
+
+    bool IsApplicable(const ExecutionContext& context,
+                      const miopen::softmax::ProblemDescription& problem) const override;
+
+    ConvSolution GetSolution(const ExecutionContext& context,
+                             const miopen::softmax::ProblemDescription& problem) const override;
+
+    std::size_t GetWorkspaceSize(const ExecutionContext&,
+                                 const miopen::softmax::ProblemDescription&) const override
+    {
+        return 0;
+    }
+
+    bool MayNeedWorkspace() const override { return false; }
+};
+
 } // namespace softmax
 
 } // namespace solver
