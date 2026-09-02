@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import enum
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
@@ -1371,14 +1372,8 @@ class _DebugInfo:
                 continue
             lines[i] = f"{line}, !dbg !{dbg}"
 
-    def variable_id(self, name: str, type_name: str, loc: str) -> int:
-        """Create one scalar source variable for ``llvm.dbg.value``."""
-        if not self._has_variables:
-            raise ValueError("debug variable metadata was not enabled")
-        frames = _parse_loc(loc)
-        if not frames:
-            raise ValueError(f"debug value {name!r} has no usable source location")
-        frame = frames[0]
+    def _basic_type_id(self, type_name: str) -> tuple[int, int]:
+        """Create a scalar DI type and return ``(metadata id, bit width)``."""
         type_specs = {
             "i1": (1, "DW_ATE_boolean"),
             "i8": (8, "DW_ATE_signed"),
@@ -1396,6 +1391,45 @@ class _DebugInfo:
             raise ValueError(f"unsupported debug scalar type {type_name!r}")
         size, encoding = spec
         type_id = self._alloc()
+        escaped_type = _escape_md_string(type_name)
+        self._nodes.append(
+            f'!{type_id} = !DIBasicType(name: "{escaped_type}", size: {size}, '
+            f"encoding: {encoding})"
+        )
+        return type_id, size
+
+    def _type_id(self, type_name: str) -> int:
+        """Create scalar or fixed-vector debug type metadata."""
+        match = re.fullmatch(r"vec<(.+)x([1-9][0-9]*)>", type_name)
+        if match is None:
+            return self._basic_type_id(type_name)[0]
+
+        element_name, count_text = match.groups()
+        count = int(count_text)
+        element_id, element_bits = self._basic_type_id(element_name)
+        range_id = self._alloc()
+        elements_id = self._alloc()
+        vector_id = self._alloc()
+        self._nodes.extend(
+            [
+                f"!{range_id} = !DISubrange(count: {count})",
+                f"!{elements_id} = !{{!{range_id}}}",
+                f"!{vector_id} = !DICompositeType(tag: DW_TAG_array_type, "
+                f"baseType: !{element_id}, size: {element_bits * count}, "
+                f"flags: DIFlagVector, elements: !{elements_id})",
+            ]
+        )
+        return vector_id
+
+    def variable_id(self, name: str, type_name: str, loc: str) -> int:
+        """Create one scalar or fixed-vector source variable."""
+        if not self._has_variables:
+            raise ValueError("debug variable metadata was not enabled")
+        frames = _parse_loc(loc)
+        if not frames:
+            raise ValueError(f"debug value {name!r} has no usable source location")
+        frame = frames[0]
+        type_id = self._type_id(type_name)
         variable_id = self._alloc()
         file_id = self._file_id(frame.path)
         scope_id = (
@@ -1403,12 +1437,7 @@ class _DebugInfo:
             if len(frames) == 1
             else self._inlined_subprogram_id(frame)
         )
-        escaped_type = _escape_md_string(type_name)
         escaped_name = _escape_md_string(name)
-        self._nodes.append(
-            f'!{type_id} = !DIBasicType(name: "{escaped_type}", size: {size}, '
-            f"encoding: {encoding})"
-        )
         self._nodes.append(
             f'!{variable_id} = !DILocalVariable(name: "{escaped_name}", '
             f"scope: !{scope_id}, file: !{file_id}, "
@@ -1495,6 +1524,7 @@ class _Lowerer:
                 raise ValueError("each debug_values entry must be a mapping")
             value_name = str(selection.get("value", ""))
             self._debug_values.setdefault(value_name, []).append(selection)
+        self._emitted_debug_values: Set[str] = set()
         self._debug: Optional[_DebugInfo] = (
             _DebugInfo(kernel.name, bool(debug_values))
             if kernel.attrs.get("debug_info")
@@ -1991,6 +2021,9 @@ class _Lowerer:
             return
         for result in op.results:
             for selection in self._debug_values.get(result.name, []):
+                selected_name = str(selection["name"])
+                if selected_name in self._emitted_debug_values:
+                    continue
                 loc = str(selection["loc"])
                 dbg = self._debug.location_id(loc)
                 if dbg is None:
@@ -1998,7 +2031,7 @@ class _Lowerer:
                         f"debug value {selection['name']!r} has no usable location"
                     )
                 variable = self._debug.variable_id(
-                    str(selection["name"]), str(selection["type"]), loc
+                    selected_name, str(selection["type"]), loc
                 )
                 self._need("dbg.value")
                 self._current().emit(
@@ -2006,6 +2039,7 @@ class _Lowerer:
                     f"metadata {_llvm_type(result.type)} {self._operand(result)}, "
                     f"metadata !{variable}, metadata !DIExpression()), !dbg !{dbg}"
                 )
+                self._emitted_debug_values.add(selected_name)
 
     def lower_region(self, region: Region) -> None:
         for op in region.ops:

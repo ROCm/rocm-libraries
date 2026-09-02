@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from .arch import LayoutMap
+from .arch import ArchTarget, LayoutMap, MmaOp, known_arches
 
 LOGICAL_DTYPES = (
     "f16",
@@ -24,6 +24,15 @@ LOGICAL_DTYPES = (
     "iu8",
     "iu4",
 )
+
+_CATALOG_TO_LOGICAL_DTYPE = {
+    "fp16": "f16",
+    "bf16": "bf16",
+    "fp32": "f32",
+    "fp8e4m3": "fp8e4m3",
+    "bf8e5m2": "bf8e5m2",
+    "i32": "i32",
+}
 
 
 class _IntegerBuilder:
@@ -183,3 +192,65 @@ def logical_value_description(
             "coordinates": coordinates,
         },
     }
+
+
+def mma_accumulator_description(*, name: str, op_id: str) -> dict[str, Any]:
+    """Describe a direct ``tile.mma`` result without requiring a target.
+
+    An ``op_id`` is a cross-target instruction identity. Every architecture
+    catalog row carrying that identity must therefore agree on the operation's
+    family, types, shape, fragment width, wave size, and logical accumulator
+    layout. Validate that invariant here so debug metadata cannot silently use
+    whichever architecture happens to be visited first.
+    """
+    matches: list[MmaOp] = []
+    for arch in known_arches():
+        op = ArchTarget.from_gfx(arch).mma.by_op_id(op_id)
+        if op is not None:
+            matches.append(op)
+    if not matches:
+        raise ValueError(f"unknown MMA op_id {op_id!r}")
+
+    first = matches[0]
+    layout = first.acc_layout()
+    first_signature = (
+        first.family,
+        first.a_dtype,
+        first.b_dtype,
+        first.c_dtype,
+        first.shape,
+        first.c_frag_len,
+        first.wave_size,
+        evaluate_layout(layout),
+    )
+    for candidate in matches[1:]:
+        candidate_layout = candidate.acc_layout()
+        candidate_signature = (
+            candidate.family,
+            candidate.a_dtype,
+            candidate.b_dtype,
+            candidate.c_dtype,
+            candidate.shape,
+            candidate.c_frag_len,
+            candidate.wave_size,
+            evaluate_layout(candidate_layout),
+        )
+        if candidate_signature != first_signature:
+            raise ValueError(
+                f"MMA op_id {op_id!r} has inconsistent accumulator metadata "
+                "across architecture catalogs"
+            )
+
+    dtype = _CATALOG_TO_LOGICAL_DTYPE.get(first.c_dtype)
+    if dtype is None:
+        raise ValueError(
+            f"MMA op_id {op_id!r} has unsupported accumulator dtype "
+            f"{first.c_dtype!r}"
+        )
+    return logical_value_description(
+        name=name,
+        dtype=dtype,
+        shape=(first.m, first.n),
+        layout=layout,
+        layout_name=f"{op_id}.acc",
+    )

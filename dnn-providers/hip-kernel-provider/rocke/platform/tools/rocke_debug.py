@@ -7,9 +7,8 @@ Source this file from rocGDB, then use one of these commands::
 
     (gdb) source tools/rocke_debug.py
     (gdb) rocke decode $v40 --dtype f32
-    (gdb) rocke print acc --manifest debug-manifest.json
-    (gdb) rocke collect acc --manifest debug-manifest.json \
-            --scope wave --output acc.snapshot.json
+    (gdb) rocke print
+    (gdb) rocke collect --scope wave --output acc.snapshot.json
 
 Decoding, snapshot validation, and rendering are independent of rocGDB. The
 adapter below only reads stopped-wave state, invokes the pure host library, and
@@ -31,11 +30,20 @@ from rocke.debug.logical_value_reconstruction import (
 from rocke.debug.logical_value_rendering import (
     decode_logical_value,
     decode_word,
+    render_readable,
     unavailable_value,
-    values_human,
 )
 from rocke.debug.register_value_decoding import DTYPES, FLOAT8_FORMATS
+from rocke.debug.rocgdb_value_locations import (
+    bind_debug_description,
+    kernel_symbol,
+    symbol_address,
+)
 from rocke.debug.stopped_wave_snapshot import collect_selected_wave, dump_snapshot
+from rocke.core.debug_manifest import (
+    DEBUG_DESCRIPTION_MAGIC,
+    debug_description_symbol,
+)
 
 SCHEMA = "rocke-register-v1"
 MANIFEST_SCHEMA = "rocke-debug-manifest/v1"
@@ -142,19 +150,20 @@ def _argument_parser() -> argparse.ArgumentParser:
 
 def _print_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rocke print", add_help=False)
-    parser.add_argument("name", nargs="+")
-    parser.add_argument("--manifest", required=True)
+    parser.add_argument("name", nargs="*")
+    parser.add_argument("--manifest")
     parser.add_argument("--format", choices=("human", "jsonl"), default="human")
     parser.add_argument("--float8-format", choices=FLOAT8_FORMATS, default="ocp")
     parser.add_argument("--exec", dest="exec_expression", default="$exec")
+    parser.add_argument("--show-sources", action="store_true")
     parser.add_argument("--help", action="help")
     return parser
 
 
 def _collect_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rocke collect", add_help=False)
-    parser.add_argument("name", nargs="+")
-    parser.add_argument("--manifest", required=True)
+    parser.add_argument("name", nargs="*")
+    parser.add_argument("--manifest")
     parser.add_argument("--scope", choices=("wave", "block"), default="wave")
     parser.add_argument("--output", required=True)
     parser.add_argument("--float8-format", choices=FLOAT8_FORMATS, default="ocp")
@@ -170,6 +179,57 @@ except ModuleNotFoundError:
 
 
 if gdb is not None:
+
+    def _current_kernel_and_pc() -> tuple[str, int]:
+        pc = int(gdb.parse_and_eval("$pc"))
+        kernel = kernel_symbol(gdb.execute(f"info symbol 0x{pc:x}", to_string=True))
+        return kernel, pc
+
+    def _embedded_debug_description(kernel: str) -> dict[str, Any]:
+        symbol = debug_description_symbol(kernel)
+        address = symbol_address(gdb.execute(f"info address {symbol}", to_string=True))
+        inferior = gdb.selected_inferior()
+        header = bytes(inferior.read_memory(address, 16))
+        if header[:8] != DEBUG_DESCRIPTION_MAGIC:
+            raise ValueError(f"invalid rocKE debug description header for {kernel!r}")
+        size = int.from_bytes(header[8:16], byteorder="little")
+        if not 0 < size <= 16 * 1024 * 1024:
+            raise ValueError(f"invalid rocKE debug description size {size}")
+        payload = bytes(inferior.read_memory(address + 16, size))
+        try:
+            description = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError("invalid embedded rocKE debug description") from error
+        if description.get("kernel") != kernel:
+            raise ValueError(
+                f"embedded debug description is for {description.get('kernel')!r}, "
+                f"not stopped kernel {kernel!r}"
+            )
+        return description
+
+    def _manifest_and_names(
+        manifest_path: str | None, names: Sequence[str]
+    ) -> tuple[dict[str, Any], list[str]]:
+        if manifest_path is not None:
+            manifest = load_manifest(manifest_path)
+            if names:
+                return manifest, list(names)
+            available = [value["logical"]["name"] for value in manifest["values"]]
+            if len(available) != 1:
+                raise ValueError(
+                    "multiple debug values are available; choose one of: "
+                    + ", ".join(sorted(available))
+                )
+            return manifest, available
+        kernel, pc = _current_kernel_and_pc()
+        return bind_debug_description(
+            _embedded_debug_description(kernel),
+            names,
+            pc=pc,
+            location_text=lambda name: gdb.execute(
+                f"info address {name}", to_string=True
+            ),
+        )
 
     def _gdb_words(value: Any) -> list[int]:
         try:
@@ -213,9 +273,7 @@ if gdb is not None:
             manifest,
             names,
             read_words=lambda expression: _gdb_words(gdb.parse_and_eval(expression)),
-            thread_id=str(
-                getattr(thread, "global_num", getattr(thread, "num", "?"))
-            ),
+            thread_id=str(getattr(thread, "global_num", getattr(thread, "num", "?"))),
             pc=pc,
             exec_mask=exec_mask,
             architecture=architecture,
@@ -270,7 +328,7 @@ if gdb is not None:
                 raise gdb.GdbError(str(error)) from error
 
     class RockePrint(gdb.Command):
-        """Collect and render logical values: rocke print NAME --manifest PATH."""
+        """Collect and render logical values: rocke print [NAME]."""
 
         def __init__(self) -> None:
             super().__init__("rocke print", gdb.COMMAND_DATA)
@@ -279,9 +337,10 @@ if gdb is not None:
             del from_tty
             try:
                 args = _print_argument_parser().parse_args(shlex.split(argument))
+                manifest, names = _manifest_and_names(args.manifest, args.name)
                 snapshot = _collect_current_wave(
-                    load_manifest(args.manifest),
-                    args.name,
+                    manifest,
+                    names,
                     exec_expression=args.exec_expression,
                     float8_format=args.float8_format,
                 )
@@ -289,14 +348,14 @@ if gdb is not None:
                 rendered = (
                     records_jsonl(records)
                     if args.format == "jsonl"
-                    else values_human(records)
+                    else render_readable(records, show_sources=args.show_sources)
                 )
                 gdb.write(rendered + "\n")
             except (TypeError, ValueError, RuntimeError, gdb.error) as error:
                 raise gdb.GdbError(str(error)) from error
 
     class RockeCollect(gdb.Command):
-        """Capture stopped-wave values: rocke collect NAME --manifest PATH."""
+        """Capture stopped-wave values: rocke collect [NAME] --output PATH."""
 
         def __init__(self) -> None:
             super().__init__("rocke collect", gdb.COMMAND_DATA)
@@ -309,10 +368,10 @@ if gdb is not None:
                     raise ValueError(
                         "the implementation spike supports --scope wave only"
                     )
-                manifest = load_manifest(args.manifest)
+                manifest, names = _manifest_and_names(args.manifest, args.name)
                 snapshot = _collect_current_wave(
                     manifest,
-                    args.name,
+                    names,
                     exec_expression=args.exec_expression,
                     float8_format=args.float8_format,
                 )

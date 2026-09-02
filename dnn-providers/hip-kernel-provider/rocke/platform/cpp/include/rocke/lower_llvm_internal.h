@@ -502,7 +502,7 @@ bool rocke_ll_debug_has_locations(const rocke_ll_debug_t* D);
  * location carries no usable frame (Python location_id). */
 int rocke_ll_debug_location_id(rocke_lower_t* L, rocke_ll_debug_t* D, const char* loc);
 
-/* Create one scalar DILocalVariable and return its metadata id
+/* Create one scalar or fixed-vector DILocalVariable and return its metadata id
  * (Python variable_id). */
 int rocke_ll_debug_variable_id(rocke_lower_t* L,
                                rocke_ll_debug_t* D,

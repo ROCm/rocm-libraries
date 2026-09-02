@@ -46,9 +46,14 @@ from .backend import (
     resolve_backend,
 )
 from .debug_manifest import (
+    DEBUG_DESCRIPTION_MAGIC,
+    DEBUG_DESCRIPTION_SCHEMA,
     DEBUG_MANIFEST_SCHEMA,
+    automatic_debug_description,
     bind_logical_value,
+    debug_description_symbol,
     debug_manifest,
+    embed_debug_description,
     register_value_binding,
 )
 from .ir import (
@@ -99,6 +104,8 @@ from .verify import Diagnostic, verify, verify_or_raise
 
 __all__ = [
     "BF16",
+    "DEBUG_DESCRIPTION_MAGIC",
+    "DEBUG_DESCRIPTION_SCHEMA",
     "DEBUG_MANIFEST_SCHEMA",
     "F16",
     "F32",
@@ -124,8 +131,11 @@ __all__ = [
     "canonical_equal",
     "canonicalize",
     "canonicalize_region",
+    "automatic_debug_description",
     "bind_logical_value",
+    "debug_description_symbol",
     "debug_manifest",
+    "embed_debug_description",
     "eliminate_dead_pure_ops",
     "evaluate_layout",
     "logical_value_description",
