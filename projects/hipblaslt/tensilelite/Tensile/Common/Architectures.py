@@ -72,6 +72,7 @@ architectureMap = {
     # shares gfx1250's ISA, so `all` -- built from SUPPORTED_ISA -- cannot name
     # it and it has to be asked for explicitly.
     "gfx1250v0": "gfx1250v0",
+    "gfx1250-strict": "gfx1250-strcit"
 }
 
 gfxVariantMap = {

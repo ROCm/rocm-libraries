@@ -18,6 +18,7 @@ set(SUPPORTED_ARCHITECTURES
     "gfx1200"
     "gfx1201"
     "gfx1250"
+    "gfx1250-strict"
     "gfx908:xnack+"
     "gfx908:xnack-"
     "gfx90a:xnack+"
@@ -44,6 +45,7 @@ if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZ
         "gfx942:xnack+"
         "gfx950:xnack+"
         "gfx1250"
+	    "gfx1250-strict"
         )
 else()
     # For non address sanitizer builds, "all" is non-xnack architectures.
@@ -61,7 +63,9 @@ else()
         "gfx1153"
         "gfx1200"
         "gfx1201"
-        "gfx1250")
+        "gfx1250"
+	    "gfx1250-strict"
+       )
 endif()
 
 # Validate that all BASE_ARCHITECTURES are in the SUPPORTED_ARCHITECTURES list
