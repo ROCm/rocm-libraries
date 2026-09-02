@@ -120,3 +120,16 @@ endif()
 
     _apply_hipdnn_test_category_labels(hipdnn_list_engines_smoke)
 endif()
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # ValidateDescriptors.cpp transitively includes <hip/hip_runtime.h> through
+    # DescriptorLoader.hpp -> MakeEngine.hpp -> GenericEngine.hpp ->
+    # EnginePluginTypeTraits.hpp, so it needs the same HIP wiring every ingestor test
+    # target already carries (plugin_sdk/tests/CMakeLists.txt).
+    find_package(hip REQUIRED)
+
+    add_executable(hipdnn_validate_descriptors IngestorGenerator/ValidateDescriptors.cpp)
+    target_compile_definitions(hipdnn_validate_descriptors PRIVATE __HIP_PLATFORM_AMD__)
+    target_link_libraries(hipdnn_validate_descriptors PRIVATE hipdnn_plugin_sdk hip::host)
+    install(TARGETS hipdnn_validate_descriptors RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()

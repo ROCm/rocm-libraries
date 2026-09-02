@@ -28,6 +28,13 @@ struct IngestorPack
     std::string_view label;
     /// May throw; caller rolls back this pack alone.
     void (*registerSymbols)(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+    /// Whether this pack owns a kpack module cache -- i.e. whether `resetModuleCache`
+    /// must be non-null. Set independently of `resetModuleCache` itself so the two can
+    /// disagree: TestIngestorPacksModuleCacheOwnership walks this table asserting
+    /// `ownsModuleCache == (resetModuleCache != nullptr)`, which is what turns a pack
+    /// that gains a kpack cache but forgets to wire its reset pointer into a caught
+    /// contradiction instead of a silent gap in resetIngestorModuleCachesForTesting().
+    bool ownsModuleCache;
     /// Drops this pack's cached kpack modules, or null for a pack that loads no kpack
     /// archive. Tests only -- see resetIngestorModuleCachesForTesting().
     void (*resetModuleCache)();

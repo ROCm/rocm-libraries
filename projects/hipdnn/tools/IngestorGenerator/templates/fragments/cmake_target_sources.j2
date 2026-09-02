@@ -1,0 +1,4 @@
+## Splice point 3: .../kernel_ingestor_engine/CMakeLists.txt:19-25
+## Append this line to the existing target_sources(hip_kernel_provider_impl PRIVATE ...)
+## block. Do not replace the block -- append inside it.
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/{{ config.native_class_name }}Native.cpp

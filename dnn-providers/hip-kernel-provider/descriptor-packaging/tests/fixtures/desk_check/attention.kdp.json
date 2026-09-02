@@ -1,0 +1,53 @@
+{
+  "version": "0.1",
+  "id": "kdp-attention",
+  "name": "Attention pack",
+  "arch": ["gfx950"],
+  "matchers": ["umd-attention"],
+  "engine": "ued-attention",
+  "dispatch": "udd-attention",
+  "kernelDescriptors": [
+    {
+      "version": "0.1",
+      "id": "ukd-attention-dense-d64",
+      "name": "Attention dense d64",
+      "arch": ["gfx950"],
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 1,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 64
+        }
+      },
+      "metadata": { "family": "attention_dense", "batch": 1, "head_size": 64 },
+      "priority": 0
+    },
+    {
+      "version": "0.1",
+      "id": "ukd-attention-dense-d128",
+      "name": "Attention dense d128",
+      "arch": ["gfx950"],
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 1,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 128
+        }
+      },
+      "metadata": { "family": "attention_dense", "batch": 1, "head_size": 128 },
+      "priority": 0
+    }
+  ]
+}

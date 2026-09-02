@@ -1,0 +1,56 @@
+# Worked example: a multi-pack engine, modeled on the shipped "pointwise" engine
+# (one pack per operation, sharing one KMD/UED/UHD/UDD). Exercises the UMD policy's
+# other branch: a multi-pack engine gets one graph-scoped operation matcher per pack,
+# on top of the one shared kernel-scoped dtype matcher.
+
+engine:
+  name: hipkernel:BinaryOps
+  sdk_version: "1.0.0"
+  behavior_notes: [runtime_compilation]
+  knobs: [block_size]
+  heuristic: native
+
+kmd_fields:
+  - name: block_size
+    type: int
+    default_value: 64
+  - name: dtype
+    type: string
+  - name: operation
+    type: string
+
+graph_match:
+  shape: shared_shape
+  discriminator: field_value
+
+kernel_source_kind: embedded_source
+workspace_policy: none
+delegates_to_existing_plan: false
+
+packs:
+  - name: add
+    discriminator: add
+    kernels:
+      - name: binary_ops_add.f32_block64
+        kernel_source:
+          kind: embedded_source
+          source_file: BinaryOpsAdd.cpp
+          entry_point: BinaryOpsAdd
+        metadata:
+          block_size: 64
+          dtype: FLOAT
+          operation: ADD
+        priority: 0
+  - name: max
+    discriminator: max
+    kernels:
+      - name: binary_ops_max.f32_block64
+        kernel_source:
+          kind: embedded_source
+          source_file: BinaryOpsMax.cpp
+          entry_point: BinaryOpsMax
+        metadata:
+          block_size: 64
+          dtype: FLOAT
+          operation: MAX
+        priority: 0
