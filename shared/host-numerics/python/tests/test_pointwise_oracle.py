@@ -355,7 +355,6 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 hv.ScalarType.Int8,
                 hv.ScalarType.Float32,
                 bias=hv.from_numpy(bias),
-                bias_axis=hv.MatrixAxis.Column,
                 activation=hv.Activation.LeakyRelu,
                 activation_parameter0=0.25,
                 output_scale=2.0,
