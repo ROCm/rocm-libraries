@@ -44,6 +44,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <iomanip>
 #include <mutex>
 #include <random>
@@ -151,6 +152,21 @@ namespace TensileLite
                              "non-work-stealing solution will be used instead.\n";
             });
         }
+
+        // One-shot notice when uniform-summation-order grid steering displaces a developer
+        // override (skFixedGrid) or production CU knobs (skMaxCUs / skGridMultiplier).
+        void warnStreamKUniformityGridSnapOnce(size_t g0, size_t gStar)
+        {
+            static std::once_flag warnedFlag;
+            std::call_once(warnedFlag, [g0, gStar]() {
+                std::cerr << "hipBLASLt Warning: uniformSummationOrder steered the Stream-K grid "
+                             "from "
+                          << g0 << " to " << gStar
+                          << " (never upward) so the launch stays row-uniform; "
+                             "skFixedGrid / skMaxCUs / skGridMultiplier act as hints under "
+                             "uniform summation order.\n";
+            });
+        }
     }
 
     StreamKStaticSplit streamKStaticSplit(
@@ -178,6 +194,10 @@ namespace TensileLite
 
         split.skTiles      = skTiles;
         split.skItersPerWG = static_cast<uint32_t>(skTiles * itersPerTile / skGrid);
+        // Global leftover under the historical first-E mapping. The device may
+        // redistribute these extras within each tile when
+        // InternalArgsSupport::perTileExtraIters is set and skGrid % skTiles == 0;
+        // the packed value itself is unchanged.
         split.extraIters   = static_cast<uint32_t>(static_cast<size_t>(skTiles) * itersPerTile
                                                  - static_cast<size_t>(split.skItersPerWG)
                                                        * skGrid);
@@ -186,32 +206,113 @@ namespace TensileLite
 
     bool streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
                                       size_t                    tiles,
-                                      size_t                    itersPerTile)
+                                      size_t                    itersPerTile,
+                                      size_t                    skGrid,
+                                      bool                      perTileExtraIters)
     {
         // A tile's fold signature is the ordered list of chunk lengths whose
         // partials are summed to produce it, and two tiles are bitwise equal
         // for identical inputs exactly when their signatures match. Every tile
-        // in the launch must therefore share one signature. Three ways that
-        // happens:
+        // in the launch must therefore share one signature. Ways that happens:
         //
         //  skTiles == 0        force-DP-only, so every tile is whole.
-        //  skItersPerWG == I   every StreamK chunk is one whole tile;
-        //                      equivalent to tiles % grid == 0.
-        //  skTiles == tiles && I % skItersPerWG == 0
-        //                      no data-parallel region, and every tile is cut
-        //                      into I/skItersPerWG equal chunks at identical
-        //                      offsets; equivalent to tiles | grid and
-        //                      (grid/tiles) | I.
+        //  skTiles == tiles && I % skItersPerWG == 0 && extraIters == 0
+        //                      no data-parallel region. Includes GridEqualsTiles
+        //                      (skItersPerWG == I) and all-partial equal chunks
+        //                      (tiles | grid and (grid/tiles) | I).
+        //                      Mixed GridDividesTiles (skTiles == grid < tiles,
+        //                      skItersPerWG == I) is two-tile DP-first then SK.
+        //                      gfx950 skips tree-partials workspace when
+        //                      tiles % grid == 0, and the SK half of D is never
+        //                      stored (uso-row-sweep C1: 992/1024 rows stay
+        //                      poison). Refuse that split until the device path
+        //                      writes every tile.
+        //  per-tile extras: skTiles == tiles && grid % tiles == 0 with a kernel
+        //                      that redistributes extras within each tile.
+        //                      extraIters may be nonzero; fold signatures still
+        //                      match because each tile gets the same intra-tile
+        //                      remainder pattern.
         //
-        // extraIters != 0 means chunks come in two lengths, so the chunk
-        // lattice has no single period and tile boundaries interleave with it
-        // irregularly. skItersPerWG != 0 is not implied by the rest: tiles == 0
-        // is reachable from the grouped-GEMM callers and would otherwise leave
+        // Without the capability bit, extraIters != 0 means chunks come in two
+        // lengths under the global first-E mapping, so the chunk lattice has no
+        // single period. skItersPerWG != 0 is not implied by the rest: tiles ==
+        // 0 is reachable from the grouped-GEMM callers and would otherwise leave
         // I % skItersPerWG undefined.
-        return split.skTiles == 0
-               || (split.extraIters == 0 && split.skItersPerWG != 0
-                   && (split.skItersPerWG == itersPerTile
-                       || (split.skTiles == tiles && itersPerTile % split.skItersPerWG == 0)));
+        if(split.skTiles == 0)
+            return true;
+
+        if(split.skItersPerWG != 0 && split.extraIters == 0 && split.skTiles == tiles
+           && itersPerTile % split.skItersPerWG == 0)
+            return true;
+
+        if(perTileExtraIters && split.skTiles == tiles && tiles != 0 && skGrid % tiles == 0
+           && split.skItersPerWG != 0)
+            return true;
+
+        return false;
+    }
+
+    bool streamKParallelReductionRowUniform(StreamKSettings const& sk,
+                                            int                    streamKAtomic,
+                                            bool                   staticTwoTilePacking,
+                                            size_t                 tiles)
+    {
+        // Parallel Stream-K under static two-tile packing maps each workgroup
+        // to TileIdx = StreamKIdx // F and PartialIdx = StreamKIdx % F, with
+        // F = grid/tiles. Every tile sees the same PartialIdx set and the same
+        // per-partial K ranges (extras go by PartialIdx), so identical A rows
+        // produce identical D rows when F >= 2 and grid is an exact multiple
+        // of tiles. Atomic fixup and non-static ABIs are out of scope.
+        if(sk.reduction != origami::reduction_t::parallel)
+            return false;
+        if(streamKAtomic != 0)
+            return false;
+        if(!staticTwoTilePacking)
+            return false;
+        if(sk.grid == 0 || tiles == 0)
+            return false;
+        if(sk.grid % tiles != 0)
+            return false;
+        if((sk.grid / tiles) < 2)
+            return false;
+        return true;
+    }
+
+    StreamKWorkgroupIterRange streamKWorkgroupIterRange(
+        size_t w, size_t tiles, size_t itersPerTile, size_t skGrid, bool perTileExtraIters)
+    {
+        StreamKWorkgroupIterRange range;
+        if(skGrid == 0 || tiles == 0)
+            return range;
+
+        const size_t totalIters = tiles * itersPerTile;
+        const size_t W          = totalIters / skGrid;
+        const size_t E          = totalIters - W * skGrid;
+
+        if(perTileExtraIters && skGrid % tiles == 0)
+        {
+            const size_t F    = skGrid / tiles;
+            const size_t q    = w / F;
+            const size_t s    = w % F;
+            const size_t remI = itersPerTile % F;
+            const size_t base = itersPerTile / F;
+            range.start       = q * itersPerTile + s * base + std::min(s, remI);
+            range.end = range.start + base + (s < remI ? size_t{1} : size_t{0});
+            return range;
+        }
+
+        // Historical global first-E mapping.
+        if(w < E)
+        {
+            range.start = w * (W + 1);
+            range.end   = range.start + (W + 1);
+        }
+        else
+        {
+            range.start = E * (W + 1) + (w - E) * W;
+            range.end   = range.start + W;
+        }
+        return range;
     }
 
     enum class KERNELARGTYPE
@@ -3401,6 +3502,42 @@ namespace TensileLite
                              bool*                         outTreeBoundsFallback = nullptr,
                              bool*                         outClusterDPGridClamp = nullptr,
                              size_t*                       outSelectedGrid       = nullptr);
+
+        // Reconcile the reduction strategy with the grid that was finally
+        // chosen. The strategy is picked BEFORE the grid -- getSKReduction()
+        // feeds getSKGridImpl() as an input -- so the grid can still land on a
+        // splitting factor F = grid / tiles of 1, which parallel reduction
+        // cannot express: it splits each output tile across F workgroups and
+        // sums the partials in a second kernel, so F < 2 leaves it nothing to
+        // reduce (solve() rejects it outright). Ways the grid gets there:
+        //
+        //   * the uniform-summation-order F-star snap in getSKGridImpl() finds
+        //     no admissible F >= 2 (workspace too small for 2 * tiles partial
+        //     tiles, or ItersPerTile / F below MinItersPerCU) and falls back to
+        //     the all-full grid == tiles;
+        //   * the same snap sees g0 < tiles and snaps up to tiles;
+        //   * skFixedGrid / skMaxCUs / skGridMultiplier / the analytical grid
+        //     land anywhere in [1, 2 * tiles).
+        //
+        // Tree reduction is always expressible at those grids, so fall back to
+        // it rather than failing the launch. Applied AFTER the grid is final
+        // and never fed back into grid selection, so it cannot perturb the
+        // grid.
+        //
+        // Both requiredWorkspaceSize() -- the workspace query the caller sizes
+        // its allocation from -- and resolveStreamKSettings() -- what solve()
+        // launches -- call this on the same (reduction, grid, tiles) triple
+        // immediately after getSKGridImpl(), so query and launch cannot
+        // disagree about which reduction is in play, and therefore cannot
+        // disagree about the workspace it needs.
+        inline origami::reduction_t streamKReconcileReduction(
+            origami::reduction_t reductionStrat, size_t skGrid, size_t tiles)
+        {
+            if(reductionStrat == origami::reduction_t::parallel
+               && (tiles == 0 || (skGrid / tiles) < 2))
+                return origami::reduction_t::tree;
+            return reductionStrat;
+        }
     }
 
     std::vector<KernelInvocation>
@@ -3548,25 +3685,36 @@ namespace TensileLite
                     "per-XCD queue count; this kernel is unsupported here. "
                     "Select a non-work-stealing solution instead.");
             }
-            // Consume the reduction / grid decided above. computeStreamKDecisions
-            // has already applied the workspace-insufficient DP fallback, and no
-            // further StreamK sizing happens below, so these are the launch values.
-            sk.reduction                 = skDecisions.reduction;
-            sk.grid                      = skDecisions.skGrid;
-            sk.streamKTileSchedulingMode = problem.getParams().streamKTileSchedulingMode();
-            sk.smCountTarget             = problem.getParams().smCountTarget();
 
-            if(sk.reduction == origami::reduction_t::parallel && sk.grid / tiles < 2)
+            // Consume the reduction / grid decided above. resolveStreamKSettings()
+            // is the single source of truth for what is launched: it runs the same
+            // reduction selection, the same getSKGridImpl() call and the same
+            // workspace-insufficient DP fallback that computeStreamKDecisions()
+            // reports on, and additionally applies streamKReconcileReduction() so
+            // requiredWorkspaceSize() and the launch cannot disagree.
+            // computeStreamKDecisions() mirrors that reconciliation at the same
+            // point, so the snapshot above and the settings below carry the same
+            // (reduction, grid) pair; the re-wire after the guard re-asserts it.
+            sk = resolveStreamKSettings(problem, hardware);
+
+            // Defensive only: resolveStreamKSettings() runs
+            // streamKReconcileReduction() on the final grid, which demotes
+            // parallel to tree exactly when this condition would hold, so this
+            // is unreachable. Kept so a future path that builds a
+            // StreamKSettings without that reconciliation still fails loudly
+            // rather than launching a fixup kernel with nothing to reduce.
+            if(tiles != 0 && sk.reduction == origami::reduction_t::parallel && sk.grid / tiles < 2)
             {
                 throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
                                          "StreamK kernel with splitting factor < 2\n");
             }
 
-            // Wire the FINAL launch grid from the value solve() actually launches
-            // with (post all fallbacks), so the diagnostic summary can never drift
-            // from the real launch.
+            // Wire the FINAL launch grid and reduction from the values solve()
+            // actually launches with (post all fallbacks, post reconciliation), so
+            // the diagnostic summary can never drift from the real launch.
             skDecisions.finalGrid = sk.grid;
             skDecisions.skGrid    = sk.grid;
+            skDecisions.reduction = sk.reduction;
             if(Debug::Instance().printStreamKLaunchSummary())
                 printStreamKLaunchSummary(std::cerr, problem, skDecisions);
         }
@@ -3992,7 +4140,16 @@ namespace TensileLite
                 const bool effectiveDynamic = (sizeMapping.streamK == 5)
                                                   ? streamK5EffectiveDynamic(problem, hardware)
                                                   : false;
-                auto   reductionStrat = getSKReduction(problem, hardware);
+                // Mirror solve()'s SK4 / SK5-dynamic tree forcing so the grid
+                // and workspace reported here match the launch reduction.
+                origami::reduction_t reductionStrat;
+                if(sizeMapping.streamK == 4)
+                    reductionStrat = origami::reduction_t::tree;
+                else if(sizeMapping.streamK == 5)
+                    reductionStrat = effectiveDynamic ? origami::reduction_t::tree
+                                                      : getSKReduction(problem, hardware);
+                else
+                    reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getSKGridImpl(*this,
                                               problem,
                                               hardware,
@@ -4000,6 +4157,11 @@ namespace TensileLite
                                               reductionStrat,
                                               sizeMapping.streamK == 5 ? &effectiveDynamic
                                                                        : nullptr);
+                // A grid with fewer than two workgroups per tile cannot carry
+                // parallel reduction. Reconcile with the SAME helper
+                // resolveStreamKSettings() uses, on the same triple, so the
+                // size reported here is the size the launch actually needs.
+                reductionStrat = streamKReconcileReduction(reductionStrat, skGrid, tiles);
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
@@ -4140,6 +4302,19 @@ namespace TensileLite
         return 0;
     }
 
+    namespace
+    {
+        // Forward declaration: defined with the other uniform-summation-order Stream-K
+        // helpers later in this file. getSKReduction consults it when deciding
+        // whether parallel remains eligible under uniform summation order, and
+        // wants only the yes/no, so obstacleToken defaults to unrequested.
+        std::string streamKUniformSummationOrderObstacle(
+            SizeMapping const&                      sizeMapping,
+            ContractionSolution::ProblemType const& problemType,
+            ContractionSolution::Problem const&     problem,
+            char const**                            obstacleToken = nullptr);
+    } // namespace
+
     origami::reduction_t ContractionSolution::getSKReduction(Problem const&  problem,
                                                              Hardware const& hardware) const
     {
@@ -4148,9 +4323,11 @@ namespace TensileLite
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
-        if(!sizeMapping.customKernelName.empty())
+        if(!sizeMapping.customKernelName.empty() || handwrittenCustomKernel())
         {
-            // Custom kernel currently only supports single-kernel reduction
+            // Custom kernels currently only support single-kernel (tree) reduction.
+            // YAML records set sizeMapping.customKernelName; handwritten kernels
+            // are identified by customKernel.name && !generated.
             reductionStrat = origami::reduction_t::tree;
         }
         else if(sizeMapping.streamKForceDPOnly != 0)
@@ -4206,6 +4383,34 @@ namespace TensileLite
                 *(hipAMDGPU->analyticalHardware),
                 origami_config,
                 static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
+        }
+
+        // Under USO + static two-tile packing, admit origami's parallel
+        // reduction when the launch is eligible (non-atomic and no static
+        // obstacles). Final grid / F checks run at the launch gate once
+        // getSKGridImpl has sized the grid. Otherwise refuse parallel and
+        // force tree so query (requiredWorkspaceSize) and launch (solve)
+        // stay on the steered tree path. Mirror the gate's
+        // staticTwoTilePacking predicate.
+        if(problem.getParams().uniformSummationOrder())
+        {
+            const bool effectiveDynamic
+                = (sizeMapping.streamK == 5) ? streamK5EffectiveDynamic(problem, hardware)
+                                             : false;
+            const bool staticTwoTilePacking
+                = (sizeMapping.streamK == 3)
+                  || (sizeMapping.streamK == 5 && !effectiveDynamic);
+            if(staticTwoTilePacking)
+            {
+                const bool keepParallel
+                    = reductionStrat == origami::reduction_t::parallel
+                      && sizeMapping.streamKAtomic == 0
+                      && streamKUniformSummationOrderObstacle(
+                             sizeMapping, problemType, problem)
+                             .empty();
+                if(!keepParallel)
+                    reductionStrat = origami::reduction_t::tree;
+            }
         }
 
         return reductionStrat;
@@ -4358,14 +4563,145 @@ namespace TensileLite
         return !customKernel.name.empty() && !customKernel.generated;
     }
 
+    StreamKSettings ContractionSolution::resolveStreamKSettings(Problem const&  problem,
+                                                                Hardware const& hardware) const
+    {
+        StreamKSettings sk;
+        if(sizeMapping.streamK == 0)
+            return sk;
+
+        auto tiles = problem.getNumTiles(sizeMapping, 1);
+        const bool effectiveDynamic = (sizeMapping.streamK == 5)
+                                          ? streamK5EffectiveDynamic(problem, hardware)
+                                          : false;
+        const bool dynamicQueuePath
+            = (sizeMapping.streamK == 4)
+              || (sizeMapping.streamK == 5 && effectiveDynamic);
+
+        if(sizeMapping.streamK == 4)
+            sk.reduction = origami::reduction_t::tree;
+        else if(sizeMapping.streamK == 5)
+            sk.reduction = effectiveDynamic ? origami::reduction_t::tree
+                                            : getSKReduction(problem, hardware);
+        else
+            sk.reduction = getSKReduction(problem, hardware);
+        sk.streamKTileSchedulingMode = problem.getParams().streamKTileSchedulingMode();
+        sk.smCountTarget             = problem.getParams().smCountTarget();
+        sk.grid = getSKGridImpl(*this,
+                                problem,
+                                hardware,
+                                tiles,
+                                sk.reduction,
+                                sizeMapping.streamK == 5 ? &effectiveDynamic : nullptr);
+        // Same reconciliation, same helper, same triple as
+        // requiredWorkspaceSize(). Must run before the workspace-fit fallback
+        // below so that fallback sees the reduction the launch will use.
+        sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
+
+        const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
+        const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
+        if(sk.grid > 0
+           && (sk.reduction == origami::reduction_t::parallel
+               || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
+        {
+            size_t idealWorkspace = partialTileSize(sk.grid);
+            // SK4 and SK5-dynamic need the per-XCD work-queue region; SK5-static
+            // sizes like standalone SK3. The region is sized as (per-queue
+            // stride) * (baked per-XCD queue count), both sourced from origami:
+            // the stride is the L2 cache-line size (get_default_cache_line_bytes,
+            // 128 B for gfx942/gfx950) so each counter owns its line (no false
+            // sharing), and the queue count is the per-arch XCD count. The
+            // acceptance guard requires runtime NUM_XCD == baked, so this equals
+            // cacheLineBytes * NUM_XCD for every device that reaches here.
+            if(dynamicQueuePath)
+                idealWorkspace
+                    += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
+            // If given workspace is less than ideal, we can fall back to DP mode
+            // Performance will likely be lower, but the kernel can run if workspace is unavailable.
+            // (The non-power-of-two XCD case is handled earlier by explicit
+            // rejection, not by a silent fall back to tree reduction.)
+            if(idealWorkspace > problem.workspaceSize())
+            {
+                sk.reduction = origami::reduction_t::tree;
+                sk.grid      = tiles;
+            }
+        }
+
+        return sk;
+    }
+
     namespace
     {
+        // Thread-local tally of the uniform-summation-order selection filter.
+        //
+        // Capacity is fixed and the token strings are borrowed rather than
+        // copied, so recording a rejection never allocates. The token set is
+        // closed and small (one literal per clause of the launch-obstacle
+        // helper), so a linear scan is cheaper than any keyed container and
+        // keeps the report in a deterministic insertion order.
+        constexpr size_t uniformSummationOrderTallyCapacity = 32;
+
+        struct UniformSummationOrderTally
+        {
+            char const* tokens[uniformSummationOrderTallyCapacity] = {};
+            size_t      counts[uniformSummationOrderTallyCapacity] = {};
+            size_t      distinct                                   = 0;
+            // Candidates that reached the uniform-summation-order filter, i.e.
+            // that had already satisfied every other selection predicate.
+            size_t examined = 0;
+            size_t refused  = 0;
+        };
+
+        UniformSummationOrderTally& uniformSummationOrderTally()
+        {
+            static thread_local UniformSummationOrderTally tally;
+            return tally;
+        }
+
+        void uniformSummationOrderTallyRecord(char const* token)
+        {
+            UniformSummationOrderTally& tally = uniformSummationOrderTally();
+            ++tally.refused;
+
+            // Every clause tags itself, so a null token means a clause was
+            // added without one. Naming that case is better than dropping the
+            // rejection out of the total.
+            if(token == nullptr)
+                token = "Untagged";
+
+            for(size_t i = 0; i < tally.distinct; ++i)
+            {
+                if(std::strcmp(tally.tokens[i], token) == 0)
+                {
+                    ++tally.counts[i];
+                    return;
+                }
+            }
+
+            if(tally.distinct == uniformSummationOrderTallyCapacity)
+            {
+                // Unreachable while the token set is smaller than the capacity;
+                // folding rather than dropping keeps the counts summing to
+                // refused if a future clause pushes it over.
+                ++tally.counts[uniformSummationOrderTallyCapacity - 1];
+                return;
+            }
+
+            tally.tokens[tally.distinct] = token;
+            tally.counts[tally.distinct] = 1;
+            ++tally.distinct;
+        }
+
         // Statically-knowable reasons a StreamK launch cannot be shown
         // row-uniform: no resolved grid, reduction strategy or Synchronizer
-        // pointer is consulted, so both checkUniformSummationOrder() (which
-        // throws) and uniformSummationOrderSupported() (which quietly drops the
-        // solution from selection) can share one implementation and cannot
-        // disagree. Returns an empty string when nothing here objects.
+        // pointer is consulted, so the launch-obstacle helper (used by both
+        // checkUniformSummationOrder() and uniformSummationOrderSupported())
+        // can share one implementation and cannot disagree. Returns an empty
+        // string when nothing here objects.
+        //
+        // Each rejection also names itself through obstacleToken (see the
+        // declaration of uniformSummationOrderLaunchObstacle) so a diagnostic
+        // never has to recover the reason by matching on the prose.
         //
         // None of these fires for any solution in the shipped tuned logic. They
         // fence configurations that are expressible but were never audited for
@@ -4373,11 +4709,18 @@ namespace TensileLite
         std::string streamKUniformSummationOrderObstacle(
             SizeMapping const&                        sizeMapping,
             ContractionSolution::ProblemType const&   problemType,
-            ContractionSolution::Problem const&       problem)
+            ContractionSolution::Problem const&       problem,
+            char const**                              obstacleToken)
         {
+            auto refuse = [&](char const* token, std::string detail) -> std::string {
+                if(obstacleToken != nullptr)
+                    *obstacleToken = token;
+                return detail;
+            };
+
             // Atomic fixup accumulates partial tiles in arrival order.
             if(sizeMapping.streamKAtomic != 0)
-                return "StreamKAtomic=1";
+                return refuse("StreamKAtomic", "StreamKAtomic=1");
 
             // The partials write and the fixup read both build their store
             // state coordinate-agnostically (lane-linear addressing, no
@@ -4389,8 +4732,9 @@ namespace TensileLite
             // in the solution serialization: a record omitting it reads false,
             // so this rejection is only as good as the logic files.
             if(problemType.useInitialStridesCD)
-                return "UseInitialStridesCD=1 disables the coordinate-agnostic store "
-                       "addressing the StreamK partials path relies on";
+                return refuse("UseInitialStridesCD",
+                              "UseInitialStridesCD=1 disables the coordinate-agnostic store "
+                              "addressing the StreamK partials path relies on");
 
             // Same premise, different switch: more than one packed index in
             // dimension 0 selects per-column address VGPRs and more than one in
@@ -4398,11 +4742,13 @@ namespace TensileLite
             // the expression the file already uses for the same question in
             // projectedPerformance()/calculateDimensionM().
             if(problem.freeIndicesA().size() > 1 || (sizeMapping.packBatchDims & 0x1))
-                return "a packed C0 index set disables the coordinate-agnostic store "
-                       "addressing the StreamK partials path relies on";
+                return refuse("PackedC0Index",
+                              "a packed C0 index set disables the coordinate-agnostic store "
+                              "addressing the StreamK partials path relies on");
             if(problem.freeIndicesB().size() > 1 || (sizeMapping.packBatchDims & 0x2))
-                return "a packed C1 index set disables the coordinate-agnostic store "
-                       "addressing the StreamK partials path relies on";
+                return refuse("PackedC1Index",
+                              "a packed C1 index set disables the coordinate-agnostic store "
+                              "addressing the StreamK partials path relies on");
 
             // WaveSplitK and LocalSplitU are mutually exclusive projections of
             // WorkGroup[2] (Solution.py), so WorkGroup[2] > 1 with LocalSplitU
@@ -4413,9 +4759,12 @@ namespace TensileLite
             // StreamK scope is deliberate, since every shipped WaveSplitK
             // solution has StreamK=0 and refusing those would buy nothing.
             if(sizeMapping.workGroupSize.z > 1 && sizeMapping.LocalSplitU <= 1)
-                return "WaveSplitK (WorkGroup[2]=" + std::to_string(sizeMapping.workGroupSize.z)
-                       + " with LocalSplitU=" + std::to_string(sizeMapping.LocalSplitU)
-                       + ") does not mask redundant lanes on the StreamK partials store";
+                return refuse("WaveSplitK",
+                              "WaveSplitK (WorkGroup[2]="
+                                  + std::to_string(sizeMapping.workGroupSize.z)
+                                  + " with LocalSplitU=" + std::to_string(sizeMapping.LocalSplitU)
+                                  + ") does not mask redundant lanes on the StreamK partials "
+                                    "store");
 
             // MX block scaling. Detected from the problem type, never from a
             // kernel-name substring: thousands of shipped f32 records carry an
@@ -4430,15 +4779,21 @@ namespace TensileLite
                 // one, so pin the envelope the derivation covers. All shipped
                 // MX solutions satisfy all three.
                 if(problemType.mxScaleFormat != 1)
-                    return "MX scale format " + std::to_string(problemType.mxScaleFormat)
-                           + " under StreamK is not audited for uniform summation order";
+                    return refuse("MXScaleFormat",
+                                  "MX scale format " + std::to_string(problemType.mxScaleFormat)
+                                      + " under StreamK is not audited for uniform summation "
+                                        "order");
                 if((problemType.mxBlockA != 0 && problemType.mxBlockA != 32)
                    || (problemType.mxBlockB != 0 && problemType.mxBlockB != 32))
-                    return "an MX block size other than 32 under StreamK is not audited for "
-                           "uniform summation order";
+                    return refuse("MXBlockSize",
+                                  "an MX block size other than 32 under StreamK is not audited "
+                                  "for uniform summation order");
                 if(sizeMapping.matrixInstruction[2] != 128)
-                    return "MX with MatrixInstK=" + std::to_string(sizeMapping.matrixInstruction[2])
-                           + " under StreamK is not audited for uniform summation order";
+                    return refuse("MXMatrixInstK",
+                                  "MX with MatrixInstK="
+                                      + std::to_string(sizeMapping.matrixInstruction[2])
+                                      + " under StreamK is not audited for uniform summation "
+                                        "order");
 
                 // The gfx950 HostPreSwizzle scale layout packs 32 M/N rows x 8
                 // MX blocks into one 256-byte granule addressed lane-linearly,
@@ -4452,9 +4807,11 @@ namespace TensileLite
                 // DepthU=128 for MX fp8, so assert it here.
                 constexpr size_t mxScaleSwizzleGranuleK = 256; // lrSubtileShape[1](2) * instK(128)
                 if(sizeMapping.depthU % mxScaleSwizzleGranuleK != 0)
-                    return "DepthU=" + std::to_string(sizeMapping.depthU)
-                           + " is not a multiple of the MX scale swizzle granule (256 K "
-                             "elements), so a StreamK K-cut can land inside a granule";
+                    return refuse("MXScaleSwizzleGranule",
+                                  "DepthU=" + std::to_string(sizeMapping.depthU)
+                                      + " is not a multiple of the MX scale swizzle granule (256 "
+                                        "K elements), so a StreamK K-cut can land inside a "
+                                        "granule");
             }
 
             return {};
@@ -4467,82 +4824,124 @@ namespace TensileLite
         if(!problem.getParams().uniformSummationOrder())
             return true;
 
-        if(handwrittenCustomKernel())
-            return false;
+        StreamKSettings sk;
+        uint32_t        gsu        = 0;
+        size_t          resolvedGA = 0;
 
-        // The statically-knowable StreamK obstacles, shared verbatim with
-        // checkUniformSummationOrder() so the two cannot drift. Turning them
-        // into a quiet non-selection rather than a throw is a better outcome
-        // for the caller, and the filter stays permissive by construction
-        // because every reason here is one the gate rejects too.
-        if(sizeMapping.streamK != 0
-           && !streamKUniformSummationOrderObstacle(sizeMapping, problemType, problem).empty())
-            return false;
-
-        // getAccumulation() may adapt this upward to 2 (MultipleBuffer) when
-        // AdaptiveGemmGSUA is enabled, so sizeMapping is only conclusive when it
-        // cannot: rejecting an adaptive solution here could discard one the
-        // launch gate would have accepted.
-        if(sizeMapping.adaptiveGemmGSUA == 0 && sizeMapping.globalAccumulation != 2
-           && sizeMapping.globalAccumulation != 3 && sizeMapping.globalAccumulation != 4)
+        if(problem.groupedGemm())
+        {
+            // generateSingleCallGroupedGemm() packs skGrid == 0 and reads
+            // sizeMapping.globalAccumulation directly. Matching that here is
+            // what keeps a grouped StreamK winner from surviving selection and
+            // then failing the launch gate on grid == 0.
+            gsu        = problem.getParams().gsu() > 0 ? problem.getParams().gsu()
+                                                       : calculateAutoGSU(problem, &hardware);
+            resolvedGA = sizeMapping.globalAccumulation;
+        }
+        else
         {
             const uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
-            const uint32_t gsu
-                = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
-            if(gsu > 1
-               || (sizeMapping.globalAccumulation != 0 && sizeMapping.globalAccumulation != 1))
-                return false;
+            gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+            sk  = resolveStreamKSettings(problem, hardware);
+            resolvedGA = problem.getAccumulation(hardware, sizeMapping, gsu);
         }
 
-        // A kernel with no runtime StaggerU field never sees the clamp in
-        // calculateAutoStaggerU() and would stagger with its compiled-in value.
-        if(!internalArgsSupport.staggerU && sizeMapping.staggerU != 0)
-            return false;
+        // The Synchronizer pointer is not allocated at heuristic time; skip
+        // that one launch-only clause. Everything else the gate would refuse
+        // is dropped here so findTopSolutions / isAlgoSupported return only
+        // kernels this problem can launch under USO.
+        //
+        // The token is collected only to be tallied: a lookup that ends with no
+        // admissible solution reports which clauses emptied it, which is the
+        // only way to tell "uniform summation order refused everything" from
+        // "nothing matched this problem in the first place". Tallying is off
+        // unless TENSILE_DB bit 0x200000 is set and never changes the verdict.
+        char const*       obstacleToken = nullptr;
+        const std::string obstacle      = uniformSummationOrderLaunchObstacle(
+            problem, hardware, sk, resolvedGA, gsu, nullptr, false, &obstacleToken);
 
-        return true;
+        if(Debug::Instance().printNoSolutionUniformSummationOrder())
+        {
+            ++uniformSummationOrderTally().examined;
+            if(!obstacle.empty())
+                uniformSummationOrderTallyRecord(obstacleToken);
+        }
+
+        return obstacle.empty();
     }
 
-    void ContractionSolution::checkUniformSummationOrder(Problem const&         problem,
-                                                         Hardware const&        hardware,
-                                                         StreamKSettings const& sk,
-                                                         size_t      resolvedGlobalAccumulation,
-                                                         uint32_t    gsu,
-                                                         void const* synchronizer) const
+    void uniformSummationOrderSelectionTallyReset()
     {
-        if(!problem.getParams().uniformSummationOrder())
-            return;
+        uniformSummationOrderTally() = UniformSummationOrderTally{};
+    }
 
-        auto reject = [this](std::string const& reason) {
-            throw UniformSummationOrderError(
-                "hipBLASLt Error: solution '" + this->kernelName
-                + "' cannot guarantee uniform summation order for this launch: " + reason);
+    std::string uniformSummationOrderSelectionTallyReport(size_t& examined, size_t& refused)
+    {
+        UniformSummationOrderTally const& tally = uniformSummationOrderTally();
+        examined                                = tally.examined;
+        refused                                 = tally.refused;
+
+        if(tally.distinct == 0)
+            return "none";
+
+        // Most frequent first, insertion order breaking ties, so the same run
+        // always renders the same string.
+        std::vector<size_t> order(tally.distinct);
+        for(size_t i = 0; i < tally.distinct; ++i)
+            order[i] = i;
+        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            return tally.counts[a] > tally.counts[b];
+        });
+
+        std::string report;
+        for(size_t i = 0; i < order.size(); ++i)
+        {
+            if(i != 0)
+                report += ',';
+            report += tally.tokens[order[i]];
+            report += ':';
+            report += std::to_string(tally.counts[order[i]]);
+        }
+        return report;
+    }
+
+    std::string ContractionSolution::uniformSummationOrderLaunchObstacle(
+        Problem const&         problem,
+        Hardware const&        hardware,
+        StreamKSettings const& sk,
+        size_t                 resolvedGlobalAccumulation,
+        uint32_t               gsu,
+        void const*            synchronizer,
+        bool                   requireSynchronizer,
+        char const**           obstacleToken) const
+    {
+        auto refuse = [&](char const* token, std::string detail) -> std::string {
+            if(obstacleToken != nullptr)
+                *obstacleToken = token;
+            return detail;
         };
 
         if(handwrittenCustomKernel())
-            reject("custom kernel " + customKernel.name
-                   + " is not supported under uniform summation order");
+            return refuse("CustomKernel",
+                          "custom kernel " + customKernel.name
+                              + " is not supported under uniform summation order");
 
         if(sizeMapping.streamK != 0)
         {
             // The statically-knowable obstacles (atomic fixup,
-            // UseInitialStridesCD, packed C0/C1, WaveSplitK, MX scale granule),
-            // shared with uniformSummationOrderSupported().
-            const std::string obstacle
-                = streamKUniformSummationOrderObstacle(sizeMapping, problemType, problem);
+            // UseInitialStridesCD, packed C0/C1, WaveSplitK, MX scale granule).
+            // That helper tags itself, so the token is already set when it
+            // objects.
+            const std::string obstacle = streamKUniformSummationOrderObstacle(
+                sizeMapping, problemType, problem, obstacleToken);
             if(!obstacle.empty())
-                reject(obstacle);
-
-            // Checked before the split arithmetic below, which models the tree
-            // packing specifically: the parallel path reinterprets the same
-            // kernel arguments and splits K across workgroups instead.
-            if(sk.reduction != origami::reduction_t::tree)
-                reject("the resolved StreamK reduction is parallel, not tree");
+                return obstacle;
 
             // Load-bearing rather than defensive: the grouped-GEMM callers pass
             // a default-constructed StreamKSettings, so this is what stands
             // between them and a division by zero below.
             if(sk.grid == 0)
-                reject("the resolved StreamK grid is 0");
+                return refuse("StreamKGridZero", "the resolved StreamK grid is 0");
 
             // StreamK=5 hybrid runs the static (SK3) packing unless its
             // sub-mode resolves to dynamic. generateSingleCall() decides this
@@ -4558,63 +4957,98 @@ namespace TensileLite
             // resolution and the kernel-arg packing both use.
             const size_t tiles = problem.getNumTiles(sizeMapping, 1);
 
-            if(staticTwoTilePacking)
+            if(sk.reduction == origami::reduction_t::parallel)
             {
-                // Clamped exactly as generateSingleCall() clamps it, so K==0
-                // resolves the same way on both sides.
-                const size_t itersPerTile
-                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
-
-                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
-                if(pAMDGPU == nullptr)
-                    reject("the StreamK split cannot be recomputed for this hardware");
-
-                // The same helper generateSingleCall() packs from, so the gate
-                // reasons about the split the kernel actually performs.
-                const StreamKStaticSplit split
-                    = streamKStaticSplit(tiles,
-                                         itersPerTile,
-                                         sk.grid,
-                                         pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
-                                         sizeMapping.streamKForceDPOnly != 0);
-
-                if(!streamKStaticSplitRowUniform(split, tiles, itersPerTile))
-                    reject("the StreamK split is not row-uniform: tiles=" + std::to_string(tiles)
-                           + " itersPerTile=" + std::to_string(itersPerTile)
-                           + " grid=" + std::to_string(sk.grid)
-                           + " skTiles=" + std::to_string(split.skTiles)
-                           + " skItersPerWG=" + std::to_string(split.skItersPerWG)
-                           + " extraIters=" + std::to_string(split.extraIters));
+                // Parallel packs AddressFlags == 0 and does not use the tree
+                // static-split model. Admit only when the shared helper proves
+                // the launch is row-uniform; otherwise fail closed.
+                if(!streamKParallelReductionRowUniform(
+                       sk, sizeMapping.streamKAtomic, staticTwoTilePacking, tiles))
+                    return refuse(
+                        "ParallelReductionNotRowUniform",
+                        "the resolved StreamK parallel reduction is not row-uniform: tiles="
+                            + std::to_string(tiles) + " grid=" + std::to_string(sk.grid)
+                            + " streamKAtomic=" + std::to_string(sizeMapping.streamKAtomic)
+                            + " staticTwoTilePacking=" + (staticTwoTilePacking ? "1" : "0"));
             }
-            else if(tiles % sk.grid != 0)
+            else if(sk.reduction == origami::reduction_t::tree)
             {
-                // SK4 and SK5-dynamic pack SKTiles/SKSplit/SKItersPerWI, which
-                // the derivation above does not describe. They are additionally
-                // held to SKTiles == 0 below, so the divisibility test is
-                // redundant for them, but redundant and fail-closed is the
-                // right side to err on.
-                reject("StreamK grid " + std::to_string(sk.grid)
-                       + " does not divide the tile count " + std::to_string(tiles));
+                if(staticTwoTilePacking)
+                {
+                    // Clamped exactly as generateSingleCall() clamps it, so K==0
+                    // resolves the same way on both sides.
+                    const size_t itersPerTile
+                        = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+
+                    AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+                    if(pAMDGPU == nullptr)
+                        return refuse("HardwareNotAMDGPU",
+                                      "the StreamK split cannot be recomputed for this hardware");
+
+                    // The same helper generateSingleCall() packs from, so the gate
+                    // reasons about the split the kernel actually performs.
+                    const StreamKStaticSplit split
+                        = streamKStaticSplit(tiles,
+                                             itersPerTile,
+                                             sk.grid,
+                                             pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
+                                             sizeMapping.streamKForceDPOnly != 0);
+
+                    if(!streamKStaticSplitRowUniform(split,
+                                                     tiles,
+                                                     itersPerTile,
+                                                     sk.grid,
+                                                     internalArgsSupport.perTileExtraIters))
+                        return refuse(
+                            "StaticSplitNotRowUniform",
+                            "the StreamK split is not row-uniform: tiles=" + std::to_string(tiles)
+                                + " itersPerTile=" + std::to_string(itersPerTile)
+                                + " grid=" + std::to_string(sk.grid)
+                                + " skTiles=" + std::to_string(split.skTiles)
+                                + " skItersPerWG=" + std::to_string(split.skItersPerWG)
+                                + " extraIters=" + std::to_string(split.extraIters)
+                                + " perTileExtraIters="
+                                + (internalArgsSupport.perTileExtraIters ? "1" : "0"));
+                }
+                else if(tiles % sk.grid != 0)
+                {
+                    // SK4 and SK5-dynamic pack SKTiles/SKSplit/SKItersPerWI, which
+                    // the derivation above does not describe. They are additionally
+                    // held to SKTiles == 0 below, so the divisibility test is
+                    // redundant for them, but redundant and fail-closed is the
+                    // right side to err on.
+                    return refuse("GridDoesNotDivideTiles",
+                                  "StreamK grid " + std::to_string(sk.grid)
+                                      + " does not divide the tile count "
+                                      + std::to_string(tiles));
+                }
+
+                // Mirrors the arg-packing condition: the ws/Flags pair is only
+                // appended for these kernels, and the device reads AddressFlags == 0
+                // as a request for the parallel reduction path.
+                if(requireSynchronizer && sizeMapping.streamKAtomic == 0
+                   && sizeMapping.streamKForceDPOnly == 0 && synchronizer == nullptr)
+                    return refuse("SynchronizerNull",
+                                  "the StreamK Synchronizer/Flags pointer is null");
+
+                // The dynamic-queue variants are row-uniform only while every output
+                // tile stays data-parallel, i.e. the packed SKTiles is 0.
+                if(sizeMapping.streamK == 4 || effectiveDynamic)
+                {
+                    AMDGPU const*  pAMDGPU       = dynamic_cast<AMDGPU const*>(&hardware);
+                    const int      overrideTiles = pAMDGPU != nullptr ? pAMDGPU->skTiles : -1;
+                    const uint32_t skTiles
+                        = overrideTiles > -1 ? static_cast<uint32_t>(overrideTiles) : 0u;
+                    if(skTiles != 0)
+                        return refuse("DynamicQueueSKTiles",
+                                      "the dynamic-queue StreamK path is packing SKTiles="
+                                          + std::to_string(skTiles) + " rather than 0");
+                }
             }
-
-            // Mirrors the arg-packing condition: the ws/Flags pair is only
-            // appended for these kernels, and the device reads AddressFlags == 0
-            // as a request for the parallel reduction path.
-            if(sizeMapping.streamKAtomic == 0 && sizeMapping.streamKForceDPOnly == 0
-               && synchronizer == nullptr)
-                reject("the StreamK Synchronizer/Flags pointer is null");
-
-            // The dynamic-queue variants are row-uniform only while every output
-            // tile stays data-parallel, i.e. the packed SKTiles is 0.
-            if(sizeMapping.streamK == 4 || effectiveDynamic)
+            else
             {
-                AMDGPU const*  pAMDGPU       = dynamic_cast<AMDGPU const*>(&hardware);
-                const int      overrideTiles = pAMDGPU != nullptr ? pAMDGPU->skTiles : -1;
-                const uint32_t skTiles
-                    = overrideTiles > -1 ? static_cast<uint32_t>(overrideTiles) : 0u;
-                if(skTiles != 0)
-                    reject("the dynamic-queue StreamK path is packing SKTiles="
-                           + std::to_string(skTiles) + " rather than 0");
+                return refuse("UnknownReduction",
+                              "the resolved StreamK reduction is neither tree nor parallel");
             }
         }
 
@@ -4629,8 +5063,10 @@ namespace TensileLite
               || resolvedGlobalAccumulation == 4
               || ((resolvedGlobalAccumulation == 0 || resolvedGlobalAccumulation == 1) && gsu <= 1);
         if(!accumulationRowUniform)
-            reject("resolved GlobalAccumulation=" + std::to_string(resolvedGlobalAccumulation)
-                   + " with GSU=" + std::to_string(gsu) + " is not row-uniform");
+            return refuse("GlobalAccumulation",
+                          "resolved GlobalAccumulation="
+                              + std::to_string(resolvedGlobalAccumulation)
+                              + " with GSU=" + std::to_string(gsu) + " is not row-uniform");
 
         // Recomputes exactly what generateSingleCall() packs. The clamp in
         // calculateAutoStaggerU() should already have forced this to 0; checking
@@ -4639,12 +5075,58 @@ namespace TensileLite
         const size_t  resolvedStaggerU
             = std::get<1>(calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM));
         if(resolvedStaggerU != 0)
-            reject("the resolved StaggerU is " + std::to_string(resolvedStaggerU)
-                   + " rather than 0");
+            return refuse("ResolvedStaggerU",
+                          "the resolved StaggerU is " + std::to_string(resolvedStaggerU)
+                              + " rather than 0");
 
-        if(!internalArgsSupport.staggerU && sizeMapping.staggerU != 0)
-            reject("this kernel has no runtime StaggerU and a compiled-in StaggerU="
-                   + std::to_string(sizeMapping.staggerU));
+        // Only a handwritten custom kernel can carry a stagger the host cannot
+        // reach. A generated kernel takes StaggerU exclusively from the packed
+        // internal argument: the solution's StaggerU survives code generation
+        // only as an SGPR-pool sizing input, so two solutions differing only in
+        // StaggerU -- or only in SupportCustomStaggerU -- emit byte-identical
+        // assembly, and every generated wrap site unpacks the runtime value.
+        // The clamp above therefore does reach it, and !internalArgsSupport
+        // .staggerU says nothing about whether the kernel staggers; it only
+        // says the host declines to write the field, which leaves it 0.
+        //
+        // A handwritten custom kernel is one with a non-empty customKernel.name
+        // that the generator did not produce (customKernel.generated == false);
+        // see handwrittenCustomKernel(). Those are frozen assembly and may bake
+        // a literal stagger into the loop, which no host-side clamp can undo.
+        //
+        // Defense in depth rather than a live path: the CustomKernel clause at
+        // the top of this function already refuses every handwritten custom
+        // kernel outright, so this cannot fire today. It is kept, like the
+        // ResolvedStaggerU check above, so that relaxing that clause to admit
+        // individually vetted custom kernels cannot silently admit one whose
+        // stagger is compiled in.
+        if(handwrittenCustomKernel() && sizeMapping.staggerU != 0)
+            return refuse("CompiledInStaggerU",
+                          "this kernel has a compiled-in StaggerU="
+                              + std::to_string(sizeMapping.staggerU)
+                              + " that the host cannot clamp");
+
+        return {};
+    }
+
+    void ContractionSolution::checkUniformSummationOrder(Problem const&         problem,
+                                                         Hardware const&        hardware,
+                                                         StreamKSettings const& sk,
+                                                         size_t      resolvedGlobalAccumulation,
+                                                         uint32_t    gsu,
+                                                         void const* synchronizer) const
+    {
+        if(!problem.getParams().uniformSummationOrder())
+            return;
+
+        const std::string reason = uniformSummationOrderLaunchObstacle(
+            problem, hardware, sk, resolvedGlobalAccumulation, gsu, synchronizer, true);
+        if(!reason.empty())
+        {
+            throw UniformSummationOrderError(
+                "hipBLASLt Error: solution '" + this->kernelName
+                + "' cannot guarantee uniform summation order for this launch: " + reason);
+        }
     }
 
     namespace
@@ -4811,8 +5293,113 @@ namespace TensileLite
                 skGrid = cuCount;
             }
 
+            // Under uniform-summation-order + static two-tile packing, snap the chain output
+            // g0 onto an admissible uniform grid. F-star is never-upward
+            // (g0 > tiles). When g0 < tiles, snap up to tiles (all-full): mixed
+            // GridDividesTiles (tiles % g0 == 0) is two-tile DP+SK that gfx950
+            // does not store (workspace skipped, SK D rows stay poison). Must
+            // run before the magic-division guard below so that guard still
+            // validates the final grid (a snap after it can emit out-of-range
+            // itersPerWG). Same ABI predicate as checkUniformSummationOrder.
+            if(problem.getParams().uniformSummationOrder() && tiles > 0 && skGrid > 0)
+            {
+                const bool effectiveDynamic
+                    = (self.sizeMapping.streamK == 5)
+                      && (sk5EffectiveDynamic != nullptr
+                              ? *sk5EffectiveDynamic
+                              : self.streamK5EffectiveDynamic(problem, hardware));
+                const bool staticTwoTilePacking
+                    = (self.sizeMapping.streamK == 3)
+                      || (self.sizeMapping.streamK == 5 && !effectiveDynamic);
+                if(staticTwoTilePacking)
+                {
+                    const size_t g0 = skGrid;
+                    // Same clamp as the packer / gate: K==0 yields I==0 otherwise.
+                    const size_t I
+                        = std::max(size_t{1}, problem.getItersPerTile(self.sizeMapping));
+                    // Matches origami::streamk MinItersPerCU (streamk.cpp).
+                    constexpr size_t MinItersPerCU = 8;
+                    const bool perTileExtraIters = self.internalArgsSupport.perTileExtraIters;
+
+                    // The flag-region bound is a constraint ON this selection, not
+                    // a correction applied after it. Every grid this snap can emit
+                    // for F >= 2 is tiles * F > tiles, so tiles % skGrid == tiles
+                    // != 0 and the flag clamp below would fire on exactly these
+                    // grids -- rewriting tiles * F to StreamKFlagElements, which is
+                    // not in general a multiple of tiles and so is refused by
+                    // checkUniformSummationOrder as a non-row-uniform static split.
+                    // Folding the bound in here instead means the search picks a
+                    // uniform grid that already satisfies it and the clamp becomes
+                    // a no-op, so the flag-region invariant is enforced exactly as
+                    // before and never has to rewrite a uniform grid.
+                    //
+                    // Conditioned on the same three predicates the clamp uses, so a
+                    // launch that never touches the flag region is not constrained
+                    // by its size. The clamp's fourth predicate (tiles % skGrid !=
+                    // 0) is implied for every F >= 2 candidate and so is omitted.
+                    // The all-full grid (F == 1, skGrid == tiles) satisfies
+                    // tiles % skGrid == 0, uses no flag region at all, and is
+                    // therefore admissible at any tile count -- which is what keeps
+                    // FStar = 1 a valid floor even when tiles itself exceeds the
+                    // bound.
+                    const bool flagRegionBinds
+                        = self.sizeMapping.streamKAtomic == 0
+                          && self.sizeMapping.streamKForceDPOnly == 0
+                          && reductionStrat != origami::reduction_t::parallel;
+
+                    if(g0 > tiles)
+                    {
+                        const size_t F0    = g0 / tiles;
+                        size_t       FStar = 1; // always admissible (all-full)
+                        for(size_t F = F0; F >= 2; --F)
+                        {
+                            // Tree all-partial without per-tile extras needs
+                            // F | I. Parallel extras are per PartialIdx and
+                            // tile-symmetric without that capability bit, so
+                            // skip the divisibility requirement for parallel.
+                            if(reductionStrat != origami::reduction_t::parallel
+                               && !perTileExtraIters && (I % F) != 0)
+                                continue;
+                            if((I / F) < MinItersPerCU)
+                                continue;
+                            // F==1 needs no partials; for F>=2 require workspace fit.
+                            if(self.partialTileSize(tiles * F) > problem.workspaceSize())
+                                continue;
+                            // Stay inside the flag region these grids will use.
+                            if(flagRegionBinds
+                               && (tiles * F) > static_cast<size_t>(StreamKFlagElements))
+                                continue;
+                            FStar = F;
+                            break;
+                        }
+                        skGrid = tiles * FStar;
+                    }
+                    else if(g0 < tiles)
+                    {
+                        skGrid = tiles;
+                    }
+
+                    if(skGrid != g0
+                       && (pAMDGPU->skFixedGrid > 0 || pAMDGPU->skMaxCUs > 0
+                           || pAMDGPU->skGridMultiplier > 1))
+                    {
+                        warnStreamKUniformityGridSnapOnce(g0, skGrid);
+                    }
+                }
+            }
+
             // Grid selected by the config/CU/override logic, captured before the
             // "reset to tiles" tree-fixup-bounds fallback below.
+            //
+            // Captured AFTER the uniform-summation-order snap above, because that
+            // snap is grid SELECTION under uniform summation order -- it is how an
+            // admissible uniform grid is chosen -- and not one of the post-selection
+            // fallbacks the launch summary attributes with `changedBy`. Capturing
+            // ahead of it would report selected != final with changedBy = none,
+            // which is exactly the unattributed-rewrite misreport the out-params
+            // exist to prevent. The snap emits its own
+            // warnStreamKUniformityGridSnapOnce() note when it overrides an
+            // explicitly requested grid, so the override is still observable.
             if(outSelectedGrid)
                 *outSelectedGrid = skGrid;
 
@@ -4985,7 +5572,18 @@ namespace TensileLite
         d.treeBoundsFallbackFired = treeBounds;
         d.clusterDPGridClamped    = clusterDPClamp;
 
-        size_t     grid        = gridInitial;
+        size_t grid = gridInitial;
+
+        // Same reconciliation, same helper, same triple as
+        // resolveStreamKSettings() -- which is what solve() actually launches --
+        // and as requiredWorkspaceSize(). It has to run here, before the
+        // workspace-fit fallback below, for the same reason it does there: the
+        // fallback's `reduction == parallel` disjunct must see the reduction the
+        // launch will use. Omitting it would let this snapshot report a
+        // workspaceDP fallback (and a grid) that the launch never took, whenever
+        // the grid lands on a splitting factor below 2 with parallel selected.
+        reduction = streamKReconcileReduction(reduction, grid, tiles);
+
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
         d.streamKDP            = streamKDP;
