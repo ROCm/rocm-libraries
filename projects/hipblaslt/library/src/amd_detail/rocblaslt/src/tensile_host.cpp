@@ -3984,16 +3984,22 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
                && !solution->problemType.outputAmaxD)
             {
+                // A group is one kernel launch, so two of its problems sharing
+                // a region would let one clear a flag the other is spinning on.
+                // Past c_syncSkSlotsPerStream there is no region left to give
+                // them, so the call is refused rather than wrapped onto slot 0.
+                if(data->inputs.grouped.size() > _rocblaslt_handle::c_syncSkSlotsPerStream)
+                {
+                    log_error(__func__,
+                              "a Stream-K solution cannot run a grouped GEMM wider than "
+                              "c_syncSkSlotsPerStream problems: the problems past it have no "
+                              "flag region of their own");
+                    return rocblaslt_status_invalid_value;
+                }
                 for(size_t i = 0; i < data->inputs.grouped.size(); i++)
                 {
-                    // SynchronizerSizeCheck refuses every solution that uses
-                    // these flags once the group is wider than the block, so
-                    // problems past it never read the pointer. Give them the
-                    // stream's first region rather than failing a call that runs
-                    // fine without it.
-                    const size_t slot   = i < _rocblaslt_handle::c_syncSkSlotsPerStream ? i : 0;
-                    void*        region = nullptr;
-                    if(rocblaslt_status s = handle->streamKFlagsForStream(stream, slot, &region);
+                    void* region = nullptr;
+                    if(rocblaslt_status s = handle->streamKFlagsForStream(stream, i, &region);
                        s != rocblaslt_status_success)
                     {
                         log_error(__func__,
