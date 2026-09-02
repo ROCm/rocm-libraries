@@ -430,6 +430,20 @@ else()
       add_library(roc::rocprim_hip ALIAS rocprim_hip)
     endif()
   endif()
+
+  # libhipcxx (only for ROCm platform)
+  # TODO: use fetch_dep when it's possible
+  set(REPO_NAME "libhipcxx")
+  message(STATUS "Searching for ${REPO_NAME} package")
+
+  # Add default install location for WIN32 and non-WIN32 as hint
+  find_package(${REPO_NAME} CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/${REPO_NAME}")
+
+  if(NOT ${${REPO_NAME}_FOUND})
+    message(STATUS "No existing ${REPO_NAME} package was found.")
+  else()
+    message(STATUS "Package found (${${REPO_NAME}_DIR}) with version ${libhipcxx_VERSION}")
+  endif()
 endif()
 
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
