@@ -287,7 +287,7 @@ class RuntimeGemmFinalizer {
               runtimeScalar<Accumulator>(problem.activationParameter0, "activation parameter 0"))),
           m_activationParameter1(m_quantizeAccumulator(
               runtimeScalar<Accumulator>(problem.activationParameter1, "activation parameter 1"))),
-          m_alphaIsZero(m_alpha == Accumulator(0)),
+          m_skipProduct(m_alpha == Accumulator(0) || problem.a.shape()[1] == 0),
           m_betaIsZero(m_beta == Accumulator(0)) {
         if (problem.bias) m_bias.emplace(problem.bias->broadcastTo(problem.c.shape()));
         if (problem.scaleAlpha)
@@ -296,8 +296,8 @@ class RuntimeGemmFinalizer {
         if (problem.scaleB) m_scaleB.emplace(problem.scaleB->broadcastTo(problem.c.shape()));
     }
 
-    bool alphaIsZero() const {
-        return m_alphaIsZero;
+    bool skipsProduct() const {
+        return m_skipProduct;
     }
 
     Accumulator multiply(Accumulator left, Accumulator right) const {
@@ -310,15 +310,16 @@ class RuntimeGemmFinalizer {
 
     // Finalize a backend-produced raw accumulator.
     Accumulator finalize(size_t row, size_t column, Accumulator accumulation) const {
-        Accumulator effectiveAlpha = m_alpha;
-        if (!m_alphaIsZero) {
+        Accumulator result = Accumulator(0);
+        if (!m_skipProduct) {
+            Accumulator effectiveAlpha = m_alpha;
             if (m_scaleA) effectiveAlpha = multiply(effectiveAlpha, (*m_scaleA)(row, column));
             if (m_scaleB) effectiveAlpha = multiply(effectiveAlpha, (*m_scaleB)(row, column));
             if (m_scaleAlpha)
                 effectiveAlpha = multiply(effectiveAlpha, (*m_scaleAlpha)(row, column));
+            result = multiply(effectiveAlpha, accumulation);
         }
 
-        Accumulator result = multiply(effectiveAlpha, accumulation);
         if (!m_betaIsZero)
             result = add(result, multiply(multiply(m_beta, m_scaleC), m_c(row, column)));
         return finalizeCombined(row, column, result);
@@ -348,7 +349,7 @@ class RuntimeGemmFinalizer {
     Accumulator m_outputScale;
     Accumulator m_activationParameter0;
     Accumulator m_activationParameter1;
-    bool m_alphaIsZero;
+    bool m_skipProduct;
     bool m_betaIsZero;
 };
 
@@ -395,7 +396,7 @@ GemmExecutionInfo runPointwiseGemmTyped(const GemmInvocation& problem,
     auto computeOutput = [&](size_t row, size_t column, size_t selectedIndex) {
         Accumulator sum = Accumulator(0);
 
-        if (!finalizer.alphaIsZero() && (blockScaleA || blockScaleB)) {
+        if (!finalizer.skipsProduct() && (blockScaleA || blockScaleB)) {
             size_t blockBase = 0;
             while (blockBase < k) {
                 const size_t remainingA = blockScaleA
@@ -430,7 +431,7 @@ GemmExecutionInfo runPointwiseGemmTyped(const GemmInvocation& problem,
                 sum = finalizer.add(sum, finalizer.multiply(blockSum, scale));
                 blockBase = blockEnd;
             }
-        } else if (!finalizer.alphaIsZero()) {
+        } else if (!finalizer.skipsProduct()) {
             for (size_t reduction = 0; reduction < k; ++reduction) {
                 Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.conjugateA);
                 Accumulator bValue = conjugateIfNeeded(b(reduction, column), problem.conjugateB);
@@ -454,7 +455,7 @@ GemmExecutionInfo runPointwiseGemmTyped(const GemmInvocation& problem,
     const size_t logicalElements = problem.d.shape().elementCount();
     size_t outputElementsWritten = 0;
     const bool parallelOutput = canParallelizeGemmOutput(problem);
-    const size_t reductionWork = finalizer.alphaIsZero() ? 0 : k;
+    const size_t reductionWork = finalizer.skipsProduct() ? 0 : k;
     if (problem.outputSelection.selectsAll()) {
         outputElementsWritten = logicalElements;
         forEachParallelIndex(logicalElements, saturatedProduct(logicalElements, reductionWork),

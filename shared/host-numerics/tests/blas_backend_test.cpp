@@ -138,6 +138,32 @@ void testTransformingAutomaticCostPolicy() {
             "Automatic GEMM ignored reusable BLAS inputs for a skinny request.");
 }
 
+void testZeroExtentsDoNotInvokeBlas() {
+    using namespace roc::host_numerics;
+
+    for (const auto& [rows, columns, reductions] :
+         std::array<std::array<size_t, 3>, 2>{{{0, 3, 2}, {2, 0, 3}}}) {
+        GemmTestCase problem(Tensor(ScalarType::Float32, Shape{rows, reductions}),
+                             Tensor(ScalarType::Float32, Shape{reductions, columns}),
+                             Tensor(ScalarType::Float32, Shape{rows, columns}),
+                             Tensor(ScalarType::Float32, Shape{rows, columns}),
+                             ScalarType::Float32);
+        const GemmTestRunInfo runInfo = referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
+        require(runInfo.backendUsed == GemmBackend::Blas && runInfo.outputElementsWritten == 0,
+                "BLAS strategy did not treat an empty output as a no-op.");
+    }
+
+    Tensor output = Tensor::copyNativeValues<float>(Shape{1, 1}, std::array<float, 1>{2.0f});
+    GemmTestCase zeroReduction(Tensor(ScalarType::Float32, Shape{1, 0}),
+                               Tensor(ScalarType::Float32, Shape{0, 1}), output, output,
+                               ScalarType::Float32);
+    zeroReduction.alpha = std::numeric_limits<float>::quiet_NaN();
+    zeroReduction.beta = 3.0f;
+    const GemmTestRunInfo runInfo = referenceGemmWithBlasBackend(zeroReduction, GemmBackend::Blas);
+    require(runInfo.backendUsed == GemmBackend::Blas && output.loadAs<float>({0, 0}) == 6.0f,
+            "BLAS strategy did not treat an empty reduction as a null product.");
+}
+
 void testModeratelyLargeExactGemm() {
     using namespace roc::host_numerics;
 
@@ -200,6 +226,7 @@ int main() {
 
     testPartialOutputSelection();
     testTransformingAutomaticCostPolicy();
+    testZeroExtentsDoNotInvokeBlas();
     testModeratelyLargeExactGemm();
 
     const std::array<std::complex<float>, 1> complexA{std::complex<float>(1, 2)};

@@ -250,8 +250,6 @@ void validateTransforming(const GemmInvocation& problem) {
     const size_t m = problem.a.shape()[0];
     const size_t n = problem.b.shape()[1];
     const size_t k = problem.a.shape()[1];
-    if (m == 0 || n == 0 || k == 0)
-        throw std::invalid_argument("Transforming BLAS backend requires nonzero M, N, and K.");
     if (m > static_cast<size_t>(std::numeric_limits<int>::max()) ||
         n > static_cast<size_t>(std::numeric_limits<int>::max()) ||
         k > static_cast<size_t>(std::numeric_limits<int>::max()))
@@ -345,12 +343,19 @@ template <typename Accumulator>
 GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
     using namespace detail;
     static const BlasGemmBackend blas;
-    if (blas.querySupport(problem)) return blas.run(problem);
+    if (problem.d.elementCount() == 0)
+        return {
+            .backendUsed = GemmBackend::Blas,
+            .fallbackReason = std::nullopt,
+            .outputElementsWritten = 0,
+            .outputElementsCovered = 0,
+        };
+    if (problem.a.shape()[1] != 0 && blas.querySupport(problem)) return blas.run(problem);
 
     Tensor stagedOutput(nativeScalarType<Accumulator>, columnMajorLayout(problem.d.shape()));
     const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
 
-    if (!finalizer.alphaIsZero()) {
+    if (!finalizer.skipsProduct()) {
         auto [stagedA, conjugateA] = prepareBlasOperand<Accumulator>(
             problem.a, problem.computeTypeA, problem.preQuantizationScalesA, problem.conjugateA,
             problem.mathMode, "A");
@@ -440,6 +445,12 @@ GemmExecutionInfo BlasGemmBackend::run(const GemmInvocation& problem) const {
 GemmSupportInfo queryTransformingBlasGemmSupport(const GemmInvocation& problem) {
     try {
         validateTransforming(problem);
+        if (problem.d.elementCount() == 0 || problem.a.shape()[1] == 0)
+            return {
+                .supported = true,
+                .reason = {},
+                .preferredForAutomaticExecution = false,
+            };
         static const BlasGemmBackend directBlas;
         if (directBlas.querySupport(problem)) return {.supported = true, .reason = {}};
 
