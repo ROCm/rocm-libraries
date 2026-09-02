@@ -14,6 +14,7 @@ in emitted bytes.
 """
 
 import os
+import shutil
 
 import pytest
 
@@ -21,6 +22,9 @@ from codegen_harness import (
     canonicalize_asm,
     emit_kernels_from_logic,
 )
+from config_harness import emit_kernels_from_config
+from Tensile.Common.Architectures import gfxToIsa
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
@@ -33,6 +37,26 @@ _LOGIC = os.path.join(
     "data",
     "logic_gfx942_HSS_BH.yaml",
 )
+
+_CONFIG = os.path.join(
+    os.path.dirname(__file__),
+    "data",
+    "test_data",
+    "_designed",
+    "gfx950",
+    "subtile3_gr_variants.yaml",
+)
+
+
+def _pin_rocisa(arch, wavefront):
+    from rocisa import rocIsa
+
+    isa = gfxToIsa(arch)
+    assert isa is not None, f"unrecognized test architecture: {arch}"
+    ri = rocIsa.getInstance()
+    ri.init(isa, shutil.which("amdclang++") or "/usr/bin/amdclang++")
+    ri.setKernel(isa, wavefront)
+    return ri
 
 
 def test_emit_produces_assembly():
@@ -54,6 +78,28 @@ def test_emit_is_deterministic():
     b = emit_kernels_from_logic(_LOGIC)
     assert [t[0] for t in a] == [t[0] for t in b]
     assert [t[1] for t in a] == [t[1] for t in b]
+
+
+@pytest.mark.parametrize(
+    "emit,kwargs",
+    [
+        (emit_kernels_from_logic, {"logic_path": _LOGIC}),
+        (emit_kernels_from_config, {"config_path": _CONFIG, "limit": 1, "arch": "gfx950"}),
+    ],
+    ids=["logic", "config"],
+)
+def test_emit_restores_callers_rocisa_kernel(emit, kwargs):
+    """Logic/config harnesses must not leak their target ISA to callers."""
+    with preserve_rocisa_kernel_state():
+        ri = _pin_rocisa("gfx1250", 32)
+        before = ri.getKernel()
+
+        results = emit(**kwargs)
+
+        after = ri.getKernel()
+        assert results
+        assert tuple(after.isa) == tuple(before.isa)
+        assert after.wavefrontSize == before.wavefrontSize
 
 
 def test_canonicalize_neutralizes_random_labels():
