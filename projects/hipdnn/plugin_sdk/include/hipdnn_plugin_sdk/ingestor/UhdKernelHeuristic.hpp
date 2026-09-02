@@ -107,6 +107,21 @@ inline uhd::FeatureExtractionContext::ValueMap kernelVarsFrom(const KernelDefini
 
 /// `priority` descending, then id ascending -- the order rank() falls back to, and the
 /// same one UnrankedKernelHeuristic produces.
+/// Declared order as §15.2's (id, score) pairs, reporting the 0 that means "no measurement".
+///
+/// Shared by every path that degrades, so a fallback cannot come to describe itself one way in
+/// one place and another way elsewhere.
+inline std::vector<IKernelHeuristic::ScoredKernel> asScored(const std::vector<KernelDefinition>& ordered)
+{
+    std::vector<IKernelHeuristic::ScoredKernel> scored;
+    scored.reserve(ordered.size());
+    for(const auto& entry : ordered)
+    {
+        scored.push_back({entry.kernelId, 0.0});
+    }
+    return scored;
+}
+
 inline std::vector<KernelDefinition> declaredOrder(const std::vector<KernelDefinition>& entries)
 {
     std::vector<KernelDefinition> ordered(entries);
@@ -176,6 +191,24 @@ class UhdKernelHeuristic : public IKernelHeuristic
 public:
     /// @returns nullptr when the UHD cannot be brought up, so the caller can substitute
     ///          declared-order ranking. Never throws.
+    /// Builds an instance that holds no model of its own, only the per-arch candidates.
+    ///
+    /// RFC 0019 §8.3 resolves "exact gcnArchName, then `default`". A UED may name per-arch
+    /// models and no `default`, and that engine must still rank by model on the architectures
+    /// it does name. Previously such a UED produced no object at all -- there was nothing to
+    /// build eagerly -- so the whole map was discarded and the engine ranked by declared order
+    /// everywhere, including on the architectures it had a model for.
+    static std::shared_ptr<UhdKernelHeuristic>
+        makeArchResolver(const std::map<std::string, HeuristicDescriptor>& byArch,
+                         const std::string& describedBy,
+                         const std::vector<std::string>& knobs)
+    {
+        auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(describedBy));
+        built->_byArch = byArch;
+        built->_knobs = knobs;
+        return built;
+    }
+
     static std::shared_ptr<UhdKernelHeuristic> tryCreate(const HeuristicDescriptor& descriptor,
                                                          const std::string& describedBy,
                                                          const std::vector<std::string>& knobs = {},
@@ -292,17 +325,35 @@ public:
         {
             return forArch->rankWith(catalog, context);
         }
-        return rankWith(catalog, context);
+        if(_hasDefaultModel)
+        {
+            return rankWith(catalog, context);
+        }
+
+        // §8.3's third step, which had no implementation: exact, then `default`, then
+        // unavailable. A UED naming models only for other architectures has nothing to say
+        // about this one, and using one of them anyway would rank this device on a model
+        // trained for different hardware -- silently, since the ranking would look normal.
+        reportNoModelForArchOnce(context.deviceProperties.gcnArchName);
+        return detail::asScored(detail::declaredOrder(catalog.entries));
     }
 
     /// @returns the model for @p arch when the UED named a different one for it, else
     ///          nullptr, meaning "the model this object already holds applies".
     std::shared_ptr<const UhdKernelHeuristic> resolveForArch(const std::string& arch) const
     {
-        if(_byArch.size() < 2 || arch.empty())
+        if(arch.empty() || _byArch.empty())
         {
-            // One entry (or none) means every architecture gets the same model, which is
-            // what was built eagerly. No lookup, no lock, no cache.
+            return nullptr;
+        }
+        if(_byArch.size() == 1 && _byArch.count("default") == 1)
+        {
+            // The only entry is the `default` one, which is what was built eagerly. Every
+            // architecture gets it, so there is nothing to look up: no lock, no cache.
+            //
+            // Keyed on the entry being `default`, not on the count. A single *arch-named*
+            // entry is not a universal model -- treating it as one is how a gfx950-only UHD
+            // came to rank every device, including the ones it says nothing about.
             return nullptr;
         }
 
@@ -450,15 +501,9 @@ private:
                                                  << " features_hash=" << _config.featuresHash);
             // Declared order carries no model score. It reports 0 -- RFC 0019 §5 step 7's
             // value for "no measurement" -- so a degraded ranking and a model that scored zero
-            // are described the same way, which is what lets estimateTflops apply one rule.
-            // traceDecidedBy() is where the two are told apart.
-            std::vector<ScoredKernel> fallback;
-            fallback.reserve(catalog.entries.size());
-            for(const auto& entry : detail::declaredOrder(catalog.entries))
-            {
-                fallback.push_back({entry.kernelId, 0.0});
-            }
-            return fallback;
+            // describe themselves the same way, which is what lets estimateTflops apply one
+            // rule. traceDecidedBy() is where the two are told apart.
+            return detail::asScored(detail::declaredOrder(catalog.entries));
         }
     }
 
@@ -503,6 +548,11 @@ private:
                                << " ranked=[" << candidates.str() << "]");
     }
 
+    explicit UhdKernelHeuristic(std::string describedBy)
+        : _describedBy(std::move(describedBy))
+    {
+    }
+
     UhdKernelHeuristic(uhd::UhdConfig config,
                        std::shared_ptr<const uhd::IUhdAdapter> adapter,
                        std::shared_ptr<const uhd::FeatureExtractor> extractor,
@@ -514,6 +564,7 @@ private:
         // be negated. Omitting this silently inverts every latency-trained UHD.
         , _objectiveSign(_config.objective == "min" ? -1.0 : 1.0)
         , _describedBy(std::move(describedBy))
+        , _hasDefaultModel(true)
     {
     }
 
@@ -567,6 +618,29 @@ private:
         return {oriented, oriented};
     }
 
+    /// Reports that no model covers the running architecture, once per heuristic.
+    ///
+    /// The engine still selects, by declared order, which RFC 0019 §5 step 7 makes a legal
+    /// ranking -- so without this the only symptom is that a UHD-carrying engine quietly stops
+    /// using its UHD on some machines and not others.
+    void reportNoModelForArchOnce(const std::string& arch) const
+    {
+        if(_reportedNoModelForArch.exchange(true))
+        {
+            return;
+        }
+
+        std::ostringstream named;
+        for(const auto& [candidate, descriptor] : _byArch)
+        {
+            named << (named.tellp() == std::streampos(0) ? "" : ", ") << candidate;
+        }
+        HIPDNN_PLUGIN_LOG_WARN("uhd: " << _describedBy << " names no model for '" << arch
+                                       << "' and no 'default' (it names: " << named.str()
+                                       << "); kernels rank by priority, then descriptor id. "
+                                          "Further occurrences are not logged.");
+    }
+
     /// Reports a model predicting outside the range its target can occupy, once per heuristic.
     ///
     /// ERROR, not WARN. The one WARN peer on this path is "not trained for this architecture",
@@ -616,12 +690,19 @@ private:
     /// ranking runs through a shared_ptr<const> from any thread.
     mutable std::atomic<bool> _reportedScoreOutOfRange{false};
 
+    /// Set the first time an architecture resolves to no model at all.
+    mutable std::atomic<bool> _reportedNoModelForArch{false};
+
     /// The most recent offending pair, carried to the report so it names a concrete value.
     /// Racy under concurrent ranking, which is acceptable: it is diagnostic detail on a message
     /// that fires once, and any offending pair illustrates the condition as well as another.
     mutable double _lastOutOfRangeRaw = 0.0;
     mutable double _lastOutOfRangeRecovered = 0.0;
     std::string _describedBy;
+
+    /// False for an instance built by makeArchResolver: it carries candidates but no model of
+    /// its own, so §8.3's `default` step has nothing to fall back to.
+    bool _hasDefaultModel = false;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

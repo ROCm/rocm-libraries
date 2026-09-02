@@ -903,4 +903,101 @@ TEST(TestIngestorUhdKernelHeuristic, APartiallyAffectedRankingSaysTheModelStillD
     EXPECT_DOUBLE_EQ(scored.back().score, 0.0);
 }
 
+TEST(TestIngestorUhdKernelHeuristic, PerArchModelsRankWithoutADefaultEntry)
+{
+    // RFC 0019 §8.3's first step is the exact gcnArchName, so a UED naming models per
+    // architecture and no `default` must still rank by model on the architectures it names.
+    // It did not: with no `default` the loader left heuristicId unset, makeKernelHeuristic
+    // returned the unranked fallback before looking at the map, and the engine ranked by
+    // declared order everywhere -- including on the very architectures it shipped a model for.
+    //
+    // Every pre-existing arch test passed a "default" key, which is why nothing caught this.
+    const hipdnn_test_sdk::utilities::ScopedDirectory gfx942Dir("uhd_no_default_942");
+    const hipdnn_test_sdk::utilities::ScopedDirectory gfx950Dir("uhd_no_default_950");
+    const auto onNine42 = writeFixture(gfx942Dir.path(), preferLargeTiles());
+    const auto onNine50 = writeFixture(gfx950Dir.path(), preferSmallTiles());
+
+    const std::map<std::string, HeuristicDescriptor> byArch{
+        {"gfx942", modelDescriptor(gfx942Dir.path(), onNine42.uhdFileName)},
+        {"gfx950", modelDescriptor(gfx950Dir.path(), onNine50.uhdFileName)}};
+
+    // No descriptor: there is no `default` for the loader to have resolved.
+    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, byArch);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, testId(0x02))
+        << "the gfx942 model did not rank; this is declared order";
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AnArchNamedModelDoesNotRankAnArchitectureItDoesNotName)
+{
+    // §8.3's third step, which had no implementation: exact, then `default`, then unavailable.
+    // A single arch-named entry used to be promoted to the universal model on the reasoning
+    // that one entry means one model. But `{"gfx950": X}` says X describes gfx950 -- not that
+    // it describes everything -- so a gfx950-only UHD ranked every device, silently, on a model
+    // trained for different hardware.
+    auto recorder = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(
+        HIPDNN_SEV_INFO);
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_wrong_arch_only");
+    const auto onNine50 = writeFixture(dir.path(), preferLargeTiles());
+
+    const std::map<std::string, HeuristicDescriptor> byArch{
+        {"gfx950", modelDescriptor(dir.path(), onNine50.uhdFileName)}};
+
+    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, byArch);
+    ASSERT_NE(heuristic, nullptr);
+
+    // A device the UED says nothing about.
+    const testing::TestGraph graph;
+    auto properties = gfx942();
+    properties.gcnArchName = "gfx1100";
+    const MatchContext context{graph, 0, properties};
+    const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
+
+    // Declared order -- catalogAgainstPriority puts the small tile first -- not the gfx950
+    // model, which prefers large tiles and would have put 0x02 first.
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, testId(0x01))
+        << "a model named only for gfx950 ranked a gfx1100 device";
+
+    // And it says so. Without this the only symptom is a UHD-carrying engine quietly not
+    // using its UHD on some machines and not others.
+    EXPECT_TRUE(recorder.hasLogContaining("names no model for 'gfx1100'"));
+}
+
+TEST(TestIngestorUhdKernelHeuristic, ADefaultStillCoversAnArchitectureNotNamedExplicitly)
+{
+    // The compatibility half of the same rule. Tightening the third step must not break the
+    // second: a UED that does declare a `default` still ranks every unnamed architecture with
+    // it, which is what every model shipped so far relies on.
+    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir("uhd_default_covers");
+    const hipdnn_test_sdk::utilities::ScopedDirectory archDir("uhd_default_covers_950");
+    const auto fallback = writeFixture(defaultDir.path(), preferLargeTiles());
+    const auto specific = writeFixture(archDir.path(), preferSmallTiles());
+
+    const std::map<std::string, HeuristicDescriptor> byArch{
+        {"default", modelDescriptor(defaultDir.path(), fallback.uhdFileName)},
+        {"gfx950", modelDescriptor(archDir.path(), specific.uhdFileName)}};
+
+    const auto heuristic = makeKernelHeuristic(
+        modelDescriptor(defaultDir.path(), fallback.uhdFileName), "test-engine", KNOBS, byArch);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    auto properties = gfx942();
+    properties.gcnArchName = "gfx1100";
+    const MatchContext context{graph, 0, properties};
+    const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, testId(0x02)) << "the default model did not cover gfx1100";
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor

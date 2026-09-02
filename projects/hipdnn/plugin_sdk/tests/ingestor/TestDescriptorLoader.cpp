@@ -487,6 +487,55 @@ TEST(TestDescriptorLoader, LoadsRoleScopedHeuristicsMappedByArchitecture)
     EXPECT_EQ(engine.sortKernelCatalog.at("default"), *engine.heuristicId);
 }
 
+/// RFC 0019 §8.3 resolves the exact gcnArchName, then `default`, then nothing. An arch-named
+/// entry is a claim about that architecture, not about every architecture, so it must not become
+/// the single reference consumers read as the universal model.
+///
+/// It used to, whenever the map held exactly one entry -- on the reasoning that one model means
+/// one model. The consequence was a gfx950-only UHD ranking every device, including ones it says
+/// nothing about, with nothing in the output to show it. The candidates stay in
+/// heuristicsByArch, where rank() resolves them against the running device.
+TEST(TestDescriptorLoader, ASingleArchScopedHeuristicDoesNotBecomeTheDefault)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("single_arch"));
+    auto documents = makeSetDocuments('1', "test:single_arch");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    const auto uhdId = engineDocument.at("heuristic").get<std::string>();
+
+    engineDocument.erase("heuristic");
+    engineDocument["sort_kernel_catalog"] = {{"gfx950", uhdId}};
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& engine = sets.front().engine;
+    EXPECT_EQ(engine.sortKernelCatalog.size(), 1u);
+    EXPECT_FALSE(engine.heuristicId.has_value())
+        << "a model named only for gfx950 was promoted to the engine's default";
+
+    // But it is still reachable: discarding it would leave the engine ranking by declared order
+    // even on gfx950, which is the architecture it does have a model for.
+    EXPECT_EQ(sets.front().heuristicsByArch.count("gfx950"), 1u);
+}
+
+/// The legacy spelling stays a default. A bare `"heuristic": "<id>"` is keyed "default" by the
+/// loader, so tightening the rule above must not disturb the form every shipped UED uses.
+TEST(TestDescriptorLoader, ABareHeuristicIdIsStillTheDefault)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bare_id"));
+    auto documents = makeSetDocuments('1', "test:bare_id");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().engine.heuristicId.has_value());
+    EXPECT_EQ(sets.front().engine.sortKernelCatalog.count("default"), 1u);
+}
+
 /// A per-arch reference to a UHD nothing defines is the same broken install as a dangling
 /// default one. Loading it would defer the failure to whichever device selects that arch.
 TEST(TestDescriptorLoader, DropsAnEngineWhoseArchScopedHeuristicDoesNotResolve)

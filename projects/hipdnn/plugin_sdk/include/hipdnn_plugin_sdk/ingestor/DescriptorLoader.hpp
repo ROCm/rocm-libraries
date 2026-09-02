@@ -831,23 +831,23 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
                "so declare one");
     }
 
-    // The single reference every existing consumer reads.
+    // The `default` model, and only that.
     //
-    // RFC 0019 §8.3 wants this resolved against the running gcnArchName, then `default`. It
-    // cannot happen here: descriptor discovery is a process-wide memoized static that runs
-    // before any device or stream exists (Container's engine-id enumeration calls it), and
-    // getDeviceArch needs a stream. Resolving by arch therefore belongs where an engine
-    // instance is built, which needs DescriptorSet to carry the candidates rather than one
-    // pre-resolved heuristic. Until then a per-arch entry is validated and the `default` one
-    // is used.
+    // RFC 0019 §8.3 resolves against the running gcnArchName first, and that cannot happen
+    // here: descriptor discovery is a process-wide memoized static that runs before any device
+    // or stream exists (Container's engine-id enumeration calls it), and getDeviceArch needs a
+    // stream. So the arch step happens at first rank(), reading the candidates DescriptorSet
+    // carries in heuristicsByArch, and this field carries only §8.3's second step.
+    //
+    // A single arch-named entry deliberately does *not* land here. It used to, on the reasoning
+    // that one entry means one model -- but `{"gfx950": X}` says X describes gfx950, not that it
+    // describes everything, and promoting it made a gfx950-only UHD rank every device including
+    // the ones it says nothing about. A bare `"heuristic": "<id>"` is keyed "default" by
+    // readRole, so the legacy single-model form is unaffected.
     if(const auto fallback = engine.sortKernelCatalog.find("default");
        fallback != engine.sortKernelCatalog.end())
     {
         engine.heuristicId = fallback->second;
-    }
-    else if(engine.sortKernelCatalog.size() == 1)
-    {
-        engine.heuristicId = engine.sortKernelCatalog.begin()->second;
     }
     engine.metadataSchemaId = requireId(root, "metadata", where);
     engine.knobs = optionalStringArray(root, "knobs", where);

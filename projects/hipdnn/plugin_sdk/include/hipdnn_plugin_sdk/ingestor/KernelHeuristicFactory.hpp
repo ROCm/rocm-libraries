@@ -36,6 +36,18 @@ inline std::shared_ptr<IKernelHeuristic>
 {
     if(!descriptor.has_value())
     {
+        // No `default` model, but the UED may still name models per architecture. RFC 0019
+        // §8.3's first step is the exact gcnArchName, so those have to be reachable -- and they
+        // were not: this returned before ever looking at byArch, discarding the whole map and
+        // ranking by declared order even on the architectures the engine had a model for.
+        //
+        // The arch is unknown here, by construction (see DescriptorLoader), so this builds a
+        // resolver that consults the map at first rank(), when a device exists.
+        if(!byArch.empty())
+        {
+            return UhdKernelHeuristic::makeArchResolver(byArch, describedBy, knobs);
+        }
+
         // Warn, not fail: an engine with no model still selects deterministically. The
         // warning is the point -- it separates an engine that declares its order from
         // one still waiting on a UHD, which otherwise look identical from the outside.
