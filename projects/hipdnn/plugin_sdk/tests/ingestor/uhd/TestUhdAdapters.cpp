@@ -6,29 +6,29 @@
 #include <hipdnn_plugin_sdk/ingestor/uhd/AdapterFactory.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/NativeScorerRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/UhdConfig.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/CustomLibraryAdapter.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/adapters/NativeAdapter.hpp>
 
 #include <gtest/gtest.h>
 
-#include <cstddef>
 #include <string>
-#include <vector>
 
 /// @file TestUhdAdapters.cpp
-/// @brief RFC 0019 §7's adapter kinds, at the boundary where a bad descriptor arrives.
+/// @brief makeUhdAdapter's dispatch -- RFC 0019 §7's kind names, resolved to an adapter.
 ///
-/// A descriptor set is drop-in data from a potentially third-party author, and §5 step 7 requires
-/// a malformed one to degrade to `static_order` rather than fail the request. That makes the
-/// failure paths the interesting ones: each returns nullptr, and returning a half-built adapter
-/// instead would put a scorer with the wrong shape on the live path. The adapters' happy paths
-/// are covered through TestUhdKernelHeuristic, which drives them the way ranking does.
+/// Scoped to the factory. The adapters themselves are covered by the backend suite, which owns
+/// TestNativeAdapter, TestCustomLibraryAdapter, TestTableAdapter and TestTreeDataAdapter and
+/// drives each one directly, including a real dlopen'd scorer built from test_scorer_lib.cpp.
+/// Only the dispatch was untested: nothing outside TestUhdGenArtifact's happy path called
+/// makeUhdAdapter, so no case covered what it does with a kind it cannot build.
+///
+/// That matters because the alternative to declining is not an error. A factory falling through
+/// to a default kind would score against a model the descriptor never named, and §5 step 7's
+/// degradation to `static_order` -- which is what nullptr triggers -- would never happen.
 namespace hipdnn_plugin_sdk::ingestor::uhd
 {
 namespace
 {
 
-constexpr size_t NUM_FEATURES = 3;
 const std::string FEATURES_HASH = "sha256:test";
 
 double alwaysSeven(const double* /*features*/, size_t /*count*/)
@@ -59,45 +59,6 @@ public:
 private:
     std::string _symbol;
 };
-
-TEST(TestIngestorUhdAdapters, ANativeScorerResolvesByTheSymbolItRegistered)
-{
-    const ScopedNativeScorer scorer("test.adapters.resolves");
-
-    const auto adapter
-        = NativeAdapter::resolve("test.adapters.resolves", NUM_FEATURES, FEATURES_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    EXPECT_EQ(adapter->type(), UhdAdapterType::NATIVE);
-    EXPECT_EQ(adapter->expectedFeatureCount(), NUM_FEATURES);
-    EXPECT_EQ(adapter->getFeaturesHash(), FEATURES_HASH);
-    EXPECT_DOUBLE_EQ(adapter->score({1.0, 2.0, 3.0}), 7.0);
-}
-
-TEST(TestIngestorUhdAdapters, AnUnregisteredSymbolYieldsNoAdapterRatherThanACallToNothing)
-{
-    // The engine registers its scorers at load; a UHD naming one that was never registered is
-    // an authoring or packaging error. nullptr is what lets makeKernelHeuristic degrade to
-    // declared order -- a null function pointer reached at score() time would be a crash inside
-    // the caller's process instead.
-    EXPECT_EQ(NativeAdapter::resolve("test.adapters.never_registered", NUM_FEATURES, FEATURES_HASH),
-              nullptr);
-}
-
-TEST(TestIngestorUhdAdapters, AScorerIsNotReachableAfterItIsUnregistered)
-{
-    // Registration is process-wide and mutable, so "was resolvable once" is not the same claim
-    // as "is resolvable now". A stale registry entry would outlive the plugin that owns the
-    // function it points at.
-    {
-        const ScopedNativeScorer scorer("test.adapters.transient");
-        ASSERT_NE(NativeAdapter::resolve("test.adapters.transient", NUM_FEATURES, FEATURES_HASH),
-                  nullptr);
-    }
-
-    EXPECT_EQ(NativeAdapter::resolve("test.adapters.transient", NUM_FEATURES, FEATURES_HASH),
-              nullptr);
-}
 
 TEST(TestIngestorUhdAdapters, TheFactoryBuildsANativeAdapterFromItsConfig)
 {
@@ -133,53 +94,6 @@ TEST(TestIngestorUhdAdapters, TheFactoryDeclinesANativeKindWithNoSymbol)
     config.nativeSymbol = "";
 
     EXPECT_EQ(makeUhdAdapter(config), nullptr);
-}
-
-TEST(TestIngestorUhdAdapters, ACustomLibraryDeclinesRatherThanThrowingOnABadPath)
-{
-    // §7.2's escape hatch dlopen's a `.so` the descriptor names. Every failure below is
-    // reachable from a descriptor alone -- a typo, a missing file, a renamed export -- so each
-    // must return nullptr and let selection degrade, per §5 step 7.
-    EXPECT_EQ(CustomLibraryAdapter::load("", "score", NUM_FEATURES, FEATURES_HASH), nullptr)
-        << "an empty path";
-    EXPECT_EQ(CustomLibraryAdapter::load("/nonexistent/uhd_scorer.so",
-                                         "score",
-                                         NUM_FEATURES,
-                                         FEATURES_HASH),
-              nullptr)
-        << "a path that does not exist";
-
-    // A real, loadable library that does not export the named symbol. Distinct from the case
-    // above: dlopen succeeds and dlsym is what fails, which is the path that leaks the handle
-    // if the failure branch forgets to dlclose.
-    EXPECT_EQ(CustomLibraryAdapter::load("libm.so.6",
-                                         "hipdnn_no_such_scorer_symbol",
-                                         NUM_FEATURES,
-                                         FEATURES_HASH),
-              nullptr)
-        << "a library without the named symbol";
-}
-
-TEST(TestIngestorUhdAdapters, ACustomLibraryDeclinesAnEmptySymbolWithoutOpeningAnything)
-{
-    // Checked before dlopen. dlsym("") is not a defined lookup, so reaching it would ask the
-    // dynamic linker a question with no answer.
-    EXPECT_EQ(CustomLibraryAdapter::load("libm.so.6", "", NUM_FEATURES, FEATURES_HASH), nullptr);
-}
-
-TEST(TestIngestorUhdAdapters, AShortFeatureRowIsRefusedRatherThanPassedToTheScorer)
-{
-    // The native scorer takes a raw pointer and a count and reads that many doubles. Handing it
-    // a row shorter than it expects is an out-of-bounds read inside code this process does not
-    // own -- and for the custom_library kind, code this repository did not compile. The count is
-    // checked on our side of the call for that reason.
-    const ScopedNativeScorer scorer("test.adapters.short_row");
-    const auto adapter
-        = NativeAdapter::resolve("test.adapters.short_row", NUM_FEATURES, FEATURES_HASH);
-    ASSERT_NE(adapter, nullptr);
-
-    EXPECT_THROW(adapter->score({1.0}), std::invalid_argument);
-    EXPECT_NO_THROW(adapter->score({1.0, 2.0, 3.0}));
 }
 
 } // namespace
