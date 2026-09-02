@@ -88,6 +88,16 @@ struct PassFeatureConfig {
         /// Internal tuning knob only — deliberately not surfaced as a module
         /// option, so TensileLite cannot set it.
         int mergeBarrierThreshold = 0;
+        /// Run the per-window WMMA hide-budget pre-scan (analyzeWmmaHideBudget) at the
+        /// top of each scheduling region, and report it through --remarks.
+        ///
+        /// OFF by default. The pre-scan is a pure measurement — nothing in the pick
+        /// paths gates on its verdict yet — so running it in production would be cost
+        /// for no decision. A follow-up wires the budget into the scheduler and turns
+        /// this on. Internal knob only, like mergeBarrierThreshold above: deliberately
+        /// not surfaced as a module option, so TensileLite cannot set it and only
+        /// stinkytofu-opt --enable-wmma-hide-budget-prescan reaches it.
+        bool enableWmmaHideBudgetPrescan = false;
         /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
         /// after the scheduler and plant SCC-clobbering handshakes around workgroup
         /// barriers. Enables the scheduler's cluster-barrier SCC rule and the

@@ -42,6 +42,7 @@
 
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
+#include "stinkytofu/analysis/asm/WmmaHideBudgetAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
@@ -404,6 +405,13 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
         return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
     }
+    // Whether to run the per-window hide-budget pre-scan at the top of each region. OFF
+    // by default and reachable only from stinkytofu-opt: the budget is a pure
+    // measurement so far -- nothing in the pick paths gates on it -- so a production
+    // compile would pay for a verdict nobody reads.
+    bool hideBudgetPrescanEnabled() const {
+        return getPassContext().getPassFeatureConfig().dagFeatures.enableWmmaHideBudgetPrescan;
+    }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
     }
@@ -617,8 +625,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void onInit(IRList::iterator regionStart, IRList::iterator regionEnd) override;
 
     void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
-                      IRList::iterator blockBegin,
-                      std::vector<HardSchedulingConstraint>& hardConstraints) override;
+                      IRList::iterator blockBegin, const RegionDependencies& deps) override;
 
     void onFinishBB() override;
 };
@@ -628,10 +635,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
 // instruction of any pipe can issue there. The mask is end-anchored, so bit 0 is the
 // window's last cycle.
 bool CDNA5ReadyQueue::isBlockedCycle(int pos) const {
-    if (activeWmmaBlockedScale_ == 0 || pos < 0 || pos >= activeWmmaLatency_) return false;
-    const int fromEnd = activeWmmaLatency_ - 1 - pos;
-    constexpr int kBits = (int)(sizeof(activeWmmaBlockedScale_) * 8);
-    return fromEnd < kBits && ((activeWmmaBlockedScale_ >> fromEnd) & 1u) != 0u;
+    return isBlockedWindowCycle(pos, activeWmmaLatency_, activeWmmaBlockedScale_);
 }
 
 // Cycles of genuinely free latency shadow left in the active op's window: it ends at the
@@ -1931,8 +1935,7 @@ void CDNA5ReadyQueue::onFinishBB() {
 // Rule (2): seedWmmaDsLatencyFromPrefix. Rule (5): head balance.
 // Barrier thresholds: computeBarrierAfterThresholds / computeBarrierBeforeThresholds.
 void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
-                                   IRList::iterator blockBegin,
-                                   std::vector<HardSchedulingConstraint>& hardConstraints) {
+                                   IRList::iterator blockBegin, const RegionDependencies& deps) {
     wmmaIssuedCountThisRegion_ = 0;
     dsInsertedSinceLastWmma_ = 0;
     lastPickedNode_ = nullptr;
@@ -1955,6 +1958,32 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // cuts — no reordering crosses them), so it has nothing left to gate here.
     hazardHoistCandidates_.clear();
     for (auto& gate : hazardGates_) gate.clear();
+
+    // Hide-budget pre-scan. Runs ahead of the unrollGemm gate below, and ahead of every
+    // other per-region analysis, because it describes the region itself, not a
+    // scheduling strategy: what each WMMA window can hide, and what the dependency graph
+    // obliges it to issue anyway. Nothing in the pick paths gates on the verdict yet, so
+    // the budget is a local: it is reported here and dropped. The follow-up that reads it
+    // from pickOne() is what promotes it to per-region state.
+    if (hideBudgetPrescanEnabled()) {
+        const RegionHideBudget hideBudget = analyzeWmmaHideBudget(deps.dag);
+        PASS_DEBUG({
+            std::cerr << "[CDNA5 hideBudget] windows=" << hideBudget.numWindows()
+                      << " prologueCycles=" << hideBudget.prologueCycles
+                      << " deadlinedCycles=" << hideBudget.deadlinedCycles
+                      << " floatingCycles=" << hideBudget.floatingCycles
+                      << " windowsPastSlot=" << hideBudget.windowsPastSlot() << "\n";
+            for (int i = 0; i < hideBudget.numWindows(); ++i) {
+                const WmmaWindowBudget& w = hideBudget.windows[static_cast<size_t>(i)];
+                std::cerr << "[CDNA5 hideBudget]   window#" << i
+                          << " capacityCycles=" << w.capacityCycles
+                          << " capacityValu=" << w.capacityValu << " extraIssue=" << w.extraIssue
+                          << "\n";
+            }
+        });
+        reportWmmaHideBudget(getPassContext(), hideBudget);
+    }
+
     if (getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false) return;
 
     const Loop* loop = getLoop();
@@ -1966,10 +1995,12 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
     wmmaIssueConfig.issuedCount = 0;
     hasWMMAInRegion_ = false;
+    std::unordered_set<StinkyInstruction*> regionInsts;
     for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
         auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!instPtr) continue;
         StinkyInstruction& inst = *instPtr;
+        regionInsts.insert(instPtr);
 
         if (isMatrixInstruction(inst)) {
             wmmaIssueConfig.issuedCount++;
@@ -2066,8 +2097,47 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             buildExclusiveGroups(/*useSrcTokens=*/false, /*fromAfterMap=*/false);
         const int totalWmma = std::max(1, wmmaIssueConfig.issuedCount);
         const int targetTensorLoadWmmaSpace = this->tensorLoadWmmaSpace();
-        for (auto& afterGroup : exclusiveAfterGroups) {
-            for (auto& beforeGroup : exclusiveBeforeGroups) {
+
+        // Collect transitive def-use descendants of \p seeds matching \p isMatch. Traversal
+        // stops at instructions outside this scheduling region: their own descendants can
+        // never map to a valid hard constraint (the scheduler only knows about in-region
+        // instructions), so there is nothing to gain by walking past them.
+        auto collectDescendants = [&](const std::vector<StinkyInstruction*>& seeds,
+                                      auto&& isMatch) {
+            std::vector<StinkyInstruction*> pending(seeds.begin(), seeds.end());
+            std::unordered_set<StinkyInstruction*> visited;
+            std::vector<StinkyInstruction*> result;
+            while (!pending.empty()) {
+                StinkyInstruction* descendant = pending.back();
+                pending.pop_back();
+                if (!visited.insert(descendant).second) continue;
+                if (isMatch(*descendant)) result.push_back(descendant);
+                if (!regionInsts.contains(descendant)) continue;
+                for (StinkyInstruction* user : descendant->getUsers()) pending.push_back(user);
+            }
+            return result;
+        };
+
+        // Computed once per group (not once per after x before pair): each depends on only
+        // one side of the overlap check below.
+        std::vector<std::vector<StinkyInstruction*>> afterGroupTensorLoads(
+            exclusiveAfterGroups.size());
+        for (size_t i = 0; i < exclusiveAfterGroups.size(); ++i)
+            afterGroupTensorLoads[i] =
+                collectDescendants(exclusiveAfterGroups[i].barriers,
+                                   [](StinkyInstruction& inst) { return isTensorLoad(inst); });
+
+        std::vector<std::vector<StinkyInstruction*>> beforeGroupDsLoads(
+            exclusiveBeforeGroups.size());
+        for (size_t i = 0; i < exclusiveBeforeGroups.size(); ++i)
+            beforeGroupDsLoads[i] =
+                collectDescendants(exclusiveBeforeGroups[i].barriers,
+                                   [](StinkyInstruction& inst) { return isDSRead(inst); });
+
+        for (size_t afterIdx = 0; afterIdx < exclusiveAfterGroups.size(); ++afterIdx) {
+            auto& afterGroup = exclusiveAfterGroups[afterIdx];
+            for (size_t beforeIdx = 0; beforeIdx < exclusiveBeforeGroups.size(); ++beforeIdx) {
+                auto& beforeGroup = exclusiveBeforeGroups[beforeIdx];
                 int adjustedAfterEnd = afterGroup.threshold;
                 int adjustedBeforeBegin = beforeGroup.threshold;
                 PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion after-before exclusive overlap] "
@@ -2087,48 +2157,22 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     // which threshold-adjustment branch above was taken.
                     for (StinkyInstruction* barrierAfter : afterGroup.barriers) {
                         for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
-                            hardConstraints.emplace_back(barrierAfter, barrierBefore);
+                            deps.requestedConstraints.emplace_back(barrierAfter, barrierBefore);
                         }
                     }
 
                     // Also keep tensor_load descendants of barrierAfter ahead of the
-                    // barrierBefore group. Traverse the transitive def-use users; edges
-                    // whose endpoints are outside this scheduling region are ignored by
-                    // the region scheduler.
-                    std::vector<StinkyInstruction*> pending(afterGroup.barriers.begin(),
-                                                            afterGroup.barriers.end());
-                    std::unordered_set<StinkyInstruction*> visited;
-                    std::vector<StinkyInstruction*> descendantTensorLoads;
-                    while (!pending.empty()) {
-                        StinkyInstruction* descendant = pending.back();
-                        pending.pop_back();
-                        if (!visited.insert(descendant).second) continue;
-                        if (isTensorLoad(*descendant)) descendantTensorLoads.push_back(descendant);
-                        for (StinkyInstruction* user : descendant->getUsers())
-                            pending.push_back(user);
-                    }
+                    // barrierBefore group, and prevent them from interleaving with ds_load
+                    // descendants of barrierBefore: all matching tensor_loads must issue
+                    // first. Both descendant sets were precomputed once per group above.
+                    const auto& descendantTensorLoads = afterGroupTensorLoads[afterIdx];
+                    const auto& descendantDsLoads = beforeGroupDsLoads[beforeIdx];
                     for (StinkyInstruction* tensorLoad : descendantTensorLoads) {
                         for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
-                            hardConstraints.emplace_back(tensorLoad, barrierBefore);
+                            deps.requestedConstraints.emplace_back(tensorLoad, barrierBefore);
                         }
-                    }
-
-                    // Prevent these tensor_loads from interleaving with ds_load descendants
-                    // of barrierBefore: all matching tensor_loads must issue first.
-                    pending.assign(beforeGroup.barriers.begin(), beforeGroup.barriers.end());
-                    visited.clear();
-                    std::vector<StinkyInstruction*> descendantDsLoads;
-                    while (!pending.empty()) {
-                        StinkyInstruction* descendant = pending.back();
-                        pending.pop_back();
-                        if (!visited.insert(descendant).second) continue;
-                        if (isDSRead(*descendant)) descendantDsLoads.push_back(descendant);
-                        for (StinkyInstruction* user : descendant->getUsers())
-                            pending.push_back(user);
-                    }
-                    for (StinkyInstruction* tensorLoad : descendantTensorLoads) {
                         for (StinkyInstruction* dsLoad : descendantDsLoads) {
-                            hardConstraints.emplace_back(tensorLoad, dsLoad);
+                            deps.requestedConstraints.emplace_back(tensorLoad, dsLoad);
                         }
                     }
 

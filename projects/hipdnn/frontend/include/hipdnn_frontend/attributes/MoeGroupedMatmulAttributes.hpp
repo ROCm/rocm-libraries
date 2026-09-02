@@ -220,4 +220,5 @@ public:
         return logicallyEqualsImpl(other);
     }
 };
+typedef MoeGroupedMatmulAttributes Moe_grouped_matmul_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

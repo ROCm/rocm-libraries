@@ -119,3 +119,38 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 512]
           - Exact: [512, 512, 1, 4096] # large K: exercises the hybrid dynamic work-queue
           - Exact: [512, 512, 2, 128]  # batched
+
+    - # HGEMM NT: TDMInst=3 shares LDS0 with the StreamK mailbox
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [1]
+      ForkParameters:
+        - StreamK: [5]
+        - GlobalSplitU: [0]
+        - WavefrontSize: [32]
+        - DepthU: [ 32 ]
+        - 1LDSBuffer: [0]
+        - ExpandPointerSwap: [False]
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1,1, 1, 2]
+          - [16, 16, 32, 1, 1, 1,1, 2, 1]
+        - MIArchVgpr: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [0, 4]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - TransposeLDS: [0]
+        - WorkGroupMapping: [1]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 4096] # large K: hybrid dynamic work-queue
+          - Exact: [512, 512, 2, 128]  # batched
