@@ -76,17 +76,26 @@ _apply_softcap = apply_softcap_log2
 # the unify phase lands it.
 
 
-def _enable_fp8_decode_3d(problem: "UnifiedAttentionProblem") -> bool:
-    # fp8 decode is VALU-bound (per-element dequant); 3D split-KV fans that work
-    # across CTAs (~2x on gfx950, where num_cus resolves to a legacy count that
-    # undersizes the 2D-vs-3D target and mis-routes long-KV decode to 2D). Keep
-    # 2D only where split-KV overhead loses: sliding window and short KV.
+def _is_fp8_long_kv_decode(problem: "UnifiedAttentionProblem") -> bool:
+    """The fp8 KV-cache decode cohort the gfx950 3D-routing and waves_per_eu
+    tunes target: fp8 decode, long context, no sliding window. Single source for
+    both gates (``_enable_fp8_decode_3d`` and ``_enable_gfx950_fp8_decode_wpe3``)
+    so the cohort has one edit point, not two."""
     return (
         problem.use_fp8
         and problem.all_decode
         and problem.sliding_window == 0
         and problem.max_seqlen_k > 512
     )
+
+
+def _enable_fp8_decode_3d(problem: "UnifiedAttentionProblem") -> bool:
+    # gfx950-only. fp8 decode is VALU-bound (per-element dequant); 3D split-KV
+    # fans that work across CTAs. On gfx950 num_cus resolves to a legacy count
+    # that undersizes the 2D-vs-3D target and mis-routes long-KV decode to 2D;
+    # forcing 3D restores the split-KV fan-out. gfx942 resolves its live CU count
+    # correctly, so it is excluded rather than routed unconditionally.
+    return _resolve_attention_arch() == "gfx950" and _is_fp8_long_kv_decode(problem)
 
 
 @dataclass(frozen=True)
@@ -2015,13 +2024,7 @@ def _enable_gfx950_fp8_decode_wpe3(problem: UnifiedAttentionProblem) -> bool:
     is a pure AMDGPU occupancy hint (kernel attribute only, no compute change), so
     output is bit-identical. Same cohort ``_enable_fp8_decode_3d`` routes to 3D.
     """
-    return (
-        _resolve_attention_arch() == "gfx950"
-        and problem.use_fp8
-        and problem.all_decode
-        and problem.sliding_window == 0
-        and problem.max_seqlen_k > 512
-    )
+    return _resolve_attention_arch() == "gfx950" and _is_fp8_long_kv_decode(problem)
 
 
 def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
