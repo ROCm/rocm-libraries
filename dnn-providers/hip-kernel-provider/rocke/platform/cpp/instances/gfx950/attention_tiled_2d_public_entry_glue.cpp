@@ -135,8 +135,10 @@ static bool rocke_g950_wide_k_available(const rocke_arch_target_t* target)
 
 static bool rocke_g950_narrow_k_available(const rocke_arch_target_t* target)
 {
-    return rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 16)
-           && rocke_mma_catalog_has_shape(&target->mma, "mma", "bf16", "bf16", "fp32", "fp32", 16, 16, 16);
+    return rocke_mma_catalog_has_shape(
+               &target->mma, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 16)
+           && rocke_mma_catalog_has_shape(
+               &target->mma, "mma", "bf16", "bf16", "fp32", "fp32", 16, 16, 16);
 }
 
 static bool rocke_g950_arch_in_narrow_set(const char* arch)

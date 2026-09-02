@@ -120,13 +120,12 @@ const char* rocke_archtarget_isa_triple(const rocke_archtarget_t* t, char* out, 
 bool rocke_archtarget_fits_lds(const rocke_archtarget_t* t, long bytes_in_use);
 
 /* ArchTarget.supports_dtype_combo(a, b, c, d, family). family NULL => "mma". */
-bool rocke_archtarget_supports_dtype_combo(
-    const rocke_archtarget_t* t,
-    const char* a,
-    const char* b,
-    const char* c,
-    const char* d,
-    const char* family);
+bool rocke_archtarget_supports_dtype_combo(const rocke_archtarget_t* t,
+                                           const char* a,
+                                           const char* b,
+                                           const char* c,
+                                           const char* d,
+                                           const char* family);
 
 /* ArchTarget.max_vector_load_dwords(dtype) (dtype accepted for parity, ignored
  * as in Python: width gated by the buffer-load path). */

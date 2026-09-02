@@ -182,8 +182,7 @@ int rocke_mfma_atom_mfma_cycle(const rocke_mfma_atom_t* atom)
     return -1; /* Python NotImplementedError path (no 16x16/32x32 XDL shape). */
 }
 
-rocke_value_t* rocke_mfma_atom_zero_acc(rocke_ir_builder_t* b,
-                                        const rocke_mfma_atom_t* atom)
+rocke_value_t* rocke_mfma_atom_zero_acc(rocke_ir_builder_t* b, const rocke_mfma_atom_t* atom)
 {
     const rocke_type_t* elem = NULL;
     if(!rocke_i_live(b))
@@ -213,10 +212,8 @@ rocke_value_t* rocke_mfma_atom_zero_acc(rocke_ir_builder_t* b,
     }
     else
     {
-        return (rocke_value_t*)rocke_i_set_err(b,
-                                               ROCKE_ERR_VALUE,
-                                               "unsupported MMA accumulator input dtype '%s'",
-                                               atom->dtype_c);
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "unsupported MMA accumulator input dtype '%s'", atom->dtype_c);
     }
     return rocke_b_zero_vec(b, elem, atom->c_per_lane);
 }
@@ -231,8 +228,7 @@ rocke_status_t rocke_mfma_atom_require_recurrence(rocke_ir_builder_t* b,
     }
     if(atom == NULL || atom->dtype_c == NULL || atom->dtype_d == NULL)
     {
-        rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "MMA recurrence: atom and C/D dtypes must be non-NULL");
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "MMA recurrence: atom and C/D dtypes must be non-NULL");
         return b->status;
     }
     if(atom->c_per_lane != atom->d_per_lane || strcmp(atom->dtype_c, atom->dtype_d) != 0)

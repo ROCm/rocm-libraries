@@ -261,7 +261,8 @@ def is_valid_spec(spec: StreamKGemmSpec, arch: str = "gfx950") -> Tuple[bool, st
     if not target.mma.has_shape(
         a_dtype=a_dtype,
         b_dtype=a_dtype,
-        c_dtype="fp32", d_dtype="fp32",
+        c_dtype="fp32",
+        d_dtype="fp32",
         m=atom.m,
         n=atom.n,
         k=atom.k,

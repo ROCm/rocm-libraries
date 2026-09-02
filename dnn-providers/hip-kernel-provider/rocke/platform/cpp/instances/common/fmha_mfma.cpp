@@ -248,8 +248,7 @@ bool rocke_fmha_mfma_is_valid_spec(const rocke_fmha_mfma_spec_t* spec,
 
     /* The QK / PV chain is the f16 16x16x16 atom; require it on the target
      * catalog (MFMA on CDNA, WMMA on RDNA). */
-    if(!rocke_archtarget_supports_dtype_combo(
-           target, "f16", "f16", "fp32", "fp32", family))
+    if(!rocke_archtarget_supports_dtype_combo(target, "f16", "f16", "fp32", "fp32", family))
     {
         snprintf(buf, sizeof(buf), "unsupported f16 %s dtype combo on %s", family, arch);
         fmha_set_reason(reason, reason_cap, buf);

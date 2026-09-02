@@ -161,7 +161,8 @@ def _validate_attention_atom(atom: "MfmaAtom", arch: str) -> None:
     if not target.mma.has_shape(
         a_dtype=cat_dtype,
         b_dtype=cat_dtype,
-        c_dtype="fp32", d_dtype="fp32",
+        c_dtype="fp32",
+        d_dtype="fp32",
         m=atom.m,
         n=atom.n,
         k=atom.k,

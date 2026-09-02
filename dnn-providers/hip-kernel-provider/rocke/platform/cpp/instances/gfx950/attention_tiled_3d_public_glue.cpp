@@ -131,7 +131,8 @@ static bool rocke_attn3d950_narrow_k_available(const rocke_archtarget_t* t)
  * exposed by the C arch surface -- see the ARCH GATE NOTE above). */
 static bool rocke_attn3d950_wide_k_available(const rocke_archtarget_t* t)
 {
-    return rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 32) != NULL;
+    return rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 32)
+           != NULL;
 }
 
 /* validate_tiled_attention_arch(arch) gate (shared by supports + config). On

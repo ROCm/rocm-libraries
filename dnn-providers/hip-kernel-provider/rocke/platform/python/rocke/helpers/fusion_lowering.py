@@ -399,7 +399,8 @@ class GemmEpilogueLowerer:
                 family=family,
                 a_dtype=dtype,
                 b_dtype=dtype,
-                c_dtype="fp32", d_dtype="fp32",
+                c_dtype="fp32",
+                d_dtype="fp32",
                 m=wtm,
                 n=wtn,
             )

@@ -135,8 +135,7 @@ bool rocke_validate_fmha_mfma_atom(const char* dtype, const char* arch, char* ou
      * has_shape(m,n,k) is true iff a matching op exists; since enumerate()
      * filters on m,n and has_shape compares the full (m,n,k) shape, this is
      * exactly op_for_shape(...,k) != None. family defaults to "mma". */
-    if(rocke_archtarget_op_for_shape(
-           target, "mma", a_name, a_name, "fp32", "fp32", blk, blk, blk)
+    if(rocke_archtarget_op_for_shape(target, "mma", a_name, a_name, "fp32", "fp32", blk, blk, blk)
        == NULL)
     {
         if(out != NULL && out_cap != 0)

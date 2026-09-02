@@ -74,8 +74,9 @@ static bool rocke_a2d_require_tiled_attention_arch(rocke_ir_builder_t* b, const 
     if(wide_k && target->memory.has_ds_read_tr)
         return true;
     bool narrow_arch = rocke_a2d_streq(arch, "gfx942");
-    bool narrow_k = rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 16)
-                    && rocke_mma_catalog_has_shape(mma, "mma", "bf16", "bf16", "fp32", "fp32", 16, 16, 16);
+    bool narrow_k
+        = rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 16)
+          && rocke_mma_catalog_has_shape(mma, "mma", "bf16", "bf16", "fp32", "fp32", 16, 16, 16);
     if(narrow_arch && narrow_k)
         return true;
     if(b)
@@ -138,8 +139,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     const char* a_dt = rocke_a2d_streq(spec->dtype, "fp16") ? "f16" : "bf16";
     const rocke_mma_catalog_t* mma = rocke_archtarget_mma(target);
     const rocke_mma_op_t* qk_atom
-        = rocke_mma_catalog_select_largest_k(
-            mma, "mma", a_dt, a_dt, "fp32", "fp32", 16, 16, 16);
+        = rocke_mma_catalog_select_largest_k(mma, "mma", a_dt, a_dt, "fp32", "fp32", 16, 16, 16);
     if(qk_atom == NULL || qk_atom->k != 16)
     {
         b->status = ROCKE_ERR_NOTIMPL;

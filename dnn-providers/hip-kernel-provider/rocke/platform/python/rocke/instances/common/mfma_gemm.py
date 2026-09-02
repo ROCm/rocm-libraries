@@ -222,7 +222,8 @@ def is_valid_spec(spec: MfmaGemmSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     if not target.mma.has_shape(
         a_dtype=cat_dtype,
         b_dtype=cat_dtype,
-        c_dtype="fp32", d_dtype="fp32",
+        c_dtype="fp32",
+        d_dtype="fp32",
         m=atom.m,
         n=atom.n,
         k=atom.k,

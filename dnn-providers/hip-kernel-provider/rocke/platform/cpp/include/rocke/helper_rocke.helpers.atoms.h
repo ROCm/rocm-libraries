@@ -99,8 +99,7 @@ int rocke_mfma_atom_mfma_cycle(const rocke_mfma_atom_t* atom);
 bool rocke_mfma_atom_is_f4f6(const rocke_mfma_atom_t* atom);
 
 /* Construct the initial MMA C fragment from dtype_c/c_per_lane. */
-rocke_value_t* rocke_mfma_atom_zero_acc(rocke_ir_builder_t* b,
-                                        const rocke_mfma_atom_t* atom);
+rocke_value_t* rocke_mfma_atom_zero_acc(rocke_ir_builder_t* b, const rocke_mfma_atom_t* atom);
 
 /* Reject helpers that feed D back as C when the fragment contracts differ. */
 rocke_status_t rocke_mfma_atom_require_recurrence(rocke_ir_builder_t* b,

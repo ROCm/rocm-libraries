@@ -46,12 +46,11 @@
 #define DFCP_K_PER_I32 ROCKE_GFX1151_DFCP_K_PER_I32 /* _K_PER_I32 = 4 */
 #define DFCP_I4_PER_I32 ROCKE_GFX1151_DFCP_I4_PER_I32 /* _I4_PER_I32 = 8 */
 
-static rocke_value_t* dfcp_zero_recurrent_mma_acc(rocke_ir_builder_t* b,
-                                                  const rocke_mma_op_t* op)
+static rocke_value_t* dfcp_zero_recurrent_mma_acc(rocke_ir_builder_t* b, const rocke_mma_op_t* op)
 {
     const rocke_type_t* elem;
-    if(op == NULL || op->c_dtype == NULL || op->d_dtype == NULL
-       || op->c_frag_len != op->d_frag_len || strcmp(op->c_dtype, op->d_dtype) != 0)
+    if(op == NULL || op->c_dtype == NULL || op->d_dtype == NULL || op->c_frag_len != op->d_frag_len
+       || strcmp(op->c_dtype, op->d_dtype) != 0)
     {
         return (rocke_value_t*)rocke_i_set_err(
             b,

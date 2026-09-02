@@ -97,16 +97,15 @@ rocke_status_t rocke_validate_attention_atom(rocke_ir_builder_t* b,
     {
         return b->status;
     }
-    if(!rocke_mma_catalog_has_shape(
-           &target->mma,
-           NULL,
-           cat_dtype,
-           cat_dtype,
-           atom->dtype_c,
-           atom->dtype_d,
-           atom->m,
-           atom->n,
-           atom->k))
+    if(!rocke_mma_catalog_has_shape(&target->mma,
+                                    NULL,
+                                    cat_dtype,
+                                    cat_dtype,
+                                    atom->dtype_c,
+                                    atom->dtype_d,
+                                    atom->m,
+                                    atom->n,
+                                    atom->k))
     {
         rocke_i_set_err(b,
                         ROCKE_ERR_VALUE,

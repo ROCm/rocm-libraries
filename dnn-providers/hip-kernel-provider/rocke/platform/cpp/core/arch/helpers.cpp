@@ -127,13 +127,12 @@ bool rocke_archtarget_fits_lds(const rocke_archtarget_t* t, long bytes_in_use)
     return rocke_arch_fits_lds(t, bytes_in_use);
 }
 
-bool rocke_archtarget_supports_dtype_combo(
-    const rocke_archtarget_t* t,
-    const char* a,
-    const char* b,
-    const char* c,
-    const char* d,
-    const char* family)
+bool rocke_archtarget_supports_dtype_combo(const rocke_archtarget_t* t,
+                                           const char* a,
+                                           const char* b,
+                                           const char* c,
+                                           const char* d,
+                                           const char* family)
 {
     /* ArchTarget.supports_dtype_combo(a, b, c, d, family). */
     return rocke_arch_supports_dtype_combo(t, a, b, c, d, family);

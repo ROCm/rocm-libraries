@@ -23,8 +23,8 @@
 
 /* Private universal-GEMM helper under test. Keep the core test independent of
  * the large instance_gemm_internal.h closure-state surface. */
-extern "C" rocke_value_t*
-    rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b, const rocke_mma_op_t* op);
+extern "C" rocke_value_t* rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b,
+                                                      const rocke_mma_op_t* op);
 
 static int g_failures = 0;
 
@@ -168,8 +168,7 @@ int main(void)
         }
         try
         {
-            rejected = rocke_mfma_atom_require_recurrence(&b, &unequal, "test")
-                       == ROCKE_ERR_VALUE;
+            rejected = rocke_mfma_atom_require_recurrence(&b, &unequal, "test") == ROCKE_ERR_VALUE;
         }
         catch(...)
         {

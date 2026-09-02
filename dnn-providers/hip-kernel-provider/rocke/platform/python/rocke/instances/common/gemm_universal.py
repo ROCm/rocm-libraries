@@ -387,7 +387,8 @@ def _resolve_mma_op(spec: "UniversalGemmSpec", arch: str):
         family=_mma_family(arch),
         a_dtype=a_name,
         b_dtype=a_name,
-        c_dtype="fp32", d_dtype="fp32",
+        c_dtype="fp32",
+        d_dtype="fp32",
         m=t.warp_tile_m,
         n=t.warp_tile_n,
         k=t.warp_tile_k,
@@ -475,15 +476,14 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     family = _mma_family(arch)
     a_name = spec.data.dtype_a  # homogeneous A/B/C (checked above)
     atom = (t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
-    if not target.supports_dtype_combo(
-        a_name, a_name, "fp32", "fp32", family=family
-    ):
+    if not target.supports_dtype_combo(a_name, a_name, "fp32", "fp32", family=family):
         return False, f"unsupported GEMM dtype {a_name!r} on {arch}"
     if not target.mma.has_shape(
         family=family,
         a_dtype=a_name,
         b_dtype=a_name,
-        c_dtype="fp32", d_dtype="fp32",
+        c_dtype="fp32",
+        d_dtype="fp32",
         m=t.warp_tile_m,
         n=t.warp_tile_n,
         k=t.warp_tile_k,

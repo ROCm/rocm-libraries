@@ -134,15 +134,7 @@ bool rocke_wmma_gemm_int8_is_valid_spec(const rocke_wmma_gemm_int8_spec_t* spec,
      * *compute* atom we gate on is the fp16 WMMA 16x16x16 one.
      * op_for_shape returns NULL when the shape/dtype combo is absent. */
     if(rocke_archtarget_op_for_shape(
-           target,
-           "wmma",
-           "fp16",
-           "fp16",
-           "fp32",
-           "fp32",
-           ROCKE_WMMA_M,
-           ROCKE_WMMA_N,
-           ROCKE_WMMA_K)
+           target, "wmma", "fp16", "fp16", "fp32", "fp32", ROCKE_WMMA_M, ROCKE_WMMA_N, ROCKE_WMMA_K)
        == NULL)
     {
         snprintf(buf,

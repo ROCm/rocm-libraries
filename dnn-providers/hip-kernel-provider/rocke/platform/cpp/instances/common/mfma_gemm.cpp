@@ -253,16 +253,15 @@ bool rocke_mfma_gemm_is_valid_spec(const rocke_mfma_gemm_spec_t* spec,
 
     /* if not target.mma.has_shape(a=cat, b=cat, c="fp32", m, n, k): ...
      * op_for_shape returns NULL when the shape/dtype combo is absent. */
-    if(rocke_archtarget_op_for_shape(
-           target,
-           "mma",
-           cat_dtype,
-           cat_dtype,
-           atom->dtype_c,
-           atom->dtype_d,
-           atom->m,
-           atom->n,
-           atom->k)
+    if(rocke_archtarget_op_for_shape(target,
+                                     "mma",
+                                     cat_dtype,
+                                     cat_dtype,
+                                     atom->dtype_c,
+                                     atom->dtype_d,
+                                     atom->m,
+                                     atom->n,
+                                     atom->k)
        == NULL)
     {
         snprintf(buf,

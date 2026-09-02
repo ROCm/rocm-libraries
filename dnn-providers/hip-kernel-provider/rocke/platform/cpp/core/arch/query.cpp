@@ -381,13 +381,12 @@ bool rocke_arch_fits_lds(const rocke_arch_target_t* t, long bytes_in_use)
     return bytes_in_use <= (long)t->lds_capacity_bytes;
 }
 
-bool rocke_arch_supports_dtype_combo(
-    const rocke_arch_target_t* t,
-    const char* a,
-    const char* b,
-    const char* c,
-    const char* d,
-    const char* family)
+bool rocke_arch_supports_dtype_combo(const rocke_arch_target_t* t,
+                                     const char* a,
+                                     const char* b,
+                                     const char* c,
+                                     const char* d,
+                                     const char* family)
 {
     if(!t)
         return false;

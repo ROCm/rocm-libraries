@@ -749,16 +749,15 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         const char* a_norm = rocke_normalize_dtype(s->dtype_a, a_scratch, sizeof(a_scratch));
         const char* b_norm = rocke_normalize_dtype(s->dtype_b, b_scratch, sizeof(b_scratch));
         mma = rocke_archtarget_mma(target);
-        if(!rocke_mma_catalog_has_shape(
-               mma,
-               family,
-               a_norm,
-               b_norm,
-               "fp32",
-               "fp32",
-               s->warp_tile_m,
-               s->warp_tile_n,
-               s->warp_tile_k))
+        if(!rocke_mma_catalog_has_shape(mma,
+                                        family,
+                                        a_norm,
+                                        b_norm,
+                                        "fp32",
+                                        "fp32",
+                                        s->warp_tile_m,
+                                        s->warp_tile_n,
+                                        s->warp_tile_k))
         {
             ROCKE_CONVVS_REJECT("unsupported %s warp_tile (%d, %d, %d) on %s",
                                 s->dtype_a ? s->dtype_a : "f16",
