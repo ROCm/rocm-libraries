@@ -210,17 +210,15 @@ namespace rocRollerTest
         ASSERT_THAT(hipMemcpy(gpu_D.data(), d_D.get(), M * N * sizeof(TypeD), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        auto referenceProblem
-            = HostNumerics::makeHostReferenceProblem(HostNumerics::hostTensor(descA, A),
-                                                     HostNumerics::hostTensor(descB, B),
-                                                     HostNumerics::hostTensor(descC, C),
-                                                     std::nullopt,
-                                                     std::nullopt,
-                                                     0,
-                                                     1.0f,
-                                                     1.0f);
         auto tmp_D = HostNumerics::convertHostReference<float>(
-            HostNumerics::computeHostReference(referenceProblem));
+            HostNumerics::computeHostReference(HostNumerics::hostTensor(descA, A),
+                                               HostNumerics::hostTensor(descB, B),
+                                               HostNumerics::hostTensor(descC, C),
+                                               std::nullopt,
+                                               std::nullopt,
+                                               0,
+                                               1.0f,
+                                               1.0f));
 
         std::vector<TypeD> cpu_D;
         cpu_D.reserve(M * N);
@@ -335,17 +333,15 @@ namespace rocRollerTest
 
         std::vector<TypeAB> zeroC(M * N, 0.f);
         TensorDescriptor    referenceDescC(dataTypeAB, {size_t(M), size_t(N)}, "N");
-        auto                referenceProblem = HostNumerics::makeHostReferenceProblem(
-            HostNumerics::hostTensor(descA, A),
-            HostNumerics::hostTensor(descB, B),
-            HostNumerics::hostTensor(referenceDescC, zeroC),
-            std::nullopt,
-            std::nullopt,
-            0,
-            1.0f,
-            1.0f);
-        auto tmp_D = HostNumerics::convertHostReference<TypeAB>(
-            HostNumerics::computeHostReference(referenceProblem));
+        auto                tmp_D = HostNumerics::convertHostReference<TypeAB>(
+            HostNumerics::computeHostReference(HostNumerics::hostTensor(descA, A),
+                                               HostNumerics::hostTensor(descB, B),
+                                               HostNumerics::hostTensor(referenceDescC, zeroC),
+                                               std::nullopt,
+                                               std::nullopt,
+                                               0,
+                                               1.0f,
+                                               1.0f));
 
         std::vector<TypeD> cpu_D;
         cpu_D.reserve(M * N);
@@ -492,7 +488,7 @@ namespace rocRollerTest
         // Convert A to destination type
         auto tagCvtA = seed.has_value()
                            ? execute.addXOp(rocRoller::Operations::E_StochasticRoundingCvt(
-                               tagLoadA, tagLoadSeed, destDataType))
+                                 tagLoadA, tagLoadSeed, destDataType))
                            : execute.addXOp(rocRoller::Operations::E_Cvt(tagLoadA, destDataType));
         command->addOperation(std::move(execute));
 

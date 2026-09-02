@@ -24,8 +24,8 @@ namespace GEMMTests
     concept isF8 = std::is_same_v<T, rocRoller::FP8> || std::is_same_v<T, rocRoller::BF8>;
 
     template <typename T>
-    concept isF6F4 = std::is_same_v<T, rocRoller::FP6> || std::is_same_v<T, rocRoller::BF6> || std::
-        is_same_v<T, rocRoller::FP4>;
+    concept isF6F4 = std::is_same_v<T, rocRoller::FP6> || std::is_same_v<T, rocRoller::BF6>
+                     || std::is_same_v<T, rocRoller::FP4>;
 
     template <typename... Ts>
     class BaseGEMMContextFixture
@@ -80,7 +80,7 @@ namespace GEMMTests
                                         GPUCapability::HasWMMA_f8f6f4);
             }
 
-            if((isF8<TA> || isF8<TB>)&&(gemm.waveK >= 64))
+            if((isF8<TA> || isF8<TB>) && (gemm.waveK >= 64))
             {
                 REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4,
                                         GPUCapability::HasWMMA_f8f6f4,
@@ -632,7 +632,7 @@ namespace GEMMTests
                 auto tagCvt
                     = srCvtSeed.has_value()
                           ? cvtOp.addXOp(rocRoller::Operations::E_StochasticRoundingCvt(
-                              tagStoreD, tagLoadSeed, dataTypeD))
+                                tagStoreD, tagLoadSeed, dataTypeD))
                           : cvtOp.addXOp(rocRoller::Operations::E_Cvt(tagStoreD, dataTypeD));
                 tagStoreD = command->addOperation(std::move(cvtOp));
                 command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
@@ -951,7 +951,7 @@ namespace GEMMTests
                 referenceScaleB = HostNumerics::hostScaleTensor(
                     gemm.scaleTypeB, hostScaleB, descB, 0, referenceScaleBlockSize);
             }
-            auto referenceProblem = HostNumerics::makeHostReferenceProblem(
+            auto floatReference = HostNumerics::computeHostReference(
                 HostNumerics::hostTensor(descA,
                                          hostA,
                                          gemm.scaleAMode == Operations::ScaleMode::Separate
@@ -968,7 +968,6 @@ namespace GEMMTests
                 referenceScaleBlockSize,
                 alpha,
                 beta);
-            auto floatReference = HostNumerics::computeHostReference(referenceProblem);
 
             std::vector<TD> h_result;
             if constexpr(std::is_same_v<TC, TD>)
