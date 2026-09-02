@@ -73,12 +73,12 @@ namespace hipblaslt::host_numerics
             options.preQuantizationScalesA.push_back(inputs.alphaVector->expandDims(1));
         if(inputs.scaleB && !isBlockScaling(scaleBMode))
             options.preQuantizationScalesB.push_back(inputs.scaleB->expandDims(0));
-        options.epilogue.alpha       = scalarValue(preparation.alpha, dataTypes.coefficient);
-        options.epilogue.beta        = scalarValue(preparation.beta, dataTypes.coefficient);
-        options.epilogue.scaleC      = inputs.scaleC.value_or(Scalar::one(accumulatorType));
-        options.epilogue.outputScale = inputs.scaleD.value_or(Scalar::one(accumulatorType));
+        options.alpha       = scalarValue(preparation.alpha, dataTypes.coefficient);
+        options.beta        = scalarValue(preparation.beta, dataTypes.coefficient);
+        options.scaleC      = inputs.scaleC.value_or(Scalar::one(accumulatorType));
+        options.outputScale = inputs.scaleD.value_or(Scalar::one(accumulatorType));
         if(inputs.d.type() == ScalarType::Int8)
-            options.epilogue.outputConversion = OutputConversion::SaturatingInt8;
+            options.outputConversion = OutputConversion::SaturatingInt8;
         (void)referenceGemmIntoWithBlasBackend(std::move(inputs.a),
                                                std::move(inputs.b),
                                                std::move(inputs.c),
