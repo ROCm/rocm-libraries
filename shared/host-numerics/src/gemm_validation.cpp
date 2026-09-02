@@ -10,6 +10,8 @@
 
 namespace roc::host_numerics {
 namespace {
+using detail::GemmSupportInfo;
+
 void remapComparisonLocations(ComparisonReport& result, const Tensor& observed,
                               const OutputSelection& selection,
                               const std::vector<size_t>& selectedIndices) {
