@@ -1982,9 +1982,10 @@ class TestAttentionHelpers(unittest.TestCase):
 
     def test_fp8_long_kv_decode_routes_3d(self):
         """fp8 long-KV decode routes to 3D split-KV (VALU-bound; 3D fans the
-        per-element dequant across CTAs, ~2x on gfx950 where the 2D-vs-3D target
-        is undersized). 2D is preserved where split-KV loses: short KV and SWA;
-        prefill and bf16 are untouched by the gate.
+        per-element dequant across CTAs). On gfx950 the 2D-vs-3D target is
+        undersized by the mis-resolved CU count, which mis-routes this cohort to
+        2D; the gate forces 3D. 2D is preserved where split-KV loses: short KV
+        and SWA; prefill and bf16 are untouched.
         """
         make = self._decode_problem
         with _patch_resolved_arch("gfx950"):
