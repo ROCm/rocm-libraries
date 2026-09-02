@@ -361,9 +361,11 @@ rocsparse_status rocsparse::dnmat_transpose(rocsparse_handle            handle,
         }
 
         const rocsparse_indextype I_indextype
-            = ((source->rows * source->cols) <= std::numeric_limits<int32_t>::max())
+            = (((source->rows * source->cols) <= std::numeric_limits<int32_t>::max())
+               && (target->batch_count <= std::numeric_limits<int32_t>::max()))
                   ? rocsparse_indextype_i32
                   : rocsparse_indextype_i64;
+
         auto f = find(I_indextype, source->data_type);
         if(f == nullptr)
         {
@@ -399,11 +401,13 @@ rocsparse_status rocsparse::dnmat_switch_order(rocsparse_handle            handl
                                       : rocsparse_status_invalid_value);
     }
 
-    const rocsparse_indextype I_indextype = (source->rows <= std::numeric_limits<int32_t>::max()
-                                             && source->cols <= std::numeric_limits<int32_t>::max())
-                                                ? rocsparse_indextype_i32
-                                                : rocsparse_indextype_i64;
-    auto                      f           = find(I_indextype, source->data_type);
+    const rocsparse_indextype I_indextype
+        = (((source->rows * source->cols) <= std::numeric_limits<int32_t>::max())
+           && (target->batch_count <= std::numeric_limits<int32_t>::max()))
+              ? rocsparse_indextype_i32
+              : rocsparse_indextype_i64;
+
+    auto f = find(I_indextype, source->data_type);
     if(f == nullptr)
     {
         RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error, "find failed");

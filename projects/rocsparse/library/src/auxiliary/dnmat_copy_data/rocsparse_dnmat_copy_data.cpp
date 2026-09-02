@@ -336,7 +336,7 @@ rocsparse_status rocsparse::dnmat_copy_data(rocsparse_handle            handle,
 
     const rocsparse_indextype I_indextype
         = (((source->rows * source->cols) <= std::numeric_limits<int32_t>::max())
-           || (target->batch_count <= std::numeric_limits<int32_t>::max()))
+           && (target->batch_count <= std::numeric_limits<int32_t>::max()))
               ? rocsparse_indextype_i32
               : rocsparse_indextype_i64;
 
