@@ -40,6 +40,8 @@
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
 
+#include <hipblaslt/hipblaslt-opt-in-features.h>
+
 #ifdef HIPBLASLT_USE_ROCROLLER
 #include "rocroller_host.hpp"
 #endif
@@ -49,7 +51,9 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
 #include <Tensile/FusedA2AKernArg.hpp>
+#endif
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -84,6 +88,7 @@
 
 #define INTERNAL_HIPHOSTMEM_SIZE 32768
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
 // Declared in rocblaslt-auxiliary.h, and defined here because this is the only
 // translation unit that may name the constant it forwards. Reporting the
 // kernel's own number is what keeps the flag region defined in one place; the
@@ -103,6 +108,7 @@ static_assert(HIPBLASLT_DEVICE_COMM_MAX_WORLD == TensileLite::FUSED_A2A_MAX_RANK
               "the communicator's maximum world and the kernarg ABI's rank slot count have "
               "diverged: peer slots would be allocated for ranks the kernel cannot address, or "
               "the kernel would scan slots the host never filled");
+#endif
 
 RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     trans_a,
                                                          hipblasOperation_t     trans_b,

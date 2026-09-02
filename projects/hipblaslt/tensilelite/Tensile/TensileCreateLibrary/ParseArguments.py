@@ -101,6 +101,13 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         help="Include logic files in directories named 'Experimental'.",
     )
     argParser.add_argument(
+        "--enable-gemm-a2a-fusion",
+        dest="EnableGemmA2AFusion",
+        action="store_true",
+        default=False,
+        help="Include logic whose ProblemType enables fused GEMM + all-to-all.",
+    )
+    argParser.add_argument(
         "--no-enumerate", action="store_true", help="Do not run rocm_agent_enumerator."
     )
     argParser.add_argument("--version", help="Version string to embed into library file.")
@@ -233,6 +240,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["LogicFilter"] = args.LogicFilter
     arguments["OutputPath"] = args.OutputPath
     arguments["Experimental"] = args.Experimental
+    arguments["EnableGemmA2AFusion"] = args.EnableGemmA2AFusion
     arguments["GenSolTable"] = args.GenSolTable
 
     return arguments

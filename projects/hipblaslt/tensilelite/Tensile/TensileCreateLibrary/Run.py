@@ -892,8 +892,14 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     parsedLibraries = ParallelMap2(
         LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
     )
+    skippedGemmA2AFusion = 0
     for library in parsedLibraries:
-        scheduleName, architectureName, _, _, _, newLibrary, typeMismatches = library
+        scheduleName, architectureName, problemType, _, _, newLibrary, typeMismatches = library
+        if not _includeGemmA2AFusionProblemType(
+            problemType, args.get("EnableGemmA2AFusion", False)
+        ):
+            skippedGemmA2AFusion += 1
+            continue
         mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
 
         if architectureName == "":
@@ -921,6 +927,9 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         else:
             masterLibraries[architectureName] = newLibrary
             masterLibraries[architectureName].version = args["CodeObjectVersion"]
+
+    if skippedGemmA2AFusion:
+        print1(f"# GEMM+A2A fusion: disabled; filtered {skippedGemmA2AFusion} logic files")
 
     # After all YAML files have been parsed and Solution objects created,
     # fail on any type mismatches that were collected.
@@ -999,6 +1008,11 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     print1(f"Number of unique solutions: {len(solutions)}")
 
     return solutions, masterLibraries, codeObjectFilesIndex
+
+
+def _includeGemmA2AFusionProblemType(problemType, enabled: bool) -> bool:
+    """Return whether this build admits one library logic's GEMM+A2A solutions."""
+    return enabled or not problemType["FusedGemmA2A"]
 
 
 ################################################################################

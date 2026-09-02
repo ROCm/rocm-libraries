@@ -44,6 +44,7 @@
 #define _HIPBLASLT_H_
 
 #include "hipblaslt/hipblaslt-export.h"
+#include "hipblaslt/hipblaslt-opt-in-features.h"
 #include "hipblaslt/hipblaslt-version.h"
 #ifndef LEGACY_HIPBLAS_DIRECT
 #include <hipblas-common/hipblas-common.h>
@@ -108,6 +109,7 @@ typedef enum {
   HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT = 131204, /**<Output GEMM results after applying bias but before applying clamp transform.*/
 } hipblasLtEpilogue_t;
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /*! \ingroup types_module
  *  \brief Stages that can be selected on a fused epilogue descriptor.
  *
@@ -225,6 +227,7 @@ typedef hipblasStatus_t (*hipblasLtDeviceCommAllgatherFn)(void*       userData,
                                                           const void* sendbuf,
                                                           void*       recvbuf,
                                                           size_t      bytesPerRank);
+#endif
 
 /*! \ingroup types_module
  *  \brief Specify the batch mode of the matrices.
@@ -372,7 +375,9 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,              /**<Second extra argument for the activation function. Data type: ``float``. */
   HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT = 104,      /**<Select the hipBLASLt StreamK tile scheduling mode for StreamK=5 hybrid kernels (static SK3 vs dynamic SK4 work-queue sub-paths). Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtStreamKTileSchedulingMode_t``: ``0`` (``OFF``, default) uses the SK3 static sub-path; when ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` is set to a positive value the library heuristic still runs per launch to pick SK4 when appropriate; ``1`` (``ON``) always requests the SK4 dynamic work-queue sub-path when the selected kernel supports it; ``2`` (``AUTO``) always lets the library's heuristic pick between static and dynamic per launch. Values outside ``{0, 1, 2}`` are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT = 105, /**<Request a uniform summation order across the M dimension. Provided as an ``_EXT`` attribute. When enabled, hipBLASLt guarantees that if every row of matrix A is the identical vector, every row of the output matrix D is bitwise identical. This is uniformity across the M dimension within a single run; it is **not** run-to-run determinism. ``0`` (default) inherits the handle-level request (``hipblasLtSetUniformSummationOrder``); ``1`` enables this GEMM. Other values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Enabling the mode restricts kernel selection and the launch configuration, so it can reduce performance, and hipblasLtMatmul() returns ``HIPBLAS_STATUS_INVALID_VALUE`` when no uniform-safe configuration exists for the resolved launch rather than silently producing a non-uniform result. Data type: ``int32_t``. */
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
   HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,              /**<Attach a fused epilogue to this matmul. The value is a ``hipblasLtFusedEpilogueDescriptor_t`` built with ``hipblasLtFusedEpilogueCreate`` / ``...Add`` / ``...SetAttribute``. The descriptor is referenced, not copied, so it must outlive every matmul call that uses this matmul descriptor. Setting the attribute validates that the selected stages have all of their required parameters; set the value to NULL to detach. Data type: ``hipblasLtFusedEpilogueDescriptor_t``. */
+#endif
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 
@@ -756,6 +761,7 @@ HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle,
                                             uint32_t*         first_nan_call_id);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /*! \ingroup library_module
  *  \brief Register this handle's view of a device communicator.
  *
@@ -812,6 +818,7 @@ hipblasStatus_t hipblasLtSetDeviceComm(hipblasLtHandle_t              handle,
                                        uint32_t                       nChannels,
                                        hipblasLtDeviceCommAllgatherFn allgather,
                                        void*                          userData);
+#endif
 
 /*! \ingroup library_module
  *  \brief Create a matrix layout descriptor.
@@ -1028,6 +1035,7 @@ hipblasStatus_t hipblasLtMatmulDescGetAttribute(hipblasLtMatmulDesc_t           
                                                 size_t                          sizeInBytes,
                                                 size_t*                         sizeWritten);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /*! \ingroup library_module
  *  \brief Create a fused epilogue descriptor.
  *
@@ -1116,6 +1124,7 @@ hipblasStatus_t hipblasLtFusedEpilogueSetAttribute(hipblasLtFusedEpilogueDescrip
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtFusedEpilogueDestroy(hipblasLtFusedEpilogueDescriptor_t desc);
+#endif
 
 /*! \ingroup library_module
  *  \brief Create a preference descriptor.
