@@ -397,7 +397,7 @@ namespace rocRoller::HostNumerics
 
             auto result
                 = roc::host_numerics::generateMx(std::move(mxShape), dataGeneration, options);
-            Tensor data   = result.data.shareStorageWithLayout(hostTensorLayout(descriptor));
+            Tensor data = result.data.shareStorageWithLayout(hostTensorLayout(descriptor));
 
             auto const scaleLayout = hostScaleLayout(descriptor, blockedDimension, scaleBlockSize);
             Tensor     scales      = result.scales.shareStorageWithLayout(scaleLayout);
