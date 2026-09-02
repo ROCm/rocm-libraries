@@ -23,7 +23,9 @@
 #ifndef MIOPEN_DEPTHWISE_MFMA_KERNELS_HPP
 #define MIOPEN_DEPTHWISE_MFMA_KERNELS_HPP
 
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
+#endif
 
 namespace miopen {
 namespace conv_depthwise_direct {
