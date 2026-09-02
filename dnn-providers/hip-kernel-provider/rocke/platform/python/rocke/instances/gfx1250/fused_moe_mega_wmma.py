@@ -1171,7 +1171,7 @@ def build_moe_fused_mega_wmma(
     tokens = b.param("tokens", I32)
 
     t = spec.gate_up_tile()
-    d_per_lane = op_gu.c_frag_len  # noqa: F841
+    d_per_lane = op_gu.d_frag_len  # noqa: F841
 
     block_m = t.tile_m
     block_n = t.tile_n
@@ -1429,7 +1429,7 @@ def build_moe_fused_mega_wmma(
                 SortedTokenIds,
                 SortedWeights,
                 Y,
-                op_down.c_frag_len,
+                op_down.d_frag_len,
                 batch_bucket_off=c0,
                 tokens=tokens,
                 pad_m=down_pad_m,

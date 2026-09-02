@@ -110,7 +110,7 @@ class TestMmaFragTables(unittest.TestCase):
         builder = IRBuilder("synthetic_four_role")
         a = builder.const_i32(1)
         b = builder.const_i32(2)
-        c = builder.const_i32(3)
+        c = builder.zero_vec(I32, 7)
         d = builder.mma(op, a, b, c)
 
         self.assertEqual(d.type.count, 3)
@@ -118,26 +118,44 @@ class TestMmaFragTables(unittest.TestCase):
         self.assertEqual(d.op.name, "tile.mma")
         self.assertEqual(d.op.operands, [a, b, c])
 
-        int_result = builder.mma(
-            MmaOp(
-                family="mma",
-                a_dtype="fp16",
-                b_dtype="fp16",
-                c_dtype="fp32",
-                d_dtype="i32",
-                m=1,
-                n=1,
-                k=1,
-                op_id="synthetic_i32_result",
-                c_frag_len=2,
-                d_frag_len=5,
-            ),
-            a,
-            b,
-            c,
+        int_op = MmaOp(
+            family="mma",
+            a_dtype="fp16",
+            b_dtype="fp16",
+            c_dtype="fp32",
+            d_dtype="i32",
+            m=1,
+            n=1,
+            k=1,
+            op_id="synthetic_i32_result",
+            c_frag_len=2,
+            d_frag_len=5,
         )
+        int_c = builder.zero_vec(F32, 2)
+        int_result = builder.mma(int_op, a, b, int_c)
         self.assertEqual(int_result.type.count, 5)
         self.assertIs(int_result.type.elem, I32)
+
+    def test_mma_rejects_c_operand_that_disagrees_with_metadata(self):
+        op = MmaOp(
+            family="mma",
+            a_dtype="fp16",
+            b_dtype="fp16",
+            c_dtype="i32",
+            d_dtype="fp32",
+            m=1,
+            n=1,
+            k=1,
+            op_id="synthetic_four_role",
+            c_frag_len=2,
+            d_frag_len=5,
+        )
+        builder = IRBuilder("synthetic_four_role_bad_c")
+        scalar = builder.const_i32(0)
+        with self.assertRaisesRegex(
+            ValueError, r"expects C operand type .*vec<i32x2>.*got i32"
+        ):
+            builder.mma(op, scalar, scalar, scalar)
 
 
 if __name__ == "__main__":  # pragma: no cover

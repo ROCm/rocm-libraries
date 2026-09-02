@@ -521,7 +521,7 @@ class TestHelpers(unittest.TestCase):
         bt = WmmaTensor(atom, "b", b2.zero_vec_f32(16), "gfx1151")
         acc = WmmaTensor.zero_acc(b2, atom)
         out = wmma_mma(b2, at, bt, acc)
-        self.assertEqual(out.role, "c")
+        self.assertEqual(out.role, "d")
         self.assertEqual(out.value.type.count, 8)
         self.assertEqual(out.value.type.elem.name, "f32")
         mmas = [o for o in self._kernel_ops(b2.kernel) if o.name == "tile.mma"]
@@ -542,7 +542,9 @@ class TestHelpers(unittest.TestCase):
         oview = make_global_view(o, shape=(256, 128), strides=(so, 1), dtype=F16)
         lane4 = b4.mod(b4.thread_id_x(), b4.const_i32(32))
         owin = oview.tile(lengths=(16, 16), origin=(b4.const_i32(0), b4.const_i32(0)))
-        store_wmma_tile(b4, owin, WmmaTensor.zero_acc(b4, atom), lane4, col_offset=16)
+        store_wmma_tile(
+            b4, owin, WmmaTensor(atom, "d", atom.zero_acc(b4)), lane4, col_offset=16
+        )
         stores = [o for o in self._kernel_ops(b4.kernel) if "global_store" in o.name]
         self.assertEqual(len(stores), 8)
 

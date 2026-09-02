@@ -1819,6 +1819,25 @@ class IRBuilder:
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
         """
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
+        if hasattr(op, "c_frag_len") and op.c_frag_len:
+            c_elem = {
+                "f16": F16,
+                "fp16": F16,
+                "bf16": BF16,
+                "f32": F32,
+                "fp32": F32,
+                "i32": I32,
+            }.get(op.c_dtype)
+            if c_elem is None:
+                raise ValueError(
+                    f"MMA op_id {op_id!r} has unsupported C dtype {op.c_dtype!r}"
+                )
+            expected_c = VectorType(c_elem, op.c_frag_len)
+            if c.type != expected_c:
+                raise ValueError(
+                    f"MMA op_id {op_id!r} expects C operand type {expected_c}, "
+                    f"got {c.type}"
+                )
         d_frag_len = (
             op.d_frag_len
             if hasattr(op, "d_frag_len") and op.d_frag_len

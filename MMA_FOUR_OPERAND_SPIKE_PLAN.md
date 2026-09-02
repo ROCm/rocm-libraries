@@ -531,3 +531,32 @@ The implementation is ready only when the handoff records:
 - Changing intrinsic selection, instruction encodings, or generated code.
 - Adding new MFMA/WMMA instructions or datatypes.
 - Preserving the old public source/ABI/schema names during this spike.
+- Extending attention-builder ``unpack()`` signatures or restructuring their
+  loop-carried state. Those helpers may continue to reconstruct a carried
+  accumulator as C-compatible state; result storage must select D metadata
+  locally without pushing role plumbing through kernel builders.
+
+## Review follow-up implementation
+
+The post-implementation review identified several paths where the newly
+separate metadata was still treated as one accumulator/result role. The fix is
+deliberately local to the MMA abstraction:
+
+1. ``MfmaAtom.zero_acc`` and ``WmmaAtom.zero_acc`` construct the initial C
+   fragment from ``dtype_c`` and ``c_per_lane``.
+2. ``IRBuilder.mma(MmaOp, ...)`` validates the third operand against the
+   explicit C contract and continues to derive its result solely from D.
+   Bare-string ``op_id`` calls retain their existing compatibility behavior.
+3. ``WmmaTensor`` distinguishes immediate C and D values, while allowing an
+   equal-contract D fragment to feed the next accumulation. Kernel loop-state
+   unpacking remains unchanged.
+4. WMMA result storage always uses ``d_layout`` and ``d_per_lane``, regardless
+   of how a loop-carried value was reconstructed by a kernel builder.
+5. Remaining result-side ``c_frag_len`` uses are migrated to ``d_frag_len``;
+   genuine Matrix C and GEMM C tensor names remain untouched.
+6. The table-driven C++ MFMA lowerer carries separate C-argument and D-return
+   type spellings. Existing rows intentionally initialize both to the same
+   value, preserving generated LLVM bytes.
+7. Test-local atoms with unequal C/D dtype, length, and layout verify C zero
+   construction, explicit-MmaOp validation, C-to-D role transition, D storage,
+   and rejection of incompatible D-to-C recurrence.

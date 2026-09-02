@@ -38,10 +38,30 @@ from typing import Dict, Tuple
 
 from ..core.arch import ArchTarget, LayoutMap, MmaOp
 from ..core.ir import (
+    BF16,
+    F16,
+    F32,
+    I32,
     IRBuilder,
     Value,
 )
 from .distribution import TileDistributionEncoding
+
+
+def _accumulator_ir_type(dtype: str):
+    """Map an atom's logical C dtype to the IR type used by ``zero_acc``."""
+    types = {
+        "f16": F16,
+        "fp16": F16,
+        "bf16": BF16,
+        "f32": F32,
+        "fp32": F32,
+        "i32": I32,
+    }
+    try:
+        return types[dtype]
+    except KeyError as exc:
+        raise ValueError(f"unsupported MMA accumulator input dtype {dtype!r}") from exc
 
 
 @dataclass(frozen=True)
@@ -633,12 +653,12 @@ class MfmaAtom:
         return b.mfma_scale_f32_16x16x128_f8f6f4(a, bb, c, a_scale, b_scale)
 
     def zero_acc(self, b: IRBuilder) -> Value:
-        """Allocate a fresh `<d_per_lane x float>` accumulator (all zeros).
+        """Allocate a fresh C-input accumulator fragment filled with zeros.
 
         This is the accumulator initial value that the K-loop carries
         through `scf.for_iter`'s `iter_args`.
         """
-        return b.zero_vec_f32(self.d_per_lane)
+        return b.zero_vec(_accumulator_ir_type(self.dtype_c), self.c_per_lane)
 
     # ---- output lane layout ----
 
@@ -791,9 +811,8 @@ class WmmaAtom:
         return b.mma(self.name, a, bb, c)
 
     def zero_acc(self, b: IRBuilder) -> Value:
-        """Allocate a fresh ``<d_per_lane x float>`` accumulator (all zeros) for
-        the K-loop ``iter_args``."""
-        return b.zero_vec_f32(self.d_per_lane)
+        """Allocate a fresh C-input accumulator fragment for the K-loop."""
+        return b.zero_vec(_accumulator_ir_type(self.dtype_c), self.c_per_lane)
 
     # ---- physical lane layout (delegated to the arch-target SSOT) ----
 

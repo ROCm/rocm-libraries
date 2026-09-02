@@ -1675,7 +1675,7 @@ def _fuse_c0_to_conv1_a_regs(
     for mi in range(mfmas_m):
         for kk in range(mfmas_n):
             acc = accs0[mi * mfmas_n + kk]
-            codes = [code_fn(b.vec_extract(acc, s)) for s in range(op0.c_frag_len)]
+            codes = [code_fn(b.vec_extract(acc, s)) for s in range(op0.d_frag_len)]
             words = b.bitcast(b.vec_pack(codes, I8), VectorType(I32, 2))
             lo = b.vec_extract(words, 0)  # this half's k0_local {0,2,4,6}+half
             hi = b.vec_extract(words, 1)  # this half's k0_local {8,10,12,14}+half

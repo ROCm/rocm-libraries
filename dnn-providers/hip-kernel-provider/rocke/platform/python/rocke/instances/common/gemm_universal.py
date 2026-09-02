@@ -58,6 +58,7 @@ from typing import Iterator, List, Literal, Optional, Sequence, Tuple
 from ...core.ir import (
     BF16,
     F16,
+    F32,
     I32,
     IRBuilder,
     KernelDef,
@@ -372,7 +373,7 @@ def _resolve_mma_op(spec: "UniversalGemmSpec", arch: str):
 
     The op carries the backend ``op_id`` (consumed by the target-neutral
     :meth:`IRBuilder.mma`), the per-lane fragment vector lengths
-    (``a_frag_len`` / ``b_frag_len`` / ``c_frag_len``) and the
+    (``a_frag_len`` / ``b_frag_len`` / ``d_frag_len``) and the
     lane/slot -> tile-coordinate layout maps that drive the fragment loads and
     the accumulator scatter. Returns ``None`` if the target has no atom for the
     spec's warp-tile shape + dtype (callers turn that into a structured reject).
@@ -668,7 +669,7 @@ def _emit_zero_acc(b: IRBuilder, spec: UniversalGemmSpec) -> Value:
 
 
 def _atom_frag_lengths(op) -> Tuple[int, int, int]:
-    """Return ``(a_frag_len, b_frag_len, c_frag_len)`` — the per-lane fragment
+    """Return ``(a_frag_len, b_frag_len, d_frag_len)`` — the per-lane fragment
     vector lengths of the resolved :class:`~rocke.core.arch.MmaOp`.
 
     These come from the MMA contract, **not** from the ``shape / wave`` formula:
@@ -693,8 +694,9 @@ def _emit_mma(b: IRBuilder, op, a: Value, bb: Value, c: Value) -> Value:
 
 
 def _emit_zero_acc_op(b: IRBuilder, op) -> Value:
-    """Zero accumulator vector sized from the resolved op's ``c_frag_len``."""
-    return b.zero_vec_f32(op.d_frag_len)
+    """Zero the resolved op's C-input accumulator fragment."""
+    c_elem = I32 if op.c_dtype == "i32" else F32
+    return b.zero_vec(c_elem, op.c_frag_len)
 
 
 def _choose_load_vec(spec: UniversalGemmSpec) -> int:
