@@ -36,4 +36,14 @@ if((DTYPES MATCHES "fp8" AND DTYPES MATCHES "bf8" AND DTYPES MATCHES "fp16") OR 
         xdl/device_grouped_conv3d_bwd_data_xdl_ndhwgc_gkzyxc_ndhwgk_input_f16_comp_bf8_f8_instance.cpp)
 endif()
 
+# WORKAROUND (ROCm 7.0.2 toolchain): see the matching note in
+# grouped_conv2d_bwd_data/nhwgc/CMakeLists.txt. Same clang backend crash in the
+# AMDGPU "SI Form memory clauses" pass, gfx908 only, f32 / f32_tf32 variants.
+if(GPU_TARGETS MATCHES "gfx908")
+    set_source_files_properties(
+        xdl/device_grouped_conv3d_bwd_data_xdl_ndhwgc_gkzyxc_ndhwgk_f32_optimized_loads_instance.cpp
+        xdl/device_grouped_conv3d_bwd_data_xdl_ndhwgc_gkzyxc_ndhwgk_f32_tf32_optimized_loads_instance.cpp
+        PROPERTIES COMPILE_OPTIONS "-O1")
+endif()
+
 add_instance_library(device_grouped_conv3d_bwd_data_ndhwgc_instance ${GROUPED_CONV3D_BWD_DATA_NDHWGC})
