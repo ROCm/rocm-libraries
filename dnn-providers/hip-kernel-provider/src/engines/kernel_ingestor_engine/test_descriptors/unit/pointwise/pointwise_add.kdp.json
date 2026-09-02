@@ -16,7 +16,7 @@
       "name": "pointwise_add.f32_block64",
       "kernel_source": {
         "kind": "embedded_source",
-        "source_file": "PointwiseAdd.cpp",
+        "source_file": "kernels/PointwiseAdd.cpp",
         "entry_point": "PointwiseAdd"
       },
       "metadata": {
@@ -32,7 +32,7 @@
       "name": "pointwise_add.f32_block256",
       "kernel_source": {
         "kind": "embedded_source",
-        "source_file": "PointwiseAdd.cpp",
+        "source_file": "kernels/PointwiseAdd.cpp",
         "entry_point": "PointwiseAdd"
       },
       "metadata": {

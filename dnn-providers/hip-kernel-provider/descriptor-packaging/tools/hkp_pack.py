@@ -88,6 +88,13 @@ def _parse_args(argv):
         "longer holds their kernels. Defaults to the shipped group.",
     )
     p.add_argument(
+        "--source-label",
+        required=True,
+        help="The name of the build rule that packs this root. Recorded in "
+        "each pass-through descriptor's provenance, so a reader of the staged "
+        "tree can find the invocation that wrote the folder.",
+    )
+    p.add_argument(
         "--rocke-wheel-stamp",
         default=None,
         help="Path to the rocke wheel content-digest stamp. Its digest is "
@@ -109,6 +116,7 @@ def main(argv=None):
         inter_root=Path(args.inter_root),
         rocke_wheel_stamp=args.rocke_wheel_stamp,
         group=args.group,
+        source_label=args.source_label,
     )
     return 0
 

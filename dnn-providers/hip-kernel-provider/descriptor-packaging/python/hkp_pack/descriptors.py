@@ -1,7 +1,7 @@
 import json
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from .errors import HkpPackError
 
@@ -232,16 +232,23 @@ def _validate_embedded_source_file(source_file, where):
 
     The value names the source file and is not normalised anywhere. A '..'
     segment lets one file be named by two different spellings, so one file
-    takes two identities.
+    takes two identities. An absolute path names a location on one machine,
+    and the emitted key must be the same on every machine.
     """
     if not isinstance(source_file, str) or not source_file:
         raise HkpPackError(
             f"{where} kernel_source 'source_file' must be a non-empty string"
         )
-    if ".." in source_file.replace("\\", "/").split("/"):
+    posix = source_file.replace("\\", "/")
+    if ".." in posix.split("/"):
         raise HkpPackError(
             f"{where} kernel_source source_file '{source_file}' must not "
             "contain a '..' segment"
+        )
+    if posix.startswith("/") or PureWindowsPath(source_file).is_absolute():
+        raise HkpPackError(
+            f"{where} kernel_source source_file '{source_file}' must be "
+            "relative to its descriptor, not absolute"
         )
 
 

@@ -187,11 +187,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # subtrees and the integration root holds three, all five wired in
     # descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
     # subtree per architecture: it rewrites an authored hip descriptor to kpack and writes
-    # the archive beside it, and it emits an embedded_source descriptor as authored, with
-    # the shard architecture stamped on it. An embedded_source descriptor names a kernel
-    # compiled into a binary and JIT-compiled at load. Its subtree gets descriptors and
-    # no archive. Both roots stage into the build tree rather than being
-    # read from the source tree, so the build tree matches the install tree.
+    # the archive beside it. For an embedded_source descriptor it stamps the shard
+    # architecture and records the authored values in a provenance block. An
+    # embedded_source descriptor names a kernel compiled into a binary and JIT-compiled
+    # at load. Its subtree gets descriptors and no archive. Both roots stage into the
+    # build tree rather than being read from the source tree, so the build tree matches
+    # the install tree.
     set(HIPKERNELPROVIDER_TEST_SET_UNIT "unit")
     set(HIPKERNELPROVIDER_TEST_SET_INTEGRATION "integration")
     # Defined here, with the other path variables, and NOT beside the staging rules that

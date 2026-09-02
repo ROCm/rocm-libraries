@@ -16,7 +16,7 @@
       "name": "pointwise_mul.f32_block64",
       "kernel_source": {
         "kind": "embedded_source",
-        "source_file": "PointwiseMul.cpp",
+        "source_file": "kernels/PointwiseMul.cpp",
         "entry_point": "PointwiseMul"
       },
       "metadata": {
@@ -32,7 +32,7 @@
       "name": "pointwise_mul.f32_block256",
       "kernel_source": {
         "kind": "embedded_source",
-        "source_file": "PointwiseMul.cpp",
+        "source_file": "kernels/PointwiseMul.cpp",
         "entry_point": "PointwiseMul"
       },
       "metadata": {
@@ -48,7 +48,7 @@
       "name": "pointwise_mul.f16_block64",
       "kernel_source": {
         "kind": "embedded_source",
-        "source_file": "PointwiseMul.cpp",
+        "source_file": "kernels/PointwiseMul.cpp",
         "entry_point": "PointwiseMul"
       },
       "metadata": {

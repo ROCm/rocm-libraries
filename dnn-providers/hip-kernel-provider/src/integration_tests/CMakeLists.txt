@@ -117,6 +117,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             add_dependencies(hip_kernel_provider_integration_tests ${_hkp_set})
         endif()
     endforeach()
+
+    # The parent of the integration descriptor sets, which holds all three. A
+    # walk of a parent reaches every subtree staged under it, so a further pack
+    # there comes under the check with no edit here.
+    hkp_verify_embedded_sources(
+        TARGET hip_kernel_provider_integration_tests
+        STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}
+        PACK_NAMES integration_conv integration_pointwise archive_fixture
+    )
 endif()
 
 clang_tidy_check(hip_kernel_provider_integration_tests)

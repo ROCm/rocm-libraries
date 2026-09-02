@@ -10,7 +10,6 @@ include_guard(GLOBAL)
 
 # Captured at include time so it survives into functions: inside a function
 # CMAKE_CURRENT_LIST_DIR reflects the invoking listfile, not this module.
-set(HKP_CMAKE_DIR "${CMAKE_CURRENT_LIST_DIR}")
 set(HKP_PKG_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
 set(HKP_PYTHON_ROOT "${HKP_PKG_DIR}/python")
 set(HKP_TOOL "${HKP_PKG_DIR}/tools/hkp_pack.py")
@@ -137,6 +136,11 @@ endfunction()
 #   rocke/library rebuilds the wheel, changes the digest, and RESTAGES the
 #   packaged artifacts. Without that edge the kpacks would keep shipping kernels
 #   compiled from stale wheel contents.
+#
+#   NAME is also the source label the packer writes into every descriptor's
+#   provenance. The function records NAME and the absolute SOURCE_ROOT in a
+#   global registry, which hkp_verify_embedded_sources() reads to resolve a
+#   descriptor's authored location.
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR
@@ -238,6 +242,7 @@ function(hkp_wire_pack_target)
                 --hipcc "${ARG_HIPCC}"
                 --inter-root "${_inter_root}"
                 --kpack-python-dir "${ARG_ROCM_KPACK_DIR}"
+                --source-label "${ARG_NAME}"
                 ${_wheel_stamp_arg}
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
@@ -248,6 +253,130 @@ function(hkp_wire_pack_target)
     add_custom_target(hkp_packaging_${ARG_NAME} ALL
                       DEPENDS "${_stamp}"
                       COMMENT "hkp: descriptor packaging (${ARG_NAME})")
+    set_property(GLOBAL PROPERTY HKP_PACK_STAMP_${ARG_NAME} "${_stamp}")
+
+    # The key manifest normalises each registered path the same lexical way, so
+    # the two spellings agree and the verify step compares them exactly.
+    get_filename_component(_abs_source_root "${ARG_SOURCE_ROOT}" ABSOLUTE)
+    set_property(GLOBAL PROPERTY HKP_PACK_SOURCE_ROOT_${ARG_NAME} "${_abs_source_root}")
+    set_property(GLOBAL APPEND PROPERTY HKP_PACK_LABELS "${ARG_NAME}")
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_verify_embedded_sources(TARGET <t> STAGED_DESCRIPTOR_ROOTS <roots>
+#                             PACK_NAMES <names>)
+#   Add a build step that checks <t> against the staged descriptors it serves.
+#
+#   Every value of STAGED_DESCRIPTOR_ROOTS is a packer output tree. None of them
+#   is an authored source tree.
+#
+#   Every embedded_source descriptor under STAGED_DESCRIPTOR_ROOTS names a kernel
+#   source. The step reads the key table embed_kernel_sources() wrote for <t>
+#   and fails the build when a named source is absent from it, or when the file
+#   registered under a key is not the file at the authored location the
+#   descriptor's provenance records.
+#
+#   A descriptor resolves its own source root from its provenance.source_label,
+#   through the registry hkp_wire_pack_target() fills. The step joins that root
+#   with the descriptor's rel_dir and source_file, and compares the whole path
+#   against the registered one. Every wired label goes to every call site, so a
+#   descriptor written by a pack no PACK_NAMES value lists still resolves.
+#
+#   PACK_NAMES lists the pack roots that write STAGED_DESCRIPTOR_ROOTS. Each one
+#   contributes its stamp file, so packing a root reruns the check. A name whose
+#   root is not wired contributes nothing.
+#
+#   An absent root, an empty root, a root with no embedded_source descriptor and
+#   an empty key table each pass.
+# ---------------------------------------------------------------------------
+function(hkp_verify_embedded_sources)
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "TARGET" "STAGED_DESCRIPTOR_ROOTS;PACK_NAMES")
+
+    if(ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+                "hkp_verify_embedded_sources: unrecognised argument(s): "
+                "${ARG_UNPARSED_ARGUMENTS}")
+    endif()
+    if(NOT ARG_TARGET)
+        message(FATAL_ERROR "hkp_verify_embedded_sources called without a TARGET!")
+    endif()
+    if(NOT TARGET ${ARG_TARGET})
+        message(FATAL_ERROR
+                "hkp_verify_embedded_sources: the target ${ARG_TARGET} does not exist "
+                "yet. Call it after the target is created.")
+    endif()
+    if(NOT Python3_EXECUTABLE)
+        message(FATAL_ERROR
+                "hkp_verify_embedded_sources: Python3_EXECUTABLE is empty. The "
+                "descriptor packaging finds the interpreter, so add it before the "
+                "targets it verifies.")
+    endif()
+
+    # Resolved from the defining listfile: the callers are sibling directories that
+    # never see this module's include-time variables.
+    set(_tool "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/hkp_verify_embedded_sources.py")
+    set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/${ARG_TARGET}_kernel_keys.txt")
+    set(_stamp "${CMAKE_CURRENT_BINARY_DIR}/hkp-verify-${ARG_TARGET}.stamp")
+
+    set(_root_args "")
+    foreach(_root IN LISTS ARG_STAGED_DESCRIPTOR_ROOTS)
+        list(APPEND _root_args --staged-descriptor-root "${_root}")
+    endforeach()
+
+    # Every wired label, at every call site. A label the registry knows but no
+    # property backs contributes nothing, the same rule the stamp lookup follows.
+    set(_source_root_args "")
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    foreach(_label IN LISTS _labels)
+        get_property(_label_root GLOBAL PROPERTY HKP_PACK_SOURCE_ROOT_${_label})
+        if(_label_root)
+            list(APPEND _source_root_args --source-root "${_label}=${_label_root}")
+        endif()
+    endforeach()
+
+    # The stamp file, not the packaging target: a target-level edge orders the two
+    # steps but leaves the check stale after a repack.
+    set(_pack_stamps "")
+    set(_pack_targets "")
+    foreach(_pack IN LISTS ARG_PACK_NAMES)
+        get_property(_pack_stamp GLOBAL PROPERTY HKP_PACK_STAMP_${_pack})
+        if(_pack_stamp)
+            list(APPEND _pack_stamps "${_pack_stamp}")
+        endif()
+        if(TARGET hkp_packaging_${_pack})
+            list(APPEND _pack_targets hkp_packaging_${_pack})
+        endif()
+    endforeach()
+
+    # A target that embeds nothing has no key table. The tool reads an absent one
+    # as empty; naming it as a dependency would ask the generator for a rule that
+    # produces it.
+    set(_manifest_dep "")
+    if(EXISTS "${_manifest}")
+        set(_manifest_dep "${_manifest}")
+    endif()
+
+    add_custom_command(
+        OUTPUT "${_stamp}"
+        COMMAND "${Python3_EXECUTABLE}" "${_tool}"
+                --target "${ARG_TARGET}"
+                --key-manifest "${_manifest}"
+                ${_root_args}
+                ${_source_root_args}
+        COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
+        DEPENDS "${_tool}" ${_manifest_dep} ${_pack_stamps}
+        COMMENT "hkp: verifying embedded kernel sources (${ARG_TARGET})"
+        VERBATIM)
+
+    add_custom_target(hkp_verify_${ARG_TARGET} ALL
+                      DEPENDS "${_stamp}"
+                      COMMENT "hkp: embedded source verification (${ARG_TARGET})")
+    if(_pack_targets)
+        # The stamps are written from another directory, where a file-level edge
+        # alone leaves generators that build per directory without a rule for them.
+        add_dependencies(hkp_verify_${ARG_TARGET} ${_pack_targets})
+    endif()
+    add_dependencies(${ARG_TARGET} hkp_verify_${ARG_TARGET})
 endfunction()
 
 # ---------------------------------------------------------------------------

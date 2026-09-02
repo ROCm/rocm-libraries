@@ -68,12 +68,15 @@ class StandaloneUKD(InlineUKD):
 
 @dataclass
 class PassthroughUKD:
-    """A UKD the packer emits as authored.
+    """A UKD the packer emits without running a producer.
 
     `embedded_source` names a key into a table that the consuming binary
     compiles in. The packer builds no code object for it, so the authored
-    document is what ships. `filename` and `rel_dir` are set only for the
-    standalone form, which stays its own file in the shard.
+    document is what ships, with `arch` narrowed to the shard. `rel_dir` is the
+    descriptor's position under the source root, which provenance records: for
+    an inline UKD it is the directory of the KDP that holds it, and for a
+    standalone UKD its own. `filename` is set only for the standalone form,
+    which stays its own file in the shard.
     """
 
     doc: dict
@@ -371,7 +374,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 kind = ukd["kernel_source"]["kind"]
                 log(f"{where}: emitting kind '{kind}' as authored")
                 new_kds.append(ukd)
-                entries.append(PassthroughUKD(doc=ukd))
+                entries.append(PassthroughUKD(doc=ukd, rel_dir=kdp.rel_dir))
                 continue
             vk, symbol, fields = _compile_ukd_variant(
                 ukd,
@@ -516,6 +519,56 @@ def _rewrite_ukd_kpack(
     return doc
 
 
+def _rewrite_passthrough_ukd(passthrough, arch, source_label=None):
+    """Rewrite a pass-through UKD into shipped form.
+
+    One field may change: `arch` narrows to the shard. `kernel_source` ships as
+    authored, so the `source_file` the descriptor names is the key the consuming
+    binary's source table is keyed on.
+
+    The provenance block records the authored values for a person reading the
+    build output. `rewritten` names the fields whose emitted value differs from
+    the authored one. It holds nothing machine-specific and nothing
+    time-varying, so two runs over one source tree write the same bytes. Nothing
+    at runtime reads it. It sits at the top level, because `kernel_source`
+    accepts only the keys the loader parses.
+    """
+    authored = passthrough.doc
+    rel_dir = Path(passthrough.rel_dir).as_posix()
+    kernel_source = authored["kernel_source"]
+    source_file = kernel_source["source_file"]
+    if not source_label:
+        raise HkpPackError(
+            "source_label is required for pass-through descriptor "
+            f"'{rel_dir}/{source_file}': pass --source-label (or source_label=) "
+            "naming the build rule that packs this root."
+        )
+    authored_arch = list(authored.get("arch") or [])
+
+    doc = {k: v for k, v in authored.items() if k != "provenance"}
+    doc["kernel_source"] = dict(kernel_source)
+
+    rewritten = []
+    if authored_arch != [arch]:
+        rewritten.append("arch")
+
+    provenance = {
+        "origin_kind": kernel_source["kind"],
+        "source_label": source_label,
+    }
+    provenance.update(
+        {
+            "rel_dir": rel_dir,
+            "source_file": source_file,
+            "authored_arch": authored_arch,
+            "rewritten": rewritten,
+        }
+    )
+    doc["provenance"] = provenance
+    doc["arch"] = [arch]
+    return doc
+
+
 def _toolchain_for(ukd, hipcc, rocke_wheel_stamp):
     """Toolchain provenance for one UKD, dispatched on its producer."""
     if ukd.origin_kind == "rocke":
@@ -533,6 +586,7 @@ def pack_arch(
     hipcc=None,
     rocke_wheel_stamp=None,
     group=GROUP_NAME,
+    source_label=None,
 ):
     """Pack a pruned intermediate arch into the shipped kpack release tree.
 
@@ -541,9 +595,10 @@ def pack_arch(
     and moving build into a sibling provenance block. Guarded against toc_key
     collisions (distinct inputs mapping to one key).
 
-    A UKD of a pass-through kind is emitted as authored. A shard with no
-    compiled variant holds no archive and no `kpack/` directory, and its
-    ArchResult carries kpack_path=None.
+    A UKD of a pass-through kind takes the shard arch, keeps its authored
+    kernel_source, and carries a provenance block naming its authored values. A
+    shard with no compiled variant holds no archive and no `kpack/` directory,
+    and its ArchResult carries kpack_path=None.
     """
     arch = inter.arch
     out_arch_dir = Path(out_arch_dir)
@@ -635,18 +690,17 @@ def pack_arch(
         # per-arch content, unique per arch rather than globally.
         out_doc["arch"] = [arch]
         # Preserve the authored heterogeneous vector: compiled inline UKDs are
-        # rewritten to kpack form, pass-through inline UKDs ship as authored, and
-        # standalone-UKD id refs are kept as bare strings (those UKDs ship as
-        # their own files below).
+        # rewritten to kpack form, pass-through inline UKDs take the shard arch,
+        # and standalone-UKD id refs are kept as bare strings (those UKDs ship
+        # as their own files below).
         out_kds = []
         for e in kdp.entries:
             if isinstance(e, str):
                 out_kds.append(e)
             elif isinstance(e, PassthroughUKD):
-                # Narrow to the shard arch like the compiled path does. An
-                # inline UKD whose arch reaches past its pack's arch makes the
-                # loader reject the whole KDP.
-                out_kds.append({**e.doc, "arch": [arch]})
+                # An inline UKD whose arch reaches past its pack's arch makes
+                # the loader reject the whole KDP.
+                out_kds.append(_rewrite_passthrough_ukd(e, arch, source_label))
             else:
                 out_kds.append(
                     _rewrite_ukd_kpack(
@@ -691,11 +745,10 @@ def pack_arch(
             json.dumps(out_doc, indent=2) + "\n",
         )
 
-    # A pass-through standalone UKD keeps its authored kernel_source and takes
-    # this shard's arch, matching the KDP that references it.
+    # A pass-through standalone UKD is its own file. It takes this shard's arch,
+    # matching the KDP that references it.
     for ukd in inter.passthrough_standalone_ukds.values():
-        out_doc = dict(ukd.doc)
-        out_doc["arch"] = [arch]
+        out_doc = _rewrite_passthrough_ukd(ukd, arch, source_label)
         _write_text_at(
             out_arch_dir,
             ukd.rel_dir,
@@ -726,6 +779,7 @@ def run_pipeline(
     expected_sha256=None,
     rocke_wheel_stamp=None,
     group=GROUP_NAME,
+    source_label=None,
     log=print,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
@@ -793,6 +847,7 @@ def run_pipeline(
                 hipcc=hipcc,
                 rocke_wheel_stamp=rocke_wheel_stamp,
                 group=group,
+                source_label=source_label,
             )
             if out_arch_dir.exists():
                 shutil.rmtree(out_arch_dir)

@@ -542,7 +542,9 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(int64_t blockSiz
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000002");
     kernel.dispatchId
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000003");
-    kernel.source.sourceFile = entryPoint + ".cpp";
+    // The key the compiled-in source table holds, which is what the staged descriptor of
+    // this kernel carries.
+    kernel.source.sourceFile = "kernels/" + entryPoint + ".cpp";
     kernel.source.entryPoint = entryPoint;
     kernel.metadata
         = {{std::string(BLOCK_SIZE_FIELD), blockSize}, {std::string(DTYPE_FIELD), dtype}};

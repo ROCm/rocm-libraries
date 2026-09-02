@@ -472,9 +472,9 @@ TEST(TestConvFwdPack, PointwisePacksClaimTheOperationTheyActuallyImplement)
 {
     const auto& set = loadedSet("hipkernel:Pointwise");
 
-    for(const auto& expected : {std::pair{"PointwiseAdd.cpp", "ADD"},
-                                std::pair{"PointwiseMul.cpp", "MUL"},
-                                std::pair{"PointwiseSub.cpp", "SUB"}})
+    for(const auto& expected : {std::pair{"kernels/PointwiseAdd.cpp", "ADD"},
+                                std::pair{"kernels/PointwiseMul.cpp", "MUL"},
+                                std::pair{"kernels/PointwiseSub.cpp", "SUB"}})
     {
         // Not a structured binding: capturing one in the lambda below is C++20, and this
         // project is C++17.

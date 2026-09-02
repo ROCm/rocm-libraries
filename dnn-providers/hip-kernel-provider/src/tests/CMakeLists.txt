@@ -31,24 +31,21 @@ add_executable(
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/KernelEmbedding.cmake")
 add_kernels_for_embedding(TARGET hip_kernel_provider_tests FILES ${CMAKE_CURRENT_SOURCE_DIR}/kernels/vector_add.cpp)
 
-# Test binary needs its own copy of each pack's kernel (embedding is per-target).
-# Copied via configure_file: registering the same source for embedding in two
-# directories doubles its CMAKE_CONFIGURE_DEPENDS entry, which Ninja rejects as two
-# rules for one file. The list itself is the engine's, so a new pack adds its kernel
-# once and both binaries pick it up.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    include("${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/IngestorKernels.cmake")
-    foreach(kernel IN LISTS HIPDNN_INGESTOR_PACK_KERNELS)
-        configure_file(
-            ${HIPDNN_INGESTOR_PACK_KERNEL_DIR}/${kernel}.cpp
-            ${CMAKE_CURRENT_BINARY_DIR}/kernels/${kernel}.cpp
-            COPYONLY
-        )
-        add_kernels_for_embedding(
-            TARGET hip_kernel_provider_tests
-            FILES ${CMAKE_CURRENT_BINARY_DIR}/kernels/${kernel}.cpp
-        )
-    endforeach()
+    # The kernel sources the ingestor engine's unit descriptor set names. Each key is the
+    # `source_file` its descriptor authors, which is the string the runtime looks up.
+    # hkp_verify_embedded_sources() compares this list against the staged descriptors.
+    set(_ingestor_kernel_dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/test_descriptors/unit/pointwise/kernels")
+    add_kernels_for_embedding(
+        TARGET hip_kernel_provider_tests
+        FILES "${_ingestor_kernel_dir}/PointwiseAdd.cpp"
+              "${_ingestor_kernel_dir}/PointwiseMul.cpp"
+              "${_ingestor_kernel_dir}/PointwiseSub.cpp"
+        KEYS kernels/PointwiseAdd.cpp
+             kernels/PointwiseMul.cpp
+             kernels/PointwiseSub.cpp
+    )
 endif()
 embed_kernel_sources(
     TARGET hip_kernel_provider_tests
@@ -73,7 +70,7 @@ target_link_libraries(
 )
 
 # make it so tests inside folders can find files without having to use a relative path.
-target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_BINARY_DIR}/src/tests/engines)
+target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_CURRENT_BINARY_DIR}/engines)
 
 if(ENABLE_ASM_SDPA_ENGINE)
     if(NOT HIPDNN_ENABLE_SDPA)
@@ -145,6 +142,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             add_dependencies(hip_kernel_provider_tests ${_hkp_set})
         endif()
     endforeach()
+
+    # The parent of the unit descriptor sets, and the archive fixture root this
+    # binary also compiles in. A walk of a parent reaches every subtree staged
+    # under it, so a further pack there comes under the check with no edit here.
+    hkp_verify_embedded_sources(
+        TARGET hip_kernel_provider_tests
+        STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_UNIT_BUILD_DIR}
+                                ${HIPKERNELPROVIDER_ARCHIVE_FIXTURE_BUILD_DIR}
+        PACK_NAMES unit_conv unit_pointwise archive_fixture
+    )
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

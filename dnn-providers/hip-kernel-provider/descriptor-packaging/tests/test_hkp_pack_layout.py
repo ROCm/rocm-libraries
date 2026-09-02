@@ -41,7 +41,8 @@ def _load_kpack(rocm_kpack_dir):
     return kpack
 
 
-def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches):
+def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches, source_label=None):
+    """Pack one root. A root holding an `embedded_source` descriptor needs a label."""
     return run_pipeline(
         source_root=source_root,
         arches=list(arches),
@@ -49,6 +50,7 @@ def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches):
         hipcc=hipcc,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        source_label=source_label,
     )
 
 
@@ -1228,6 +1230,26 @@ def test_embedded_source_rejects_a_parent_segment(
         load_flat_input(root)
 
 
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "source_file", ["/etc/PointwiseAdd.cpp", "C:/kernels/PointwiseAdd.cpp"]
+)
+def test_embedded_source_rejects_an_absolute_path(
+    tmp_path, empty_arch_fixture, source_file
+):
+    """The emitted key must be the same string on every machine.
+
+    An absolute path passes through the key computation unchanged, so it would
+    name one machine's filesystem in a shipped descriptor.
+    """
+    root = _embedded_source_root(
+        tmp_path, empty_arch_fixture, dict(_EMBEDDED_SOURCE, source_file=source_file)
+    )
+
+    with pytest.raises(HkpPackError, match=re.escape(source_file)):
+        load_flat_input(root)
+
+
 # --- J. Emitting embedded_source through pass-through and pruning -----------
 _STANDALONE_ID = "ukd-solo-mul-f32-b64"
 _STANDALONE_FILE = "solo_mul.ukd.json"
@@ -1244,6 +1266,29 @@ _GENERICS = (
     "solo.uhd.json",
 )
 OTHER_ARCH = "gfx90a"
+_LABEL = "solo_label"
+
+
+def _expected_provenance(
+    rel_dir,
+    kernel_source,
+    authored_arch=(),
+    label=_LABEL,
+    rewritten=("arch",),
+):
+    provenance = {
+        "origin_kind": kernel_source["kind"],
+        "source_label": label,
+    }
+    provenance.update(
+        {
+            "rel_dir": rel_dir,
+            "source_file": kernel_source["source_file"],
+            "authored_arch": list(authored_arch),
+            "rewritten": list(rewritten),
+        }
+    )
+    return provenance
 
 
 def _make_embedded(folder, arch=None):
@@ -1312,15 +1357,16 @@ def _add_wildcard_embedded_kdp(folder):
     )
 
 
-def _pack_embedded(root, tmp_path, rocm_kpack_dir, arches, log=print):
+def _pack_embedded(root, tmp_path, rocm_kpack_dir, arches, log=print, out="out"):
     """Pack a root that compiles nothing, so hipcc must never be invoked."""
     return run_pipeline(
         source_root=root,
         arches=list(arches),
-        out_root=tmp_path / "out",
+        out_root=tmp_path / out,
         hipcc="hipcc-not-invoked",
         rocm_kpack_dir=rocm_kpack_dir,
-        inter_root=tmp_path / "inter",
+        inter_root=tmp_path / f"inter-{out}",
+        source_label=_LABEL,
         log=log,
     )
 
@@ -1330,8 +1376,9 @@ def test_embedded_source_shard_holds_the_authored_descriptors(
 ):
     """The shard carries the authored documents plus this shard's arch.
 
-    The KDP and the standalone UKD are arch-stamped; kernel_source is emitted
-    exactly as authored, and the generics are byte-identical to their files.
+    The KDP and the standalone UKD are arch-stamped, they keep their authored
+    kernel_source, and their provenance records what was authored. The generics
+    are byte-identical to their files and carry no provenance.
     """
     root = _embedded_root(tmp_path, empty_arch_fixture)
     authored = root / "pointwise"
@@ -1344,16 +1391,21 @@ def test_embedded_source_shard_holds_the_authored_descriptors(
     inline = kdp["kernelDescriptors"][0]
     assert inline["arch"] == [ARCH]
     assert inline["kernel_source"] == _EMBEDDED_SOURCE
-    assert "provenance" not in inline
+    assert inline["provenance"] == _expected_provenance("pointwise", _EMBEDDED_SOURCE)
+    assert "provenance" not in inline["kernel_source"]
     assert kdp["kernelDescriptors"][1] == _STANDALONE_ID
 
     standalone = _read(shard / _STANDALONE_FILE)
     assert standalone["arch"] == [ARCH]
     assert standalone["kernel_source"] == _STANDALONE_SOURCE
-    assert "provenance" not in standalone
+    assert standalone["provenance"] == _expected_provenance(
+        "pointwise", _STANDALONE_SOURCE
+    )
+    assert "provenance" not in standalone["kernel_source"]
 
     for name in _GENERICS:
         assert (shard / name).read_bytes() == (authored / name).read_bytes(), name
+        assert "provenance" not in _read(shard / name), name
 
     # The authored KDP keeps the wildcard; only the emitted copy names an arch.
     assert _read(authored / "solo.kdp.json")["arch"] == []
@@ -1381,6 +1433,7 @@ def test_inline_embedded_ukd_is_narrowed_to_the_shard_arch(
     inline = emitted["kernelDescriptors"][0]
     assert inline["arch"] == [ARCH]
     assert inline["kernel_source"] == _EMBEDDED_SOURCE
+    assert inline["provenance"]["authored_arch"] == [ARCH, OTHER_ARCH]
     # The authored list is untouched; only the emitted copy is narrowed.
     assert _read(kdp_path)["kernelDescriptors"][0]["arch"] == [ARCH, OTHER_ARCH]
 
@@ -1473,7 +1526,7 @@ def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
     _nest(root, "hip/pointwise", main_fixture)
     _make_embedded(_nest(root, "embedded/pointwise", empty_arch_fixture))
 
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
+    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH], source_label=_LABEL)
 
     out = tmp_path / "out" / ARCH
     assert (out / "kpack" / f"hip_kernel_provider_{ARCH}.kpack").is_file()
@@ -1483,5 +1536,97 @@ def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
     embedded = out / "embedded" / "pointwise"
     emb_kdp = _read(embedded / "solo.kdp.json")
     assert emb_kdp["kernelDescriptors"][0]["kernel_source"] == _EMBEDDED_SOURCE
+    assert emb_kdp["kernelDescriptors"][0]["provenance"]["source_label"] == _LABEL
     assert _read(embedded / _STANDALONE_FILE)["kernel_source"] == _STANDALONE_SOURCE
     assert not (embedded / "kpack").exists()
+
+
+def _embedded_copy(root, sub, fixture, suffix=""):
+    """Copy the fixture to `root/sub`, put it on the embedded kind, re-stem it.
+
+    `suffix` re-stems every file name and every id, so two copies of one fixture
+    coexist under one root.
+    """
+    dest = root / sub if sub else root
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(fixture, dest)
+    _make_embedded(dest)
+    if suffix:
+        for path in sorted(dest.glob("*.json")):
+            text = path.read_text(encoding="utf-8").replace("solo", f"solo{suffix}")
+            renamed = path.with_name(path.name.replace("solo", f"solo{suffix}", 1))
+            renamed.write_text(text, encoding="utf-8")
+            if renamed != path:
+                path.unlink()
+    return dest
+
+
+def test_a_field_the_packer_left_alone_is_not_reported_as_rewritten(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """A descriptor that needed no change says so.
+
+    The block tells a reader what happened on the way here, so it must not
+    claim a rewrite the packer did not make.
+    """
+    root = tmp_path / "root"
+    folder = _embedded_copy(root, "", empty_arch_fixture)
+    kdp_path = folder / "solo.kdp.json"
+    kdp = _read(kdp_path)
+    kdp["kernelDescriptors"][0]["arch"] = [ARCH]
+    kdp_path.write_text(json.dumps(kdp, indent=2) + "\n", encoding="utf-8")
+
+    _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
+
+    inline = _read(tmp_path / "out" / ARCH / "solo.kdp.json")["kernelDescriptors"][0]
+    assert inline["provenance"]["rewritten"] == []
+
+
+def test_embedded_source_shards_are_reproducible(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """Two runs over one source tree write the same bytes.
+
+    Provenance records nothing that varies by machine, time or invocation.
+    """
+    root = tmp_path / "root"
+    _embedded_copy(root, "", empty_arch_fixture)
+    _embedded_copy(root, "deep/child", empty_arch_fixture, suffix="2")
+
+    _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH], out="out-first")
+    _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH], out="out-second")
+
+    first = sorted((tmp_path / "out-first").rglob("*"))
+    second = sorted((tmp_path / "out-second").rglob("*"))
+    assert [p.relative_to(tmp_path / "out-first") for p in first] == [
+        p.relative_to(tmp_path / "out-second") for p in second
+    ]
+    for left, right in zip(first, second):
+        if left.is_file():
+            assert left.read_bytes() == right.read_bytes(), left
+
+
+def test_packing_without_a_source_label_is_refused(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """Every pass-through descriptor records the build rule that packs it.
+
+    The message names the descriptor, so an author of a hand-run sees which
+    document the packer stopped on.
+    """
+    root = _embedded_root(tmp_path, empty_arch_fixture)
+
+    with pytest.raises(HkpPackError) as excinfo:
+        run_pipeline(
+            source_root=root,
+            arches=[ARCH],
+            out_root=tmp_path / "out",
+            hipcc="hipcc-not-invoked",
+            rocm_kpack_dir=rocm_kpack_dir,
+            inter_root=tmp_path / "inter",
+        )
+
+    message = str(excinfo.value)
+    assert "source_label is required" in message
+    assert "--source-label" in message
+    assert "pointwise/kernels/PointwiseAdd.cpp" in message

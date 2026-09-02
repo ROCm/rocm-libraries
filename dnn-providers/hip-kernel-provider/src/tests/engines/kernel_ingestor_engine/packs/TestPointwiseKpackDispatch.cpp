@@ -361,7 +361,7 @@ DescriptorSet makeTwoPackSet(const std::filesystem::path& emptyDirectory)
     sibling.id = id(0x31);
     sibling.name = "the kernel that still serves";
     sibling.source.kind = KernelSourceKind::EMBEDDED_SOURCE;
-    sibling.source.sourceFile = "PointwiseAdd.cpp";
+    sibling.source.sourceFile = "kernels/PointwiseAdd.cpp";
     sibling.source.entryPoint = "PointwiseAdd";
     sibling.metadata = {{std::string(BLOCK_SIZE_FIELD), int64_t{64}},
                         {std::string(DTYPE_FIELD), std::string("FLOAT")}};
