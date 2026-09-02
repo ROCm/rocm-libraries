@@ -316,8 +316,10 @@ void testRuntimeMixedAndBlockScaledGemm() {
 
     GemmOperand blockOperandA(blockA);
     GemmOperand blockOperandB(blockB);
-    blockOperandA.blockScale = BlockScaleBinding{scalesA, 2};
-    blockOperandB.blockScale = BlockScaleBinding{scalesB, 2};
+    blockOperandA.blockScale = scalesA;
+    blockOperandA.blockSize = 2;
+    blockOperandB.blockScale = scalesB;
+    blockOperandB.blockSize = 2;
     GemmTestCase blockScaled(std::move(blockOperandA), std::move(blockOperandB), blockC, blockD,
                              ScalarType::Float32);
     referenceGemm(blockScaled);
@@ -339,16 +341,12 @@ void testPointwiseRoutes() {
             Layout::contiguousLastDimensionFastest(Shape{1, 7}), std::span<const float>(a)));
         GemmOperand operandB(Tensor::copyNativeStorage<float>(
             Layout::contiguousLastDimensionFastest(Shape{7, 2}), std::span<const float>(b)));
-        operandA.blockScale = BlockScaleBinding{
-            Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 3}),
-                                             std::span<const float>(scaleA)),
-            3,
-        };
-        operandB.blockScale = BlockScaleBinding{
-            Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
-                                             std::span<const float>(scaleB)),
-            4,
-        };
+        operandA.blockScale = Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{1, 3}), std::span<const float>(scaleA));
+        operandA.blockSize = 3;
+        operandB.blockScale = Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(scaleB));
+        operandB.blockSize = 4;
         GemmTestCase problem(
             std::move(operandA), std::move(operandB),
             Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 2}),
@@ -547,10 +545,10 @@ void testStreamingGemmValidation() {
     const std::array<float, 4> a{1, 2, 3, 4};
     const std::array<float, 4> b{5, 6, 7, 8};
     const std::array<float, 4> c{};
-    GemmTestSpecification problem(GemmOperand(Tensor::copyNativeValues<float>(Shape{2, 2}, a)),
-                                  GemmOperand(Tensor::copyNativeValues<float>(Shape{2, 2}, b)),
-                                  Tensor::copyNativeValues<float>(Shape{2, 2}, c),
-                                  ScalarType::Float32, ScalarType::Float32);
+    const Tensor tensorA = Tensor::copyNativeValues<float>(Shape{2, 2}, a);
+    const Tensor tensorB = Tensor::copyNativeValues<float>(Shape{2, 2}, b);
+    const Tensor tensorC = Tensor::copyNativeValues<float>(Shape{2, 2}, c);
+    const GemmOptions gemmOptions(ScalarType::Float32);
 
     Tensor observed =
         Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{19, 999, 43, 50});
@@ -560,18 +558,18 @@ void testStreamingGemmValidation() {
         OutputSelection::explicitIndices({1}, IndexOrder::FirstDimensionFastest);
 
     ComparisonReport pointwise =
-        validateGemm(problem.a, problem.b, problem.c, observed, problem, options);
+        validateGemm(tensorA, tensorB, tensorC, observed, gemmOptions, options);
     require(pointwise.passed() && pointwise.compared == 1,
             "Streaming GEMM validation did not isolate the selected output.");
 
     options.backend = GemmBackend::Blocked;
     ComparisonReport blocked =
-        validateGemm(problem.a, problem.b, problem.c, observed, problem, options);
+        validateGemm(tensorA, tensorB, tensorC, observed, gemmOptions, options);
     require(blocked.passed(), "Streaming blocked GEMM validation reported the wrong work.");
 
     observed.storeFrom({1, 0}, 44.0f);
     ComparisonReport mismatch =
-        validateGemm(problem.a, problem.b, problem.c, observed, problem, options);
+        validateGemm(tensorA, tensorB, tensorC, observed, gemmOptions, options);
     require(!mismatch.passed() && mismatch.mismatches == 1 &&
                 mismatch.reportedMismatches[0].index == 1 &&
                 mismatch.reportedMismatches[0].coordinates == std::vector<size_t>({1, 0}) &&

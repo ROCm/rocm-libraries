@@ -20,6 +20,8 @@
 
 namespace roc::host_numerics {
 namespace {
+using detail::GemmOperand;
+
 // Executes the subset of dense GEMM requests that CBLAS can consume directly.
 // A, B, C, D, and the accumulator must already use one matching BLAS scalar
 // type, and their views must satisfy the direct-layout and aliasing restrictions.
@@ -502,13 +504,13 @@ detail::GemmExecutionInfo detail::executeBlasGemm(const GemmInvocation& problem,
     return runInfo;
 }
 
-GemmSupportInfo queryGemmSupportWithBlasBackend(const GemmOperand& a, const GemmOperand& b,
-                                                const Tensor& c, const Tensor& d,
-                                                const GemmOptions& options, GemmBackend backend) {
+GemmSupportInfo queryGemmSupportWithBlasBackend(const Tensor& a, const Tensor& b, const Tensor& c,
+                                                const Tensor& d, const GemmOptions& options,
+                                                GemmBackend backend) {
     return detail::queryBlasGemmSupport(GemmInvocation(a, b, c, d, options), backend);
 }
 
-GemmBackend referenceGemmIntoWithBlasBackend(GemmOperand a, GemmOperand b, Tensor c, Tensor d,
+GemmBackend referenceGemmIntoWithBlasBackend(Tensor a, Tensor b, Tensor c, Tensor d,
                                              const GemmOptions& options, GemmBackend backend) {
     return detail::executeBlasGemm(
                GemmInvocation(std::move(a), std::move(b), std::move(c), std::move(d), options),
@@ -516,7 +518,7 @@ GemmBackend referenceGemmIntoWithBlasBackend(GemmOperand a, GemmOperand b, Tenso
         .backendUsed;
 }
 
-Tensor referenceGemmWithBlasBackend(GemmOperand a, GemmOperand b, Tensor c, ScalarType outputType,
+Tensor referenceGemmWithBlasBackend(Tensor a, Tensor b, Tensor c, ScalarType outputType,
                                     const GemmOptions& options, std::optional<Layout> outputLayout,
                                     GemmBackend backend) {
     const GemmSpecification problem(std::move(a), std::move(b), std::move(c), outputType, options);

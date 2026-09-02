@@ -13,9 +13,9 @@ int main() {
     const Layout layout(Shape{2, 2}, {1, 2});
     Tensor output(ScalarType::Float32, layout);
     referenceGemmIntoWithBlasBackend(
-        GemmOperand(Tensor::copyNativeStorage<float>(layout, std::span<const float>(a))),
-        GemmOperand(Tensor::copyNativeStorage<float>(layout, std::span<const float>(b))), output,
-        output, GemmOptions{}, GemmBackend::Blas);
+        Tensor::copyNativeStorage<float>(layout, std::span<const float>(a)),
+        Tensor::copyNativeStorage<float>(layout, std::span<const float>(b)), output, output,
+        GemmOptions{}, GemmBackend::Blas);
 
     return output.loadAs<float>({0, 0}) == 19 && output.loadAs<float>({1, 0}) == 43 &&
                    output.loadAs<float>({0, 1}) == 22 && output.loadAs<float>({1, 1}) == 50

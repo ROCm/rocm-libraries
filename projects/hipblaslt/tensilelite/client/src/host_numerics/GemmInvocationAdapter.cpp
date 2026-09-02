@@ -1047,33 +1047,6 @@ namespace TensileLite::Client::HostNumerics
             const auto&         plan   = m_state->batchPlans.at(batch);
             const auto          source = m_state->materializeBatch(batch);
 
-            GemmOperand operandA(source.a);
-            GemmOperand operandB(source.b);
-            if(m_state->computeTypeA != m_state->typeA)
-                operandA.computeType = m_state->computeTypeA;
-            if(m_state->computeTypeB != m_state->typeB)
-                operandB.computeType = m_state->computeTypeB;
-
-            if(m_state->scaleA && m_state->preQuantizationScaleA)
-                operandA.preQuantizationScales.push_back(m_state->scaleA->expandDims(1));
-            if(m_state->scaleB && m_state->preQuantizationScaleB)
-                operandB.preQuantizationScales.push_back(m_state->scaleB->expandDims(0));
-            operandA.conjugate = m_state->aConjugate;
-            operandB.conjugate = m_state->bConjugate;
-
-            if(plan.blockScaleA && plan.blockScaleB)
-            {
-                operandA.blockScale = BlockScaleBinding{
-                    Tensor::copyEncodedBackingStorage(m_state->mxScaleTypeA,
-                                                      plan.blockScaleA->layout,
-                                                      plan.blockScaleA->storage),
-                    m_state->mxBlockA};
-                operandB.blockScale = BlockScaleBinding{
-                    Tensor::copyEncodedBackingStorage(
-                        m_state->mxScaleTypeB, plan.blockScaleB->layout, plan.blockScaleB->storage),
-                    m_state->mxBlockB};
-            }
-
             Tensor                productOutput = source.d;
             Tensor                gemmOutput    = productOutput;
             std::optional<Tensor> intermediate;
@@ -1084,7 +1057,7 @@ namespace TensileLite::Client::HostNumerics
             }
 
             TranslatedGemmBatch translated(
-                std::move(operandA), std::move(operandB), source.c, gemmOutput, accumulatorType);
+                source.a, source.b, source.c, gemmOutput, accumulatorType);
             translated.copyBacks.push_back(
                 {source.dDestination, productOutput, source.outputSelection});
             if(m_state->amax && m_state->amaxDestination)
@@ -1098,6 +1071,27 @@ namespace TensileLite::Client::HostNumerics
                                                 *source.auxiliaryOutput,
                                                 source.outputSelection});
             auto& request           = translated.gemmOptions();
+            request.computeTypeA    = m_state->computeTypeA != m_state->typeA
+                                          ? std::optional<ScalarType>(m_state->computeTypeA)
+                                          : std::nullopt;
+            request.computeTypeB    = m_state->computeTypeB != m_state->typeB
+                                          ? std::optional<ScalarType>(m_state->computeTypeB)
+                                          : std::nullopt;
+            if(m_state->scaleA && m_state->preQuantizationScaleA)
+                request.preQuantizationScalesA.push_back(m_state->scaleA->expandDims(1));
+            if(m_state->scaleB && m_state->preQuantizationScaleB)
+                request.preQuantizationScalesB.push_back(m_state->scaleB->expandDims(0));
+            request.conjugateA = m_state->aConjugate;
+            request.conjugateB = m_state->bConjugate;
+            if(plan.blockScaleA && plan.blockScaleB)
+            {
+                request.blockScaleA = Tensor::copyEncodedBackingStorage(
+                    m_state->mxScaleTypeA, plan.blockScaleA->layout, plan.blockScaleA->storage);
+                request.blockScaleB = Tensor::copyEncodedBackingStorage(
+                    m_state->mxScaleTypeB, plan.blockScaleB->layout, plan.blockScaleB->storage);
+                request.blockSizeA = m_state->mxBlockA;
+                request.blockSizeB = m_state->mxBlockB;
+            }
             request.epilogue.alpha  = m_state->alpha;
             request.epilogue.beta   = m_state->beta;
             request.epilogue.scaleC = m_state->scaleC;
@@ -1178,17 +1172,13 @@ namespace TensileLite::Client::HostNumerics
                     }
                     else if(m_state->biasSource == ContractionProblemGemm::A)
                     {
-                        translated.biasReduction.emplace(translated.a.values,
-                                                         biasOutput,
-                                                         accumulatorType,
-                                                         std::vector<size_t>{1});
+                        translated.biasReduction.emplace(
+                            translated.a, biasOutput, accumulatorType, std::vector<size_t>{1});
                     }
                     else
                     {
-                        translated.biasReduction.emplace(translated.b.values,
-                                                         biasOutput,
-                                                         accumulatorType,
-                                                         std::vector<size_t>{0});
+                        translated.biasReduction.emplace(
+                            translated.b, biasOutput, accumulatorType, std::vector<size_t>{0});
                     }
                 }
             }

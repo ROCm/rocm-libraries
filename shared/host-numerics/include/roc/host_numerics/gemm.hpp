@@ -8,7 +8,6 @@
 #include <roc/host_numerics/operation_types.hpp>
 #include <roc/host_numerics/tensor.hpp>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace roc::host_numerics {
@@ -29,26 +28,6 @@ enum class AccumulationRounding {
     TypeDefault,         // Stepwise rounding for F16/BF16 accumulators; full precision otherwise.
     FullPrecision,       // Keeps the host register type through the complete dot product.
     AfterProductAndSum,  // Quantizes every product and accumulated sum.
-};
-
-// Associates a rank-two scale tensor with its reduction-dimension block width.
-struct BlockScaleBinding {
-    BlockScaleBinding(Tensor tensor, size_t reductionBlockSize)
-        : values(std::move(tensor)), blockSize(reductionBlockSize) {}
-
-    Tensor values;     // [free dimension, reduction block].
-    size_t blockSize;  // Number of consecutive K elements sharing one scale.
-};
-
-// Describes one normalized rank-two GEMM operand.
-struct GemmOperand {
-    explicit GemmOperand(Tensor tensor) : values(std::move(tensor)) {}
-
-    Tensor values;                                // A is [M,K]; B is [K,N].
-    std::optional<ScalarType> computeType;        // Optional per-element input quantization.
-    std::vector<Tensor> preQuantizationScales;    // Ordered broadcast factors before quantization.
-    std::optional<BlockScaleBinding> blockScale;  // Independent per-reduction-block factor.
-    bool conjugate = false;  // Conjugates values after loading and before scaling.
 };
 
 // Describes alpha/beta/C-scale combination and the fused D finalization program.
@@ -75,7 +54,7 @@ struct GemmEpilogue {
     Scalar activationParameter1;  // Second activation-specific scalar.
 };
 
-// Arithmetic, epilogue, and output-selection policy for one GEMM.
+// Operand transforms, arithmetic, epilogue, and output-selection policy for one GEMM.
 struct GemmOptions {
     explicit GemmOptions(ScalarType accumulator = ScalarType::Float32)
         : accumulatorType(accumulator), epilogue(accumulator) {}
@@ -83,6 +62,18 @@ struct GemmOptions {
     ScalarType accumulatorType;  // Dot-product and epilogue arithmetic type.
     AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
     MathMode mathMode = MathMode::Default;  // Operand transform after compute-type quantization.
+
+    std::optional<ScalarType> computeTypeA;
+    std::optional<ScalarType> computeTypeB;
+    std::vector<Tensor> preQuantizationScalesA;  // Ordered factors broadcast to A.
+    std::vector<Tensor> preQuantizationScalesB;  // Ordered factors broadcast to B.
+    std::optional<Tensor> blockScaleA;           // [M, ceil(K / blockSizeA)].
+    std::optional<Tensor> blockScaleB;           // [N, ceil(K / blockSizeB)].
+    size_t blockSizeA = 0;
+    size_t blockSizeB = 0;
+    bool conjugateA = false;
+    bool conjugateB = false;
+
     GemmEpilogue epilogue;
     OutputSelection outputSelection = OutputSelection::all();  // Logical D coordinates to write.
 };
@@ -102,19 +93,19 @@ struct GemmSupportInfo {
 
 // Validates the complete invocation and selected built-in strategy without
 // mutating any tensor. Backend support can depend on D's layout and aliases.
-GemmSupportInfo queryGemmSupport(const GemmOperand& a, const GemmOperand& b, const Tensor& c,
-                                 const Tensor& d, const GemmOptions& options = GemmOptions{},
+GemmSupportInfo queryGemmSupport(const Tensor& a, const Tensor& b, const Tensor& c, const Tensor& d,
+                                 const GemmOptions& options = GemmOptions{},
                                  GemmBackend backend = GemmBackend::Automatic);
 
 // Writes selected coordinates into caller-owned D and reports the concrete
 // backend used. Exact same-layout C/D aliasing is supported.
-GemmBackend referenceGemmInto(GemmOperand a, GemmOperand b, Tensor c, Tensor d,
+GemmBackend referenceGemmInto(Tensor a, Tensor b, Tensor c, Tensor d,
                               const GemmOptions& options = GemmOptions{},
                               GemmBackend backend = GemmBackend::Automatic);
 
 // Allocates and zero-initializes D, then executes the owning GEMM. Unselected
 // logical coordinates remain zero.
-Tensor referenceGemm(GemmOperand a, GemmOperand b, Tensor c, ScalarType outputType,
+Tensor referenceGemm(Tensor a, Tensor b, Tensor c, ScalarType outputType,
                      const GemmOptions& options = GemmOptions{},
                      std::optional<Layout> outputLayout = std::nullopt,
                      GemmBackend backend = GemmBackend::Automatic);

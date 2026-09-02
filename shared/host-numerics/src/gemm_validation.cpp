@@ -45,7 +45,7 @@ void runSelectedReference(const GemmInvocation& request, Tensor& selectedOutput,
 }
 }  // namespace
 
-ComparisonReport validateGemm(const GemmOperand& a, const GemmOperand& b, const Tensor& c,
+ComparisonReport validateGemm(const Tensor& a, const Tensor& b, const Tensor& c,
                               const Tensor& observed, const GemmOptions& gemmOptions,
                               const GemmValidationOptions& validationOptions) {
     GemmOptions executionOptions = gemmOptions;
