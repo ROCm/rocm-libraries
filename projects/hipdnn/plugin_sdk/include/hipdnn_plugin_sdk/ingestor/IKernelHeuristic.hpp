@@ -96,12 +96,15 @@ public:
         scored.reserve(catalog.entries.size());
         for(const auto& entry : catalog.entries)
         {
-            // NaN sorts last rather than poisoning the comparator, but it is reported to the
-            // caller unchanged: §15.2's score is a figure of merit, and a heuristic that
-            // computed none has to say so rather than hand back a number that reads as one.
+            // A non-finite score sorts last and is reported as 0, the value §5 step 7 gives
+            // "no measurement". Keeping the two keys separate is still necessary: NaN in the
+            // comparator is undefined behaviour, not merely a wrong order, because it compares
+            // false both ways and so is "equivalent" to everything while real scores stay
+            // ordered among themselves.
             const double raw = score(context, catalog.bound, entry);
-            scored.push_back({std::isnan(raw) ? -std::numeric_limits<double>::infinity() : raw,
-                              raw,
+            const bool usable = std::isfinite(raw);
+            scored.push_back({usable ? raw : -std::numeric_limits<double>::infinity(),
+                              usable ? raw : 0.0,
                               &entry});
         }
 
@@ -153,32 +156,38 @@ public:
     /// has not said otherwise is never compared against another engine by accident.
     virtual bool scoreIsCalibrated() const { return false; }
 
-    /// @brief This engine's predicted TFLOPS for @p catalog, or nullopt if it cannot say.
+    /// @brief This engine's predicted TFLOPS for @p catalog, or 0 when it cannot say.
     ///
     /// RFC 0019 §11.1 defines `predict_engine_tflops` as the cheap proxy for engine ranking and
     /// then states it is not needed for v1: with a single descriptor engine there is nothing to
     /// rank against. It names the stopgap -- "an engine reports sort_kernel_catalog's best
     /// predicted score as its estimate, accepting the enumeration cost" -- which is what this
-    /// is. A distinct estimate model, when one exists, replaces the body without moving the
-    /// seam.
+    /// is. A distinct estimate model, when one exists, replaces the body without moving the seam.
     ///
-    /// Returns nullopt rather than a number whenever the number would not mean what the caller
-    /// needs it to. An uncalibrated score ranks within one engine only (§15.1), and a NaN score
-    /// is a ranking that computed no figure of merit at all (§15.2). Both are legal rankings and
-    /// neither is an estimate, so the distinction is returned rather than flattened -- a caller
-    /// comparing engines has to be able to tell "slow" from "declined to say".
-    std::optional<double> estimateTflops(const Catalog& catalog, const MatchContext& context) const
+    /// Returns 0, not an absent value, when this heuristic has no figure of merit to offer:
+    /// §5 step 7 and §7 both spell the contract as "the engine reports an estimated throughput
+    /// of 0 so any engine with a real estimate outranks it in engine selection. The engine still
+    /// answers, still dispatches, and loses on merit rather than by exception." An optional
+    /// would have made every caller decide separately what an absent estimate means, and §11.3
+    /// needs one comparable scale rather than two kinds of answer.
+    ///
+    /// The two cases that yield 0 are an uncalibrated score -- which ranks within one engine
+    /// only (§15.1) and says nothing cross-engine -- and a ranking that computed no score at
+    /// all (§15.2). Both still rank; declining to estimate is not declining to select.
+    double estimateTflops(const Catalog& catalog, const MatchContext& context) const
     {
         if(!scoreIsCalibrated())
         {
-            return std::nullopt;
+            return 0.0;
         }
 
         const auto scored = rankScored(catalog, context);
-        if(scored.empty() || std::isnan(scored.front().score))
+        if(scored.empty())
         {
-            return std::nullopt;
+            return 0.0;
         }
+        // rankScored already reports an unusable score as 0, so the top entry needs no second
+        // sentinel check -- one rule, applied once, at the point that knows.
         return scored.front().score;
     }
 
@@ -252,14 +261,16 @@ public:
         return "declared_order";
     }
 
-    /// NaN, not zero: this heuristic ranks by declared order and computes no figure of merit.
-    /// Zero is a value an engine could legitimately score, so reporting it here would let
-    /// §15.2's engine-selection caller compare a fallback against a model on the same scale.
+    /// Zero: this heuristic ranks by declared order and computes no figure of merit. RFC 0019
+    /// §5 step 7 fixes what "no measurement" reports -- an estimate of 0, losing on merit
+    /// rather than by exception -- and a per-kernel score meaning the same thing says it the
+    /// same way. Ordering is unaffected, since every kernel scores alike and priority then
+    /// descriptor id decide.
     double score(const MatchContext& /*context*/,
                  const BoundTokens& /*bound*/,
                  const KernelDefinition& /*kernel*/) const override
     {
-        return std::numeric_limits<double>::quiet_NaN();
+        return 0.0;
     }
 };
 

@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <atomic>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -266,7 +267,9 @@ public:
         ctx.bindDeviceVars(detail::deviceVarsFrom(context.deviceProperties));
         ctx.bindQueryVars(detail::queryVarsFrom(bound));
         ctx.bindKernelVars(detail::kernelVarsFrom(kernel));
-        return orientedScore(_extractor->extract(ctx));
+        // The reported form: this entry point answers "what is this kernel worth", and
+        // ranking does not go through it -- rankScored is overridden and uses both forms.
+        return scoreCandidate(_extractor->extract(ctx)).reported;
     }
 
     /// Whatever the UHD declared. §15.1 already refused the one combination that would make
@@ -341,6 +344,24 @@ public:
     }
 
 private:
+    /// One candidate's number, in the two forms that must not be conflated.
+    struct CandidateScore
+    {
+        /// Higher wins. -infinity when there is no measurement, so an unmeasured candidate
+        /// sorts last whichever way the objective points.
+        double ordering;
+        /// RFC 0019.13 §15.2's figure of merit. 0 when there is no measurement, matching the
+        /// value §5 step 7 gives that condition at the engine level.
+        double reported;
+    };
+
+    /// One scored candidate, as the ranking holds it before it becomes a ScoredKernel.
+    struct Ranked
+    {
+        CandidateScore score;
+        const KernelDefinition* entry;
+    };
+
     std::vector<ScoredKernel> rankWith(const Catalog& catalog,
                                        const MatchContext& context) const
     {
@@ -363,7 +384,7 @@ private:
             // candidate, so they are evaluated once and the kernel slots overwritten.
             const std::vector<double> sharedRow = _extractor->extractSharedRow(ctx);
 
-            std::vector<std::pair<double, const KernelDefinition*>> scored;
+            std::vector<Ranked> scored;
             scored.reserve(catalog.entries.size());
             for(const auto& entry : catalog.entries)
             {
@@ -372,28 +393,33 @@ private:
 
                 std::vector<double> row = sharedRow;
                 _extractor->extractKernelInto(ctx, row);
-                scored.emplace_back(orientedScore(row), &entry);
+                scored.push_back({scoreCandidate(row), &entry});
             }
 
+            // scoreCandidate already replaced any non-finite value with -infinity, so the
+            // comparator sees only real numbers. That matters beyond tidiness: NaN compares
+            // false both ways, so it reads as "equivalent" to every element while real scores
+            // stay ordered among themselves, which violates the strict weak ordering
+            // std::stable_sort requires -- undefined behaviour, not merely a wrong order.
             std::stable_sort(scored.begin(),
                              scored.end(),
                              [](const auto& a, const auto& b) {
-                                 if(a.first != b.first)
+                                 if(a.score.ordering != b.score.ordering)
                                  {
-                                     return a.first > b.first;
+                                     return a.score.ordering > b.score.ordering;
                                  }
-                                 if(a.second->priority != b.second->priority)
+                                 if(a.entry->priority != b.entry->priority)
                                  {
-                                     return a.second->priority > b.second->priority;
+                                     return a.entry->priority > b.entry->priority;
                                  }
-                                 return a.second->kernelId < b.second->kernelId;
+                                 return a.entry->kernelId < b.entry->kernelId;
                              });
 
             std::vector<ScoredKernel> ordered;
             ordered.reserve(scored.size());
-            for(const auto& [score, entry] : scored)
+            for(const auto& candidate : scored)
             {
-                ordered.push_back({entry->kernelId, score});
+                ordered.push_back({candidate.entry->kernelId, candidate.score.reported});
             }
 
             traceSelection(scored, context);
@@ -416,15 +442,15 @@ private:
                                                  << " uhd=" << _config.uhdId
                                                  << " adapter=" << _config.adapterType
                                                  << " features_hash=" << _config.featuresHash);
-            // Declared order carries no model score, and inventing one would let a caller
-            // read a fallback as a figure of merit. NaN says "not scored" in the same
-            // channel §15.2 defines, and rank()'s ordering is unaffected.
+            // Declared order carries no model score. It reports 0 -- RFC 0019 §5 step 7's
+            // value for "no measurement" -- so a degraded ranking and a model that scored zero
+            // are described the same way, which is what lets estimateTflops apply one rule.
+            // traceDecidedBy() is where the two are told apart.
             std::vector<ScoredKernel> fallback;
             fallback.reserve(catalog.entries.size());
             for(const auto& entry : detail::declaredOrder(catalog.entries))
             {
-                fallback.push_back({entry.kernelId,
-                                    std::numeric_limits<double>::quiet_NaN()});
+                fallback.push_back({entry.kernelId, 0.0});
             }
             return fallback;
         }
@@ -442,10 +468,12 @@ private:
     /// At INFO because it is per-graph and verbose: a build ranking thousands of graphs should
     /// not pay for it by default, and §12's error-level requirements are the contract
     /// diagnostics, which are logged where they occur.
-    void traceSelection(const std::vector<std::pair<double, const KernelDefinition*>>& scored,
-                        const MatchContext& context) const
+    void traceSelection(const std::vector<Ranked>& scored, const MatchContext& context) const
     {
-        if(scored.empty())
+        // The level check precedes the work. Building the candidate string walks every kernel
+        // and formats a double per entry, on every graph -- so doing it before asking whether
+        // anyone is listening put a per-selection cost on builds that log nothing.
+        if(scored.empty() || !::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))
         {
             return;
         }
@@ -453,13 +481,13 @@ private:
         std::ostringstream candidates;
         for(size_t i = 0; i < scored.size(); ++i)
         {
-            candidates << (i == 0 ? "" : " ") << toString(scored[i].second->kernelId)
-                       << "=" << scored[i].first;
+            candidates << (i == 0 ? "" : " ") << toString(scored[i].entry->kernelId) << "="
+                       << scored[i].score.reported;
         }
 
         HIPDNN_PLUGIN_LOG_INFO("uhd trace: "
                                << _describedBy << " decided_by=model"
-                               << " winner=" << toString(scored.front().second->kernelId)
+                               << " winner=" << toString(scored.front().entry->kernelId)
                                << " candidates=" << scored.size()
                                << " arch=" << context.deviceProperties.gcnArchName
                                << " uhd=" << _config.uhdId
@@ -485,10 +513,70 @@ private:
 
     /// The model's raw output, returned to its declared units and oriented so that larger
     /// is better.
-    double orientedScore(const std::vector<double>& row) const
+    /// The model's score, oriented so higher always wins, or 0 when there is no usable number.
+    ///
+    /// Non-finite is reachable without anything malformed: `applyInverse` reports out-of-domain
+    /// as NaN, and a GBDT raw score is unbounded, so a `log`/`exp`/`sqrt`-transformed model
+    /// predicting a negative value lands here on a legal descriptor. A native or custom_library
+    /// scorer can return anything at all.
+    ///
+    /// Zero, not NaN, because RFC 0019 §5 step 7 already fixed what "no measurement" looks like
+    /// one layer up -- "the engine reports an estimated throughput of 0... and loses on merit
+    /// rather than by exception" -- and a per-kernel score that means the same thing should say
+    /// it the same way. Nothing needs the two distinguished: §15.2's callers use the order, and
+    /// the one caller that reads the value is estimateTflops, which reports 0 for this case too.
+    CandidateScore scoreCandidate(const std::vector<double>& row) const
     {
         const double raw = _adapter->score(row);
-        return _objectiveSign * uhd::score_transform::applyInverse(raw, _config.scoreTransform);
+        const double recovered = uhd::score_transform::applyInverse(raw, _config.scoreTransform);
+
+        // `recovered` is a physical quantity before any orientation is applied: throughput for
+        // a calibrated model, and a cost -- a time -- for the `min` targets §15.1 permits.
+        // RFC 0019.13 §8.4 names no target that can be negative, so a negative value here is
+        // the model predicting outside the range it was fitted to. That is a training defect,
+        // not a slow kernel, and it is refused whatever the model declares.
+        //
+        // Only some transforms make it loud. log's inverse yields NaN, but log1p's yields a
+        // finite negative, and log1p is what uhd_gen emits by default -- so the most common
+        // configuration is the one a finite-only check lets through.
+        //
+        // Bounded here rather than in the adapter because this is the only layer that knows
+        // what the number means: TreeDataAdapter sums leaves and has no transform and no units.
+        if(!std::isfinite(recovered) || recovered < 0.0)
+        {
+            warnScoreOutOfRangeOnce(raw, recovered);
+            return {-std::numeric_limits<double>::infinity(), 0.0};
+        }
+
+        // Orientation is applied only to a value that survived the range check, which is what
+        // keeps the two ideas apart. A negative *oriented* score is ordinary -- `objective: min`
+        // negates a cost, so every real candidate scores below zero -- while a negative
+        // *recovered* value is never meaningful. Reporting 0 as the ordering key would have
+        // made an unmeasured candidate outrank every measured one under that objective.
+        const double oriented = _objectiveSign * recovered;
+        return {oriented, oriented};
+    }
+
+    /// Warns the first time this heuristic produces an unusable score, and never again.
+    ///
+    /// Once, because the condition is a property of the model rather than of the graph: if it
+    /// happens for one kernel it will happen for many, and a per-candidate warning would bury
+    /// the fact it is trying to report. It is worth reporting at all because a model predicting
+    /// outside its target's range is broken in training, and the 0 it degrades to is otherwise
+    /// indistinguishable from an engine that simply has no model.
+    void warnScoreOutOfRangeOnce(double raw, double recovered) const
+    {
+        if(_warnedScoreOutOfRange.exchange(true))
+        {
+            return;
+        }
+        HIPDNN_PLUGIN_LOG_WARN("uhd: " << _describedBy << " predicted a score outside the range "
+                                       << "its target occupies (raw=" << raw << ", recovered="
+                                       << recovered << ", transform='" << _config.scoreTransform
+                                       << "', calibrated="
+                                       << (_config.scoreCalibrated ? "true" : "false")
+                                       << "). Treating it as no measurement (0). Further "
+                                          "occurrences for this heuristic are not logged.");
     }
 
     /// RFC 0019 §3.1's arch -> UHD map, and §9.2's per-engine cache of what has been
@@ -503,6 +591,10 @@ private:
     std::shared_ptr<const uhd::IUhdAdapter> _adapter;
     std::shared_ptr<const uhd::FeatureExtractor> _extractor;
     double _objectiveSign;
+
+    /// Set the first time an unusable score is seen. Mutable and atomic because ranking runs
+    /// through a shared_ptr<const> from any thread.
+    mutable std::atomic<bool> _warnedScoreOutOfRange{false};
     std::string _describedBy;
 };
 

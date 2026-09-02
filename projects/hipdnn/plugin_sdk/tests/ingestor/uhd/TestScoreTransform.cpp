@@ -80,12 +80,42 @@ TEST(TestIngestorScoreTransform, TheInverseIsMonotoneSoRankingSurvivesIt)
     // Why a wrong transform is invisible to selection, stated as a property: the inverse is
     // increasing, so applying the wrong one reorders nothing. Anything asserting only on the
     // chosen kernel cannot detect the defect this file exists to catch.
+    //
+    // Sampled across zero, not just on the positive side. The first version of this case used
+    // 1.5 and 2.5 and passed while `sqrt` was inverting as raw*raw -- which is monotone on the
+    // positives and inverts the order across zero, mapping -0.5 to 0.25 so that it outranks
+    // +0.25. Two positive points cannot see that, and a GBDT raw score is unbounded.
     for(const auto* transform : score_transform::SUPPORTED_TRANSFORMS)
     {
-        const double lower = score_transform::applyInverse(1.5, transform);
-        const double upper = score_transform::applyInverse(2.5, transform);
-        EXPECT_LT(lower, upper) << "not order-preserving: " << transform;
+        for(const double lower : {-2.5, -0.5, 0.25, 1.5})
+        {
+            const double a = score_transform::applyInverse(lower, transform);
+            const double b = score_transform::applyInverse(lower + 1.0, transform);
+
+            // NaN is the declared out-of-domain answer, and the ranking maps it to "no
+            // measurement". Only the in-domain pairs carry an ordering obligation.
+            if(std::isnan(a) || std::isnan(b))
+            {
+                continue;
+            }
+            EXPECT_LT(a, b) << "not order-preserving: " << transform << " at " << lower;
+        }
     }
+}
+
+TEST(TestIngestorScoreTransform, AnOutOfDomainPredictionIsReportedAsNaNRatherThanAWrongNumber)
+{
+    // Each of these inverses has a domain the raw score can leave, because a GBDT prediction is
+    // unbounded. Saying NaN lets the caller apply RFC 0019 §5 step 7's "no measurement" rule;
+    // returning a plausible number instead puts a fabricated score into a ranking.
+    EXPECT_TRUE(std::isnan(score_transform::applyInverse(-0.5, "exp")))   // log of a negative
+        << "exp's inverse produced a number outside its domain";
+    EXPECT_TRUE(std::isnan(score_transform::applyInverse(-0.5, "sqrt")))  // squaring flips sign
+        << "sqrt's inverse mapped a negative prediction to a positive score";
+
+    // In-domain values are untouched.
+    EXPECT_DOUBLE_EQ(score_transform::applyInverse(4.0, "sqrt"), 16.0);
+    EXPECT_DOUBLE_EQ(score_transform::applyInverse(0.0, "sqrt"), 0.0);
 }
 
 } // namespace

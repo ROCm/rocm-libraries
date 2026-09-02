@@ -72,6 +72,33 @@ KernelDefinition kernelWith(uint8_t tag, int64_t tileM, int64_t priority)
 
 /// A tree splitting on slot 0 (`$kernel.tile_m`): tile_m <= 96 scores 1.0, above scores
 /// 9.0. Larger tiles win, which lets a test set priority the other way round.
+/// Every leaf negative. A GBDT raw score is unbounded, so this is an ordinary model -- it only
+/// becomes interesting once a transform whose inverse is a logarithm is declared over it.
+/// One usable leaf and one out-of-range leaf, so a single ranking contains both kinds.
+hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec oneUsableOneOutOfRange()
+{
+    hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec spec;
+    spec.featureIndices = {0, 0, 0};
+    spec.thresholds = {96.0, 0.0, 0.0};
+    spec.leftChildren = {1, -1, -1};
+    spec.rightChildren = {2, -1, -1};
+    spec.leafValues = {0.0, 4.0, -1.0};
+    spec.defaultLeft = {1, 1, 1};
+    return spec;
+}
+
+hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec preferNegativeScores()
+{
+    hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec spec;
+    spec.featureIndices = {0, 0, 0};
+    spec.thresholds = {96.0, 0.0, 0.0};
+    spec.leftChildren = {1, -1, -1};
+    spec.rightChildren = {2, -1, -1};
+    spec.leafValues = {0.0, -2.0, -0.5};
+    spec.defaultLeft = {1, 1, 1};
+    return spec;
+}
+
 hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec preferLargeTiles()
 {
     hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec spec;
@@ -123,7 +150,8 @@ std::string writeUhd(const std::filesystem::path& dir,
                      const std::string& modelFileName,
                      const std::string& objective,
                      const std::string& featuresHash,
-                     bool calibrated)
+                     bool calibrated,
+                     const std::string& scoreTransform)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -132,7 +160,7 @@ std::string writeUhd(const std::filesystem::path& dir,
     auto hash = builder.CreateString(featuresHash);
     auto obj = builder.CreateString(objective);
     auto units = builder.CreateString("tflops");
-    auto transform = builder.CreateString("identity");
+    auto transform = builder.CreateString(scoreTransform);
     auto artifact = builder.CreateString(modelFileName);
 
     std::vector<flatbuffers::Offset<flatbuffers::String>> signature;
@@ -181,7 +209,11 @@ Fixture writeFixture(const std::filesystem::path& dir,
                      // RFC 0019.13 §15.1 binds these: a calibrated score is cross-engine
                      // TFLOPS and therefore ascending, so a descending objective defaults to
                      // uncalibrated. A caller passing the pair explicitly is testing the rule.
-                     std::optional<bool> calibrated = std::nullopt)
+                     std::optional<bool> calibrated = std::nullopt,
+                     /// The target transform the model was trained under; its inverse runs at
+                     /// score time. "exp" inverts as a logarithm, which is out of domain for a
+                     /// negative prediction.
+                     const std::string& scoreTransform = "identity")
 {
     const std::string signatureHash = uhd::FeatureExtractor::computeHash(SIGNATURE);
 
@@ -196,7 +228,8 @@ Fixture writeFixture(const std::filesystem::path& dir,
                      "model.bin",
                      objective,
                      signatureHash,
-                     calibrated.value_or(objective != "min")),
+                     calibrated.value_or(objective != "min"),
+                     scoreTransform),
             signatureHash};
 }
 
@@ -560,7 +593,7 @@ TEST(TestIngestorUhdKernelHeuristic, SelectionReturnsIdsWithScoresWinnerFirst)
     // Ordered by score, and the scores are real rather than placeholders -- a caller reading
     // the top one as a figure of merit has to get the model's number.
     EXPECT_GT(scored.front().score, scored.back().score);
-    EXPECT_FALSE(std::isnan(scored.front().score));
+    EXPECT_TRUE(std::isfinite(scored.front().score));
 
     // The whole-kernel view reports the same order, since one implementation decides it.
     const auto ordered = heuristic->rank(catalogAgainstPriority(2048), context);
@@ -571,10 +604,11 @@ TEST(TestIngestorUhdKernelHeuristic, SelectionReturnsIdsWithScoresWinnerFirst)
     }
 }
 
-TEST(TestIngestorUhdKernelHeuristic, ADegradedRankingReportsNoScoreRatherThanAFakeOne)
+TEST(TestIngestorUhdKernelHeuristic, ADegradedRankingReportsTheZeroTheRfcPrescribes)
 {
-    // Declared order carries no model score. Reporting 0.0 would let engine selection read a
-    // fallback as a figure of merit and rank the engine last on merit it never claimed.
+    // Declared order carries no model score, so it reports 0 -- RFC 0019 §5 step 7: "the engine
+    // reports an estimated throughput of 0 so any engine with a real estimate outranks it...
+    // and loses on merit rather than by exception."
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_scored_degraded");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
@@ -589,8 +623,8 @@ TEST(TestIngestorUhdKernelHeuristic, ADegradedRankingReportsNoScoreRatherThanAFa
     const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
 
     ASSERT_EQ(scored.size(), 2U);
-    EXPECT_TRUE(std::isnan(scored.front().score))
-        << "a fallback ordering must not report a score it did not compute";
+    EXPECT_DOUBLE_EQ(scored.front().score, 0.0)
+        << "a fallback ordering invented a score it did not compute";
 }
 
 TEST(TestIngestorUhdKernelHeuristic, ACalibratedScoreCannotAlsoBeMinimising)
@@ -633,17 +667,18 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngi
     const MatchContext context{graph, 0, properties};
 
     const auto estimate = heuristic->estimateTflops(catalogAgainstPriority(2048), context);
-    ASSERT_TRUE(estimate.has_value());
-    EXPECT_DOUBLE_EQ(*estimate,
+    EXPECT_DOUBLE_EQ(estimate,
                      heuristic->rankScored(catalogAgainstPriority(2048), context).front().score);
+    EXPECT_GT(estimate, 0.0) << "a real estimate must outrank the 0 a declining engine reports";
 }
 
-TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedModelDeclinesToEstimate)
+TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedModelEstimatesZero)
 {
     // §11.3: a cross-engine score has to be an absolute metric on a shared scale. An
     // uncalibrated model ranks within its own engine and says nothing about how it compares to
-    // another, so it returns nothing rather than a number that would be compared anyway. It
-    // still ranks -- declining to estimate is not declining to select.
+    // another. RFC 0019 §5 step 7 fixes what it reports instead: "an estimated throughput of 0
+    // so any engine with a real estimate outranks it... loses on merit rather than by
+    // exception." It still ranks -- declining to estimate is not declining to select.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_no_estimate");
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/false);
@@ -656,22 +691,145 @@ TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedModelDeclinesToEstimate)
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
 
-    EXPECT_FALSE(heuristic->estimateTflops(catalogAgainstPriority(2048), context).has_value());
+    EXPECT_DOUBLE_EQ(heuristic->estimateTflops(catalogAgainstPriority(2048), context), 0.0);
     EXPECT_FALSE(heuristic->rankScored(catalogAgainstPriority(2048), context).empty())
-        << "declining to estimate must not stop it selecting";
+        << "reporting a zero estimate must not stop it selecting";
 }
 
-TEST(TestIngestorKernelHeuristicEstimate, AnEngineWithNoModelDeclinesToEstimate)
+TEST(TestIngestorKernelHeuristicEstimate, AnEngineWithNoModelEstimatesZero)
 {
-    // The fallback ranks on declared order and computes no figure of merit. §11.1's stopgap is
-    // "report the ranker's best predicted score"; there is no predicted score here, and
-    // reporting the priority it sorted by would put an arbitrary integer on a TFLOPS scale.
+    // The fallback ranks on declared order and computes no figure of merit, so it reports the 0
+    // §5 step 7 prescribes. Reporting the priority it sorted by would put an arbitrary integer
+    // on a TFLOPS scale, where a large priority would outrank a real throughput.
     const testing::TestGraph graph;
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
 
     const UnrankedKernelHeuristic heuristic;
-    EXPECT_FALSE(heuristic.estimateTflops(catalogAgainstPriority(2048), context).has_value());
+    EXPECT_DOUBLE_EQ(heuristic.estimateTflops(catalogAgainstPriority(2048), context), 0.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AModelWhoseTransformGoesOutOfDomainDoesNotCorruptTheSort)
+{
+    // The regression this pair of defects needed. `exp` inverts as log(raw), and a GBDT raw
+    // score is unbounded, so a negative prediction makes applyInverse return NaN on a wholly
+    // legal descriptor -- no third party, no malformed artifact.
+    //
+    // NaN in a sort comparator is undefined behaviour rather than a wrong answer: it compares
+    // false both ways, so it reads as "equivalent" to every element while real scores stay
+    // ordered among themselves, which violates the strict weak ordering std::stable_sort
+    // requires. The base class had always sanitized for this reason; overriding rankScored
+    // bypassed that, and this case is what would have caught it.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_out_of_domain");
+    const auto fixture = writeFixture(dir.path(), preferNegativeScores(), "max", {}, false, "exp");
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
+                                               {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(scored.size(), 2U);
+
+    // Every reported score is a real number, and specifically the 0 that means "no measurement"
+    // -- not a NaN leaking out to a caller that would compare it.
+    for(const auto& entry : scored)
+    {
+        EXPECT_TRUE(std::isfinite(entry.score)) << "a non-finite score reached the caller";
+        EXPECT_DOUBLE_EQ(entry.score, 0.0);
+    }
+
+    // And the engine estimate agrees, which is the point of using one sentinel at both layers.
+    EXPECT_DOUBLE_EQ(heuristic->estimateTflops(catalogAgainstPriority(2048), context), 0.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelCannotReportANegativeThroughput)
+{
+    // The case a finite-only guard misses, and the one most likely to occur: log1p is what
+    // uhd_gen emits by default, and expm1 of a negative prediction is finite and negative. A
+    // calibrated score is TFLOPS (§11.3) and a throughput cannot be negative, so that value is
+    // the model predicting outside its target's range -- a training defect, not a slow kernel.
+    //
+    // It matters which way it fails. A negative score is *below* the 0 that RFC 0019 §5 step 7
+    // gives "no measurement", so an engine emitting nonsense would rank beneath an engine that
+    // honestly declined to estimate. Bounding it to 0 puts the two on the footing the RFC
+    // describes: it loses on merit, not beneath merit.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_negative_tflops");
+    const auto fixture
+        = writeFixture(dir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/true, "log1p");
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
+                                               {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(scored.size(), 2U);
+    for(const auto& entry : scored)
+    {
+        EXPECT_GE(entry.score, 0.0) << "a negative throughput reached the caller";
+        EXPECT_DOUBLE_EQ(entry.score, 0.0);
+    }
+
+    EXPECT_DOUBLE_EQ(heuristic->estimateTflops(catalogAgainstPriority(2048), context), 0.0)
+        << "the engine estimate went below the RFC's zero";
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AMinObjectiveScoresBelowZeroWithoutThatBeingAnError)
+{
+    // The distinction the range check must not flatten. `objective: min` negates a cost, so
+    // every *oriented* score is below zero while the underlying cost is perfectly ordinary.
+    // A negative recovered value is meaningless; a negative oriented one is the normal case
+    // for a cost target, and refusing it would refuse every candidate a min model ever ranks.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_min_negative_oriented");
+    const auto fixture = writeFixture(
+        dir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/false, "identity");
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
+                                               {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_LT(scored.front().score, 0.0) << "a min objective's oriented scores were clamped";
+    EXPECT_GT(scored.front().score, scored.back().score) << "the cheaper candidate did not win";
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AnUnmeasuredCandidateSortsLastUnderAMinObjectiveToo)
+{
+    // Why the ordering key and the reported score have to be separate values. Reporting 0 for
+    // "no measurement" is right -- RFC 0019 §5 step 7 -- but 0 is *greater* than every oriented
+    // score a min objective produces, so using it to sort as well made an unmeasured candidate
+    // outrank every measured one. It has to sort last whichever way the objective points.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_min_unmeasured_last");
+    const auto fixture = writeFixture(
+        dir.path(), oneUsableOneOutOfRange(), "min", {}, /*calibrated=*/false, "identity");
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
+                                               {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(scored.size(), 2U);
+
+    // The measured candidate wins even though its reported score (-4.0, a negated cost) is
+    // numerically below the 0 the unmeasured one reports.
+    EXPECT_LT(scored.front().score, 0.0) << "the measured candidate did not come first";
+    EXPECT_DOUBLE_EQ(scored.back().score, 0.0) << "the unmeasured candidate is not reporting 0";
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

@@ -433,17 +433,18 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
 {
     // The fallback must contribute no ordering of its own: any score spread would
     // outrank priority, which is the one signal an engine without a model still has.
-    // It reports NaN rather than a shared constant, because RFC 0019.13 §15.2 hands the
-    // score to engine selection as a figure of merit and a constant reads as one.
+    // It reports 0 -- RFC 0019 §5 step 7's value for "no measurement" -- so a fallback and a
+    // model that scored zero describe themselves the same way. traceDecidedBy() is what tells
+    // them apart, and estimateTflops needs one rule rather than two sentinels.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
     const UnrankedKernelHeuristic heuristic;
 
-    EXPECT_TRUE(std::isnan(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64))));
-    EXPECT_TRUE(
-        std::isnan(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096))));
+    EXPECT_DOUBLE_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64)), 0.0);
+    EXPECT_DOUBLE_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096)),
+                     0.0);
 
     // Equal-in-ordering is what the fallback owes. These two definitions carry the same
     // priority, so the documented tiebreak -- ascending descriptor id -- has to decide, and
@@ -454,7 +455,7 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
     const auto ranked = heuristic.rankScored(catalog, context);
     ASSERT_EQ(ranked.size(), 2U);
     EXPECT_EQ(ranked.front().kernelId, testId(0x01)) << "the id tiebreak did not decide";
-    EXPECT_TRUE(std::isnan(ranked.front().score)) << "the fallback reported a figure of merit";
+    EXPECT_DOUBLE_EQ(ranked.front().score, 0.0) << "the fallback invented a figure of merit";
 }
 
 } // namespace
