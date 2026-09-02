@@ -61,6 +61,29 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         self.assertIn("gqapair", spec.kernel_name())
         self.assertEqual(spec.num_persistent, 256)
 
+    def test_explicit_gqa_pair_passes_through_dispatcher(self):
+        req = _gfx950_dense_req(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="on",
+            dense_persist_decode="gqa_pair",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.persist_decode, "gqa_pair")
+        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        self.assertIn("gqapair", spec.kernel_name())
+
+    def test_invalid_dense_decode_is_rejected_at_dispatch(self):
+        req = _gfx950_dense_req(dense_persist_decode="not-a-decode")
+        with self.assertRaisesRegex(ValueError, "dense_persist_decode"):
+            dense_spec_for_request(req)
+
     def test_nearby_shape_stays_on_existing_auto_policy(self):
         req = _gfx950_dense_req(
             batch=1,

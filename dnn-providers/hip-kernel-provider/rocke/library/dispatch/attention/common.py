@@ -98,10 +98,12 @@ class AttentionRequest(OperatorRequest):
     #     Defaults deliver the persistent ~970-TFLOPS prefill path for large Sq:
     #     ``dense_persistent="auto"`` turns on the grid-stride variant once there
     #     is enough work to fill the persistent grid, and ``persist_decode="auto"``
-    #     picks the L2-locality hkv-major decode where it is balance-safe. ---
+    #     picks gqa_pair for the measured Llama-3-8B cohort, hkv-major where
+    #     its broader balance condition holds, and qb-major otherwise. ---
     dense_persistent: str = "auto"  # "auto" | "on" | "off"
     dense_num_persistent: int = 256
-    dense_persist_decode: str = "auto"  # "auto" | "qb_major" | "hkv_major"
+    # "auto" | "qb_major" | "hkv_major" | "gqa_pair"
+    dense_persist_decode: str = "auto"
 
     def normalized(self) -> dict:
         d = asdict(self)
