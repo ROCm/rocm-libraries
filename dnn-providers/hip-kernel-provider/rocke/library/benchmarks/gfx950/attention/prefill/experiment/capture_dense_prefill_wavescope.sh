@@ -11,9 +11,9 @@ U="${USER:-yraparti}"
 SHARED="/ossci-storage/spur/${U}"
 CAND="${SHARED}/src/rocke-dense-opt/rocke"
 BASE="${SHARED}/src/rocke-dense-baseline"
-VENV="${SHARED}/rocke-venv"
 DECODER_DIR="${SHARED}/tools/rocprof-trace-decoder/lib"
-IMAGE="docker.io/rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0"
+HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+RUN_CONTAINER="${HERE}/run_in_rocm_container.sh"
 
 WHICH=baseline
 RESULTS=""
@@ -27,8 +27,8 @@ done
 [ -n "${RESULTS}" ] || RESULTS="${SHARED}/results/wavescope_$(date +%Y%m%d_%H%M%S)"
 
 case "${WHICH}" in
-    baseline) TREE="${BASE}"; SHAPE=llama3_8b_dense_prefill_baseline_shape.json; EXTRA="" ;;
-    candidate) TREE="${CAND}"; SHAPE=llama3_8b_dense_prefill_shape.json; EXTRA="--q-reload" ;;
+    baseline) TREE="${BASE}"; SHAPE=llama3_8b_dense_prefill_baseline_shape.json ;;
+    candidate) TREE="${CAND}"; SHAPE=llama3_8b_dense_prefill_shape.json ;;
     *) echo "--which must be baseline|candidate"; exit 2 ;;
 esac
 
@@ -39,32 +39,19 @@ mkdir -p "${OUT}"
 
 [ -f "${DECODER_DIR}/librocprof-trace-decoder.so" ] || {
     echo "missing decoder in ${DECODER_DIR}"; exit 1; }
+[ -x "${RUN_CONTAINER}" ] || {
+    echo "missing container helper ${RUN_CONTAINER}"; exit 1; }
 
-RENDER_GID="$(getent group render | cut -d: -f3)"
-VIDEO_GID="$(getent group video | cut -d: -f3)"
-
-docker run --rm \
-    --device=/dev/kfd \
-    --device=/dev/dri \
-    --user "$(id -u):$(id -g)" \
-    --group-add "${VIDEO_GID}" \
-    --group-add "${RENDER_GID}" \
-    --ipc=host \
-    --network=host \
-    --cap-add=SYS_PTRACE \
-    --security-opt seccomp=unconfined \
-    -v /ossci-storage:/ossci-storage \
-    -w "${TREE}/library" \
-    -e HOME=/tmp \
-    -e HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}" \
-    -e ROCKE_DENSE_VPAD=32 \
-    -e ROCKE_LLVM_FLAVOR=llvm22 \
-    -e ROCKE_DEBUG_LOC=1 \
-    -e PYTHONDONTWRITEBYTECODE=1 \
-    -e PYTHONPATH="${TREE}/library:${TREE}/platform/python" \
-    -e ROCPROF_TRACE_DECODER_LIB="${DECODER_DIR}" \
-    "${IMAGE}" \
-    bash -lc "
+ROCKE_CONTAINER_CWD="${TREE}/library" \
+HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}" \
+ROCKE_DENSE_VPAD=32 \
+ROCKE_DENSE_NBUF=2 \
+ROCKE_LLVM_FLAVOR=llvm22 \
+ROCKE_DEBUG_LOC=1 \
+PYTHONDONTWRITEBYTECODE=1 \
+PYTHONPATH="${TREE}/library:${TREE}/platform/python" \
+ROCPROF_TRACE_DECODER_LIB="${DECODER_DIR}" \
+"${RUN_CONTAINER}" bash -lc "
 set -eu
 # The image's own torch is linked against this /opt/rocm, so rocprofv3 loads one
 # rocprofiler. A pip torch wheel bundles a second copy and aborts in
@@ -74,10 +61,10 @@ PY=/opt/venv/bin/python
 \${PY} '${TOOLS}/wavescope/capture_wavescope_trace.py' \
   --output-dir '${OUT}' \
   --kernel-regex 'rocke_attention_dense' \
-  -- \${PY} builders/gfx950/attention/prefill/attention_dense_prefill.py \
-     --exact-shape --sq 8192 --hq 32 --hkv 8 --dtype fp16 --d 128 \
-     --persistent --np 256 --bn 64 --wpe 2 ${EXTRA} \
-     --warmup 2 --iters 3 --no-check
+  -- \${PY} '${BENCH}/benchmark_dense_prefill_exact.py' \
+     --shape-json '${BENCH}/${SHAPE}' \
+     --warmup 2 --iters 3 --no-check \
+     --output-json '${RESULTS}/capture_benchmark_${WHICH}.json'
 " 2>&1 | tee "${RESULTS}/capture_${WHICH}.log"
 
 echo "=== dispatch folders ==="

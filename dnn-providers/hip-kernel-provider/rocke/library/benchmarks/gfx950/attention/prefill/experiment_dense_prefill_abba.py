@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
+import platform
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -64,6 +65,9 @@ def _device_info() -> dict:
     props = torch.cuda.get_device_properties(0)
     return {
         "available": True,
+        "node": platform.node(),
+        "torch": torch.__version__,
+        "hip": torch.version.hip,
         "name": props.name,
         "gcnArchName": props.gcnArchName,
         "multi_processor_count": props.multi_processor_count,
@@ -88,32 +92,77 @@ def _run_side(
     seed: int,
     check: bool,
 ) -> dict:
-    """Benchmark using the rocke tree at ``root`` (directory containing library/)."""
+    """Benchmark one immutable tree in a fresh Python process.
+
+    Import reload is insufficient here: ``builders`` and ``kernels`` are package
+    modules, so their cached ``__path__`` and transitive imports can keep using
+    the first tree even after ``sys.path`` changes. A subprocess makes each A/B
+    sample resolve every module from exactly one staged snapshot.
+    """
     rocke = root
     if not (rocke / "library").is_dir():
         raise FileNotFoundError(f"expected rocke tree at {rocke} (missing library/)")
 
     lib = rocke / "library"
     plat = rocke / "platform" / "python"
-    # Fresh import path for each staged tree.
-    for p in (str(lib), str(plat)):
-        if p not in sys.path:
-            sys.path.insert(0, p)
-
-    import importlib
-
-    import builders.gfx950.attention.prefill.attention_dense_prefill as adp
-
-    importlib.reload(adp)
-
-    spec = adp.make_spec_from_shape(shape)
-    t0 = time.time()
-    result = adp.run_benchmark(
-        spec, warmup=warmup, iters=iters, seed=seed, check=check
+    bench = (
+        lib
+        / "benchmarks"
+        / "gfx950"
+        / "attention"
+        / "prefill"
+        / "benchmark_dense_prefill_exact.py"
     )
+    if not bench.is_file():
+        raise FileNotFoundError(f"missing exact-shape benchmark at {bench}")
+
+    t0 = time.time()
+    with tempfile.TemporaryDirectory(prefix="rocke-abba-") as td:
+        shape_json = Path(td) / "shape.json"
+        result_json = Path(td) / "result.json"
+        shape_json.write_text(json.dumps(shape))
+
+        cmd = [
+            sys.executable,
+            str(bench),
+            "--shape-json",
+            str(shape_json),
+            "--warmup",
+            str(warmup),
+            "--iters",
+            str(iters),
+            "--seed",
+            str(seed),
+            "--output-json",
+            str(result_json),
+        ]
+        if not check:
+            cmd.append("--no-check")
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join((str(lib), str(plat)))
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        completed = subprocess.run(
+            cmd,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if completed.stdout:
+            print(completed.stdout, end="", flush=True)
+        if completed.returncode != 0:
+            if completed.stderr:
+                print(completed.stderr, file=sys.stderr, end="", flush=True)
+            raise RuntimeError(
+                f"{label} benchmark exited {completed.returncode}: {' '.join(cmd)}"
+            )
+        result = json.loads(result_json.read_text())
+
     result["label"] = label
     result["elapsed_s"] = round(time.time() - t0, 2)
     result["git"] = _git_info(root)
+    result["source_root"] = str(root)
     return result
 
 
@@ -196,9 +245,6 @@ def main() -> int:
                 f"max_abs={sample['max_abs']:.2e}  ok={sample['ok']}",
                 flush=True,
             )
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
-
     report["summary"] = {
         "baseline_tflops_median": statistics.median(baseline_tflops),
         "candidate_tflops_median": statistics.median(candidate_tflops),

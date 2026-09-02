@@ -1,5 +1,6 @@
 #!/bin/bash
-# Direct-SSH experiment runner (no Spur sbatch): docker + rocke-venv on Conductor n01.
+# Direct-SSH experiment runner (no Spur submission). It uses Docker where
+# available, or rootless runc over Spur's imported image on n07.
 #
 #   stage 1  calibrate legal knobs on the unchanged baseline kernel
 #   stage 2  single-shot baseline and candidate at the exact shape
@@ -12,8 +13,8 @@ U="${USER:-yraparti}"
 SHARED="/ossci-storage/spur/${U}"
 CAND="${SHARED}/src/rocke-dense-opt/rocke"
 BASE="${SHARED}/src/rocke-dense-baseline"
-VENV="${SHARED}/rocke-venv"
-IMAGE="docker.io/rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0"
+HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+RUN_CONTAINER="${HERE}/run_in_rocm_container.sh"
 
 STAGE=all
 ROUNDS=3
@@ -28,38 +29,23 @@ while [ $# -gt 0 ]; do
 done
 [ -n "${RESULTS}" ] || RESULTS="${SHARED}/results/dense_prefill_$(date +%Y%m%d_%H%M%S)"
 
-[ -f "${VENV}/bin/activate" ] || { echo "missing ${VENV}; run setup_rocke_venv.sh"; exit 1; }
+[ -x "${RUN_CONTAINER}" ] || { echo "missing container helper ${RUN_CONTAINER}"; exit 1; }
 [ -d "${CAND}/library" ] || { echo "missing candidate tree ${CAND}"; exit 1; }
 [ -d "${BASE}/library" ] || { echo "missing baseline tree ${BASE}"; exit 1; }
 mkdir -p "${RESULTS}"
 
-# Run a command in the ROCm container with the venv active. $1 = tree whose
+# Run a command in the exact ROCm 7.2.4 image. $1 = tree whose
 # library/ + platform/python go on PYTHONPATH, rest = command.
-RENDER_GID="$(getent group render | cut -d: -f3)"
-VIDEO_GID="$(getent group video | cut -d: -f3)"
-
 in_container() {
     tree="$1"; shift
-    docker run --rm \
-        --device=/dev/kfd \
-        --device=/dev/dri \
-        --user "$(id -u):$(id -g)" \
-        --group-add "${VIDEO_GID}" \
-        --group-add "${RENDER_GID}" \
-        -e HOME=/tmp \
-        --ipc=host \
-        --network=host \
-        --cap-add=SYS_PTRACE \
-        --security-opt seccomp=unconfined \
-        -v /ossci-storage:/ossci-storage \
-        -w "${tree}/library" \
-        -e HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}" \
-        -e ROCKE_DENSE_VPAD=32 \
-        -e ROCKE_LLVM_FLAVOR=llvm22 \
-        -e PYTHONDONTWRITEBYTECODE=1 \
-        -e PYTHONPATH="${tree}/library:${tree}/platform/python" \
-        "${IMAGE}" \
-        "${VENV}/bin/python" "$@"
+    ROCKE_CONTAINER_CWD="${tree}/library" \
+    HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}" \
+    ROCKE_DENSE_VPAD="${ROCKE_DENSE_VPAD:-32}" \
+    ROCKE_DENSE_NBUF="${ROCKE_DENSE_NBUF:-2}" \
+    ROCKE_LLVM_FLAVOR=llvm22 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="${tree}/library:${tree}/platform/python" \
+        "${RUN_CONTAINER}" /opt/venv/bin/python "$@"
 }
 
 BENCH_C="${CAND}/library/benchmarks/gfx950/attention/prefill"
