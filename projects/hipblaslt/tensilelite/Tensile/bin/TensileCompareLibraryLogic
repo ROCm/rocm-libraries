@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+try:
+    from Tensile.Utilities.compare_library_logic import main
+except ImportError:
+    import os.path
+    import sys
+
+    parentdir = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..")
+    )
+    sys.path.append(parentdir)
+
+    from Tensile.Utilities.compare_library_logic import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
