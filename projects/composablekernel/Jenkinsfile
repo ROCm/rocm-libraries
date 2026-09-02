@@ -738,7 +738,7 @@ pipeline {
                 }
             }
         }
-        stage("Run DISPATCHER_CORRECTNESS Tests")
+        stage("Run DISPATCHER Tests")
         {
             when {
                 beforeAgent true
@@ -782,16 +782,6 @@ pipeline {
                         }
                     }
                 }
-            }
-        }
-        stage("Run DISPATCHER_PERF Tests")
-        {
-            when {
-                beforeAgent true
-                expression { env.SHOULD_RUN_CI.toBoolean() }
-            }
-            parallel
-            {
                 stage("Run DISPATCHER_PERF Tests on gfx942")
                 {
                     when {
