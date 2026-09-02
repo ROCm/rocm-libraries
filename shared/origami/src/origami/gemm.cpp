@@ -939,6 +939,45 @@ size_t compute_mt_compute_latency(const problem_t& problem,
   return L_MT;
 }
 
+// LocalSplitU reduction cost: after the mainloop, the `lsu` partial MT_MxMT_N
+// tiles held by the lsu waves are reduced through LDS (write partials -> barrier
+// -> read + accumulate).  Ported from Formocast getLocalSplitKOverhead
+// (formocast.cpp); returned in raw cycles to match L_compute's basis.  Charged
+// once per output tile.  Zero when lsu <= 1.
+static double compute_lsu_reduction_latency(const problem_t& problem,
+                                            const hardware_t& hardware,
+                                            const config_t& config) {
+  (void)hardware;
+  const long lsu = std::max<long>(tparams(config).local_split_u, 1);
+  if (lsu <= 1) return 0.0;
+
+  const double wg_m = std::max<double>(static_cast<double>(tparams(config).wave_group_m), 1.0);
+  const double wg_n = std::max<double>(static_cast<double>(tparams(config).wave_group_n), 1.0);
+  const double num_threads = wg_m * wg_n * static_cast<double>(lsu)
+                           * static_cast<double>(heuristic_defaults_t::WAVEFRONT_SIZE);
+  const double tile_elems =
+      static_cast<double>(config.mt.m) * static_cast<double>(config.mt.n);
+  const double elems_per_thread = tile_elems / std::max(num_threads, 1.0);
+
+  const double svw = std::max(1.0, static_cast<double>(config.gwvw_d));
+  const double bpe = std::max(1.0, static_cast<double>(data_type_to_bytes(problem.mi_dtype)));
+
+  // Local-write cost per element (cycles), keyed on store-width x bytes-per-elem,
+  // then doubled for the write pass (Formocast shape).
+  double lw_cycle;
+  switch (static_cast<int>(svw * bpe)) {
+    case 32: lw_cycle = 20.0 * 2.0; break;  // widest store splits into two
+    case 16: lw_cycle = 20.0; break;
+    case 8:  lw_cycle = 12.0; break;
+    default: lw_cycle = 8.0; break;
+  }
+  const double local_write = elems_per_thread * lw_cycle * 2.0;
+  const double local_read  = elems_per_thread / svw * 4.0 * 2.0;
+  const double reduction   = elems_per_thread * static_cast<double>(lsu - 1) * 4.0;
+
+  return local_write + local_read + reduction;
+}
+
 /* ---------------------------------------------------------------------------------------- */
 /* Memory-related functions                                                                 */
 /* ---------------------------------------------------------------------------------------- */
@@ -2106,6 +2145,12 @@ double compute_tile_latency(const problem_t& problem,
   const auto&  heuristic        = context.heuristic;
   const bool   debug            = context.debug;
 
+  // LocalSplitU: splits the per-WG K-range across LSU waves inside one workgroup
+  // (reduced via LDS), as opposed to splitting_factor which splits K across
+  // workgroups (reduced via DRAM workspace).  The two compose on K; LSU==1 makes
+  // every LSU hook below a strict no-op.
+  const long lsu = std::max<long>(tparams(config).local_split_u, 1);
+
   // Per-K-iter cycle costs (simple MFMA-only compute model; bytes/BW memory).
   double L_compute = static_cast<double>(compute_mt_compute_latency(problem, hardware, config));
   double L_mem     = compute_memory_latency(problem, hardware, config, context);
@@ -2128,7 +2173,9 @@ double compute_tile_latency(const problem_t& problem,
   // ---------------------------------------------------------------------------
   const size_t MIWG_M_pw = std::max<size_t>(tparams(config).wave_group_m, 1);
   const size_t MIWG_N_pw = std::max<size_t>(tparams(config).wave_group_n, 1);
-  const size_t waves_per_wg = MIWG_M_pw * MIWG_N_pw;
+  // LocalSplitU adds lsu extra waves per workgroup (all resident on the same CU),
+  // raising resident waves/SIMD and improving mainloop latency hiding.
+  const size_t waves_per_wg = MIWG_M_pw * MIWG_N_pw * static_cast<size_t>(lsu);
 
   // Occupancy.
   //
@@ -2188,9 +2235,31 @@ double compute_tile_latency(const problem_t& problem,
   // the WG that completes a tile, attempts to model that have been worse
   // overall than the uniform-tail charge, so we keep the simple shape.
   const long total_full_iters = static_cast<long>(K / MT_K);
-  const long k_iters = (splitting_factor > 1)
+  // LocalSplitU shortens the per-wave mainloop only to the extent it unlocks new
+  // SIMD parallelism.  The lsu waves time-share the CU's SIMDs, so once the base
+  // wave-group already saturates them, extra lsu waves interleave and give no
+  // compute speedup.  Gain = min(base*lsu, simds) / min(base, simds), capped at
+  // simds/base.  (splitting_factor, by contrast, splits K across whole WGs.)
+  const size_t simds_per_cu = hardware_t::get_simds_per_cu(hardware.arch);
+  const size_t base_waves =
+      std::max<size_t>(static_cast<size_t>(tparams(config).wave_group_m), 1) *
+      std::max<size_t>(static_cast<size_t>(tparams(config).wave_group_n), 1);
+  // LSU deepening (a shorter per-wave K-loop) only pays off on smaller shapes;
+  // on large GEMMs it mis-tunes (256x256x32 -> 64x64x128 canary).  Confine the
+  // LSU iteration gain to a small-shape box; outside it, LSU does not shorten
+  // the modelled K-loop.
+  const bool deepening_box =
+      (std::min(problem.size.m, problem.size.n) <= heuristic_defaults_t::DEEPEN_MN_MAX
+       && std::max(problem.size.m, problem.size.n) <= heuristic_defaults_t::DEEPEN_MAX_DIM
+       && K <= heuristic_defaults_t::DEEPEN_K_MAX);
+  const long lsu_par_gain = (lsu > 1 && deepening_box)
+      ? std::max<long>(1, static_cast<long>(std::min(base_waves * static_cast<size_t>(lsu), simds_per_cu)
+                                            / std::max<size_t>(std::min(base_waves, simds_per_cu), 1)))
+      : 1;
+  const long effective_split = static_cast<long>(splitting_factor) * lsu_par_gain;
+  const long k_iters = (effective_split > 1)
       ? static_cast<long>(math::safe_ceil_div(
-            static_cast<size_t>(total_full_iters), splitting_factor))
+            static_cast<size_t>(total_full_iters), static_cast<size_t>(effective_split)))
       : total_full_iters;
   const long num_main_iters = std::max<long>(k_iters - pgr, 0);
   const long num_ngll_iters = (k_iters > 0 && pgr > 1)
@@ -2277,7 +2346,6 @@ double compute_tile_latency(const problem_t& problem,
     constexpr size_t alignment_bytes = heuristic_defaults_t::DRAM_SECTOR_BYTES;
     // Sector-rounded A+B bytes for a K-window of `k` slices.  Rounding is
     // applied to whichever axis is contiguous in DRAM. The tail and full iters share this helper, so
-    // the rounding is consistent between numerator and denominator.
     auto iter_bytes = [&](size_t k) -> double {
       return compute_operand_window_bytes(problem, config, context, k, alignment_bytes);
     };
@@ -2377,6 +2445,7 @@ double compute_tile_latency(const problem_t& problem,
   // Penalize by how far the K-loop length (main iters + partial tail) falls short
   // of a target.  Fires even with a tail present (unlike no_steady_state below),
   // and gated to batch > 1 so streaming batch==1 large-N shapes are untouched.
+
   const double k_loop_len = static_cast<double>(k_iters) + (tail_k > 0 ? 1.0 : 0.0);
   const double batched_fill_ratio =
       (problem.batch > 1 && k_loop_len >= 1.0)
@@ -2386,14 +2455,18 @@ double compute_tile_latency(const problem_t& problem,
 
   // Unbatched single fill+drain regime (batch==1, num_main_iters==0): the whole
   // K-loop lives in the PGR fill/drain window, so the kernel never reaches steady
-  // state and the MT_K-deep fill is exposed unamortized.  Base tax for a genuine
-  // single iter; deeper tiles are charged by DepthU fill excess so the model
-  // can't escape a penalized k_iters==2 tile by hopping to a deeper one.
+  // state and the per-wave-deep fill is exposed unamortized.  Base tax for a
+  // genuine single iter; deeper tiles are charged by DepthU fill excess so the
+  // model can't escape a penalized k_iters==2 tile by hopping to a deeper one.
   const bool no_steady_state =
       (problem.batch == 1 && num_main_iters == 0 && k_iters >= 1 && tail_k == 0
-       && exact_one_iter_large_k);
+       && exact_one_iter_large_k && !deepening_box);
+  // LocalSplitU splits DepthU across LSU waves, so the exposed fill is only
+  // MT_K/LSU deep per wave -- a large workgroup DepthU realised via LSU does not
+  // pay a deep single-wave fill.  (lsu is defined above in the occupancy block.)
+  const double per_wave_du = mt_k_dd / static_cast<double>(lsu);
   const double fill_depth_excess =
-      std::max(0.0, mt_k_dd * a_bytes_du / phys_cl - 1.0);
+      std::max(0.0, per_wave_du * a_bytes_du / phys_cl - 1.0);
   const double no_steady_base = (k_iters == 1) ? 2.0 : 0.0;
   const double no_steady_state_ratio = no_steady_state
       ? no_steady_base + fill_depth_excess * heuristic_defaults_t::UNAMORTIZED_FILL_PENALTY
@@ -2468,8 +2541,10 @@ double compute_tile_latency(const problem_t& problem,
     const bool xcd_aligned = (sf % xcd == 0) || (xcd % sf == 0);
     if (!xcd_aligned) weight_tile_total = 1.0;
   }
+  // LocalSplitU LDS reduction, charged once per tile (0 when lsu <= 1).
+  const double L_lsu_reduce = compute_lsu_reduction_latency(problem, hardware, config);
   const double L_tile_total =
-      (L_prologue + L_mainloop + L_epilogue + L_tile_fixed) * weight_tile_total;
+      (L_prologue + L_mainloop + L_epilogue + L_lsu_reduce + L_tile_fixed) * weight_tile_total;
 
   if (debug) {
     OLOG_DEBUG("per_wave waves_per_wg: " << waves_per_wg);
@@ -2519,6 +2594,8 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("scalar_store_mult: " << scalar_store_mult);
     OLOG_DEBUG("L_epilogue_hbm: " << L_epilogue_hbm);
     OLOG_DEBUG("L_epilogue: " << L_epilogue);
+    OLOG_DEBUG("lsu: " << lsu);
+    OLOG_DEBUG("L_lsu_reduce: " << L_lsu_reduce);
     OLOG_DEBUG("L_tile_fixed: " << L_tile_fixed);
     OLOG_DEBUG("L_tile_total: " << L_tile_total);
   }

@@ -2190,6 +2190,39 @@ TEST_CASE("GEMM: PrefetchGlobalRead PGR2 vs PGR1 latency ordering", "[gemm][pgr]
   }
 }
 
+// Single K iteration (k_iters == 1, no tail): PGR>1 has no next tile to
+// prefetch, so its double-buffer is pure overhead (extra registers + an
+// unamortized fill/drain).  PGR1 must strictly win.  The model expresses this
+// via L_pgr_stall, which charges PGR2 an unamortized fill that PGR1 skips.
+TEST_CASE("GEMM: PGR1 wins for single-K-iter tiles", "[gemm][pgr]") {
+  for (int gpu_arch : test_architectures) {
+    auto hw = make_hardware(gpu_arch);
+
+    // K == MT_K => exactly one full K-iter and no tail.  stream_k=0 isolates
+    // the PGR delta on a data-parallel grid.
+    auto require_pgr1_wins = [&](size_t mt_k, origami::transpose_t ta, origami::transpose_t tb) {
+      auto c = make_config(128, 128, mt_k, 16, 16, 16, false, 1, 1, 0, 0, 0);
+      auto p = make_problem(4096, 4096, mt_k, ta, tb);
+      auto lat = [&](int pgr) {
+        c.tensile().prefetch_global_read = pgr;
+        return origami::gemm::compute_total_latency(p, hw, c);
+      };
+      double l1 = lat(1), l2 = lat(2);
+      INFO("MT_K=" << mt_k << "  PGR1=" << l1 << "  PGR2=" << l2);
+      REQUIRE(l1 < l2);
+    };
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - single-iter PGR1 strictly wins") {
+      using T = origami::transpose_t;
+      require_pgr1_wins(32,  T::T, T::N);   // TN, shallow DepthU
+      require_pgr1_wins(64,  T::T, T::N);   // TN
+      require_pgr1_wins(128, T::T, T::N);   // TN, deep DepthU
+      require_pgr1_wins(64,  T::N, T::T);   // NT
+      require_pgr1_wins(64,  T::N, T::N);   // NN
+    }
+  }
+}
+
 // NonTemporalD (cache_hints_d) directional truth.  NTD only enters the model
 // through the epilogue store path (apply_epilogue_store_cache_model), gated by
 // store_exposure, so it surfaces at total-latency level -- not in
