@@ -25,8 +25,9 @@ namespace
     using roc::host_numerics::IndexOrder;
     using roc::host_numerics::Layout;
     using roc::host_numerics::MxDataGeneration;
-    using roc::host_numerics::MxGenerationProblem;
+    using roc::host_numerics::MxGenerationOptions;
     using roc::host_numerics::MxScaleGenerationMode;
+    using roc::host_numerics::MxTensor;
     using roc::host_numerics::ScalarType;
     using roc::host_numerics::Shape;
     using roc::host_numerics::Tensor;
@@ -283,12 +284,12 @@ namespace
             "Padded ordinary storage values mismatch.");
     }
 
-    MxGenerationProblem expectedMxProblem(ScalarType dataType,
-                                          ScalarType scaleType,
-                                          Shape      shape,
-                                          ptrdiff_t  leadingDimension,
-                                          size_t     blockAxis,
-                                          uint32_t   seed)
+    MxTensor expectedMxTensor(ScalarType dataType,
+                              ScalarType scaleType,
+                              Shape      shape,
+                              ptrdiff_t  leadingDimension,
+                              size_t     blockAxis,
+                              uint32_t   seed)
     {
         MxDataGeneration data = MxDataGeneration::preserveGeneratedEncoding(
             GenerationRecipe::realOnly(GenerationRecipe::uniformFiniteEncodedValue(),
@@ -296,14 +297,14 @@ namespace
                                            .seed       = seed,
                                            .indexOrder = IndexOrder::FirstDimensionFastest,
                                        }));
-        MxGenerationProblem problem(std::move(shape), std::move(data));
-        problem.dataType         = dataType;
-        problem.scaleType        = scaleType;
-        problem.leadingDimension = leadingDimension;
-        problem.blockAxis        = blockAxis;
-        problem.blockSize        = 4;
-        problem.scale            = MxScaleGenerationMode::RandomFinite;
-        return problem;
+        MxGenerationOptions options;
+        options.dataType         = dataType;
+        options.scaleType        = scaleType;
+        options.leadingDimension = leadingDimension;
+        options.blockAxis        = blockAxis;
+        options.blockSize        = 4;
+        options.scale            = MxScaleGenerationMode::RandomFinite;
+        return roc::host_numerics::generateMx(std::move(shape), std::move(data), options);
     }
 
     void testScaledTypeBlockAndNaturalOrder()
@@ -328,10 +329,10 @@ namespace
                     && generated.scaleB->layout() == Layout(Shape{5, 2}, {2, 1}),
                 "K-contiguous canonical scale layout mismatch.");
 
-        auto expectedA = roc::host_numerics::generateMx(
-            expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E4M3, Shape{8, 3}, 8, 0, 31416u));
-        auto expectedB = roc::host_numerics::generateMx(
-            expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E5M3, Shape{8, 5}, 8, 0, 31417u));
+        auto expectedA
+            = expectedMxTensor(ScalarType::Float4E2M1, ScalarType::E4M3, Shape{8, 3}, 8, 0, 31416u);
+        auto expectedB
+            = expectedMxTensor(ScalarType::Float4E2M1, ScalarType::E5M3, Shape{8, 5}, 8, 0, 31417u);
         require(bytes(generated.a) == bytes(expectedA.data)
                     && bytes(*generated.scaleA) == bytes(expectedA.scales),
                 "A data or natural scale order differs from generateMx.");
@@ -354,10 +355,10 @@ namespace
                     && noncontiguous.scaleB->layout() == Layout(Shape{5, 2}, {1, 5}),
                 "K-strided canonical scale layout mismatch.");
 
-        auto expectedNoncontiguousA = roc::host_numerics::generateMx(
-            expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E4M3, Shape{3, 8}, 3, 1, 31416u));
-        auto expectedNoncontiguousB = roc::host_numerics::generateMx(
-            expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E5M3, Shape{5, 8}, 5, 1, 31417u));
+        auto expectedNoncontiguousA
+            = expectedMxTensor(ScalarType::Float4E2M1, ScalarType::E4M3, Shape{3, 8}, 3, 1, 31416u);
+        auto expectedNoncontiguousB
+            = expectedMxTensor(ScalarType::Float4E2M1, ScalarType::E5M3, Shape{5, 8}, 5, 1, 31417u);
         require(bytes(noncontiguous.a) == bytes(expectedNoncontiguousA.data)
                     && bytes(*noncontiguous.scaleA) == bytes(expectedNoncontiguousA.scales),
                 "K-strided A generation did not use logical K blocks.");

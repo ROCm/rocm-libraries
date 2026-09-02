@@ -84,11 +84,14 @@ int main(int argc, char** argv) {
         Tensor::copyNativeStorage<float>(compressedLayout, std::span<const float>(compressed));
     Tensor metadataTensor =
         Tensor::copyNativeStorage<uint8_t>(metadataLayout, std::span<const uint8_t>(metadata));
-    StructuredSparsityRequest request(prunedTensor, prunedTensor, compressedTensor, std::nullopt,
-                                      metadataTensor, pattern);
+    const StructuredSparseTensor outputs{
+        .pruned = prunedTensor,
+        .compressed = compressedTensor,
+        .twoOfFourMetadata = metadataTensor,
+    };
 
-    const double componentMilliseconds =
-        milliseconds([&] { applyStructuredSparsity(request); }, iterations);
+    const double componentMilliseconds = milliseconds(
+        [&] { applyStructuredSparsityInto(prunedTensor, outputs, pattern); }, iterations);
     std::memcpy(pruned.data(), prunedTensor.rawEncodedBackingStorage().data(),
                 prunedTensor.rawEncodedBackingStorage().size());
     std::memcpy(compressed.data(), compressedTensor.rawEncodedBackingStorage().data(),

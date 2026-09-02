@@ -14,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+#include "gemm_test_adapter.hpp"
+
 #ifdef HOST_NUMERICS_TEST_OPENMP
 #include <omp.h>
 #endif
@@ -59,7 +61,7 @@ void testRuntimeReferenceGemm() {
     const std::array<float, 2> scaleA{2, 3};
     const std::array<float, 2> scaleB{5, 7};
 
-    GemmRequest problem(
+    GemmTestCase problem(
         GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}),
                                                      std::span<const float>(a))),
         GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}),
@@ -93,7 +95,7 @@ void testRuntimeReferenceGemm() {
     GemmBackend backend = GemmBackend::Automatic;
     require(static_cast<bool>(queryGemmSupport(problem, backend)),
             "Runtime reference GEMM request support mismatch.");
-    const GemmRunInfo runInfo = referenceGemm(problem, backend);
+    const GemmTestRunInfo runInfo = referenceGemm(problem, backend);
     require(runInfo.backendUsed == GemmBackend::Pointwise && runInfo.outputElementsWritten == 4 &&
                 runInfo.outputElementsCovered == 4,
             "Runtime reference GEMM run information mismatch.");
@@ -112,17 +114,17 @@ void testRuntimeReferenceGemm() {
     backend = GemmBackend::Blocked;
     require(static_cast<bool>(queryGemmSupport(problem, backend)),
             "Built-in Blocked reference GEMM unexpectedly rejected the request.");
-    const GemmRunInfo blocked = referenceGemm(problem, backend);
+    const GemmTestRunInfo blocked = referenceGemm(problem, backend);
     require(blocked.backendUsed == GemmBackend::Blocked && !blocked.fallbackReason.has_value(),
             "Built-in Blocked reference GEMM dispatch mismatch.");
 
-    const GemmProblem owningProblem = problem;
+    const GemmTestSpecification owningProblem = problem;
     const Layout owningLayout(Shape{2, 2}, {7, 2}, 1);
-    const GemmOutputOptions owningOutput{
+    const GemmTestOutputOptions owningOutput{
         .layout = owningLayout,
         .selection = OutputSelection::explicitIndices({0, 1}),
     };
-    const GemmResult owned = referenceGemm(owningProblem, owningOutput, GemmBackend::Pointwise);
+    const GemmTestResult owned = referenceGemm(owningProblem, owningOutput, GemmBackend::Pointwise);
     require(owned.output.layout() == owningLayout && owned.runInfo.outputElementsWritten == 2 &&
                 owned.output.loadAs<float>({0, 0}) == expected[0] &&
                 owned.output.loadAs<float>({0, 1}) == expected[2] &&
@@ -158,7 +160,7 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
     const std::array<float, 4> finiteC{1, 2, 3, 4};
     Tensor output(ScalarType::Float32, Shape{2, 2});
 
-    GemmRequest alphaZero(
+    GemmTestCase alphaZero(
         GemmOperand(
             Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
                                              std::span<const float>(nonFiniteA))),
@@ -212,7 +214,7 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
     const std::array<float, 4> finiteA{1, 2, 3, 4};
     const std::array<float, 4> finiteB{5, 6, 7, 8};
     const std::array<float, 4> nonFiniteC{infinity, infinity, infinity, infinity};
-    GemmRequest betaZero(
+    GemmTestCase betaZero(
         GemmOperand(Tensor::copyNativeStorage<float>(
             Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(finiteA))),
         GemmOperand(Tensor::copyNativeStorage<float>(
@@ -234,7 +236,7 @@ void testGemmScaleCValidationMatchesExecution() {
 
     const std::array<float, 1> realValues{1.0f};
     Tensor realOutput = Tensor::copyNativeValues<float>(Shape{1, 1}, std::array<float, 1>{-7.0f});
-    GemmRequest realProblem(
+    GemmTestCase realProblem(
         GemmOperand(Tensor::copyNativeStorage<float>(std::span<const float>(realValues))),
         GemmOperand(Tensor::copyNativeStorage<float>(std::span<const float>(realValues))),
         Tensor::copyNativeStorage<float>(std::span<const float>(realValues)), realOutput,
@@ -255,7 +257,7 @@ void testGemmScaleCValidationMatchesExecution() {
     const std::array<int32_t, 1> integerValues{1};
     Tensor integerOutput =
         Tensor::copyNativeValues<int32_t>(Shape{1, 1}, std::array<int32_t, 1>{-7});
-    GemmRequest integerProblem(
+    GemmTestCase integerProblem(
         GemmOperand(Tensor::copyNativeStorage<int32_t>(std::span<const int32_t>(integerValues))),
         GemmOperand(Tensor::copyNativeStorage<int32_t>(std::span<const int32_t>(integerValues))),
         Tensor::copyNativeStorage<int32_t>(std::span<const int32_t>(integerValues)), integerOutput,
@@ -290,7 +292,7 @@ void testRuntimeMixedAndBlockScaledGemm() {
 
     GemmOperand operandA(a);
     operandA.computeType = ScalarType::Float4E2M1;
-    GemmRequest mixed(std::move(operandA), GemmOperand(b), c, d, ScalarType::Float32);
+    GemmTestCase mixed(std::move(operandA), GemmOperand(b), c, d, ScalarType::Float32);
     mixed.epilogue.beta = 1.0;
     referenceGemm(mixed);
     require(d.loadAs<float>({0, 0}) == 9.0f, "Runtime mixed-type GEMM result mismatch.");
@@ -315,8 +317,8 @@ void testRuntimeMixedAndBlockScaledGemm() {
     GemmOperand blockOperandB(blockB);
     blockOperandA.blockScale = BlockScaleBinding{scalesA, 2};
     blockOperandB.blockScale = BlockScaleBinding{scalesB, 2};
-    GemmRequest blockScaled(std::move(blockOperandA), std::move(blockOperandB), blockC, blockD,
-                            ScalarType::Float32);
+    GemmTestCase blockScaled(std::move(blockOperandA), std::move(blockOperandB), blockC, blockD,
+                             ScalarType::Float32);
     referenceGemm(blockScaled);
     require(blockD.loadAs<float>({0, 0}) == 2 * 2 * 8 + 2 * 4 * 16,
             "Runtime block-scaled GEMM result mismatch.");
@@ -346,7 +348,7 @@ void testPointwiseRoutes() {
                                              std::span<const float>(scaleB)),
             4,
         };
-        GemmRequest problem(
+        GemmTestCase problem(
             std::move(operandA), std::move(operandB),
             Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 2}),
                                              std::span<const float>(c)),
@@ -357,13 +359,13 @@ void testPointwiseRoutes() {
 
     Tensor automaticOutput =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
-    GemmRequest automaticProblem = makeProblem(automaticOutput);
-    const GemmRunInfo automatic = referenceGemm(automaticProblem);
+    GemmTestCase automaticProblem = makeProblem(automaticOutput);
+    const GemmTestRunInfo automatic = referenceGemm(automaticProblem);
 
     Tensor pointwiseOutput =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
-    GemmRequest pointwiseProblem = makeProblem(pointwiseOutput);
-    const GemmRunInfo pointwise = referenceGemm(pointwiseProblem, GemmBackend::Pointwise);
+    GemmTestCase pointwiseProblem = makeProblem(pointwiseOutput);
+    const GemmTestRunInfo pointwise = referenceGemm(pointwiseProblem, GemmBackend::Pointwise);
 
     const Tensor expected =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, 184});
@@ -385,7 +387,7 @@ void testExactIntegerGemm() {
     const std::array<int32_t, 1> b{2};
     const std::array<int32_t, 1> c{std::numeric_limits<int32_t>::max()};
     Tensor d(ScalarType::Int32, Shape{1, 1});
-    GemmRequest problem(
+    GemmTestCase problem(
         GemmOperand(Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
                                               std::span<const int32_t>(a))),
         GemmOperand(Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
@@ -429,14 +431,14 @@ void testRuntimeComplexAndExplicitAxisGemm() {
         Layout::contiguousLastDimensionFastest(Shape{1, 1}),
         std::span<const std::complex<float>>(complexA)));
     complexOperandA.conjugate = true;
-    GemmRequest complexProblem(std::move(complexOperandA),
-                               GemmOperand(Tensor::copyNativeStorage<std::complex<float>>(
-                                   Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                   std::span<const std::complex<float>>(complexB))),
-                               Tensor::copyNativeStorage<std::complex<float>>(
-                                   Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                   std::span<const std::complex<float>>(complexC)),
-                               complexD, ScalarType::ComplexFloat32);
+    GemmTestCase complexProblem(std::move(complexOperandA),
+                                GemmOperand(Tensor::copyNativeStorage<std::complex<float>>(
+                                    Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                    std::span<const std::complex<float>>(complexB))),
+                                Tensor::copyNativeStorage<std::complex<float>>(
+                                    Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                    std::span<const std::complex<float>>(complexC)),
+                                complexD, ScalarType::ComplexFloat32);
     referenceGemm(complexProblem);
     require(complexD.loadAs<std::complex<float>>({0, 0}) == std::complex<float>(11.0f, -2.0f),
             "Runtime complex GEMM result mismatch.");
@@ -446,7 +448,7 @@ void testRuntimeComplexAndExplicitAxisGemm() {
     const std::array<float, 2> realC{0, 0};
     const std::array<float, 2> columnBias{2, 3};
     Tensor realD(ScalarType::Float32, Shape{1, 2});
-    GemmRequest axisProblem(
+    GemmTestCase axisProblem(
         GemmOperand(Tensor::copyNativeStorage<float>(
             Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(realA))),
         GemmOperand(Tensor::copyNativeStorage<float>(
@@ -476,7 +478,7 @@ void testOutputSelection() {
     Tensor d =
         Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{-99, -99, -99, -99});
 
-    GemmRequest problem(
+    GemmTestCase problem(
         GemmOperand(Tensor::copyNativeStorage<float>(
             Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(a))),
         GemmOperand(Tensor::copyNativeStorage<float>(
@@ -485,7 +487,7 @@ void testOutputSelection() {
                                          std::span<const float>(c)),
         d, ScalarType::Float32);
     problem.outputSelection = OutputSelection::explicitIndices({0, 3});
-    const GemmRunInfo runInfo = referenceGemm(problem);
+    const GemmTestRunInfo runInfo = referenceGemm(problem);
     require(runInfo.outputElementsWritten == 2 && runInfo.outputElementsCovered == 2,
             "Selected-output GEMM reported the wrong element count.");
     require(d.loadAs<float>({0, 0}) == 19 && d.loadAs<float>({0, 1}) == -99 &&
@@ -494,7 +496,7 @@ void testOutputSelection() {
 
     Tensor firstDimensionFastestOutput =
         Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{-99, -99, -99, -99});
-    GemmRequest firstDimensionFastestProblem(problem, firstDimensionFastestOutput);
+    GemmTestCase firstDimensionFastestProblem(problem, firstDimensionFastestOutput);
     firstDimensionFastestProblem.outputSelection =
         OutputSelection::explicitIndices({1}, IndexOrder::FirstDimensionFastest);
     referenceGemm(firstDimensionFastestProblem);
@@ -547,10 +549,10 @@ void testStreamingGemmValidation() {
     const std::array<float, 4> a{1, 2, 3, 4};
     const std::array<float, 4> b{5, 6, 7, 8};
     const std::array<float, 4> c{};
-    GemmProblem problem(GemmOperand(Tensor::copyNativeValues<float>(Shape{2, 2}, a)),
-                        GemmOperand(Tensor::copyNativeValues<float>(Shape{2, 2}, b)),
-                        Tensor::copyNativeValues<float>(Shape{2, 2}, c), ScalarType::Float32,
-                        ScalarType::Float32);
+    GemmTestSpecification problem(GemmOperand(Tensor::copyNativeValues<float>(Shape{2, 2}, a)),
+                                  GemmOperand(Tensor::copyNativeValues<float>(Shape{2, 2}, b)),
+                                  Tensor::copyNativeValues<float>(Shape{2, 2}, c),
+                                  ScalarType::Float32, ScalarType::Float32);
 
     Tensor observed =
         Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{19, 999, 43, 50});
@@ -559,27 +561,24 @@ void testStreamingGemmValidation() {
     options.comparison.selection =
         OutputSelection::explicitIndices({1}, IndexOrder::FirstDimensionFastest);
 
-    GemmValidationResult pointwise = validateGemm(problem, observed, options);
-    require(pointwise.comparison.passed() && pointwise.comparison.compared == 1 &&
-                pointwise.reference.backendUsed == GemmBackend::Pointwise &&
-                pointwise.reference.outputElementsWritten == 1,
+    ComparisonReport pointwise =
+        validateGemm(problem.a, problem.b, problem.c, observed, problem, options);
+    require(pointwise.passed() && pointwise.compared == 1,
             "Streaming GEMM validation did not isolate the selected output.");
 
     options.backend = GemmBackend::Blocked;
-    GemmValidationResult blocked = validateGemm(problem, observed, options);
-    require(blocked.comparison.passed() && blocked.reference.backendUsed == GemmBackend::Blocked &&
-                blocked.reference.outputElementsWritten == 1 &&
-                blocked.reference.outputElementsCovered == 4,
-            "Streaming blocked GEMM validation reported the wrong work.");
+    ComparisonReport blocked =
+        validateGemm(problem.a, problem.b, problem.c, observed, problem, options);
+    require(blocked.passed(), "Streaming blocked GEMM validation reported the wrong work.");
 
     observed.storeFrom({1, 0}, 44.0f);
-    GemmValidationResult mismatch = validateGemm(problem, observed, options);
-    require(
-        !mismatch.comparison.passed() && mismatch.comparison.mismatches == 1 &&
-            mismatch.comparison.reportedMismatches[0].index == 1 &&
-            mismatch.comparison.reportedMismatches[0].coordinates == std::vector<size_t>({1, 0}) &&
-            mismatch.comparison.reportedMismatches[0].observedOffset == 2,
-        "Streaming GEMM validation did not preserve the original logical location.");
+    ComparisonReport mismatch =
+        validateGemm(problem.a, problem.b, problem.c, observed, problem, options);
+    require(!mismatch.passed() && mismatch.mismatches == 1 &&
+                mismatch.reportedMismatches[0].index == 1 &&
+                mismatch.reportedMismatches[0].coordinates == std::vector<size_t>({1, 0}) &&
+                mismatch.reportedMismatches[0].observedOffset == 2,
+            "Streaming GEMM validation did not preserve the original logical location.");
 }
 
 void testReferenceEpilogue() {
@@ -592,27 +591,26 @@ void testReferenceEpilogue() {
     Tensor auxiliary(ScalarType::BFloat16, Shape{2, 2});
     Tensor amax(ScalarType::Float32, Shape{1});
 
-    EpilogueRequest problem(
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
-                                         std::span<const float>(input)),
-        output, rawOutput, auxiliary, amax, ScalarType::Float32);
-    require(problem.outputScale.type() == ScalarType::Float32 &&
-                problem.auxiliaryScale.type() == ScalarType::Float32 &&
-                problem.activationParameter0.type() == ScalarType::Float32 &&
-                problem.activationParameter1.type() == ScalarType::Float32,
+    const Tensor inputTensor = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(input));
+    EpilogueOptions options(ScalarType::Float32);
+    require(options.outputScale.type() == ScalarType::Float32 &&
+                options.auxiliaryScale.type() == ScalarType::Float32 &&
+                options.activationParameter0.type() == ScalarType::Float32 &&
+                options.activationParameter1.type() == ScalarType::Float32,
             "Reference epilogue defaults do not use the requested compute type.");
-    problem.bias = VectorBinding{
+    options.bias = VectorBinding{
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
                                          std::span<const float>(bias)),
         MatrixAxis::Row,
     };
-    problem.outputScale = 2.0;
-    problem.auxiliaryScale = 3.0;
-    problem.activation = Activation::Relu;
-    const EpilogueRunInfo run = referenceEpilogue(problem);
-    require(run.outputElementsWritten == 4 && run.rawOutputElementsWritten == 4 &&
-                run.auxiliaryOutputElementsWritten == 4 && run.amaxElementsWritten == 1,
-            "Reference epilogue run information mismatch.");
+    options.outputScale = 2.0;
+    options.auxiliaryScale = 3.0;
+    options.activation = Activation::Relu;
+    referenceEpilogueInto(
+        inputTensor,
+        {.output = output, .rawOutput = rawOutput, .auxiliaryOutput = auxiliary, .amax = amax},
+        options);
 
     require(output.loadAs<float>({0, 0}) == 0 && output.loadAs<float>({0, 1}) == 4 &&
                 output.loadAs<float>({1, 0}) == 10 && output.loadAs<float>({1, 1}) == 0,
@@ -629,16 +627,16 @@ void testReferenceEpilogue() {
     const std::array<float, 4> gradientInput{10, 20, 30, 40};
     const std::array<float, 4> activationInput{-1, 1, 2, -2};
     Tensor gradientOutput(ScalarType::Float32, Shape{2, 2});
-    EpilogueRequest gradient(
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
-                                         std::span<const float>(gradientInput)),
-        gradientOutput, ScalarType::Float32);
-    gradient.auxiliaryInput =
+    EpilogueOptions gradientOptions(ScalarType::Float32);
+    gradientOptions.auxiliaryInput =
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
                                          std::span<const float>(activationInput));
-    gradient.activation = Activation::Relu;
-    gradient.activationApplication = ActivationApplication::Gradient;
-    referenceEpilogue(gradient);
+    gradientOptions.activation = Activation::Relu;
+    gradientOptions.activationApplication = ActivationApplication::Gradient;
+    referenceEpilogueInto(
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                         std::span<const float>(gradientInput)),
+        {.output = gradientOutput}, gradientOptions);
     require(compare(gradientOutput, Tensor::copyNativeValues<float>(
                                         Shape{2, 2}, std::array<float, 4>{0, 20, 30, 0}))
                 .passed(),
@@ -646,14 +644,11 @@ void testReferenceEpilogue() {
 
     const std::array<float, 4> gate{0.5f, 2.0f, -1.0f, 0.25f};
     Tensor gatedOutput(ScalarType::Float32, Shape{2, 2});
-    EpilogueRequest gated(
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
-                                         std::span<const float>(input)),
-        gatedOutput, ScalarType::Float32);
-    gated.gateResidual = Tensor::copyNativeStorage<float>(
+    EpilogueOptions gatedOptions(ScalarType::Float32);
+    gatedOptions.gateResidual = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(gate));
-    gated.outputScale = 2.0;
-    referenceEpilogue(gated);
+    gatedOptions.outputScale = 2.0;
+    referenceEpilogueInto(inputTensor, {.output = gatedOutput}, gatedOptions);
     require(compare(gatedOutput, Tensor::copyNativeValues<float>(
                                      Shape{2, 2}, std::array<float, 4>{-1.5f, 6.0f, -7.0f, -1.75f}))
                 .passed(),
@@ -661,12 +656,12 @@ void testReferenceEpilogue() {
 
     const std::array<float, 4> int8Input{-200.0f, -128.5f, 126.5f, 300.0f};
     Tensor int8Output(ScalarType::Int8, Shape{2, 2});
-    EpilogueRequest saturatingInt8(
+    EpilogueOptions int8Options(ScalarType::Float32);
+    int8Options.outputConversion = OutputConversion::SaturatingInt8;
+    referenceEpilogueInto(
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
                                          std::span<const float>(int8Input)),
-        int8Output, ScalarType::Float32);
-    saturatingInt8.outputConversion = OutputConversion::SaturatingInt8;
-    referenceEpilogue(saturatingInt8);
+        {.output = int8Output}, int8Options);
     require(compare(int8Output, Tensor::copyNativeValues<int8_t>(
                                     Shape{2, 2}, std::array<int8_t, 4>{-128, -128, 126, 127}))
                 .passed(),
@@ -675,28 +670,28 @@ void testReferenceEpilogue() {
     constexpr double highPrecisionInput = 1.0000000001;
     const std::array<double, 1> highPrecisionValues{highPrecisionInput};
     Tensor highPrecisionOutput(ScalarType::Float64, Shape{1, 1});
-    EpilogueRequest highPrecisionActivation(
+    EpilogueOptions highPrecisionOptions(ScalarType::Float64);
+    highPrecisionOptions.activation = Activation::Sigmoid;
+    referenceEpilogueInto(
         Tensor::copyNativeStorage<double>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
                                           highPrecisionValues),
-        highPrecisionOutput, ScalarType::Float64);
-    highPrecisionActivation.activation = Activation::Sigmoid;
-    referenceEpilogue(highPrecisionActivation);
+        {.output = highPrecisionOutput}, highPrecisionOptions);
     const double expectedHighPrecision = 1.0 / (1.0 + std::exp(-highPrecisionInput));
     require(std::abs(highPrecisionOutput.loadAs<double>({0, 0}) - expectedHighPrecision) < 1e-15,
             "Float64 reference activation used reduced-precision intermediates.");
 
     for (const Activation activation : {Activation::Tanh, Activation::Swish}) {
         Tensor gradientResult(ScalarType::Float64, Shape{1, 1});
-        EpilogueRequest highPrecisionGradient(
-            Tensor::copyNativeValues<double>(Shape{1, 1}, std::array<double, 1>{1.0}),
-            gradientResult, ScalarType::Float64);
+        EpilogueOptions highPrecisionGradient(ScalarType::Float64);
         highPrecisionGradient.auxiliaryInput = Tensor::copyNativeValues<double>(
             Shape{1, 1}, std::array<double, 1>{highPrecisionInput});
         highPrecisionGradient.activation = activation;
         highPrecisionGradient.activationApplication = ActivationApplication::Gradient;
         highPrecisionGradient.activationParameter0 = 1.0;
         highPrecisionGradient.activationParameter1 = 1.0;
-        referenceEpilogue(highPrecisionGradient);
+        referenceEpilogueInto(
+            Tensor::copyNativeValues<double>(Shape{1, 1}, std::array<double, 1>{1.0}),
+            {.output = gradientResult}, highPrecisionGradient);
 
         const double sigmoid = 1.0 / (1.0 + std::exp(-highPrecisionInput));
         const double hyperbolicTangent = std::tanh(highPrecisionInput);
@@ -710,23 +705,16 @@ void testReferenceEpilogue() {
 
     const Tensor ownedInput = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(input));
-    EpilogueProblem ownedProblem(ownedInput, ScalarType::Float16, ScalarType::Float32);
-    ownedProblem.rawOutputType = ScalarType::Float32;
-    ownedProblem.auxiliaryOutputType = ScalarType::BFloat16;
-    ownedProblem.amaxType = ScalarType::Float32;
-    ownedProblem.bias = problem.bias;
-    ownedProblem.outputScale = 2.0;
-    ownedProblem.auxiliaryScale = 3.0;
-    ownedProblem.activation = Activation::Relu;
-    ownedProblem.outputSelection = OutputSelection::explicitIndices({1, 2});
-
-    const EpilogueResult owned = referenceEpilogue(ownedProblem);
+    EpilogueOptions ownedOptions = options;
+    ownedOptions.outputSelection = OutputSelection::explicitIndices({1, 2});
+    const EpilogueOutputs owned = referenceEpilogue(ownedInput,
+                                                    {.output = ScalarType::Float16,
+                                                     .rawOutput = ScalarType::Float32,
+                                                     .auxiliaryOutput = ScalarType::BFloat16,
+                                                     .amax = ScalarType::Float32},
+                                                    ownedOptions);
     require(owned.output.layout() == Layout::contiguousLastDimensionFastest(Shape{2, 2}) &&
-                owned.rawOutput && owned.auxiliaryOutput && owned.amax &&
-                owned.runInfo.outputElementsWritten == 2 &&
-                owned.runInfo.rawOutputElementsWritten == 2 &&
-                owned.runInfo.auxiliaryOutputElementsWritten == 2 &&
-                owned.runInfo.amaxElementsWritten == 1,
+                owned.rawOutput && owned.auxiliaryOutput && owned.amax,
             "Owning reference epilogue result contract mismatch.");
     require(owned.output.loadAs<float>({0, 0}) == 0 && owned.output.loadAs<float>({0, 1}) == 4 &&
                 owned.output.loadAs<float>({1, 0}) == 10 &&
@@ -738,22 +726,23 @@ void testReferenceEpilogue() {
                 owned.amax->loadAs<float>({0}) == 5,
             "Owning reference epilogue did not zero unselected values.");
 
-    EpilogueProblem emptySelection = ownedProblem;
-    emptySelection.outputSelection = OutputSelection::strided(4, 1);
-    const EpilogueResult empty = referenceEpilogue(emptySelection);
-    require(empty.runInfo.outputElementsWritten == 0 &&
-                empty.runInfo.rawOutputElementsWritten == 0 &&
-                empty.runInfo.auxiliaryOutputElementsWritten == 0 &&
-                empty.runInfo.amaxElementsWritten == 1 && empty.output.loadAs<float>({0, 0}) == 0 &&
-                empty.rawOutput && empty.rawOutput->loadAs<float>({0, 0}) == 0 &&
-                empty.auxiliaryOutput && empty.auxiliaryOutput->loadAs<float>({0, 0}) == 0 &&
-                empty.amax && empty.amax->loadAs<float>({0}) == 0,
+    EpilogueOptions emptyOptions = ownedOptions;
+    emptyOptions.outputSelection = OutputSelection::strided(4, 1);
+    const EpilogueOutputs empty = referenceEpilogue(ownedInput,
+                                                    {.output = ScalarType::Float16,
+                                                     .rawOutput = ScalarType::Float32,
+                                                     .auxiliaryOutput = ScalarType::BFloat16,
+                                                     .amax = ScalarType::Float32},
+                                                    emptyOptions);
+    require(empty.output.loadAs<float>({0, 0}) == 0 && empty.rawOutput &&
+                empty.rawOutput->loadAs<float>({0, 0}) == 0 && empty.auxiliaryOutput &&
+                empty.auxiliaryOutput->loadAs<float>({0, 0}) == 0 && empty.amax &&
+                empty.amax->loadAs<float>({0}) == 0,
             "Owning reference epilogue empty selection was not zero initialized.");
 
-    EpilogueProblem invalidProblem(ownedInput, ScalarType::E8M0, ScalarType::Float32);
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceEpilogue(invalidProblem);
+        (void)referenceEpilogue(ownedInput, {.output = ScalarType::E8M0});
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
@@ -764,13 +753,16 @@ void testReferenceEpilogue() {
     Tensor preservedRaw = preservedOutput.deepCopy();
     Tensor preservedAuxiliary = preservedOutput.deepCopy();
     Tensor accumulatedAmax = Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{100});
-    EpilogueRequest preserved(ownedInput, preservedOutput, preservedRaw, preservedAuxiliary,
-                              accumulatedAmax, ScalarType::Float32);
-    preserved.outputSelection = OutputSelection::explicitIndices({0, 3});
-    preserved.accumulateAmax = true;
-    const EpilogueRunInfo preservedRun = referenceEpilogue(preserved);
-    require(preservedRun.outputElementsWritten == 2 &&
-                preservedOutput.loadAs<float>({0, 1}) == -99 &&
+    EpilogueOptions preservedOptions;
+    preservedOptions.outputSelection = OutputSelection::explicitIndices({0, 3});
+    preservedOptions.accumulateAmax = true;
+    referenceEpilogueInto(ownedInput,
+                          {.output = preservedOutput,
+                           .rawOutput = preservedRaw,
+                           .auxiliaryOutput = preservedAuxiliary,
+                           .amax = accumulatedAmax},
+                          preservedOptions);
+    require(preservedOutput.loadAs<float>({0, 1}) == -99 &&
                 preservedOutput.loadAs<float>({1, 0}) == -99 &&
                 preservedRaw.loadAs<float>({0, 1}) == -99 &&
                 preservedAuxiliary.loadAs<float>({1, 0}) == -99 &&
@@ -793,57 +785,46 @@ void testReferenceReduction() {
     }
 
     Tensor output(ScalarType::Float32, Layout(Shape{3}, {2}));
-    ReductionRequest request(input, output, ScalarType::Float32, {0, 2});
-    const ReductionRunInfo run = referenceSum(request);
-    require(run.outputElementsWritten == 3 && run.inputElementsRead == 24,
-            "Reference reduction run information mismatch.");
+    referenceSumInto(input, output, {0, 2}, ScalarType::Float32);
     require(compare(output,
                     Tensor::copyNativeValues<float>(Shape{3}, std::array<float, 3>{412, 492, 572}))
                 .passed(),
             "Reference reduction result mismatch.");
 
     const std::array<int32_t, 2> wrappingInputValues{std::numeric_limits<int32_t>::max(), 1};
-    const ReductionResult wrappingSum = referenceSum(
-        ReductionProblem(Tensor::copyNativeStorage<int32_t>(
-                             Layout::contiguousLastDimensionFastest(Shape{2}), wrappingInputValues),
-                         ScalarType::Int32, ScalarType::Int32, {0}));
-    require(wrappingSum.output.loadAs<int32_t>({}) == std::numeric_limits<int32_t>::min(),
+    const Tensor wrappingSum =
+        referenceSum(Tensor::copyNativeStorage<int32_t>(
+                         Layout::contiguousLastDimensionFastest(Shape{2}), wrappingInputValues),
+                     {0}, ScalarType::Int32, ScalarType::Int32);
+    require(wrappingSum.loadAs<int32_t>({}) == std::numeric_limits<int32_t>::min(),
             "Int32 reference reduction did not use defined wrapping arithmetic.");
 
     Tensor maximumAbsolute(ScalarType::Float32, Shape{});
-    const ReductionRunInfo maximumRun =
-        referenceMaximumAbsolute(input, maximumAbsolute, ScalarType::Float32);
-    require(maximumRun.outputElementsWritten == 1 && maximumRun.inputElementsRead == 24,
-            "Reference maximum-absolute run information mismatch.");
+    referenceMaximumAbsoluteInto(input, maximumAbsolute, ScalarType::Float32);
     require(maximumAbsolute.loadAs<float>({}) == 123.0f,
             "Reference maximum-absolute result mismatch.");
 
-    const ReductionProblem ownedProblem(input, ScalarType::Float32, ScalarType::Float32, {0, 2});
-    const ReductionResult owned = referenceSum(ownedProblem);
-    require(owned.output.layout() == Layout::contiguousLastDimensionFastest(Shape{3}) &&
-                owned.output.type() == ScalarType::Float32 &&
-                owned.runInfo.outputElementsWritten == 3 && owned.runInfo.inputElementsRead == 24 &&
-                compare(owned.output, Tensor::copyNativeValues<float>(
-                                          Shape{3}, std::array<float, 3>{412, 492, 572}))
+    const Tensor owned = referenceSum(input, {0, 2}, ScalarType::Float32, ScalarType::Float32);
+    require(owned.layout() == Layout::contiguousLastDimensionFastest(Shape{3}) &&
+                owned.type() == ScalarType::Float32 &&
+                compare(owned, Tensor::copyNativeValues<float>(Shape{3},
+                                                               std::array<float, 3>{412, 492, 572}))
                     .passed(),
             "Owning reference sum result contract mismatch.");
 
-    const ReductionProblem invalidProblem(input, ScalarType::Float32, ScalarType::Float32, {0, 0});
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceSum(invalidProblem);
+        (void)referenceSum(input, {0, 0}, ScalarType::Float32, ScalarType::Float32);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
     require(rejectedBeforeAllocation, "Owning reference sum accepted invalid axes.");
 
-    const ReductionResult ownedMaximum =
+    const Tensor ownedMaximum =
         referenceMaximumAbsolute(input, ScalarType::Float32, ScalarType::Float32);
-    require(ownedMaximum.output.shape() == Shape{} &&
-                ownedMaximum.output.layout() == Layout::contiguousLastDimensionFastest(Shape{}) &&
-                ownedMaximum.runInfo.outputElementsWritten == 1 &&
-                ownedMaximum.runInfo.inputElementsRead == 24 &&
-                ownedMaximum.output.loadAs<float>({}) == 123.0f,
+    require(ownedMaximum.shape() == Shape{} &&
+                ownedMaximum.layout() == Layout::contiguousLastDimensionFastest(Shape{}) &&
+                ownedMaximum.loadAs<float>({}) == 123.0f,
             "Owning reference maximum-absolute result contract mismatch.");
 }
 
@@ -874,11 +855,9 @@ void testStructuredSparsity() {
     StructuredSparsityPattern pattern;
     pattern.axis = 1;
     pattern.fixedPositions = {1, 3};
-    const StructuredSparsityRunInfo run = applyStructuredSparsity(
-        StructuredSparsityRequest(input, pruned, compressed, retainedIndices, pattern));
-    require(run.groupsProcessed == 4 && run.prunedElementsWritten == 16 &&
-                run.compressedElementsWritten == 8,
-            "Structured sparsity run information mismatch.");
+    applyStructuredSparsityInto(
+        input, {.pruned = pruned, .compressed = compressed, .retainedIndices = retainedIndices},
+        pattern);
 
     for (size_t row = 0; row < 2; ++row) {
         for (size_t group = 0; group < 2; ++group) {
@@ -903,28 +882,22 @@ void testStructuredSparsity() {
     }
 
     Tensor metadata(ScalarType::UInt8, Shape{2, 1});
-    const TwoOfFourMetadataRunInfo metadataRun =
-        encodeTwoOfFourMetadata(TwoOfFourMetadataRequest(retainedIndices, metadata, 1));
-    require(metadataRun.sparsityGroupsEncoded == 4 && metadataRun.metadataBytesWritten == 2,
-            "Two-of-four metadata run information mismatch.");
+    encodeTwoOfFourMetadataInto(retainedIndices, metadata, 1);
     require(metadata.loadAs<uint8_t>({0, 0}) == 0xdd && metadata.loadAs<uint8_t>({1, 0}) == 0xdd,
             "Two-of-four metadata encoding mismatch.");
 
     Tensor fusedPruned(ScalarType::Float32, Shape{2, 8});
     Tensor fusedCompressed(ScalarType::Float32, Shape{2, 4});
     Tensor fusedMetadata(ScalarType::UInt8, Shape{2, 1});
-    StructuredSparsityRequest fusedRequest(input, fusedPruned, fusedCompressed, std::nullopt,
-                                           fusedMetadata, pattern);
-    const StructuredSparsityRunInfo firstFusedRun =
-        applyStructuredSparsity(fusedRequest, {.firstSlice = 0, .sliceCount = 1});
-    const StructuredSparsityRunInfo secondFusedRun =
-        applyStructuredSparsity(fusedRequest, {.firstSlice = 1, .sliceCount = 1});
-    require(
-        firstFusedRun.groupsProcessed == 2 && secondFusedRun.groupsProcessed == 2 &&
-            firstFusedRun.retainedIndicesWritten == 0 &&
-            secondFusedRun.retainedIndicesWritten == 0 && firstFusedRun.metadataBytesWritten == 1 &&
-            secondFusedRun.metadataBytesWritten == 1 && compare(fusedMetadata, metadata).passed(),
-        "Fused structured sparsity metadata mismatch.");
+    const StructuredSparseTensor fusedOutputs{
+        .pruned = fusedPruned,
+        .compressed = fusedCompressed,
+        .twoOfFourMetadata = fusedMetadata,
+    };
+    applyStructuredSparsityInto(input, fusedOutputs, pattern, {.firstSlice = 0, .sliceCount = 1});
+    applyStructuredSparsityInto(input, fusedOutputs, pattern, {.firstSlice = 1, .sliceCount = 1});
+    require(compare(fusedMetadata, metadata).passed(),
+            "Fused structured sparsity metadata mismatch.");
 
     Tensor inPlace =
         Tensor::copyNativeValues<float>(Shape{8}, std::array<float, 8>{1, 2, 3, 4, 5, 6, 7, 8});
@@ -932,8 +905,10 @@ void testStructuredSparsity() {
     Tensor inPlaceIndices(ScalarType::UInt8, Shape{4});
     pattern.axis = 0;
     pattern.fixedPositions = {0, 2};
-    applyStructuredSparsity(
-        StructuredSparsityRequest(inPlace, inPlace, inPlaceCompressed, inPlaceIndices, pattern));
+    applyStructuredSparsityInto(
+        inPlace,
+        {.pruned = inPlace, .compressed = inPlaceCompressed, .retainedIndices = inPlaceIndices},
+        pattern);
     require(inPlace.loadAs<float>({0}) == 1 && inPlace.loadAs<float>({1}) == 0 &&
                 inPlace.loadAs<float>({2}) == 3 && inPlace.loadAs<float>({3}) == 0,
             "In-place structured sparsity mismatch.");
@@ -942,18 +917,17 @@ void testStructuredSparsity() {
     StructuredSparsityPattern ownedPattern;
     ownedPattern.axis = 0;
     ownedPattern.fixedPositions = {0, 2};
-    StructuredSparsityProblem ownedProblem(
-        Tensor::copyNativeValues<float>(Shape{12}, std::span<const float>(ownedValues)),
-        ownedPattern, {.retainedIndices = true, .twoOfFourMetadata = true});
-    const StructuredSparsityResult owned = applyStructuredSparsity(ownedProblem);
+    const Tensor ownedInput =
+        Tensor::copyNativeValues<float>(Shape{12}, std::span<const float>(ownedValues));
+    const StructuredSparseTensor owned = applyStructuredSparsity(
+        ownedInput, ownedPattern, {.retainedIndices = true, .twoOfFourMetadata = true});
     require(
         owned.pruned.layout() == Layout::contiguousLastDimensionFastest(Shape{12}) &&
             owned.compressed.layout() == Layout::contiguousLastDimensionFastest(Shape{6}) &&
             owned.retainedIndices &&
             owned.retainedIndices->layout() == Layout::contiguousLastDimensionFastest(Shape{6}) &&
             owned.twoOfFourMetadata &&
-            owned.twoOfFourMetadata->layout() == Layout::contiguousLastDimensionFastest(Shape{2}) &&
-            owned.runInfo.groupsProcessed == 3,
+            owned.twoOfFourMetadata->layout() == Layout::contiguousLastDimensionFastest(Shape{2}),
         "Owning structured-sparsity result contract mismatch.");
     require(owned.twoOfFourMetadata->loadAs<uint8_t>({0}) == 0x88 &&
                 owned.twoOfFourMetadata->loadAs<uint8_t>({1}) == 0x08,
@@ -962,33 +936,27 @@ void testStructuredSparsity() {
     StructuredSparsityPattern invalidMetadataPattern = ownedPattern;
     invalidMetadataPattern.retainedElements = 1;
     invalidMetadataPattern.fixedPositions = {0};
-    StructuredSparsityProblem invalidMetadataProblem(
-        ownedProblem.input, invalidMetadataPattern,
-        {.retainedIndices = false, .twoOfFourMetadata = true});
     bool rejectedBeforeAllocation = false;
     try {
-        (void)applyStructuredSparsity(invalidMetadataProblem);
+        (void)applyStructuredSparsity(ownedInput, invalidMetadataPattern,
+                                      {.retainedIndices = false, .twoOfFourMetadata = true});
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
     require(rejectedBeforeAllocation,
             "Owning structured sparsity accepted an invalid metadata policy.");
 
-    const TwoOfFourMetadataResult ownedMetadata =
-        encodeTwoOfFourMetadata(TwoOfFourMetadataProblem(*owned.retainedIndices, 0));
-    require(ownedMetadata.metadata.shape() == Shape{2} &&
-                ownedMetadata.metadata.loadAs<uint8_t>({0}) == 0x88 &&
-                ownedMetadata.metadata.loadAs<uint8_t>({1}) == 0x08,
+    const Tensor ownedMetadata = encodeTwoOfFourMetadata(*owned.retainedIndices, 0);
+    require(ownedMetadata.shape() == Shape{2} && ownedMetadata.loadAs<uint8_t>({0}) == 0x88 &&
+                ownedMetadata.loadAs<uint8_t>({1}) == 0x08,
             "Owning two-of-four metadata result contract mismatch.");
 
     const std::array<uint8_t, 2> invalidRetainedValues{2, 1};
-    const TwoOfFourMetadataProblem invalidRetained(
-        Tensor::copyNativeValues<uint8_t>(Shape{2},
-                                          std::span<const uint8_t>(invalidRetainedValues)),
-        0);
+    const Tensor invalidRetained = Tensor::copyNativeValues<uint8_t>(
+        Shape{2}, std::span<const uint8_t>(invalidRetainedValues));
     rejectedBeforeAllocation = false;
     try {
-        (void)encodeTwoOfFourMetadata(invalidRetained);
+        (void)encodeTwoOfFourMetadata(invalidRetained, 0);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
@@ -1000,8 +968,8 @@ void testStructuredSparsity() {
     widePattern.groupSize = 257;
     widePattern.retainedElements = 1;
     widePattern.fixedPositions = {0};
-    const StructuredSparsityResult wide = applyStructuredSparsity(
-        StructuredSparsityProblem(Tensor(ScalarType::Float32, Shape{257}), widePattern));
+    const StructuredSparseTensor wide =
+        applyStructuredSparsity(Tensor(ScalarType::Float32, Shape{257}), widePattern);
     require(wide.compressed.shape() == Shape{1} && !wide.retainedIndices,
             "Structured sparsity imposed the UInt8 index limit without an index output.");
 
@@ -1012,10 +980,12 @@ void testStructuredSparsity() {
     StructuredSparsityPattern overlappingPattern;
     overlappingPattern.axis = 1;
     overlappingPattern.fixedPositions = {1, 3};
-    applyStructuredSparsity(StructuredSparsityRequest(input, overlappingPrunedA,
-                                                      independentCompressedA, overlappingPattern));
-    applyStructuredSparsity(StructuredSparsityRequest(input, overlappingPrunedB,
-                                                      independentCompressedB, overlappingPattern));
+    applyStructuredSparsityInto(
+        input, {.pruned = overlappingPrunedA, .compressed = independentCompressedA},
+        overlappingPattern);
+    applyStructuredSparsityInto(
+        input, {.pruned = overlappingPrunedB, .compressed = independentCompressedB},
+        overlappingPattern);
     require(std::ranges::equal(overlappingPrunedA.rawEncodedBackingStorage(),
                                overlappingPrunedB.rawEncodedBackingStorage()) &&
                 compare(independentCompressedA, independentCompressedB).passed(),
@@ -1044,11 +1014,11 @@ void testIndexedGeneration() {
     const std::array<double, 8> expectedCandidateValues{0.0, -1.5, 0.0, -6.0, 0.0, -6.0, -1.5, 0.0};
     constexpr uint64_t candidateSeed = 37;
     generate(candidates,
-             GenerationRecipe::realOnly(GenerationRecipe::candidateSet({.values = candidateValues}),
+             GenerationRecipe::realOnly(GenerationRecipe::choice({.values = candidateValues}),
                                         {.seed = candidateSeed}));
     for (size_t index = 0; index < candidates.elementCount(); ++index) {
         require(candidates.loadAs<float>({index}) == expectedCandidateValues[index],
-                "Candidate-set generation mismatch.");
+                "Choice generation mismatch.");
     }
 
     Tensor point(ScalarType::Float32, Shape{2, 3, 2});
@@ -1119,7 +1089,7 @@ void testIndexedGeneration() {
 #endif
 }
 
-void testReferenceAxpby() {
+void testLinearCombination() {
     using namespace roc::host_numerics;
 
     const Shape shape{2, 2, 2};
@@ -1136,15 +1106,13 @@ void testReferenceAxpby() {
         }
     }
 
-    AxpbyRequest request(x, y, output, ScalarType::Float32);
+    LinearCombinationOptions options(ScalarType::Float32);
     require(
-        request.alpha.type() == ScalarType::Float32 && request.beta.type() == ScalarType::Float32,
-        "Reference AXPBY defaults do not use the requested accumulator type.");
-    request.alpha = 2.0;
-    request.beta = -0.5;
-    const AxpbyRunInfo run = referenceAxpby(request);
-    require(run.outputElementsWritten == shape.elementCount(),
-            "Reference AXPBY element count mismatch.");
+        options.alpha.type() == ScalarType::Float32 && options.beta.type() == ScalarType::Float32,
+        "Linear-combination defaults do not use the requested accumulator type.");
+    options.alpha = 2.0;
+    options.beta = -0.5;
+    linearCombinationInto(x, y, output, options);
 
     for (size_t batch = 0; batch < 2; ++batch) {
         for (size_t row = 0; row < 2; ++row) {
@@ -1153,60 +1121,64 @@ void testReferenceAxpby() {
                 const float expected =
                     2.0f * x.loadAs<float>(indices) - 0.5f * y.loadAs<float>(indices);
                 require(output.loadAs<float>(indices) == expected,
-                        "Reference AXPBY value mismatch.");
+                        "Linear-combination value mismatch.");
             }
         }
     }
 
     Tensor yOnlyOutput(ScalarType::Float32, shape);
-    AxpbyRequest yOnly(std::nullopt, y, yOnlyOutput, ScalarType::Float32);
-    yOnly.beta = 3.0;
-    referenceAxpby(yOnly);
+    LinearCombinationOptions yOnlyOptions(ScalarType::Float32);
+    yOnlyOptions.beta = 3.0;
+    linearCombinationInto(std::nullopt, y, yOnlyOutput, yOnlyOptions);
     require(yOnlyOutput.loadAs<float>({1, 0, 1}) == 3.0f * y.loadAs<float>({1, 0, 1}),
-            "Reference AXPBY optional-input mismatch.");
+            "Linear-combination optional-input mismatch.");
+
+    Tensor coefficientTensor(ScalarType::Float32, Shape{});
+    coefficientTensor.storeFrom({}, 3.0f);
+    LinearCombinationOptions tensorCoefficientOptions(ScalarType::Float32);
+    tensorCoefficientOptions.alpha = coefficientTensor;
+    coefficientTensor.storeFrom({}, 7.0f);
+    const Tensor tensorCoefficientOutput =
+        linearCombination(x, std::nullopt, ScalarType::Float32, tensorCoefficientOptions);
+    require(tensorCoefficientOutput.loadAs<float>({1, 0, 1}) == 3.0f * x.loadAs<float>({1, 0, 1}),
+            "Rank-zero Tensor coefficient did not retain snapshot semantics.");
 
     const std::array<std::complex<float>, 1> complexXValues{std::complex<float>(1, 2)};
     const std::array<std::complex<float>, 1> complexYValues{std::complex<float>(3, -1)};
     Tensor complexX = Tensor::copyNativeValues<std::complex<float>>(Shape{1}, complexXValues);
     Tensor complexY = Tensor::copyNativeValues<std::complex<float>>(Shape{1}, complexYValues);
     Tensor complexOutput(ScalarType::ComplexFloat32, Shape{1});
-    AxpbyRequest complexRequest(complexX, complexY, complexOutput, ScalarType::ComplexFloat32);
-    complexRequest.alpha = std::complex<double>(0.5, 1.0);
-    complexRequest.beta = -2.0;
-    referenceAxpby(complexRequest);
+    LinearCombinationOptions complexOptions(ScalarType::ComplexFloat32);
+    complexOptions.alpha = std::complex<double>(0.5, 1.0);
+    complexOptions.beta = -2.0;
+    linearCombinationInto(complexX, complexY, complexOutput, complexOptions);
     require(complexOutput.loadAs<std::complex<float>>({0}) == std::complex<float>(-7.5f, 4.0f),
-            "Complex reference AXPBY mismatch.");
+            "Complex linear combination mismatch.");
 
-    AxpbyProblem ownedProblem(x, y, ScalarType::Float32, ScalarType::Float32);
-    ownedProblem.alpha = 2.0;
-    ownedProblem.beta = -0.5;
-    const AxpbyResult owned = referenceAxpby(ownedProblem);
-    require(owned.output.layout() == Layout::contiguousLastDimensionFastest(shape) &&
-                owned.output.type() == ScalarType::Float32 &&
-                owned.runInfo.outputElementsWritten == shape.elementCount() &&
-                owned.output.loadAs<float>({1, 0, 1}) ==
+    const Tensor owned = linearCombination(x, y, ScalarType::Float32, options);
+    require(owned.layout() == Layout::contiguousLastDimensionFastest(shape) &&
+                owned.type() == ScalarType::Float32 &&
+                owned.loadAs<float>({1, 0, 1}) ==
                     2.0f * x.loadAs<float>({1, 0, 1}) - 0.5f * y.loadAs<float>({1, 0, 1}),
-            "Owning reference AXPBY result contract mismatch.");
+            "Owning linear combination result contract mismatch.");
 
-    AxpbyProblem invalidProblem(std::nullopt, std::nullopt, ScalarType::Float32,
-                                ScalarType::Float32);
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceAxpby(invalidProblem);
+        (void)linearCombination(std::nullopt, std::nullopt, ScalarType::Float32);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation, "Owning reference AXPBY accepted an invalid problem.");
+    require(rejectedBeforeAllocation, "Owning linear combination accepted an invalid problem.");
 
-    AxpbyProblem invalidCoefficient(x, std::nullopt, ScalarType::Float32, ScalarType::Float32);
+    LinearCombinationOptions invalidCoefficient(ScalarType::Float32);
     invalidCoefficient.alpha = std::complex<double>(1.0, 1.0);
     rejectedBeforeAllocation = false;
     try {
-        (void)referenceAxpby(invalidCoefficient);
+        (void)linearCombination(x, std::nullopt, ScalarType::Float32, invalidCoefficient);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation, "Owning reference AXPBY accepted invalid coefficients.");
+    require(rejectedBeforeAllocation, "Owning linear combination accepted invalid coefficients.");
 }
 
 void testReferenceSoftmax() {
@@ -1225,10 +1197,7 @@ void testReferenceSoftmax() {
         }
     }
 
-    const SoftmaxRunInfo run =
-        referenceSoftmax(SoftmaxRequest(input, output, 1, ScalarType::Float32));
-    require(run.slicesProcessed == 4 && run.outputElementsWritten == shape.elementCount(),
-            "Reference softmax run information mismatch.");
+    referenceSoftmaxInto(input, output, 1, ScalarType::Float32);
 
     for (size_t batch = 0; batch < 2; ++batch) {
         for (size_t row = 0; row < 2; ++row) {
@@ -1242,18 +1211,14 @@ void testReferenceSoftmax() {
                 output.loadAs<float>({0, 1, 0}) < output.loadAs<float>({0, 2, 0}),
             "Reference softmax ordering mismatch.");
 
-    const SoftmaxProblem ownedProblem(input, ScalarType::Float32, 1, ScalarType::Float32);
-    const SoftmaxResult owned = referenceSoftmax(ownedProblem);
-    require(owned.output.layout() == Layout::contiguousLastDimensionFastest(shape) &&
-                owned.output.type() == ScalarType::Float32 && owned.runInfo.slicesProcessed == 4 &&
-                owned.runInfo.outputElementsWritten == shape.elementCount(),
+    const Tensor owned = referenceSoftmax(input, 1, ScalarType::Float32, ScalarType::Float32);
+    require(owned.layout() == Layout::contiguousLastDimensionFastest(shape) &&
+                owned.type() == ScalarType::Float32,
             "Owning reference softmax result contract mismatch.");
 
-    const SoftmaxProblem invalidProblem(input, ScalarType::Float32, shape.rank(),
-                                        ScalarType::Float32);
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceSoftmax(invalidProblem);
+        (void)referenceSoftmax(input, shape.rank(), ScalarType::Float32, ScalarType::Float32);
     } catch (const std::out_of_range&) {
         rejectedBeforeAllocation = true;
     }
@@ -1282,13 +1247,12 @@ void testReferenceLayerNorm() {
     Tensor mean(ScalarType::Float32, Layout(Shape{2, 2}, {3, 1}));
     Tensor inverseVariance(ScalarType::Float32, Layout(Shape{2, 2}, {1, 3}));
 
-    LayerNormRequest request(input, output, mean, inverseVariance, 1, ScalarType::Float32);
-    request.gamma = gamma;
-    request.beta = beta;
-    const LayerNormRunInfo run = referenceLayerNorm(request);
-    require(run.slicesProcessed == 4 && run.outputElementsWritten == shape.elementCount() &&
-                run.meanElementsWritten == 4 && run.inverseVarianceElementsWritten == 4,
-            "Reference LayerNorm run information mismatch.");
+    LayerNormOptions options;
+    options.axis = 1;
+    options.gamma = gamma;
+    options.beta = beta;
+    referenceLayerNormInto(
+        input, {.output = output, .mean = mean, .inverseVariance = inverseVariance}, options);
     require(mean.loadAs<float>({0, 0}) == 2.0f, "Reference LayerNorm mean mismatch.");
     require(std::abs(inverseVariance.loadAs<float>({0, 0}) -
                      1.0f / std::sqrt(2.0f / 3.0f + 1e-5f)) < 1e-6f,
@@ -1296,99 +1260,93 @@ void testReferenceLayerNorm() {
     require(output.loadAs<float>({0, 1, 0}) == -0.5f,
             "Reference LayerNorm affine output mismatch.");
 
-    LayerNormProblem ownedProblem(input, ScalarType::Float32, 1, ScalarType::Float32);
-    ownedProblem.meanType = ScalarType::Float32;
-    ownedProblem.inverseVarianceType = ScalarType::Float32;
-    ownedProblem.gamma = gamma;
-    ownedProblem.beta = beta;
-    const LayerNormResult owned = referenceLayerNorm(ownedProblem);
+    const LayerNormOutputs owned = referenceLayerNorm(input,
+                                                      {.output = ScalarType::Float32,
+                                                       .mean = ScalarType::Float32,
+                                                       .inverseVariance = ScalarType::Float32},
+                                                      options);
     require(owned.output.layout() == Layout::contiguousLastDimensionFastest(shape) && owned.mean &&
                 owned.mean->layout() == Layout::contiguousLastDimensionFastest(Shape{2, 2}) &&
                 owned.inverseVariance &&
                 owned.inverseVariance->layout() ==
                     Layout::contiguousLastDimensionFastest(Shape{2, 2}) &&
-                owned.runInfo.slicesProcessed == 4 &&
-                owned.runInfo.outputElementsWritten == shape.elementCount() &&
-                owned.runInfo.meanElementsWritten == 4 &&
-                owned.runInfo.inverseVarianceElementsWritten == 4 &&
                 owned.output.loadAs<float>({0, 1, 0}) == -0.5f,
             "Owning reference LayerNorm result contract mismatch.");
 
-    LayerNormProblem invalidProblem = ownedProblem;
-    invalidProblem.epsilon = std::numeric_limits<double>::quiet_NaN();
+    LayerNormOptions invalidOptions = options;
+    invalidOptions.epsilon = std::numeric_limits<double>::quiet_NaN();
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceLayerNorm(invalidProblem);
+        (void)referenceLayerNorm(input, {}, invalidOptions);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
     require(rejectedBeforeAllocation, "Owning reference LayerNorm accepted invalid epsilon.");
 
-    LayerNormProblem outputOnly(input, ScalarType::Float32, 1, ScalarType::Float32);
-    const LayerNormResult outputOnlyResult = referenceLayerNorm(outputOnly);
-    require(!outputOnlyResult.mean && !outputOnlyResult.inverseVariance &&
-                outputOnlyResult.runInfo.meanElementsWritten == 0 &&
-                outputOnlyResult.runInfo.inverseVarianceElementsWritten == 0,
+    const LayerNormOutputs outputOnly = referenceLayerNorm(input, {}, options);
+    require(!outputOnly.mean && !outputOnly.inverseVariance,
             "Owning reference LayerNorm created unrequested statistics.");
 
     const std::array<float, 3> rankOneValues{1.0f, 2.0f, 3.0f};
-    LayerNormProblem rankOne(
+    const LayerNormOutputs rankOneResult = referenceLayerNorm(
         Tensor::copyNativeValues<float>(Shape{3}, std::span<const float>(rankOneValues)),
-        ScalarType::Float32, 0, ScalarType::Float32);
-    rankOne.meanType = ScalarType::Float32;
-    const LayerNormResult rankOneResult = referenceLayerNorm(rankOne);
+        {.output = ScalarType::Float32, .mean = ScalarType::Float32});
     require(rankOneResult.mean && rankOneResult.mean->shape() == Shape{} &&
-                !rankOneResult.inverseVariance && rankOneResult.runInfo.meanElementsWritten == 1,
+                !rankOneResult.inverseVariance,
             "Owning reference LayerNorm did not preserve a requested rank-zero statistic.");
 }
 
 void testReferenceOperationAliasing() {
     using namespace roc::host_numerics;
 
-    Tensor axpbyInPlace =
+    Tensor linearCombinationInPlace =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{1.0f, 2.0f});
-    const Tensor axpbyY =
+    const Tensor linearCombinationY =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{3.0f, 4.0f});
-    AxpbyRequest axpbyInPlaceRequest(axpbyInPlace, axpbyY, axpbyInPlace, ScalarType::Float32);
-    axpbyInPlaceRequest.alpha = 2.0;
-    axpbyInPlaceRequest.beta = 1.0;
-    referenceAxpby(axpbyInPlaceRequest);
-    require(axpbyInPlace.loadAs<float>({0}) == 5.0f && axpbyInPlace.loadAs<float>({1}) == 8.0f,
-            "Reference AXPBY rejected or corrupted an exact in-place mapping.");
+    LinearCombinationOptions linearCombinationOptions(ScalarType::Float32);
+    linearCombinationOptions.alpha = 2.0;
+    linearCombinationOptions.beta = 1.0;
+    linearCombinationInto(linearCombinationInPlace, linearCombinationY, linearCombinationInPlace,
+                          linearCombinationOptions);
+    require(linearCombinationInPlace.loadAs<float>({0}) == 5.0f &&
+                linearCombinationInPlace.loadAs<float>({1}) == 8.0f,
+            "Linear-combination rejected or corrupted an exact in-place mapping.");
 
-    Tensor axpbyOverlap =
+    Tensor linearCombinationOverlap =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{11.0f, 22.0f});
-    Tensor axpbyReversedOutput = axpbyOverlap.shareStorageWithLayout(Layout(Shape{2}, {-1}, 1));
-    const std::vector<std::byte> axpbyOverlapBefore = copyRawEncodedBackingStorage(axpbyOverlap);
+    Tensor linearCombinationReversedOutput =
+        linearCombinationOverlap.shareStorageWithLayout(Layout(Shape{2}, {-1}, 1));
+    const std::vector<std::byte> linearCombinationOverlapBefore =
+        copyRawEncodedBackingStorage(linearCombinationOverlap);
     requireInvalidArgument(
         [&] {
-            referenceAxpby(
-                AxpbyRequest(axpbyOverlap, std::nullopt, axpbyReversedOutput, ScalarType::Float32));
+            linearCombinationInto(linearCombinationOverlap, std::nullopt,
+                                  linearCombinationReversedOutput);
         },
-        "Reference AXPBY accepted differently mapped overlapping storage.");
+        "Linear-combination accepted differently mapped overlapping storage.");
     requireRawEncodedBackingStorageEquals(
-        axpbyOverlap, axpbyOverlapBefore,
-        "Reference AXPBY modified destination storage before rejecting overlap.");
+        linearCombinationOverlap, linearCombinationOverlapBefore,
+        "Linear-combination modified destination storage before rejecting overlap.");
 
-    const Tensor distinctAxpbyInput =
+    const Tensor distinctLinearCombinationInput =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{1.0f, 2.0f});
-    Tensor selfCollidingAxpbyOutput(ScalarType::Float32, Layout(Shape{2}, {0}));
-    selfCollidingAxpbyOutput.storeFrom({0}, 17.0f);
-    const std::vector<std::byte> selfCollidingAxpbyOutputBefore =
-        copyRawEncodedBackingStorage(selfCollidingAxpbyOutput);
+    Tensor selfCollidingLinearCombinationOutput(ScalarType::Float32, Layout(Shape{2}, {0}));
+    selfCollidingLinearCombinationOutput.storeFrom({0}, 17.0f);
+    const std::vector<std::byte> selfCollidingLinearCombinationOutputBefore =
+        copyRawEncodedBackingStorage(selfCollidingLinearCombinationOutput);
     requireInvalidArgument(
         [&] {
-            referenceAxpby(AxpbyRequest(distinctAxpbyInput, std::nullopt, selfCollidingAxpbyOutput,
-                                        ScalarType::Float32));
+            linearCombinationInto(distinctLinearCombinationInput, std::nullopt,
+                                  selfCollidingLinearCombinationOutput);
         },
-        "Reference AXPBY accepted a self-colliding destination.");
+        "Linear-combination accepted a self-colliding destination.");
     requireRawEncodedBackingStorageEquals(
-        selfCollidingAxpbyOutput, selfCollidingAxpbyOutputBefore,
-        "Reference AXPBY modified a self-colliding destination before rejecting it.");
+        selfCollidingLinearCombinationOutput, selfCollidingLinearCombinationOutputBefore,
+        "Linear-combination modified a self-colliding destination before rejecting it.");
 
     Tensor softmaxInPlace =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{1.0f, 2.0f});
-    referenceSoftmax(SoftmaxRequest(softmaxInPlace, softmaxInPlace, 0, ScalarType::Float32));
+    referenceSoftmaxInto(softmaxInPlace, softmaxInPlace, 0);
     require(std::abs(softmaxInPlace.loadAs<float>({0}) + softmaxInPlace.loadAs<float>({1}) - 1.0f) <
                     1e-6f &&
                 softmaxInPlace.loadAs<float>({0}) < softmaxInPlace.loadAs<float>({1}),
@@ -1399,20 +1357,17 @@ void testReferenceOperationAliasing() {
     Tensor softmaxReversedOutput = softmaxOverlap.shareStorageWithLayout(Layout(Shape{2}, {-1}, 1));
     const std::vector<std::byte> softmaxOverlapBefore =
         copyRawEncodedBackingStorage(softmaxOverlap);
-    requireInvalidArgument(
-        [&] {
-            referenceSoftmax(
-                SoftmaxRequest(softmaxOverlap, softmaxReversedOutput, 0, ScalarType::Float32));
-        },
-        "Reference softmax accepted differently mapped overlapping storage.");
+    requireInvalidArgument([&] { referenceSoftmaxInto(softmaxOverlap, softmaxReversedOutput, 0); },
+                           "Reference softmax accepted differently mapped overlapping storage.");
     requireRawEncodedBackingStorageEquals(
         softmaxOverlap, softmaxOverlapBefore,
         "Reference softmax modified destination storage before rejecting overlap.");
 
     Tensor layerNormInPlace =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{1.0f, 3.0f});
-    referenceLayerNorm(
-        LayerNormRequest(layerNormInPlace, layerNormInPlace, 1, ScalarType::Float32));
+    LayerNormOptions layerNormOptions;
+    layerNormOptions.axis = 1;
+    referenceLayerNormInto(layerNormInPlace, {.output = layerNormInPlace}, layerNormOptions);
     require(layerNormInPlace.loadAs<float>({0, 0}) < 0.0f &&
                 layerNormInPlace.loadAs<float>({0, 1}) > 0.0f &&
                 std::abs(layerNormInPlace.loadAs<float>({0, 0}) +
@@ -1427,8 +1382,8 @@ void testReferenceOperationAliasing() {
         copyRawEncodedBackingStorage(layerNormOverlap);
     requireInvalidArgument(
         [&] {
-            referenceLayerNorm(LayerNormRequest(layerNormOverlap, layerNormReversedOutput, 1,
-                                                ScalarType::Float32));
+            referenceLayerNormInto(layerNormOverlap, {.output = layerNormReversedOutput},
+                                   layerNormOptions);
         },
         "Reference LayerNorm accepted differently mapped overlapping storage.");
     requireRawEncodedBackingStorageEquals(
@@ -1437,7 +1392,7 @@ void testReferenceOperationAliasing() {
 
     Tensor reductionInPlace =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{5.0f, 7.0f});
-    referenceSum(ReductionRequest(reductionInPlace, reductionInPlace, ScalarType::Float32, {}));
+    referenceSumInto(reductionInPlace, reductionInPlace, {}, ScalarType::Float32);
     require(
         reductionInPlace.loadAs<float>({0}) == 5.0f && reductionInPlace.loadAs<float>({1}) == 7.0f,
         "Reference reduction rejected or corrupted an exact pointwise mapping.");
@@ -1450,8 +1405,7 @@ void testReferenceOperationAliasing() {
         copyRawEncodedBackingStorage(reductionOverlap);
     requireInvalidArgument(
         [&] {
-            referenceSum(ReductionRequest(reductionOverlap, reductionReversedOutput,
-                                          ScalarType::Float32, {}));
+            referenceSumInto(reductionOverlap, reductionReversedOutput, {}, ScalarType::Float32);
         },
         "Reference reduction accepted differently mapped overlapping storage.");
     requireRawEncodedBackingStorageEquals(
@@ -1460,9 +1414,9 @@ void testReferenceOperationAliasing() {
 
     Tensor epilogueInPlace =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{1.0f, -2.0f});
-    EpilogueRequest epilogueInPlaceRequest(epilogueInPlace, epilogueInPlace, ScalarType::Float32);
-    epilogueInPlaceRequest.outputScale = 2.0;
-    referenceEpilogue(epilogueInPlaceRequest);
+    EpilogueOptions epilogueInPlaceOptions;
+    epilogueInPlaceOptions.outputScale = 2.0;
+    referenceEpilogueInto(epilogueInPlace, {.output = epilogueInPlace}, epilogueInPlaceOptions);
     require(epilogueInPlace.loadAs<float>({0, 0}) == 2.0f &&
                 epilogueInPlace.loadAs<float>({0, 1}) == -4.0f,
             "Reference epilogue rejected or corrupted an exact in-place mapping.");
@@ -1474,10 +1428,7 @@ void testReferenceOperationAliasing() {
     const std::vector<std::byte> epilogueOverlapBefore =
         copyRawEncodedBackingStorage(epilogueOverlap);
     requireInvalidArgument(
-        [&] {
-            referenceEpilogue(
-                EpilogueRequest(epilogueOverlap, epilogueReversedOutput, ScalarType::Float32));
-        },
+        [&] { referenceEpilogueInto(epilogueOverlap, {.output = epilogueReversedOutput}); },
         "Reference epilogue accepted differently mapped overlapping storage.");
     requireRawEncodedBackingStorageEquals(
         epilogueOverlap, epilogueOverlapBefore,
@@ -1491,9 +1442,8 @@ void testReferenceOperationAliasing() {
         copyRawEncodedBackingStorage(overlappingEpilogueOutputs);
     requireInvalidArgument(
         [&] {
-            referenceEpilogue(EpilogueRequest(epilogueInput, overlappingEpilogueOutputs,
-                                              overlappingEpilogueOutputs, std::nullopt,
-                                              std::nullopt, ScalarType::Float32));
+            referenceEpilogueInto(epilogueInput, {.output = overlappingEpilogueOutputs,
+                                                  .rawOutput = overlappingEpilogueOutputs});
         },
         "Reference epilogue accepted overlapping result tensors.");
     requireRawEncodedBackingStorageEquals(
@@ -1509,7 +1459,7 @@ void testActivations() {
     const std::array<float, 1> c{0};
     Tensor d(ScalarType::Float32, Shape{1, 1});
 
-    GemmRequest problem(
+    GemmTestCase problem(
         GemmOperand(Tensor::copyNativeStorage<float>(
             Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(a))),
         GemmOperand(Tensor::copyNativeStorage<float>(
@@ -1549,7 +1499,7 @@ void testStridedAndOffsetViews() {
     std::memcpy(dStorage.data(), initialStorage.data(), dStorage.size());
 
     const Layout outputLayout(Shape{2, 2}, {1, 5}, 1);
-    GemmRequest problem(
+    GemmTestCase problem(
         GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {4, 1}),
                                                      std::span<const float>(a))),
         GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {3, 1}),
@@ -1586,8 +1536,8 @@ void testStridedAndOffsetViews() {
 void testGenerationAndComparison() {
     using namespace roc::host_numerics;
 
-    const GenerationRecipe binaryGeneration = GenerationRecipe::realOnly(
-        GenerationRecipe::candidateSet({.values = {-1.0, 1.0}}), {.seed = 42});
+    const GenerationRecipe binaryGeneration =
+        GenerationRecipe::realOnly(GenerationRecipe::choice({.values = {-1.0, 1.0}}), {.seed = 42});
     Tensor a(ScalarType::Float32, Shape{32});
     Tensor b(ScalarType::Float32, Shape{32});
     generate(a, binaryGeneration);
@@ -1674,7 +1624,7 @@ void testComparisonProgram() {
                        Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
                        options);
     };
-    const ComparisonResult emptyResult = compareEmpty(emptyOptions);
+    const ComparisonReport emptyResult = compareEmpty(emptyOptions);
     require(emptyResult.compared == 0 && emptyResult.pointwiseEvaluated &&
                 emptyResult.pointwisePassed && !emptyResult.frobeniusEvaluated &&
                 !emptyResult.ulpEvaluated,
@@ -1722,7 +1672,7 @@ void testComparisonProgram() {
     evidenceOnly.pointwise = false;
     evidenceOnly.computeUlp = true;
     evidenceOnly.ulpType = ScalarType::Float64;
-    const ComparisonResult evidenceResult =
+    const ComparisonReport evidenceResult =
         compare(Tensor::copyNativeStorage(std::span<const double>(evidenceObserved)),
                 Tensor::copyNativeStorage(std::span<const double>(evidenceExpected)), evidenceOnly);
     require(!evidenceResult.pointwiseEvaluated && !evidenceResult.frobeniusEvaluated &&
@@ -1836,7 +1786,7 @@ void testComparisonProgram() {
     exactUnsignedOptions.ulpType = ScalarType::UInt64;
     exactUnsignedOptions.maximumUlpTolerance = 0.0;
     exactUnsignedOptions.maxReportedMismatches = 1;
-    const ComparisonResult exactUnsignedResult =
+    const ComparisonReport exactUnsignedResult =
         compare(Tensor::copyNativeStorage(std::span<const uint64_t>(exactUnsignedObserved)),
                 Tensor::copyNativeStorage(std::span<const uint64_t>(exactUnsignedExpected)),
                 exactUnsignedOptions);
@@ -1860,7 +1810,7 @@ void testComparisonProgram() {
     };
     ComparisonOptions exactSignedOptions = exactUnsignedOptions;
     exactSignedOptions.ulpType = ScalarType::Int64;
-    const ComparisonResult exactSignedResult =
+    const ComparisonReport exactSignedResult =
         compare(Tensor::copyNativeStorage(std::span<const int64_t>(exactSignedObserved)),
                 Tensor::copyNativeStorage(std::span<const int64_t>(exactSignedExpected)),
                 exactSignedOptions);
@@ -1872,7 +1822,7 @@ void testComparisonProgram() {
 
     const std::array<uint64_t, 1> mixedUnsignedObserved{uint64_t{1} << 53};
     const std::array<int64_t, 1> mixedSignedExpected{(int64_t{1} << 53) + 1};
-    const ComparisonResult mixedIntegerResult =
+    const ComparisonReport mixedIntegerResult =
         compare(Tensor::copyNativeStorage(std::span<const uint64_t>(mixedUnsignedObserved)),
                 Tensor::copyNativeStorage(std::span<const int64_t>(mixedSignedExpected)),
                 exactUnsignedOptions);
@@ -1882,7 +1832,7 @@ void testComparisonProgram() {
 
     const std::array<uint64_t, 1> unsignedMaximum{std::numeric_limits<uint64_t>::max()};
     const std::array<uint64_t, 1> unsignedZero{};
-    const ComparisonResult unsignedExtremeResult = compare(
+    const ComparisonReport unsignedExtremeResult = compare(
         Tensor::copyNativeStorage(std::span<const uint64_t>(unsignedMaximum)),
         Tensor::copyNativeStorage(std::span<const uint64_t>(unsignedZero)), exactUnsignedOptions);
     require(unsignedExtremeResult.maximumUlp ==
@@ -1892,7 +1842,7 @@ void testComparisonProgram() {
             "UInt64 comparison evidence overflowed at the full-width difference.");
 
     const std::array<int64_t, 1> negativeOne{-1};
-    const ComparisonResult mixedSignExtremeResult = compare(
+    const ComparisonReport mixedSignExtremeResult = compare(
         Tensor::copyNativeStorage(std::span<const uint64_t>(unsignedMaximum)),
         Tensor::copyNativeStorage(std::span<const int64_t>(negativeOne)), exactUnsignedOptions);
     require(mixedSignExtremeResult.mismatches == 1 &&
@@ -1902,7 +1852,7 @@ void testComparisonProgram() {
 
     const std::array<int64_t, 1> signedIntegerObserved{std::numeric_limits<int64_t>::lowest()};
     const std::array<int64_t, 1> signedIntegerExpected{std::numeric_limits<int64_t>::max()};
-    const ComparisonResult signedExtremeResult =
+    const ComparisonReport signedExtremeResult =
         compare(Tensor::copyNativeStorage(std::span<const int64_t>(signedIntegerObserved)),
                 Tensor::copyNativeStorage(std::span<const int64_t>(signedIntegerExpected)),
                 exactSignedOptions);
@@ -1947,7 +1897,7 @@ void testComparisonProgram() {
 
     const std::array<double, 1> zeroNorm{};
     strictNorm.zeroExpectedNormIsNaN = true;
-    const ComparisonResult zeroNormResult =
+    const ComparisonReport zeroNormResult =
         compare(Tensor::copyNativeStorage(std::span<const double>(zeroNorm)),
                 Tensor::copyNativeStorage(std::span<const double>(zeroNorm)), strictNorm);
     require(std::isnan(zeroNormResult.relativeFrobeniusError) &&
@@ -1956,7 +1906,7 @@ void testComparisonProgram() {
 
     const std::array<double, 1> infiniteNormValue{std::numeric_limits<double>::infinity()};
     strictNorm.nonFiniteValuesInvalidateRelativeNorms = true;
-    const ComparisonResult nonFiniteNormResult =
+    const ComparisonReport nonFiniteNormResult =
         compare(Tensor::copyNativeStorage(std::span<const double>(infiniteNormValue)),
                 Tensor::copyNativeStorage(std::span<const double>(infiniteNormValue)), strictNorm);
     require(std::isnan(nonFiniteNormResult.relativeFrobeniusError) &&
@@ -2011,7 +1961,7 @@ void testComparisonProgram() {
     ComparisonOptions noPointwiseStatistics;
     noPointwiseStatistics.computePointwiseStatistics = false;
     noPointwiseStatistics.computeFrobenius = false;
-    const ComparisonResult noPointwiseStatisticsResult = compare(
+    const ComparisonReport noPointwiseStatisticsResult = compare(
         Tensor::copyNativeStorage(std::span<const double>(doubleInfinity)),
         Tensor::copyNativeStorage(std::span<const float>(floatInfinity)), noPointwiseStatistics);
     require(
@@ -2104,7 +2054,7 @@ void testComparisonProgram() {
         std::complex<double>(1.0, quietNaN)};
     ComparisonOptions magnitudeEqualNaNs = allCloseComparisonOptions(0.0, 0.0, true);
     magnitudeEqualNaNs.computeFrobenius = false;
-    const ComparisonResult crossComponentNaNResult = compare(
+    const ComparisonReport crossComponentNaNResult = compare(
         Tensor::copyNativeStorage(std::span<const std::complex<double>>(crossComponentNaNObserved)),
         Tensor::copyNativeStorage(std::span<const std::complex<double>>(crossComponentNaNExpected)),
         magnitudeEqualNaNs);
@@ -2114,14 +2064,14 @@ void testComparisonProgram() {
     const double infinity = std::numeric_limits<double>::infinity();
     const std::array<std::complex<double>, 1> complexInfinity{
         std::complex<double>(infinity, infinity)};
-    const ComparisonResult complexInfinityResult =
+    const ComparisonReport complexInfinityResult =
         compare(Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexInfinity)),
                 Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexInfinity)),
                 magnitudeEqualNaNs);
     require(complexInfinityResult.passed() && complexInfinityResult.matchedInfinities == 1,
             "Complex magnitude comparison did not count a matched infinity as one logical value.");
     ComparisonOptions magnitudeInfinityWithFrobenius = allCloseComparisonOptions(0.0, 0.0, true);
-    const ComparisonResult complexInfinityWithFrobeniusResult =
+    const ComparisonReport complexInfinityWithFrobeniusResult =
         compare(Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexInfinity)),
                 Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexInfinity)),
                 magnitudeInfinityWithFrobenius);
@@ -2164,7 +2114,7 @@ void testComparisonProgram() {
     ComparisonOptions signedZeroNaN = allCloseComparisonOptions(0.0, 0.0, true);
     signedZeroNaN.equalSignedZero = false;
     signedZeroNaN.computeFrobenius = false;
-    const ComparisonResult signedZeroNaNResult = compare(
+    const ComparisonReport signedZeroNaNResult = compare(
         Tensor::copyNativeStorage(std::span<const std::complex<double>>(signedZeroNaNObserved)),
         Tensor::copyNativeStorage(std::span<const std::complex<double>>(signedZeroNaNExpected)),
         signedZeroNaN);
@@ -2209,7 +2159,7 @@ void testComparisonProgram() {
     std::array<float, 5> rangedSentinel{
         std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
         std::numeric_limits<float>::infinity(), 0.0f, std::numeric_limits<float>::infinity()};
-    const SentinelResult rangedSentinelResult = checkUnwrittenSentinel(
+    const SentinelReport rangedSentinelResult = checkUnwrittenSentinel(
         ScalarType::Float32, std::as_bytes(std::span<const float>(rangedSentinel)), 2, 2,
         SentinelRegion::Before);
     require(rangedSentinelResult.checked == 2 && rangedSentinelResult.mismatches == 1 &&
@@ -2257,7 +2207,7 @@ int main() {
     testReferenceReduction();
     testStructuredSparsity();
     testIndexedGeneration();
-    testReferenceAxpby();
+    testLinearCombination();
     testReferenceSoftmax();
     testReferenceLayerNorm();
     testReferenceOperationAliasing();

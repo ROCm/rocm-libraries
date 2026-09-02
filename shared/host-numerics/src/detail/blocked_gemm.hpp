@@ -3,11 +3,12 @@
 
 #pragma once
 
-#include <roc/host_numerics/gemm.hpp>
+#include "gemm_invocation.hpp"
 
 namespace roc::host_numerics::detail {
-GemmSupportInfo queryBlockedGemmSupport(const GemmRequest& request);
-bool isBlockedGemmPreferredForAutomaticExecution(const GemmRequest& request);
-GemmRunInfo runBlockedGemm(const GemmRequest& request);
-GemmRunInfo runBlockedGemmToSelectedOutput(const GemmRequest& request, Tensor& selectedOutput);
+GemmSupportInfo queryBlockedGemmSupport(const GemmInvocation& request);
+bool isBlockedGemmPreferredForAutomaticExecution(const GemmInvocation& request);
+GemmExecutionInfo runBlockedGemm(const GemmInvocation& request);
+GemmExecutionInfo runBlockedGemmToSelectedOutput(const GemmInvocation& request,
+                                                 Tensor& selectedOutput);
 }  // namespace roc::host_numerics::detail

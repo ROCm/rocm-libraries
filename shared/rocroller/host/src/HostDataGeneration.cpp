@@ -26,7 +26,7 @@ namespace rocRoller::HostNumerics
         using roc::host_numerics::IndexOrder;
         using roc::host_numerics::Layout;
         using roc::host_numerics::MxDataGeneration;
-        using roc::host_numerics::MxGenerationProblem;
+        using roc::host_numerics::MxGenerationOptions;
         using roc::host_numerics::MxScaleGenerationMode;
         using roc::host_numerics::ScalarType;
         using roc::host_numerics::Shape;
@@ -384,18 +384,19 @@ namespace rocRoller::HostNumerics
             Shape mxShape{descriptor.size(contiguousDimension), descriptor.size(freeDimension)};
             MxDataGeneration dataGeneration
                 = mxDataGeneration(initialization, mxShape, minimum, maximum, seed);
-            MxGenerationProblem problem(std::move(mxShape), std::move(dataGeneration));
-            problem.dataType
+            MxGenerationOptions options;
+            options.dataType
                 = hostScalarType(descriptor.dataType(), DataTypeInterpretation::BlockScaled);
-            problem.scaleType = hostScalarType(scaleType);
-            problem.leadingDimension
+            options.scaleType = hostScalarType(scaleType);
+            options.leadingDimension
                 = checkedPtrdiff(descriptor.stride(freeDimension),
                                  "rocRoller MX leading dimension exceeds ptrdiff_t.");
-            problem.blockAxis = blockedDimension == contiguousDimension ? 0 : 1;
-            problem.blockSize = scaleBlockSize;
-            problem.scale     = mxScaleGenerationMode(initialization.mode);
+            options.blockAxis = blockedDimension == contiguousDimension ? 0 : 1;
+            options.blockSize = scaleBlockSize;
+            options.scale     = mxScaleGenerationMode(initialization.mode);
 
-            auto   result = roc::host_numerics::generateMx(problem);
+            auto result
+                = roc::host_numerics::generateMx(std::move(mxShape), dataGeneration, options);
             Tensor data   = result.data.shareStorageWithLayout(hostTensorLayout(descriptor));
 
             auto const scaleLayout = hostScaleLayout(descriptor, blockedDimension, scaleBlockSize);

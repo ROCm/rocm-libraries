@@ -18,7 +18,7 @@ bool gemmTensorStorageOverlaps(const Tensor& left, const Tensor& right) {
                                      right.rawEncodedBackingStorage());
 }
 
-void validateOwnedGemmStorage(const GemmProblem& problem, const Tensor& output) {
+void validateOwnedGemmStorage(const GemmSpecification& problem, const Tensor& output) {
     std::vector<const Tensor*> inputs{
         &problem.a.values,
         &problem.b.values,
@@ -50,7 +50,7 @@ void initializeOwnedGemmOutput(const Tensor& output, size_t requiredStorageBytes
 }
 }  // namespace
 
-GemmSupportInfo queryGemmSupport(const GemmRequest& request, GemmBackend backend) {
+GemmSupportInfo detail::queryGemmSupport(const GemmInvocation& request, GemmBackend backend) {
     try {
         detail::validateRuntimeGemm(request);
     } catch (const std::exception& error) {
@@ -77,12 +77,12 @@ GemmSupportInfo queryGemmSupport(const GemmRequest& request, GemmBackend backend
     return {.supported = false, .reason = "Invalid reference GEMM backend."};
 }
 
-GemmRunInfo referenceGemm(const GemmRequest& request, GemmBackend backend) {
+detail::GemmExecutionInfo detail::executeGemm(const GemmInvocation& request, GemmBackend backend) {
     std::optional<std::string> fallbackReason;
     if (backend == GemmBackend::Automatic) {
         const GemmSupportInfo blockedSupport = detail::queryBlockedGemmSupport(request);
         if (blockedSupport && blockedSupport.preferredForAutomaticExecution) {
-            GemmRunInfo runInfo = detail::runBlockedGemm(request);
+            GemmExecutionInfo runInfo = detail::runBlockedGemm(request);
             runInfo.fallbackReason = std::move(fallbackReason);
             return runInfo;
         }
@@ -99,28 +99,43 @@ GemmRunInfo referenceGemm(const GemmRequest& request, GemmBackend backend) {
     const GemmSupportInfo pointwiseSupport = queryGemmSupport(request, GemmBackend::Pointwise);
     if (!pointwiseSupport) throw std::invalid_argument(pointwiseSupport.reason);
 
-    GemmRunInfo runInfo = detail::runPointwiseGemm(request);
+    GemmExecutionInfo runInfo = detail::runPointwiseGemm(request);
     runInfo.fallbackReason = std::move(fallbackReason);
     return runInfo;
 }
 
-GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& output,
-                         GemmBackend backend) {
+GemmSupportInfo queryGemmSupport(const GemmOperand& a, const GemmOperand& b, const Tensor& c,
+                                 const Tensor& d, const GemmOptions& options, GemmBackend backend) {
+    return detail::queryGemmSupport(detail::GemmInvocation(a, b, c, d, options), backend);
+}
+
+GemmBackend referenceGemmInto(GemmOperand a, GemmOperand b, Tensor c, Tensor d,
+                              const GemmOptions& options, GemmBackend backend) {
+    return detail::executeGemm(detail::GemmInvocation(std::move(a), std::move(b), std::move(c),
+                                                      std::move(d), options),
+                               backend)
+        .backendUsed;
+}
+
+Tensor referenceGemm(GemmOperand a, GemmOperand b, Tensor c, ScalarType outputType,
+                     const GemmOptions& options, std::optional<Layout> outputLayout,
+                     GemmBackend backend) {
+    const GemmSpecification problem(std::move(a), std::move(b), std::move(c), outputType, options);
     detail::validateRuntimeGemmProblem(problem);
     const Shape outputShape{problem.a.values.shape()[0], problem.b.values.shape()[1]};
-    const Layout outputLayout =
-        output.layout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
-    if (outputLayout.shape() != outputShape)
+    const Layout layout =
+        outputLayout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
+    if (layout.shape() != outputShape)
         throw std::invalid_argument("Owning reference GEMM output layout shape mismatch.");
-    (void)output.selection.selectedCount(outputShape.elementCount());
-    const size_t requiredStorageBytes = storageBytesForLayout(problem.outputType, outputLayout);
+    (void)options.outputSelection.selectedCount(outputShape.elementCount());
+    const size_t requiredStorageBytes = storageBytesForLayout(outputType, layout);
 
-    Tensor destination(problem.outputType, outputLayout);
+    Tensor destination(outputType, layout);
     validateOwnedGemmStorage(problem, destination);
     initializeOwnedGemmOutput(destination, requiredStorageBytes);
-    GemmRequest request(problem, destination, output.selection);
-    GemmRunInfo runInfo = referenceGemm(request, backend);
-    return {.output = std::move(destination), .runInfo = std::move(runInfo)};
+    (void)detail::executeGemm(GemmInvocation(problem, destination, options.outputSelection),
+                              backend);
+    return destination;
 }
 
 }  // namespace roc::host_numerics

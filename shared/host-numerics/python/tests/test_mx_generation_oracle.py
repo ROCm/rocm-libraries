@@ -737,14 +737,14 @@ def make_problem(case):
         data_generation = hv.MxDataGeneration.preserve_generated_encoding(data)
     else:
         data_generation = hv.MxDataGeneration.quantize(data)
-    problem = hv.MxGenerationProblem(hv.Shape(list(case.shape)), data_generation)
-    problem.data_type = case.data_type
-    problem.scale_type = case.scale_type
-    problem.leading_dimension = case.leading_dimension
-    problem.block_axis = case.block_axis
-    problem.block_size = case.block_size
-    problem.scale = case.scale if scale_override is None else scale_override
-    return problem
+    options = hv.MxGenerationOptions()
+    options.data_type = case.data_type
+    options.scale_type = case.scale_type
+    options.leading_dimension = case.leading_dimension
+    options.block_axis = case.block_axis
+    options.block_size = case.block_size
+    options.scale = case.scale if scale_override is None else scale_override
+    return hv.Shape(list(case.shape)), data_generation, options
 
 
 class MxGenerationOracleTests(unittest.TestCase):
@@ -761,7 +761,7 @@ class MxGenerationOracleTests(unittest.TestCase):
 
     def assert_matches_oracle(self, case):
         expected = expected_mx(case)
-        observed = hv.generate_mx(make_problem(case))
+        observed = hv.generate_mx(*make_problem(case))
         rows = case.shape[0]
         leading_dimension = case.leading_dimension or rows
         blocked_extent = case.shape[case.block_axis]
@@ -1014,7 +1014,7 @@ class MxGenerationOracleTests(unittest.TestCase):
             )
             with self.subTest(recipe=label):
                 with self.assertRaises(ValueError):
-                    hv.generate_mx(make_problem(case))
+                    hv.generate_mx(*make_problem(case))
 
         with self.assertRaises(TypeError):
             hv.UniformIntegerGenerationParameters(0, 1 << 40)
@@ -1030,7 +1030,7 @@ class MxGenerationOracleTests(unittest.TestCase):
             Recipe(RecipeKind.TYPE_INFINITY),
         )
         with self.assertRaises(ValueError):
-            hv.generate_mx(make_problem(no_infinity))
+            hv.generate_mx(*make_problem(no_infinity))
 
         impossible_interval = MxCase(
             "unrepresentable_bounded_interval",
@@ -1044,7 +1044,7 @@ class MxGenerationOracleTests(unittest.TestCase):
             scale=hv.MxScaleGenerationMode.One,
         )
         with self.assertRaises(ValueError):
-            hv.generate_mx(make_problem(impossible_interval))
+            hv.generate_mx(*make_problem(impossible_interval))
 
     def test_invalid_geometry_and_type_pairs_are_rejected(self):
         base = dict(
@@ -1094,7 +1094,7 @@ class MxGenerationOracleTests(unittest.TestCase):
         for label, case, error in invalid_cases:
             with self.subTest(case=label):
                 with self.assertRaises(error):
-                    hv.generate_mx(make_problem(case))
+                    hv.generate_mx(*make_problem(case))
 
 
 if __name__ == "__main__":

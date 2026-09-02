@@ -22,6 +22,12 @@ struct LayerNormPlan {
     size_t slices = 0;
 };
 
+struct LayerNormInvocation {
+    Tensor input;
+    LayerNormOutputs outputs;
+    LayerNormOptions options;
+};
+
 inline Shape layerNormStatisticsShape(const Shape& inputShape, size_t axis) {
     std::vector<size_t> dimensions;
     dimensions.reserve(inputShape.rank() - 1);
@@ -31,90 +37,90 @@ inline Shape layerNormStatisticsShape(const Shape& inputShape, size_t axis) {
     return Shape(std::move(dimensions));
 }
 
-inline LayerNormPlan validateLayerNormProblem(const LayerNormProblem& problem) {
-    if (!isConcreteScalarType(problem.outputType))
+inline LayerNormPlan validateLayerNormArguments(const Tensor& input,
+                                                const LayerNormOutputTypes& outputTypes,
+                                                const LayerNormOptions& options) {
+    if (!isConcreteScalarType(outputTypes.output))
         throw std::invalid_argument("Reference LayerNorm output type is invalid.");
-    if (problem.meanType && !isConcreteScalarType(*problem.meanType))
+    if (outputTypes.mean && !isConcreteScalarType(*outputTypes.mean))
         throw std::invalid_argument("Reference LayerNorm mean type is invalid.");
-    if (problem.inverseVarianceType && !isConcreteScalarType(*problem.inverseVarianceType))
+    if (outputTypes.inverseVariance && !isConcreteScalarType(*outputTypes.inverseVariance))
         throw std::invalid_argument("Reference LayerNorm inverse-variance type is invalid.");
-    if (problem.axis >= problem.input.shape().rank())
+    if (options.axis >= input.shape().rank())
         throw std::out_of_range("Reference LayerNorm axis exceeds input rank.");
-    if (problem.input.shape()[problem.axis] == 0)
+    if (input.shape()[options.axis] == 0)
         throw std::invalid_argument("Reference LayerNorm axis must be nonempty.");
-    if (!std::isfinite(problem.epsilon) || problem.epsilon < 0)
+    if (!std::isfinite(options.epsilon) || options.epsilon < 0)
         throw std::invalid_argument("Reference LayerNorm epsilon must be finite and nonnegative.");
-    if (problem.accumulatorType != ScalarType::Float32 &&
-        problem.accumulatorType != ScalarType::Float64)
+    if (options.accumulatorType != ScalarType::Float32 &&
+        options.accumulatorType != ScalarType::Float64)
         throw std::invalid_argument(
             "Reference LayerNorm requires a Float32 or Float64 accumulator.");
 
-    const size_t axisElements = problem.input.shape()[problem.axis];
-    if (problem.gamma) validateRuntimeVector(*problem.gamma, axisElements, "LayerNorm", "gamma");
-    if (problem.beta) validateRuntimeVector(*problem.beta, axisElements, "LayerNorm", "beta");
+    const size_t axisElements = input.shape()[options.axis];
+    if (options.gamma) validateRuntimeVector(*options.gamma, axisElements, "LayerNorm", "gamma");
+    if (options.beta) validateRuntimeVector(*options.beta, axisElements, "LayerNorm", "beta");
 
     return {
-        .statisticsShape = layerNormStatisticsShape(problem.input.shape(), problem.axis),
+        .statisticsShape = layerNormStatisticsShape(input.shape(), options.axis),
         .axisElements = axisElements,
-        .slices = problem.input.shape().elementCountExcluding(problem.axis),
+        .slices = input.shape().elementCountExcluding(options.axis),
     };
 }
 
-inline LayerNormPlan validateLayerNormRequest(const LayerNormRequest& request) {
-    LayerNormPlan plan = validateLayerNormProblem(request);
-    if (request.output.shape() != request.input.shape())
+inline LayerNormPlan validateLayerNormInvocation(const LayerNormInvocation& invocation) {
+    const LayerNormOutputTypes outputTypes{
+        .output = invocation.outputs.output.type(),
+        .mean =
+            invocation.outputs.mean ? std::optional(invocation.outputs.mean->type()) : std::nullopt,
+        .inverseVariance = invocation.outputs.inverseVariance
+                               ? std::optional(invocation.outputs.inverseVariance->type())
+                               : std::nullopt,
+    };
+    LayerNormPlan plan =
+        validateLayerNormArguments(invocation.input, outputTypes, invocation.options);
+    if (invocation.outputs.output.shape() != invocation.input.shape())
         throw std::invalid_argument("Reference LayerNorm input/output shapes differ.");
-    if (request.output.type() != request.outputType)
-        throw std::invalid_argument("Reference LayerNorm output type differs from the problem.");
-    if (request.mean.has_value() != request.meanType.has_value())
-        throw std::invalid_argument(
-            "Reference LayerNorm mean destination does not match the problem.");
-    if (request.inverseVariance.has_value() != request.inverseVarianceType.has_value())
-        throw std::invalid_argument(
-            "Reference LayerNorm inverse-variance destination does not match the problem.");
-    if (request.mean && request.mean->shape() != plan.statisticsShape)
+    if (invocation.outputs.mean && invocation.outputs.mean->shape() != plan.statisticsShape)
         throw std::invalid_argument("Reference LayerNorm mean shape mismatch.");
-    if (request.mean && request.mean->type() != *request.meanType)
-        throw std::invalid_argument("Reference LayerNorm mean type differs from the problem.");
-    if (request.inverseVariance && request.inverseVariance->shape() != plan.statisticsShape)
+    if (invocation.outputs.inverseVariance &&
+        invocation.outputs.inverseVariance->shape() != plan.statisticsShape)
         throw std::invalid_argument("Reference LayerNorm inverse-variance shape mismatch.");
-    if (request.inverseVariance && request.inverseVariance->type() != *request.inverseVarianceType)
-        throw std::invalid_argument(
-            "Reference LayerNorm inverse-variance type differs from the problem.");
 
-    requireProvablyDistinctDestinationElementOffsets(request.output, "Reference LayerNorm",
-                                                     "output");
+    requireProvablyDistinctDestinationElementOffsets(invocation.outputs.output,
+                                                     "Reference LayerNorm", "output");
     rejectOverlappingTensorStorageUnlessIdenticallyMapped(
-        request.output, request.input,
+        invocation.outputs.output, invocation.input,
         "Reference LayerNorm output overlaps input with a different storage mapping.");
-    if (request.gamma)
-        rejectOverlappingTensorStorage(request.output, *request.gamma,
+    if (invocation.options.gamma)
+        rejectOverlappingTensorStorage(invocation.outputs.output, *invocation.options.gamma,
                                        "Reference LayerNorm output overlaps gamma.");
-    if (request.beta)
-        rejectOverlappingTensorStorage(request.output, *request.beta,
+    if (invocation.options.beta)
+        rejectOverlappingTensorStorage(invocation.outputs.output, *invocation.options.beta,
                                        "Reference LayerNorm output overlaps beta.");
 
     const std::array<const Tensor*, 2> statistics{
-        request.mean ? &*request.mean : nullptr,
-        request.inverseVariance ? &*request.inverseVariance : nullptr,
+        invocation.outputs.mean ? &*invocation.outputs.mean : nullptr,
+        invocation.outputs.inverseVariance ? &*invocation.outputs.inverseVariance : nullptr,
     };
     for (const Tensor* statistic : statistics) {
         if (!statistic) continue;
         requireProvablyDistinctDestinationElementOffsets(*statistic, "Reference LayerNorm",
                                                          "statistic output");
-        rejectOverlappingTensorStorage(*statistic, request.input,
+        rejectOverlappingTensorStorage(*statistic, invocation.input,
                                        "Reference LayerNorm statistic output overlaps input.");
-        if (request.gamma)
-            rejectOverlappingTensorStorage(*statistic, *request.gamma,
+        if (invocation.options.gamma)
+            rejectOverlappingTensorStorage(*statistic, *invocation.options.gamma,
                                            "Reference LayerNorm statistic output overlaps gamma.");
-        if (request.beta)
-            rejectOverlappingTensorStorage(*statistic, *request.beta,
+        if (invocation.options.beta)
+            rejectOverlappingTensorStorage(*statistic, *invocation.options.beta,
                                            "Reference LayerNorm statistic output overlaps beta.");
-        rejectOverlappingTensorStorage(*statistic, request.output,
+        rejectOverlappingTensorStorage(*statistic, invocation.outputs.output,
                                        "Reference LayerNorm statistic output overlaps output.");
     }
-    if (request.mean && request.inverseVariance)
-        rejectOverlappingTensorStorage(*request.mean, *request.inverseVariance,
+    if (invocation.outputs.mean && invocation.outputs.inverseVariance)
+        rejectOverlappingTensorStorage(*invocation.outputs.mean,
+                                       *invocation.outputs.inverseVariance,
                                        "Reference LayerNorm statistic outputs overlap.");
     return plan;
 }
@@ -142,28 +148,28 @@ inline std::vector<size_t> layerNormStatisticsCoordinates(std::span<const size_t
 }
 
 template <typename Accumulator>
-LayerNormRunInfo referenceLayerNormTyped(const LayerNormRequest& request,
-                                         const LayerNormPlan& plan) {
-    const RuntimeTensorReader<Accumulator> input(request.input);
-    const RuntimeTensorWriter<Accumulator> output(request.output);
+void referenceLayerNormTyped(const LayerNormInvocation& invocation, const LayerNormPlan& plan) {
+    const RuntimeTensorReader<Accumulator> input(invocation.input);
+    const RuntimeTensorWriter<Accumulator> output(invocation.outputs.output);
     std::optional<RuntimeTensorWriter<Accumulator>> mean;
     std::optional<RuntimeTensorWriter<Accumulator>> inverseVariance;
     std::optional<RuntimeVectorReader<Accumulator>> gamma;
     std::optional<RuntimeVectorReader<Accumulator>> beta;
-    if (request.mean) mean.emplace(*request.mean);
-    if (request.inverseVariance) inverseVariance.emplace(*request.inverseVariance);
-    if (request.gamma) gamma.emplace(*request.gamma);
-    if (request.beta) beta.emplace(*request.beta);
+    if (invocation.outputs.mean) mean.emplace(*invocation.outputs.mean);
+    if (invocation.outputs.inverseVariance)
+        inverseVariance.emplace(*invocation.outputs.inverseVariance);
+    if (invocation.options.gamma) gamma.emplace(*invocation.options.gamma);
+    if (invocation.options.beta) beta.emplace(*invocation.options.beta);
 
-    const Accumulator epsilon = static_cast<Accumulator>(request.epsilon);
+    const Accumulator epsilon = static_cast<Accumulator>(invocation.options.epsilon);
 
     for (size_t slice = 0; slice < plan.slices; ++slice) {
         std::vector<size_t> coordinates =
-            layerNormSliceCoordinates(slice, request.input.shape(), request.axis);
+            layerNormSliceCoordinates(slice, invocation.input.shape(), invocation.options.axis);
         Accumulator average = Accumulator(0);
         Accumulator secondMoment = Accumulator(0);
         for (size_t index = 0; index < plan.axisElements; ++index) {
-            coordinates[request.axis] = index;
+            coordinates[invocation.options.axis] = index;
             const Accumulator value = input(coordinates);
             const Accumulator delta = value - average;
             average += delta / static_cast<Accumulator>(index + 1);
@@ -176,26 +182,19 @@ LayerNormRunInfo referenceLayerNormTyped(const LayerNormRequest& request,
 
         if (mean || inverseVariance) {
             const std::vector<size_t> statisticsCoordinates =
-                layerNormStatisticsCoordinates(coordinates, request.axis);
+                layerNormStatisticsCoordinates(coordinates, invocation.options.axis);
             if (mean) mean->store(statisticsCoordinates, average);
             if (inverseVariance) inverseVariance->store(statisticsCoordinates, inverse);
         }
 
         for (size_t index = 0; index < plan.axisElements; ++index) {
-            coordinates[request.axis] = index;
+            coordinates[invocation.options.axis] = index;
             Accumulator value = (input(coordinates) - average) * inverse;
             if (gamma) value *= (*gamma)[index];
             if (beta) value += (*beta)[index];
             output.store(coordinates, value);
         }
     }
-
-    return {
-        .slicesProcessed = plan.slices,
-        .outputElementsWritten = request.output.shape().elementCount(),
-        .meanElementsWritten = request.mean ? plan.slices : 0,
-        .inverseVarianceElementsWritten = request.inverseVariance ? plan.slices : 0,
-    };
 }
 }  // namespace detail
 }  // namespace roc::host_numerics

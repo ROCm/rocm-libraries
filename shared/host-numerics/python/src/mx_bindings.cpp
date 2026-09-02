@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/vector.h>
 
 #include <roc/host_numerics/mx.hpp>
 
@@ -42,25 +43,29 @@ void registerMxBindings(nb::module_& module) {
         .value("Maximum", MxScaleGenerationMode::Maximum)
         .value("NaN", MxScaleGenerationMode::NaN);
 
-    nb::class_<MxGenerationProblem>(module, "MxGenerationProblem")
-        .def(nb::init<Shape, MxDataGeneration>(), "shape"_a, "data"_a)
-        .def_rw("data_type", &MxGenerationProblem::dataType)
-        .def_rw("scale_type", &MxGenerationProblem::scaleType)
-        .def_rw("shape", &MxGenerationProblem::shape)
-        .def_rw("leading_dimension", &MxGenerationProblem::leadingDimension)
-        .def_rw("block_axis", &MxGenerationProblem::blockAxis)
-        .def_rw("block_size", &MxGenerationProblem::blockSize)
-        .def_rw("data", &MxGenerationProblem::data)
-        .def_rw("scale", &MxGenerationProblem::scale);
+    nb::class_<MxGenerationOptions>(module, "MxGenerationOptions")
+        .def(nb::init<>())
+        .def_rw("data_type", &MxGenerationOptions::dataType)
+        .def_rw("scale_type", &MxGenerationOptions::scaleType)
+        .def_rw("leading_dimension", &MxGenerationOptions::leadingDimension)
+        .def_rw("block_axis", &MxGenerationOptions::blockAxis)
+        .def_rw("block_size", &MxGenerationOptions::blockSize)
+        .def_rw("scale", &MxGenerationOptions::scale);
 
-    nb::class_<MxGenerationResult>(module, "MxGenerationResult")
-        .def_ro("data", &MxGenerationResult::data)
-        .def_ro("scales", &MxGenerationResult::scales)
-        .def_ro("scale_indices", &MxGenerationResult::scaleIndices)
-        .def_ro("reference", &MxGenerationResult::reference);
+    nb::class_<MxTensor>(module, "MxTensor")
+        .def_ro("data", &MxTensor::data)
+        .def_ro("scales", &MxTensor::scales)
+        .def_ro("scale_indices", &MxTensor::scaleIndices)
+        .def_ro("reference", &MxTensor::reference);
 
-    module.def("generate_mx",
-               static_cast<MxGenerationResult (*)(const MxGenerationProblem&)>(&generateMx),
-               "problem"_a);
+    module.def(
+        "generate_mx",
+        [](std::vector<size_t> shape, MxDataGeneration generation,
+           const MxGenerationOptions& options) {
+            return generateMx(Shape(std::move(shape)), std::move(generation), options);
+        },
+        "shape"_a, "generation"_a, "options"_a = MxGenerationOptions{});
+    module.def("generate_mx", &generateMx, "shape"_a, "generation"_a,
+               "options"_a = MxGenerationOptions{});
 }
 }  // namespace roc::host_numerics::python_bindings

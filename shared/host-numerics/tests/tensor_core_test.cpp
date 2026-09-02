@@ -111,6 +111,21 @@ int main() {
     require(nativeTensor.type() == ScalarType::Float32 && nativeTensor.loadAs<float>({2}) == 6.0f,
             "Native tensor factory mismatch.");
 
+    Tensor scalarTensor(ScalarType::Float32, Layout(Shape{}, {}, 2));
+    scalarTensor.storeFrom({}, -3.5f);
+    const Scalar scalarSnapshot = scalarTensor.item();
+    scalarTensor.storeFrom({}, 9.0f);
+    require(scalarSnapshot.type() == ScalarType::Float32 && scalarSnapshot.as<float>() == -3.5f,
+            "Tensor item did not preserve independent scalar value semantics.");
+
+    Tensor packedScalarTensor(ScalarType::Float6E3M2, Layout(Shape{}, {}, 1));
+    packedScalarTensor.storeFrom({}, 1.5f);
+    const Scalar packedScalar = packedScalarTensor;
+    require(packedScalar.type() == ScalarType::Float6E3M2 && packedScalar.as<float>() == 1.5f,
+            "Packed rank-zero Tensor did not convert to Scalar.");
+    requireInvalidArgument([&] { (void)nativeTensor.item(); },
+                           "Tensor item accepted a non-scalar shape.");
+
     Tensor uninitialized = Tensor::allocateUninitialized(ScalarType::Float32, Shape{2});
     uninitialized.storeFrom({0}, 3.0f);
     uninitialized.storeFrom({1}, 7.0f);

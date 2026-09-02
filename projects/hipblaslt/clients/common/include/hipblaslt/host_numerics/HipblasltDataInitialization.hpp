@@ -34,7 +34,7 @@ namespace hipblaslt::host_numerics
     using ::roc::host_numerics::Tensor;
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-    using ::roc::host_numerics::MxGenerationProblem;
+    using ::roc::host_numerics::MxTensor;
 #endif
 
     enum class MatrixRole
@@ -69,15 +69,14 @@ namespace hipblaslt::host_numerics
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
     inline constexpr uint32_t mxDefaultSeed = 1713573849U;
 
-    ::roc::host_numerics::MxGenerationProblem
-        makeMxGenerationProblem(hipDataType              dataType,
-                                hipDataType              scaleType,
-                                ::roc::host_numerics::Shape shape,
-                                uint64_t                 leadingDimension,
-                                size_t                   blockAxis,
-                                size_t                   blockSize,
-                                hipblaslt_initialization initialization,
-                                uint32_t                 seed = mxDefaultSeed);
+    ::roc::host_numerics::MxTensor generateMxData(hipDataType                 dataType,
+                                                  hipDataType                 scaleType,
+                                                  ::roc::host_numerics::Shape shape,
+                                                  uint64_t                    leadingDimension,
+                                                  size_t                      blockAxis,
+                                                  size_t                      blockSize,
+                                                  hipblaslt_initialization    initialization,
+                                                  uint32_t                    seed = mxDefaultSeed);
 
     ::roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout
         mxScaleStorageLayoutForArchName(std::string_view archName);

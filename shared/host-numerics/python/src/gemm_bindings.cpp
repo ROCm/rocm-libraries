@@ -29,16 +29,19 @@ void validatePythonGemmBackend(GemmBackend backend) {
         throw std::invalid_argument("Mixed is a reporting-only GEMM backend value.");
 }
 
-GemmResult referenceGemmRequestBound(const GemmRequest& request, GemmBackend backend) {
+Tensor referenceGemmOwned(GemmOperand a, GemmOperand b, Tensor c, ScalarType outputType,
+                          GemmOptions options, std::optional<Layout> outputLayout,
+                          GemmBackend backend) {
     validatePythonGemmBackend(backend);
-    GemmRunInfo runInfo = referenceGemm(request, backend);
-    return {.output = request.d, .runInfo = std::move(runInfo)};
+    return referenceGemm(std::move(a), std::move(b), std::move(c), outputType, options,
+                         std::move(outputLayout), backend);
 }
 
-GemmResult referenceGemmProblemOwned(const GemmProblem& problem, const GemmOutputOptions& output,
-                                     GemmBackend backend) {
+GemmBackend referenceGemmIntoBound(GemmOperand a, GemmOperand b, Tensor c, Tensor d,
+                                   GemmOptions options, GemmBackend backend) {
     validatePythonGemmBackend(backend);
-    return referenceGemm(problem, output, backend);
+    return referenceGemmInto(std::move(a), std::move(b), std::move(c), std::move(d), options,
+                             backend);
 }
 
 }  // namespace
@@ -116,53 +119,18 @@ void registerGemmBindings(nb::module_& module) {
                 epilogue.activationParameter1 = Scalar(value);
             });
 
-    nb::class_<GemmOutputOptions>(module, "GemmOutputOptions",
-                                  "Owning GEMM output layout and logical-coordinate selection.")
-        .def(nb::init<>())
-        .def_rw("layout", &GemmOutputOptions::layout)
-        .def_rw("selection", &GemmOutputOptions::selection);
+    nb::class_<GemmOptions>(module, "GemmOptions", "GEMM arithmetic and epilogue options.")
+        .def(nb::init<ScalarType>(), "accumulator_type"_a = ScalarType::Float32)
+        .def_rw("accumulator_type", &GemmOptions::accumulatorType)
+        .def_rw("accumulation_rounding", &GemmOptions::accumulationRounding)
+        .def_rw("math_mode", &GemmOptions::mathMode)
+        .def_rw("epilogue", &GemmOptions::epilogue)
+        .def_rw("output_selection", &GemmOptions::outputSelection);
 
-    nb::class_<GemmProblem>(module, "GemmProblem", "Reusable numerical GEMM descriptor.")
-        .def(nb::init<GemmOperand, GemmOperand, Tensor, ScalarType, ScalarType>(), "a"_a, "b"_a,
-             "c"_a, "output_type"_a = ScalarType::Float32,
-             "accumulator_type"_a = ScalarType::Float32)
-        .def_rw("a", &GemmProblem::a)
-        .def_rw("b", &GemmProblem::b)
-        .def_rw("c", &GemmProblem::c)
-        .def_rw("output_type", &GemmProblem::outputType)
-        .def_rw("accumulator_type", &GemmProblem::accumulatorType)
-        .def_rw("accumulation_rounding", &GemmProblem::accumulationRounding)
-        .def_rw("math_mode", &GemmProblem::mathMode)
-        .def_rw("epilogue", &GemmProblem::epilogue);
-
-    nb::class_<GemmRequest, GemmProblem>(
-        module, "GemmRequest",
-        "Caller-owned GEMM invocation. The result aliases the supplied D tensor.")
-        .def(nb::init<GemmOperand, GemmOperand, Tensor, Tensor, ScalarType>(), "a"_a, "b"_a, "c"_a,
-             "d"_a, "accumulator_type"_a = ScalarType::Float32)
-        .def(nb::init<GemmProblem, Tensor, OutputSelection>(), "problem"_a, "d"_a,
-             "output_selection"_a = OutputSelection::all())
-        .def_rw("d", &GemmRequest::d)
-        .def_rw("output_selection", &GemmRequest::outputSelection);
-
-    nb::class_<GemmRunInfo>(module, "GemmRunInfo")
-        .def_ro("backend_used", &GemmRunInfo::backendUsed)
-        .def_ro("fallback_reason", &GemmRunInfo::fallbackReason)
-        .def_ro("output_elements_written", &GemmRunInfo::outputElementsWritten)
-        .def_ro("output_elements_covered", &GemmRunInfo::outputElementsCovered);
-
-    nb::class_<GemmResult>(module, "GemmResult")
-        .def_prop_ro(
-            "output", [](const GemmResult& result) -> const Tensor& { return result.output; },
-            nb::rv_policy::reference_internal)
-        .def_prop_ro(
-            "run_info",
-            [](const GemmResult& result) -> const GemmRunInfo& { return result.runInfo; },
-            nb::rv_policy::reference_internal);
-
-    module.def("reference_gemm_result", &referenceGemmRequestBound, "request"_a,
-               "backend"_a = GemmBackend::Pointwise);
-    module.def("reference_gemm_result", &referenceGemmProblemOwned, "problem"_a,
-               "output"_a = GemmOutputOptions{}, "backend"_a = GemmBackend::Pointwise);
+    module.def("reference_gemm_operands", &referenceGemmOwned, "a"_a, "b"_a, "c"_a,
+               "output_type"_a = ScalarType::Float32, "options"_a = GemmOptions{},
+               "output_layout"_a = std::optional<Layout>{}, "backend"_a = GemmBackend::Pointwise);
+    module.def("reference_gemm_into", &referenceGemmIntoBound, "a"_a, "b"_a, "c"_a, "d"_a,
+               "options"_a = GemmOptions{}, "backend"_a = GemmBackend::Pointwise);
 }
 }  // namespace roc::host_numerics::python_bindings

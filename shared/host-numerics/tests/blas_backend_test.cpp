@@ -11,6 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include "gemm_test_adapter.hpp"
+
 namespace {
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
@@ -51,21 +53,21 @@ void testTransformingBlockScaleFallsBack(roc::host_numerics::ScalarType accumula
         return operand;
     };
 
-    GemmRequest pointwiseProblem(makeOperandA(), makeOperandB(),
-                                 Tensor::copyNativeStorage<T>(layoutD, std::span<const T>(c)),
-                                 pointwiseD, accumulatorType);
+    GemmTestCase pointwiseProblem(makeOperandA(), makeOperandB(),
+                                  Tensor::copyNativeStorage<T>(layoutD, std::span<const T>(c)),
+                                  pointwiseD, accumulatorType);
     referenceGemm(pointwiseProblem);
 
-    GemmRequest transformingProblem(makeOperandA(), makeOperandB(),
-                                    Tensor::copyNativeStorage<T>(layoutD, std::span<const T>(c)),
-                                    transformingD, accumulatorType);
+    GemmTestCase transformingProblem(makeOperandA(), makeOperandB(),
+                                     Tensor::copyNativeStorage<T>(layoutD, std::span<const T>(c)),
+                                     transformingD, accumulatorType);
     const GemmSupportInfo support =
         queryGemmSupportWithBlasBackend(transformingProblem, GemmBackend::Blas);
     require(!support.supported &&
                 support.reason ==
                     "Transforming BLAS backend cannot preserve block-scale reduction boundaries.",
             "Transforming BLAS did not reject block scaling with a precise reason.");
-    const GemmRunInfo runInfo = referenceGemmWithBlasBackend(transformingProblem);
+    const GemmTestRunInfo runInfo = referenceGemmWithBlasBackend(transformingProblem);
     require(runInfo.backendUsed == GemmBackend::Pointwise && runInfo.fallbackReason.has_value(),
             "Transforming BLAS block scaling did not fall back to Pointwise.");
 
@@ -86,11 +88,11 @@ void testPartialOutputSelection() {
     constexpr std::array<float, 4> untouched{-99, -99, -99, -99};
     Tensor d = Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}),
                                                 std::span<const float>(untouched));
-    GemmRequest problem(GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}),
-                                                                     std::span<const float>(a))),
-                        GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}),
-                                                                     std::span<const float>(b))),
-                        d, d, ScalarType::Float32);
+    GemmTestCase problem(GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}),
+                                                                      std::span<const float>(a))),
+                         GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}),
+                                                                      std::span<const float>(b))),
+                         d, d, ScalarType::Float32);
     problem.outputSelection = OutputSelection::explicitIndices({0, 3});
 
     const GemmSupportInfo support = queryGemmSupportWithBlasBackend(problem, GemmBackend::Blas);
@@ -110,7 +112,7 @@ void testPartialOutputSelection() {
             .passed(),
         "Rejected BLAS execution modified output.");
 
-    const GemmRunInfo fallback = referenceGemmWithBlasBackend(problem);
+    const GemmTestRunInfo fallback = referenceGemmWithBlasBackend(problem);
     require(fallback.backendUsed == GemmBackend::Pointwise &&
                 fallback.fallbackReason == support.reason && fallback.outputElementsWritten == 2 &&
                 fallback.outputElementsCovered == 2,
@@ -124,10 +126,10 @@ void testTransformingAutomaticCostPolicy() {
     using namespace roc::host_numerics;
 
     auto makeProblem = [](ScalarType inputType, size_t rows, size_t columns, size_t reductions) {
-        return GemmRequest(GemmOperand(Tensor(inputType, Shape{rows, reductions})),
-                           GemmOperand(Tensor(inputType, Shape{reductions, columns})),
-                           Tensor(ScalarType::Float32, Shape{rows, columns}),
-                           Tensor(ScalarType::Float32, Shape{rows, columns}), ScalarType::Float32);
+        return GemmTestCase(GemmOperand(Tensor(inputType, Shape{rows, reductions})),
+                            GemmOperand(Tensor(inputType, Shape{reductions, columns})),
+                            Tensor(ScalarType::Float32, Shape{rows, columns}),
+                            Tensor(ScalarType::Float32, Shape{rows, columns}), ScalarType::Float32);
     };
 
     const GemmSupportInfo dense = queryGemmSupportWithBlasBackend(
@@ -154,7 +156,7 @@ void testModeratelyLargeExactGemm() {
     const std::vector<float> ones(dimension * dimension, 1.0f);
     Tensor output(ScalarType::Float32, layout);
 
-    GemmRequest problem(
+    GemmTestCase problem(
         GemmOperand(Tensor::copyNativeStorage<float>(layout, std::span<const float>(ones))),
         GemmOperand(Tensor::copyNativeStorage<float>(layout, std::span<const float>(ones))), output,
         output, ScalarType::Float32);
@@ -174,17 +176,17 @@ int main() {
     const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
     Tensor d = Tensor::copyNativeStorage<float>(
         Layout(Shape{2, 2}, {1, 2}), std::span<const float>(std::array<float, 4>{1, 1, 1, 1}));
-    GemmRequest problem(GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}),
-                                                                     std::span<const float>(a))),
-                        GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}),
-                                                                     std::span<const float>(b))),
-                        d, d, ScalarType::Float32);
+    GemmTestCase problem(GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}),
+                                                                      std::span<const float>(a))),
+                         GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}),
+                                                                      std::span<const float>(b))),
+                         d, d, ScalarType::Float32);
     problem.epilogue.alpha = 2.0;
     problem.epilogue.beta = 3.0;
 
     require(queryGemmSupportWithBlasBackend(problem, GemmBackend::Blas).supported,
             "BLAS backend unexpectedly rejected F32 GEMM.");
-    const GemmRunInfo runInfo = referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
+    const GemmTestRunInfo runInfo = referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
     require(runInfo.backendUsed == GemmBackend::Blas, "BLAS backend run information mismatch.");
     require(d.loadAs<float>({0, 0}) == 119 && d.loadAs<float>({1, 0}) == 281 &&
                 d.loadAs<float>({0, 1}) == 131 && d.loadAs<float>({1, 1}) == 311,
@@ -193,7 +195,7 @@ int main() {
     const Tensor ones = Tensor::copyNativeStorage<float>(
         d.layout(), std::span<const float>(std::array<float, 4>{1, 1, 1, 1}));
     d.copyLogicalElementsFrom(ones);
-    const GemmRunInfo automatic = referenceGemmWithBlasBackend(problem);
+    const GemmTestRunInfo automatic = referenceGemmWithBlasBackend(problem);
     require(automatic.backendUsed == GemmBackend::Blas && d.loadAs<float>({0, 0}) == 119 &&
                 d.loadAs<float>({1, 0}) == 281 && d.loadAs<float>({0, 1}) == 131 &&
                 d.loadAs<float>({1, 1}) == 311,
@@ -201,7 +203,7 @@ int main() {
 
     d.copyLogicalElementsFrom(ones);
     problem.epilogue.activation = Activation::Relu;
-    const GemmRunInfo fallback = referenceGemmWithBlasBackend(problem);
+    const GemmTestRunInfo fallback = referenceGemmWithBlasBackend(problem);
     require(fallback.backendUsed == GemmBackend::Pointwise && fallback.fallbackReason.has_value() &&
                 d.loadAs<float>({0, 0}) == 119 && d.loadAs<float>({1, 0}) == 281 &&
                 d.loadAs<float>({0, 1}) == 131 && d.loadAs<float>({1, 1}) == 311,
@@ -218,11 +220,11 @@ int main() {
     GemmOperand operandA(Tensor::copyNativeStorage<std::complex<float>>(
         Layout(Shape{1, 1}, {2, 1}), std::span<const std::complex<float>>(complexA)));
     operandA.conjugate = true;
-    GemmRequest complexProblem(std::move(operandA),
-                               GemmOperand(Tensor::copyNativeStorage<std::complex<float>>(
-                                   Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                   std::span<const std::complex<float>>(complexB))),
-                               complexD, complexD, ScalarType::ComplexFloat32);
+    GemmTestCase complexProblem(std::move(operandA),
+                                GemmOperand(Tensor::copyNativeStorage<std::complex<float>>(
+                                    Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                    std::span<const std::complex<float>>(complexB))),
+                                complexD, complexD, ScalarType::ComplexFloat32);
     referenceGemmWithBlasBackend(complexProblem, GemmBackend::Blas);
     require(complexD.loadAs<std::complex<float>>({0, 0}) == std::complex<float>(11, -2),
             "BLAS backend complex result mismatch.");
@@ -244,7 +246,7 @@ int main() {
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
                                          std::span<const float>(transformedAlphaVector)),
         MatrixAxis::Row});
-    GemmRequest transformedProblem(
+    GemmTestCase transformedProblem(
         std::move(transformedOperandA),
         GemmOperand(
             Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
@@ -278,7 +280,7 @@ int main() {
     transformedProblem.epilogue.scaleB.reset();
 
     transformedD.storeFrom({0, 0}, 0.0f);
-    const GemmRunInfo smallAutomatic = referenceGemmWithBlasBackend(transformedProblem);
+    const GemmTestRunInfo smallAutomatic = referenceGemmWithBlasBackend(transformedProblem);
     require(smallAutomatic.backendUsed == GemmBackend::Pointwise &&
                 transformedD.loadAs<float>({0, 0}) == 25.0f,
             "Automatic GEMM did not avoid staging a tiny transformed request.");
@@ -296,7 +298,7 @@ int main() {
     const std::array<float, 1> saturatingB{2.0f};
     const std::array<int8_t, 1> saturatingC{};
     Tensor saturatingD(ScalarType::Int8, Shape{1, 1});
-    GemmRequest saturatingProblem(
+    GemmTestCase saturatingProblem(
         GemmOperand(
             Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
                                              std::span<const float>(saturatingA))),

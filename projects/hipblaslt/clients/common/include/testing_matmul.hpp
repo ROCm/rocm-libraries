@@ -1132,7 +1132,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                   if(blockRows == 0 || blockColumns == 0
                      || blockColumns > std::numeric_limits<size_t>::max() / blockRows)
                       throw std::invalid_argument("Invalid hipBLASLt MX scale block dimensions.");
-                  auto mxProblem = hipblaslt::host_numerics::makeMxGenerationProblem(
+                  auto generated = hipblaslt::host_numerics::generateMxData(
                       dataType,
                       scaleType,
                       roc::host_numerics::Shape{static_cast<size_t>(rows),
@@ -1141,7 +1141,6 @@ void testing_matmul_with_bias(const Arguments&                                  
                       blockColumns > 1 ? 1 : 0,
                       blockRows * blockColumns,
                       arg.initialization);
-                  auto       generated   = roc::host_numerics::generateMx(mxProblem);
                   const auto dataStorage = generated.data.rawEncodedBackingStorage();
                   if(dataOutput.size() < dataStorage.size())
                       throw std::invalid_argument("hipBLASLt MX data output is too small.");
@@ -1153,7 +1152,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                           generated.scales.rawEncodedBackingStorage().data(),
                           generated.scales.rawEncodedBackingStorage().size(),
                           {generated.scales.shape()[0], generated.scales.shape()[1]},
-                          mxProblem.blockSize,
+                          blockRows * blockColumns,
                           scaleLayout);
                   if(scaleOutput.size() < scaleStorage.size())
                       throw std::invalid_argument("hipBLASLt MX scale output is too small.");

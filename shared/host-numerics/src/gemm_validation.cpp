@@ -10,7 +10,7 @@
 
 namespace roc::host_numerics {
 namespace {
-void remapComparisonLocations(ComparisonResult& result, const Tensor& observed,
+void remapComparisonLocations(ComparisonReport& result, const Tensor& observed,
                               const OutputSelection& selection,
                               const std::vector<size_t>& selectedIndices) {
     const auto remap = [&](Mismatch& mismatch) {
@@ -26,62 +26,55 @@ void remapComparisonLocations(ComparisonResult& result, const Tensor& observed,
     for (Mismatch& comparison : result.reportedComparisons) remap(comparison);
 }
 
-GemmRunInfo runSelectedReference(const GemmRequest& request, Tensor& selectedOutput,
-                                 GemmBackend backend) {
-    std::optional<std::string> fallbackReason;
+void runSelectedReference(const GemmInvocation& request, Tensor& selectedOutput,
+                          GemmBackend backend) {
     if (backend == GemmBackend::Automatic) {
         const GemmSupportInfo blockedSupport = detail::queryBlockedGemmSupport(request);
         if (blockedSupport && blockedSupport.preferredForAutomaticExecution)
-            return detail::runBlockedGemmToSelectedOutput(request, selectedOutput);
-        if (!blockedSupport) fallbackReason = blockedSupport.reason;
+            return (void)detail::runBlockedGemmToSelectedOutput(request, selectedOutput);
         backend = GemmBackend::Pointwise;
     }
 
     const GemmSupportInfo support = queryGemmSupport(request, backend);
     if (!support) throw std::invalid_argument(support.reason);
 
-    GemmRunInfo runInfo;
     if (backend == GemmBackend::Blocked)
-        runInfo = detail::runBlockedGemmToSelectedOutput(request, selectedOutput);
+        (void)detail::runBlockedGemmToSelectedOutput(request, selectedOutput);
     else
-        runInfo = detail::runPointwiseGemmToSelectedOutput(request, selectedOutput);
-    runInfo.fallbackReason = std::move(fallbackReason);
-    return runInfo;
+        (void)detail::runPointwiseGemmToSelectedOutput(request, selectedOutput);
 }
 }  // namespace
 
-GemmValidationResult validateGemm(const GemmProblem& problem, const Tensor& observed,
-                                  const GemmValidationOptions& options) {
-    GemmRequest request(problem, observed, options.comparison.selection);
-    const GemmSupportInfo support = queryGemmSupport(request, options.backend);
+ComparisonReport validateGemm(const GemmOperand& a, const GemmOperand& b, const Tensor& c,
+                              const Tensor& observed, const GemmOptions& gemmOptions,
+                              const GemmValidationOptions& validationOptions) {
+    GemmOptions executionOptions = gemmOptions;
+    executionOptions.outputSelection = validationOptions.comparison.selection;
+    GemmInvocation request(a, b, c, observed, executionOptions);
+    const GemmSupportInfo support = detail::queryGemmSupport(request, validationOptions.backend);
     if (!support) throw std::invalid_argument(support.reason);
 
-    if (options.comparison.selection.selectsAll()) {
-        GemmOutputOptions output;
-        output.layout = observed.layout();
-        output.selection = options.comparison.selection;
-        GemmResult expected = referenceGemm(problem, output, options.backend);
-        return {
-            .reference = std::move(expected.runInfo),
-            .comparison = compare(observed, expected.output, options.comparison),
-        };
+    if (validationOptions.comparison.selection.selectsAll()) {
+        Tensor expected = referenceGemm(a, b, c, observed.type(), executionOptions,
+                                        observed.layout(), validationOptions.backend);
+        return compare(observed, expected, validationOptions.comparison);
     }
 
     const std::vector<size_t> selectedIndices =
-        options.comparison.selection.indices(observed.shape().elementCount());
-    Tensor expected(problem.outputType, Shape{1, selectedIndices.size()});
+        validationOptions.comparison.selection.indices(observed.shape().elementCount());
+    Tensor expected(observed.type(), Shape{1, selectedIndices.size()});
     Tensor observedSelected =
-        observed.copySelectedElements(selectedIndices, options.comparison.selection.indexOrder())
+        observed
+            .copySelectedElements(selectedIndices,
+                                  validationOptions.comparison.selection.indexOrder())
             .reshapeSharingStorage(Shape{1, selectedIndices.size()});
 
-    GemmRunInfo runInfo = runSelectedReference(request, expected, options.backend);
-    ComparisonOptions compactOptions = options.comparison;
+    runSelectedReference(request, expected, validationOptions.backend);
+    ComparisonOptions compactOptions = validationOptions.comparison;
     compactOptions.selection = OutputSelection::all();
-    ComparisonResult comparison = compare(observedSelected, expected, compactOptions);
-    remapComparisonLocations(comparison, observed, options.comparison.selection, selectedIndices);
-    return {
-        .reference = std::move(runInfo),
-        .comparison = std::move(comparison),
-    };
+    ComparisonReport comparison = compare(observedSelected, expected, compactOptions);
+    remapComparisonLocations(comparison, observed, validationOptions.comparison.selection,
+                             selectedIndices);
+    return comparison;
 }
 }  // namespace roc::host_numerics

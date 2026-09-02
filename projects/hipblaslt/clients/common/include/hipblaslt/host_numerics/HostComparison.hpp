@@ -22,7 +22,7 @@ namespace hipblaslt::host_numerics
     using ::roc::host_numerics::allCloseComparisonOptions;
     using ::roc::host_numerics::compare;
     using ::roc::host_numerics::ComparisonOptions;
-    using ::roc::host_numerics::ComparisonResult;
+    using ::roc::host_numerics::ComparisonReport;
     using ::roc::host_numerics::ComparisonTolerance;
     using ::roc::host_numerics::findAllCloseTolerance;
     using ::roc::host_numerics::IndexOrder;
@@ -102,10 +102,10 @@ namespace hipblaslt::host_numerics
     struct HostComparisonReport
     {
         /// Primary pointwise result and/or special-value statistics requested by comparison.
-        ComparisonResult comparison;
+        ComparisonReport comparison;
 
         /// ULP metrics requested by computeUnitsInLastPlace.
-        ComparisonResult unitsInLastPlaceComparison;
+        ComparisonReport unitsInLastPlaceComparison;
 
         /// Sum of per-batch relative Frobenius errors.
         double relativeFrobeniusError = 0.0;
@@ -267,8 +267,10 @@ namespace hipblaslt::host_numerics
                     Shape{static_cast<size_t>(request.rows), static_cast<size_t>(request.columns)},
                     {1, static_cast<ptrdiff_t>(request.leadingDimension)},
                     batchOffset);
-                const ComparisonResult batchReport = compare(
-                    observed.shareStorageWithLayout(batchLayout), expected.shareStorageWithLayout(batchLayout), frobeniusOptions);
+                const ComparisonReport batchReport
+                    = compare(observed.shareStorageWithLayout(batchLayout),
+                              expected.shareStorageWithLayout(batchLayout),
+                              frobeniusOptions);
                 report.relativeFrobeniusError += batchReport.relativeFrobeniusError;
             }
         }

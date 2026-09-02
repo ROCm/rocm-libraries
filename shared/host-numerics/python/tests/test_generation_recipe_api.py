@@ -102,9 +102,7 @@ class GenerationRecipeApiTests(unittest.TestCase):
 
     def test_typed_factories_validate_named_parameters(self):
         with self.assertRaises(ValueError):
-            hv.GenerationRecipe.candidate_set(
-                hv.CandidateSetGenerationParameters(values=[])
-            )
+            hv.GenerationRecipe.choice(hv.ChoiceGenerationParameters(values=[]))
         with self.assertRaises(ValueError):
             hv.GenerationRecipe.uniform_real(
                 hv.UniformRealGenerationParameters(lower=2.0, upper=-1.0)
@@ -119,8 +117,8 @@ class GenerationRecipeApiTests(unittest.TestCase):
     def test_all_named_parameter_factories_are_bound(self):
         components = [
             hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=1.0)),
-            hv.GenerationRecipe.candidate_set(
-                hv.CandidateSetGenerationParameters(values=[-1.0, 1.0])
+            hv.GenerationRecipe.choice(
+                hv.ChoiceGenerationParameters(values=[-1.0, 1.0])
             ),
             hv.GenerationRecipe.uniform_integer(
                 hv.UniformIntegerGenerationParameters(lower=-2, upper=2)

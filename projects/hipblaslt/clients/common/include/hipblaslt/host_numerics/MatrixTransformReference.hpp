@@ -8,23 +8,22 @@
 #include <complex>
 #include <cstddef>
 #include <hip/library_types.h>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <optional>
 #include <ostream>
-#include <hipblaslt/host_numerics/Types.hpp>
-#include <roc/host_numerics/axpby.hpp>
 #include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/linear_combination.hpp>
 #include <stdexcept>
 #include <utility>
 
 namespace hipblaslt::host_numerics
 {
-    using ::roc::host_numerics::AxpbyRequest;
-    using ::roc::host_numerics::AxpbyRunInfo;
     using ::roc::host_numerics::compare;
     using ::roc::host_numerics::ComparisonOptions;
-    using ::roc::host_numerics::ComparisonResult;
+    using ::roc::host_numerics::ComparisonReport;
     using ::roc::host_numerics::Layout;
-    using ::roc::host_numerics::referenceAxpby;
+    using ::roc::host_numerics::linearCombinationInto;
+    using ::roc::host_numerics::LinearCombinationOptions;
     using ::roc::host_numerics::ScalarType;
     using ::roc::host_numerics::scalarTypeInfo;
     using ::roc::host_numerics::Shape;
@@ -56,14 +55,8 @@ namespace hipblaslt::host_numerics
         ComparisonOptions    comparison;
     };
 
-    struct MatrixTransformReferenceResult
-    {
-        AxpbyRunInfo     runInfo;
-        ComparisonResult comparison;
-    };
-
     inline void reportMatrixTransformMismatches(std::ostream&           output,
-                                                const ComparisonResult& comparison)
+                                                const ComparisonReport& comparison)
     {
         output << "MatrixTransform validation found " << comparison.mismatches
                << " mismatches among " << comparison.compared << " compared elements";
@@ -108,7 +101,7 @@ namespace hipblaslt::host_numerics
                        batchStride});
     }
 
-    inline MatrixTransformReferenceResult
+    inline ComparisonReport
         referenceMatrixTransform(const MatrixTransformReferenceArguments& arguments)
     {
         const ScalarType type = scalarType(arguments.type);
@@ -148,19 +141,15 @@ namespace hipblaslt::host_numerics
             b = copyTensorFromEncodedStorage(arguments.b, arguments.bStorageBytes, type, bLayout);
 
         Tensor       expected(ScalarType::Float32, outputLayout);
-        AxpbyRequest request(std::move(a), std::move(b), expected, ScalarType::Float32);
-        request.alpha              = arguments.alpha;
-        request.beta               = arguments.beta;
-        const AxpbyRunInfo runInfo = referenceAxpby(request);
+        LinearCombinationOptions options(ScalarType::Float32);
+        options.alpha = arguments.alpha;
+        options.beta  = arguments.beta;
+        linearCombinationInto(std::move(a), std::move(b), expected, options);
 
         Tensor observed
             = copyTensorFromEncodedStorage(
                   arguments.observed, arguments.observedStorageBytes, type, outputLayout)
                   .copyConvertedTo(ScalarType::Float32);
-        const ComparisonResult comparison = compare(observed, expected, arguments.comparison);
-        return {
-            .runInfo    = runInfo,
-            .comparison = comparison,
-        };
+        return compare(observed, expected, arguments.comparison);
     }
 } // namespace hipblaslt::host_numerics

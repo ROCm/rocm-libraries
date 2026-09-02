@@ -67,13 +67,18 @@ MxDataGeneration MxDataGeneration::withSeed(uint64_t seed) const {
     return MxDataGeneration(recipe_.withSeed(seed), quantization_, representedValueRange_);
 }
 
-MxGenerationProblem::MxGenerationProblem(Shape shape, MxDataGeneration data)
-    : shape(std::move(shape)), data(std::move(data)) {
-    if (this->shape.rank() != 2)
-        throw std::invalid_argument("MX generation requires a rank-two shape.");
-}
-
 namespace {
+struct MxGenerationInvocation : MxGenerationOptions {
+    MxGenerationInvocation(Shape inputShape, MxDataGeneration dataGeneration,
+                           const MxGenerationOptions& options)
+        : MxGenerationOptions(options),
+          shape(std::move(inputShape)),
+          data(std::move(dataGeneration)) {}
+
+    Shape shape;
+    MxDataGeneration data;
+};
+
 size_t checkedMultiply(size_t first, size_t second, const char* message) {
     if (first != 0 && second > std::numeric_limits<size_t>::max() / first)
         throw std::overflow_error(message);
@@ -92,7 +97,7 @@ struct ScaleBlocking {
     size_t blockCount;
     size_t scaleCount;
 
-    explicit ScaleBlocking(const MxGenerationProblem& problem)
+    explicit ScaleBlocking(const MxGenerationInvocation& problem)
         : blockAxis(problem.blockAxis),
           blockSize(problem.blockSize),
           blockedExtent(problem.shape[problem.blockAxis]),
@@ -204,7 +209,7 @@ uint8_t scaleAtLeast(double requested, const std::vector<ScaleCandidate>& candid
     return candidate->raw;
 }
 
-std::optional<uint8_t> explicitScaleRaw(const MxGenerationProblem& problem) {
+std::optional<uint8_t> explicitScaleRaw(const MxGenerationInvocation& problem) {
     switch (problem.scale) {
         case MxScaleGenerationMode::Derived:
         case MxScaleGenerationMode::RandomFinite:
@@ -223,7 +228,7 @@ std::optional<uint8_t> explicitScaleRaw(const MxGenerationProblem& problem) {
     throw std::invalid_argument("Invalid MX scale generation mode.");
 }
 
-double generatedValue(const MxGenerationProblem& problem, size_t row, size_t column,
+double generatedValue(const MxGenerationInvocation& problem, size_t row, size_t column,
                       size_t logicalIndex) {
     const std::array<size_t, 2> indices{row, column};
     return detail::GenerationRecipeAccess::generatedNumericalValue(
@@ -310,7 +315,7 @@ std::vector<std::byte> packRawValues(std::span<const uint8_t> rawValues, uint16_
     return storage;
 }
 
-void generateUnbounded(const MxGenerationProblem& problem, const ScaleBlocking& blocking,
+void generateUnbounded(const MxGenerationInvocation& problem, const ScaleBlocking& blocking,
                        std::vector<uint8_t>& dataRawValues, std::vector<uint8_t>& scaleRawValues,
                        std::vector<uint32_t>& scaleIndexValues, std::vector<float>& referenceValues,
                        int threadCount) {
@@ -359,7 +364,7 @@ void generateUnbounded(const MxGenerationProblem& problem, const ScaleBlocking& 
     }
 }
 
-void generateQuantized(const MxGenerationProblem& problem, const ScaleBlocking& blocking,
+void generateQuantized(const MxGenerationInvocation& problem, const ScaleBlocking& blocking,
                        std::vector<uint8_t>& dataRawValues, std::vector<uint8_t>& scaleRawValues,
                        std::vector<uint32_t>& scaleIndexValues, std::vector<float>& referenceValues,
                        int threadCount) {
@@ -477,7 +482,7 @@ void generateQuantized(const MxGenerationProblem& problem, const ScaleBlocking& 
 #endif
 }
 
-void validateProblem(const MxGenerationProblem& problem) {
+void validateInvocation(const MxGenerationInvocation& problem) {
     if (problem.shape.rank() != 2)
         throw std::invalid_argument("MX generation requires a rank-two tensor.");
     if (problem.shape[0] == 0 || problem.shape[1] == 0)
@@ -504,8 +509,9 @@ void validateProblem(const MxGenerationProblem& problem) {
 }
 }  // namespace
 
-MxGenerationResult generateMx(const MxGenerationProblem& problem) {
-    validateProblem(problem);
+MxTensor generateMx(Shape shape, MxDataGeneration generation, const MxGenerationOptions& options) {
+    const MxGenerationInvocation problem(std::move(shape), std::move(generation), options);
+    validateInvocation(problem);
     const size_t rows = problem.shape[0];
     const size_t columns = problem.shape[1];
     const size_t leadingDimension =

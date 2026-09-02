@@ -374,7 +374,7 @@ namespace TensileLite
             options.maxReportedMismatches
                 = m_printMax > 0 ? static_cast<size_t>(m_printMax) : 0;
 
-            ComparisonResult comparison;
+            ComparisonReport comparison;
             {
                 ScopedTimer timer("validate_element_comparison");
                 comparison = compareHostBuffers(
@@ -426,7 +426,7 @@ namespace TensileLite
                           << " total values compared." << std::endl;
             }
 
-            SentinelResult sentinel;
+            SentinelReport sentinel;
             const auto completeStorage = std::span<const std::byte>(
                 reinterpret_cast<const std::byte*>(
                     m_cpuResultBuffer.get()),

@@ -189,10 +189,9 @@ TEST(ReferenceMXFastPath, MatchesPointwiseForScaledFP8Gemm)
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
 
-    const auto binaryValues
-        = roc::host_numerics::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
+    const auto binaryValues = roc::host_numerics::GenerationRecipe::choice({.values = {-1.0, 1.0}});
     const auto scaleValues
-        = roc::host_numerics::GenerationRecipe::candidateSet({.values = {1.0, 2.0, 4.0}});
+        = roc::host_numerics::GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}});
     generateValues(a, roc::host_numerics::ScalarType::Float8E4M3, binaryValues, 12345, 0);
     generateValues(b, roc::host_numerics::ScalarType::Float8E4M3, binaryValues, 12345, 1);
     generateValues(mxsa, roc::host_numerics::ScalarType::E8M0Zero, scaleValues, 12345, 2);
@@ -244,10 +243,9 @@ TEST(ReferenceMXFastPath, MatchesPointwiseWithBetaAndBias)
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
 
-    const auto binaryValues
-        = roc::host_numerics::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
+    const auto binaryValues = roc::host_numerics::GenerationRecipe::choice({.values = {-1.0, 1.0}});
     const auto scaleValues
-        = roc::host_numerics::GenerationRecipe::candidateSet({.values = {1.0, 2.0, 4.0}});
+        = roc::host_numerics::GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}});
     const auto cValues    = roc::host_numerics::GenerationRecipe::constant({.value = 0.25});
     const auto biasValues = roc::host_numerics::GenerationRecipe::constant({.value = 0.5});
     generateValues(a, roc::host_numerics::ScalarType::Float8E4M3, binaryValues, 54321, 0);

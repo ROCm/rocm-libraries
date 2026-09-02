@@ -41,11 +41,11 @@ void registerGenerationBindings(nb::module_& module) {
         .def(nb::init<double>(), "value"_a = 0.0)
         .def_rw("value", &ConstantGenerationParameters::value);
 
-    nb::class_<CandidateSetGenerationParameters>(
-        module, "CandidateSetGenerationParameters",
+    nb::class_<ChoiceGenerationParameters>(
+        module, "ChoiceGenerationParameters",
         "Candidate values; repeated entries increase selection frequency.")
         .def(nb::init<std::vector<double>>(), "values"_a = std::vector<double>{})
-        .def_rw("values", &CandidateSetGenerationParameters::values);
+        .def_rw("values", &ChoiceGenerationParameters::values);
 
     nb::class_<UniformIntegerGenerationParameters>(module, "UniformIntegerGenerationParameters",
                                                    "Inclusive integer generation bounds.")
@@ -130,7 +130,7 @@ void registerGenerationBindings(nb::module_& module) {
 
     recipe.def_static("zero", &GenerationRecipe::zero)
         .def_static("constant", &GenerationRecipe::constant, "parameters"_a)
-        .def_static("candidate_set", &GenerationRecipe::candidateSet, "parameters"_a)
+        .def_static("choice", &GenerationRecipe::choice, "parameters"_a)
         .def_static("uniform_integer", &GenerationRecipe::uniformInteger, "parameters"_a)
         .def_static("absolute_uniform_integer", &GenerationRecipe::absoluteUniformInteger,
                     "parameters"_a)

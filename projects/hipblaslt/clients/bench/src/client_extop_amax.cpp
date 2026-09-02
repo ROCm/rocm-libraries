@@ -182,12 +182,12 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
     using namespace roc::host_numerics;
     Tensor referenceOutput = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
         refOutput.data(), refOutput.size(), Layout::contiguousLastDimensionFastest(Shape{}));
-    referenceMaximumAbsolute(hipblaslt::host_numerics::copyTensorFromEncodedStorage(
-                                 cpuInput.data(),
-                                 cpuInput.size(),
-                                 Layout::contiguousLastDimensionFastest(Shape{numElements})),
-                             referenceOutput,
-                             ScalarType::Float32);
+    referenceMaximumAbsoluteInto(hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+                                     cpuInput.data(),
+                                     cpuInput.size(),
+                                     Layout::contiguousLastDimensionFastest(Shape{numElements})),
+                                 referenceOutput,
+                                 ScalarType::Float32);
     hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
         refOutput.data(), refOutput.size(), referenceOutput);
 
