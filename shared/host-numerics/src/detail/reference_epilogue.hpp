@@ -216,12 +216,13 @@ inline EpiloguePlan validateEpilogueInvocation(const EpilogueInvocation& problem
     if (problem.activationApplication == ActivationApplication::Gradient && !problem.auxiliaryInput)
         throw std::invalid_argument("Gradient epilogue requires an auxiliary input tensor.");
     if (problem.bias) {
-        if (problem.bias->axis != MatrixAxis::Row && problem.bias->axis != MatrixAxis::Column)
-            throw std::invalid_argument("Reference epilogue bias axis is invalid.");
-        const size_t expected =
-            axisExtent(problem.bias->axis, problem.input.shape()[0], problem.input.shape()[1]);
-        validateRuntimeVector(problem.bias->values, expected, "Reference epilogue", "bias");
-        validateEpilogueValueType(problem.bias->values.type(), "bias");
+        try {
+            (void)problem.bias->broadcastTo(problem.input.shape());
+        } catch (const std::invalid_argument&) {
+            throw std::invalid_argument(
+                "Reference epilogue bias is not broadcast-compatible with the input.");
+        }
+        validateEpilogueValueType(problem.bias->type(), "bias");
     }
     return {
         .selectedElements =
@@ -267,7 +268,7 @@ inline void validateEpilogueInvocationStorage(const EpilogueInvocation& request)
         &request.input,
         request.auxiliaryInput ? &*request.auxiliaryInput : nullptr,
         request.gateResidual ? &*request.gateResidual : nullptr,
-        request.bias ? &request.bias->values : nullptr,
+        request.bias ? &*request.bias : nullptr,
     };
     for (const Tensor* output : outputs) {
         if (!output) continue;
@@ -309,12 +310,12 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
     std::optional<RuntimeMatrixWriter<Accumulator>> auxiliaryOutput;
     std::optional<RuntimeMatrixReader<Accumulator>> auxiliaryInput;
     std::optional<RuntimeMatrixReader<Accumulator>> gateResidual;
-    std::optional<RuntimeVectorReader<Accumulator>> bias;
+    std::optional<RuntimeMatrixReader<Accumulator>> bias;
     if (problem.rawOutput) rawOutput.emplace(*problem.rawOutput);
     if (problem.auxiliaryOutput) auxiliaryOutput.emplace(*problem.auxiliaryOutput);
     if (problem.auxiliaryInput) auxiliaryInput.emplace(*problem.auxiliaryInput);
     if (problem.gateResidual) gateResidual.emplace(*problem.gateResidual);
-    if (problem.bias) bias.emplace(problem.bias->values);
+    if (problem.bias) bias.emplace(problem.bias->broadcastTo(problem.input.shape()));
 
     const Accumulator outputScale = runtimeScalar<Accumulator>(problem.outputScale, "output scale");
     const Accumulator auxiliaryScale =
@@ -330,10 +331,7 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
     const size_t columns = problem.output.shape()[1];
     auto computeOutput = [&](size_t row, size_t column) {
         Accumulator value = input(row, column);
-        if (bias) {
-            const MatrixAxis axis = problem.bias->axis;
-            value = wrappingAdd(value, (*bias)[axis == MatrixAxis::Row ? row : column]);
-        }
+        if (bias) value = wrappingAdd(value, (*bias)(row, column));
 
         if (auxiliaryOutput)
             auxiliaryOutput->store(row, column, wrappingMultiply(value, auxiliaryScale));
