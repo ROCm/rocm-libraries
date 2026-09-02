@@ -64,9 +64,13 @@ public:
         return tmp;
     }
 
+    /// Two iterators are equal when they sit on the same variable, so an
+    /// iterator equals itself and both end iterators (_cur == nullptr) compare
+    /// equal. Comparing only against end would break every algorithm that
+    /// compares two positions.
     bool operator==(const VarIterator& o) const
     {
-        return _cur == nullptr && o._cur == nullptr;
+        return _cur == o._cur;
     }
     bool operator!=(const VarIterator& o) const
     {

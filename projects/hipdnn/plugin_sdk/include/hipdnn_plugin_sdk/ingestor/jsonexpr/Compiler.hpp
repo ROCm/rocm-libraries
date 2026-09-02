@@ -40,9 +40,9 @@ inline Value jsonScalarToValue(const nlohmann::json& j)
     return {}; // null
 }
 
-inline NodePtr compileNode(const nlohmann::json& j, char sigil);
+inline NodePtr compileNode(const nlohmann::json& j, char sigil, std::size_t depth = 0);
 
-inline NodePtr compileObject(const nlohmann::json& j, char sigil)
+inline NodePtr compileObject(const nlohmann::json& j, char sigil, std::size_t depth)
 {
     if(j.size() != 1)
     {
@@ -71,22 +71,23 @@ inline NodePtr compileObject(const nlohmann::json& j, char sigil)
         node->args.reserve(val.size());
         for(const auto& e : val)
         {
-            node->args.push_back(compileNode(e, sigil));
+            node->args.push_back(compileNode(e, sigil, depth + 1));
         }
     }
     else
     {
-        node->args.push_back(compileNode(val, sigil));
+        node->args.push_back(compileNode(val, sigil, depth + 1));
     }
     checkArity(*spec, node->args.size(), key);
     return node;
 }
 
-inline NodePtr compileNode(const nlohmann::json& j, char sigil)
+inline NodePtr compileNode(const nlohmann::json& j, char sigil, std::size_t depth)
 {
+    checkExpressionDepth(depth);
     if(j.is_object())
     {
-        return compileObject(j, sigil);
+        return compileObject(j, sigil, depth);
     }
     if(j.is_array())
     {
@@ -94,7 +95,7 @@ inline NodePtr compileNode(const nlohmann::json& j, char sigil)
         n->items.reserve(j.size());
         for(const auto& e : j)
         {
-            n->items.push_back(compileNode(e, sigil));
+            n->items.push_back(compileNode(e, sigil, depth + 1));
         }
         return n;
     }

@@ -110,4 +110,21 @@ TEST(TestJsonDataSource, SetRejectsMalformedPaths)
     EXPECT_THROW(src.setData("q.dims.nope", V(1)), std::invalid_argument); // string key on array
 }
 
+TEST(TestJsonDataSource, SetRejectsAnOutOfBoundsIndex)
+{
+    // A `[N]` subscript grows the array to N, so an unbounded index turns a
+    // typo in a descriptor path into an allocation of arbitrary size.
+    jexpr::JsonDataSource src;
+    EXPECT_THROW(src.setData("q[100000000]", V(1)), std::invalid_argument);
+    EXPECT_THROW(src.setData("q[99999999999999999999]", V(1)), std::invalid_argument);
+    // Nothing was written on the way to the rejection.
+    EXPECT_EQ(src.getData("q"), V());
+
+    // An index inside the bound still works, and getData resolves an
+    // out-of-bounds index to null exactly as it does past the end.
+    src.setData("q[3]", V(7));
+    EXPECT_EQ(src.getData("q[3]"), V(7));
+    EXPECT_EQ(src.getData("q[100000000]"), V());
+}
+
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

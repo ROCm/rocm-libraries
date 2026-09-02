@@ -93,9 +93,11 @@ src.setData("$q.dims[0]", 2);   // -> {"q":{"dims":[2, 16]}}
 
 A `[N]` subscript grows an array (filling gaps with null); any other key creates
 or descends into an object; the empty path replaces the whole document.
-`setData` throws `std::invalid_argument` on a malformed path or a non-numeric
-index applied to an array. Objects and null in the document read back as `Value`
-null, matching `Value`'s scalar/array-only model.
+`setData` throws `std::invalid_argument` on a malformed path, a non-numeric
+index applied to an array, or an index at or above `MAX_ARRAY_INDEX` — a `[N]`
+subscript grows the array to `N`, so an unbounded index would turn a typo into
+an allocation of arbitrary size. Objects and null in the document read back as
+`Value` null, matching `Value`'s scalar/array-only model.
 
 ## `Value`
 
@@ -153,6 +155,19 @@ A name is read as an alias **only where a `stride_order` reference gives it
 that meaning** — opposite one in an `==` / `!=`, or as an element of the array
 an `in` searches. Anywhere else `"nhwc"` is an ordinary string literal, so a
 data field that happens to hold layout names is untouched.
+
+A name is a *plain* string. A sigil-prefixed string in an alias position is a
+variable reference (or, doubled, an escaped literal) and is left alone, so one
+tensor's layout can be compared against another's:
+
+```jsonc
+{"==": ["$q.stride_order", "$k.stride_order"]}       // do q and k share a layout?
+{"in": ["$q.stride_order", ["$k.stride_order", "nhwc"]]}
+```
+
+Note also that an alias names an *array*, not a distinct layout: `bhsd` and
+`nchw` both expand to `[3,2,1,0]`, so either name accepts a tensor carrying
+that stride order. Aliases are spelling conveniences, not narrowing checks.
 
 In those positions a `stride_order` is an integer array, so a string can only
 be an alias. Two mistakes are therefore compile-time errors rather than
@@ -229,7 +244,7 @@ dispatch formulas need.
 | --- | --- | --- | --- |
 | `ceil_div` | 2 | number (coerced) | Ceiling division, `ceil(a / b)`. Declines on a zero divisor. |
 | `abs` | 1 | number (coerced) | Absolute value. |
-| `pow` | 2 | number (coerced) | `a` raised to the power `b`. |
+| `pow` | 2 | number (coerced) | `a` raised to the power `b`. Declines when the result is not finite — a negative base under a fractional exponent, or an overflow. |
 | `log2` | 1 | number (coerced) | Base-2 logarithm. Declines on a non-positive operand. |
 | `rsqrt` | 1 | number (coerced) | Reciprocal square root, `1 / sqrt(x)`. Declines on a non-positive operand. |
 
@@ -284,7 +299,10 @@ declines.
 
 Malformed rules (unknown operator, wrong argument count, a non-operator object)
 raise `JsonExpressionCompileError` at `compile` time, so evaluation stays on the
-fast path.
+fast path. Nesting deeper than `MAX_EXPRESSION_DEPTH` is rejected the same way:
+compilation and evaluation both recurse per level, and rules are read from
+descriptor files on disk, so an over-deep rule must report a bad rule rather
+than exhaust the stack.
 
 Not included: the `var` operator (variables are the sigil form only), and the
 collection and string operators (`map`, `reduce`, `filter`, `all`, `some`,

@@ -123,8 +123,9 @@ public:
     /// containers as needed: a `[N]` subscript (or a dot-form index against an
     /// existing array) grows an array, filling gaps with null; any other key
     /// creates or descends into an object. An empty path replaces the whole
-    /// document. Throws std::invalid_argument on a malformed path or a
-    /// non-numeric index applied to an array.
+    /// document. Throws std::invalid_argument on a malformed path, a
+    /// non-numeric index applied to an array, or an index at or above
+    /// MAX_ARRAY_INDEX.
     void setData(const std::string& path, const Value& value)
     {
         std::vector<Segment> segs;
@@ -228,8 +229,16 @@ private:
         return true;
     }
 
-    /// Parse a non-negative decimal index. Rejects empty, negative, and
-    /// non-numeric (with trailing garbage) text.
+    /// The largest index a path may name. A `[N]` subscript in setData grows
+    /// the array to N, so an unbounded index turns a one-character typo in a
+    /// descriptor path into an allocation of arbitrary size. No document this
+    /// addresses is anywhere near this long, and getData resolves an index at
+    /// or above the bound to null exactly as it already did for any index past
+    /// the end.
+    static constexpr std::size_t MAX_ARRAY_INDEX = (1U << 20U);
+
+    /// Parse a non-negative decimal index below MAX_ARRAY_INDEX. Rejects empty,
+    /// negative, out-of-bounds, and non-numeric (with trailing garbage) text.
     static bool parseIndex(const std::string& s, std::size_t& idx)
     {
         if(s.empty())
@@ -238,7 +247,9 @@ private:
         }
         char* endp = nullptr;
         const long val = std::strtol(s.c_str(), &endp, 10);
-        if(*endp != '\0' || val < 0)
+        // strtol saturates at LONG_MAX on overflow rather than failing, so the
+        // bound below is what rejects an absurdly long digit string too.
+        if(*endp != '\0' || val < 0 || static_cast<unsigned long>(val) >= MAX_ARRAY_INDEX)
         {
             return false;
         }

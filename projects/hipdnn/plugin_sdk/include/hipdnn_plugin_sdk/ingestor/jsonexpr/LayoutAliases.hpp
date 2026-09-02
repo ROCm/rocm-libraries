@@ -37,7 +37,8 @@ struct LayoutAlias
     std::size_t rank;
 };
 
-inline const LayoutAlias* lookupLayoutAlias(const std::string& name)
+/// Every layout name the language knows, and the array each expands to.
+inline const std::array<LayoutAlias, 5>& layoutAliasTable()
 {
     static const std::int64_t s_nchw[] = {3, 2, 1, 0};
     static const std::int64_t s_nhwc[] = {3, 0, 2, 1};
@@ -49,7 +50,12 @@ inline const LayoutAlias* lookupLayoutAlias(const std::string& name)
                                                         {"ncdhw", s_ncdhw, 5},
                                                         {"ndhwc", s_ndhwc, 5},
                                                         {"bhsd", s_bhsd, 4}}};
-    for(const auto& e : s_table)
+    return s_table;
+}
+
+inline const LayoutAlias* lookupLayoutAlias(const std::string& name)
+{
+    for(const auto& e : layoutAliasTable())
     {
         if(name == e.name)
         {
@@ -59,9 +65,20 @@ inline const LayoutAlias* lookupLayoutAlias(const std::string& name)
     return nullptr;
 }
 
+/// The accepted names, for the diagnostic naming them. Built from the table so
+/// a new alias cannot be added without the error message following it.
 inline std::string knownLayoutAliases()
 {
-    return "nchw, nhwc, ncdhw, ndhwc, bhsd";
+    std::string s;
+    for(const auto& e : layoutAliasTable())
+    {
+        if(!s.empty())
+        {
+            s += ", ";
+        }
+        s += e.name;
+    }
+    return s;
 }
 
 /// The variable path in a sigil-prefixed string, or nullptr if `j` is not one.
@@ -78,6 +95,20 @@ inline const std::string* variablePath(const nlohmann::json& j, char sigil)
         return nullptr;
     }
     return &s;
+}
+
+/// True for a string that can be read as a layout alias. A sigil-prefixed
+/// string is a variable reference ("$k.stride_order") or an escaped literal
+/// ("$$nhwc") -- both are strings, and neither names a layout, so comparing
+/// one tensor's layout against another's must not be read as a typo'd alias.
+inline bool isLayoutAliasCandidate(const nlohmann::json& j, char sigil)
+{
+    if(!j.is_string())
+    {
+        return false;
+    }
+    const auto& s = j.get_ref<const nlohmann::json::string_t&>();
+    return s.empty() || s[0] != sigil;
 }
 
 /// True for a reference whose last path segment is `stride_order`.
@@ -104,9 +135,12 @@ inline std::string variableRoot(const std::string& sigilPath)
 /// root, and anything reachable from it through `and` only. A pin inside an
 /// `or` / `if` / `!` arm is conditional and cannot contradict an alias, so it
 /// is deliberately not collected.
-inline void
-    collectRankPins(const nlohmann::json& j, char sigil, std::map<std::string, std::int64_t>& pins)
+inline void collectRankPins(const nlohmann::json& j,
+                            char sigil,
+                            std::map<std::string, std::int64_t>& pins,
+                            std::size_t depth = 0)
 {
+    checkExpressionDepth(depth);
     if(!j.is_object() || j.size() != 1)
     {
         return;
@@ -118,7 +152,7 @@ inline void
     {
         for(const auto& e : val)
         {
-            collectRankPins(e, sigil, pins);
+            collectRankPins(e, sigil, pins, depth + 1);
         }
         return;
     }
@@ -180,14 +214,16 @@ inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
 /// "nhwc" stays an ordinary string literal everywhere else.
 inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
                                           char sigil,
-                                          const std::map<std::string, std::int64_t>& rankPins)
+                                          const std::map<std::string, std::int64_t>& rankPins,
+                                          std::size_t depth = 0)
 {
+    checkExpressionDepth(depth);
     if(j.is_array())
     {
         nlohmann::json out = nlohmann::json::array();
         for(const auto& e : j)
         {
-            out.push_back(expandLayoutAliases(e, sigil, rankPins));
+            out.push_back(expandLayoutAliases(e, sigil, rankPins, depth + 1));
         }
         return out;
     }
@@ -211,13 +247,13 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
             {
                 const nlohmann::json& side = val.at(i);
                 const nlohmann::json& ref = val.at(1 - i);
-                if(isStrideOrderRef(ref, sigil) && side.is_string())
+                if(isStrideOrderRef(ref, sigil) && isLayoutAliasCandidate(side, sigil))
                 {
                     args.push_back(resolveLayoutAlias(side, ref.get<std::string>(), rankPins));
                 }
                 else
                 {
-                    args.push_back(expandLayoutAliases(side, sigil, rankPins));
+                    args.push_back(expandLayoutAliases(side, sigil, rankPins, depth + 1));
                 }
             }
             out[key] = std::move(args);
@@ -233,14 +269,15 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
             nlohmann::json hay = nlohmann::json::array();
             for(const auto& e : val.at(1))
             {
-                hay.push_back(e.is_string() ? resolveLayoutAlias(e, refPath, rankPins)
-                                            : expandLayoutAliases(e, sigil, rankPins));
+                hay.push_back(isLayoutAliasCandidate(e, sigil)
+                                  ? resolveLayoutAlias(e, refPath, rankPins)
+                                  : expandLayoutAliases(e, sigil, rankPins, depth + 1));
             }
             out[key] = nlohmann::json::array({val.at(0), std::move(hay)});
             continue;
         }
 
-        out[key] = expandLayoutAliases(val, sigil, rankPins);
+        out[key] = expandLayoutAliases(val, sigil, rankPins, depth + 1);
     }
     return out;
 }

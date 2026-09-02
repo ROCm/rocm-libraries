@@ -301,6 +301,49 @@ TEST(TestJsonExpression, LayoutAliasContradictingARankPinRejected)
         json({{"and", json::array({{{"or", json::array({rankFour, false})}}, aliasRank5})}})));
 }
 
+TEST(TestJsonExpression, LayoutAliasPrePassLeavesVariableReferencesAlone)
+{
+    // A variable reference is a string too, so the alias pre-pass must key on
+    // the sigil, not on "is a string": "do these two tensors share a layout"
+    // is the most ordinary cross-tensor layout criterion there is, and reading
+    // the second reference as a typo'd alias made it uncompilable.
+    const jexpr::JsonDataSource src{json{{"q", {{"rank", 4}, {"stride_order", {3, 0, 2, 1}}}},
+                                         {"k", {{"rank", 4}, {"stride_order", {3, 0, 2, 1}}}},
+                                         {"v", {{"rank", 4}, {"stride_order", {3, 2, 1, 0}}}}}};
+    const auto ev
+        = [&src](const json& rule) { return jexpr::compile<jexpr::JsonDataSource>(rule)(src); };
+
+    // Reference against reference, both operand orders.
+    EXPECT_EQ(ev(json({{"==", json::array({"$q.stride_order", "$k.stride_order"})}})), V(true));
+    EXPECT_EQ(ev(json({{"==", json::array({"$q.stride_order", "$v.stride_order"})}})), V(false));
+    EXPECT_EQ(ev(json({{"!=", json::array({"$q.stride_order", "$v.stride_order"})}})), V(true));
+    EXPECT_EQ(ev(json({{"==", json::array({"$k.stride_order", "$q.stride_order"})}})), V(true));
+
+    // A reference among a membership set's elements is a value to compare
+    // against, not an alias to expand.
+    EXPECT_EQ(
+        ev(json(
+            {{"in", json::array({"$q.stride_order", json::array({"$v.stride_order", "nhwc"})})}})),
+        V(true));
+    EXPECT_EQ(
+        ev(json(
+            {{"in", json::array({"$q.stride_order", json::array({"$v.stride_order", "ncdhw"})})}})),
+        V(false));
+
+    // An escaped literal stays a literal here, exactly as it does everywhere
+    // else, rather than being read as an unknown alias.
+    EXPECT_EQ(ev(json({{"==", json::array({"$q.stride_order", "$$nhwc"})}})), V(false));
+
+    // An unresolved reference still propagates null rather than throwing.
+    EXPECT_TRUE(
+        ev(json({{"==", json::array({"$q.stride_order", "$nope.stride_order"})}})).isNull());
+
+    // A genuine typo opposite a reference is still refused.
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(
+                     json({{"==", json::array({"$q.stride_order", "nhcw"})}})),
+                 jexpr::JsonExpressionCompileError);
+}
+
 TEST(TestJsonExpression, LayoutAliasesInAMembershipSet)
 {
     // RFC 0018 section 5: a family accepting either of two layouts anchors an
@@ -441,9 +484,51 @@ TEST(TestJsonExpression, DivisionAndDomainErrorsFailClosed)
     EXPECT_TRUE(eval(json({{"log2", 0}})).isNull());
     EXPECT_TRUE(eval(json({{"rsqrt", 0}})).isNull());
     EXPECT_TRUE(eval(json({{"rsqrt", -4}})).isNull());
+    // pow declines on a domain error or an overflow for the same reason: a
+    // NaN/inf result compares UNORDERED, so every ordering test on it is
+    // false and its negation is true -- a criterion would ACCEPT input it
+    // never meaningfully evaluated.
+    EXPECT_TRUE(eval(json({{"pow", json::array({-8, 0.5})}})).isNull());
+    EXPECT_TRUE(eval(json({{"pow", json::array({10, 400})}})).isNull());
+    // ...so the surrounding predicate declines rather than passing.
+    const json domainError = json({{"pow", json::array({-8, 0.5})}});
+    const json narrowing = json({{"<", json::array({domainError, 1})}});
+    EXPECT_TRUE(eval(narrowing).isNull());
+    EXPECT_TRUE(eval(json({{"!", json::array({narrowing})}})).isNull());
+    EXPECT_EQ(eval(json({{"pow", json::array({2, 10})}})), V(1024));
     // The well-behaved cases still compute.
     EXPECT_EQ(eval(json({{"/", json::array({8, 2})}})), V(4));
     EXPECT_EQ(eval(json({{"log2", 8}})), V(3));
+}
+
+TEST(TestJsonExpression, DeeplyNestedRulesAreRejectedNotFatal)
+{
+    // Rules are read from descriptor files on disk, and compilation and
+    // evaluation both recurse per nesting level, so an over-deep rule must
+    // report a bad rule rather than overflow the stack.
+    const auto nest = [](std::size_t depth) {
+        json rule = json("$x");
+        for(std::size_t i = 0; i < depth; ++i)
+        {
+            rule = json({{"+", json::array({rule, 1})}});
+        }
+        return rule;
+    };
+    // Comfortably inside the limit: compiles and evaluates.
+    EXPECT_EQ(eval(nest(16)), V(41 + 16));
+    EXPECT_NO_THROW(jexpr::compile<jexpr::JsonDataSource>(nest(jexpr::MAX_EXPRESSION_DEPTH / 2)));
+    // Past it: a diagnostic, not a crash.
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(nest(jexpr::MAX_EXPRESSION_DEPTH * 4)),
+                 jexpr::JsonExpressionCompileError);
+    // The alias pre-pass runs before lowering and recurses too, so it must
+    // enforce the same bound rather than being reached with an over-deep rule.
+    json aliasRule = json({{"==", json::array({"$q.stride_order", "nhwc"})}});
+    for(std::size_t i = 0; i < jexpr::MAX_EXPRESSION_DEPTH * 4; ++i)
+    {
+        aliasRule = json({{"and", json::array({aliasRule})}});
+    }
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(aliasRule),
+                 jexpr::JsonExpressionCompileError);
 }
 
 TEST(TestJsonExpression, ConstraintShapes)
@@ -541,6 +626,34 @@ TEST(TestJsonExpression, VariablesRangeIsLazyAndKeepsDuplicates)
     const auto r = expr.variables();
     EXPECT_EQ(std::distance(r.begin(), r.end()), 3);
     EXPECT_TRUE(std::any_of(r.begin(), r.end(), [](const std::string& s) { return s == "y"; }));
+}
+
+TEST(TestJsonExpression, VariablesIteratorEqualityComparesPositions)
+{
+    // The range advertises input_iterator_tag, so equality must compare
+    // positions. Comparing only "both at end" makes an iterator unequal to
+    // itself, which quietly breaks any algorithm comparing two positions --
+    // and the end-only cases above would not notice.
+    const auto expr
+        = jexpr::compile<jexpr::JsonDataSource>(json({{"+", json::array({"$x", "$y"})}}));
+    const auto r = expr.variables();
+
+    auto first = r.begin();
+    EXPECT_TRUE(first == first); // reflexive
+    EXPECT_FALSE(first != first);
+
+    auto copy = first;
+    EXPECT_TRUE(copy == first); // a copy sits at the same position
+
+    auto second = first;
+    ++second;
+    EXPECT_FALSE(second == first); // different positions differ
+    EXPECT_TRUE(second != first);
+    EXPECT_FALSE(second == r.end()); // ...and neither is the end yet
+
+    ++second;
+    EXPECT_TRUE(second == r.end()); // exhausted compares equal to end
+    EXPECT_TRUE(r.end() == r.end());
 }
 
 TEST(TestJsonExpression, WholeDocumentReferenceRejected)

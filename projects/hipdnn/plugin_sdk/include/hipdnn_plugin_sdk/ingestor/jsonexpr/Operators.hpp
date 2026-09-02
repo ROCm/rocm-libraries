@@ -234,7 +234,17 @@ inline Value absoluteValue(const std::vector<Value>& v)
 
 inline Value power(const std::vector<Value>& v)
 {
-    return Value::number(std::pow(v[0].toNumber(), v[1].toNumber()));
+    // A domain error (a negative base under a fractional exponent) or an
+    // overflow yields NaN/inf, which compares UNORDERED and so makes every
+    // ordering test false -- and its negation true, accepting input the
+    // criterion never meaningfully evaluated. Decline instead, as every other
+    // partial operator here does.
+    const double r = std::pow(v[0].toNumber(), v[1].toNumber());
+    if(!std::isfinite(r))
+    {
+        return {};
+    }
+    return Value::number(r);
 }
 
 inline Value log2Of(const std::vector<Value>& v)
