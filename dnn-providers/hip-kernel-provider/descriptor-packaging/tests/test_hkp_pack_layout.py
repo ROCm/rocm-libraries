@@ -559,11 +559,7 @@ def test_example_tree_is_self_consistent():
     ids = [d.id for d in flat.descriptors]
     assert len(ids) == len(set(ids)), "duplicate descriptor ids in the example"
     rel_dirs = {d.rel_dir.as_posix() for d in flat.kdps()}
-    assert rel_dirs == {
-        "hip/pointwise_add",
-        "rocKE/gfx942_tiled_attention",
-        "rocKE/gfx942_attention_dense",
-    }
+    assert rel_dirs == {"hip/pointwise_add", "rocKE/gfx942_tiled_attention"}
 
 
 # --- F. Toolchain provenance ------------------------------------------------
@@ -815,10 +811,6 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
     invented field set -- the failure that shipped here once already, where UDD
     had `grid`/`block`/`args` instead of `dispatch_symbol` and UMD had
     `criteria`/`nodes` instead of `match_symbol`.
-
-    Intersected, not unioned: a UHD's body key is its adapter's name (RFC 0019
-    §4), so a `native` and a `tree_data` heuristic legitimately differ below the
-    header. Unioning would demand every UHD carry `tree_data`.
     """
     if not RUNTIME_FIXTURE.is_dir():
         pytest.skip(f"runtime fixture not present at {RUNTIME_FIXTURE}")
@@ -827,8 +819,7 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
         out = {}
         for path in _descriptor_files(root):
             kind = path.name.split(".")[-2]
-            keys = set(_read(path).keys())
-            out[kind] = keys if kind not in out else out[kind] & keys
+            out.setdefault(kind, set()).update(_read(path).keys())
         return out
 
     fixture = shapes(RUNTIME_FIXTURE)
@@ -970,7 +961,7 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
         # cleanly and is rejected at load, dropping the matcher, then the pack
         # naming it, then the engine -- at a log level that is off by default.
         ("pointwise.umd.json", {"scope": "Kernel"}, "invalid scope"),
-        ("shared.uhd.json", {"adapter": "Native"}, "invalid adapter"),
+        ("shared.uhd.json", {"kind": "Native"}, "invalid kind"),
         (
             "pointwise.kmd.json",
             {"fields": [{"name": "block_size", "type": "integer"}]},
@@ -1130,49 +1121,3 @@ def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
     ):
         clash = example & ids(other)
         assert not clash, f"example ids collide with {other.name}: {sorted(clash)}"
-
-
-def test_a_model_uhds_artifact_reaches_the_shipped_tree(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
-):
-    """A trained UHD must be shipped with the model it names.
-
-    test_hkp_pack_sidecars.py covers resolution and the intermediate mirror, and
-    stops there. Carriage happens twice -- once into the pre-prune intermediate and
-    once into the arch output -- and only the second is what the runtime reads. With
-    the second missing, every sidecar case still passed while the shipped tree held a
-    descriptor naming a model that was never packed; the runtime then finds the
-    artifact missing and drops the whole engine.
-    """
-    root = tmp_path / "root"
-    dest = _nest(root, "hip/pointwise", main_fixture)
-
-    # The fixture's UHD is native, so it names no file. Make it the trained kind. Both
-    # UEDs already reference `uhd-shared`, so it survives the reachability walk and its
-    # sidecar has to survive with it.
-    (dest / "shared.uhd.json").write_text(
-        json.dumps(
-            {
-                "version": "0.1",
-                "id": "uhd-shared",
-                "name": "Shared trained heuristic",
-                "adapter": "tree_data",
-                "features_signature": ["$kernel.block_size"],
-                "features_hash": "sha256:0000000000000000",
-                "objective": "max",
-                "tree_data": {"artifact": "shared_model.bin"},
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (dest / "shared_model.bin").write_bytes(b"HGBM-arch")
-
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
-
-    shipped = tmp_path / "out" / ARCH / "hip" / "pointwise"
-    assert (shipped / "shared.uhd.json").is_file(), "the UHD itself must ship"
-    artifact = shipped / "shared_model.bin"
-    assert artifact.is_file(), "a shipped UHD must be shipped with the model it names"
-    assert artifact.read_bytes() == b"HGBM-arch"

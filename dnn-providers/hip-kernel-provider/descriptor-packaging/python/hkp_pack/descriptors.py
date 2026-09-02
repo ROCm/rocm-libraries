@@ -38,29 +38,6 @@ def type_from_filename(path):
     return parts[-2]
 
 
-@dataclass(frozen=True)
-class Sidecar:
-    """A non-descriptor file a descriptor names by relative path.
-
-    The packer is otherwise JSON-only: discovery globs `*.json`, so a file that
-    is not a descriptor is invisible to validation, staging and install alike.
-    A trained UHD needs one anyway -- `adapter: "tree_data"` names a model
-    artifact -- so those files are resolved at discovery and carried alongside
-    the descriptor that named them.
-
-    Fields are a resolved absolute source and the destination it keeps in an arch
-    tree. The destination preserves the authored layout rather than flattening to
-    the descriptor's own folder, so the authored path stays valid verbatim in the
-    packed tree and the runtime's `baseDir / artifact` join resolves the same way
-    it did in the source. This mirrors `kernel_source.library`, the only other
-    descriptor field naming a file the packer must carry.
-    """
-
-    source: Path
-    rel_dir: Path
-    name: str
-
-
 @dataclass
 class Descriptor:
     """A parsed descriptor loaded from a flat-folder JSON file.
@@ -75,7 +52,6 @@ class Descriptor:
     path: Path
     doc: dict
     rel_dir: Path = Path(".")
-    sidecars: list = field(default_factory=list)
 
     @property
     def type(self):
@@ -107,10 +83,6 @@ class FlatInput:
 
     def ukd_by_id(self):
         return {d.id: d for d in self.ukds()}
-
-    def sidecars_for(self, descriptors):
-        """Every sidecar the given descriptors name, in descriptor order."""
-        return [sidecar for desc in descriptors for sidecar in desc.sidecars]
 
 
 def _read_json(path):
@@ -360,12 +332,7 @@ def _validate_ued(desc):
 # DescriptorLoader.hpp matchScopeFromString / heuristicKindFromString /
 # metadataTypeFromString.
 _MATCH_SCOPES = ("graph", "kernel")
-_UHD_ADAPTERS = ("static_order", "native", "tree_data", "table", "custom_library")
-
-# The adapters whose body names a file the packed tree has to carry. `static_order`
-# scores from the descriptor's own fields and `native` names a symbol the provider
-# registered in-process; neither has anything on disk.
-_ARTIFACT_ADAPTERS = ("tree_data", "table", "custom_library")
+_HEURISTIC_KINDS = ("native", "model")
 _METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
 
 
@@ -395,71 +362,12 @@ def _validate_udd(desc):
     _require(desc.doc, ["name", "dispatch_symbol"], f"UDD {desc.path.name}")
 
 
-def _validate_uhd(desc, source_root):
-    """UHD: adapter is a closed enum, and the adapter-scoped body it selects has
-    to carry what that adapter cannot work without. Mirrors
-    parseHeuristicDescriptor.
-
-    The UHD is the whole descriptor now, not a stub naming a FlatBuffer, so the
-    fields checked here are the ones the runtime reads -- a body naming no
-    artifact drops the model at load and the engine ranks by declared order,
-    silently.
-
-    Takes `source_root` because it does not only validate: an artifact-bearing
-    adapter registers its file as a sidecar here, which is what carries the model
-    into the packed tree. Validating without registering ships a descriptor whose
-    artifact was checked and then left behind.
-    """
+def _validate_uhd(desc):
+    """UHD: kind is a closed enum, payload required. Mirrors
+    parseHeuristicDescriptor."""
     where = f"UHD {desc.path.name}"
-    _require(desc.doc, ["name", "adapter"], where)
-    _require_enum(desc.doc, "adapter", _UHD_ADAPTERS, where)
-
-    adapter = desc.doc["adapter"]
-    if adapter == "native":
-        body = desc.doc.get("native")
-        if not isinstance(body, dict) or not body.get("symbol"):
-            raise HkpPackError(f"{where} adapter 'native' requires 'native.symbol'")
-        return
-    if adapter not in _ARTIFACT_ADAPTERS:
-        return
-
-    body = desc.doc.get(adapter)
-    if not isinstance(body, dict) or not body.get("artifact"):
-        raise HkpPackError(f"{where} adapter '{adapter}' requires '{adapter}.artifact'")
-
-    desc.sidecars.append(_resolve_sidecar(desc, source_root, body["artifact"]))
-
-
-def _resolve_sidecar(desc, source_root, payload):
-    """Resolve a descriptor-relative payload path to a carriable Sidecar.
-
-    Descriptor-relative with no root-relative fallback, matching
-    compile_hip_variant: a fallback fires exactly when the local file is missing,
-    so a typo would stop being an error and bind silently to a same-named file
-    elsewhere in the tree. Sharing one artifact between sibling folders stays
-    expressible by saying so -- `"../shared/model.bin"`.
-
-    The destination keeps the resolved path's position under the root, so an
-    authored `../shared/...` lands in the packed tree where the same relative
-    path still reaches it.
-    """
-    root = Path(source_root).resolve()
-    resolved = (root / desc.rel_dir / payload).resolve()
-    where = f"UHD {desc.path.name}"
-
-    if not resolved.is_relative_to(root):
-        raise HkpPackError(
-            f"{where} payload escapes the source root: {payload} "
-            f"(from {Path(desc.rel_dir).as_posix()}, resolved to {resolved})"
-        )
-    if not resolved.is_file():
-        raise HkpPackError(
-            f"{where} payload source not found: {payload} (looked for {resolved}, "
-            f"resolved relative to descriptor folder {Path(desc.rel_dir).as_posix()})"
-        )
-
-    dest = resolved.relative_to(root)
-    return Sidecar(source=resolved, rel_dir=dest.parent, name=dest.name)
+    _require(desc.doc, ["name", "kind", "payload"], where)
+    _require_enum(desc.doc, "kind", _HEURISTIC_KINDS, where)
 
 
 def _validate_kmd(desc):
@@ -483,7 +391,7 @@ def _validate_kmd(desc):
         _require_enum(entry, "type", _METADATA_TYPES, entry_where)
 
 
-def _validate_shape(desc, source_root, log=print):
+def _validate_shape(desc, log=print):
     doc = desc.doc
     path = desc.path
     if not isinstance(doc, dict):
@@ -510,7 +418,7 @@ def _validate_shape(desc, source_root, log=print):
     if dtype == "udd":
         _validate_udd(desc)
     if dtype == "uhd":
-        _validate_uhd(desc, source_root)
+        _validate_uhd(desc)
     if dtype == "kmd":
         _validate_kmd(desc)
 
@@ -570,7 +478,7 @@ def load_flat_input(root, log=print):
             doc=_read_json(jp),
             rel_dir=rel_dir,
         )
-        _validate_shape(desc, root, log)
+        _validate_shape(desc, log)
         descriptors.append(desc)
 
     flat = FlatInput(descriptors=descriptors)
