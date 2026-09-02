@@ -202,10 +202,13 @@ typedef struct hipblasLtFusedEpilogueDescriptor* hipblasLtFusedEpilogueDescripto
  *  ``recvbuf + r * bytesPerRank`` on every rank, and \p recvbuf must be readable on return.
  *  The payload is opaque; the caller must not interpret or reorder it.
  *
- *  This callback is the only capability the caller hands over, and the reason one entry point
- *  covers both deployment shapes: the library performs no rendezvous of its own. In a single
- *  process the callback is a memcpy; across processes it is ``MPI_Allgather`` or a
- *  ``torch.distributed`` store, and nothing else changes.
+ *  The library performs no rendezvous of its own, which is why one entry point covers both
+ *  deployment shapes: across processes this is ``MPI_Allgather`` or a ``torch.distributed``
+ *  store, and within one process it is rank-indexed storage plus a barrier. Only at
+ *  ``world == 1``, with nothing to collect, does it degenerate to a memcpy of \p sendbuf.
+ *
+ *  Returning before every rank has contributed does not deadlock but fails registration: a
+ *  slot no rank has written cannot pass validation.
  *
  *  @param[in]
  *  userData      the pointer passed to ``hipblasLtSetDeviceComm``, verbatim.
