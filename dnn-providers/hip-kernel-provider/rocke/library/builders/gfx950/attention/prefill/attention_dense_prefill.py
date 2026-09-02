@@ -143,7 +143,7 @@ def run_benchmark(
     ok = (not check) or (err < _TOL)
     return {
         "kernel_name": spec.kernel_name(),
-        "persist_decode": spec.resolved_persist_decode(),
+        "persist_decode": spec.resolved_persist_decode,
         "ms": ms,
         "tflops": tf,
         "max_abs": err,

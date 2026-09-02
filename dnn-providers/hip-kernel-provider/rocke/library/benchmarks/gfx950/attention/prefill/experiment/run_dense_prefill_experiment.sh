@@ -35,12 +35,18 @@ mkdir -p "${RESULTS}"
 
 # Run a command in the ROCm container with the venv active. $1 = tree whose
 # library/ + platform/python go on PYTHONPATH, rest = command.
+RENDER_GID="$(getent group render | cut -d: -f3)"
+VIDEO_GID="$(getent group video | cut -d: -f3)"
+
 in_container() {
     tree="$1"; shift
     docker run --rm \
         --device=/dev/kfd \
         --device=/dev/dri \
-        --group-add=video \
+        --user "$(id -u):$(id -g)" \
+        --group-add "${VIDEO_GID}" \
+        --group-add "${RENDER_GID}" \
+        -e HOME=/tmp \
         --ipc=host \
         --network=host \
         --cap-add=SYS_PTRACE \
