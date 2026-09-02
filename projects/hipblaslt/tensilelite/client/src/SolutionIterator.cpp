@@ -345,6 +345,26 @@ namespace TensileLite
         {
             m_firstSolutionIdx = firstSolutionIdx;
 
+            // This iterator walks every solution by construction, so an indexed
+            // library gains nothing from staying lazy here -- and the index
+            // range below is picked straight off the solutions map, which is
+            // empty for that format until something publishes into it. Note this
+            // has to be materializeAllSolutions() and not the blob cache's own
+            // materializeAll(): leaf nodes resolve through the cache and never
+            // touch the map, so filling the cache alone would leave the reads
+            // below dereferencing an empty map.
+            //
+            // Scoped to this iterator on purpose: the Best/Top iterators are
+            // what load-latency measurements go through, and materializing for
+            // them would erase the very cost this is meant to reduce.
+            library->materializeAllSolutions();
+
+            if(library->solutions.empty())
+            {
+                throw std::runtime_error(
+                    "[AllSolutionsIterator] library contains no solutions to enumerate");
+            }
+
             if(m_firstSolutionIdx < 0)
                 m_firstSolutionIdx = library->solutions.begin()->first;
 
@@ -546,7 +566,10 @@ namespace TensileLite
             }
             if(m_currentSolution == nullptr)
             {
-                m_currentSolution = m_library->solutions.find(0)->second;
+                // Goes through the resolver rather than solutions.find(0):
+                // indexed libraries have not materialized index 0 yet, and the
+                // old form dereferenced end() when it was missing.
+                m_currentSolution = m_library->resolveSolutionByIndex(0);
             }
             m_usedCurrentSolution = false;
         }
@@ -619,7 +642,9 @@ namespace TensileLite
             }
             if(m_solutions.size() == 0)
             {
-                m_solutions.push_back(m_library->solutions.find(0)->second);
+                // See the note in BestSolutionIterator::preProblem.
+                if(auto fallback = m_library->resolveSolutionByIndex(0))
+                    m_solutions.push_back(fallback);
             }
 
             if(m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))

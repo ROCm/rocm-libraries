@@ -85,6 +85,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/SolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SingleSolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Singleton.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionBlobCache.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionLibrary_fwd.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Task.hpp"
