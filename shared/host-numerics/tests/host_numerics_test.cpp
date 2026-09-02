@@ -599,11 +599,8 @@ void testReferenceEpilogue() {
                 options.activationParameter0.type() == ScalarType::Float32 &&
                 options.activationParameter1.type() == ScalarType::Float32,
             "Reference epilogue defaults do not use the requested compute type.");
-    options.bias = VectorBinding{
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
-                                         std::span<const float>(bias)),
-        MatrixAxis::Row,
-    };
+    options.bias = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{2, 1}), std::span<const float>(bias));
     options.outputScale = 2.0;
     options.auxiliaryScale = 3.0;
     options.activation = Activation::Relu;
