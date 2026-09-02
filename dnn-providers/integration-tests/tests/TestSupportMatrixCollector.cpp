@@ -9,30 +9,11 @@
 #include <fstream>
 #include <string>
 
-// getpid() below stamps the temp path per process. MSVC ships no <unistd.h>;
-// it spells the same call _getpid() in <process.h>.
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
-
+#include "ScratchDirectory.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 
 using hipdnn_integration_tests::SupportMatrixCollector;
-
-namespace
-{
-/// This process's id. MSVC has no <unistd.h> and spells the call _getpid().
-int currentProcessId()
-{
-#ifdef _WIN32
-    return _getpid();
-#else
-    return ::getpid();
-#endif
-}
-} // namespace
+using hipdnn_integration_tests::scratch::currentProcessId;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 

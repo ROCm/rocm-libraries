@@ -70,10 +70,12 @@ namespace TensileLite
     // Must stay in sync with _rocblaslt_handle::c_syncGsuSlots.
     constexpr uint32_t SynchronizerGroupedSlots = 16;
 
-    // Elements in one Stream-K flag region. Stream-K indexes its flags by
-    // workgroup id, so this is the largest skGrid that fits; gfx950 picks 224.
-    // A grid past this would write beyond its own region, so getSKGrid clamps
-    // against it.
+    // Elements in one Stream-K flag region: one flag per Stream-K workgroup,
+    // indexed by workgroup id on the static path and by partial-tile index on
+    // the dynamic-queue ones, which spend the leading elements on the per-XCD
+    // work-queue counters and so fit fewer. A grid past its bound writes into
+    // the next region, so getSKGrid clamps it. skGrid defaults to the CU count
+    // and TENSILE_STREAMK_GRID_MULTIPLIER scales it.
     //
     // Must stay in sync with _rocblaslt_handle::c_syncSkSlotElements.
     constexpr uint32_t StreamKFlagElements = 2048;
