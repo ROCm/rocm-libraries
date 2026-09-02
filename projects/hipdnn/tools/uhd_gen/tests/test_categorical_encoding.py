@@ -143,10 +143,75 @@ def test_dtype_codes_ascend_with_byte_width():
 def test_dtype_members_are_the_spellings_the_library_produces():
     """to_string(DataType) in hipdnn_frontend/Types.hpp is the only place this library
     turns a data type into a string, so it is the only vocabulary a binding can hold.
-    "float16" is the plausible near-miss that must not resolve."""
+    "float16" is the plausible near-miss that must not resolve.
+
+    This is the line the case fold below must not cross. `BF16` and `bf16` are one value
+    because they are the same letters; `float16` and `fp16` are two vocabularies, and
+    bridging them silently trains the model on numbers the runtime never emits.
+    """
     assert encode_categorical("dtype", "fp16") == 13
     assert encode_categorical("dtype", "float16") is None
+    assert encode_categorical("dtype", "FLOAT16") is None
     assert encode_categorical("dtype", "unknown") is None
+
+
+def test_letter_case_is_a_spelling_not_a_different_value():
+    """The rocKE KMDs declare `"BF16"`; to_string(DataType) produces `"bf16"`. One value,
+    two shift keys -- refusing either stopped a real gfx942 sweep at training and bought
+    no safety. They resolve to the same code, not to two rows sharing a number."""
+    assert encode_categorical("dtype", "BF16") == 12
+    assert encode_categorical("dtype", "bf16") == 12
+    assert encode_categorical("dtype", "Bf16") == 12
+    assert encode_categorical("dtype", "FP16") == encode_categorical("dtype", "fp16")
+
+    # Both directions: the table spells layouts upper case, so the fold has to reach a
+    # lower-case query from an upper-case row too.
+    assert encode_categorical("layout", "nchw") == 2
+    assert encode_categorical("LAYOUT", "NCHW") == 2
+
+
+def test_a_case_variant_encodes_through_the_feature_path():
+    """Through the function training actually calls: the KMD's spelling and the runtime's
+    land on one number, which is the only reason a model trained on one means anything
+    against the other (RFC 0019 11.3)."""
+    assert encode_feature_value("$kernel.dtype", "BF16") == encode_feature_value(
+        "$kernel.dtype", "bf16"
+    )
+    assert encode_feature_value("$kernel.dtype", "BF16") == 12.0
+
+
+def test_folding_case_does_not_invent_a_category():
+    """The fold is over letter case only. `pipeline` has no table in any casing, so this
+    still means nothing numerically and still has to raise the no-table error."""
+    with pytest.raises(ValueError) as excinfo:
+        encode_feature_value("$kernel.PIPELINE", "intrawave")
+    assert "no categorical encoding" in str(excinfo.value)
+
+
+def test_the_fold_is_ascii_only():
+    """The C++ side folds the bytes 'A'-'Z' and nothing else, so this side must too.
+
+    `str.lower()` is Unicode-aware: it turns the Kelvin sign into 'k'. If Python folded
+    more than C++ did, a value would encode at training to a code the runtime refuses at
+    selection -- the corpus and the engine back on two different axes, which is the whole
+    failure this file exists to prevent. (The C++ comment rules out `std::tolower` for the
+    matching reason: it is locale-dependent, so the code would depend on the machine.)
+    """
+    from uhd_gen import features
+
+    mapping = {"k": 1}
+    assert features._lookup_folding_ascii_case(mapping, "K") == 1
+    assert features._lookup_folding_ascii_case(mapping, "\u212a") is None
+    assert "\u212a".lower() == "k", "the Unicode fold this deliberately does not use"
+
+
+def test_the_cpp_lookup_folds_case_too():
+    """A fold on one side only is the same defect as a table on one side only: training
+    would encode `BF16` to 12 while the runtime refused it, and nothing would say so."""
+    _, _, body = _header_text().partition("inline std::optional<double> encodeCategorical")
+    body, _, _ = body.partition("\n}")
+    assert body, "encodeCategorical is not declared in the header"
+    assert "equalsFoldingAsciiCase" in body
 
 
 @pytest.mark.parametrize(

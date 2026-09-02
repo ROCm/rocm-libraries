@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import string
 
 #: Largest numeric literal magnitude the cross-language canonical form is safe for.
 #:
@@ -177,10 +178,51 @@ def category_of_reference(reference: str) -> str:
     return reference.rsplit(".", 1)[1]
 
 
+#: Fold table for the 26 ASCII letters, and nothing else.
+#:
+#: Deliberately not ``str.lower()``: that is Unicode-aware, so 'İ' and the Kelvin sign
+#: 'K' fold into ASCII and a value would resolve to a code the C++ side -- which folds
+#: bytes 'A'-'Z' only -- never gives it. The two sides have to agree on one number for
+#: one value, so they have to agree on the fold, character for character.
+_ASCII_CASE_FOLD = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
+
+
+def _lookup_folding_ascii_case(mapping: dict, key: str):
+    """``mapping[key]`` ignoring ASCII letter case, or None.
+
+    Mirrors ``detail::equalsFoldingAsciiCase`` in CategoricalEncoding.hpp. Compares
+    whole folded keys, so it accepts a different case of the same spelling and nothing
+    else -- ``float16`` does not reach ``fp16``.
+    """
+    if key in mapping:
+        return mapping[key]
+    folded = key.translate(_ASCII_CASE_FOLD)
+    for candidate, entry in mapping.items():
+        if candidate.translate(_ASCII_CASE_FOLD) == folded:
+            return entry
+    return None
+
+
 def encode_categorical(category: str, value: str) -> int | None:
     """The number ``value`` takes in ``category``, or None if the pair is not in the
-    table."""
-    return CATEGORICAL_ENCODING.get(category, {}).get(value)
+    table.
+
+    Category and value are matched ignoring ASCII letter case, mirroring
+    ``encodeCategorical``. A rocKE KMD declares ``"BF16"`` where ``to_string(DataType)``
+    produces ``"bf16"``; those are one value spelled with different shift keys, and
+    refusing one of them stopped a real gfx942 sweep at training for no safety in
+    return. The fold is applied here, at lookup, rather than by adding uppercase rows:
+    rows would double the table, move the frozen digest, and claim ``BF16`` and ``bf16``
+    are two members that happen to share a code.
+
+    It stays a fold, never an alias table. ``float16`` still returns None, because a
+    second vocabulary's spelling is a genuine difference and bridging it silently trains
+    the model on numbers the runtime never emits.
+    """
+    members = _lookup_folding_ascii_case(CATEGORICAL_ENCODING, category)
+    if members is None:
+        return None
+    return _lookup_folding_ascii_case(members, value)
 
 
 def encode_feature_value(reference: str, value) -> float:
@@ -206,7 +248,7 @@ def encode_feature_value(reference: str, value) -> float:
     code = encode_categorical(category, value)
     if code is not None:
         return float(code)
-    if category in CATEGORICAL_ENCODING:
+    if _lookup_folding_ascii_case(CATEGORICAL_ENCODING, category) is not None:
         raise ValueError(
             f"{reference}: categorical value {value!r} has no code in category "
             f"'{category}'. Append it to CATEGORICAL_ENCODING here and to "

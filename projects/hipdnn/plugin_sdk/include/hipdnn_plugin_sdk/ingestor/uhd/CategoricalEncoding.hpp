@@ -189,11 +189,57 @@ constexpr bool tableIsDigestSafe()
     return true;
 }
 
+/// Lowercase the 26 ASCII letters; leave every other byte exactly as it is.
+///
+/// Deliberately not std::tolower. That function consults the current C locale, so the
+/// code a category value resolves to would depend on the machine the engine or the
+/// trainer happens to run on -- in a Turkish locale 'I' does not fold to 'i'. The whole
+/// point of this table is that every engine and every trainer agree on one number, so
+/// the fold has to be a fixed function of the bytes and of nothing else. std::tolower
+/// is also undefined behaviour on a negative char, which every byte above 0x7F is here.
+constexpr char foldAsciiCase(char character)
+{
+    return (character >= 'A' && character <= 'Z') ? static_cast<char>(character - 'A' + 'a')
+                                                  : character;
+}
+
+/// True if `first` and `second` are the same string up to ASCII letter case.
+///
+/// Case is not a real difference: a rocKE KMD declares its dtype values as `BF16` while
+/// to_string(DataType) spells the same thing `bf16`, and refusing one of them buys no
+/// safety -- it only forces a second spelling into the table, which would imply the two
+/// are separate category members that happen to share a code.
+///
+/// A different *spelling* remains a real difference. This compares character by
+/// character, so `float16` still never reaches `fp16`: that is a genuine near-miss
+/// between two vocabularies, and silently accepting it is how a model gets trained on
+/// numbers the runtime will never produce.
+constexpr bool equalsFoldingAsciiCase(std::string_view first, std::string_view second)
+{
+    if(first.size() != second.size())
+    {
+        return false;
+    }
+    for(size_t index = 0; index < first.size(); ++index)
+    {
+        if(foldAsciiCase(first[index]) != foldAsciiCase(second[index]))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// True if no category repeats a value and no category repeats a code.
 ///
 /// A repeated value makes the lookup order-dependent; a repeated code collapses two
 /// categories' members onto one number, which a model cannot tell apart. Both are the
 /// kind of mistake an append introduces, so it is caught where the append is made.
+///
+/// Compared up to ASCII case because the lookup is: since `BF16` and `bf16` resolve to
+/// the same entry, appending both would be exactly the order-dependent lookup this
+/// guards against, and it has to fail at compile time rather than pick whichever row
+/// came first.
 constexpr bool tableIsUnambiguous()
 {
     for(size_t i = 0; i < CATEGORICAL_ENCODING_TABLE.size(); ++i)
@@ -202,8 +248,9 @@ constexpr bool tableIsUnambiguous()
         {
             const auto& first = CATEGORICAL_ENCODING_TABLE[i];
             const auto& second = CATEGORICAL_ENCODING_TABLE[j];
-            if(first.category == second.category
-               && (first.value == second.value || first.code == second.code))
+            if(equalsFoldingAsciiCase(first.category, second.category)
+               && (equalsFoldingAsciiCase(first.value, second.value)
+                   || first.code == second.code))
             {
                 return false;
             }
@@ -265,11 +312,14 @@ inline std::string categoricalEncodingDigest()
 /// Separates "this string means nothing here" from "this category is known and that is
 /// not one of its values" -- two failures that read identically at a call site but mean
 /// very different things to whoever has to fix them.
+///
+/// Matched up to ASCII case, like encodeCategorical below, so the two never disagree
+/// about whether a category is known.
 inline bool isKnownCategory(std::string_view category)
 {
     for(const auto& entry : CATEGORICAL_ENCODING_TABLE)
     {
-        if(entry.category == category)
+        if(detail::equalsFoldingAsciiCase(entry.category, category))
         {
             return true;
         }
@@ -278,11 +328,24 @@ inline bool isKnownCategory(std::string_view category)
 }
 
 /// The number `value` takes in `category`, or nullopt if the pair is not in the table.
+///
+/// The match ignores ASCII letter case on both the category and the value. A rocKE KMD
+/// declares `"BF16"` where to_string(DataType) produces `"bf16"`; those are one value
+/// with two spellings of the same letters, and rejecting one of them stopped a real
+/// gfx942 sweep at training for no safety in return. The fold happens here, at lookup,
+/// rather than as extra rows in the table: extra rows would double the table, move the
+/// frozen digest, and assert that `BF16` and `bf16` are distinct members that merely
+/// share a code.
+///
+/// It is a fold, not an alias table. `float16` still finds nothing, because two
+/// vocabularies that spell the type differently are genuinely different and quietly
+/// bridging them trains a model on numbers the runtime cannot reproduce.
 inline std::optional<double> encodeCategorical(std::string_view category, std::string_view value)
 {
     for(const auto& entry : CATEGORICAL_ENCODING_TABLE)
     {
-        if(entry.category == category && entry.value == value)
+        if(detail::equalsFoldingAsciiCase(entry.category, category)
+           && detail::equalsFoldingAsciiCase(entry.value, value))
         {
             return static_cast<double>(entry.code);
         }

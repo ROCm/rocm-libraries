@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -90,6 +91,42 @@ TEST(TestCategoricalEncoding, AStringFeatureReachesTheModelAsItsCode)
     EXPECT_DOUBLE_EQ(extractKernelFeature("layout", "BSHD"), 7.0);
 }
 
+// ---- Case is a spelling, not a category ----------------------------------------
+
+TEST(TestCategoricalEncoding, LetterCaseDoesNotChangeTheCode)
+{
+    // The rocKE KMDs declare `"BF16"`; to_string(DataType) produces `"bf16"`. One value,
+    // two shift keys. Rejecting either one stopped a gfx942 sweep at training and bought
+    // nothing, so the lookup folds ASCII case -- and folds it to the *same* code, not to
+    // a second row that happens to carry the same number.
+    EXPECT_EQ(encodeCategorical("dtype", "BF16"), 12.0);
+    EXPECT_EQ(encodeCategorical("dtype", "bf16"), 12.0);
+    EXPECT_EQ(encodeCategorical("dtype", "Bf16"), 12.0);
+    EXPECT_EQ(encodeCategorical("dtype", "FP16"), encodeCategorical("dtype", "fp16"));
+
+    // Both directions: the table spells layouts upper case, so the fold has to work from
+    // an upper-case row towards a lower-case query too.
+    EXPECT_EQ(encodeCategorical("layout", "nchw"), 2.0);
+    EXPECT_EQ(encodeCategorical("LAYOUT", "NCHW"), 2.0);
+}
+
+TEST(TestCategoricalEncoding, ACaseVariantReachesTheModelAsTheSameCode)
+{
+    // End to end, through the extractor the engine actually runs: the KMD's spelling and
+    // the runtime's spelling land on one number, which is the only reason a model trained
+    // on one is meaningful against the other.
+    EXPECT_DOUBLE_EQ(extractKernelFeature("dtype", "BF16"),
+                     extractKernelFeature("dtype", "bf16"));
+    EXPECT_DOUBLE_EQ(extractKernelFeature("dtype", "BF16"), 12.0);
+}
+
+TEST(TestCategoricalEncoding, FoldingCaseDoesNotInventACategory)
+{
+    // The fold is over letter case only. `pipeline` has no table in any casing, so this
+    // still means nothing numerically and still has to throw rather than reach a row.
+    EXPECT_THROW(extractKernelFeature("PIPELINE", "intrawave"), JsonLogicError);
+}
+
 // ---- An unencodable string still fails loudly ----------------------------------
 
 TEST(TestCategoricalEncoding, StringOutsideAnyCategoryStillThrows)
@@ -104,7 +141,13 @@ TEST(TestCategoricalEncoding, ValueOutsideAKnownCategoryStillThrows)
     // "float16" is a plausible spelling that this codebase never produces --
     // to_string(DataType) emits "fp16". Accepting near-misses is how a training corpus
     // and a runtime end up on two different axes.
+    //
+    // This is the line the case fold above must not cross. Folding case makes `BF16`
+    // and `bf16` one value, because they are; widening it into anything that also
+    // reconciles two vocabularies' spellings lands here, and that is the whole reason
+    // this test outranks the convenience of accepting `float16`.
     EXPECT_THROW(extractKernelFeature("dtype", "float16"), JsonLogicError);
+    EXPECT_EQ(encodeCategorical("dtype", "FLOAT16"), std::nullopt);
 }
 
 TEST(TestCategoricalEncoding, ArithmeticOnACategoryStillThrows)
