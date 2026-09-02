@@ -111,7 +111,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
     # The integration root is packed by three roots, and each stages under its own
     # packaging target. Name each one individually.
-    foreach(_hkp_set hkp_packaging_integration_conv hkp_packaging_integration_pointwise
+    foreach(_hkp_set hkp_packaging_integration hkp_packaging_integration_shared
                      hkp_packaging_archive_fixture)
         if(TARGET ${_hkp_set})
             add_dependencies(hip_kernel_provider_integration_tests ${_hkp_set})
@@ -124,7 +124,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     hkp_verify_embedded_sources(
         TARGET hip_kernel_provider_integration_tests
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}
-        PACK_NAMES integration_conv integration_pointwise archive_fixture
+        PACK_NAMES integration integration_shared archive_fixture
     )
 endif()
 

@@ -23,6 +23,31 @@ Every root is optional. An absent root, an empty root, a root with no
 `embedded_source` descriptor and an absent key table each pass. A pass reports
 the two counts it compared, so a pass over nothing reads differently in the
 build log from a step that did not run.
+
+An emptied root therefore passes even when its pack stamp is still present. That
+is the one corruption this check cannot tell apart from a root that is
+legitimately empty, and why the stale-tree hint says to confirm against a clean
+build directory.
+
+The comparison runs one way, from a staged descriptor to the table. Neither
+reverse direction is checked.
+
+A key the table holds that no descriptor names is not an error. Most embedded
+kernels have no descriptor at all: the hip_mlops engine resolves its sources by
+name, as do the compile and cache tests, so requiring a descriptor per key would
+fail on correct code. A rule covering only descriptor-backed keys would have to
+be asked for where the kernel is registered, and nothing distinguishes the two
+kinds there today.
+
+A descriptor that never reaches a staged root is not an error either. Authored
+under a folder no pack is wired to, it is never staged, so this walk never sees
+it and passes while the runtime never receives it. Catching that needs the
+authored tree as a second input, which provenance cannot supply, because the
+packer is what writes provenance.
+
+Both gaps exist because the descriptor and the embedding declaration are written
+independently. A build that derived one from the other would leave nothing for
+either direction to catch.
 """
 
 from __future__ import annotations

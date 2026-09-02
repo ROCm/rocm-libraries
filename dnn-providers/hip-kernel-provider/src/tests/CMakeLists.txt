@@ -97,8 +97,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # fixed offset. Same value the provider is compiled with, so the test cannot drift
     # into asserting a path the provider never builds.
     #
-    # One define per descriptor set. A single define cannot serve both: the discovery set
-    # and the archive fixture root are different folders.
+    # One define per descriptor set. A single define cannot serve both: the discovery set is
+    # the whole unit root, and the kpack cases need the one subtree under it that carries an
+    # archive.
     #
     # Binary-relative, never an absolute build path. The offset holds in the build tree and
     # the install tree alike, so these cases read the descriptors beside whichever copy of
@@ -107,15 +108,14 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
-        HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}")
+        HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
 
     # The kpack adapter's tests. Gated with the sources they exercise, and kept together
-    # here -- including the dispatch one, which sits under engines/ -- so all three sit
-    # between the two defines they read. Those are
-    # HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR above, under which the device cases
-    # find the archive this build packed for the local arch, and HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE
-    # below, which the parse-level cases open because they need a real container rather
-    # than a matching device.
+    # here -- including the dispatch ones, which sit under engines/ -- so they sit between
+    # the two defines they read. Those are HIPKERNELPROVIDER_UNIT_KPACK_RELDIR above, under
+    # which the device cases find the archive this build packed for the local arch, and
+    # HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE below, which the parse-level cases open because
+    # they need a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
@@ -136,21 +136,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # Building this binary by name -- what `ninja check` does -- otherwise runs the cases
     # against a directory that does not exist yet, and they skip rather than fail.
     # Each descriptor set has its own staging target. Name each one individually.
-    foreach(_hkp_set hkp_packaging_unit_conv hkp_packaging_unit_pointwise
-                     hkp_packaging_archive_fixture)
+    foreach(_hkp_set hkp_packaging_unit hkp_packaging_unit_shared)
         if(TARGET ${_hkp_set})
             add_dependencies(hip_kernel_provider_tests ${_hkp_set})
         endif()
     endforeach()
 
-    # The parent of the unit descriptor sets, and the archive fixture root this
-    # binary also compiles in. A walk of a parent reaches every subtree staged
-    # under it, so a further pack there comes under the check with no edit here.
+    # The parent of the unit descriptor sets, and the only root this binary reads.
+    # A walk of a parent reaches every subtree staged under it, so a further pack
+    # there comes under the check with no edit here.
     hkp_verify_embedded_sources(
         TARGET hip_kernel_provider_tests
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_UNIT_BUILD_DIR}
-                                ${HIPKERNELPROVIDER_ARCHIVE_FIXTURE_BUILD_DIR}
-        PACK_NAMES unit_conv unit_pointwise archive_fixture
+        PACK_NAMES unit unit_shared
     )
 endif()
 

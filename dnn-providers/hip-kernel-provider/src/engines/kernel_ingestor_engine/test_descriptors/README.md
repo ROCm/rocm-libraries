@@ -4,20 +4,33 @@ Authored descriptor sets for the hip-kernel-provider test suites. The build pack
 into one of two discovery roots. The unit binary reads the `unit` root. The integration
 binary reads the `integration` root. The two roots stay disjoint.
 
-| Source folder | Dialect | Stages into | Consumer |
-|---|---|---|---|
-| `shared/conv_fwd/` | `hip` | `unit/conv/`, `integration/conv/` | both binaries |
-| `unit/pointwise/` | `embedded_source` | `unit/pointwise/` | the unit binary |
-| `integration/pointwise/` | `hip` | `integration/pointwise/` | the integration binary |
-| `integration/archive_fixture/` | `hip` | `integration/archive_fixture/` | the integration binary |
+Every set is a top-level folder here, and every one is packed whole.
 
-The packer runs five times over these sets. `shared/conv_fwd/` feeds both binaries, and each
-other folder feeds one binary. Every descriptor in these sets applies to each packed
-architecture. Each set therefore stages one architecture folder for each packed architecture.
+| Source folder | Holds | Dialect | Stages into | Consumer |
+|---|---|---|---|---|
+| `shared/` | `conv_fwd/` | `hip` | `unit/shared/`, `integration/shared/` | both binaries |
+| `unit/` | `pointwise/` | `embedded_source` | `unit/unit/` | the unit binary |
+| `integration/` | `pointwise/` | `hip` | `integration/integration/` | the integration binary |
+| `archive_fixture/` | `pointwise/` | `hip` | `integration/archive_fixture/` | the integration binary |
+
+The packer runs five times over these four sets. `shared/` feeds both binaries, and each other
+folder feeds one binary. Every descriptor in these sets applies to each packed architecture.
+Each set therefore stages one architecture folder for each packed architecture.
 
 A staged folder carries the name of the folder it was authored in, so a shard in the build
-tree names its own origin. `shared/conv_fwd/` is the one set that cannot: it stages twice,
-under a name that says which root each copy serves.
+tree names its own origin. `shared/` is the one name that appears under both roots, which is
+what marks the set that stages twice.
+
+Each set is packed by its top-level folder rather than by the folder inside it, so every
+descriptor lands in a child of its shard root while the archive is written at the shard root
+itself. That climb out of a child folder is what the runtime containment guard checks, and a
+set packed from its own leaf folder never produces it. Keep one level of nesting in every set.
+
+`archive_fixture/` is authored beside the other sets rather than inside `integration/`, even
+though only the integration binary reads it. The two cannot both be source roots: one folder
+cannot contain another, because packing the parent would sweep the child's descriptors in and
+write them into the parent's archive. The fixture needs an archive that can be corrupted on
+its own -- see below -- so it needs a source root of its own.
 
 ## `shared/conv_fwd/`
 
@@ -28,7 +41,8 @@ same authored descriptors.
 ## `unit/pointwise/` and `integration/pointwise/`
 
 Both folders declare the engine `hipkernel:Pointwise`. `unit/pointwise/` uses the
-`embedded_source` dialect. `integration/pointwise/` uses the `hip` dialect.
+`embedded_source` dialect. `integration/pointwise/` uses the `hip` dialect. Each is the only
+set inside its top-level folder, which is what the packer is pointed at.
 
 Author the two sets one time each, one set per dialect. One engine id in two dialects
 collides on the completed metadata tuple. The collision removes that engine from the whole
@@ -66,7 +80,7 @@ Each staged `embedded_source` descriptor holds a `provenance` block beside its
 architecture stamp. Read the block to find the origin of a staged descriptor. The runtime
 does not read the block.
 
-## `integration/archive_fixture/`
+## `archive_fixture/`
 
 Descriptors in the `hip` dialect, which the build packs into a per-arch archive.
 

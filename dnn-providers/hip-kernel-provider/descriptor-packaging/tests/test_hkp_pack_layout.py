@@ -765,7 +765,7 @@ def test_kpack_folder_rejected_only_at_the_arch_root(tmp_path, empty_arch_fixtur
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 RUNTIME_FIXTURE = (
     Path(__file__).resolve().parent.parent.parent
-    / "src/engines/kernel_ingestor_engine/test_descriptors/integration/archive_fixture"
+    / "src/engines/kernel_ingestor_engine/test_descriptors/archive_fixture"
 )
 
 
@@ -808,7 +808,7 @@ def test_example_tree_ids_are_uuids():
 def test_example_tree_field_shape_matches_the_runtime_fixture():
     """Per descriptor type, carry the fields the runtime fixture carries.
 
-    `integration/archive_fixture/` is the tree the C++ integration test actually loads
+    `archive_fixture/` is the tree the C++ integration test actually loads
     and dispatches, so it is the authority on shape. Comparing against it catches an
     invented field set -- the failure that shipped here once already, where UDD
     had `grid`/`block`/`args` instead of `dispatch_symbol` and UMD had
@@ -1126,7 +1126,7 @@ def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
         descriptors / "shared/conv_fwd",
         descriptors / "unit/pointwise",
         descriptors / "integration/pointwise",
-        descriptors / "integration/archive_fixture",
+        descriptors / "archive_fixture",
     ]
     assert any(
         ids(other) for other in others

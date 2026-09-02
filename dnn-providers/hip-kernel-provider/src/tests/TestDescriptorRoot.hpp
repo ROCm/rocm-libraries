@@ -74,12 +74,18 @@ inline std::string describeUnusableDescriptorRoot(const std::filesystem::path& r
     return "the descriptor root '" + root.string() + "' holds no descriptor JSON";
 }
 
-#ifdef HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR
-/// The archive fixture set, holding one subdirectory per packed arch.
-inline const std::filesystem::path& archiveFixtureRoot()
+#ifdef HIPKERNELPROVIDER_UNIT_KPACK_RELDIR
+/// The packed set inside this binary's own discovery root, holding one subdirectory per
+/// packed arch, each with a real archive under `kpack/`.
+///
+/// The kpack cases need staged output that a packer actually compiled: an archive to open,
+/// a toc_key to resolve against, and a descriptor naming both. `unit/pointwise` cannot
+/// serve them -- it is authored in the embedded_source dialect, so the packer compiles
+/// nothing for it and its arch folders hold no archive at all.
+inline const std::filesystem::path& unitKpackRoot()
 {
     static const std::filesystem::path root
-        = descriptorSetRoot(HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR);
+        = descriptorSetRoot(HIPKERNELPROVIDER_UNIT_KPACK_RELDIR);
     return root;
 }
 #endif

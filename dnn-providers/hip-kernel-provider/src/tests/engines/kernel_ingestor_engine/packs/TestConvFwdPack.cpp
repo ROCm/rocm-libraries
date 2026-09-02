@@ -4,7 +4,9 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -13,13 +15,17 @@
 
 #include <gtest/gtest.h>
 
+#include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "PackedKernelSource.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 /**
@@ -29,6 +35,9 @@
  *        a pointwise graph each reach only their own matcher. Modelled on
  *        TestPointwiseAddMatchers.cpp; this pack has no operation-matcher section since
  *        it is the engine's only pack.
+ *
+ *        Also the kpack dispatch case, which lives here because this is the pack whose
+ *        descriptors the unit binary's own root stages with a real archive.
  */
 namespace
 {
@@ -493,6 +502,103 @@ TEST(TestConvFwdPack, PointwisePacksClaimTheOperationTheyActuallyImplement)
                 << kernel.name;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// One module across two dispatches
+// ---------------------------------------------------------------------------
+
+/// The standalone descriptor the [GPU] case takes its archive and toc_key from. Read out
+/// of the built file rather than written here: a copy would silently decouple this test
+/// from the artifact it exists to read.
+constexpr const char* PACKED_UKD_DESCRIPTOR = "conv_fwd_f16_block64.ukd.json";
+
+/// The entry point that descriptor names.
+constexpr const char* PACKED_SYMBOL = "ConvFwd";
+
+/// A KernelDefinition whose code comes from a kpack archive at
+/// `originDirectory / library`. Metadata carries exactly what the conv handler reads, so
+/// the only thing that differs from the embedded-source path is the source.
+///
+/// `treeRoot` is the containment boundary the loader would have stamped. Passed
+/// separately from originDirectory because they differ for a nested descriptor, which is
+/// exactly the case whose archive lives at the arch root above it.
+hipdnn_plugin_sdk::ingestor::KernelDefinition
+    makeKpackConvKernel(const std::filesystem::path& originDirectory,
+                        const std::filesystem::path& treeRoot,
+                        const std::string& library,
+                        const std::string& tocKey,
+                        int64_t blockSize)
+{
+    auto kernel = makeKernel(blockSize, "HALF", PACKED_SYMBOL);
+    kernel.name = "conv_fwd_f16_kpack";
+    kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK;
+    kernel.source.library = library;
+    kernel.source.tocKey = tocKey;
+    kernel.source.symbol = PACKED_SYMBOL;
+    kernel.originDirectory = originDirectory;
+    kernel.treeRoot = treeRoot;
+    return kernel;
+}
+
+/// Two kernels differing only by block size, both naming one (archive, toc_key, arch):
+/// the cache must grow by exactly one, because a second load of a blob already resident
+/// is the cost this cache exists to avoid and nothing else observes it.
+///
+/// Measured as a delta rather than against 1, so a module some earlier case left resident
+/// does not decide the outcome. That holds only while this is the one case in the binary
+/// that loads a conv module: discovery reads descriptor JSON and never loads code, and
+/// the other two conv dispatch cases refuse before reaching the loader. A case added
+/// later that genuinely loads THIS (archive, toc_key, arch) would make the assertion
+/// depend on suite order -- reset the cache in that case rather than widening this one.
+TEST(TestConvFwdDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
+{
+    SKIP_IF_NO_DEVICES();
+
+    hipDeviceProp_t properties{};
+    std::string arch;
+    std::filesystem::path packed;
+    ASSERT_NO_FATAL_FAILURE(
+        hip_kernel_provider::testing::findPackedArchDirectory(properties, arch, packed));
+    if(packed.empty())
+    {
+        GTEST_SKIP() << "nothing was packed for this device (" << arch
+                     << "): " << hip_kernel_provider::testing::unitKpackRoot() / arch
+                     << " does not exist. Environmental -- the build packs per arch and this "
+                        "device is outside GPU_TARGETS.";
+    }
+
+    hip_kernel_provider::testing::PackedKernelSource source;
+    ASSERT_NO_FATAL_FAILURE(hip_kernel_provider::testing::readPackedKernelSource(
+        packed, PACKED_UKD_DESCRIPTOR, source));
+
+    // Built from the stripped arch rather than currentDeviceProperties(), which keeps the
+    // feature flags hipGetDeviceProperties reports ("gfx1152:xnack-"). The packer names
+    // shards with the bare arch, so the archive lookup has to be asked in that spelling.
+    hipdnn_plugin_sdk::ingestor::DeviceProperties deviceProperties;
+    deviceProperties.gcnArchName = arch;
+    deviceProperties.warpSize = properties.warpSize;
+
+    const GraphFixture fixture(buildConvFwdGraph(data_objects::DataType::HALF), deviceProperties);
+    const auto bound = matchesGraph(CONV_FWD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // originDirectory is the descriptor's own (nested) folder; the arch root is the tree,
+    // and the archive sits under it -- the real shipped shape.
+    const auto first
+        = makeKpackConvKernel(source.originDirectory, packed, source.library, source.tocKey, 64);
+    const auto second
+        = makeKpackConvKernel(source.originDirectory, packed, source.library, source.tocKey, 256);
+
+    const auto& handler = dispatchHandler(CONV_FWD);
+    const size_t before = convFwdKpackModuleCache().size();
+
+    const auto preparedFirst = handler.prepare(fixture.context(), *bound, first);
+    const auto preparedSecond = handler.prepare(fixture.context(), *bound, second);
+    ASSERT_NE(preparedFirst, nullptr);
+    ASSERT_NE(preparedSecond, nullptr);
+
+    EXPECT_EQ(convFwdKpackModuleCache().size(), before + 1);
 }
 
 } // namespace

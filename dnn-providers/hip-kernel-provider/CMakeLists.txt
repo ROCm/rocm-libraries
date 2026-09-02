@@ -204,35 +204,28 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR
         "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}")
 
-    set(_test_descriptor_source_root
+    set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/test_descriptors")
 
-    # conv_fwd is authored once and packed into both roots.
-    set(HIPKERNELPROVIDER_SHARED_CONV_SOURCE_DIR
-        "${_test_descriptor_source_root}/shared/conv_fwd")
-    set(HIPKERNELPROVIDER_UNIT_CONV_BUILD_DIR
-        "${HIPKERNELPROVIDER_UNIT_BUILD_DIR}/conv")
-    set(HIPKERNELPROVIDER_INTEGRATION_CONV_BUILD_DIR
-        "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}/conv")
-
-    # pointwise is authored once per dialect, and each dialect stages into its own root.
-    set(HIPKERNELPROVIDER_UNIT_POINTWISE_SOURCE_DIR
-        "${_test_descriptor_source_root}/unit/pointwise")
-    set(HIPKERNELPROVIDER_UNIT_POINTWISE_BUILD_DIR
-        "${HIPKERNELPROVIDER_UNIT_BUILD_DIR}/pointwise")
-    set(HIPKERNELPROVIDER_INTEGRATION_POINTWISE_SOURCE_DIR
-        "${_test_descriptor_source_root}/integration/pointwise")
-    set(HIPKERNELPROVIDER_INTEGRATION_POINTWISE_BUILD_DIR
-        "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}/pointwise")
-
-    # The archive fixture carries its own engine identity and its own output folder. The
-    # output folder carries the authored name, so a reader of the staged tree can find the
-    # folder a shard came from without consulting the packing rules.
+    # The name of each authored set, which is also the name it stages under. Named here
+    # only because the test subdirectories compile these same segments into their binaries
+    # as a relative offset; the packing rules in HkpPackaging.cmake join them to the two
+    # roots above directly.
+    #
+    # Every set is a top-level folder under test_descriptors/, and every one is packed
+    # WHOLE rather than by the set inside it. Each descriptor therefore lands in a CHILD of
+    # its shard root while the archive is written at the shard root itself, so it must
+    # climb out of its own folder to reach the archive -- the climb the runtime containment
+    # guard checks, which a set packed from its own leaf folder never produces.
+    #
+    # One archive is written per pack. A folder added under one of these roots joins that
+    # root's archive rather than getting its own; a set that has to be able to fail on its
+    # own needs a top-level folder here and an OUT_ROOT of its own. That is why
+    # archive_fixture/ is authored beside the others rather than inside integration/: the
+    # broken-archive test corrupts its archive and asserts the shipped pointwise engine
+    # still serves, which needs the two archives to be separate files.
+    set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
-    set(HIPKERNELPROVIDER_ARCHIVE_FIXTURE_SOURCE_DIR
-        "${_test_descriptor_source_root}/integration/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}")
-    set(HIPKERNELPROVIDER_ARCHIVE_FIXTURE_BUILD_DIR
-        "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}")
 
     # The offset a test binary walks from its own directory to reach the test descriptor
     # trees. Both trees hang off HIPDNN_PLUGIN_ROOTDIR and both binaries off
@@ -420,15 +413,31 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # production source root is set and is a real directory. Re-testing the source root
     # here would emit the rule for configurations the packer skips, turning a supported
     # build into an install-time failure.
+    # Each pack marks its output root complete with a stamp file inside it, so that
+    # emptying the tree invalidates the stamp too. The stamp belongs to the build and not
+    # to the package, and every pack writes the same name, so one pattern drops all of
+    # them from both trees below and from any pack added later.
+    #
+    # Asserted rather than defaulted: an empty name here would install a pattern that
+    # matches nothing, and the stamp would ship with no diagnostic.
+    if(NOT HKP_PACK_STAMP_NAME)
+        message(FATAL_ERROR
+                "hkp: HKP_PACK_STAMP_NAME is empty, so the descriptor install rules "
+                "cannot exclude the pack stamps. descriptor-packaging defines it; this "
+                "means it was not added before these rules.")
+    endif()
+
     if(TARGET hkp_packaging_product)
         install(DIRECTORY "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/"
-                DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+                DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
+                PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE)
     endif()
 
     # The test packing roots are wired unconditionally under this gate, so the test tree
     # always has content to ship once the build has run.
     if(HIPKERNELPROVIDER_ENABLE_TESTS)
         install(DIRECTORY "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/"
-                DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}")
+                DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
+                PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE)
     endif()
 endif()

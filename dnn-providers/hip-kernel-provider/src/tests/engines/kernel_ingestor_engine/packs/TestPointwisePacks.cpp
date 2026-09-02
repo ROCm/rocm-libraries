@@ -134,8 +134,15 @@ TEST(TestPointwisePacks, EveryEmbeddedSourceKeyResolvesInTheCompiledInTable)
 }
 
 /// The authored packs claim every architecture. The packer stamps each emitted copy with
-/// the architecture of the shard directory it writes it into. originDirectory is that
-/// directory, so the two must agree pack by pack.
+/// the architecture of the shard directory it writes it into, so a pack's stamp must name
+/// a directory it actually sits under.
+///
+/// Asserted as "some component of the path is the stamped arch" rather than against a
+/// directory at a fixed depth, because neither end is fixed. originDirectory is the
+/// descriptor's OWN folder, which equals the shard only for a descriptor staged flat;
+/// treeRoot is whatever root the catalog was loaded from, which is this binary's whole
+/// discovery root here and one arch shard in the packer/loader seam tests. The arch
+/// folder sits between them, at a depth that changes with the authored layout.
 TEST(TestPointwisePacks, EveryPackNamesTheArchitectureItWasPackedFor)
 {
     const auto& set = loadedSet("hipkernel:Pointwise");
@@ -143,12 +150,18 @@ TEST(TestPointwisePacks, EveryPackNamesTheArchitectureItWasPackedFor)
     ASSERT_FALSE(set.packs.empty());
     for(const auto& pack : set.packs)
     {
-        ASSERT_FALSE(pack.arch.empty()) << pack.name;
+        // One stamp per emitted copy: the packer writes a shard per arch and narrows each
+        // copy to that one, so a pack carrying two would mean the narrowing was skipped.
+        ASSERT_EQ(pack.arch.size(), 1U) << pack.name;
         ASSERT_FALSE(pack.kernels.empty()) << pack.name;
-        EXPECT_EQ(
-            pack.arch,
-            std::vector<std::string>{pack.kernels.front().originDirectory.filename().string()})
-            << pack.name;
+
+        const auto& origin = pack.kernels.front().originDirectory;
+        const auto& stamped = pack.arch.front();
+        EXPECT_TRUE(std::any_of(
+            origin.begin(),
+            origin.end(),
+            [&](const std::filesystem::path& part) { return part.string() == stamped; }))
+            << pack.name << ": stamped '" << stamped << "' but was staged at " << origin;
     }
 }
 

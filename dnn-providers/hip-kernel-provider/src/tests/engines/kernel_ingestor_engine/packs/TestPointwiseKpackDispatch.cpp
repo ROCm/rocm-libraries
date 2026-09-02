@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -14,9 +13,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
-#include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -34,7 +31,6 @@
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "TestDescriptorRoot.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -45,13 +41,15 @@
  * @brief The pointwise pack seen from the dispatch side once a kernel's code comes from
  *        a kpack archive rather than embedded source.
  *
- * Three questions, only one of which needs a device:
+ * Two questions, neither of which needs a device:
  *  - the workspace query is unchanged by the new source kind;
  *  - a kpack whose archive is absent costs only itself, and a sibling still serves
- *    -- the failure is raised at archive-open, before any HIP call, so this needs no
- *    device;
- *  - two dispatches over one (archive, toc_key, arch) load one module, which
- *    cannot be observed without a device and is marked [GPU] accordingly.
+ *    -- the failure is raised at archive-open, before any HIP call.
+ *
+ * Both build their kpack coordinates by hand, because a path that never resolves is the
+ * point of each. The case that needs a real archive -- two dispatches over one
+ * (archive, toc_key, arch) loading one module -- is in TestConvFwdPack.cpp, against the
+ * packed set this binary's own descriptor root carries.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -67,94 +65,6 @@ using hip_kernel_provider::kernel_ingestor_engine::testing::GraphFixture;
 using hip_kernel_provider::kernel_ingestor_engine::testing::matchesGraph;
 using hip_kernel_provider::kernel_ingestor_engine::testing::POINTWISE_ADD;
 using hip_kernel_provider::kernel_ingestor_engine::testing::testDeviceProperties;
-
-using hip_kernel_provider::testing::archiveFixtureRoot;
-
-/// The packaged descriptor the [GPU] case takes its archive and toc_key from. Read out of
-/// the built file rather than written here: a copy would silently decouple this test
-/// from the artifact it exists to read.
-constexpr const char* PACKED_UKD_DESCRIPTOR = "packed_pointwise_add_b256.ukd.json";
-
-/// The entry point that descriptor names.
-constexpr const char* PACKED_SYMBOL = "PointwiseAdd";
-
-/// The kpack coordinates a built descriptor declares. `library` is kept in its authored,
-/// relative form because a KernelDefinition carries it that way and resolves it against
-/// originDirectory.
-struct PackagedKernelSource
-{
-    std::string library;
-    std::string tocKey;
-    /// The descriptor's OWN directory, which `library` is relative to. Not the arch
-    /// root: the packer preserves each descriptor's authored subpath, so the two differ
-    /// for every nested descriptor.
-    std::filesystem::path originDirectory;
-};
-
-/// The bare arch of device 0 and the directory this build packed for it. `directory` is
-/// left empty when nothing was packed for that arch -- environmental, not a broken build.
-///
-/// hipGetDeviceProperties reports feature flags on some configurations ("gfx1152:xnack-")
-/// while the packager uses the bare name, so everything past here uses the stripped form.
-///
-/// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
-void findPackagedDirectory(hipDeviceProp_t& properties,
-                           std::string& arch,
-                           std::filesystem::path& directory)
-{
-    ASSERT_EQ(hipGetDeviceProperties(&properties, 0), hipSuccess);
-
-    const std::string reported = properties.gcnArchName;
-    arch = reported.substr(0, reported.find(':'));
-
-    const std::filesystem::path candidate = archiveFixtureRoot() / arch;
-    directory = std::filesystem::is_directory(candidate) ? candidate : std::filesystem::path{};
-}
-
-/// Reads `kernel_source` out of a built .ukd.json. Parsed directly rather than through
-/// DescriptorLoader, whose contract the integration tier covers.
-///
-/// Asserts rather than skips -- the per-arch directory exists by the time this is
-/// called, so anything missing inside it is a broken build. Call through
-/// ASSERT_NO_FATAL_FAILURE.
-void readPackagedKernelSource(const std::filesystem::path& directory,
-                              const std::string& descriptorFile,
-                              PackagedKernelSource& out)
-{
-    // Found by recursive search: the packer preserves the authored subpath, so the
-    // descriptor sits at whatever depth its source root put it. A flat join here is
-    // what kept this suite blind to nesting.
-    std::filesystem::path descriptor;
-    std::error_code walkError;
-    for(const auto& entry : std::filesystem::recursive_directory_iterator(directory, walkError))
-    {
-        if(entry.is_regular_file() && entry.path().filename() == descriptorFile)
-        {
-            descriptor = entry.path();
-            break;
-        }
-    }
-    ASSERT_FALSE(descriptor.empty()) << "the packaged descriptor is missing anywhere under "
-                                     << directory << ": " << descriptorFile;
-
-    std::ifstream in(descriptor);
-    ASSERT_TRUE(in.good()) << "could not open " << descriptor;
-
-    nlohmann::json document;
-    ASSERT_NO_THROW(document = nlohmann::json::parse(in)) << descriptor;
-    ASSERT_TRUE(document.contains("kernel_source")) << descriptor;
-
-    const nlohmann::json& source = document["kernel_source"];
-    ASSERT_TRUE(source.contains("toc_key")) << descriptor;
-    ASSERT_TRUE(source.contains("library")) << descriptor;
-
-    out.tocKey = source["toc_key"].get<std::string>();
-    out.library = source["library"].get<std::string>();
-    out.originDirectory = descriptor.parent_path();
-    ASSERT_TRUE(std::filesystem::exists(out.originDirectory / out.library))
-        << descriptor
-        << " names an archive that is not on disk: " << out.originDirectory / out.library;
-}
 
 DescriptorId id(uint8_t seed)
 {
@@ -433,58 +343,6 @@ TEST(TestPointwiseKpackDispatch, SurvivesAKpackWhoseArchiveIsAbsent)
     // indistinguishable from the broken kernel never having been a candidate.
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, toString(id(0x30))));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "does not exist"));
-}
-
-// ---------------------------------------------------------------------------
-// One module across two dispatches
-// ---------------------------------------------------------------------------
-
-/// Two kernels differing only by block size, both naming one (archive, toc_key, arch):
-/// the cache must grow by exactly one. Measured as a delta because the cache is
-/// process-lifetime and another case may have populated it first.
-TEST(TestPointwiseKpackDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
-{
-    SKIP_IF_NO_DEVICES();
-
-    hipDeviceProp_t properties{};
-    std::string arch;
-    std::filesystem::path packaged;
-    ASSERT_NO_FATAL_FAILURE(findPackagedDirectory(properties, arch, packaged));
-    if(packaged.empty())
-    {
-        GTEST_SKIP() << "nothing was packaged for this device (" << arch
-                     << "): " << archiveFixtureRoot() / arch
-                     << " does not exist. Environmental -- the build packs per arch and this "
-                        "device is outside GPU_TARGETS.";
-    }
-
-    PackagedKernelSource packed;
-    ASSERT_NO_FATAL_FAILURE(readPackagedKernelSource(packaged, PACKED_UKD_DESCRIPTOR, packed));
-
-    DeviceProperties deviceProperties;
-    deviceProperties.gcnArchName = arch;
-    deviceProperties.warpSize = properties.warpSize;
-
-    const GraphFixture fixture(buildPointwiseGraph(), deviceProperties);
-    const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
-    ASSERT_TRUE(bound.has_value());
-
-    // originDirectory is the descriptor's own (nested) folder; the arch root is the
-    // tree, and the archive sits under it -- the real shipped shape.
-    const auto first = makeKpackKernel(
-        packed.originDirectory, packaged, packed.library, packed.tocKey, PACKED_SYMBOL, 256, 0x60);
-    const auto second = makeKpackKernel(
-        packed.originDirectory, packaged, packed.library, packed.tocKey, PACKED_SYMBOL, 64, 0x70);
-
-    const auto& handler = dispatchHandler(POINTWISE_ADD);
-    const size_t before = pointwiseKpackModuleCache().size();
-
-    const auto preparedFirst = handler.prepare(fixture.context(), *bound, first);
-    const auto preparedSecond = handler.prepare(fixture.context(), *bound, second);
-    ASSERT_NE(preparedFirst, nullptr);
-    ASSERT_NE(preparedSecond, nullptr);
-
-    EXPECT_EQ(pointwiseKpackModuleCache().size(), before + 1);
 }
 
 } // namespace

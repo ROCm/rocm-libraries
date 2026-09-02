@@ -41,6 +41,11 @@ static_assert(hipdnn_plugin_sdk::HasGetEngineName<Container>::value,
 ///
 /// Containment, not equality: the catalog is descriptor-driven, so a build that stages
 /// additional descriptor sets legitimately exposes more engines. These names are a floor.
+///
+/// The ingestor names are literals where the others are shared constants, and must stay
+/// that way. The others are declared in C++ and read here from the same constant as
+/// production, so a rename moves both sides together and goes undetected. These two are
+/// declared in descriptor JSON, so restating them here is an independent check.
 static std::vector<std::string> expectedEngineNames()
 {
     std::vector<std::string> names;
@@ -149,6 +154,8 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
         names.push_back(set.engine.name);
     }
     std::sort(names.begin(), names.end());
+    // Literals for the reason expectedEngineNames() records: a constant shared with
+    // the production table would make a rename propagate here and this never fail.
     for(const auto* expected : {"hipkernel:ConvFwd", "hipkernel:Pointwise"})
     {
         EXPECT_NE(std::find(names.begin(), names.end(), expected), names.end())

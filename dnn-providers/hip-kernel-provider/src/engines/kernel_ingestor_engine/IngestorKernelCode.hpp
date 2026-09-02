@@ -25,12 +25,16 @@
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
-/// The kpack module cache the pointwise packs' dispatch handler loads through,
-/// process-lifetime. Declared here rather than in IngestorPacks.hpp because it belongs
+/// The kpack module caches each pack's dispatch handler loads through,
+/// process-lifetime. Declared here rather than in IngestorPacks.hpp because they belong
 /// to the kernel-code path, and exposed at all so a test can assert that two dispatches
-/// over one (archive, toc_key, arch) produced a single hipModule_t -- the direct
-/// otherwise unobservable. Defined in PointwiseNative.cpp beside the handler it serves.
+/// over one (archive, toc_key, arch) produced a single hipModule_t -- otherwise
+/// unobservable. Each is defined beside the handler it serves.
+///
+/// One cache per pack, not one shared: a key is (archive, toc_key, arch), so two packs
+/// reading one archive would answer each other's lookups.
 compilation::KpackModuleCache& pointwiseKpackModuleCache();
+compilation::KpackModuleCache& convFwdKpackModuleCache();
 
 /// The program plus the kernel resolved out of it, in the shape every pack's
 /// PreparedDispatch already holds. Returned together because the kernel is a

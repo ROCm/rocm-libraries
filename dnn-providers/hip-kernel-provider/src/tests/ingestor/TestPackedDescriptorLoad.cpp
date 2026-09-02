@@ -56,7 +56,7 @@ using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog;
 using hipdnn_plugin_sdk::ingestor::resolveDescriptorSets;
 
-using hip_kernel_provider::testing::archiveFixtureRoot;
+using hip_kernel_provider::testing::unitKpackRoot;
 
 /// Every per-arch shard this build produced.
 ///
@@ -69,7 +69,7 @@ std::vector<std::filesystem::path> packedArchShards()
     std::vector<std::filesystem::path> shards;
 
     std::error_code ec;
-    const std::filesystem::path& root = archiveFixtureRoot();
+    const std::filesystem::path& root = unitKpackRoot();
     if(!std::filesystem::is_directory(root, ec))
     {
         return shards;
@@ -102,14 +102,14 @@ std::vector<std::filesystem::path> packedArchShards()
 /// skips every case in this file.
 #define REQUIRE_PACKED_SHARDS(shards)                                                      \
     std::error_code missingRoot;                                                           \
-    ASSERT_TRUE(std::filesystem::is_directory(archiveFixtureRoot(), missingRoot))          \
-        << "the archive fixture root " << archiveFixtureRoot()                             \
+    ASSERT_TRUE(std::filesystem::is_directory(unitKpackRoot(), missingRoot))               \
+        << "the packed set root " << unitKpackRoot()                                       \
         << " is not a directory. The staged tree sits elsewhere, or this binary holds a "  \
            "stale offset to it.";                                                          \
     const auto shards = packedArchShards();                                                \
     if((shards).empty())                                                                   \
     {                                                                                      \
-        GTEST_SKIP() << "no packed arch shard under " << archiveFixtureRoot()              \
+        GTEST_SKIP() << "no packed arch shard under " << unitKpackRoot()                   \
                      << " -- the packaging rule did not run. Configure with "              \
                         "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON, a discoverable hipcc, and a " \
                         "HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT.";                       \

@@ -16,6 +16,17 @@ set(HKP_TOOL "${HKP_PKG_DIR}/tools/hkp_pack.py")
 set(HKP_WHEEL_DIGEST_TOOL "${HKP_PKG_DIR}/tools/hkp_wheel_digest.py")
 set(HKP_FIXTURES "${HKP_PKG_DIR}/tests/fixtures")
 
+# The file every pack writes at the top of its output root to mark that root complete.
+# One name for all of them: a caller installing a staged tree excludes it with a single
+# pattern that never needs a clause per pack. Distinctive enough that the pattern cannot
+# match a descriptor -- no authored or emitted file carries this name.
+#
+# Cached rather than plain, because this module is included from a subdirectory and the
+# install() rules that must exclude the stamp are written by the parent, which a plain
+# variable set here never reaches.
+set(HKP_PACK_STAMP_NAME ".hkp-packed.stamp" CACHE INTERNAL
+    "Name of the completion stamp each pack writes inside its output root")
+
 include(KpackPython)
 
 # ---------------------------------------------------------------------------
@@ -160,11 +171,17 @@ function(hkp_wire_pack_target)
     endif()
 
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
-    # Kept in the binary dir rather than beside the output: both the output and the
-    # intermediate roots are wiped before each pack, which would take a stamp inside
-    # either of them with it. Living outside the tree it vouches for, it is removed
-    # before the wipe rather than only rewritten after the pack -- see the recipe.
-    set(_stamp "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-descriptors.stamp")
+    # Inside the output root, so the stamp shares the fate of the tree it vouches for.
+    # A stamp kept anywhere else witnesses only the pack's own run: it can say "the pack
+    # finished", never "the output is still there". Whatever empties the tree -- a partial
+    # restore, a stray clean, a disk that filled -- takes the stamp with it, and the next
+    # build packs again instead of reading a stamp that outlived its descriptors.
+    #
+    # One fixed name for every pack, not one per pack, so a single install() filter
+    # excludes all of them and a pack added later needs no new clause. Dot-prefixed to
+    # match the convention the packer already uses for the in-progress shard directories
+    # it does not ship.
+    set(_stamp "${ARG_OUT_ROOT}/${HKP_PACK_STAMP_NAME}")
 
     # The rocKE producer needs the wheel-provisioned interpreter so its UKDs
     # import; a hip-only pack runs under the base interpreter (hip compiles shell
@@ -209,6 +226,13 @@ function(hkp_wire_pack_target)
     # The authored root is a tree: glob recursively so a descriptor added in any
     # child folder retriggers the pack step. The packer itself walks recursively
     # so a flat glob here would drop the dependency edge for every nested descriptor.
+    #
+    # A descriptor REMOVED from the tree does not retrigger it. CONFIGURE_DEPENDS
+    # re-globs and CMake re-runs, but a shorter DEPENDS list makes no input newer
+    # and changes no command, so the edge stays clean and the wipe below never
+    # fires -- the staged copy of a deleted descriptor survives an incremental
+    # build. A clean configure is always correct. Putting the input set into the
+    # edge, as a digest of the sorted glob, would close it.
     file(GLOB_RECURSE _source_inputs CONFIGURE_DEPENDS
          "${ARG_SOURCE_ROOT}/*")
 
@@ -216,6 +240,8 @@ function(hkp_wire_pack_target)
     # artifacts go stale against the current pipeline code. The resolved
     # rocm_kpack package counts too: kpack_resolver.py imports it and it decides
     # the archive format, so a packer change there must invalidate the stamp.
+    # Deleting one of these sources does not retrigger it either, for the reason
+    # the authored-root glob above records.
     file(GLOB _tool_sources CONFIGURE_DEPENDS
          "${HKP_PYTHON_ROOT}/hkp_pack/*.py"
          "${ARG_ROCM_KPACK_DIR}/rocm_kpack/*.py")
@@ -232,16 +258,24 @@ function(hkp_wire_pack_target)
     set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env} "${_interp}"
         "${HKP_TOOL}")
 
-    # The stamp goes first, ahead of the wipe. It is the only thing standing between a
-    # half-packed tree and a build that believes the tree is current: the wipe empties
-    # OUT_ROOT, so a pack that dies after it -- a compiler failure, a killed job, an
-    # interrupted build -- leaves no descriptors behind. A stamp that outlived that pack
-    # would mark the edge up to date, the empty tree would never be repacked, and the
-    # embedding check would walk nothing and pass at zero descriptors. Removing it first
-    # means no stamp exists until a pack completes.
+    # The wipe removes the stamp along with the tree, because the stamp lives inside it.
+    # So no stamp exists from the moment a pack begins until it completes: a pack that
+    # dies after the wipe -- a compiler failure, a killed job, an interrupted build --
+    # leaves an empty tree AND no stamp, and the next build packs again rather than
+    # reading the edge as up to date and letting the embedding check walk nothing and
+    # pass at zero descriptors.
+    #
+    # This does not cover a tree emptied while its stamp survives: the build reads the
+    # edge as up to date and the embedding check walks nothing and passes, because a
+    # root with no descriptors is a legal pass. Only a check-side rule -- a stamped
+    # root must hold at least one descriptor -- would catch it.
+    #
+    # The output root is created before the stamp is written, because a pack that emits
+    # nothing never creates it and `touch` does not create parents. Such a root holds
+    # the stamp alone, and installs as an empty directory: the install rules exclude the
+    # stamp file, not the directory it sits in.
     add_custom_command(
         OUTPUT "${_stamp}"
-        COMMAND "${CMAKE_COMMAND}" -E rm -f "${_stamp}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_inter_root}"
         COMMAND ${_tool_cmd}
@@ -253,6 +287,7 @@ function(hkp_wire_pack_target)
                 --kpack-python-dir "${ARG_ROCM_KPACK_DIR}"
                 --source-label "${ARG_NAME}"
                 ${_wheel_stamp_arg}
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
                 ${_interp_dep} ${_wheel_dep}
@@ -337,7 +372,13 @@ endfunction()
 #   root is not wired contributes nothing.
 #
 #   An absent root, an empty root, a root with no embedded_source descriptor and
-#   an empty key table each pass.
+#   an empty key table each pass -- including a root emptied after its pack
+#   stamped it.
+#
+#   The comparison runs one way, from a staged descriptor to the table. A key no
+#   descriptor names is not an error, and neither is a descriptor no pack stages.
+#   The tool's docstring records why neither reverse direction can be turned on
+#   while the descriptor and the embedding declaration are written independently.
 # ---------------------------------------------------------------------------
 function(hkp_verify_embedded_sources)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "TARGET" "STAGED_DESCRIPTOR_ROOTS;PACK_NAMES")
@@ -810,52 +851,59 @@ assertion: an unloadable path silently falls through to the next candidate.")
             "packaging dormant (tests still run against the fixtures).")
     endif()
 
-    # Test descriptors. The conv_fwd source root is packed twice, once into each test
-    # root, so both test binaries see the same authored descriptors.
-    hkp_wire_pack_target(
-        NAME unit_conv
-        SOURCE_ROOT "${HIPKERNELPROVIDER_SHARED_CONV_SOURCE_DIR}"
-        ENABLE_ROCKE OFF
-        ARCHES "${_arches}"
-        HIPCC "${HKP_HIPCC}"
-        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-        OUT_ROOT "${HIPKERNELPROVIDER_UNIT_CONV_BUILD_DIR}")
+    # Test descriptors, one pack per authored set. The shared root is packed twice, once
+    # into each test root, so both test binaries see the same authored descriptors. Every
+    # NAME is the folder its SOURCE_ROOT names, because the name is also the source_label
+    # stamped into each emitted descriptor's provenance -- a reader of a staged shard
+    # traces it back by that label alone.
+    set(_authored "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT}")
+    set(_unit "${HIPKERNELPROVIDER_UNIT_BUILD_DIR}")
+    set(_integration "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}")
 
     hkp_wire_pack_target(
-        NAME unit_pointwise
-        SOURCE_ROOT "${HIPKERNELPROVIDER_UNIT_POINTWISE_SOURCE_DIR}"
+        NAME unit_shared
+        SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_SHARED}"
         ENABLE_ROCKE OFF
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-        OUT_ROOT "${HIPKERNELPROVIDER_UNIT_POINTWISE_BUILD_DIR}")
+        OUT_ROOT "${_unit}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
 
     hkp_wire_pack_target(
-        NAME integration_conv
-        SOURCE_ROOT "${HIPKERNELPROVIDER_SHARED_CONV_SOURCE_DIR}"
+        NAME unit
+        SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
         ENABLE_ROCKE OFF
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-        OUT_ROOT "${HIPKERNELPROVIDER_INTEGRATION_CONV_BUILD_DIR}")
+        OUT_ROOT "${_unit}/${HIPKERNELPROVIDER_TEST_SET_UNIT}")
 
     hkp_wire_pack_target(
-        NAME integration_pointwise
-        SOURCE_ROOT "${HIPKERNELPROVIDER_INTEGRATION_POINTWISE_SOURCE_DIR}"
+        NAME integration_shared
+        SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_SHARED}"
         ENABLE_ROCKE OFF
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-        OUT_ROOT "${HIPKERNELPROVIDER_INTEGRATION_POINTWISE_BUILD_DIR}")
+        OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
+
+    hkp_wire_pack_target(
+        NAME integration
+        SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
+        ENABLE_ROCKE OFF
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}")
 
     hkp_wire_pack_target(
         NAME archive_fixture
-        SOURCE_ROOT "${HIPKERNELPROVIDER_ARCHIVE_FIXTURE_SOURCE_DIR}"
+        SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
         ENABLE_ROCKE OFF
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-        OUT_ROOT "${HIPKERNELPROVIDER_ARCHIVE_FIXTURE_BUILD_DIR}")
+        OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}")
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
 endfunction()
