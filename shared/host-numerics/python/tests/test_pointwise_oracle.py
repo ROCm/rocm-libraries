@@ -49,6 +49,38 @@ def per_k_block_scaled_gemm(left, right, scale_a, scale_b, block_a, block_b):
     return result
 
 
+def quantize_bfloat16(value):
+    value = np.asarray(value, dtype=np.float32)
+    bits = value.view(np.uint32)
+    least_significant_bit = (bits >> np.uint32(16)) & np.uint32(1)
+    rounded = bits + np.uint32(0x7FFF) + least_significant_bit
+    result = (rounded & np.uint32(0xFFFF0000)).view(np.float32)
+    return result[()] if result.ndim == 0 else result
+
+
+def stepwise_gemm(left, right, accumulator_type):
+    """Round every product and sum in an independently implemented accumulator."""
+
+    if accumulator_type == hv.ScalarType.Float16:
+        quantize = lambda value: np.float32(np.float16(value))
+    elif accumulator_type == hv.ScalarType.BFloat16:
+        quantize = quantize_bfloat16
+    else:
+        raise ValueError("stepwise_gemm requires a reduced-precision accumulator")
+
+    result = np.empty((left.shape[0], right.shape[1]), dtype=np.float32)
+    for row in range(left.shape[0]):
+        for column in range(right.shape[1]):
+            accumulation = np.float32(0.0)
+            for reduction in range(left.shape[1]):
+                product = quantize(
+                    np.float32(left[row, reduction] * right[reduction, column])
+                )
+                accumulation = quantize(np.float32(accumulation + product))
+            result[row, column] = accumulation
+    return result
+
+
 def affine_tensor(values, scalar_type, strides, offset):
     values = np.asarray(values)
     maximum_offset = offset
@@ -91,6 +123,158 @@ def modular_values(rows, columns, row_factor, column_factor, modulus, center, di
 
 
 class PointwiseOracleTests(unittest.TestCase):
+    def test_zero_matrix_extents_are_no_ops(self):
+        for rows, columns, reductions in ((0, 4, 3), (2, 0, 3), (2, 4, 0)):
+            with self.subTest(rows=rows, columns=columns, reductions=reductions):
+                left = np.empty((rows, reductions), dtype=np.float32)
+                right = np.empty((reductions, columns), dtype=np.float32)
+                initial = np.arange(rows * columns, dtype=np.float32).reshape(
+                    rows, columns
+                )
+                expected = np.float32(1.5) * initial
+                for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
+                    observed = hv.reference_gemm(
+                        hv.from_numpy(left),
+                        hv.from_numpy(right),
+                        hv.from_numpy(initial),
+                        hv.ScalarType.Float32,
+                        hv.ScalarType.Float32,
+                        beta=1.5,
+                        backend=backend,
+                    )
+                    self.assertEqual(observed.shape, [rows, columns])
+                    np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+
+    def test_selected_affine_reduced_precision_accumulation_rounds_each_step(self):
+        left = np.asarray(
+            [
+                [0.1] * 16,
+                [0.2, -0.3, 0.4, -0.5] * 4,
+            ],
+            dtype=np.float32,
+        )
+        right = np.asarray(
+            [[0.1, np.float32((index % 5) - 2) / 7.0] for index in range(16)],
+            dtype=np.float32,
+        )
+        initial = np.zeros((2, 2), dtype=np.float32)
+        selected = [0, 3]
+        output_layout = hv.Layout(hv.Shape([2, 2]), [7, 2], 1)
+
+        full_precision = np.asarray(left @ right, dtype=np.float32)
+        for accumulator_type in (
+            hv.ScalarType.Float16,
+            hv.ScalarType.BFloat16,
+        ):
+            with self.subTest(accumulator_type=accumulator_type):
+                complete_expected = stepwise_gemm(left, right, accumulator_type)
+                expected = selected_values(complete_expected, selected)
+                self.assertTrue(
+                    np.any(
+                        complete_expected.reshape(-1)[selected]
+                        != full_precision.reshape(-1)[selected]
+                    )
+                )
+
+                observed = hv.reference_gemm(
+                    affine_tensor(left, hv.ScalarType.Float32, [19, 1], 2),
+                    affine_tensor(right, hv.ScalarType.Float32, [3, 1], 1),
+                    affine_tensor(initial, hv.ScalarType.Float32, [5, 2], 1),
+                    hv.ScalarType.Float32,
+                    accumulator_type,
+                    output_selection=hv.OutputSelection.explicit_indices(selected),
+                    output_layout=output_layout,
+                    backend=hv.GemmBackend.Pointwise,
+                )
+
+                self.assertEqual(observed.strides, [7, 2])
+                self.assertEqual(observed.offset, 1)
+                np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+
+    def test_selected_affine_zero_coefficients_suppress_poisoned_inputs(self):
+        selected = [0, 3]
+        selection = hv.OutputSelection.explicit_indices(selected)
+        output_layout = hv.Layout(hv.Shape([2, 2]), [7, 2], 1)
+        finite_left = np.asarray([[1.0, 2.0, -3.0], [4.0, -5.0, 6.0]], dtype=np.float32)
+        finite_right = np.asarray(
+            [[2.0, -1.0], [0.5, 3.0], [-4.0, 2.0]], dtype=np.float32
+        )
+        finite_initial = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+
+        alpha_zero = hv.reference_gemm(
+            affine_tensor(
+                np.full((2, 3), np.nan, dtype=np.float32),
+                hv.ScalarType.Float32,
+                [5, 1],
+                1,
+            ),
+            affine_tensor(
+                np.full((3, 2), np.nan, dtype=np.float32),
+                hv.ScalarType.Float32,
+                [3, 1],
+                1,
+            ),
+            affine_tensor(finite_initial, hv.ScalarType.Float32, [5, 2], 1),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            alpha=0.0,
+            beta=2.0,
+            output_selection=selection,
+            output_layout=output_layout,
+            backend=hv.GemmBackend.Pointwise,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(alpha_zero), selected_values(2.0 * finite_initial, selected)
+        )
+
+        beta_zero = hv.reference_gemm(
+            affine_tensor(finite_left, hv.ScalarType.Float32, [5, 1], 1),
+            affine_tensor(finite_right, hv.ScalarType.Float32, [3, 1], 1),
+            affine_tensor(
+                np.full((2, 2), np.nan, dtype=np.float32),
+                hv.ScalarType.Float32,
+                [5, 2],
+                1,
+            ),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            alpha=1.0,
+            beta=0.0,
+            output_selection=selection,
+            output_layout=output_layout,
+            backend=hv.GemmBackend.Pointwise,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(beta_zero),
+            selected_values(finite_left @ finite_right, selected),
+        )
+
+    def test_negative_stride_numpy_gemm_operands_match_numpy(self):
+        left = np.arange(24, dtype=np.float32).reshape(4, 6)[::-1, ::-2]
+        right = (np.arange(15, dtype=np.float32).reshape(3, 5) - 4.0)[::-1, ::-1]
+        initial = np.arange(20, dtype=np.float32).reshape(4, 5)[:, ::-1]
+
+        left_tensor = hv.Tensor.from_numpy(left)
+        right_tensor = hv.Tensor.from_numpy(right)
+        initial_tensor = hv.Tensor.from_numpy(initial)
+        self.assertTrue(any(stride < 0 for stride in left_tensor.strides))
+        self.assertTrue(any(stride < 0 for stride in right_tensor.strides))
+
+        observed = hv.reference_gemm(
+            left_tensor,
+            right_tensor,
+            initial_tensor,
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            alpha=0.75,
+            beta=-0.25,
+            backend=hv.GemmBackend.Pointwise,
+        )
+        expected = np.float32(0.75) * (left @ right) + np.float32(-0.25) * initial
+        np.testing.assert_allclose(
+            hv.to_numpy(observed), expected, rtol=1e-6, atol=1e-6
+        )
+
     def test_selected_int32_outputs_wrap_in_affine_storage(self):
         left = np.asarray(
             [
