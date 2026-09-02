@@ -295,19 +295,17 @@ class PointwiseOracleTests(unittest.TestCase):
         output_layout = hv.Layout(hv.Shape([2, 2]), [7, 2], 1)
 
         output = hv.Tensor(hv.ScalarType.Int32, output_layout)
-        options = hv.GemmOptions(hv.ScalarType.Int32)
-        options.epilogue.alpha = alpha
-        options.epilogue.beta = beta
-        options.epilogue.output_scale = output_scale
-        options.output_selection = hv.OutputSelection.explicit_indices(selected)
-
         backend = hv.reference_gemm_into(
             hv.from_numpy(left),
             hv.from_numpy(right),
             hv.from_numpy(initial),
             output,
-            options,
-            hv.GemmBackend.Pointwise,
+            accumulator_type=hv.ScalarType.Int32,
+            alpha=alpha,
+            beta=beta,
+            output_scale=output_scale,
+            output_selection=hv.OutputSelection.explicit_indices(selected),
+            backend=hv.GemmBackend.Pointwise,
         )
 
         complete_expected = exact_int32_gemm(
@@ -373,20 +371,17 @@ class PointwiseOracleTests(unittest.TestCase):
         operand_a = hv.from_numpy(left, hv.ScalarType.Float4E2M1)
         operand_b = hv.from_numpy(right, hv.ScalarType.Float4E2M1)
         output = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3]))
-        options = hv.GemmOptions(hv.ScalarType.Float32)
-        options.block_scale_a = scale_a
-        options.block_scale_b = scale_b
-        options.block_size_a = block_a
-        options.block_size_b = block_b
-        options.output_selection = hv.OutputSelection.explicit_indices(selected)
-
         backend = hv.reference_gemm_into(
             operand_a,
             operand_b,
             hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3])),
             output,
-            options,
-            hv.GemmBackend.Pointwise,
+            block_scale_a=scale_a,
+            block_scale_b=scale_b,
+            block_size_a=block_a,
+            block_size_b=block_b,
+            output_selection=hv.OutputSelection.explicit_indices(selected),
+            backend=hv.GemmBackend.Pointwise,
         )
 
         expected_complete = per_k_block_scaled_gemm(
@@ -483,19 +478,17 @@ class PointwiseOracleTests(unittest.TestCase):
             offset=1,
         )
         output = hv.Tensor(hv.ScalarType.ComplexFloat32, output_layout)
-        options = hv.GemmOptions(hv.ScalarType.ComplexFloat32)
-        options.epilogue.alpha = complex(alpha)
-        options.epilogue.beta = complex(beta)
-        options.conjugate_a = True
-        options.output_selection = hv.OutputSelection.explicit_indices(selected)
-
         backend = hv.reference_gemm_into(
             operand_a,
             operand_b,
             initial_tensor,
             output,
-            options,
-            hv.GemmBackend.Pointwise,
+            accumulator_type=hv.ScalarType.ComplexFloat32,
+            alpha=complex(alpha),
+            beta=complex(beta),
+            conjugate_a=True,
+            output_selection=hv.OutputSelection.explicit_indices(selected),
+            backend=hv.GemmBackend.Pointwise,
         )
 
         expected_complete = np.complex64(alpha) * (np.conjugate(left) @ right)
