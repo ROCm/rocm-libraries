@@ -250,7 +250,6 @@ TEST(HostNumericsTypeBridge, UsesScalarTypeAsTheExternalTypeConversionHub)
         EXPECT_EQ(scalarType(hip), scalar);
 }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 TEST(HostNumericsMxGenerationBridge, MapsScaleLayoutsAndGeneratesTypedData)
 {
     using namespace hipblaslt::host_numerics;
@@ -276,7 +275,6 @@ TEST(HostNumericsMxGenerationBridge, MapsScaleLayoutsAndGeneratesTypedData)
     EXPECT_EQ(generated.scales.type(), ScalarType::E8M0);
     EXPECT_EQ(generated.reference.shape(), (Shape{8, 4}));
 }
-#endif
 
 TEST(HostNumericsDataInitializationBridge, GeneratesComplexTrigonometricValues)
 {

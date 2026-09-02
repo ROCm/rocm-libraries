@@ -26,11 +26,9 @@
 
 #include "DataInitialization.hpp"
 
-#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-#include <TensileLite/Client/HostNumerics/DataInitializationHelpers.hpp>
-#endif
 #include "Utility.hpp"
+#include <TensileLite/Client/HostNumerics/DataInitializationHelpers.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
 // #include "DataInitializationTyped.hpp"
 
 #include <Tensile/Utils.hpp>
@@ -1653,8 +1651,6 @@ namespace TensileLite
             }
         }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-
         using namespace HostNumerics::detail;
         using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
 
@@ -1961,17 +1957,6 @@ namespace TensileLite
                     initTensorFromDefault(ContractionProblemGemm::TENSOR::MXSB);
             }
         }
-#else // HIPBLASLT_ENABLE_MXDATAGENERATOR
-        void DataInitialization::initializeMXData(ContractionProblemGemm const& /*problem*/)
-        {
-            // The MX data generator is disabled at build time. Reaching this
-            // path means a problem requiring MX initialization was issued
-            // against a build that doesn't include MX host-initialization support.
-            throw std::runtime_error("MX data initialization requires "
-                                     "HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time");
-        }
-#endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
-
         void DataInitialization::initializeConstantInputs(ContractionProblemGemm const& problem)
         {
             // Update constants if needed

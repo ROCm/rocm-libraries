@@ -6,6 +6,9 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
+#include <TensileLite/Client/HostNumerics/DataInitializationHelpers.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
+#include <TensileLite/Client/HostNumerics/TensileDataGeneration.hpp>
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -16,18 +19,13 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 #include <limits>
-#include <TensileLite/Client/HostNumerics/DataInitializationHelpers.hpp>
-#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
-#include <TensileLite/Client/HostNumerics/TensileDataGeneration.hpp>
 #include <roc/host_numerics/validation.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-#include <hip/hip_runtime.h>
-#endif
 
 using TensileLite::ContractionProblemGemm;
 using TensileLite::DataTypeInfo;
@@ -42,10 +40,8 @@ using TensileLite::Client::PruneSparseMode;
 using TensileLite::Client::toHostNumericsScalarType;
 using TensileLite::Client::initializeHostBufferWithHostNumerics;
 
-// Shorthand for the production helper namespace under test (MX builds only).
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+// Shorthand for the production helper namespace under test.
 namespace dt = TensileLite::Client::HostNumerics::detail;
-#endif
 namespace
 {
     constexpr DataInitializationKey fixedInitializationKey{0x12345678ULL, 0x01020304ULL};
@@ -850,9 +846,8 @@ TEST(InitializeMXDataForFP4OrFP8_BatchStrideFormula, BFloat8_OneBytePerElement)
 }
 
 // =============================================================================
-//   Section 4 — direct calls into TensileLite::Client::detail (MX builds only)
+//   Section 4 — direct calls into TensileLite::Client::detail
 // =============================================================================
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 TEST(TensileMxGenerationTranslation, MapsTypesAndInitializationPolicy)
 {
     using namespace roc::host_numerics;
@@ -906,5 +901,3 @@ TEST(TensileMxGenerationTranslation, RejectsUnsupportedTypesAndModes)
                                     17),
                  std::invalid_argument);
 }
-
-#endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
