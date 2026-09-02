@@ -63,14 +63,14 @@ namespace TensileLite
                                  ContractionInputs const&            inputs,
                                  roc::host_numerics::OutputSelection outputSelection,
                                  roc::host_numerics::GemmBackend     backend
-                                 = roc::host_numerics::GemmBackend::Pointwise);
+                                 = roc::host_numerics::GemmBackend::Automatic);
 
         roc::host_numerics::GemmBackend
             executeReferenceGemm(ContractionProblemGemm const&   problem,
                                  ContractionInputs const&        inputs,
                                  size_t                          elementsToValidate,
                                  roc::host_numerics::GemmBackend backend
-                                 = roc::host_numerics::GemmBackend::Pointwise);
+                                 = roc::host_numerics::GemmBackend::Automatic);
 
     } // namespace Client
 } // namespace TensileLite
