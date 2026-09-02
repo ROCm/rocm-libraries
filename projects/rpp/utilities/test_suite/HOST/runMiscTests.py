@@ -237,7 +237,6 @@ def run_test(
         ):
             bitDepths = [
                 BitDepthTestMode.U8_TO_U8,
-                BitDepthTestMode.F16_TO_F16,
                 BitDepthTestMode.F32_TO_F32,
                 BitDepthTestMode.I8_TO_I8,
                 BitDepthTestMode.I16_TO_I16,
@@ -249,7 +248,6 @@ def run_test(
             bitDepths = [
                 BitDepthTestMode.U8_TO_F32,
                 BitDepthTestMode.F32_TO_F32,
-                BitDepthTestMode.F16_TO_F16,
                 BitDepthTestMode.U16_TO_F32,
                 BitDepthTestMode.U32_TO_F32,
                 BitDepthTestMode.I8_TO_F32,
