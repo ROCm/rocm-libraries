@@ -301,6 +301,56 @@ TEST(TestJsonExpression, LayoutAliasContradictingARankPinRejected)
         json({{"and", json::array({{{"or", json::array({rankFour, false})}}, aliasRank5})}})));
 }
 
+TEST(TestJsonExpression, LayoutAliasRankPinAppliesOnlyToItsOwnTensor)
+{
+    // A pin constrains the tensor it names, and the tensor is the whole path
+    // ahead of `.rank`, not that path's first segment. $inputs[0] and
+    // $inputs[1] are two tensors that happen to live in one array, so keying
+    // the pin on the root made the first element's rank veto the second's
+    // layout -- rejecting a rule that any 4d-then-5d graph satisfies.
+    const json tensor4 = json{{"rank", 4}, {"stride_order", json::array({3, 0, 2, 1})}};
+    const json tensor5 = json{{"rank", 5}, {"stride_order", json::array({4, 0, 3, 2, 1})}};
+    const jexpr::JsonDataSource src{json{{"inputs", json::array({tensor4, tensor5})},
+                                         {"a", json{{"b", json{{"c", tensor4}, {"d", tensor5}}}}}}};
+    const auto ev
+        = [&src](const json& rule) { return jexpr::compile<jexpr::JsonDataSource>(rule)(src); };
+
+    // The pin is on element 0; element 1 is unconstrained and is in fact rank
+    // 5, so the rule compiles and holds.
+    EXPECT_EQ(
+        ev(json({{"and",
+                  json::array({{{"==", json::array({"$inputs[0].rank", 4})}},
+                               {{"==", json::array({"$inputs[1].stride_order", "ndhwc"})}}})}})),
+        V(true));
+
+    // Same subscript, though, is the same tensor, and rank 4 against a rank-5
+    // alias is still unsatisfiable.
+    EXPECT_THROW(
+        jexpr::compile<jexpr::JsonDataSource>(
+            json({{"and",
+                   json::array({{{"==", json::array({"$inputs[0].rank", 4})}},
+                                {{"==", json::array({"$inputs[0].stride_order", "ndhwc"})}}})}})),
+        jexpr::JsonExpressionCompileError);
+
+    // A multi-segment prefix identifies a tensor just as a subscript does:
+    // $a.b.c and $a.b.d are distinct, and $a.b.c contradicts itself.
+    EXPECT_EQ(ev(json({{"and",
+                        json::array({{{"==", json::array({"$a.b.c.rank", 4})}},
+                                     {{"==", json::array({"$a.b.d.stride_order", "ndhwc"})}}})}})),
+              V(true));
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(json(
+                     {{"and",
+                       json::array({{{"==", json::array({"$a.b.c.rank", 4})}},
+                                    {{"==", json::array({"$a.b.c.stride_order", "ndhwc"})}}})}})),
+                 jexpr::JsonExpressionCompileError);
+
+    // A pin on the containing array is not a pin on an element of it.
+    EXPECT_NO_THROW(jexpr::compile<jexpr::JsonDataSource>(
+        json({{"and",
+               json::array({{{"==", json::array({"$inputs.rank", 4})}},
+                            {{"==", json::array({"$inputs[1].stride_order", "ndhwc"})}}})}})));
+}
+
 TEST(TestJsonExpression, LayoutAliasPrePassLeavesVariableReferencesAlone)
 {
     // A variable reference is a string too, so the alias pre-pass must key on

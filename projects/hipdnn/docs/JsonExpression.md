@@ -177,11 +177,23 @@ expressions that quietly never match:
 
 - an **unrecognized name** (`"nhcw"`), which would otherwise compare unequal
   against every array forever;
-- an alias whose **rank contradicts a rank pin** in the same expression, e.g.
+- an alias whose **rank contradicts a rank pin on the same tensor**, e.g.
   `{"and": [{"==": ["$x.rank", 4]}, {"==": ["$x.stride_order", "ndhwc"]}]}` —
   every alias is fixed-rank, so a rank-5 alias on a tensor pinned to rank 4
   can never hold. Only pins reachable through `and` are considered; a pin
   inside an `or` / `if` arm is conditional and cannot contradict the alias.
+
+  The tensor is the whole path ahead of the final `.rank` / `.stride_order`
+  segment, so `$inputs[0]` and `$inputs[1]` are two tensors and a pin on one
+  says nothing about the other. This rule is accepted, and holds whenever the
+  second input really is 5d:
+
+  ```json
+  {"and": [
+    {"==": ["$inputs[0].rank", 4]},
+    {"==": ["$inputs[1].stride_order", "ndhwc"]}
+  ]}
+  ```
 
 ## Supported operators
 

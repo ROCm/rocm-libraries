@@ -124,11 +124,21 @@ inline bool isStrideOrderRef(const nlohmann::json& j, char sigil)
            && s->compare(s->size() - k_suffix.size(), k_suffix.size(), k_suffix) == 0;
 }
 
-/// The variable root of a reference: "$q.stride_order" -> "q".
-inline std::string variableRoot(const std::string& sigilPath)
+/// The tensor a `.rank` / `.stride_order` reference is about: the whole path
+/// ahead of that final segment, sigil dropped. "$q.stride_order" -> "q",
+/// "$inputs[1].rank" -> "inputs[1]", "$a.b.c.rank" -> "a.b.c".
+///
+/// It has to be the whole prefix rather than the path's first segment: two
+/// elements of one array share a root but are separate tensors of their own
+/// ranks, so keying on "inputs" would let a rank pin on $inputs[0] veto a
+/// layout alias on $inputs[1], which it does not constrain.
+///
+/// Both callers reach here only after matching their suffix, so the last '.'
+/// is the separator before it and is always present.
+inline std::string tensorKey(const std::string& sigilPath)
 {
     const std::string path = sigilPath.substr(1);
-    return path.substr(0, path.find_first_of(".["));
+    return path.substr(0, path.rfind('.'));
 }
 
 /// Collect `{"==": ["$x.rank", N]}` rank pins that hold unconditionally: the
@@ -174,7 +184,7 @@ inline void collectRankPins(const nlohmann::json& j,
         {
             // First pin wins; a second, contradictory one makes the criteria
             // unsatisfiable on its own terms, which is not the alias's problem.
-            pins.emplace(variableRoot(*s), other.get<std::int64_t>());
+            pins.emplace(tensorKey(*s), other.get<std::int64_t>());
         }
     }
 }
@@ -197,8 +207,9 @@ inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
     }
     // Every alias is fixed-rank, so an alias compared against a tensor the
     // criteria pin to a different rank can never hold. Refuse it here rather
-    // than let it decline silently on every graph.
-    const auto pin = rankPins.find(variableRoot(refPath));
+    // than let it decline silently on every graph. The pin has to name this
+    // same tensor: $inputs[0] and $inputs[1] are two of them.
+    const auto pin = rankPins.find(tensorKey(refPath));
     if(pin != rankPins.end() && pin->second != static_cast<std::int64_t>(alias->rank))
     {
         throw JsonExpressionCompileError(
