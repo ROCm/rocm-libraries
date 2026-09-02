@@ -228,6 +228,11 @@ class AttentionDenseSpec:
     # use_sinks: A per-query-head learned scalar logit that participates in the softmax
     # denominator but has no value vector, acting as a repository for unnecessary attention mass.
     use_sinks: bool = False
+    # q_reload: reload each Q MFMA pack from global memory inside the KV loop instead
+    #   of holding all K_STEPS packs in VGPR across the whole tile loop. Frees ~32
+    #   VGPR for deeper software pipelining; Q is L2-resident on prefill so reload is
+    #   cheap. Off by default (byte-identical to the resident-q path).
+    q_reload: bool = False
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -378,6 +383,10 @@ class AttentionDenseSpec:
                 raise ValueError(
                     "paged not yet implemented for plain-causal (sliding_window>0 only)"
                 )
+        if self.persistent and self.q_reload and self.varlen:
+            raise ValueError("q_reload is not yet supported with varlen")
+        if self.persistent and self.q_reload and self.paged:
+            raise ValueError("q_reload is not yet supported with paged KV")
         if self.use_sinks and self.paged:
             raise ValueError("use_sinks is not yet supported with paged KV")
         if self.use_sinks and self.varlen:
@@ -451,6 +460,8 @@ class AttentionDenseSpec:
                 parts.append("hkvmaj")
             if self.interleave:
                 parts.append("intl")
+            if self.q_reload:
+                parts.append("qreload")
         return kernel_name_join(*parts)
 
 
@@ -1245,6 +1256,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     SWt = SW // BN  # window length in KV tiles
     LAZY_RESCALE = spec.lazy_rescale
     use_sinks = spec.use_sinks
+    Q_RELOAD = spec.q_reload
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -1385,10 +1397,12 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         )
 
         q_tok = b.add(q_tok0, lane_m)
-        q_packs = []
-        for ks in range(K_STEPS):
+
+        def _load_q_pack(ks: int):
             col = b.add(b.const_i32(ks * 16), d_base)
-            addr = b.add(b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col)
+            addr = b.add(
+                b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col
+            )
             if RAGGED:
                 raw = b.buffer_load_vN(
                     q_rsrc, b.mul(addr, b.const_i32(2)), b.const_i32(0), dtype, 8
@@ -1401,7 +1415,12 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 )
                 for j in range(8)
             ]
-            q_packs.append(b.vec_pack(elems, dtype))
+            return b.vec_pack(elems, dtype)
+
+        q_packs = []
+        if not Q_RELOAD:
+            for ks in range(K_STEPS):
+                q_packs.append(_load_q_pack(ks))
 
         def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
             """Async DMA one K/V tile (see default builder ``_async_load``).
@@ -1485,7 +1504,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     if K_GROUP > 1:
                         col = b.add(k_sub_col, col)
                     k_pack = b.smem_load_vN(K_lds, kbuf, krow, col, dtype=dtype, n=8)
-                    acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
+                    q_pack = _load_q_pack(ks) if Q_RELOAD else q_packs[ks]
+                    acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_pack, acc)
                 s_reg.append([b.vec_extract(acc, i) for i in range(16)])
             return s_reg
 
@@ -1610,9 +1630,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             ]
 
         def pv_fused_exp(o_acc_in, p_packs, vbuf, s_reg, m_new):
-            exp_per = (
-                1  # one exp2 per PV-MFMA step -> 256 VGPR / 0 spill (see docstring)
-            )
+            exp_per = 2 if Q_RELOAD else 1
             slots = [(nsub, i) for nsub in range(N_SUB) for i in range(16)]
             p_vals = [[None] * 16 for _ in range(N_SUB)]
             it = iter(slots)
