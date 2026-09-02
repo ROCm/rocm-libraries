@@ -3,10 +3,6 @@
 
 #pragma once
 
-#ifndef CK_TILE_FMHA_GFX125_D192_CROSS_TILE
-#define CK_TILE_FMHA_GFX125_D192_CROSS_TILE 0
-#endif
-
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_load.hpp"
@@ -28,11 +24,6 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
     static constexpr index_t kVPhysicalStride = 144;
     static constexpr index_t kVPadAmount      = 7;
     static constexpr index_t kVPadInterval    = 5;
-    static constexpr index_t kLdsOffsetK0     = 0x00000;
-    static constexpr index_t kLdsOffsetK1     = 0x10000;
-    static constexpr index_t kLdsOffsetV0     = 0x20000;
-    static constexpr index_t kLdsOffsetV1     = 0x30000;
-    static constexpr index_t kLdsArenaSize    = 0x39000;
     static constexpr index_t kKFootprintBytes = kLdsRows * kKPhysicalStride * sizeof(bf16_t);
     static constexpr index_t kVFootprintBytes = kLdsRows * kVPhysicalStride * sizeof(bf16_t);
     static constexpr bool kUseFullHeadKSuQk   = true;
@@ -41,13 +32,25 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
     static constexpr bool kUseCustomQkStageSchedule   = true;
     static constexpr bool kUseCustomPvStageSchedule   = true;
     static constexpr bool kUseOutputFragments         = true;
-    static constexpr bool kUseCrossTile               = CK_TILE_FMHA_GFX125_D192_CROSS_TILE != 0;
     static constexpr auto kORescaleToken              = FmhaD192ScheduleToken::ORescale;
+
+    // Optionally pack the four buffers back to back instead of aligning each one to 64 KiB.
+#ifndef CK_TILE_FMHA_GFX125_D192_LDS_PACK
+#define CK_TILE_FMHA_GFX125_D192_LDS_PACK 0
+#endif
+    static constexpr bool kPackLds = CK_TILE_FMHA_GFX125_D192_LDS_PACK != 0;
+
+    static constexpr index_t kLdsOffsetK0  = 0;
+    static constexpr index_t kLdsOffsetK1  = kPackLds ? kKFootprintBytes : 0x10000;
+    static constexpr index_t kLdsOffsetV0  = kPackLds ? 2 * kKFootprintBytes : 0x20000;
+    static constexpr index_t kLdsOffsetV1  = kLdsOffsetV0 + (kPackLds ? kVFootprintBytes : 0x10000);
+    static constexpr index_t kLdsArenaSize = kPackLds ? kLdsOffsetV1 + kVFootprintBytes : 0x39000;
 
     using OutputFragments = FmhaD192OutputFragments;
 
     static_assert(kKFootprintBytes == 0xc800);
     static_assert(kVFootprintBytes == 0x9000);
+    static_assert(kLdsArenaSize == (kPackLds ? 0x2b000 : 0x39000));
     static_assert(kLdsOffsetK0 + kKFootprintBytes <= kLdsOffsetK1);
     static_assert(kLdsOffsetK1 + kKFootprintBytes <= kLdsOffsetV0);
     static_assert(kLdsOffsetV0 + kVFootprintBytes <= kLdsOffsetV1);
@@ -96,15 +99,13 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
     }
 
     template <index_t WmmaOrdinal,
-              bool HasSoftmaxDependency,
               typename BlockGemm,
               typename CBlockTensor,
               typename ABlockTensor,
               typename BBlockTensor>
-    CK_TILE_DEVICE static float RunQkSuWmmaImpl(CBlockTensor& c_block_tensor,
-                                                const ABlockTensor& a_block_tensor,
-                                                const BBlockTensor& b_block_tensor,
-                                                float softmax_dependency)
+    CK_TILE_DEVICE static void RunQkSuWmma(CBlockTensor& c_block_tensor,
+                                           const ABlockTensor& a_block_tensor,
+                                           const BBlockTensor& b_block_tensor)
     {
         using WarpGemm    = typename BlockGemm::WarpGemm;
         using AWarpDstr   = typename WarpGemm::AWarpDstr;
@@ -137,14 +138,6 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
         a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
             merge_sequences(sequence<m_iter, k_iter>{}, a_warp_y_index_zeros),
             merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
-        if constexpr(HasSoftmaxDependency)
-        {
-            const float anchored = FmhaD192OutputFragments::AnchorValue(
-                type_convert<float>(a_warp_tensor.get_thread_buffer()[number<0>{}]),
-                softmax_dependency);
-            a_warp_tensor.get_thread_buffer()[number<0>{}] =
-                type_convert<typename ABlockTensor::DataType>(anchored);
-        }
 
         BWarpTensor b_warp_tensor;
         b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
@@ -161,34 +154,6 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
             merge_sequences(sequence<m_iter, n_iter>{}, c_warp_y_index_zeros),
             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
             c_warp_tensor.get_thread_buffer());
-        return c_warp_tensor.get_thread_buffer()[number<0>{}];
-    }
-
-    template <index_t WmmaOrdinal,
-              typename BlockGemm,
-              typename CBlockTensor,
-              typename ABlockTensor,
-              typename BBlockTensor>
-    CK_TILE_DEVICE static float RunQkSuWmma(CBlockTensor& c_block_tensor,
-                                            const ABlockTensor& a_block_tensor,
-                                            const BBlockTensor& b_block_tensor)
-    {
-        return RunQkSuWmmaImpl<WmmaOrdinal, false, BlockGemm>(
-            c_block_tensor, a_block_tensor, b_block_tensor, 0.0f);
-    }
-
-    template <index_t WmmaOrdinal,
-              typename BlockGemm,
-              typename CBlockTensor,
-              typename ABlockTensor,
-              typename BBlockTensor>
-    CK_TILE_DEVICE static float RunQkSuWmmaAfterDependency(CBlockTensor& c_block_tensor,
-                                                           const ABlockTensor& a_block_tensor,
-                                                           const BBlockTensor& b_block_tensor,
-                                                           float softmax_dependency)
-    {
-        return RunQkSuWmmaImpl<WmmaOrdinal, true, BlockGemm>(
-            c_block_tensor, a_block_tensor, b_block_tensor, softmax_dependency);
     }
 
     template <typename BlockGemm,
@@ -288,125 +253,14 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
                 emit_softmax_token(token, ordinal);
             }
         };
-        auto emit_point = [](auto, auto, auto) { __builtin_amdgcn_sched_barrier(0); };
+        auto emit_point = [](auto, auto, auto point) {
+            if constexpr(decltype(point)::value == FmhaD192SchedulePoint::AfterTokens)
+                __builtin_amdgcn_sched_barrier(0);
+            else
+                __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
+        };
 
         Executor::template ExecuteQkStage<Stage>(emit_wmma, emit_token, emit_point);
-        s_wait_dscnt<0>();
-    }
-
-    template <bool EnableCompletionDependency,
-              index_t Stage,
-              typename BlockGemm,
-              typename CBlockTensor,
-              typename ABlockTensor,
-              typename BBlockTensor,
-              typename AuxiliaryTokenEmitter,
-              typename SoftmaxTokenEmitter>
-    CK_TILE_DEVICE static void RunQkCrossTileRows(CBlockTensor& c_block_tensor,
-                                                  const ABlockTensor& a_block_tensor,
-                                                  const BBlockTensor& b_block_tensor,
-                                                  float& qk_dependency,
-                                                  AuxiliaryTokenEmitter& emit_auxiliary_token,
-                                                  SoftmaxTokenEmitter& emit_softmax_token)
-    {
-        using Executor = BlockFmhaPipelineQRKSVSTdmD192V128ScheduleExecutor;
-        using Schedule = typename Executor::Schedule;
-        using Token    = FmhaD192ScheduleToken;
-        static_assert(Stage >= 0 && Stage < Schedule::kNumStages);
-
-        auto emit_wmma = [&](auto, auto wmma) {
-            constexpr index_t row = Stage * Schedule::kQkWmmasPerStage + decltype(wmma)::value;
-            if constexpr(EnableCompletionDependency && row > 0)
-            {
-                if constexpr(Schedule::QkRowNeedsCompletionDependency(row - 1))
-                {
-                    qk_dependency = RunQkSuWmmaAfterDependency<decltype(wmma)::value, BlockGemm>(
-                        c_block_tensor, a_block_tensor, b_block_tensor, qk_dependency);
-                }
-                else
-                {
-                    qk_dependency = RunQkSuWmma<decltype(wmma)::value, BlockGemm>(
-                        c_block_tensor, a_block_tensor, b_block_tensor);
-                }
-            }
-            else
-            {
-                qk_dependency = RunQkSuWmma<decltype(wmma)::value, BlockGemm>(
-                    c_block_tensor, a_block_tensor, b_block_tensor);
-            }
-        };
-        auto emit_token = [&](auto token, auto ordinal) {
-            constexpr auto token_value = decltype(token)::value;
-            if constexpr((token_value >= Token::P2M0 && token_value <= Token::P2M3) ||
-                         token_value == Token::ORescale)
-            {
-                qk_dependency = emit_softmax_token(token, ordinal, qk_dependency);
-            }
-            else
-            {
-                emit_auxiliary_token(token, ordinal);
-            }
-        };
-        auto emit_point = [](auto, auto, auto) { __builtin_amdgcn_sched_barrier(0); };
-
-        Executor::template ExecuteQkStage<Stage>(emit_wmma, emit_token, emit_point);
-    }
-
-    template <index_t Stage,
-              typename BlockGemm,
-              typename CBlockTensor,
-              typename ABlockTensor,
-              typename BBlockTensor,
-              typename NextBBlockTensor,
-              typename BTileWindow,
-              typename SoftmaxTokenEmitter>
-    CK_TILE_DEVICE static void
-    RunQkScheduledStageWithCrossTileSoftmax(const BlockGemm&,
-                                            CBlockTensor& c_block_tensor,
-                                            const ABlockTensor& a_block_tensor,
-                                            const BBlockTensor& b_block_tensor,
-                                            NextBBlockTensor& next_b_block_tensor,
-                                            const BTileWindow& b_lds_window,
-                                            float& qk_dependency,
-                                            SoftmaxTokenEmitter& emit_softmax_token)
-    {
-        using Executor = BlockFmhaPipelineQRKSVSTdmD192V128ScheduleExecutor;
-        using Schedule = typename Executor::Schedule;
-        using Token    = FmhaD192ScheduleToken;
-        static_assert(Stage >= 0 && Stage < Schedule::kNumStages);
-        static_assert((Stage < Schedule::kNumStages - 1 && BTileWindow::NumAccessPerCoord == 24) ||
-                      (Stage == Schedule::kNumStages - 1 && BTileWindow::NumAccessPerCoord == 16));
-
-        auto emit_auxiliary_token = [&](auto token, auto ordinal) {
-            constexpr auto token_value = decltype(token)::value;
-            if constexpr(token_value >= Token::KM0 && token_value <= Token::KM3)
-            {
-                static_assert(Stage < Schedule::kNumStages - 1);
-                constexpr index_t msb =
-                    static_cast<index_t>(token_value) - static_cast<index_t>(Token::KM0);
-                constexpr index_t loads_per_msb = BTileWindow::NumAccessPerCoord / 4;
-                constexpr index_t local_ordinal = decltype(ordinal)::value - Stage * loads_per_msb;
-                static_assert(local_ordinal >= 0 && local_ordinal < loads_per_msb);
-                constexpr index_t access = msb * loads_per_msb + local_ordinal;
-                FmhaD192Load::LoadInstruction<access>(next_b_block_tensor, b_lds_window);
-            }
-            else if constexpr(token_value >= Token::VM0 && token_value <= Token::VM3)
-            {
-                static_assert(Stage == Schedule::kNumStages - 1);
-                constexpr index_t msb =
-                    static_cast<index_t>(token_value) - static_cast<index_t>(Token::VM0);
-                constexpr index_t loads_per_msb = BTileWindow::NumAccessPerCoord / 4;
-                constexpr index_t access        = msb * loads_per_msb + decltype(ordinal)::value;
-                FmhaD192TransposeLoad::LoadAccess<access>(next_b_block_tensor, b_lds_window);
-            }
-        };
-
-        RunQkCrossTileRows<true, Stage, BlockGemm>(c_block_tensor,
-                                                   a_block_tensor,
-                                                   b_block_tensor,
-                                                   qk_dependency,
-                                                   emit_auxiliary_token,
-                                                   emit_softmax_token);
         s_wait_dscnt<0>();
     }
 
@@ -543,7 +397,12 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
                 FmhaD192Load::LoadInstruction<access>(next_b_block_tensor, b_lds_window);
             }
         };
-        auto emit_point = [](auto, auto, auto) { __builtin_amdgcn_sched_barrier(0); };
+        auto emit_point = [](auto, auto, auto point) {
+            if constexpr(decltype(point)::value == FmhaD192SchedulePoint::AfterTokens)
+                __builtin_amdgcn_sched_barrier(0);
+            else
+                __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
+        };
 
         Executor::template ExecutePvStage<Stage>(emit_wmma, emit_token, emit_point);
         s_wait_dscnt<0>();
@@ -584,7 +443,12 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
                 FmhaD192Load::LoadInstruction<access>(next_b_block_tensor, b_lds_window);
             }
         };
-        auto emit_point = [](auto, auto, auto) { __builtin_amdgcn_sched_barrier(0); };
+        auto emit_point = [](auto, auto, auto point) {
+            if constexpr(decltype(point)::value == FmhaD192SchedulePoint::AfterTokens)
+                __builtin_amdgcn_sched_barrier(0);
+            else
+                __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
+        };
 
         Executor::template ExecutePvStage<Stage>(emit_wmma, emit_token, emit_point);
         s_wait_dscnt<0>();
@@ -757,55 +621,6 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
         if constexpr(TokenConstant::value == FmhaD192ScheduleToken::ORescale)
         {
             RunOutputRescaleToken<Ordinal::value>(output, output_scale_m0, output_scale_m1);
-        }
-    }
-
-    template <typename TokenConstant, typename Ordinal, typename Fragments>
-    CK_TILE_DEVICE static float
-    RunCrossTileQkSoftmaxToken(TokenConstant,
-                               Ordinal,
-                               FmhaD192SoftmaxState& previous_state,
-                               FmhaD192ProbabilityFragments& previous_probability,
-                               FmhaD192SoftmaxClosureState& previous_closure,
-                               Fragments& output,
-                               float scale_log2,
-                               float qk_dependency)
-    {
-        using Token                = FmhaD192ScheduleToken;
-        constexpr auto token_value = TokenConstant::value;
-        static_assert((token_value >= Token::P2M0 && token_value <= Token::P2M3) ||
-                      token_value == Token::ORescale);
-
-        if constexpr(token_value >= Token::P2M0 && token_value <= Token::P2M3)
-        {
-            constexpr index_t msb =
-                static_cast<index_t>(token_value) - static_cast<index_t>(Token::P2M0);
-            constexpr index_t op =
-                FmhaD192SplitSoftmax::kPreviousPart2OperationBeg + Ordinal::value;
-            static_assert(op >= FmhaD192SplitSoftmax::kPreviousPart2OperationBeg &&
-                          op < FmhaD192SplitSoftmax::kPart2OperationCount);
-            if constexpr(op >= FmhaD192SoftmaxTokenContract::kPart2ConvertBegin &&
-                         op < FmhaD192SoftmaxTokenContract::kPart2SumL0Begin)
-            {
-                constexpr index_t pair = op - FmhaD192SoftmaxTokenContract::kPart2ConvertBegin;
-                FmhaD192SplitSoftmax::template EmitPreviousPart2Op<msb, op>(
-                    previous_state, previous_probability, previous_closure, scale_log2);
-                return OutputFragments::AnchorValue(
-                    type_convert<float>(previous_probability.template Get<msb, pair>()[0]),
-                    qk_dependency);
-            }
-            else
-            {
-                FmhaD192SplitSoftmax::template EmitPreviousPart2Op<msb, op>(
-                    previous_state, previous_probability, previous_closure, scale_log2);
-                return qk_dependency;
-            }
-        }
-        else
-        {
-            constexpr index_t d_msb = Ordinal::value % OutputFragments::kNumDmsb;
-            return OutputFragments::template RescaleScheduled<Ordinal::value>(
-                output, previous_state.exp_delta[number<d_msb>{}], qk_dependency);
         }
     }
 

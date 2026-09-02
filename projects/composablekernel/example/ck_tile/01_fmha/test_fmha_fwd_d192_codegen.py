@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import hashlib
+import re
 import tempfile
 import unittest
 from collections import Counter
@@ -13,6 +14,9 @@ _SUPPORTED_FEATURE_FILTER = (
     "fmha_fwd_d*_bf16_*_nlogits*_nbias*_nmask*_nlse*_ndropout*_nskip*_nqscale*"
 )
 _D192_PIPELINE = "qr_tdm_d192_v128"
+_D192_ESM2_FILENAME = re.compile(
+    r"^fmha_fwd_d192_bf16_.*_qr_tdm_d192_v128_.*_gfx125\.cpp$"
+)
 _D192_SELECTOR = (
     "is_gfx125_d192_tdm_enabled() && a.hdim_q == 192 && "
     "a.hdim_v == 128 && a.max_seqlen_q >= 128"
@@ -54,6 +58,11 @@ class TestGfx125D192Codegen(unittest.TestCase):
                     self.assertEqual(kernel.F_pipeline.F_qscale, "no")
                     self.assertEqual(kernel.F_pipeline.F_skip, "f")
                     self.assertEqual(kernel.F_pipeline.F_sink, "f")
+                    self.assertRegex(kernel.filename, _D192_ESM2_FILENAME)
+
+                for kernel in kernels:
+                    if kernel not in candidates:
+                        self.assertNotRegex(kernel.filename, _D192_ESM2_FILENAME)
 
                 self.assertFalse(
                     any(

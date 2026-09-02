@@ -43,12 +43,21 @@ set_directory_properties(PROPERTIES CMAKE_CONFIGURE_DEPENDS "${CODE_GEN_SCRIPTS}
 list(JOIN INST_TARGETS , FMHA_TARGETS_ARG)
 
 string(REPLACE ";" "," FMHA_FWD_APIS "${FMHA_FWD_ENABLE_APIS}")
+# Narrow the generated instance set when only a subset is being benchmarked.
+# Candidate-only filters also retain the generic dispatcher fallback instances.
+set(FMHA_FWD_CODEGEN_FILTER "" CACHE STRING
+  "optional --filter argument forwarded to generate.py for the fwd API")
+option(FMHA_FWD_GFX1250_D192_TDM_ESM2
+  "Enable ESM2 for gfx1250 D192 BF16 QR/TDM generated instances" ON)
 set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
   --api ${FMHA_FWD_APIS}
   --optdim 32,64,80,128,256
 )
+if(FMHA_FWD_CODEGEN_FILTER)
+  list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter ${FMHA_FWD_CODEGEN_FILTER})
+endif()
 set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
@@ -62,7 +71,9 @@ set(FMHA_BWD_CODE_GEN_COMMON_ARGS
 # TODO: Consider to use a special receipt for testing only, or even two receipts: a small subset of
 # instances for quick CI runs and a larger subset for scheduled runs (the tests skip tests when
 # there is no corresponding instance for parameters).
-if(BUILD_TESTING)
+# An explicit FMHA_FWD_CODEGEN_FILTER already appended a --filter above; a second
+# one would silently override it, so only apply the testing default when unset.
+if(BUILD_TESTING AND NOT FMHA_FWD_CODEGEN_FILTER)
   # Filters are in the order of FMHA_FWD_KNOWN_APIS: fwd,fwd_splitkv_combine@fwd_splitkv,fwd_appendkv,pagedkv_prefill
   list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter *_nlogits*_nskip*,*@*_nlogits*_nbias*,*,*_nlogits*_nskip*_pagedkv*)
 endif()
@@ -116,6 +127,16 @@ add_library(${FMHA_FWD_INSTANCES} OBJECT EXCLUDE_FROM_ALL)
 target_include_directories(${FMHA_FWD_INSTANCES} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_sources(${FMHA_FWD_INSTANCES} PRIVATE ${FMHA_FWD_GEN_BLOBS})
 set_source_files_properties(${FMHA_FWD_GEN_BLOBS} PROPERTIES LANGUAGE HIP)
+if(FMHA_FWD_GFX1250_D192_TDM_ESM2 AND "gfx1250" IN_LIST INST_TARGETS)
+  foreach(fwd_blob IN LISTS FMHA_FWD_GEN_BLOBS)
+    get_filename_component(fwd_blob_name "${fwd_blob}" NAME)
+    if(fwd_blob_name MATCHES
+       "^fmha_fwd_d192_bf16_.*_qr_tdm_d192_v128_.*_gfx125\\.cpp$")
+      set_property(SOURCE "${fwd_blob}" APPEND PROPERTY COMPILE_OPTIONS
+        -mllvm -amdgpu-expert-scheduling-mode)
+    endif()
+  endforeach()
+endif()
 set_property(TARGET ${FMHA_FWD_INSTANCES} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
 
 message(DEBUG "adding instances ${FMHA_BWD_INSTANCES}")
@@ -135,9 +156,14 @@ set(FMHA_BWD_INTERFACE_COMPILE_OPTIONS)
 list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -Wno-undefined-func-template)
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -Wno-undefined-func-template)
 
-# Allow comparing floating points directly in order to check sentinel values
+# Allow comparing floating points directly in order to check sentinel values.
+# Also needed on the INTERFACE side: the example/test executables include the
+# same pipeline headers, and any pipeline whose sentinel check is instantiated
+# from their TU would otherwise trip -Werror,-Wfloat-equal.
 list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -Wno-float-equal)
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -Wno-float-equal)
+list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -Wno-float-equal)
+list(APPEND FMHA_BWD_INTERFACE_COMPILE_OPTIONS -Wno-float-equal)
 
 # NOTE: this is dangerous since will change the whole kernel to flush denormals
 #       WIP with compiler team for an exp2 intrinsic..., then remove this

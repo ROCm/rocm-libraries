@@ -104,13 +104,25 @@ static_assert(D192Pipeline::kUsesUntransposedVKernelPath);
 static_assert(D192Pipeline::kUsesTdmAffineDramPath);
 static_assert(D192Pipeline::kUsesFixedSegmentedLdsArena);
 static_assert(D192Pipeline::kBlockPerCu == 1);
-static_assert(D192Pipeline::GetSmemSize() == 0x39000);
 static_assert(D192Policy::GetQKReductionSteps<D192PolicyProblem>() == 6);
+// Two arena layouts: the 64 KiB-aligned original and the packed one selected by
+// CK_TILE_FMHA_GFX125_D192_LDS_PACK. Both must keep the buffers non-overlapping
+// and 16-byte aligned; only the offsets differ.
+#if CK_TILE_FMHA_GFX125_D192_LDS_PACK
+static_assert(D192Policy::GetLdsOffsetK0() == 0x00000);
+static_assert(D192Policy::GetLdsOffsetK1() == 0x0c800);
+static_assert(D192Policy::GetLdsOffsetV0() == 0x19000);
+static_assert(D192Policy::GetLdsOffsetV1() == 0x22000);
+static_assert(D192Policy::GetLdsArenaSize() == 0x2b000);
+static_assert(D192Pipeline::GetSmemSize() == 0x2b000);
+#else
 static_assert(D192Policy::GetLdsOffsetK0() == 0x00000);
 static_assert(D192Policy::GetLdsOffsetK1() == 0x10000);
 static_assert(D192Policy::GetLdsOffsetV0() == 0x20000);
 static_assert(D192Policy::GetLdsOffsetV1() == 0x30000);
 static_assert(D192Policy::GetLdsArenaSize() == 0x39000);
+static_assert(D192Pipeline::GetSmemSize() == 0x39000);
+#endif
 
 constexpr auto kPolicyKLdsWriteDesc = D192Policy::MakeKLdsWriteBlockDescriptor<D192PolicyProblem>();
 constexpr auto kPolicyKLdsReadDesc  = D192Policy::MakeKLdsReadBlockDescriptor<D192PolicyProblem>();

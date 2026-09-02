@@ -14,12 +14,11 @@ namespace ck_tile {
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmD192V128Policy>
 struct BlockFmhaPipelineQRKSVSTdmD192V128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Policy_>
 {
-    using Base              = BlockFmhaPipelineQRKSVSTdm<Problem_, Policy_>;
-    using Problem           = remove_cvref_t<Problem_>;
-    using Policy            = remove_cvref_t<Policy_>;
-    using ScheduleExecutor  = BlockFmhaPipelineQRKSVSTdmD192V128ScheduleExecutor;
-    using SplitSoftmax      = FmhaD192SplitSoftmax;
-    using CrossTilePrologue = FmhaD192CrossTilePrologue;
+    using Base             = BlockFmhaPipelineQRKSVSTdm<Problem_, Policy_>;
+    using Problem          = remove_cvref_t<Problem_>;
+    using Policy           = remove_cvref_t<Policy_>;
+    using ScheduleExecutor = BlockFmhaPipelineQRKSVSTdmD192V128ScheduleExecutor;
+    using SplitSoftmax     = FmhaD192SplitSoftmax;
 
     using QDataType           = typename Base::QDataType;
     using KDataType           = typename Base::KDataType;
@@ -57,7 +56,10 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128 : BlockFmhaPipelineQRKSVSTdm<Problem_,
     static constexpr bool kUsesUntransposedVKernelPath = true;
     static constexpr bool kUsesTdmAffineDramPath       = true;
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
-    static constexpr index_t kBlockPerCu               = 1;
+#ifndef CK_TILE_FMHA_GFX125_D192_BLOCK_PER_CU
+#define CK_TILE_FMHA_GFX125_D192_BLOCK_PER_CU 1
+#endif
+    static constexpr index_t kBlockPerCu = CK_TILE_FMHA_GFX125_D192_BLOCK_PER_CU;
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
     using QKBlockGemm = remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>;

@@ -24,6 +24,16 @@
 #endif
 #endif
 
+// Head-major workgroup ordering groups the m-tiles of one head together, so the
+// workgroups running concurrently share that head's K/V instead of streaming one
+// K/V per head. For non-causal attention every m-tile of a head reads the whole
+// K/V, so the reuse is real in any layout - but the remap below is gated on a
+// bhsd stride test and therefore skipped for group-mode THD. Setting this to 1
+// applies the same ordering regardless of layout.
+#if !defined(CK_TILE_FMHA_HEAD_MAJOR_ANY_LAYOUT)
+#define CK_TILE_FMHA_HEAD_MAJOR_ANY_LAYOUT 0
+#endif
+
 // S[seqlen_q, seqlen_k] = Q[seqlen_q, hdim_q] @ K[seqlen_k, hdim_q]
 // S'[seqlen_q, seqlen_k] = S[seqlen_q, seqlen_k] * Scale[1]
 // S''[seqlen_q, seqlen_k] = S'[seqlen_q, seqlen_k] + Bias[seqlen_q, seqlen_k]
@@ -1559,7 +1569,7 @@ struct FmhaFwdKernel
             // The extra nhead_stride_q guard prevents bshd false-positive when nhead == 1
             const bool is_bhsd_layout =
                 (kargs.stride_q == kargs.hdim_q) && (kargs.nhead_stride_q > kargs.hdim_q);
-            if(is_bhsd_layout)
+            if(is_bhsd_layout || CK_TILE_FMHA_HEAD_MAJOR_ANY_LAYOUT)
             {
                 const index_t num_tile_n1 =
                     ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
