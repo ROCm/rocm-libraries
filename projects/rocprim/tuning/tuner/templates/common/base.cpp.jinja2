@@ -3,8 +3,10 @@
 #include "rocprim/device/detail/device_config_helper.hpp" 
 // Include 'rocprim::empty_type'.
 #include "rocprim/types.hpp" 
+{% block benchmarking_include %}
 // Include main benchmarking logic {{algo_type}}_{{algo_name}}_benchmark.
 #include "benchmark_{{algo_type}}_{{algo_name}}.hpp"
+{% endblock %}
 // Include primbench executor.
 #include "primbench.hpp"
 // Include fixed-width integers for interop with python.
@@ -40,6 +42,8 @@ extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
     {% block primbench_settings %}
     auto settings = primbench::settings();
     settings.json_out = "/dev/null";
+    settings.max_warming_secs = 90;
+    settings.max_cooling_secs = 90;
     settings.size = bytes_size;
     settings.skip_header = true;
     {% endblock %}
@@ -52,10 +56,12 @@ extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
     auto executor = primbench::executor(1, args, settings);
     {% endblock %}
 
+    {% block benchmark_queue %}
     executor.queue<benchmark_type>();
+    {% endblock %}
+    
     executor.run();
 
-    // Return the time as milliseconds per GiB.
     return (1000 * primbench::GiB) / executor.get_last_bytes_per_second();
 }
 {% endblock %}

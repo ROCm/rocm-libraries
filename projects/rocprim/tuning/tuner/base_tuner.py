@@ -28,7 +28,7 @@ import json
 from pathlib import Path
 import numpy as np
 from jinja2 import Environment, FileSystemLoader
-from utils import TYPE_CONFIGS, Parser
+from utils import TYPE_CONFIGS, Parser, BASE_DIR
 from hip import hip  # type: ignore (pyright doesn't detect hip-python correctly)
 import warnings
 from dataclasses import dataclass
@@ -181,7 +181,7 @@ class BaseTuner(ABC):
 
         if not self.exclude_default_config:
             with open(
-                f"../../rocprim/include/rocprim/device/detail/config/{self.algo_full_name}.hpp"
+                f"{BASE_DIR}/../rocprim/include/rocprim/device/detail/config/{self.algo_full_name}.hpp"
             ) as f:
                 self.existing_config = confgen.parse.parse_lines(f.readlines())
         else:
@@ -210,7 +210,7 @@ class BaseTuner(ABC):
         cls(defaults).tune_all()
 
     @abstractmethod
-    def _get_tune_params(self) -> OrderedDict:
+    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         pass
@@ -295,8 +295,8 @@ class BaseTuner(ABC):
             (
                 c
                 for c in arch_config
-                if c["key_type"] == key_type
-                and c["value_type"] == (value_type or "empty_type")
+                if c[self._get_key_type()] == key_type
+                and (not self._get_value_type() in c or c[self._get_value_type()] == (value_type or "empty_type"))
             ),
             None,
         )
@@ -307,7 +307,7 @@ class BaseTuner(ABC):
             return
 
         default_tune_params = {
-            k: [v] for k, v in config.items() if k not in ["key_type", "value_type"]
+            k: [v] for k, v in config.items() if k not in [self._get_key_type(), self._get_value_type()]
         }
 
         # Get the base tuning archs and force set the range of the tune parameters
@@ -363,7 +363,7 @@ class BaseTuner(ABC):
         value_type: Optional[str] = None,
     ) -> str:
         """Generate wrapper code using Jinja2 template inheritance."""
-        template_dir = pathlib.Path("templates")
+        template_dir = pathlib.Path(f"{BASE_DIR}/tuner/templates")
         env = Environment(
             loader=FileSystemLoader(template_dir), trim_blocks=True, lstrip_blocks=True
         )
@@ -378,8 +378,8 @@ class BaseTuner(ABC):
             "algo_type": self.algo_type,
             "algo_name": self.algo_name,
             "config": config,
-            "key_type": key_type,
-            "value_type": value_type,
+            self._get_key_type(): key_type,
+            self._get_value_type(): value_type,
         }
 
         content = template.render(**context)
@@ -406,7 +406,7 @@ class BaseTuner(ABC):
             "kernel_source": wrapper_string,
             "problem_size": self._get_problem_size(key_type, value_type),
             "arguments": [np.uint64(self.bytes_size)],
-            "tune_params": self._get_tune_params(),
+            "tune_params": self._get_tune_params(key_type, value_type),
             "strategy": self.strategy,
             "grid_div_x": self._get_grid_div_x(),
             "cache": str(self._get_cache_file_path(key_type, value_type)),
@@ -441,6 +441,12 @@ class BaseTuner(ABC):
         "Return the path of the cache file"
         return self.output_dir / self._get_cache_file_name(key_type, value_type)
 
+    def _get_key_type(self) -> str:
+        return "key_type"
+
+    def _get_value_type(self) -> str:
+        return "value_type"
+
     def _save_output(
         self,
         cache_file: str | pathlib.Path,
@@ -456,7 +462,7 @@ class BaseTuner(ABC):
             )
             cache_file.mkdir(parents=True, exist_ok=True)
             cache_file = cache_file / self._get_cache_file_name(key_type, value_type)
-            store_output_file(str(cache_file), results, self._get_tune_params())
+            store_output_file(str(cache_file), results, self._get_tune_params(key_type, value_type))
 
         with open(cache_file, "r") as f:
             cache_dict = json.load(f)
@@ -467,9 +473,10 @@ class BaseTuner(ABC):
             new_content = "{\n"
             new_content += f'"arch_name": "{self.arch_name}",\n'
             new_content += f'"algo_name": "{self.algo_full_name}",\n'
-            new_content += f'"key_type": "{key_type}",\n'
+            new_content += f'"{self._get_key_type()}": "{key_type}",'
             value_type_string = f"{value_type}" if value_type else "empty_type"
-            new_content += f'"value_type": "{value_type_string}",'
+            if self._get_value_type():
+                new_content += f'\n"{self._get_value_type()}": "{value_type_string}",'
             new_content += content.lstrip()[1:]
 
             with open(cache_file, "w") as f:
@@ -480,7 +487,7 @@ class BaseTuner(ABC):
 
     def _get_compiler_options(self) -> List[str]:
         """Returns a list with all compiler options to pass to Kernel Tuner"""
-        monorepo_dir = pathlib.Path("../../../..").resolve()
+        monorepo_dir = (pathlib.Path(BASE_DIR) / "../../..").resolve()
         rocprim_dir = monorepo_dir / "projects/rocprim"
         return [
             "-fPIC",
