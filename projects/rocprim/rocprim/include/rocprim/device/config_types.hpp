@@ -211,7 +211,7 @@ enum class gen
     rdna1,
     rdna2,
     rdna3,
-    rdna4,
+    rdna4
 };
 
 enum class gpu
@@ -230,7 +230,7 @@ enum class gpu
     mi308x,
     mi325x,
     mi350x,
-    mi455x,
+    mi455x
 };
 
 constexpr gen gen_from_target_arch(target_arch i)
