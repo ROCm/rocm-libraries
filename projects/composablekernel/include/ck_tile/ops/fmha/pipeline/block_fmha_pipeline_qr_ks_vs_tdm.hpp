@@ -607,7 +607,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             if constexpr(1 < k0_loops)
             {
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
-                    s_wait_tensorcnt_barrier<0>();
+                    // TDM retires in order: only the first K tile has the V prefetch behind it
+                    s_wait_tensorcnt_barrier<(decltype(i_k0)::value == 0) ? 1 : 0>();
 
                     auto k_tile = load_tile(k_lds_read_window);
 
@@ -626,7 +627,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 move_tile_window(k_dram_window, {0, -kK0 * (k0_loops - 1)});
             }
 
-            s_wait_tensorcnt_barrier<0>();
+            // the V prefetch trails this K tile only when the k0 sub-loop issued nothing after it
+            s_wait_tensorcnt_barrier<(k0_loops == 1) ? 1 : 0>();
 
             auto k_tile = load_tile(k_lds_read_window);
 
@@ -874,9 +876,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
 
-            // V is on the tensorcnt counter (load_tile_tdm). Wait for V TDM
-            // write to fully commit before ds_load_tr reads.
-            s_wait_tensorcnt_barrier<0>();
+            // TDM retires in order, so V has committed once only the next-tile K prefetch is left
+            s_wait_tensorcnt_barrier<1>();
 
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
@@ -923,6 +924,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                    v_scale(number<k1_loops - 1>{}));
 
         } while(++i_total_loops < num_total_loop);
+
+        // the loop leaves one speculative K prefetch in flight; retire it before the LDS goes away
+        s_wait_tensorcnt<0>();
 
         if constexpr(kStoreLSE)
         {
