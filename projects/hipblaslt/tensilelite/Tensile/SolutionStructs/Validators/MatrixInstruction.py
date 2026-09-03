@@ -379,7 +379,20 @@ def validateMIParameters(
         elif hasSWMMAC and (not mi4 in validSWMMAC):
             return not reject(
                 solution, printSolutionRejectionReason, f"Invalid SWMMAC configuration: {solution}"
-            ) 
+            )
+        sparseFamily = "SMFMA" if hasSMFMA else "SWMMAC"
+        unsupported = unsupportedMatrixInstructionMnemonic(
+            solution, isa, mi4, macDataTypeA, macDataTypeB,
+            _as_mac_dtype(ptype.get("ComputeDataType", miDataType)), isSparse, hasMFMA,
+            useF32XEmulation=useF32XEmulationFor(solution, isaInfoMap[isa].archCaps))
+        if unsupported is not None:
+            return not reject(
+                solution,
+                printSolutionRejectionReason,
+                f"Invalid {sparseFamily} configuration: MatrixInstruction {mi4} with input data types "
+                f"{macDataTypeA}/{macDataTypeB} emits '{unsupported}', which StinkyTofu has no "
+                f"instruction definition for on {isa}",
+            )
 
     # Check MIBlock
     assert miBlock[0] == mi4[0], elineno()

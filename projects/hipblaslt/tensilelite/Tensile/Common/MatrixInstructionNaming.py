@@ -14,7 +14,7 @@ from typing import Tuple
 from rocisa import rocIsa
 from rocisa.container import vgpr
 from rocisa.enum import InstType
-from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+from rocisa.instruction import MFMAInstruction, MXMFMAInstruction, SMFMAInstruction
 
 from .DataType import DataType
 
@@ -257,6 +257,19 @@ def matrixInstructionMnemonic(
                 a=vgpr(0, 1),
                 b=vgpr(0, 1),
                 block=mxBlock,
+            ).preStr()
+
+        if isSparse:
+            # SMFMAInstruction::preStr() chooses smfmac vs swmmac from HasSMFMA.
+            return SMFMAInstruction(
+                instType=miInInstType,
+                accType=miOutInstType,
+                variant=list(mi4),
+                mfma1k=bool(mfma1k),
+                acc=vgpr(0, 1),
+                a=vgpr(0, 1),
+                b=vgpr(0, 1),
+                metadata=vgpr(0, 1),
             ).preStr()
 
         return MFMAInstruction(
