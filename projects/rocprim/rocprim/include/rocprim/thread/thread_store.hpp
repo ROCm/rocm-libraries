@@ -83,7 +83,7 @@ void asm_thread_store(void* ptr, T val)
                                                                                    type  val) \
         {                                                                                     \
             interim_type temp_val = *bit_cast<interim_type*>(&val);                           \
-            if(ROCPRIM_IS_RDNA4())                                                            \
+            if(ROCPRIM_IS_CDNA5))                                                            \
             {                                                                                 \
                 asm volatile(#asm_operator " %0, %1 th:TH_DEFAULT scope:SCOPE_DEV\n\t"        \
                                            "s_wait_storecnt_dscnt(%2)"                        \
