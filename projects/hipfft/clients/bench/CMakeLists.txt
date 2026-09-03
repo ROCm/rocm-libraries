@@ -20,39 +20,76 @@
 # THE SOFTWARE.
 # #############################################################################
 
-CMAKE_MINIMUM_REQUIRED(VERSION 3.16)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.21)
 
-project( hipfft-clients-bench LANGUAGES CXX )
+project( hipfft-clients-bench LANGUAGES CXX HIP )
 
-set( hipfft_bench_source bench.cpp ../../shared/array_validator.cpp ../../shared/data_gen_device.cpp )
-set( hipfft_bench_includes bench.h ../../shared/array_validator.h )
+if( NOT TARGET hipfft )
+  find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
+  find_package( hipfft REQUIRED CONFIG PATHS )
+  if( NOT BUILD_WITH_LIB STREQUAL "ROCM" )
+    find_package(CUDAToolkit REQUIRED)
+    set(CMAKE_HIP_ARCHITECTURES native )
+  endif()
+endif( )
+
+set( hipfft_bench_source
+  bench.cpp
+  ../../shared/array_validator.cpp
+  ../../shared/data_gen_device.cpp
+)
+set_source_files_properties(../../shared/data_gen_device.cpp
+  PROPERTIES LANGUAGE HIP
+)
+
+set( hipfft_bench_includes
+  bench.h
+  ../../shared/array_validator.h
+)
 
 add_executable( hipfft-bench ${hipfft_bench_source} ${hipfft_bench_includes} )
 
 target_compile_options( hipfft-bench PRIVATE ${WARNING_FLAGS} )
 
-set_target_properties( hipfft-bench PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON )
+set_target_properties( hipfft-bench PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
 
-target_include_directories( hipfft-bench
-  PRIVATE
-  $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocFFT/library/include>
+if( TARGET hipfft )
+  target_include_directories( hipfft-bench
+    PRIVATE
+    $<BUILD_INTERFACE:${HP_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocFFT/library/include>
   )
-  
-if((NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$") OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+else()
+  target_include_directories( hipfft-bench
+    PRIVATE
+    $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
+    ${CUDAToolkit_INCLUDE_DIRS}
+    ${HIP_ROOT_DIR}
+  )
+endif()
+
+if((NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$")
+    OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
     if( WIN32 )
       find_package( HIP CONFIG REQUIRED )
     else()
       find_package( HIP REQUIRED )
     endif()
-
-    target_link_libraries( hipfft-bench PRIVATE hip::host hip::device )
+    target_link_libraries( hipfft-bench PRIVATE hip::host hip::device hip:hipfft  )
   else()
     target_compile_definitions( hipfft-bench PRIVATE __HIP_PLATFORM_NVIDIA__)
-    target_include_directories( hipfft-bench PRIVATE ${HIP_INCLUDE_DIRS})
+    target_include_directories( hipfft-bench PRIVATE
+      PRIVATE
+      $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
+      ${CUDAToolkit_INCLUDE_DIRS}
+      ${HIP_ROOT_DIR}
+    )
   endif()
 endif()
 
@@ -60,8 +97,6 @@ if ( BUILD_WITH_LIB STREQUAL "CUDA" )
   if( CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+$" )
     target_compile_options( hipfft-bench PRIVATE -cuda -Xptxas=-w)
     target_link_options( hipfft-bench PRIVATE -cuda)
-  else()
-    target_compile_options( hipfft-bench PRIVATE -arch sm_100 -gencode=arch=compute_100,code=sm_100 -Xptxas=-w)
   endif()
   target_link_libraries( hipfft-bench PRIVATE ${CUDA_LIBRARIES} )
 else()
@@ -86,7 +121,9 @@ endif()
 target_link_libraries( hipfft-bench PRIVATE hip::hipfft )
 
 set_target_properties( hipfft-bench PROPERTIES CXX_EXTENSIONS NO )
-set_target_properties( hipfft-bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging" )
+set_target_properties( hipfft-bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+  "${PROJECT_BINARY_DIR}/staging"
+)
 
 if( HIPFFT_BUILD_SCOPE )
   set( BENCH_OUT_DIR "/../staging" )
@@ -101,5 +138,3 @@ set_target_properties( hipfft-bench
   PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY
   ${BENCH_OUT_DIR} )
-
-rocm_install(TARGETS hipfft-bench COMPONENT benchmarks)
