@@ -23,8 +23,7 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/LibraryUpdateReporter.cpp"
 )
 
-# Profiler sources only target tensilelite-client (cpu-gemm-driver does not
-# expose ROCprofiler counters).
+# Profiler sources only target tensilelite-client.
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
     target_sources(tensilelite-client
         PRIVATE
