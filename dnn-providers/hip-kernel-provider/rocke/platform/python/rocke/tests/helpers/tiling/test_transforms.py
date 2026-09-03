@@ -20,8 +20,10 @@ from rocke.helpers.tiling.register_mapper import RegisterMapper
 from rocke.helpers.tiling.traits import load_mma_traits
 from rocke.helpers.tiling.transforms import (
     classify_transform,
+    describe_edge,
     interleave_idx,
     k_distribution,
+    reorder_between,
     validate_operands,
 )
 
@@ -94,6 +96,50 @@ def test_classify_different_elements_rejected() -> None:
         classify_transform(a, a_bigger)
 
 
+# --- describe_edge: the five edge kinds (labels invariant except an EXPLICIT relabel) --------------
+def test_describe_edge_identity() -> None:
+    a = a_warp_encoding(_traits())
+    kind, why = describe_edge(a, a)
+    assert kind == "identity" and why
+
+
+def test_describe_edge_reorder_and_cross_lane() -> None:
+    # a lane-uniform register permutation is a reorder (has a cost -> new register file)
+    a = a_warp_encoding(_traits(), k_iter=2)
+    kind, _ = describe_edge(a, _swap_register_axes(a, 0, 2))
+    assert kind == "reorder"
+
+
+def test_describe_edge_reposition_is_free_and_label_invariant() -> None:
+    # register -> LDS: label INVARIANT, the datum's PHYSICAL storage placement changes -- never a LABEL
+    # transpose (the memref axis order is positional). tgt_dims must NOT manufacture a "(M,K)->(K,M)" why.
+    a = a_warp_encoding(_traits())
+    kind, why = describe_edge(a, None, src_dims=("M", "K"), tgt_dims=("K", "M"), to_space="lds")
+    assert kind == "reposition"
+    assert "invariant" in why and "lds" in why
+    assert "transpose" not in why and "->" not in why      # storage != label; no label-dims transpose
+
+
+def test_describe_edge_explicit_relabel_changes_label() -> None:
+    # Relabel = the ONE sanctioned label change: a FINISHED tile reused as a downstream input (axis
+    # permutation + rename). NOT AB-swap (that is machine-input routing, labels invariant). EXPLICIT.
+    m = {(0, 0): (0, 0), (0, 1): (1, 0), (1, 0): (0, 1), (1, 1): (1, 1)}
+    kind, why = describe_edge(m, m, src_dims=("M", "K"), tgt_dims=("N", "K"), relabel=True)
+    assert kind == "relabel" and "CHANGES" in why
+    # a transpose relabel (axes swapped) is also a relabel, and names the swap
+    mt = {k: (c[1], c[0]) for k, c in m.items()}
+    kind2, why2 = describe_edge(m, mt, src_dims=("M", "K"), tgt_dims=("K", "M"), relabel=True)
+    assert kind2 == "relabel" and "swapped" in why2
+
+
+def test_describe_edge_declared_relabel_must_be_consistent() -> None:
+    # a "relabel" that is not a consistent axis permutation of the source is rejected, not silently applied
+    s = {(0, 0): (0, 0), (0, 1): (1, 0)}
+    t = {(0, 0): (7, 7), (0, 1): (9, 9)}
+    with pytest.raises(ValueError, match="consistent axis permutation"):
+        describe_edge(s, t, relabel=True)
+
+
 def test_validate_operands_accepts_canonical() -> None:
     tr = _traits()
     a, b = a_warp_encoding(tr), b_warp_encoding(tr)
@@ -160,3 +206,51 @@ def test_b_desc_interleaved_is_broken() -> None:
                   tiling=Tiling(atom_shape=(16, 16, 16)))
     with pytest.raises(RuntimeError, match="BROKEN"):
         mma.b_desc(interleaved=True)
+
+
+# --- reorder_between: derive the in-register reorder that bridges coalesced -> requested order ---
+# All SYNTHETIC (no CRC): the interleave params are OUTPUTS of the classifier, proving genericity.
+
+def _perm_maps(perm, nlanes=2):
+    """A source frame + its within-lane register reorder by ``perm`` (same per-lane data, reordered)."""
+    src = {(l, r): (r, l) for l in range(nlanes) for r in range(len(perm))}
+    tgt = {(l, p): src[(l, perm[p])] for l in range(nlanes) for p in range(len(perm))}
+    return src, tgt
+
+
+def test_reorder_between_identity_is_none() -> None:
+    src, _ = _perm_maps((0, 1, 2, 3))
+    assert reorder_between(src, src, pack=2) is None          # no reorder -> no panel
+
+
+def test_reorder_between_dword_vs_subdword_from_pack() -> None:
+    # SAME permutation, different dtype pack: pack=1 (f32) is a dword renumber; pack=2 (f16) splits a
+    # dword -> a real v_perm repack. The tier is DERIVED from pack, not hardcoded per kernel.
+    src, tgt = _perm_maps(interleave_idx(1, 2, 4))            # (0,2,1,3)
+    dword = reorder_between(src, tgt, pack=1)
+    assert dword is not None and dword.tier == "reorder (dword)" and dword.vperm_per_lane == 0
+    assert "interleave_idx(1, 2, 4)" in dword.label
+    sub = reorder_between(src, tgt, pack=2)
+    assert sub.tier == "reorder (sub-dword, 2x)" and sub.vperm_per_lane > 0
+    # genericity: a DIFFERENT permutation yields a DIFFERENT derived label (nothing hardcoded)
+    s2, t2 = _perm_maps(interleave_idx(1, 4, 8))
+    other = reorder_between(s2, t2, pack=1).label
+    assert "interleave_idx(" in other and other != dword.label
+
+
+def test_reorder_between_cross_lane_when_not_lane_uniform() -> None:
+    # Same per-lane SET on both lanes (guard passes) but lane 0 is identity while lane 1 is swapped ->
+    # not lane-uniform -> cross_lane (its own arrow, NOT the two-panel within-lane model).
+    src = {(0, 0): (0, 0), (0, 1): (1, 0), (1, 0): (0, 1), (1, 1): (1, 1)}
+    tgt = {(0, 0): (0, 0), (0, 1): (1, 0), (1, 0): (1, 1), (1, 1): (0, 1)}
+    rp = reorder_between(src, tgt, pack=1)
+    assert rp is not None and rp.tier == "cross_lane" and rp.permutation is None
+
+
+def test_reorder_between_raises_on_different_per_lane_data() -> None:
+    # An element that changes lane means the two frames are the WRONG pair -> loud fail, never silently
+    # reinterpreted as within-lane.
+    src = {(0, 0): (0, 0), (1, 0): (1, 0)}
+    tgt = {(0, 0): (1, 0), (1, 0): (0, 0)}
+    with pytest.raises(ValueError, match="same per-lane data"):
+        reorder_between(src, tgt, pack=1)
