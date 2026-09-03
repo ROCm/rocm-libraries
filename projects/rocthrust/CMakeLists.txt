@@ -104,6 +104,7 @@ list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm ${ROCM_PATH} )
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
   ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip # FindHIP.cmake
   ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
@@ -117,18 +118,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT CODE_COVERAGE)
 endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
-
-# rocm-cmake contains common cmake code for rocm projects to help
-# setup and install
-include( cmake/FindROCMCmake.cmake )
-include( ROCMSetupVersion )
-include( ROCMCreatePackage )
-include( ROCMInstallTargets )
-include( ROCMPackageConfigHelpers )
-include( ROCMInstallSymlinks )
-include( ROCMHeaderWrapper )
-include( ROCMCheckTargetIds )
-include( ROCMClients )
 
 if(USE_HIPCXX)
   enable_language(HIP)
@@ -155,26 +144,6 @@ else()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
   endif()
 endif()
-
-# Set up options for obtaining dependencies rocPRIM and rocRAND.
-# PACKAGE: Search for an install package that contains the dependency.
-# MONOREPO: Assume this is a monorepo checkout and search for the dependency in the directory at ../../projects/.
-# DOWNLOAD: Download the dependency from the monorepo.
-set(FETCH_METHOD_OPTIONS "PACKAGE" "MONOREPO" "DOWNLOAD")
-
-set(ROCPRIM_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocPRIM dependency")
-set(ROCRAND_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocRAND dependency")
-
-# This function checks to see if the option variable it's passed is defined, and contains a valid value.
-# If it does not contain a valid value, it issues a fatal failure with an error message.
-function(check_option valid_options sel_option)
-  if (DEFINED ${sel_option} AND NOT ${${sel_option}} IN_LIST ${valid_options})
-    message(FATAL_ERROR "Unrecognized ${sel_option}: \"${${sel_option}}\". Valid options are: ${${valid_options}}.")
-  endif()
-endfunction()
-
-check_option(FETCH_METHOD_OPTIONS ROCPRIM_FETCH_METHOD)
-check_option(FETCH_METHOD_OPTIONS ROCRAND_FETCH_METHOD)
 
 # Get dependencies
 include(cmake/Dependencies.cmake)

@@ -45,10 +45,9 @@ if(NOT CMAKE_CXX_STANDARD EQUAL 17)
   message(FATAL_ERROR "Only C++17 is supported")
 endif()
 
+set(ROCPRIM_PROJECT_IS_TOP_LEVEL FALSE)
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   set(ROCPRIM_PROJECT_IS_TOP_LEVEL TRUE)
-else()
-  set(ROCPRIM_PROJECT_IS_TOP_LEVEL FALSE)
 endif()
 
 #Adding CMAKE_PREFIX_PATH
@@ -112,6 +111,7 @@ endif()
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
   ${ROCM_PATH}/lib/cmake/hip ${HIP_PATH}/cmake ${ROCM_ROOT}/lib/cmake/hip ${ROCM_ROOT}/hip/cmake # FindHIP.cmake
 )
