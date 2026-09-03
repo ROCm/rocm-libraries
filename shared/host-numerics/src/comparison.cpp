@@ -43,7 +43,7 @@ ComparisonOptions allCloseComparisonOptions(double absoluteTolerance, double rel
     options.absoluteTolerance = absoluteTolerance;
     options.relativeTolerance = relativeTolerance;
     options.equalNaNs = equalNaNs;
-    options.complexPointwiseMode = ComplexPointwiseMode::Magnitude;
+    options.complexComparisonMode = ComplexComparisonMode::Magnitude;
     return options;
 }
 
@@ -198,7 +198,7 @@ class ComparisonAccumulator {
    public:
     ComparisonAccumulator(const ComparisonOptions& options, const Shape& shape)
         : m_options(options), m_shape(&shape) {
-        m_result.pointwiseEvaluated = m_options.pointwise;
+        m_result.allCloseEvaluated = m_options.allClose;
         m_result.frobeniusEvaluated = m_options.relativeFrobeniusTolerance.has_value();
         m_result.ulpEvaluated = m_options.maximumUlpTolerance.has_value();
         m_result.reportedMismatches.reserve(m_options.maxReportedMismatches);
@@ -208,22 +208,22 @@ class ComparisonAccumulator {
 
     void observeReal(size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset,
                      double observed, double expected,
-                     std::optional<bool> pointwiseDecision = std::nullopt,
+                     std::optional<bool> allCloseDecision = std::nullopt,
                      const ExactRealEvidence* exactEvidence = nullptr) {
         ++m_result.compared;
         m_sawNonFinite = m_sawNonFinite || !std::isfinite(observed) || !std::isfinite(expected);
-        if ((!pointwiseDecision || *pointwiseDecision) && observed == expected &&
+        if ((!allCloseDecision || *allCloseDecision) && observed == expected &&
             (m_options.equalSignedZero || !oppositeZeroSigns(observed, expected)) &&
             !m_options.computeFrobenius && !m_options.computeUlp &&
             !m_options.reportMatchingElements) {
-            if (m_options.computePointwiseStatistics)
+            if (m_options.computeElementwiseStatistics)
                 m_result.matchedInfinities += static_cast<size_t>(std::isinf(observed));
             return;
         }
 
         --m_result.compared;
         observe(logicalIndex, observedOffset, expectedOffset, ComparisonValue{observed, 0.0, false},
-                ComparisonValue{expected, 0.0, false}, pointwiseDecision, exactEvidence);
+                ComparisonValue{expected, 0.0, false}, allCloseDecision, exactEvidence);
     }
 
     template <typename Observed, typename Expected>
@@ -259,13 +259,13 @@ class ComparisonAccumulator {
         };
         observeReal(logicalIndex, observedOffset, expectedOffset, static_cast<double>(observed),
                     static_cast<double>(expected),
-                    m_options.pointwise ? std::optional<bool>(component.close) : std::nullopt,
+                    m_options.allClose ? std::optional<bool>(component.close) : std::nullopt,
                     &exactEvidence);
     }
 
     void observe(size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset,
                  const ComparisonValue& observed, const ComparisonValue& expected,
-                 std::optional<bool> pointwiseDecision = std::nullopt,
+                 std::optional<bool> allCloseDecision = std::nullopt,
                  const ExactRealEvidence* exactEvidence = nullptr) {
         ++m_result.compared;
         m_sawNonFinite = m_sawNonFinite || !std::isfinite(observed.real) ||
@@ -280,12 +280,12 @@ class ComparisonAccumulator {
             m_options.equalSignedZero ||
             (!oppositeZeroSigns(observed.real, expected.real) &&
              (!complexValue || !oppositeZeroSigns(observed.imaginary, expected.imaginary)));
-        if ((!pointwiseDecision || *pointwiseDecision) && exactReal && exactImaginary &&
+        if ((!allCloseDecision || *allCloseDecision) && exactReal && exactImaginary &&
             signedZeroMatches && !m_options.computeFrobenius && !m_options.computeUlp &&
             !m_options.reportMatchingElements) {
-            if (m_options.computePointwiseStatistics) {
+            if (m_options.computeElementwiseStatistics) {
                 if (complexValue &&
-                    m_options.complexPointwiseMode == ComplexPointwiseMode::Magnitude) {
+                    m_options.complexComparisonMode == ComplexComparisonMode::Magnitude) {
                     m_result.matchedInfinities += static_cast<size_t>(
                         std::isinf(observed.real) || std::isinf(observed.imaginary));
                 } else {
@@ -305,18 +305,18 @@ class ComparisonAccumulator {
             complexValue ? compareComponent(observed.imaginary, expected.imaginary, m_options)
                          : ComponentResult{.close = true};
         const bool magnitudeMode =
-            complexValue && m_options.complexPointwiseMode == ComplexPointwiseMode::Magnitude;
+            complexValue && m_options.complexComparisonMode == ComplexComparisonMode::Magnitude;
         const ComponentResult magnitude =
             magnitudeMode ? compareComplexMagnitude(observed, expected, m_options)
                           : ComponentResult{.close = true};
 
-        const bool close = pointwiseDecision.value_or(
-            magnitudeMode ? magnitude.close : real.close && imaginary.close);
+        const bool close = allCloseDecision.value_or(magnitudeMode ? magnitude.close
+                                                                   : real.close && imaginary.close);
         const bool nonFiniteMismatch = magnitudeMode
                                            ? magnitude.nonFiniteMismatch
                                            : real.nonFiniteMismatch || imaginary.nonFiniteMismatch;
 
-        if (m_options.computePointwiseStatistics) {
+        if (m_options.computeElementwiseStatistics) {
             if (magnitudeMode) {
                 m_result.matchedNaNs += static_cast<size_t>(magnitude.matchedNaN);
                 m_result.matchedInfinities += static_cast<size_t>(magnitude.matchedInfinity);
@@ -338,10 +338,10 @@ class ComparisonAccumulator {
                                                 : real.difference);
         if (nonFiniteMismatch) difference = std::numeric_limits<double>::infinity();
 
-        if (m_options.computePointwiseStatistics || m_options.computeFrobenius)
+        if (m_options.computeElementwiseStatistics || m_options.computeFrobenius)
             m_result.maxAbsoluteDifference = std::max(m_result.maxAbsoluteDifference, difference);
 
-        if (m_options.computePointwiseStatistics) {
+        if (m_options.computeElementwiseStatistics) {
             if (magnitudeMode) {
                 m_result.maxRelativeDifference =
                     std::max(m_result.maxRelativeDifference, magnitude.relativeDifference);
@@ -406,7 +406,7 @@ class ComparisonAccumulator {
             m_options.reportMatchingElements &&
             m_result.reportedComparisons.size() < m_options.maxReportedMismatches;
         const bool reportMismatch =
-            m_options.pointwise && !close &&
+            m_options.allClose && !close &&
             m_result.reportedMismatches.size() < m_options.maxReportedMismatches;
         if (reportComparison || reportMismatch) {
             std::vector<size_t> coordinates(m_shape->rank(), 0);
@@ -429,11 +429,11 @@ class ComparisonAccumulator {
             if (reportMismatch) m_result.reportedMismatches.push_back(sample);
         }
 
-        if (m_options.pointwise && !close) ++m_result.mismatches;
+        if (m_options.allClose && !close) ++m_result.mismatches;
     }
 
     ComparisonReport finish() {
-        m_result.pointwisePassed = !m_options.pointwise || m_result.mismatches == 0;
+        m_result.allClosePassed = !m_options.allClose || m_result.mismatches == 0;
         if (m_options.computeFrobenius) {
             m_result.frobeniusDifference = std::sqrt(static_cast<double>(m_differenceSquares));
             m_result.frobeniusObserved = std::sqrt(static_cast<double>(m_observedSquares));
@@ -685,20 +685,19 @@ auto loadFastComparisonReal(std::span<const std::byte> storage, ptrdiff_t logica
 }
 
 template <typename Tag>
-bool knownPointwiseDecision(const Tensor& observed, ptrdiff_t observedOffset,
-                            const Tensor& expected, ptrdiff_t expectedOffset,
-                            const ComparisonOptions& options) {
+bool knownAllCloseDecision(const Tensor& observed, ptrdiff_t observedOffset, const Tensor& expected,
+                           ptrdiff_t expectedOffset, const ComparisonOptions& options) {
     if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
         const ComparisonValue observedValue =
             loadComparisonValueKnown<Tag>(observed.rawEncodedBackingStorage(), observedOffset);
         const ComparisonValue expectedValue =
             loadComparisonValueKnown<Tag>(expected.rawEncodedBackingStorage(), expectedOffset);
-        if (options.complexPointwiseMode == ComplexPointwiseMode::Magnitude)
+        if (options.complexComparisonMode == ComplexComparisonMode::Magnitude)
             return compareComplexMagnitude(observedValue, expectedValue, options).close;
-        return pointwiseValuesClose(observedValue.real, expectedValue.real, options) &&
-               pointwiseValuesClose(observedValue.imaginary, expectedValue.imaginary, options);
+        return valuesClose(observedValue.real, expectedValue.real, options) &&
+               valuesClose(observedValue.imaginary, expectedValue.imaginary, options);
     } else {
-        return pointwiseValuesClose(
+        return valuesClose(
             loadFastComparisonReal<Tag>(observed.rawEncodedBackingStorage(), observedOffset),
             loadFastComparisonReal<Tag>(expected.rawEncodedBackingStorage(), expectedOffset),
             options);
@@ -749,11 +748,11 @@ inline void validateSentinelRange(ScalarType type, std::span<const std::byte> st
 }
 
 template <typename Tag>
-ComparisonReport comparePointwiseOnlyKnown(const Tensor& observed, const Tensor& expected,
-                                           const ComparisonOptions& options) {
+ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& expected,
+                                          const ComparisonOptions& options) {
     const auto run = [&]<typename Predicate>(Predicate predicate) {
         ComparisonReport result;
-        result.pointwiseEvaluated = true;
+        result.allCloseEvaluated = true;
         if ((options.selection.selectsAll() ||
              (options.selection.first() == 0 && options.selection.stride() == 1)) &&
             options.selection.indexOrder() == IndexOrder::FirstDimensionFastest &&
@@ -796,7 +795,7 @@ ComparisonReport comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
                             observed.rawEncodedBackingStorage(), observedOffset);
                         const ComparisonValue expectedValue = loadComparisonValueKnown<Tag>(
                             expected.rawEncodedBackingStorage(), expectedOffset);
-                        if (options.complexPointwiseMode == ComplexPointwiseMode::Magnitude) {
+                        if (options.complexComparisonMode == ComplexComparisonMode::Magnitude) {
                             close = compareComplexMagnitude(observedValue, expectedValue, options)
                                         .close;
                         } else {
@@ -814,7 +813,7 @@ ComparisonReport comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
                 }
             }
             result.compared = selectedTotal;
-            result.pointwisePassed = result.mismatches == 0;
+            result.allClosePassed = result.mismatches == 0;
             return result;
         }
 
@@ -828,7 +827,7 @@ ComparisonReport comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
                         observed.rawEncodedBackingStorage(), observedOffset);
                     const ComparisonValue expectedValue = loadComparisonValueKnown<Tag>(
                         expected.rawEncodedBackingStorage(), expectedOffset);
-                    if (options.complexPointwiseMode == ComplexPointwiseMode::Magnitude) {
+                    if (options.complexComparisonMode == ComplexComparisonMode::Magnitude) {
                         close =
                             compareComplexMagnitude(observedValue, expectedValue, options).close;
                     } else {
@@ -844,7 +843,7 @@ ComparisonReport comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
                 }
                 result.mismatches += static_cast<size_t>(!close);
             });
-        result.pointwisePassed = result.mismatches == 0;
+        result.allClosePassed = result.mismatches == 0;
         return result;
     };
 
@@ -892,16 +891,16 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
     if (observed.shape() != expected.shape())
         throw std::invalid_argument("Host numerics tensor comparison shape mismatch.");
 
-    if (observed.type() == expected.type() && detail::pointwiseOnlyComparison(options)) {
+    if (observed.type() == expected.type() && detail::allCloseOnlyComparison(options)) {
         ComparisonReport result = visitScalarType(observed.type(), [&]<typename Tag>() {
-            return detail::comparePointwiseOnlyKnown<Tag>(observed, expected, options);
+            return detail::compareAllCloseOnlyKnown<Tag>(observed, expected, options);
         });
         const bool needsSamples = options.maxReportedMismatches != 0 &&
                                   (options.reportMatchingElements || result.mismatches != 0);
         if (!needsSamples) return result;
 
         ComparisonOptions detailed = options;
-        detailed.computePointwiseStatistics = true;
+        detailed.computeElementwiseStatistics = true;
         return compare(observed, expected, detailed);
     }
 
@@ -944,8 +943,8 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                 observed.layout(), expected.layout(), options.selection,
                 [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
                     std::optional<bool> decision;
-                    if (options.pointwise)
-                        decision.emplace(detail::knownPointwiseDecision<Tag>(
+                    if (options.allClose)
+                        decision.emplace(detail::knownAllCloseDecision<Tag>(
                             observed, observedOffset, expected, expectedOffset, options));
                     if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
                         accumulator.observe(

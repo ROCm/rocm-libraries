@@ -22,7 +22,7 @@ enum class UlpComparisonMode {
     EncodedDistance,
 };
 
-enum class ComplexPointwiseMode {
+enum class ComplexComparisonMode {
     /// Compare real and imaginary components independently. Both component comparisons must pass.
     Componentwise,
 
@@ -39,9 +39,9 @@ enum class ComplexPointwiseMode {
 ///   tolerance = absoluteTolerance + relativeTolerance * |expected|
 ///               + symmetricRelativeTolerance * (|observed| + |expected| + 1)
 ///
-/// The pointwise component passes when the values are exactly equal or `difference <= tolerance`.
-/// `strictTolerance` changes the pointwise and relative-Frobenius tolerance tests to strict
-/// inequality; exact pointwise equality still passes. Opposite signed zeros fail when
+/// The elementwise component passes when the values are exactly equal or `difference <= tolerance`.
+/// `strictTolerance` changes the elementwise and relative-Frobenius tolerance tests to strict
+/// inequality; exact elementwise equality still passes. Opposite signed zeros fail when
 /// `equalSignedZero` is false. NaNs pass only when both values are NaN and `equalNaNs` is true.
 /// Infinities pass only when they are equal.
 ///
@@ -49,7 +49,7 @@ enum class ComplexPointwiseMode {
 /// asymmetric real-valued isclose rule: expected is the reference value. The symmetric term and
 /// strict inequality are legacy host-numerics behavior, not NumPy behavior.
 ///
-/// In `ComplexPointwiseMode::Magnitude`, the finite-value rule instead uses
+/// In `ComplexComparisonMode::Magnitude`, the finite-value rule instead uses
 ///
 ///   difference = |observed - expected|
 ///   tolerance = absoluteTolerance + relativeTolerance * |expected|
@@ -64,16 +64,16 @@ enum class ComplexPointwiseMode {
 ///
 /// Pass/fail criteria are:
 ///
-/// - `pointwise`: every selected logical element must pass the component rule above.
+/// - `allClose`: every selected logical element must pass the component rule above.
 /// - `relativeFrobeniusTolerance`: `||observed - expected||F / ||expected||F` must satisfy the
 ///   configured inclusive or strict tolerance. By default, a zero expected norm produces 0 for a
 ///   zero difference and infinity otherwise. This criterion requires `computeFrobenius`.
 /// - `maximumUlpTolerance`: the maximum component ULP distance must be less than or equal to the
 ///   configured tolerance. This criterion requires `computeUlp` and a concrete `ulpType`.
 struct ComparisonOptions {
-    // Criteria. `pointwise` directly enables the pointwise criterion. The Frobenius and ULP
+    // Criteria. `allClose` directly enables the elementwise criterion. The Frobenius and ULP
     // criteria are enabled by their optional tolerance fields below.
-    bool pointwise = true;
+    bool allClose = true;
     double absoluteTolerance = 0.0;
     double relativeTolerance = 0.0;
     double symmetricRelativeTolerance = 0.0;
@@ -84,11 +84,11 @@ struct ComparisonOptions {
     bool zeroExpectedNormIsNaN = false;
     /// Make relative norm evidence NaN when either tensor contains any non-finite value.
     bool nonFiniteValuesInvalidateRelativeNorms = false;
-    ComplexPointwiseMode complexPointwiseMode = ComplexPointwiseMode::Componentwise;
+    ComplexComparisonMode complexComparisonMode = ComplexComparisonMode::Componentwise;
 
     // Evidence. These fields do not affect pass/fail by themselves.
-    /// Collect non-finite/signed-zero counters and maximum pointwise differences.
-    bool computePointwiseStatistics = true;
+    /// Collect non-finite/signed-zero counters and maximum elementwise differences.
+    bool computeElementwiseStatistics = true;
     /// Collect observed, expected, and difference Frobenius norms and maximum magnitudes.
     bool computeFrobenius = true;
     /// Collect maximum, sum, average, and component count in the configured ULP representation.
@@ -137,20 +137,20 @@ struct Mismatch {
 
 /// Comparison outcome, collected evidence, and bounded reports.
 ///
-/// `pointwiseEvaluated`, `frobeniusEvaluated`, and `ulpEvaluated` state whether the corresponding
+/// `allCloseEvaluated`, `frobeniusEvaluated`, and `ulpEvaluated` state whether the corresponding
 /// criterion contributed to `passed()`. An unevaluated criterion retains a `...Passed` value of
 /// true for source compatibility. Evidence can be present while its criterion is unevaluated.
 struct ComparisonReport {
     /// Number of selected logical tensor elements. A complex element counts once.
     size_t compared = 0;
 
-    /// Number of logical elements that failed the pointwise criterion; zero if it was disabled.
+    /// Number of logical elements that failed the elementwise criterion; zero if it was disabled.
     size_t mismatches = 0;
 
-    // Pointwise evidence. matchedNaNs and matchedInfinities count real components in componentwise
-    // mode and logical values in magnitude mode. nonFiniteMismatches and signedZeroMismatches
-    // always count logical values. For complex values, maxAbsoluteDifference uses the
-    // complex-difference magnitude. The relative maxima use the maximum component ratio in
+    // Elementwise evidence. matchedNaNs and matchedInfinities count real components in
+    // componentwise mode and logical values in magnitude mode. nonFiniteMismatches and
+    // signedZeroMismatches always count logical values. For complex values, maxAbsoluteDifference
+    // uses the complex-difference magnitude. The relative maxima use the maximum component ratio in
     // componentwise mode and the complex-magnitude ratio in magnitude mode. Relative evidence uses
     // expected as the reference; symmetric-relative evidence divides by
     // |observed| + |expected| + 1 using the corresponding component or complex magnitudes.
@@ -181,10 +181,10 @@ struct ComparisonReport {
     double averageUlp = 0.0;
     size_t ulpCompared = 0;
 
-    bool pointwiseEvaluated = false;
+    bool allCloseEvaluated = false;
     bool frobeniusEvaluated = false;
     bool ulpEvaluated = false;
-    bool pointwisePassed = true;
+    bool allClosePassed = true;
     bool frobeniusPassed = true;
     bool ulpPassed = true;
     std::vector<Mismatch> reportedMismatches;
@@ -193,7 +193,7 @@ struct ComparisonReport {
     /// Conjunction of the three `...Passed` fields. `compare` leaves an unevaluated criterion true,
     /// so this is the conjunction of enabled criteria and is true when none were enabled.
     bool passed() const {
-        return pointwisePassed && frobeniusPassed && ulpPassed;
+        return allClosePassed && frobeniusPassed && ulpPassed;
     }
 };
 
@@ -267,11 +267,11 @@ inline constexpr double defaultSymmetricRelativeTolerance(ScalarType type) {
 }
 
 /// Legacy host-numerics policy: type-specific symmetric-relative tolerance, strict inequality
-/// when that tolerance is nonzero, unequal NaNs, pointwise statistics, and Frobenius evidence.
+/// when that tolerance is nonzero, unequal NaNs, elementwise statistics, and Frobenius evidence.
 ComparisonOptions defaultComparisonOptions(
     ScalarType type, std::optional<double> symmetricRelativeTolerance = std::nullopt);
 
-/// Absolute-only pointwise comparison with equal NaNs. This is not NumPy's default policy.
+/// Absolute-only elementwise comparison with equal NaNs. This is not NumPy's default policy.
 ComparisonOptions nearComparisonOptions(double absoluteTolerance);
 
 /// NumPy-formula finite-value allclose options. Arguments remain absolute-then-relative for API

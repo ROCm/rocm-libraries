@@ -1644,7 +1644,7 @@ void testComparisonProgram() {
     const std::array<float, 0> emptyStorage{};
     const Layout emptyLayout(Shape{0, 3}, {1, 1});
     ComparisonOptions emptyOptions;
-    emptyOptions.computePointwiseStatistics = false;
+    emptyOptions.computeElementwiseStatistics = false;
     emptyOptions.computeFrobenius = false;
     emptyOptions.maxReportedMismatches = 0;
     emptyOptions.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
@@ -1654,8 +1654,8 @@ void testComparisonProgram() {
                        options);
     };
     const ComparisonReport emptyResult = compareEmpty(emptyOptions);
-    require(emptyResult.compared == 0 && emptyResult.pointwiseEvaluated &&
-                emptyResult.pointwisePassed && !emptyResult.frobeniusEvaluated &&
+    require(emptyResult.compared == 0 && emptyResult.allCloseEvaluated &&
+                emptyResult.allClosePassed && !emptyResult.frobeniusEvaluated &&
                 !emptyResult.ulpEvaluated,
             "Runtime fast comparison rejected an empty tensor.");
 
@@ -1698,13 +1698,13 @@ void testComparisonProgram() {
     const std::array<double, 1> evidenceObserved{2.0};
     const std::array<double, 1> evidenceExpected{1.0};
     ComparisonOptions evidenceOnly;
-    evidenceOnly.pointwise = false;
+    evidenceOnly.allClose = false;
     evidenceOnly.computeUlp = true;
     evidenceOnly.ulpType = ScalarType::Float64;
     const ComparisonReport evidenceResult =
         compare(Tensor::copyNativeStorage(std::span<const double>(evidenceObserved)),
                 Tensor::copyNativeStorage(std::span<const double>(evidenceExpected)), evidenceOnly);
-    require(!evidenceResult.pointwiseEvaluated && !evidenceResult.frobeniusEvaluated &&
+    require(!evidenceResult.allCloseEvaluated && !evidenceResult.frobeniusEvaluated &&
                 !evidenceResult.ulpEvaluated && evidenceResult.passed() &&
                 evidenceResult.frobeniusDifference == 1.0 && evidenceResult.ulpCompared == 1,
             "Evidence-only comparison reported an evaluated criterion.");
@@ -1712,8 +1712,8 @@ void testComparisonProgram() {
     const std::array<double, 3> reversedStorage{1.0, 2.0, 3.0};
     const Layout reversedLayout(Shape{3}, {-1}, 2);
     ComparisonOptions reversedMetrics;
-    reversedMetrics.pointwise = false;
-    reversedMetrics.computePointwiseStatistics = false;
+    reversedMetrics.allClose = false;
+    reversedMetrics.computeElementwiseStatistics = false;
     reversedMetrics.computeFrobenius = true;
     reversedMetrics.maxReportedMismatches = 0;
     const auto reversedRuntimeResult =
@@ -1751,8 +1751,8 @@ void testComparisonProgram() {
             explicitSelectedResult.reportedMismatches[0].coordinates == std::vector<size_t>({0, 2}),
         "Explicit comparison selection visited the wrong logical element.");
     ComparisonOptions paddedMetrics;
-    paddedMetrics.pointwise = false;
-    paddedMetrics.computePointwiseStatistics = false;
+    paddedMetrics.allClose = false;
+    paddedMetrics.computeElementwiseStatistics = false;
     paddedMetrics.computeFrobenius = true;
     paddedMetrics.maxReportedMismatches = 0;
     paddedMetrics.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
@@ -1765,7 +1765,7 @@ void testComparisonProgram() {
     const std::array<uint64_t, 1> wideIntegerObserved{uint64_t{1} << 53};
     const std::array<uint64_t, 1> wideIntegerExpected{(uint64_t{1} << 53) + 1};
     ComparisonOptions fastIntegerOptions;
-    fastIntegerOptions.computePointwiseStatistics = false;
+    fastIntegerOptions.computeElementwiseStatistics = false;
     fastIntegerOptions.computeFrobenius = false;
     fastIntegerOptions.maxReportedMismatches = 0;
     const auto fastIntegerComparison =
@@ -1783,7 +1783,7 @@ void testComparisonProgram() {
     require(!reportedIntegerComparison.passed() && reportedIntegerComparison.mismatches == 1 &&
                 reportedIntegerComparison.reportedMismatches.size() == 1 &&
                 !reportedIntegerComparison.reportedMismatches[0].matched,
-            "Detailed comparison changed the wide-integer pointwise decision.");
+            "Detailed comparison changed the wide-integer elementwise decision.");
 
     const auto runtimeIntegerComparison =
         compare(Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerObserved)),
@@ -1793,7 +1793,7 @@ void testComparisonProgram() {
 
     ComparisonOptions subUnitIntegerTolerance;
     subUnitIntegerTolerance.absoluteTolerance = 0.5;
-    subUnitIntegerTolerance.computePointwiseStatistics = false;
+    subUnitIntegerTolerance.computeElementwiseStatistics = false;
     subUnitIntegerTolerance.computeFrobenius = false;
     subUnitIntegerTolerance.maxReportedMismatches = 0;
     require(!compare(Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerObserved)),
@@ -1895,7 +1895,7 @@ void testComparisonProgram() {
     const std::array<double, 3> expected{3.0, 4.0, 0.0};
     const std::array<double, 3> observed{0.0, 4.0, 3.0};
     ComparisonOptions metrics;
-    metrics.pointwise = false;
+    metrics.allClose = false;
     metrics.relativeFrobeniusTolerance = 0.9;
     metrics.computeUlp = true;
     metrics.ulpType = ScalarType::Float64;
@@ -1907,15 +1907,15 @@ void testComparisonProgram() {
                 std::abs(metricResult.frobeniusDifference - std::sqrt(18.0)) < 1e-12 &&
                 std::abs(metricResult.relativeFrobeniusError - std::sqrt(18.0) / 5.0) < 1e-12 &&
                 std::abs(metricResult.relativeMaximumError - 0.75) < 1e-12 &&
-                !metricResult.pointwiseEvaluated && metricResult.frobeniusEvaluated &&
+                !metricResult.allCloseEvaluated && metricResult.frobeniusEvaluated &&
                 !metricResult.ulpEvaluated && metricResult.frobeniusPassed,
             "Comparison Frobenius evidence is incorrect.");
 
     const std::array<double, 1> unitExpected{1.0};
     const std::array<double, 1> unitDifference{2.0};
     ComparisonOptions strictNorm;
-    strictNorm.pointwise = false;
-    strictNorm.computePointwiseStatistics = true;
+    strictNorm.allClose = false;
+    strictNorm.computeElementwiseStatistics = true;
     strictNorm.computeFrobenius = true;
     strictNorm.relativeFrobeniusTolerance = 1.0;
     strictNorm.strictTolerance = true;
@@ -1961,7 +1961,7 @@ void testComparisonProgram() {
         compare(Tensor::copyNativeStorage(std::span<const double>(ulpObserved)),
                 Tensor::copyNativeStorage(std::span<const double>(ulpExpected)), ulp);
     require(ulpResult.maximumUlp == 1.0 && ulpResult.averageUlp == 1.0 &&
-                ulpResult.pointwiseEvaluated && !ulpResult.frobeniusEvaluated &&
+                ulpResult.allCloseEvaluated && !ulpResult.frobeniusEvaluated &&
                 ulpResult.ulpEvaluated && ulpResult.ulpPassed,
             "Comparison ULP evidence is incorrect.");
     require(encodedUlpDistance(0.0, static_cast<double>(std::numeric_limits<float>::denorm_min()),
@@ -1987,21 +1987,21 @@ void testComparisonProgram() {
             "Complex non-finite comparison policy is incorrect.");
     const std::array<double, 1> doubleInfinity{std::numeric_limits<double>::infinity()};
     const std::array<float, 1> floatInfinity{std::numeric_limits<float>::infinity()};
-    ComparisonOptions noPointwiseStatistics;
-    noPointwiseStatistics.computePointwiseStatistics = false;
-    noPointwiseStatistics.computeFrobenius = false;
-    const ComparisonReport noPointwiseStatisticsResult = compare(
+    ComparisonOptions noElementwiseStatistics;
+    noElementwiseStatistics.computeElementwiseStatistics = false;
+    noElementwiseStatistics.computeFrobenius = false;
+    const ComparisonReport noElementwiseStatisticsResult = compare(
         Tensor::copyNativeStorage(std::span<const double>(doubleInfinity)),
-        Tensor::copyNativeStorage(std::span<const float>(floatInfinity)), noPointwiseStatistics);
-    require(
-        noPointwiseStatisticsResult.passed() && noPointwiseStatisticsResult.matchedInfinities == 0,
-        "Disabled pointwise statistics collected matched infinities.");
+        Tensor::copyNativeStorage(std::span<const float>(floatInfinity)), noElementwiseStatistics);
+    require(noElementwiseStatisticsResult.passed() &&
+                noElementwiseStatisticsResult.matchedInfinities == 0,
+            "Disabled elementwise statistics collected matched infinities.");
 
     const ComparisonOptions numpyDefaults = allCloseComparisonOptions();
     require(numpyDefaults.absoluteTolerance == 1e-8 && numpyDefaults.relativeTolerance == 1e-5 &&
                 numpyDefaults.symmetricRelativeTolerance == 0.0 && !numpyDefaults.strictTolerance &&
                 !numpyDefaults.equalNaNs &&
-                numpyDefaults.complexPointwiseMode == ComplexPointwiseMode::Magnitude,
+                numpyDefaults.complexComparisonMode == ComplexComparisonMode::Magnitude,
             "Allclose options do not expose NumPy's finite-value defaults.");
     const std::array<double, 1> lowerValue{8.0};
     const std::array<double, 1> referenceValue{10.0};
@@ -2034,7 +2034,7 @@ void testComparisonProgram() {
                      componentwiseComplex)
                  .passed(),
             "Complex allclose did not apply magnitude tolerance.");
-    componentwiseComplex.complexPointwiseMode = ComplexPointwiseMode::Componentwise;
+    componentwiseComplex.complexComparisonMode = ComplexComparisonMode::Componentwise;
     require(
         compare(
             Tensor::copyNativeStorage(std::span<const std::complex<double>>(componentwiseObserved)),
@@ -2043,17 +2043,17 @@ void testComparisonProgram() {
             .passed(),
         "Explicit componentwise complex comparison rejected passing components.");
 
-    ComparisonOptions magnitudePointwiseOnly = allCloseComparisonOptions(1.0, 0.0);
-    magnitudePointwiseOnly.computePointwiseStatistics = false;
-    magnitudePointwiseOnly.computeFrobenius = false;
-    magnitudePointwiseOnly.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
+    ComparisonOptions magnitudeAllCloseOnly = allCloseComparisonOptions(1.0, 0.0);
+    magnitudeAllCloseOnly.computeElementwiseStatistics = false;
+    magnitudeAllCloseOnly.computeFrobenius = false;
+    magnitudeAllCloseOnly.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
     require(!compare(Tensor::copyNativeStorage(
                          std::span<const std::complex<double>>(componentwiseObserved)),
                      Tensor::copyNativeStorage(
                          std::span<const std::complex<double>>(componentwiseExpected)),
-                     magnitudePointwiseOnly)
+                     magnitudeAllCloseOnly)
                  .passed(),
-            "The optimized pointwise-only path ignored complex magnitude mode.");
+            "The optimized all-close-only path ignored complex magnitude mode.");
 
     const std::array<std::complex<double>, 1> magnitudeBoundaryObserved{
         std::complex<double>(0.0, 0.0)};
@@ -2175,7 +2175,7 @@ void testComparisonProgram() {
             std::span<const double>(complexSearchRelativeCandidates)),
         "Allclose tolerance search defaulted complex values to componentwise comparison.");
     ComparisonOptions componentwiseSearch = allCloseComparisonOptions();
-    componentwiseSearch.complexPointwiseMode = ComplexPointwiseMode::Componentwise;
+    componentwiseSearch.complexComparisonMode = ComplexComparisonMode::Componentwise;
     require(
         findAllCloseTolerance(
             Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexSearchObserved)),

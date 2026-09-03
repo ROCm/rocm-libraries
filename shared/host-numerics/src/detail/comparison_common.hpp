@@ -30,8 +30,8 @@ inline void validateComparisonOptions(const ComparisonOptions& options) {
         throw std::invalid_argument("ULP scalar type must be a concrete scalar type.");
 }
 
-inline bool pointwiseOnlyComparison(const ComparisonOptions& options) {
-    return options.pointwise && !options.computePointwiseStatistics && !options.computeFrobenius &&
+inline bool allCloseOnlyComparison(const ComparisonOptions& options) {
+    return options.allClose && !options.computeElementwiseStatistics && !options.computeFrobenius &&
            !options.computeUlp && !options.relativeFrobeniusTolerance &&
            !options.maximumUlpTolerance;
 }
@@ -258,9 +258,10 @@ inline ComponentResult compareComplexMagnitude(const ComparisonValue& observed,
     return result;
 }
 
-inline bool pointwiseStatisticsOnlyComparison(const ComparisonOptions& options) {
-    return options.computePointwiseStatistics && !options.computeFrobenius && !options.computeUlp &&
-           !options.relativeFrobeniusTolerance && !options.maximumUlpTolerance;
+inline bool elementwiseStatisticsOnlyComparison(const ComparisonOptions& options) {
+    return options.computeElementwiseStatistics && !options.computeFrobenius &&
+           !options.computeUlp && !options.relativeFrobeniusTolerance &&
+           !options.maximumUlpTolerance;
 }
 
 inline void coordinatesForLinearIndex(size_t logicalIndex, const Shape& shape, IndexOrder order,
@@ -402,7 +403,7 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
 }
 
 template <typename Observed, typename Expected>
-bool pointwiseValuesClose(Observed observed, Expected expected, const ComparisonOptions& options) {
+bool valuesClose(Observed observed, Expected expected, const ComparisonOptions& options) {
     if (options.equalSignedZero && !options.equalNaNs && options.strictTolerance &&
         options.absoluteTolerance == 0.0 && options.relativeTolerance == 0.0) {
         if constexpr (std::is_integral_v<Observed> && std::is_integral_v<Expected>) {
