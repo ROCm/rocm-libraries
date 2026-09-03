@@ -18,6 +18,15 @@ namespace {
 // load-bearing. One definition in one TU, reached through an exported function,
 // keeps that sound.
 
+// This arch's per-form wait-hide counts. Rows may be added in any order.
+// Other arches omit .waitHide.
+constexpr HWModel::WaitHide::Form kGfx1250WaitHideForms[] = {
+    {.costLatency = 4, .dstVgprs = 8, .xdlVaVdst = 13, .csmaccVaVdst = 13},
+    {.costLatency = 8, .dstVgprs = 8, .xdlVaVdst = 12, .csmaccVaVdst = 12},
+    {.costLatency = 8, .dstVgprs = 16, .xdlVaVdst = 11, .csmaccVaVdst = 11},
+    {.costLatency = 16, .dstVgprs = 8, .xdlVaVdst = 12, .csmaccVaVdst = 12},
+};
+
 constexpr HWModel kGfx1250Model = {
     .lds =
         {
@@ -55,6 +64,12 @@ constexpr HWModel kGfx1250Model = {
         {
             .hasSplitLoadStoreCnt = true,
             .hasSplitStoreCntAsyncCnt = true,  // only async stores on this arch
+        },
+    .waitHide =
+        {
+            .forms = kGfx1250WaitHideForms,
+            .vmVsrcLds = 11,
+            .vmVsrcTex = 11,
         },
 };
 
