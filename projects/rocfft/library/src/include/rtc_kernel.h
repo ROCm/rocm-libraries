@@ -29,6 +29,7 @@
 #include <future>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,11 +43,46 @@ class TreeNode;
 class LeafNode;
 struct GridParam;
 
+// Width of the integer type used for index/offset arithmetic inside
+// generated kernels. Kernels declare such arguments as "index_type".
+enum class IndexType
+{
+    U32,
+    U64,
+};
+
 // Helper class that handles alignment of kernel arguments
 class RTCKernelArgs
 {
 public:
     RTCKernelArgs() = default;
+    explicit RTCKernelArgs(IndexType itype)
+        : itype(itype)
+    {
+    }
+    // append a value for an argument declared as "index_type"
+    void append_index(size_t value, const std::optional<IndexType>& forced_itype = std::nullopt)
+    {
+        const auto arg_type = forced_itype.has_value() ? forced_itype.value() : itype;
+
+        switch(arg_type)
+        {
+        case IndexType::U32:
+        {
+            if(value > std::numeric_limits<unsigned int>::max())
+                throw std::runtime_error("index value overflows 32-bit kernel index_type");
+            unsigned int v = static_cast<unsigned int>(value);
+            append(&v, sizeof(v));
+            break;
+        }
+        case IndexType::U64:
+        {
+            unsigned long long v = value;
+            append(&v, sizeof(v));
+            break;
+        }
+        }
+    }
     void append_ptr(const void* ptr)
     {
         append(&ptr, sizeof(void*));
@@ -105,6 +141,7 @@ private:
     }
 
     std::vector<char> buf;
+    IndexType         itype = IndexType::U32;
 };
 
 // Base class for a runtime compiled kernel.  Subclassed for
@@ -284,6 +321,45 @@ static const char* rtc_array_type_name(rocfft_array_type type)
     default:
         return "_UN";
     }
+}
+
+static const char* rtc_index_name(IndexType itype)
+{
+    switch(itype)
+    {
+    case IndexType::U32:
+        return "_i32";
+    case IndexType::U64:
+        return "_i64";
+    }
+
+    throw std::runtime_error("Invalid index type");
+}
+
+static const char* rtc_index_type(IndexType itype)
+{
+    switch(itype)
+    {
+    case IndexType::U32:
+        return "unsigned int";
+    case IndexType::U64:
+        return "unsigned long long";
+    }
+
+    throw std::runtime_error("Invalid index type");
+}
+
+static const char* rtc_index_type_decl(IndexType itype)
+{
+    switch(itype)
+    {
+    case IndexType::U32:
+        return "typedef unsigned int index_type;\n";
+    case IndexType::U64:
+        return "typedef unsigned long long index_type;\n";
+    }
+
+    throw std::runtime_error("Invalid index type");
 }
 
 static const char* rtc_precision_name(rocfft_precision precision)

@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "id": "e70a52c8-1b64-4d9f-8027-c5931ae04b6d",
+  "name": "packed_pointwise_add.f32_block256",
+  "kernel_source": {
+    "kind": "hip",
+    "source": "PointwiseAdd.cpp",
+    "entry": "PointwiseAdd",
+    "build": {
+      "defines": {
+        "HIP_PLUGIN_POINTWISE_TYPE": "float",
+        "HIP_PLUGIN_POINTWISE_BLOCK_SIZE": 256
+      }
+    }
+  },
+  "metadata": {
+    "block_size": 256,
+    "dtype": "FLOAT",
+    "operation": "ADD"
+  },
+  "priority": 0
+}

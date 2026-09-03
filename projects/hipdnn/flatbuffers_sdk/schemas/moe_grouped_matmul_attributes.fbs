@@ -1,6 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 enum MoeGroupedMatmulMode : byte {
@@ -11,16 +14,16 @@ enum MoeGroupedMatmulMode : byte {
 
 table MoeGroupedMatmulAttributes {
     // Required input tensor UIDs
-    token_tensor_uid:              long;
-    weight_tensor_uid:             long;
-    first_token_offset_tensor_uid: long;
+    token_tensor_uid:              long (cache_uid);
+    weight_tensor_uid:             long (cache_uid);
+    first_token_offset_tensor_uid: long (cache_uid);
 
     // Optional input tensor UIDs
-    token_index_tensor_uid:        long = null;
-    token_ks_tensor_uid:           long = null;
+    token_index_tensor_uid:        long = null (cache_uid);
+    token_ks_tensor_uid:           long = null (cache_uid);
 
     // Required output tensor UID
-    output_tensor_uid:             long;
+    output_tensor_uid:             long (cache_uid);
 
     // Routing attributes
     mode: MoeGroupedMatmulMode = NONE;

@@ -27,6 +27,7 @@
 #ifndef GUARD_MIOPEN_FIND_CONTROLS_HPP_
 #define GUARD_MIOPEN_FIND_CONTROLS_HPP_
 
+#include <miopen/db_disable.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/solver_id.hpp>
 #include <miopen/miopen.h>
@@ -170,12 +171,10 @@ public:
     bool IsTrustVerify(const Context& context) const
     {
         // TrustVerify uses user db as groud truth, disable if no user db
-#if MIOPEN_DISABLE_USERDB
-        return false;
-#else
+        if(IsUserDbDisabled())
+            return false;
         return (value == Values::TrustVerify || value == Values::TrustVerifyFull) &&
                IsEnabled(context);
-#endif
     }
 
     template <class Context>

@@ -34,6 +34,39 @@ The Dockerfile supports two build types: **prebuilt** (using current per-family 
 |----------|---------|-------------|--------------|
 | `BUILD_TYPE` | `prebuilt` | Selects build method | `prebuilt`, `fullbuild` |
 
+#### 🧩 Kernel Packing Tooling
+
+The `devshell` and `hipdnn` images stage the `rocm_kpack` Python tooling at
+**`/opt/rocm-kpack/python`**, together with its `msgpack` and `zstandard` dependencies. The
+hip-kernel-provider build finds this path on its own, so kernel packing works inside the container
+with no CMake flags and no network access at build time. (The `fullbuildshell` target builds from
+`base` and does not include it.)
+
+Passing `-DHIPKERNELPROVIDER_KPACK_PYTHON_DIR=<dir>` overrides the staged copy — useful when
+building against a local rocm-systems checkout. See
+[Building.md](../docs/Building.md#kernel-packing-rocm_kpack).
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `ROCM_SYSTEMS_KPACK_REF` | a pinned commit | Git ref of [rocm-systems](https://github.com/ROCm/rocm-systems) to take `shared/kpack` from. Only `shared/kpack` is checked out. A branch, a tag, or a **full** commit SHA — the git wire protocol cannot fetch an abbreviated one. Independent of `ROCM_SYSTEMS_REF`, which selects TheRock's rocm-systems submodule. |
+
+> [!NOTE]
+> The default is a pinned commit, not a branch: Docker keys a layer on the command string, so a
+> branch default would let a warm builder cache ship stale tooling. Pass
+> `ROCM_SYSTEMS_KPACK_REF=develop` to track the branch. The staged commit is recorded at
+> `/opt/rocm-kpack/ROCM_SYSTEMS_COMMIT`.
+
+> [!NOTE]
+> The tooling is staged outside `/opt/rocm` because the `devshell` target expects a ROCm install
+> to be mounted at `/opt/rocm` at run time, which would shadow anything placed there at build time.
+
+```bash
+# Stage kpack from a specific rocm-systems commit
+docker build -f Dockerfile.ubuntu24 \
+    --build-arg ROCM_SYSTEMS_KPACK_REF=a022846cf553c2b135410a5168f97705f1b9c6ac \
+    -t hipdnn:prebuilt .
+```
+
 #### 📦 Prebuilt-Only Arguments
 
 > [!NOTE]

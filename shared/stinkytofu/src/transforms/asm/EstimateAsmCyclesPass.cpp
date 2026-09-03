@@ -266,6 +266,14 @@ class EstimateAsmCyclesPassImpl : public Pass {
         annotateComments_ = annotate;
     }
 
+    /// When true, also model non-loop blocks that contain an embedded
+    /// `label_LoopBeginL` (hierarchical / sub-loop IR). Used only by
+    /// computeEstimatedCyclesPerInstruction(); the published pass total stays
+    /// loop-block-only.
+    void setPerInstructionCycleQuery(bool query) {
+        perInstructionCycleQuery_ = query;
+    }
+
    private:
     // (For future extension: If analysis needs to track cycles per basic block/label,
     // consider using a map like below)
@@ -790,17 +798,25 @@ class EstimateAsmCyclesPassImpl : public Pass {
         std::string vgprLocalReadAddrB = "vgprLocalReadAddrB";
 
         uint32_t totalCycles = 0;
-        // When IR is hierarchical (e.g. populateFunctionFromString), ^block: is only a block
-        // boundary. "LoopBeginL" avoids parser conflating label_* with branch target;
-        // "label_LoopBeginL" for compat.
-        bool isLoopBeginL = (bb.getLabel() == "label_LoopBeginL" || bb.getLabel() == "LoopBeginL");
-        for (StinkyInstruction* inst : instructions) {
-            if (isLoopBeginL == false) {
-                if (isLabel(*inst) && inst->getModifier<LabelData>()->label == "label_LoopBeginL") {
-                    isLoopBeginL = true;
-                } else
-                    continue;
+        // Loop-body modelling runs in the LoopBeginL basic block (tensilelite names the block
+        // ^label_LoopBeginL and the leading label instruction matches bb.getLabel()).
+        // computeEstimatedCyclesPerInstruction() also covers blocks that embed that label.
+        std::size_t startIdx = 0;
+        if (bb.getLabel() != "label_LoopBeginL" && bb.getLabel() != "LoopBeginL") {
+            startIdx = instructions.size();
+            if (perInstructionCycleQuery_) {
+                for (std::size_t i = 0; i < instructions.size(); ++i) {
+                    const LabelData* labelData = instructions[i]->getModifier<LabelData>();
+                    if (isLabel(*instructions[i]) && labelData != nullptr &&
+                        labelData->label == "label_LoopBeginL") {
+                        startIdx = i;
+                        break;
+                    }
+                }
             }
+        }
+        for (std::size_t idx = startIdx; idx < instructions.size(); ++idx) {
+            StinkyInstruction* inst = instructions[idx];
             bool isCoIssued =
                 (!isMatrixInstruction(*inst) &&
                  canCoExecAtCurrentCycle(cycles, activeWmmaStartCycle, activeWmmaCoExecAdvance,
@@ -992,6 +1008,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
     GfxArchID arch_ = static_cast<GfxArchID>(0);
 
     bool annotateComments_ = true;
+    bool perInstructionCycleQuery_ = false;
     std::unordered_map<const StinkyInstruction*, uint32_t> perInstCycles_;
 
     unsigned int totalCycles_ = 0;
@@ -1031,6 +1048,7 @@ std::unordered_map<const StinkyInstruction*, uint32_t> computeEstimatedCyclesPer
     Function& func, PassContext& passCtx) {
     EstimateAsmCyclesPassImpl pass;
     pass.setAnnotateComments(false);
+    pass.setPerInstructionCycleQuery(true);
     AnalysisManager AM;
     (void)pass.run(func, passCtx, AM);
     return pass.getPerInstructionCycles();

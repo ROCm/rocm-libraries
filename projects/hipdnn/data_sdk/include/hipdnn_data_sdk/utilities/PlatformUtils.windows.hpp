@@ -8,6 +8,9 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 
 #include <algorithm>
 #include <array>
@@ -42,6 +45,28 @@ inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
     return value;
 }
 
+/// Wide sibling of getEnv(): reads through GetEnvironmentVariableW, which hands back the
+/// environment's native UTF-16 verbatim. getEnv() above goes through
+/// GetEnvironmentVariableA instead, which transcodes that same UTF-16 through the
+/// process's ANSI code page -- a lossy, locale-dependent step for any non-ASCII
+/// character. A caller that must feed the result to something UTF-16-native (notably
+/// std::filesystem::path's wstring constructor, or CreateFileW) should read wide from the
+/// start rather than narrow-then-reinterpret.
+inline std::wstring getEnvW(const wchar_t* var, const wchar_t* defaultValue = nullptr)
+{
+    // Same two-call sizing convention as getEnv(): the sizing call counts the
+    // terminator, the fetching call does not.
+    const DWORD size = GetEnvironmentVariableW(var, nullptr, 0);
+    if(size == 0)
+    {
+        return defaultValue != nullptr ? defaultValue : L"";
+    }
+
+    std::wstring value(size, L'\0');
+    value.resize(GetEnvironmentVariableW(var, value.data(), size));
+    return value;
+}
+
 inline void setEnv(const char* var, const char* value)
 {
     if(value != nullptr)
@@ -53,6 +78,87 @@ inline void setEnv(const char* var, const char* value)
 inline void unsetEnv(const char* var)
 {
     SetEnvironmentVariableA(var, nullptr);
+}
+
+/// Expands a **leading** `~` or **leading** `%USERPROFILE%` in @p path to the current
+/// user's home directory; see PlatformUtils.linux.hpp's expandUser() for the full
+/// leading-token/fallback contract, which applies here with `%USERPROFILE%` (matched
+/// case-insensitively) accepted alongside `~`.
+///
+/// @param path The path string to expand, e.g. as read from a config value or env var.
+/// @return @p path with a qualifying leading `~` or `%USERPROFILE%` replaced by
+///     `%USERPROFILE%`'s value, or @p path unchanged if no leading token qualifies or
+///     `USERPROFILE` is unset/empty. Never throws.
+inline std::string expandUser(const std::string& path)
+{
+    // A leading '~' qualifies only alone or followed by a path separator.
+    const bool hasLeadingTilde = !path.empty() && path.front() == '~'
+                                 && (path.size() == 1 || path[1] == '/' || path[1] == '\\');
+
+    // "%USERPROFILE%" matched as a literal leading token, case-insensitively.
+    static const std::string kUserProfileToken = "%userprofile%";
+    const std::string lowerPath = toLower(path);
+    const bool hasLeadingToken
+        = lowerPath.size() >= kUserProfileToken.size()
+          && lowerPath.compare(0, kUserProfileToken.size(), kUserProfileToken) == 0
+          && (lowerPath.size() == kUserProfileToken.size() || path[kUserProfileToken.size()] == '/'
+              || path[kUserProfileToken.size()] == '\\');
+
+    if(!hasLeadingTilde && !hasLeadingToken)
+    {
+        return path;
+    }
+
+    const std::string userProfile = getEnv("USERPROFILE");
+    if(userProfile.empty())
+    {
+        return path;
+    }
+
+    const size_t tokenLength = hasLeadingTilde ? 1 : kUserProfileToken.size();
+    return userProfile + path.substr(tokenLength);
+}
+
+/// Wide sibling of expandUser(): identical leading-token/fallback contract, but composed
+/// entirely in UTF-16 via getEnvW() so a non-ASCII `%USERPROFILE%` value (e.g. a
+/// non-ASCII Windows account name) survives intact. expandUser() above narrows through
+/// getEnv()/GetEnvironmentVariableA, which is lossy for exactly that case -- see getEnvW()
+/// for why -- and callers composing a std::filesystem::path (which MSVC's
+/// std::filesystem interprets as UTF-8, not the ANSI code page) must use this instead.
+///
+/// @param path The path string to expand, as UTF-16.
+/// @return @p path with a qualifying leading `~` or `%USERPROFILE%` replaced by
+///     `%USERPROFILE%`'s value, or @p path unchanged if no leading token qualifies or
+///     `USERPROFILE` is unset/empty. Never throws.
+inline std::wstring expandUserW(const std::wstring& path)
+{
+    // A leading '~' qualifies only alone or followed by a path separator.
+    const bool hasLeadingTilde = !path.empty() && path.front() == L'~'
+                                 && (path.size() == 1 || path[1] == L'/' || path[1] == L'\\');
+
+    // "%USERPROFILE%" matched as a literal leading token, case-insensitively.
+    static const std::wstring kUserProfileToken = L"%userprofile%";
+    std::wstring lowerPath = path;
+    std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
+    const bool hasLeadingToken
+        = lowerPath.size() >= kUserProfileToken.size()
+          && lowerPath.compare(0, kUserProfileToken.size(), kUserProfileToken) == 0
+          && (lowerPath.size() == kUserProfileToken.size() || path[kUserProfileToken.size()] == L'/'
+              || path[kUserProfileToken.size()] == L'\\');
+
+    if(!hasLeadingTilde && !hasLeadingToken)
+    {
+        return path;
+    }
+
+    const std::wstring userProfile = getEnvW(L"USERPROFILE");
+    if(userProfile.empty())
+    {
+        return path;
+    }
+
+    const size_t tokenLength = hasLeadingTilde ? 1 : kUserProfileToken.size();
+    return userProfile + path.substr(tokenLength);
 }
 
 inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::path& b)

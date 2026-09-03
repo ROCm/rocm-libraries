@@ -31,11 +31,13 @@ import sys
 import time
 import itertools
 
+import rocisa
+
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict
 
-from Tensile import CUSTOM_KERNEL_PATH, SolutionLibrary, LibraryIO
+from Tensile import SolutionLibrary, LibraryIO
 from Tensile.KernelWriter import DebugConfig
 from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from Tensile.Toolchain.Component import Assembler
@@ -192,12 +194,21 @@ def _resetCacheDir(cacheDir):
     os.makedirs(cacheDir)
 
 
-def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
+def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap,
+                              rocIsaData=None):
     """Helper function to generate a single solution from a permutation.
-    
+
     This function handles standard permutations without group_ parameter expansion.
     For GA individuals that may have group_ parameters, use the GA backend's equivalent.
+
+    ParallelMap2 hands a worker globalParameters and nothing else, so the rocIsa
+    singleton here has never been init'd and every capability lookup would read a
+    default. Validators that ask the assembly backend what a solution emits need the
+    parent's capabilities to answer the same way the emitter will.
     """
+    if rocIsaData is not None:
+        rocisa.rocIsa.getInstance().setData(rocIsaData)
+
     solution = {
         "ProblemType": deepcopy(problemType.state),
         "ISA": next(iter(isaInfoMap.keys()))
@@ -264,7 +275,8 @@ def _generateForkedSolutions(problemType, constantParams, forkPermutations, asse
         itertools.repeat(constantParams),
         itertools.repeat(assembler),
         itertools.repeat(debugConfig),
-        itertools.repeat(isaInfoMap)
+        itertools.repeat(isaInfoMap),
+        itertools.repeat(rocisa.rocIsa.getInstance().getData())
     )
     raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions", return_as="list")
 
@@ -285,7 +297,7 @@ def _getCustomKernelSolutionObj(
         assembler: Assembler,
         debugConfig: DebugConfig,
         isaInfoMap: Dict[IsaVersion, IsaInfo],
-        directory=CUSTOM_KERNEL_PATH
+        directory=None
     ):
     """Creates the Solution object for a custom kernel"""
     sol = getCustomKernelConfig(kernelName, internalSupportParams, directory)

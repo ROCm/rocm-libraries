@@ -44,6 +44,21 @@ def miopenCheckout()
     ])
 }
 
+// Root of the agent's remote filesystem, i.e. the directory holding "workspace/<job>".
+// Agents may be given a per-agent remote root (so that several agents can share a machine
+// without stepping on each other's workspaces), so this must not assume /var/jenkins.
+// A customWorkspace has no "workspace/" segment at all; fall back to the workspace's parent
+// rather than throwing out of substring().
+def nodeRemoteRoot() {
+    String ws = env.WORKSPACE
+    int idx = ws.lastIndexOf("workspace/")
+    if (idx > 0) {
+        return ws.substring(0, idx)
+    }
+    int slash = ws.lastIndexOf("/")
+    return slash > 0 ? ws.substring(0, slash + 1) : "/"
+}
+
 def check_host() {
     if ("${env.MIOPEN_SCCACHE}" != "null"){
         def SCCACHE_SERVER="${env.MIOPEN_SCCACHE.split(':')[0]}"
@@ -107,8 +122,7 @@ def cmake_build(Map conf=[:]){
     def test_flags = conf.get("test_flags","")
 
     if (conf.get("vcache_enable","") == "true"){
-        //grab root of node workspace. not guaranteed to be /var/jenkins
-        String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/"))
+        String remote_root = nodeRemoteRoot()
         def vcache = conf.get(vcache_path,"${remote_root}/.cache/miopen/vcache")
         build_envs = " MIOPEN_VERIFY_CACHE_PATH='${vcache}' " + build_envs
     } else{
@@ -810,8 +824,7 @@ def buildHipClangJob(Map conf=[:]){
                 }
             }
 
-            //grab root of node workspace. not guaranteed to be /var/jenkins
-            String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/"))
+            String remote_root = nodeRemoteRoot()
             withDockerContainer(image: image, args: dockerOpts + " -v=${remote_root}:${remote_root}") {
                 timeout(time: build_timeout, unit:'MINUTES')
                 {
@@ -853,8 +866,7 @@ def RunPerfTest(Map conf=[:]){
             docker_image.pull()
         }
         echo "docker image: ${docker_image}"
-        //grab root of node workspace. not guaranteed to be /var/jenkins
-        String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/"))
+        String remote_root = nodeRemoteRoot()
         docker_image.inside(dockerOpts + " -v=${remote_root}:${remote_root}")
         {
             timeout(time: 100, unit: 'MINUTES')
@@ -1331,15 +1343,6 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     }
 
     // GFX942 Tests
-    def dbsyncGfx942 = 'Dbsync gfx942'
-    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX942 && !passedStages.contains(dbsyncGfx942), dbsyncGfx942) {
-        node(rocmnodeFn("gfx942")) {
-            try {
-                withStageStatus { runDbSyncJobFn(gfx942_flags, "ci") }
-            } finally { cleanWs() }
-        }
-    }
-
     def bf16Gfx942 = 'Bf16 Hip Install All gfx942'
     addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx942), bf16Gfx942) {
         node(rocmnodeFn("gfx942")) {
