@@ -402,22 +402,19 @@ st.func @vm_many_ds() {
   v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- g_enableESM2SuppressValuToGlobalVaVdst gate on global_prefetch_b8: a VALU
-#--- writes a vaddr VGPR (v0), then global_prefetch_b8 reads it. The gate drops the
-#--- src-RAW va_vdst wait (the DAG already spaces the producer >=32 cycles). Two
-#--- unrelated VALUs sit between, so WITHOUT the suppression a non-zero va_vdst wait
-#--- would be emitted before the prefetch.
-#---
-#--- Regression for the classifier fix: global_prefetch_b8 does NOT carry
-#--- IF_GLOBALLoad, so the original isGLOBALOrAtomic-only gate silently skipped it,
-#--- leaving the wait in place. The gate must also classify it via isGlobalPrefetch().
-#--- No s_wait_alu va_vdst may appear between the producer and the prefetch.
-# CHECK-LABEL: @valu_to_global_prefetch_suppressed
+#--- VALU producer → global_prefetch_b8 reads the vaddr VGPR: emit va_vdst
+#--- before the prefetch. Same shape as @valu_to_vmem_raw (buffer_load).
+#--- Regression: SIA4 GL2 kernels packed v_add_co_ci of a 64-bit prefetch
+#--- address against global_prefetch_b8 with no wait → hipErrorIllegalAddress.
+# CHECK-LABEL: @valu_to_global_prefetch_raw
 # CHECK: v_add_f32
-# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst
 # CHECK: "st.global_prefetch_b8"
 
-st.func @valu_to_global_prefetch_suppressed() {
+st.func @valu_to_global_prefetch_raw() {
 ^entry:
   v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
   v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
@@ -439,14 +436,9 @@ st.func @async_store_to_valu_war() {
   v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- global_atomic_inc_u32's DATA operand (v0, not vaddr) is a genuine RAW the
-#--- DAG scheduler does not space -- only vaddr/prefetch producers get the
-#--- >=32-cycle guarantee (isVmemAddrHazardConsumer). Two unrelated VALUs sit
-#--- between, so a non-zero va_vdst wait must be emitted before the atomic.
-#---
-#--- Regression for the classifier fix: the suppression gate must not apply to
-#--- atomics, only to isGLOBALLoad()/isGlobalPrefetch() producers.
-# CHECK-LABEL: @valu_to_global_atomic_data_raw_not_suppressed
+#--- global_atomic_inc_u32's DATA operand (v0) is a VALU→VMEM src RAW.
+#--- Two unrelated VALUs sit between, so a non-zero va_vdst wait is required.
+# CHECK-LABEL: @valu_to_global_atomic_data_raw
 # CHECK: v_add_f32
 # CHECK: v_mov_b32
 # CHECK: v_mov_b32
@@ -454,7 +446,7 @@ st.func @async_store_to_valu_war() {
 # CHECK-SAME: va_vdst
 # CHECK: "st.global_atomic_inc_u32"
 
-st.func @valu_to_global_atomic_data_raw_not_suppressed() {
+st.func @valu_to_global_atomic_data_raw() {
 ^entry:
   v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
   v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }

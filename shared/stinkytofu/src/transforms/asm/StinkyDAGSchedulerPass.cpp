@@ -485,15 +485,15 @@ static void scheduleRegionWithMovableSideEffects(
     // address). Detection per rule: BFS the node's users (skipping PHIs); if a
     // rule.isConsumer user reads a register of rule.regType this node writes, flag it
     // (dagNodes[i].hazardFlags). This half drives the consumer-side gate
-    // (CDNA5ReadyQueue::hazardGates_), which blocks the consumer for as long as real
-    // intervening instructions are available to pay the wait -- but see
-    // DAGNode::hazardDeadline's comment (ReadyQueue.hpp) for the case where they run
-    // out and the scheduler's pre-existing "pay the wait via advanceTime, then issue
-    // anyway" fallback applies instead.
+    // (CDNA5ReadyQueue::hazardGates_), which defers the consumer while real
+    // intervening instructions can fill the gap. When fill runs out the scheduler
+    // still issues the consumer and only advances the simulated clock_ — hardware
+    // VALU→VMEM/prefetch RAW waits are inserted later by InsertWaitAluPass.
     //
     // Also computes each flagged producer's hazardDeadline: a throughput heuristic
-    // that, when accurate, is what keeps the gate above from ever needing that
-    // fallback. Let X = cumCycles[consumerId], the hazarded consumer's estimated
+    // that, when accurate, fills the gap with real instructions instead of only
+    // advancing the simulated clock_. That fill is still not a hardware wait.
+    // Let X = cumCycles[consumerId], the hazarded consumer's estimated
     // absolute cycle (per rule; a producer feeding several consumers, or matching
     // several rules, takes the earliest/tightest deadline over all of them). The
     // deadline is X - rule.cycles - producerCost: the gate is stamped only after this

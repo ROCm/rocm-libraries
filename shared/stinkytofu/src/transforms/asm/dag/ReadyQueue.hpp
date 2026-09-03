@@ -69,14 +69,13 @@ struct DAGNode {
     // later consumer reads, per the arch's hazard rule table (a fixed producer->consumer cycle
     // gap keyed by register file). Filled by the pre-scan via the def-use user walk.
     // Non-empty means this node's issue must stamp the corresponding hazard gate(s)
-    // (see CDNA5ReadyQueue::hazardGates_) so the consumer waits the gap out. That
-    // gate correctly blocks the consumer whenever *real* intervening instructions are
-    // available to cover the wait; when none are, the scheduler's existing "pay the
-    // remaining wait via advanceTime, then issue anyway" fallback still applies (see
-    // findSmallestPickableNonWmma/pickFreeBest) and advances the simulated clock_
-    // without a matching instruction — so the gate is not a substitute for
-    // hazardDeadline actually reserving enough real cycles; both need to be right.
-    // hazardDeadline below drives a *throughput* heuristic on top of the gate.
+    // (see CDNA5ReadyQueue::hazardGates_) so the consumer is deferred while *real*
+    // intervening instructions can fill the gap. When none remain, the scheduler
+    // still issues the consumer and only advances the simulated clock_ (see
+    // findSmallestPickableNonWmma/pickFreeBest). That is not a hardware wait —
+    // InsertWaitAluPass emits s_wait_alu va_vdst for the VALU→VMEM/prefetch RAW
+    // on the final instruction stream. hazardDeadline below is a throughput
+    // heuristic on top of the gate, not a substitute for that wait.
     std::vector<HazardFlag> hazardFlags;
     // Set by the pre-scan (see scheduleRegionWithMovableSideEffects) only when this
     // node has hazardFlags: the latest CDNA5ReadyQueue::clock_ value at which this
