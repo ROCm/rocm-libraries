@@ -72,6 +72,17 @@ Definitions:
     - { transA: C, transB: N }
     - { transA: C, transB: C }
 
+  - &complex_general_batch_edge_sizes
+    - { M: 1,   N: 1,   K: 1,   lda: 1,   ldb: 1,   ldc: 1,   ldd: 1   }
+    - { M: 8,   N: 8,   K: 8,   lda: 8,   ldb: 8,   ldc: 8,   ldd: 8   }
+    - { M: 255, N: 255, K: 255, lda: 255, ldb: 255, ldc: 255, ldd: 255 }
+
+  - &complex_general_batch_transA_transB
+    - { transA: N, transB: N }
+    - { transA: C, transB: N }
+    - { transA: T, transB: C }
+    - { transA: C, transB: C }
+
   - &swizzleA_strideA_support
     - {}
     - { stride_a: 0 }
@@ -399,8 +410,19 @@ Tests:
   transA_transB: *complex_transA_transB_range
   alpha_beta: *complex_alpha_beta_range
   batch_count: 10
+  batch_mode: [0, 1]
   gpu_arch: '9(42|50)|1250'
 
+- name: matmul_batch_complex_general_batch_edge
+  category: pre_checkin
+  function:
+    - matmul: *complex_precisions
+  matrix_size: *complex_general_batch_edge_sizes
+  transA_transB: *complex_general_batch_transA_transB
+  alpha_beta: *complex_alpha_beta_range
+  batch_count: 3
+  batch_mode: [0, 1]
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_medium_HMM
   category: HMM

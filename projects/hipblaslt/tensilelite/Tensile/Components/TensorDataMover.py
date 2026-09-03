@@ -4,8 +4,8 @@ from ..Common import INDEX_CHARS
 from typing import Mapping, Optional
 from rocisa.code import Module, Label
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
-    SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC1, TensorLoadToLds, \
-    VReadfirstlaneB32
+    SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC0, SCBranchSCC1, SCmpEQU32, \
+    SLoadB64, SWaitCnt, TensorLoadToLds, VReadfirstlaneB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
@@ -57,6 +57,54 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(gsucLabelEnd)
         return mod
 
+    def generalBatchDeref(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str) -> Module:
+        """Dereference the pointer-array base for general batched (pointer-array) mode."""
+        mod = Module()
+        tc: str = tp["tensorChar"]
+        if (not kernel["ProblemType"]["Batched"]) or tp["isM"] \
+           or kernel["ProblemType"]["GroupedGemm"] \
+           or not kernel["ProblemType"]["SupportUserArgs"]:
+            return mod
+        skipLabel = Label(writer.labels.getNameInc(f"TDMGeneralBatchDeref{tc}_Skip"),
+                          comment="skip pointer-array deref for strided batched (ArgType != 3)")
+        writer.cmpNamedArgTypeEq(mod, 3, "ArgType == 3 for General Batched GEMM")
+        mod.add(SCBranchSCC0(labelName=skipLabel.getLabelName(),
+                             comment="not general batched -> keep Address as-is"))
+        with writer.allocTmpSgpr(2, alignment=2, tag="TDMGeneralBatchDeref") as tmpRes:
+            stmp = tmpRes.idx
+            mod.add(SMulI32(dst=sgpr(stmp), src0=8, src1=sgpr("WorkGroup2"),
+                            comment="offset into pointer array = 8 * WG2"))
+            mod.add(SAddU32(dst=sgpr(stmp), src0=sgpr(stmp), src1=sgpr(f"{sgprAddr}+0"),
+                            comment="pointer array element address (lo)"))
+            mod.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr(f"{sgprAddr}+1"), src1=0,
+                             comment="pointer array element address (hi)"))
+            mod.add(SLoadB64(dst=sgpr(sgprAddr, 2), base=sgpr(stmp, 2), soffset=0,
+                             comment=f"deref matrix {tc} base from pointer array"))
+            batchOffsetKernArgOffset = writer.states.batchOffsetAKernArgOffset if tc == "A" \
+                else writer.states.batchOffsetBKernArgOffset
+            mod.add(SLoadB64(dst=sgpr(stmp, 2), base=sgpr("KernArgAddress", 2),
+                             soffset=hex(batchOffsetKernArgOffset),
+                             comment=f"load batchOffset{tc} from kernel args"))
+            mod.add(SWaitCnt(kmcnt=0, comment="wait matrix base and batchOffset loads"))
+            mod.add(SAddU32(dst=sgpr(f"{sgprAddr}+0"), src0=sgpr(f"{sgprAddr}+0"), src1=sgpr(stmp),
+                            comment=f"apply batchOffset{tc} (lo)"))
+            mod.add(SAddCU32(dst=sgpr(f"{sgprAddr}+1"), src0=sgpr(f"{sgprAddr}+1"), src1=sgpr(stmp+1),
+                             comment=f"apply batchOffset{tc} (hi)"))
+        mod.add(skipLabel)
+        return mod
+
+    def generalBatchGuard(self, writer: "KernelWriterAssembly", mod: Module, kernel: Mapping, tp: Mapping, tc: str):
+        if (not kernel["ProblemType"]["Batched"]) or tp["isM"] \
+           or kernel["ProblemType"]["GroupedGemm"] \
+           or not kernel["ProblemType"]["SupportUserArgs"]:
+            return None
+        skipStrideLabel = Label(writer.labels.getNameInc(f"TDMStridedBatchTerm{tc}_Skip"),
+                                comment="skip strided batch term for general batched (ArgType == 3)")
+        writer.cmpNamedArgTypeEq(mod, 3, "ArgType == 3 for General Batched GEMM")
+        mod.add(SCBranchSCC1(labelName=skipStrideLabel.getLabelName(),
+                             comment="general batched -> matrix base already dereferenced, skip stride term"))
+        return skipStrideLabel
+
     def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str) -> Module:
         mod = Module()
         tc: str = tp["tensorChar"]
@@ -91,6 +139,10 @@ class TensorDataMoverLoad(TensorDataMover):
         gsuOffsetBytes: int = round(depthU * bpe)
 
         mod.addComment(f"TDM calc start addr of {tc}")
+
+        # General batched (pointer-array) mode: deref Address{tc} to the real matrix
+        # base before accumulating tile/wave/GSU offsets. No-op for strided mode.
+        mod.add(self.generalBatchDeref(writer, kernel, tp, sgprAddr))
 
         with writer.allocTmpSgpr(3, tag="TensorDataMoverLoad_tmpSgprRes") as tmpSgprRes:
             tmpSgprIdx = tmpSgprRes.idx
@@ -138,15 +190,15 @@ class TensorDataMoverLoad(TensorDataMover):
             mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
             if kernel["ProblemType"]["Batched"]:
                 if kernel["ProblemType"]["StridedBatched"]:
+                    skipStrideLabel = self.generalBatchGuard(writer, mod, kernel, tp, tc)
                     batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
                     mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), sgpr("WorkGroup2"), comment="Batch: Stride*WG"))
                     with writer.allocTmpSgpr(1, tag="TensorDataMoverLoad_tmpSgprBpe") as bpeTmp:
                         mod.add(scalarMultiply64Bpe(tmpSgprIdx, tmpSgprIdx, bpe, bpeTmp.idx, comment="scale by bpe"))
                     mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
                     mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
-                else:
-                    #TODO: support general batch
-                    assert False, "Currently, TDM does not support general batch"
+                    if skipStrideLabel is not None:
+                        mod.add(skipStrideLabel)
             #TODO: support stagger U
         return mod
 
@@ -233,6 +285,10 @@ class TensorDataMoverLoad(TensorDataMover):
 
             if kernel["ProblemType"]["Batched"]:
                 if kernel["ProblemType"]["StridedBatched"]:
+                    # Strided batch adds Stride{tc}K * WG2. General batched (ArgType==3) reaches
+                    # the batch member via generalBatchDeref in initTDMDescriptorWaveSeparatedImpl
+                    # (before setGlobalAddr), so the stride term is skipped at runtime here.
+                    skipStrideLabel = self.generalBatchGuard(writer, mod, kernel, tp, tc)
                     batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
                     mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), sgpr("WorkGroup2"), comment="Batch: Stride*WG"))
                     with writer.allocTmpSgpr(1, tag="TensorDataMoverLoadWaveSeparated_tmpSgprBpe") as bpeTmp:
@@ -245,9 +301,8 @@ class TensorDataMoverLoad(TensorDataMover):
                     else:
                         mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
                         mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
-                else:
-                    #TODO: support general batch
-                    assert False, "Currently, TDM does not support general batch"
+                    if skipStrideLabel is not None:
+                        mod.add(skipStrideLabel)
             #TODO: support stagger U
         return mod
 
