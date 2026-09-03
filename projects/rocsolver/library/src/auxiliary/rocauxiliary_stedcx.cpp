@@ -96,7 +96,10 @@ try
     rocblas_device_malloc mem(handle, size_tmpT, size_work, size_work_stack, size_tempvect,
                               size_tempgemm, size_tmpz, size_splits, size_workArr);
     if(!mem)
+{
+printf("QUESO RONOSO...\n");        
         return rocblas_status_memory_error;
+}
 
     tmpT = mem[0];
     work = mem[1];

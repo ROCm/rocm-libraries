@@ -46,6 +46,37 @@ ROCSOLVER_BEGIN_NAMESPACE
 /**************************************************************************************/
 
 //--------------------------------------------------------------------------------------//
+/** This kernel deals with the case n = 1 **/
+template <typename S>
+ROCSOLVER_KERNEL void stedcx_case1_kernel(const rocblas_erange range,
+                                          const S vlow,
+                                          const S vup,
+                                          S* DA,
+                                          const rocblas_stride strideD,
+                                          rocblas_int* nev,
+                                          S* WA,
+                                          const rocblas_stride strideW)
+{
+    int bid = hipBlockIdx_x;
+
+    // select batch instance
+    S* D = DA + bid * strideD;
+    S* W = WA + bid * strideW;
+
+    // check if diagonal element is in range and return
+    S d = D[0];
+    if(range == rocblas_erange_value && (d <= vlow || d > vup))
+    {
+        nev[bid] = 0;
+    }
+    else
+    {
+        nev[bid] = 1;
+        W[0] = d;
+    }
+}
+
+//--------------------------------------------------------------------------------------//
 /** STEDCX_SETRANGE_KERNEL determines the range for the partial decomposition **/
 template <typename S>
 ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_SETRANGE_THDS)
@@ -157,23 +188,25 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_SYNTHESIS_THDS)
     bool all = (range == rocblas_erange_all);
     S low, up;
 
-    // if computing all eigenvalues, quick return
     if(all)
     {
+        // if computing all eigenvalues
         *nev = n;
         for(int k = tid; k < n; k += bdim)
+        {
             W[k] = D[k];
-        return;
+            idd[k] = 1;
+        }
     }
-
-    // otherwise, only keep eigenvalues in desired range
-    if(tid == 0)
+    else if(tid == 0)
     {
+        // if only keeping eigenvalues in desired range
         low = bounds[0];
         up = bounds[1];
 
         if(!index)
         {
+            // range given by value
             for(int k = 0; k < n; ++k)
             {
                 tmp = D[k];
@@ -186,9 +219,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_SYNTHESIS_THDS)
                 }
             }
         }
-
         else
         {
+            // range given by index
             for(int k = 0; k < n; ++k)
             {
                 tmp = D[k];
@@ -234,17 +267,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_SYNTHESIS_THDS)
     }
     __syncthreads();
 
-    // and keep corresponding eigenvectors
+    // keep corresponding eigenvectors
     nn = 0;
     for(int j = 0; j < n; ++j)
     {
         if(idd[j] == 1)
         {
-//            if(j != nn)
-//            {
-                for(int i = tid; i < n; i += bdim)
-                    C[i + nn * ldc] = V[i + j * ldv];
-//            }
+            for(int i = tid; i < n; i += bdim)
+                C[i + nn * ldc] = V[i + j * ldv];
             nn++;
         }
         __syncthreads();
@@ -327,6 +357,7 @@ void rocsolver_stedcx_getMemorySize(const rocblas_evect evect,
                                     size_t* size_workArr)
 {
     // if quick return no workspace needed
+    *size_tmpT = 0;
     *size_work = 0;
     *size_work_stack = 0;
     *size_tempvect = 0;
@@ -503,14 +534,14 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
     rocsolver_stedc_template<false, ISBATCHED, T>(
         handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, 
         tmpT, 0, ldt, strideT, info, batch_count, work_stack, tempvect, 
-        tempgemm, tmpz, splits, workArr);        
+        tempgemm, tmpz, splits, workArr, false);        
 
 
 
 //printf("\n-----------AFTER D&C--------------\n");
 //print_device_matrix(std::cout,"D",1,n,D,1);
 //print_device_matrix(std::cout,"E",1,n-1,E,1);
-//print_device_matrix(std::cout,"C",n,n,C,ldc);
+//print_device_matrix(std::cout,"tmpT",n,n,tmpT,ldt);
 
     // Synthesize the results for given range (discard values and vectors out of range)
     ROCSOLVER_LAUNCH_KERNEL((stedcx_synthesis_kernel<T>), dim3(1, batch_count), dim3(STEDCX_SYNTHESIS_THDS), 0,
@@ -518,11 +549,16 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
                             C, shiftC, ldc, strideC, tmpT, ldt, strideT, batch_count, splits, work, 
                             work_stack, eps);
 
+//printf("\n-----------AFTER SYNTHESIS--------------\n");
+//print_device_matrix(std::cout,"nev",1,1,nev,1);
+//print_device_matrix(std::cout,"W",1,n,W,1);
+//print_device_matrix(std::cout,"C",n,n,C,ldc);
+
     // sort selected eigenvalues and eigenvectors
     ROCSOLVER_LAUNCH_KERNEL((stedcx_sort<T>), dim3(1, 1, batch_count), dim3(BS1), 0, stream, n, W,
                             strideW, C, shiftC, ldc, strideC, batch_count, splits, nev);
 
-//printf("\n-----------FINAL OUTPUTS--------------\n");
+//printf("\n-----------SORTED OUTPUTS--------------\n");
 //print_device_matrix(std::cout,"nev",1,1,nev,1);
 //print_device_matrix(std::cout,"W",1,n,W,1);
 //print_device_matrix(std::cout,"C",n,n,C,ldc);
