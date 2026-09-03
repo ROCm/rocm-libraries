@@ -328,6 +328,20 @@ class OpOverride:
                 st.handle, variant_pack, ws_ptr, entry["ws"], cfg, storage
             )
         except Exception as ex:  # noqa: BLE001 -- a failed sweep must not break the model
+            # RECORD it, do not merely log it. At a raised log level the warning is
+            # invisible and tuning_report() then prints nothing, which reads as
+            # "tuning was never requested" rather than "the sweep failed".
+            self._tune_log.append(
+                {
+                    "op": self.op_name,
+                    "outcome": f"SWEEP-FAILED: {type(ex).__name__}: {ex}",
+                    "winner": entry.get("engine", "?"),
+                    "candidates": 0,
+                    "benchmarked": 0,
+                    "best_ms": None,
+                    "ranking": [],
+                }
+            )
             log.warning("%s: exhaustive sweep failed, using heuristic plan: %s",
                         self.op_name, ex)
             return
