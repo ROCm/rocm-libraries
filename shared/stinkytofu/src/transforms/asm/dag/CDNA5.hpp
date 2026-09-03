@@ -38,6 +38,7 @@
 #include <map>
 #include <tuple>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "InFlightQueue.hpp"
@@ -512,6 +513,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int wmmaIssuedCountThisRegion_ = 0;
 
     BasicBlock* currentBB_ = nullptr;
+    std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates_;
 
     DAGNode* lastPickedNode_ = nullptr;
 
@@ -605,6 +607,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     DAGNode* pickOne() override;
     void push(DAGNode* node) override;
+    std::vector<Layer2BarrierOverlapCandidate> takeLayer2BarrierOverlapCandidates() override {
+        return std::exchange(layer2BarrierOverlapCandidates_, {});
+    }
     bool empty() const override;
 
     // Build the coexec filler v_nops counted during the last pickOne() as detached insts.
@@ -2153,11 +2158,22 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     int deltaAfter = (adjustedAfterEnd - adjustedBeforeBegin + 1) / 2 + 1;
                     int deltaBefore = (adjustedAfterEnd - adjustedBeforeBegin) / 2 + 1;
 
+                    // Do not publish overlap yet: some policy constraints can be rejected
+                    // later when merged into the register DAG. The scheduler validates
+                    // every requested ordering against final instruction order first.
+                    Layer2BarrierOverlapCandidate overlapCandidate{
+                        afterGroup.barriers, beforeGroup.barriers, {}};
+                    auto requireOrdering = [&](StinkyInstruction* predecessor,
+                                               StinkyInstruction* successor) {
+                        deps.requestedConstraints.emplace_back(predecessor, successor);
+                        overlapCandidate.requiredConstraints.emplace_back(predecessor, successor);
+                    };
+
                     // Every overlapping pair needs structural ordering, independent of
                     // which threshold-adjustment branch above was taken.
                     for (StinkyInstruction* barrierAfter : afterGroup.barriers) {
                         for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
-                            deps.requestedConstraints.emplace_back(barrierAfter, barrierBefore);
+                            requireOrdering(barrierAfter, barrierBefore);
                         }
                     }
 
@@ -2169,12 +2185,13 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     const auto& descendantDsLoads = beforeGroupDsLoads[beforeIdx];
                     for (StinkyInstruction* tensorLoad : descendantTensorLoads) {
                         for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
-                            deps.requestedConstraints.emplace_back(tensorLoad, barrierBefore);
+                            requireOrdering(tensorLoad, barrierBefore);
                         }
                         for (StinkyInstruction* dsLoad : descendantDsLoads) {
-                            deps.requestedConstraints.emplace_back(tensorLoad, dsLoad);
+                            requireOrdering(tensorLoad, dsLoad);
                         }
                     }
+                    layer2BarrierOverlapCandidates_.push_back(std::move(overlapCandidate));
 
                     adjustedAfterEnd = std::clamp(adjustedAfterEnd - deltaAfter, 0, totalWmma);
                     adjustedBeforeBegin =
