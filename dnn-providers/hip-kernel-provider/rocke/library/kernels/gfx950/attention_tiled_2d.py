@@ -57,7 +57,7 @@ from rocke.core.ir import (
     Type,
     Value,
 )
-from rocke.helpers.atoms import MfmaAtom, make_d_warp_dstr_encoding
+from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
@@ -95,7 +95,7 @@ MFMA_N = 16
 # the scalar helpers from ``helpers/attention.py`` directly; this distribution-
 # driven form is local to the 2D kernel.
 _C32_DIST = make_static_tile_distribution(
-    make_d_warp_dstr_encoding(MfmaAtom.f16_32x32x16())
+    make_c_warp_dstr_encoding(MfmaAtom.f16_32x32x16())
 )
 
 
@@ -2779,7 +2779,7 @@ def build_unified_attention_2d_tiled(
     #   B (K^T) per lane: <8 x dtype>
     #     n   = n_tile*32 + (lane % 32)
     #     k   = k_iter*16 + (lane/32)*8 + [0..7]
-    #   D per lane: <16 x f32>
+    #   C per lane: <16 x f32>
     #     row = wave_row_base + ((elem//4)*8 + (lane/32)*4 + elem%4)
     #     col = tile_off + n_tile*32 + (lane % 32)
     #

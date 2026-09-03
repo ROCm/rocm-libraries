@@ -142,7 +142,6 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
         a_dtype=_canon_lowbit(spec.dtype_a),
         b_dtype=_canon_lowbit(spec.dtype_b),
         c_dtype="fp32",
-        d_dtype="fp32",
         m=_BLOCK_M,
         n=_BLOCK_N,
         k=_WMMA_K,

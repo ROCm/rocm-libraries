@@ -619,11 +619,11 @@ def build_ragged_gemm(spec: RaggedGemmSpec):
             compute(cur, cur, acc, store_on_last=sol)
 
     def store_row(acc, mi):
-        # Store one m-row (all nn n-tiles x d_per_lane elements) directly to
+        # Store one m-row (all nn n-tiles x c_per_lane elements) directly to
         # C[m_base + local_row]. Rows past the tile's valid count redirect to the
         # sink row (M) instead of branching. The row-base depends on (mi, i) only,
         # not nj -> hoist over nj.
-        for i in range(atom.d_per_lane):
+        for i in range(atom.c_per_lane):
             row_in, col_in = atom.lane_to_output(b, lane, i)
             lr = b.add(b.add(warp_m_off, b.const_i32(mi * AM)), row_in)
             orow = b.select(b.cmp_lt(lr, m_valid), b.add(m_base, lr), M)  # sink=M
@@ -654,7 +654,7 @@ def build_ragged_gemm(spec: RaggedGemmSpec):
         cTK = b.const_i32(TK)
         b.sync()  # last compute's operand ds_reads on AB done before reuse
         for mi in range(mm):
-            for i in range(atom.d_per_lane):
+            for i in range(atom.c_per_lane):
                 row_in, col_in = atom.lane_to_output(b, lane, i)
                 lr = b.add(b.add(warp_m_off, b.const_i32(mi * AM)), row_in)
                 for nj in range(nn):

@@ -379,7 +379,7 @@ rocke_value_t* rocke_load_b_col_strided_scalars(rocke_ir_builder_t* b,
  *     return kloop.results[0]
  *
  * Inlined atom methods:
- *     atom.zero_acc(b) -> rocke_mfma_atom_zero_acc(b, atom)
+ *     atom.zero_acc(b) -> b.zero_vec_f32(atom.c_per_lane)
  *     atom.emit(b,a,b,c) -> b.mma(atom.name, a, b, c)
  */
 rocke_value_t* rocke_mfma_k_loop(rocke_ir_builder_t* b,
@@ -416,10 +416,6 @@ rocke_value_t* rocke_mfma_k_loop(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "mfma_k_loop: atom/load_a/load_b must be non-NULL");
     }
-    if(rocke_mfma_atom_require_recurrence(b, atom, "mfma_k_loop") != ROCKE_OK)
-    {
-        return NULL;
-    }
 
     /* if K % atom.k != 0: raise ValueError */
     if(atom->k == 0 || (K % atom->k) != 0)
@@ -430,7 +426,7 @@ rocke_value_t* rocke_mfma_k_loop(rocke_ir_builder_t* b,
     n_tiles = K / atom->k;
 
     /* acc0 = initial_acc if initial_acc is not None else atom.zero_acc(b) */
-    acc0 = (initial_acc != NULL) ? initial_acc : rocke_mfma_atom_zero_acc(b, atom);
+    acc0 = (initial_acc != NULL) ? initial_acc : rocke_b_zero_vec_f32(b, atom->c_per_lane);
 
     /* loop_args = [(acc_name, acc0)] ; Python defaults iv_name/acc_name. */
     loop_args[0].name = (acc_name != NULL) ? acc_name : "acc";
@@ -486,7 +482,7 @@ rocke_value_t* rocke_mfma_k_loop(rocke_ir_builder_t* b,
  *                  out_dtype)
  *         return
  *     out_dtype_ir = F32 if out_dtype == "f32" else _ir_type_for_dtype(out_dtype)
- *     for i in range(atom.d_per_lane):
+ *     for i in range(atom.c_per_lane):
  *         row_in, col_in = atom.lane_to_output(b, lane_decode.lane, i)
  *         row = b.add(m_tile_base, row_in)
  *         col = b.add(n_tile_base, col_in)
@@ -518,12 +514,12 @@ static bool rocke_i_lane_to_output(rocke_ir_builder_t* b,
         rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
         rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
         rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        /* Python: row = b.add(b.mul(m_blk, b.const_i32(d_per_lane)),
+        /* Python: row = b.add(b.mul(m_blk, b.const_i32(c_per_lane)),
          *                     b.const_i32(i)). Sequence each builder call so the
          * value counter matches Python's left-to-right argument evaluation
-         * (const d_per_lane -> mul -> const i -> add); C arg order is
+         * (const c_per_lane -> mul -> const i -> add); C arg order is
          * unspecified. */
-        rocke_value_t* c_cpl = rocke_b_const_i32(b, atom->d_per_lane);
+        rocke_value_t* c_cpl = rocke_b_const_i32(b, atom->c_per_lane);
         rocke_value_t* row_mul = rocke_b_mul(b, m_blk, c_cpl);
         rocke_value_t* c_i = rocke_b_const_i32(b, i);
         rocke_value_t* row = rocke_b_add(b, row_mul, c_i);
@@ -625,7 +621,7 @@ rocke_status_t rocke_store_acc_to_global(rocke_ir_builder_t* b,
         }
     }
 
-    for(i = 0; i < atom->d_per_lane; ++i)
+    for(i = 0; i < atom->c_per_lane; ++i)
     {
         rocke_value_t* row_in;
         rocke_value_t* col_in;
@@ -794,8 +790,7 @@ bool rocke_validate_arch_and_block_size(rocke_ir_builder_t* b,
  * Python:
  *     target = ArchTarget.from_gfx(arch)
  *     if not target.mma.has_shape(a_dtype=atom.dtype_in, b_dtype=atom.dtype_in,
- *             c_dtype=atom.dtype_c, d_dtype=atom.dtype_d,
- *             m=atom.m, n=atom.n, k=atom.k):
+ *             c_dtype=atom.dtype_out, m=atom.m, n=atom.n, k=atom.k):
  *         raise NotImplementedError(
  *             f"{where} MFMA atom {atom.name!r} "
  *             f"({atom.dtype_in} {atom.m}x{atom.n}x{atom.k}) is not in the "
@@ -836,8 +831,7 @@ rocke_status_t rocke_validate_mfma_atom_in_catalog(rocke_ir_builder_t* b,
                                     /*family=*/NULL,
                                     atom->dtype_in,
                                     atom->dtype_in,
-                                    atom->dtype_c,
-                                    atom->dtype_d,
+                                    atom->dtype_out,
                                     atom->m,
                                     atom->n,
                                     atom->k))

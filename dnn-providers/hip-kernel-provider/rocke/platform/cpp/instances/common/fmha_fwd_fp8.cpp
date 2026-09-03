@@ -237,7 +237,7 @@ bool rocke_fmha_fwd_fp8_is_valid_spec(const rocke_fmha_fwd_fp8_spec_t* spec,
     }
 
     /* The dequant-on-load path emits the f16 16x16x16 atom. */
-    if(!rocke_arch_supports_dtype_combo(target, "f16", "f16", "fp32", "fp32", NULL))
+    if(!rocke_arch_supports_dtype_combo(target, "f16", "f16", "fp32", NULL))
     {
         if(reason != NULL && reason_cap > 0)
         {
@@ -249,7 +249,6 @@ bool rocke_fmha_fwd_fp8_is_valid_spec(const rocke_fmha_fwd_fp8_spec_t* spec,
                                     NULL,
                                     "f16",
                                     "f16",
-                                    "fp32",
                                     "fp32",
                                     ROCKE_MFMA_ATTN_BLOCK_M,
                                     ROCKE_MFMA_ATTN_BLOCK_M,

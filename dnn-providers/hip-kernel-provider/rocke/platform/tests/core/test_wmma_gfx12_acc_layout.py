@@ -5,8 +5,8 @@
 
 Three layers of validation:
 
-1. **Metadata identity** — every gfx1250 WMMA op carries the same C-input and
-   D-result fragment metadata as its gfx1201 counterparts.
+1. **Metadata identity** — every gfx1250 WMMA op carries the same ``c_frag_len``,
+   ``wave_size``, and ``c_fn`` object as its gfx1201 counterparts.
 
 2. **Coordinate exhaustion** — the coordinate function produces identical (row, col)
    pairs for all 256 (lane, slot) inputs on both sets of op_ids, using the same
@@ -86,7 +86,7 @@ _GFX1250_WMMA_OPS = {
 
 # Accumulator params shared by both arches: 16x16 output tile, wave32,
 # <8 x float> per lane.
-_EXPECTED_CD_FRAG_LEN = 8
+_EXPECTED_C_FRAG_LEN = 8
 _EXPECTED_WAVE_SIZE = 32
 
 
@@ -116,11 +116,10 @@ class TestWmmaGfx12AccFragMetadata(unittest.TestCase):
     def _check_acc_metadata(self, op_id: str):
         info = _MMA_FRAGMENT_INFO[op_id]
         self.assertEqual(
-            info.d_frag_len,
-            _EXPECTED_CD_FRAG_LEN,
-            msg=f"{op_id!r}: d_frag_len {info.d_frag_len} != {_EXPECTED_CD_FRAG_LEN}",
+            info.c_frag_len,
+            _EXPECTED_C_FRAG_LEN,
+            msg=f"{op_id!r}: c_frag_len {info.c_frag_len} != {_EXPECTED_C_FRAG_LEN}",
         )
-        self.assertEqual(info.c_frag_len, _EXPECTED_CD_FRAG_LEN)
         self.assertEqual(
             info.wave_size,
             _EXPECTED_WAVE_SIZE,
@@ -132,7 +131,6 @@ class TestWmmaGfx12AccFragMetadata(unittest.TestCase):
             msg=f"{op_id!r}: c_fn is not _wmma_gfx12_acc_16x16 — "
             f"accumulator layout has been forked from the shared gfx12 map",
         )
-        self.assertIs(info.d_fn, _wmma_gfx12_acc_16x16)
 
     def test_gfx1201_acc_metadata(self):
         for op_id in _GFX1201_WMMA_OPS:
@@ -161,7 +159,7 @@ class TestWmmaGfx12AccCoordinateFormula(unittest.TestCase):
     def test_coordinate_formula(self):
         builder = _ConstBuilder()
         for lane in range(_EXPECTED_WAVE_SIZE):
-            for slot in range(_EXPECTED_CD_FRAG_LEN):
+            for slot in range(_EXPECTED_C_FRAG_LEN):
                 got = _wmma_gfx12_acc_16x16(builder, lane, slot)
                 want = self._expected_coord(lane, slot)
                 self.assertEqual(
@@ -176,7 +174,7 @@ class TestWmmaGfx12AccCoordinateFormula(unittest.TestCase):
         coords = {
             self._expected_coord(lane, slot)
             for lane in range(_EXPECTED_WAVE_SIZE)
-            for slot in range(_EXPECTED_CD_FRAG_LEN)
+            for slot in range(_EXPECTED_C_FRAG_LEN)
         }
         expected = {(r, c) for r in range(16) for c in range(16)}
         self.assertEqual(
@@ -189,7 +187,7 @@ class TestWmmaGfx12AccCoordinateFormula(unittest.TestCase):
         """Each (lane, slot) pair must map to a unique matrix element."""
         seen: dict = {}
         for lane in range(_EXPECTED_WAVE_SIZE):
-            for slot in range(_EXPECTED_CD_FRAG_LEN):
+            for slot in range(_EXPECTED_C_FRAG_LEN):
                 coord = self._expected_coord(lane, slot)
                 if coord in seen:
                     prev_lane, prev_slot = seen[coord]
@@ -203,13 +201,13 @@ class TestWmmaGfx12AccCoordinateFormula(unittest.TestCase):
 
 class TestWmmaGfx12AccLayoutIdentical(unittest.TestCase):
     """The concrete (lane,slot)->(row,col) mapping must be bit-for-bit identical
-    across every gfx1201 op and every gfx1250 op that shares the gfx12 D map."""
+    across every gfx1201 op and every gfx1250 op that shares ``lm_wmma_gfx12_c``."""
 
     def _layout_for(self, op_id: str) -> dict:
         info = _MMA_FRAGMENT_INFO[op_id]
-        if info.d_fn is None:
-            self.skipTest(f"{op_id!r} has no verified result lane map (d_fn=None)")
-        return _full_layout(info.d_fn, info.d_frag_len, info.wave_size)
+        if info.c_fn is None:
+            self.skipTest(f"{op_id!r} has no verified accumulator lane map (c_fn=None)")
+        return _full_layout(info.c_fn, info.c_frag_len, info.wave_size)
 
     def test_gfx1250_layout_matches_gfx1201_reference(self):
         # Use wmma_gfx12_f32_16x16x16_f16 as the canonical gfx1201 reference.
@@ -219,11 +217,11 @@ class TestWmmaGfx12AccLayoutIdentical(unittest.TestCase):
         for op_id in _GFX1250_WMMA_OPS:
             with self.subTest(op_id=op_id):
                 info = _MMA_FRAGMENT_INFO[op_id]
-                if info.d_fn is None:
+                if info.c_fn is None:
                     # op has no verified map; identity is enforced via the
-                    # metadata test (same d_frag_len / wave_size / d_fn object).
+                    # metadata test (same c_frag_len / wave_size / c_fn object).
                     continue
-                candidate = _full_layout(info.d_fn, info.d_frag_len, info.wave_size)
+                candidate = _full_layout(info.c_fn, info.c_frag_len, info.wave_size)
                 self.assertEqual(
                     candidate,
                     ref_layout,

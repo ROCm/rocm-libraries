@@ -262,7 +262,6 @@ def is_valid_spec(spec: StreamKGemmSpec, arch: str = "gfx950") -> Tuple[bool, st
         a_dtype=a_dtype,
         b_dtype=a_dtype,
         c_dtype="fp32",
-        d_dtype="fp32",
         m=atom.m,
         n=atom.n,
         k=atom.k,
@@ -328,7 +327,7 @@ def build_streamk_gemm(spec: StreamKGemmSpec, arch: str = "gfx950") -> KernelDef
        address arithmetic in the MFMA K-loop and atomic-store epilogue
        stays in SGPRs.
     3. Run the MFMA K-loop (`tile_k / atom.k` atoms; per-lane
-       ``<d_per_lane x f32>`` accumulator).
+       ``<c_per_lane x f32>`` accumulator).
     4. Atomic-add the f32 ``acc`` into ``Cf32[m_global, n_global]``.
 
     Notes:
@@ -418,7 +417,7 @@ def build_streamk_gemm(spec: StreamKGemmSpec, arch: str = "gfx950") -> KernelDef
             )
 
         # Run ``tile_k / atom.k`` MFMA atoms; result is per-lane
-        # <d_per_lane x f32> accumulator. ``mfma_k_loop`` re-emits a
+        # <c_per_lane x f32> accumulator. ``mfma_k_loop`` re-emits a
         # fresh ``atom.zero_acc(b)`` per call so persistent reuse
         # starts cleanly on every iteration.
         acc_final = mfma_k_loop(
@@ -429,7 +428,7 @@ def build_streamk_gemm(spec: StreamKGemmSpec, arch: str = "gfx950") -> KernelDef
             load_b=_load_b,
         )
 
-        # Atomic-add each lane's d_per_lane cells into the Cf32
+        # Atomic-add each lane's c_per_lane cells into the Cf32
         # workspace. The atom's ``lane_to_output`` mapping decodes the
         # per-lane output cell coords; the f32 split-K reduction
         # across (m_tile, n_tile, *) k_iter values converges to the

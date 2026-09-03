@@ -181,7 +181,7 @@ mfmas_per_warp_m, mfmas_per_warp_n
 k_atoms_per_tile_k
 ```
 
-Each workgroup owns one `tile_m x tile_n` output tile. Each warp owns a subregion. Each lane owns `d_per_lane * mfmas_per_warp_m * mfmas_per_warp_n` accumulator slots (4 for 16x16 atoms, 16 for 32x32 atoms).
+Each workgroup owns one `tile_m x tile_n` output tile. Each warp owns a subregion. Each lane owns `c_per_lane * mfmas_per_warp_m * mfmas_per_warp_n` accumulator slots (4 for 16x16 atoms, 16 for 32x32 atoms).
 
 ## LDS Allocation
 
@@ -321,12 +321,10 @@ This is multi-launch grouped GEMM: one HSACO, one persistent `KernelLauncher`, o
 ## Multi-D GEMM `instances/gemm_multi_d.py::GemmMultiDSpec` and `build_gemm_multi_d`
 match CK Tile `19_gemm_multi_d`. The kernel computes
 ``E = f(A * B, D_0, D_1, ..., D_{n-1})`` where ``f`` is a fused
-elementwise chain over the GEMM accumulator and N auxiliary epilogue D tensors
-of the same ``(M, N)`` shape. These operator-level D tensors are bias,
-residual, or gate inputs; they are unrelated to the D result of an individual
-MMA atom. Implementation re-uses
+elementwise chain over the GEMM accumulator and N D tensors of the
+same ``(M, N)`` shape. Implementation re-uses
 `build_universal_gemm` + a `FusedEpilogue` whose op chain is one
-`ResidualAdd` / `ResidualMul` per epilogue D operand.
+`ResidualAdd` / `ResidualMul` per D operand.
 
 Per-D op is chosen from ``{"add", "mul"}``; ``num_d`` up to 8.
 Requires `epilogue="cshuffle"` on the base spec (the default epilogue

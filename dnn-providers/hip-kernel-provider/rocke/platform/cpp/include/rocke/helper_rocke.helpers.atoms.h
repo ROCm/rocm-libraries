@@ -1,37 +1,39 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * rocke/helper_rocke.helpers.atoms.h -- C99 port of the MFMA atom helpers from
+ * rocke/helper_rocke.helpers.atoms.h -- C99 port of three symbols from
  * rocke/helpers/atoms.py:
  *
  *   Python                              C99 (this header)
  *   ---------------------------------   ---------------------------------------
  *   mfma_atom(dtype, m, n, k)           rocke_mfma_atom(...) / rocke_b_mfma_atom(...)
- *   MfmaAtom.zero_acc(b)                rocke_mfma_atom_zero_acc(...)
- *   d_warp_params(atom)                 rocke_d_warp_params(...)
- *   make_d_warp_dstr_encoding(atom)     rocke_make_d_warp_dstr_encoding(...)
+ *   c_warp_params(atom)                 rocke_c_warp_params(...)
+ *   make_c_warp_dstr_encoding(atom)     rocke_make_c_warp_dstr_encoding(...)
  *
- * The recurrence guard is a C-side contract helper for Python call sites that
- * feed an MMA result D back as the next C. The WMMA family, emit,
- * lane_to_output, and the timing-trait properties remain outside this port.
+ * SCOPE: only these three symbols (plus the MfmaAtom value type they return /
+ * consume). The MfmaAtom factory class-methods, the WMMA family, emit/zero_acc/
+ * lane_to_output, and the timing-trait properties are NOT in scope for this
+ * phase -- but the static MFMA_ATOMS catalog is reproduced internally because
+ * mfma_atom() is a lookup over it.
  *
- * The three catalog/layout helpers below do not emit IR:
+ * NONE of these three call the IR builder (rocke_b_*):
  *
  *   - mfma_atom is a pure (dtype, m, n, k) -> MfmaAtom catalog lookup.
- *   - d_warp_params is a pure (m, n) -> (kCM0PerLane, kCMLane, kCM1PerLane,
- *     kCNLane) table lookup + a d_per_lane consistency check.
- *   - make_d_warp_dstr_encoding constructs a TileDistributionEncoding (no IR);
+ *   - c_warp_params is a pure (m, n) -> (kCM0PerLane, kCMLane, kCM1PerLane,
+ *     kCNLane) table lookup + a c_per_lane consistency check.
+ *   - make_c_warp_dstr_encoding constructs a TileDistributionEncoding (no IR);
  *     it only needs the builder for arena ownership of the encoding node, which
  *     is the same lifetime contract the distribution helper already uses.
  *
- * zero_acc emits the same zero-vector builder sequence as MfmaAtom.zero_acc;
- * the catalog/layout helpers remain otherwise pure.
+ * Because the op sequence emitted by all three is empty, the "byte-identical op
+ * sequence" requirement is trivially met; fidelity is on the returned struct /
+ * encoding values, which are reproduced field-for-field from the Python.
  *
  * Error model mirrors the rest of the C port: a sticky-error builder spelling
  * (rocke_b_*) stands in for `raise`, and a builder-free pure spelling returns a
  * status / NULL for call sites that have no builder. mfma_atom's
- * `raise ValueError`, d_warp_params' `raise NotImplementedError` / `ValueError`,
- * and make_d_warp_dstr_encoding's `raise NotImplementedError` all map onto
+ * `raise ValueError`, c_warp_params' `raise NotImplementedError` / `ValueError`,
+ * and make_c_warp_dstr_encoding's `raise NotImplementedError` all map onto
  * rocke_status_t codes (ROCKE_ERR_VALUE / ROCKE_ERR_NOTIMPL).
  */
 #ifndef ROCKE_HELPER_ROCKE_HELPERS_ATOMS_H
@@ -52,12 +54,11 @@ extern "C" {
  * Value type mirroring rocke.helpers.atoms.MfmaAtom (frozen dataclass). It is
  * a plain value struct (no arena ownership) -- the catalog entries are static
  * and `rocke_mfma_atom` returns a pointer into that immutable static table, so
- * callers must NOT free or mutate it. The `name` and `dtype_in`/`dtype_d`
+ * callers must NOT free or mutate it. The `name` and `dtype_in`/`dtype_out`
  * strings are string literals with static storage duration.
  *
  * Fields are 1:1 with the Python dataclass declaration order:
- *   m, n, k, a_per_lane, b_per_lane, c_per_lane, d_per_lane,
- *   dtype_in, dtype_c, dtype_d, name.
+ *   m, n, k, a_per_lane, b_per_lane, c_per_lane, dtype_in, dtype_out, name.
  */
 typedef struct rocke_mfma_atom
 {
@@ -67,10 +68,8 @@ typedef struct rocke_mfma_atom
     int a_per_lane;
     int b_per_lane;
     int c_per_lane;
-    int d_per_lane;
     const char* dtype_in; /* e.g. "f16", "bf16", "fp8e4m3", "bf8e5m2", ... */
-    const char* dtype_c; /* accumulator input dtype                         */
-    const char* dtype_d; /* always "f32" for the shipped atoms            */
+    const char* dtype_out; /* always "f32" for the shipped atoms            */
     const char* name; /* backend op_id, e.g. "mfma_f32_16x16x16_f16"   */
 } rocke_mfma_atom_t;
 
@@ -98,14 +97,6 @@ int rocke_mfma_atom_k_per_xdlops(const rocke_mfma_atom_t* atom);
 int rocke_mfma_atom_mfma_cycle(const rocke_mfma_atom_t* atom);
 bool rocke_mfma_atom_is_f4f6(const rocke_mfma_atom_t* atom);
 
-/* Construct the initial MMA C fragment from dtype_c/c_per_lane. */
-rocke_value_t* rocke_mfma_atom_zero_acc(rocke_ir_builder_t* b, const rocke_mfma_atom_t* atom);
-
-/* Reject helpers that feed D back as C when the fragment contracts differ. */
-rocke_status_t rocke_mfma_atom_require_recurrence(rocke_ir_builder_t* b,
-                                                  const rocke_mfma_atom_t* atom,
-                                                  const char* where);
-
 /* ------------------------------------------------------------------ mfma_atom *
  *
  * Python:
@@ -130,15 +121,15 @@ const rocke_mfma_atom_t* rocke_mfma_atom(const char* dtype, int m, int n, int k)
 const rocke_mfma_atom_t*
     rocke_b_mfma_atom(rocke_ir_builder_t* b, const char* dtype, int m, int n, int k);
 
-/* ------------------------------------------------------------------ d_warp_params *
+/* ------------------------------------------------------------------ c_warp_params *
  *
  * Python:
  *
- *     def d_warp_params(atom) -> (kCM0PerLane, kCMLane, kCM1PerLane, kCNLane):
+ *     def c_warp_params(atom) -> (kCM0PerLane, kCMLane, kCM1PerLane, kCNLane):
  *         key = (atom.m, atom.n)
  *         if key not in _C_WARP_PARAMS: raise NotImplementedError(...)
  *         m0, m_lane, m1, n_lane = _C_WARP_PARAMS[key]
- *         if m0 * m1 != atom.d_per_lane: raise ValueError(...)
+ *         if m0 * m1 != atom.c_per_lane: raise ValueError(...)
  *         return m0, m_lane, m1, n_lane
  *
  * Table:
@@ -148,9 +139,9 @@ const rocke_mfma_atom_t*
  * On success writes the four constants to the out-params (any may be NULL to
  * skip) and returns ROCKE_OK. Returns ROCKE_ERR_NOTIMPL if (atom->m, atom->n) is not
  * in the table (the batched 4x4 atom and every non-square shape), and
- * ROCKE_ERR_VALUE if kCM0PerLane*kCM1PerLane != atom->d_per_lane. On any error the
+ * ROCKE_ERR_VALUE if kCM0PerLane*kCM1PerLane != atom->c_per_lane. On any error the
  * out-params are left untouched. `atom` must be non-NULL. */
-rocke_status_t rocke_d_warp_params(const rocke_mfma_atom_t* atom,
+rocke_status_t rocke_c_warp_params(const rocke_mfma_atom_t* atom,
                                    int* out_kCM0PerLane,
                                    int* out_kCMLane,
                                    int* out_kCM1PerLane,
@@ -159,19 +150,19 @@ rocke_status_t rocke_d_warp_params(const rocke_mfma_atom_t* atom,
 /* Builder-aware variant: identical computation; on the NotImplementedError /
  * ValueError paths it sets the builder sticky error (ROCKE_ERR_NOTIMPL /
  * ROCKE_ERR_VALUE) with a Python-matching message and returns that status. */
-rocke_status_t rocke_b_d_warp_params(rocke_ir_builder_t* b,
+rocke_status_t rocke_b_c_warp_params(rocke_ir_builder_t* b,
                                      const rocke_mfma_atom_t* atom,
                                      int* out_kCM0PerLane,
                                      int* out_kCMLane,
                                      int* out_kCM1PerLane,
                                      int* out_kCNLane);
 
-/* ------------------------------------------------ make_d_warp_dstr_encoding *
+/* ------------------------------------------------ make_c_warp_dstr_encoding *
  *
  * Python:
  *
- *     def make_d_warp_dstr_encoding(atom) -> TileDistributionEncoding:
- *         m0, m_lane, m1, n_lane = d_warp_params(atom)
+ *     def make_c_warp_dstr_encoding(atom) -> TileDistributionEncoding:
+ *         m0, m_lane, m1, n_lane = c_warp_params(atom)
  *         return TileDistributionEncoding(
  *             Rs=(),
  *             Hs=((m0, m_lane, m1), (n_lane,)),
@@ -182,15 +173,15 @@ rocke_status_t rocke_b_d_warp_params(rocke_ir_builder_t* b,
  *         )
  *
  * Builds the MFMA C-tile TileDistributionEncoding for `atom` by feeding the
- * four d_warp_params constants into rocke_make_tile_distribution_encoding (which
+ * four c_warp_params constants into rocke_make_tile_distribution_encoding (which
  * runs the encoding's __post_init__ validation and arena-owns the node).
  *
  * Unlike the Python (which takes no builder) this needs `b` for arena
  * ownership of the returned encoding -- the same lifetime contract as
  * rocke_make_tile_distribution_encoding. Returns the arena-owned encoding, or
- * NULL with the builder sticky error set if d_warp_params fails (the
+ * NULL with the builder sticky error set if c_warp_params fails (the
  * NotImplementedError/ValueError path) or the encoding constructor fails. */
-rocke_tile_distribution_encoding_t* rocke_make_d_warp_dstr_encoding(rocke_ir_builder_t* b,
+rocke_tile_distribution_encoding_t* rocke_make_c_warp_dstr_encoding(rocke_ir_builder_t* b,
                                                                     const rocke_mfma_atom_t* atom);
 
 #ifdef __cplusplus

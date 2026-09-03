@@ -149,14 +149,13 @@ def is_valid_spec(spec: FmhaMfmaSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     # The QK / PV chain is the f16 16x16x16 atom; require it on the
     # target catalog (MFMA on CDNA, WMMA on RDNA) so an arch missing the
     # atom is rejected cleanly.
-    if not target.supports_dtype_combo("f16", "f16", "fp32", "fp32", family=family):
+    if not target.supports_dtype_combo("f16", "f16", "fp32", family=family):
         return False, f"unsupported f16 {family} dtype combo on {arch}"
     if not target.mma.has_shape(
         family=family,
         a_dtype="f16",
         b_dtype="f16",
         c_dtype="fp32",
-        d_dtype="fp32",
         m=MFMA_ATTN_BLOCK_M,
         n=MFMA_ATTN_BLOCK_M,
         k=MFMA_ATTN_BLOCK_K,

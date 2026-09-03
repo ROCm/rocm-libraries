@@ -38,7 +38,6 @@ from ...helpers.distribution import (
     make_static_distributed_tensor,
     store_tile_cshuffle,
 )
-from ...helpers.atoms import require_mma_recurrence, zero_mma_c
 from ...helpers.epilogues import _cshuffle_acc_distribution
 from ...helpers.geometry import WarpGrid
 from ...helpers.layouts import LdsLayout
@@ -67,12 +66,6 @@ __all__ = [
     "run_deep_fused_conv_pool_fp16_manifest_problem",
     "build_deep_fused_conv_pool",
 ]
-
-
-def _zero_recurrent_mma_acc(b: IRBuilder, op, *, where: str) -> Value:
-    """Construct C for an MMA loop that feeds each D result into the next C."""
-    require_mma_recurrence(op, where=where)
-    return zero_mma_c(b, op)
 
 
 @dataclass(frozen=True)
@@ -404,11 +397,11 @@ def _stage_accumulators_to_cshuffle_lds(
 ) -> Value:
     """Publish MMA accumulators to a row-major ``[tile_m, tile_n]`` LDS tile.
 
-    Fully ``op``-driven: the per-lane fragment width (``op.d_frag_len``) and the
-    slot -> (row, col) scatter (``op.d_layout().coord``) come from the resolved
+    Fully ``op``-driven: the per-lane fragment width (``op.c_frag_len``) and the
+    slot -> (row, col) scatter (``op.c_layout().coord``) come from the resolved
     MMA op, so this stages both the MFMA column-distributed vec<16> accumulator
     (gfx950) and the WMMA vec<8> accumulator (gfx1201) with one body. For MFMA
-    ``op.d_layout()`` is byte-identical to ``MfmaAtom.lane_to_output``, so the
+    ``op.c_layout()`` is byte-identical to ``MfmaAtom.lane_to_output``, so the
     gfx950 store path is unchanged.
 
     ``sync=False`` skips the trailing ``b.sync()`` so the caller can batch this
@@ -416,7 +409,7 @@ def _stage_accumulators_to_cshuffle_lds(
     a single block-wide barrier before the shared consumer reads both tiles.
     """
 
-    c_frag_len = op.d_frag_len
+    c_frag_len = op.c_frag_len
     mfmas_m = grid.mfmas_per_warp_m
     mfmas_n = grid.mfmas_per_warp_n
     if len(accs) != mfmas_m * mfmas_n:
@@ -440,7 +433,7 @@ def _stage_accumulators_to_cshuffle_lds(
     traits = LoadStoreTraits(distribution=dist, vector_dim_y=1, scalar_per_vector=1)
     warp_m_off = grid.warp_m_off(b)
     warp_n_off = grid.warp_n_off(b)
-    c_map = op.d_layout()
+    c_map = op.c_layout()
 
     for mi in range(mfmas_m):
         for ni in range(mfmas_n):
@@ -864,10 +857,7 @@ def _emit_conv1_1x1(
     needs_mask = k_chunks * conv1_tile_k != K0
     warp_m_off = grid.warp_m_off(b)
     warp_n_off = grid.warp_n_off(b)
-    accs = [
-        _zero_recurrent_mma_acc(b, op, where="deep_fused_conv_pool conv1")
-        for _ in range(mfmas_m * mfmas_n)
-    ]
+    accs = [b.zero_vec_f32(op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
 
     for k_chunk in range(k_chunks):
         chunk_base = k_chunk * conv1_tile_k

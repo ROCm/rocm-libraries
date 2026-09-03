@@ -512,7 +512,7 @@ def build_moe_fused_mega_gemm(
     tokens = b.param("tokens", I32)
 
     t = spec.gate_up_tile()
-    _, _, d_per_lane = _mfma_atom_widths(u_gu)
+    _, _, c_per_lane = _mfma_atom_widths(u_gu)
 
     block_m = t.tile_m
     block_n = t.tile_n
@@ -684,7 +684,7 @@ def build_moe_fused_mega_gemm(
             )
 
         _emit_cshuffle_stage(
-            b, u_gu, cdec, Hidden_smem, storage_dtype, d_per_lane, _silu_cell
+            b, u_gu, cdec, Hidden_smem, storage_dtype, c_per_lane, _silu_cell
         )
         b.sync()
 
@@ -743,7 +743,7 @@ def build_moe_fused_mega_gemm(
                 SortedTokenIds,
                 SortedWeights,
                 Y,
-                d_per_lane,
+                c_per_lane,
                 batch_bucket_off=c0,
                 tokens=tokens,
             )

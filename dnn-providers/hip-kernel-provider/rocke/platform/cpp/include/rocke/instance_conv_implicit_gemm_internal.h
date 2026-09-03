@@ -171,7 +171,7 @@ typedef struct rocke_conv_build_ctx
     /* ---- per-lane MMA fragment widths (off op) ---- */
     int a_per_lane; /* op.a_frag_len */
     int b_per_lane; /* op.b_frag_len */
-    int d_per_lane; /* op.d_frag_len */
+    int c_per_lane; /* op.c_frag_len */
 
     /* ---- block tile dims (aliases of spec geometry) ---- */
     int block_m; /* spec.tile_m */
@@ -219,7 +219,7 @@ typedef struct rocke_conv_build_ctx
     int k_atoms; /* spec.k_atoms_per_tile_k */
 
     /* ---- accumulators ---- */
-    rocke_value_t* acc_init; /* zero_vec_f32(d_per_lane)    */
+    rocke_value_t* acc_init; /* zero_vec_f32(c_per_lane)    */
     /* The `accs` list: one zero-acc iter-arg per (mi, ni) warp MFMA tile, named
      * "acc_m{mi}_n{ni}" + the shared acc_init. */
     const char* acc_names[ROCKE_CONV_MAX_ACCS];

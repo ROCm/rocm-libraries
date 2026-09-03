@@ -67,7 +67,7 @@ const rocke_type_t* rocke_moe_storage_dtype(const rocke_gemm_universal_spec_t* u
     return rocke_scalar_by_name(d);
 }
 
-/* _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, d_per_lane). MFMA-only
+/* _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, c_per_lane). MFMA-only
  * geometry: the warp-tile atom's per-lane fragment widths. Shared with the
  * gate-up / down / interleaved bodies via the sibling header. */
 void rocke_moe_mfma_atom_widths(const rocke_gemm_universal_spec_t* u,
@@ -204,7 +204,7 @@ int rocke_moe_cwarp_decode_init(rocke_moe_cwarp_decode_t* out,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "_CWarpDecode: no MFMA atom for warp tile");
         return 0;
     }
-    const rocke_tile_distribution_encoding_t* enc = rocke_make_d_warp_dstr_encoding(b, atom);
+    const rocke_tile_distribution_encoding_t* enc = rocke_make_c_warp_dstr_encoding(b, atom);
     if(enc == NULL)
     {
         return 0;
@@ -307,7 +307,7 @@ int rocke_moe_kloop_plan_init(rocke_moe_kloop_plan_t* out,
     out->u = u;
     out->tid = tid;
     out->storage_dtype = rocke_moe_storage_dtype(u);
-    rocke_moe_mfma_atom_widths(u, &out->a_per_lane, &out->b_per_lane, &out->d_per_lane);
+    rocke_moe_mfma_atom_widths(u, &out->a_per_lane, &out->b_per_lane, &out->c_per_lane);
     out->block_m = t->tile_m;
     out->block_n = t->tile_n;
     out->block_k = t->tile_k;
@@ -851,7 +851,7 @@ void rocke_moe_emit_cshuffle_stage(rocke_ir_builder_t* b,
                                    const rocke_moe_cwarp_decode_t* cdec,
                                    rocke_value_t* smem,
                                    const rocke_type_t* storage_dtype,
-                                   int d_per_lane,
+                                   int c_per_lane,
                                    rocke_moe_cell_value_fn cell_value,
                                    void* cell_user)
 {
@@ -863,7 +863,7 @@ void rocke_moe_emit_cshuffle_stage(rocke_ir_builder_t* b,
      * each warp atom's MFMA accumulators into LDS via the C-warp tile
      * distribution's space-filling-curve (snake) store walk. For each (mi, ni):
      *   1. materialise the per-lane slot results into a StaticDistributedTensor
-     *      (slot i = y0*m1 + y1, i in 0..d_per_lane, row-major) via cell_value;
+     *      (slot i = y0*m1 + y1, i in 0..c_per_lane, row-major) via cell_value;
      *      the cell IR is emitted in plain i-order, matching the Python dt.set
      *      loop, so the SiLU/cast ops are byte-identical;
      *   2. walk traits.iterate_accesses() (snake SFC over the non-vector Y
@@ -938,7 +938,7 @@ void rocke_moe_emit_cshuffle_stage(rocke_ir_builder_t* b,
             {
                 return;
             }
-            for(int i = 0; i < d_per_lane; ++i)
+            for(int i = 0; i < c_per_lane; ++i)
             {
                 dt->storage[i] = cell_value(mi, ni, i, cell_user);
             }
@@ -1013,7 +1013,7 @@ void rocke_moe_emit_down_reduce_epilogue_atomic(rocke_ir_builder_t* b,
                                                 rocke_value_t* SortedTokenIds,
                                                 rocke_value_t* SortedWeights,
                                                 rocke_value_t* Y,
-                                                int d_per_lane,
+                                                int c_per_lane,
                                                 rocke_value_t* batch_bucket_off,
                                                 rocke_value_t* tokens)
 {
@@ -1040,7 +1040,7 @@ void rocke_moe_emit_down_reduce_epilogue_atomic(rocke_ir_builder_t* b,
         {
             c_ns[ni] = rocke_b_add(b, block_n_off, rocke_moe_cwarp_decode_warp_col(&cdec, ni));
         }
-        for(int i = 0; i < d_per_lane; ++i)
+        for(int i = 0; i < c_per_lane; ++i)
         {
             rocke_value_t* c_m
                 = rocke_b_add(b, block_m_off, rocke_moe_cwarp_decode_warp_row(&cdec, mi, i));

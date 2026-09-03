@@ -69,7 +69,7 @@ def _gemm_warp_tile_k(default: int = 16) -> int:
     atom (a hard comgr crash) on gfx942.
     """
     op = ArchTarget.from_gfx(_ARCH).mma.select_largest_k(
-        a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", d_dtype="fp32", m=32, n=32
+        a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=32, n=32
     )
     return op.k if op is not None else default
 

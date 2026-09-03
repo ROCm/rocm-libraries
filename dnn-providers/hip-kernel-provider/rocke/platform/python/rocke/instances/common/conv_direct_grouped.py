@@ -226,11 +226,11 @@ def is_valid_spec_16c(
             f"groups {p.groups} not divisible by block_groups {spec.block_groups}"
         )
     if not target.mma.has_shape(
-        a_dtype="f16", b_dtype="f16", c_dtype="fp32", d_dtype="fp32", m=16, n=16, k=16
+        a_dtype="f16", b_dtype="f16", c_dtype="fp32", m=16, n=16, k=16
     ):
         return False, f"missing 16x16x16 f16 MFMA atom on {arch}"
     if spec.fold_k32 and not target.mma.has_shape(
-        a_dtype="f16", b_dtype="f16", c_dtype="fp32", d_dtype="fp32", m=16, n=16, k=32
+        a_dtype="f16", b_dtype="f16", c_dtype="fp32", m=16, n=16, k=32
     ):
         return False, (
             f"fold_k32=True needs the 16x16x32 f16 MFMA atom, absent on "
@@ -729,7 +729,7 @@ def build_direct_conv_16c(spec: DirectConv16cSpec, arch: str = "gfx950") -> Kern
                     # NOTE: this builder still rides the legacy hand-rolled
                     # MFMA lane math (s_lane_k32 / ch_lane_k32 magic constants)
                     # rather than the unified ``op_for_shape`` +
-                    # ``op.d_layout().coord(...)`` contract that mfma_gemm is
+                    # ``op.c_layout().coord(...)`` contract that mfma_gemm is
                     # migrating to (refactor_opportunities.md items 1-4).
                     # Migrating the C-accumulator readout + A/B K-pack to
                     # c_layout().coord would delete this whole hazard class at

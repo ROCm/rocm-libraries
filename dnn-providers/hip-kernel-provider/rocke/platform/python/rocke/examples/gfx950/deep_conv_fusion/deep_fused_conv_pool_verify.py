@@ -287,7 +287,7 @@ def main() -> int:
 
     target = ArchTarget.from_gfx(arch)
     atom = target.mma.select_largest_k(
-        a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", d_dtype="fp32", m=32, n=32
+        a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=32, n=32
     )
     if atom is None:
         print(f"no fp16 32x32 MFMA atom for {arch}", file=sys.stderr)

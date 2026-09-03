@@ -73,13 +73,7 @@ def validate_fmha_mfma_atom(dtype: str, arch: str = "gfx950") -> Tuple[bool, str
 
     blk = FMHA_MFMA_ATTN_BLOCK
     if not target.mma.has_shape(
-        a_dtype=a_name,
-        b_dtype=a_name,
-        c_dtype="fp32",
-        d_dtype="fp32",
-        m=blk,
-        n=blk,
-        k=blk,
+        a_dtype=a_name, b_dtype=a_name, c_dtype="fp32", m=blk, n=blk, k=blk
     ):
         return False, (
             f"FMHA MFMA atom {a_name} {blk}x{blk}x{blk} not in {arch} catalog"

@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from ...core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
-from ...helpers.atoms import make_d_warp_dstr_encoding, mfma_atom
+from ...helpers.atoms import make_c_warp_dstr_encoding, mfma_atom
 from ...helpers.distribution import (
     make_static_distributed_tensor,
     make_static_tile_distribution,
@@ -215,7 +215,7 @@ class _CWarpDecode:
         atom = mfma_atom(dtype_in, t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
         self.b = b
         self.t = t
-        self.dist = make_static_tile_distribution(make_d_warp_dstr_encoding(atom))
+        self.dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
         # kCM1PerLane is Hs[0][2]; kCNLane is Hs[1][0]. The per-lane slot
         # ``i`` splits row-major over (kCM0PerLane, kCM1PerLane), so the
         # trailing Y length kCM1PerLane is the inner stride.
@@ -270,7 +270,7 @@ def _emit_cshuffle_stage(
     cdec: "_CWarpDecode",
     smem: Value,
     storage_dtype,
-    d_per_lane: int,
+    c_per_lane: int,
     cell_value,
 ) -> None:
     """Stage one warp's MFMA accumulators into LDS via ``store_tile_cshuffle``.
@@ -304,7 +304,7 @@ def _emit_cshuffle_stage(
     for mi in range(t.mfmas_per_warp_m):
         for ni in range(t.mfmas_per_warp_n):
             dt = make_static_distributed_tensor(dist, dtype=storage_dtype)
-            for i in range(d_per_lane):
+            for i in range(c_per_lane):
                 dt.set([i // m1, i % m1], cell_value(mi, ni, i))
 
             def _coord(_b, y_base, k, _mi=mi, _ni=ni):
@@ -377,7 +377,7 @@ class _MoeKloopPlan:
         self.tid = tid
         self.t = t
         self.storage_dtype = _storage_dtype(u)
-        self.a_per_lane, self.b_per_lane, self.d_per_lane = _mfma_atom_widths(u)
+        self.a_per_lane, self.b_per_lane, self.c_per_lane = _mfma_atom_widths(u)
         self.block_m = t.tile_m
         self.block_n = t.tile_n
         self.block_k = t.tile_k
@@ -774,7 +774,7 @@ def build_moe_gate_up_silu_gemm(
         )
 
     t = spec.tile
-    _, _, d_per_lane = _mfma_atom_widths(u)
+    _, _, c_per_lane = _mfma_atom_widths(u)
 
     block_m = t.tile_m
     block_n = t.tile_n
@@ -904,7 +904,7 @@ def build_moe_gate_up_silu_gemm(
             M,
             N,
             Hidden,
-            d_per_lane,
+            c_per_lane,
             batch_off_c=batch_off_c,
         )
 
@@ -931,7 +931,7 @@ def _emit_gate_up_silu_epilogue_default(
     M: Value,
     N: Value,
     Hidden: Value,
-    d_per_lane: int,
+    c_per_lane: int,
     *,
     batch_off_c: Value,
 ) -> None:
@@ -976,7 +976,7 @@ def _emit_gate_up_silu_epilogue_default(
             storage_dtype,
         )
 
-    _emit_cshuffle_stage(b, spec, cdec, Cs, storage_dtype, d_per_lane, _silu_cell)
+    _emit_cshuffle_stage(b, spec, cdec, Cs, storage_dtype, c_per_lane, _silu_cell)
 
     b.sync()
 
@@ -1217,7 +1217,7 @@ def build_moe_interleaved_gate_up_silu_gemm(
         slot_size_p = b.param("slot_size", I32)
 
     t = spec.tile
-    _, _, d_per_lane = _mfma_atom_widths(u)
+    _, _, c_per_lane = _mfma_atom_widths(u)
     block_m = t.tile_m
     block_n = t.tile_n
     block_k = t.tile_k
@@ -1382,7 +1382,7 @@ def build_moe_interleaved_gate_up_silu_gemm(
             M,
             N,
             Hidden,
-            d_per_lane,
+            c_per_lane,
             batch_off_c=batch_off_c,
         )
 
@@ -1407,7 +1407,7 @@ def _emit_interleaved_silu_epilogue(
     M: Value,
     N: Value,
     Hidden: Value,
-    d_per_lane: int,
+    c_per_lane: int,
     *,
     batch_off_c: Value,
 ) -> None:
@@ -1432,7 +1432,7 @@ def _emit_interleaved_silu_epilogue(
         acc = accs[mi * mfmas_n + ni]
         return b.cast_f32_to(b.vec_extract(acc, i), storage_dtype)
 
-    _emit_cshuffle_stage(b, spec, cdec, C_smem, storage_dtype, d_per_lane, _acc_cell)
+    _emit_cshuffle_stage(b, spec, cdec, C_smem, storage_dtype, c_per_lane, _acc_cell)
 
     b.sync()
 
@@ -1685,7 +1685,7 @@ def build_moe_down_reduce_gemm(
         )
 
     t = spec.tile
-    _, _, d_per_lane = _mfma_atom_widths(u)
+    _, _, c_per_lane = _mfma_atom_widths(u)
 
     block_m = t.tile_m
     block_n = t.tile_n
@@ -1803,7 +1803,7 @@ def build_moe_down_reduce_gemm(
             SortedTokenIds,
             SortedWeights,
             Y,
-            d_per_lane,
+            c_per_lane,
             batch_bucket_off=batch_bucket_off,
             tokens=tokens,
         )
@@ -1831,7 +1831,7 @@ def _emit_down_reduce_epilogue_atomic(
     SortedTokenIds: Value,
     SortedWeights: Value,
     Y: Value,
-    d_per_lane: int,
+    c_per_lane: int,
     *,
     batch_bucket_off: Value,
     tokens: Value,
@@ -1894,7 +1894,7 @@ def _emit_down_reduce_epilogue_atomic(
         # so the inner ni loop only multiplies the acc element. ``warp_col``
         # is i-independent, so this is hoisted out of the slot loop.
         c_ns = [b.add(block_n_off, cdec.warp_col(ni)) for ni in range(mfmas_n)]
-        for i in range(d_per_lane):
+        for i in range(c_per_lane):
             c_m = b.add(block_m_off, cdec.warp_row(mi, i))
             emit_one_row(c_m, c_ns, i, mi)
 

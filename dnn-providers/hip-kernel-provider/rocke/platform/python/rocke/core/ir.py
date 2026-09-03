@@ -103,8 +103,8 @@ def _check_u16(op: str, field: str, value: int) -> int:
     return v
 
 
-def _mma_d_frag_len(op_id: str) -> int:
-    """Result fragment length for ``op_id`` from the arch SSOT.
+def _mma_c_frag_len(op_id: str) -> int:
+    """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
     Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
     ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
@@ -112,7 +112,7 @@ def _mma_d_frag_len(op_id: str) -> int:
     """
     from rocke.core.arch import target as _arch
 
-    frag_len = _arch._frag_info(op_id).d_frag_len
+    frag_len = _arch._frag_info(op_id).c_frag_len
     if frag_len <= 0:
         raise ValueError(
             f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of "
@@ -121,16 +121,16 @@ def _mma_d_frag_len(op_id: str) -> int:
     return frag_len
 
 
-def _mma_d_is_int(op_id: str) -> bool:
-    """True when ``op_id`` produces an i32 D fragment (integer WMMA).
+def _mma_c_is_int(op_id: str) -> bool:
+    """True when ``op_id`` accumulates in i32 (integer WMMA).
 
-    Sourced from the arch catalog's result dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_d_dtype``), imported
-    lazily. Op_ids absent from the catalog default to an f32 result.
+    Sourced from the arch catalog's accumulator dtype
+    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``), imported
+    lazily. Op_ids absent from the catalog default to the f32 accumulator.
     """
     from rocke.core.arch import target as _arch
 
-    return _arch._op_id_d_dtype().get(op_id) == "i32"
+    return _arch._op_id_c_dtype().get(op_id) == "i32"
 
 
 @dataclass(frozen=True)
@@ -1799,15 +1799,15 @@ class IRBuilder:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
         ``op`` is either an :class:`~rocke.core.arch.MmaOp` (preferred — its
-        ``op_id`` and ``d_frag_len`` drive the lowering) or a raw ``op_id``
+        ``op_id`` and ``c_frag_len`` drive the lowering) or a raw ``op_id``
         string. This emits a single ``tile.mma`` op carrying the ``op_id`` as an
         attribute; the LLVM lowering dispatches that ``op_id`` through the ISA
         backend (:meth:`rocke.core.isa.ISABackend.emit_mma`), which emits the
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<d_frag_len x float>`` (the per-lane
-        result length the atom produces). When ``op`` is an ``op_id``
+        The result vector type is ``<c_frag_len x float>`` (the per-lane
+        accumulator length the atom produces). When ``op`` is an ``op_id``
         string the frag length is resolved from the static MMA fragment table.
 
         The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
@@ -1819,41 +1819,22 @@ class IRBuilder:
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
         """
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
-        if hasattr(op, "c_frag_len") and op.c_frag_len:
-            c_elem = {
-                "f16": F16,
-                "fp16": F16,
-                "bf16": BF16,
-                "f32": F32,
-                "fp32": F32,
-                "i32": I32,
-            }.get(op.c_dtype)
-            if c_elem is None:
-                raise ValueError(
-                    f"MMA op_id {op_id!r} has unsupported C dtype {op.c_dtype!r}"
-                )
-            expected_c = VectorType(c_elem, op.c_frag_len)
-            if c.type != expected_c:
-                raise ValueError(
-                    f"MMA op_id {op_id!r} expects C operand type {expected_c}, "
-                    f"got {c.type}"
-                )
-        d_frag_len = (
-            op.d_frag_len
-            if hasattr(op, "d_frag_len") and op.d_frag_len
-            else _mma_d_frag_len(op_id)
+        c_frag_len = (
+            op.c_frag_len
+            if hasattr(op, "c_frag_len") and op.c_frag_len
+            else _mma_c_frag_len(op_id)
         )
-        # Result element type: integer WMMA atoms (iu8/iu4) produce i32;
-        # everything else produces f32. Prefer the atom's own d_dtype when ``op``
+        # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
+        # i32; everything else in f32. Prefer the atom's own c_dtype when ``op``
         # is an MmaOp, else resolve from the arch SSOT via op_id.
-        d_dtype = getattr(op, "d_dtype", None)
-        is_int_d = d_dtype == "i32" if d_dtype is not None else _mma_d_is_int(op_id)
-        d_elem = I32 if is_int_d else F32
+        c_dtype = getattr(op, "c_dtype", None)
+        is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
+        c_elem = I32 if is_int_acc else F32
         hint = _MMA_RESULT_HINT.get(op_id, "acc")
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(d_elem, d_frag_len)],
+            [VectorType(c_elem, c_frag_len)],
             attrs={"op_id": op_id},
             result_name_hint=hint,
         ).result
@@ -2213,7 +2194,7 @@ class IRBuilder:
     ) -> None:
         """CShuffle-style distributed LDS store (P42).
 
-        Takes a per-lane ``<d_per_lane x dtype>`` accumulator and an
+        Takes a per-lane ``<c_per_lane x dtype>`` accumulator and an
         ``LdsLayout.cshuffle`` descriptor (passed via ``layout_attrs``)
         and writes the lane's slice of the warp tile to LDS in one
         ``ds_write_b<N>``-shaped op. Replaces the per-element

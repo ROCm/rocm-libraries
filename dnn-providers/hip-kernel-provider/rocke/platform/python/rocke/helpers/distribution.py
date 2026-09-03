@@ -1693,10 +1693,10 @@ def store_wmma_acc(
     align: Optional[int] = None,
     transform: Optional[Callable[[IRBuilder, Value, int, Value, Value], Value]] = None,
 ) -> None:
-    """Scatter one lane's ``<d_per_lane x f32>`` WMMA accumulator to a window.
+    """Scatter one lane's ``<c_per_lane x f32>`` WMMA accumulator to a window.
 
-    Walks the ``d_per_lane`` accumulator slots, resolves each slot's
-    ``(row, col)`` from the atom's verified ``d_layout`` map, optionally applies
+    Walks the ``c_per_lane`` accumulator slots, resolves each slot's
+    ``(row, col)`` from the atom's verified ``c_layout`` map, optionally applies
     ``transform(b, value_f32, slot, row, col)`` (e.g. the online-softmax
     ``* inv_l[row]`` rescale), demotes f32 -> the window dtype, and issues one
     scalar store per slot — the same per-element epilogue the hand-rolled
@@ -1706,11 +1706,11 @@ def store_wmma_acc(
     block). The accumulator layout naturally places adjacent slots so the
     AMDGPU backend coalesces neighbouring stores.
     """
-    dmap = atom.d_layout(arch)
+    cmap = atom.c_layout(arch)
     c_off = b.const_i32(col_offset)
     lead = list(lead)
-    for r in range(atom.d_per_lane):
-        row, col = dmap.coord(b, lane, r)
+    for r in range(atom.c_per_lane):
+        row, col = cmap.coord(b, lane, r)
         val = b.vec_extract(acc, r)
         if transform is not None:
             val = transform(b, val, r, row, col)
@@ -1733,7 +1733,7 @@ def store_wmma_acc(
 # the wrong shape: a fragment must reach b.mma as one packed vector and the
 # accumulator rescale must stay a single b.vector_mul. WmmaTensor is the
 # distributed-tensor analogue that keeps the payload PACKED -- one SSA vector
-# (A/B inputs plus distinct C-input and D-result vectors) -- so the kernel body reads
+# (A/B: <a_per_lane x f16>, C: <c_per_lane x f32>) -- so the kernel body reads
 # in tile terms (load_wmma_tile / wmma_mma / acc.scale / store_wmma_tile)
 # while every operation lowers to the exact same single instruction the raw
 # path emits. The per-slot lane coordinate is resolved through the atom's
@@ -1744,12 +1744,11 @@ def store_wmma_acc(
 class WmmaTensor:
     """Packed distributed tensor for one lane's WMMA fragment or accumulator.
 
-    ``role`` uses instruction-level MMA terminology: ``"a"``/``"b"`` are the
-    multiplicands, ``"c"`` is the accumulator input, and ``"d"`` is the
-    produced result. This ``"d"`` is not a GEMM epilogue D tensor. ``value`` is
-    the single packed SSA vector — the form :meth:`WmmaAtom.emit` consumes and
-    produces. Carrying the packed vector (rather than a per-element list) is
-    what keeps the issue-bound kernel at one instruction per tile op.
+    ``role`` is ``"a"``/``"b"`` (a ``<a_per_lane x f16>`` input fragment) or
+    ``"c"`` (a ``<c_per_lane x f32>`` accumulator). ``value`` is the single
+    packed SSA vector — the form :meth:`WmmaAtom.emit` consumes and produces.
+    Carrying the packed vector (rather than a per-element list) is what keeps
+    the issue-bound kernel at one instruction per tile op.
     """
 
     atom: object  # WmmaAtom (duck-typed to avoid an atoms<->distribution cycle)
@@ -1764,29 +1763,17 @@ class WmmaTensor:
 
     @property
     def num_slots(self) -> int:
-        if self.role == "a":
-            return self.atom.a_per_lane
-        if self.role == "b":
-            return self.atom.b_per_lane
-        if self.role == "c":
-            return self.atom.c_per_lane
-        if self.role == "d":
-            return self.atom.d_per_lane
-        raise ValueError(f"unknown WMMA tensor role {self.role!r}")
+        return self.atom.c_per_lane if self.role == "c" else self.atom.a_per_lane
 
     def _layout(self):
         if self.role == "a":
             return self.atom.a_layout(self.arch)
         if self.role == "b":
             return self.atom.b_layout(self.arch)
-        if self.role == "c":
-            return self.atom.c_layout(self.arch)
-        if self.role == "d":
-            return self.atom.d_layout(self.arch)
-        raise ValueError(f"unknown WMMA tensor role {self.role!r}")
+        return self.atom.c_layout(self.arch)
 
     def coord(self, b: IRBuilder, lane: Value, slot: int):
-        """Physical coordinate of ``slot`` for this tensor's role."""
+        """``(row, col)`` of accumulator ``slot`` for ``lane`` (role ``"c"``)."""
         return self._layout().coord(b, lane, slot)
 
     def slot(self, b: IRBuilder, r: int) -> Value:
@@ -1834,32 +1821,12 @@ def wmma_mma(
 ) -> WmmaTensor:
     """``acc += a · bᵀ`` at tile granularity — one :meth:`WmmaAtom.emit`
     (== one ``b.mma``). Returns the updated accumulator tile."""
-    if a.role != "a" or bb.role != "b" or acc.role not in ("c", "d"):
-        raise ValueError(
-            "wmma_mma expects tensor roles ('a', 'b', 'c' or compatible 'd'), got "
-            f"({a.role!r}, {bb.role!r}, {acc.role!r})"
-        )
-    if acc.role == "d":
-        require_wmma_recurrence(acc.atom, where="wmma_mma")
     return WmmaTensor(
         atom=acc.atom,
-        role="d",
+        role="c",
         value=acc.atom.emit(b, a.value, bb.value, acc.value),
         arch=acc.arch,
     )
-
-
-def require_wmma_recurrence(atom, *, where: str) -> None:
-    """Reject an atom whose D result cannot be carried into its next C input.
-
-    Recurrent builders must call this before constructing their loop. Some
-    builders intentionally serialize only the accumulator value and reconstruct
-    its :class:`WmmaTensor` wrapper as role ``"c"`` on the next iteration, so
-    checking only the wrapper role inside :func:`wmma_mma` is insufficient.
-    """
-    from .atoms import require_mma_recurrence
-
-    require_mma_recurrence(atom, where=where)
 
 
 def store_wmma_tile(

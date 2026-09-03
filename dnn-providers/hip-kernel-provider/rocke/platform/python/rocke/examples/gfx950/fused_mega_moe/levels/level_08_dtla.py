@@ -360,8 +360,8 @@ def _emit_fp8_gateup_group_gemm(
         group_up = ginner.results[1]
 
         # Fold (post-MFMA, per-group): outer += group * (a_scale * b_scale).
-        gate_scale_vec = b.vector_splat(gate_ab, atom.d_per_lane)
-        up_scale_vec = b.vector_splat(up_ab, atom.d_per_lane)
+        gate_scale_vec = b.vector_splat(gate_ab, atom.c_per_lane)
+        up_scale_vec = b.vector_splat(up_ab, atom.c_per_lane)
         gate_outer_new = b.vector_fma(group_gate, gate_scale_vec, gate_outer)
         up_outer_new = b.vector_fma(group_up, up_scale_vec, up_outer)
         b.scf_yield(gate_outer_new, up_outer_new)
@@ -621,8 +621,8 @@ def _emit_fp8_gateup_fused_kloop(
         new_gate = []
         new_up = []
         for ni in range(nni):
-            gvec = b.vector_splat(gate_ab[ni], atom.d_per_lane)
-            uvec = b.vector_splat(up_ab[ni], atom.d_per_lane)
+            gvec = b.vector_splat(gate_ab[ni], atom.c_per_lane)
+            uvec = b.vector_splat(up_ab[ni], atom.c_per_lane)
             new_gate.append(b.vector_fma(g_acc[ni], gvec, gate_outer[ni]))
             new_up.append(b.vector_fma(u_acc[ni], uvec, up_outer[ni]))
         b.scf_yield(*(new_gate + new_up))
@@ -963,7 +963,7 @@ def _emit_fp8_down_group_gemm(
             if kk + 1 < atoms_per_group:
                 b_cur = b_next
 
-        scale_vec = b.vector_splat(ab_scale, atom.d_per_lane)
+        scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
         down_outer_new = b.vector_fma(group_acc, scale_vec, down_outer)
         b.scf_yield(down_outer_new)
 
@@ -1007,7 +1007,7 @@ def _emit_down_atomic_reduce(
     # (mi, i) row, then batch the per-ni atomics inside a single scf_if. This
     # collapses mfmas_n redundant drains per row into one.
     for mi in range(mfmas_m):
-        for i in range(atom.d_per_lane):
+        for i in range(atom.c_per_lane):
             row_in, col_in = atom.lane_to_output(b, lane, i)
             row = b.add(
                 block_m_off,
@@ -1079,7 +1079,7 @@ def _store_hidden_f32_pass(
             flat = mi * mfmas_n + ni
             g_vec = gate_list[flat]
             u_vec = up_list[flat]
-            for i in range(atom.d_per_lane):
+            for i in range(atom.c_per_lane):
                 row_in, col_in = atom.lane_to_output(b, lane, i)
                 row = b.add(warp_m_off, b.add(b.const_i32(mi * atom.m), row_in))
                 col = b.add(warp_n_off, b.add(b.const_i32(ni * atom.n), col_in))

@@ -30,9 +30,9 @@ gfx1250 WMMA 16x16x32 atom instead of the CDNA MFMA atom:
   same logical ``(m, inter)`` element of a row-major LDS tile).
 
 The WMMA wave32 deltas vs the MFMA wave64 mega (same 16x16x32 atom shape):
-``a_frag_len``/``b_frag_len`` = 16 (not 8), ``d_frag_len`` = 8 (not 4),
+``a_frag_len``/``b_frag_len`` = 16 (not 8), ``c_frag_len`` = 8 (not 4),
 ``block_size`` = warp_m*warp_n*32 = 128 (not 256), and the accumulator scatter
-is driven by ``op.d_layout()`` (column-distributed) instead of the MFMA
+is driven by ``op.c_layout()`` (column-distributed) instead of the MFMA
 ``_CWarpDecode``. The k-loop / cshuffle / atomic-reduce *structure* is a 1:1
 mirror of ``moe_gemm_fused.py`` / ``moe_fused_mega.py``; only the per-lane
 fragment math and the matmul intrinsic change.
@@ -295,7 +295,7 @@ class _WmmaMoePlan:
 
     Same static-geometry carrier the loader / store / WMMA phases share, but
     the per-lane fragment widths come from the resolved WMMA op contract
-    (``op.a_frag_len`` / ``b_frag_len`` / ``d_frag_len`` = 16 / 16 / 8 for the
+    (``op.a_frag_len`` / ``b_frag_len`` / ``c_frag_len`` = 16 / 16 / 8 for the
     gfx1250 16x16x32 atom) instead of the wave64 ``shape // waves`` MFMA
     formula. The coalesced global-load / LDS-store decode (``a_vecs_per_thread``
     / ``b_vecs_per_thread`` / ``_rowcol``) is byte-identical to the MFMA plan,
@@ -312,7 +312,7 @@ class _WmmaMoePlan:
         self.storage_dtype = _storage_dtype(u)
         self.a_per_lane = op.a_frag_len
         self.b_per_lane = op.b_frag_len
-        self.d_per_lane = op.d_frag_len
+        self.c_per_lane = op.c_frag_len
         self.block_m = t.tile_m
         self.block_n = t.tile_n
         self.block_k = t.tile_k
@@ -698,7 +698,7 @@ def _emit_wmma_silu_to_hidden(
 
     WMMA analog of ``moe_gemm_fused._emit_cshuffle_stage`` -- but the WMMA
     accumulator is column-distributed, so we scatter each per-lane slot through
-    ``op.d_layout()`` (one ``(row, col)`` per slot) instead of the MFMA C-warp
+    ``op.c_layout()`` (one ``(row, col)`` per slot) instead of the MFMA C-warp
     distribution. ``Hidden_smem`` is written in logical ``(row=m, col=inter)``
     packed layout; the down GEMM reads A from the SAME logical element, so the
     pyisa ``G_reshape`` is implicit (no explicit LDS transpose). Both A and B
@@ -709,7 +709,7 @@ def _emit_wmma_silu_to_hidden(
     t = plan.t
     op = plan.op
     sd = plan.storage_dtype
-    c_map = op.d_layout()
+    c_map = op.c_layout()
     warp_m_off = b.mul(warp_m_idx, b.const_i32(plan.mfmas_m * t.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(plan.mfmas_n * t.warp_tile_n))
 
@@ -728,7 +728,7 @@ def _emit_wmma_silu_to_hidden(
         for ni in range(plan.mfmas_n):
             flat = mi * plan.mfmas_n + ni
             atom_n = b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n))
-            for i in range(plan.d_per_lane):
+            for i in range(plan.c_per_lane):
                 row_in_atom, col_in_atom = c_map.coord(b, lane, i)
                 c_m = b.add(atom_m, row_in_atom)
                 c_n = b.add(atom_n, col_in_atom)
@@ -1030,7 +1030,7 @@ def _emit_wmma_down_reduce_atomic(
     SortedTokenIds: Value,
     SortedWeights: Value,
     Y: Value,
-    d_per_lane: int,
+    c_per_lane: int,
     *,
     batch_bucket_off: Value,
     tokens: Value,
@@ -1049,7 +1049,7 @@ def _emit_wmma_down_reduce_atomic(
     mfmas_n = t.mfmas_per_warp_n
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
-    c_map = op.d_layout()
+    c_map = op.c_layout()
 
     # col is i-independent for the column-distributed WMMA accumulator.
     _, col0 = c_map.coord(b, lane, 0)
@@ -1073,7 +1073,7 @@ def _emit_wmma_down_reduce_atomic(
 
     for mi in range(mfmas_m):
         atom_m = b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m))
-        for i in range(d_per_lane):
+        for i in range(c_per_lane):
             row_in_atom, _ = c_map.coord(b, lane, i)
             c_m = b.add(block_m_off, b.add(atom_m, row_in_atom))
 
@@ -1171,7 +1171,7 @@ def build_moe_fused_mega_wmma(
     tokens = b.param("tokens", I32)
 
     t = spec.gate_up_tile()
-    d_per_lane = op_gu.d_frag_len  # noqa: F841
+    c_per_lane = op_gu.c_frag_len  # noqa: F841
 
     block_m = t.tile_m
     block_n = t.tile_n
@@ -1429,7 +1429,7 @@ def build_moe_fused_mega_wmma(
                 SortedTokenIds,
                 SortedWeights,
                 Y,
-                op_down.d_frag_len,
+                op_down.c_frag_len,
                 batch_bucket_off=c0,
                 tokens=tokens,
                 pad_m=down_pad_m,

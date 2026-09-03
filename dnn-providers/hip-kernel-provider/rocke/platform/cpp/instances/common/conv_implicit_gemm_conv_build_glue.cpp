@@ -50,7 +50,6 @@
 
 #include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "rocke/helper_rocke.core.arch.h"
 #include "rocke/helper_rocke.helpers.grid.h" /* chiplet_aware_super_tile_dynamic */
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
@@ -222,8 +221,6 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     {
         return false; /* rocke_conv_resolve_op set the builder error */
     }
-    if(rocke_mmaop_require_recurrence(b, ctx->op, "implicit_gemm_conv") != ROCKE_OK)
-        return false;
     ctx->is_wmma = (ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0);
     /* atom = spec.atom if op.family == "mma" else None.
      *
@@ -241,7 +238,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     ctx->a_per_lane = ctx->op->a_frag_len;
     ctx->b_per_lane = ctx->op->b_frag_len;
-    ctx->d_per_lane = ctx->op->d_frag_len;
+    ctx->c_per_lane = ctx->op->c_frag_len;
 
     /* ---- block tile dims ---- (817) */
     ctx->block_m = spec->tile_m;
@@ -453,9 +450,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->k_atoms = rocke_implicit_gemm_conv_spec_k_atoms_per_tile_k(spec);
 
     /* ---- accumulators ---- (919-922).
-     * acc_init = zero_mma_c(op); accs = [(acc_m{mi}_n{ni}, acc_init)
+     * acc_init = zero_vec_f32(c_per_lane); accs = [(acc_m{mi}_n{ni}, acc_init)
      * for mi in range(mfmas_m) for ni in range(mfmas_n)]. */
-    ctx->acc_init = rocke_mmaop_zero_c(b, ctx->op);
+    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->c_per_lane);
     ctx->num_accs = ctx->mfmas_m * ctx->mfmas_n;
     if(ctx->num_accs < 0 || ctx->num_accs > ROCKE_CONV_MAX_ACCS)
     {

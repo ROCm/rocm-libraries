@@ -49,17 +49,10 @@ class TestArchTarget(unittest.TestCase):
         # WMMA catalog (no MFMA): primary fp16/bf16 atom is 16x16x32 (K=32),
         # distinct from gfx1201's 16x16x16.
         self.assertEqual(
-            t.mma.enumerate(
-                a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", d_dtype="fp32"
-            ),
-            [],
+            t.mma.enumerate(a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"), []
         )
         wmma = t.mma.enumerate(
-            family="wmma",
-            a_dtype="fp16",
-            b_dtype="fp16",
-            c_dtype="fp32",
-            d_dtype="fp32",
+            family="wmma", a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"
         )
         self.assertEqual([o.shape for o in wmma], [(16, 16, 32)])
         from rocke.core.isa import backend_for
@@ -73,17 +66,10 @@ class TestArchTarget(unittest.TestCase):
         self.assertEqual(t.family, "rdna")
         # WMMA catalog, not MFMA: no 'mma'-family atoms, has 'wmma' 16x16x16.
         self.assertEqual(
-            t.mma.enumerate(
-                a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", d_dtype="fp32"
-            ),
-            [],
+            t.mma.enumerate(a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"), []
         )
         wmma = t.mma.enumerate(
-            family="wmma",
-            a_dtype="fp16",
-            b_dtype="fp16",
-            c_dtype="fp32",
-            d_dtype="fp32",
+            family="wmma", a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"
         )
         self.assertEqual([o.shape for o in wmma], [(16, 16, 16)])
         from rocke.core.isa import backend_for, Gfx11RdnaBackend
@@ -110,16 +96,14 @@ class TestArchTarget(unittest.TestCase):
         t942 = ArchTarget.from_gfx("gfx942")
         self.assertTrue(t942.fits_lds(65536))
         self.assertFalse(t942.fits_lds(65537))
-        self.assertTrue(t942.supports_dtype_combo("fp16", "fp16", "fp32", "fp32"))
+        self.assertTrue(t942.supports_dtype_combo("fp16", "fp16", "fp32"))
         # gfx942 (CDNA3) ships fp8/bf8 MFMA, so the fp8 dtype combo IS
         # supported on it. The fp4/MX MFMA family is the gfx950-only
         # combo, so use it for the negative case.
-        self.assertTrue(t942.supports_dtype_combo("fp8", "fp8", "fp32", "fp32"))
-        self.assertFalse(t942.supports_dtype_combo("fp4", "fp4", "fp32", "fp32"))
+        self.assertTrue(t942.supports_dtype_combo("fp8", "fp8", "fp32"))
+        self.assertFalse(t942.supports_dtype_combo("fp4", "fp4", "fp32"))
         self.assertTrue(
-            ArchTarget.from_gfx("gfx950").supports_dtype_combo(
-                "fp4", "fp4", "fp32", "fp32"
-            )
+            ArchTarget.from_gfx("gfx950").supports_dtype_combo("fp4", "fp4", "fp32")
         )
         self.assertEqual(t942.max_threads_per_block, 1024)
 
@@ -155,7 +139,7 @@ class TestMmaCatalog(unittest.TestCase):
         f = lambda gfx: sorted(  # noqa: E731
             op.shape
             for op in ArchTarget.from_gfx(gfx).mma.enumerate(
-                a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", d_dtype="fp32"
+                a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"
             )
         )
         # gfx942 narrow CDNA3 atoms only; gfx950 adds the wide CDNA4 atoms.
@@ -168,43 +152,21 @@ class TestMmaCatalog(unittest.TestCase):
         t = ArchTarget.from_gfx("gfx942")
         self.assertFalse(
             t.mma.has_shape(
-                a_dtype="fp16",
-                b_dtype="fp16",
-                c_dtype="fp32",
-                d_dtype="fp32",
-                m=16,
-                n=16,
-                k=32,
+                a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16, k=32
             )
         )
         self.assertTrue(
             ArchTarget.from_gfx("gfx950").mma.has_shape(
-                a_dtype="fp16",
-                b_dtype="fp16",
-                c_dtype="fp32",
-                d_dtype="fp32",
-                m=16,
-                n=16,
-                k=32,
+                a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16, k=32
             )
         )
 
     def test_select_largest_k(self):
         op942 = ArchTarget.from_gfx("gfx942").mma.select_largest_k(
-            a_dtype="fp16",
-            b_dtype="fp16",
-            c_dtype="fp32",
-            d_dtype="fp32",
-            m=16,
-            n=16,
+            a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16
         )
         op950 = ArchTarget.from_gfx("gfx950").mma.select_largest_k(
-            a_dtype="fp16",
-            b_dtype="fp16",
-            c_dtype="fp32",
-            d_dtype="fp32",
-            m=16,
-            n=16,
+            a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16
         )
         self.assertEqual(op942.k, 16)  # gfx942 max is 16x16x16
         self.assertEqual(op950.k, 32)  # gfx950 has the wide 16x16x32
@@ -216,22 +178,12 @@ class TestMmaCatalog(unittest.TestCase):
         # genuinely gfx950-only family, so it must select to None on gfx942.
         self.assertIsNone(
             t.mma.select_largest_k(
-                a_dtype="fp4",
-                b_dtype="fp4",
-                c_dtype="fp32",
-                d_dtype="fp32",
-                m=16,
-                n=16,
+                a_dtype="fp4", b_dtype="fp4", c_dtype="fp32", m=16, n=16
             )
         )
         # ...and resolve to the fp8 hero atom on gfx942 (it's shipped).
         op_fp8 = t.mma.select_largest_k(
-            a_dtype="fp8",
-            b_dtype="fp8",
-            c_dtype="fp32",
-            d_dtype="fp32",
-            m=16,
-            n=16,
+            a_dtype="fp8", b_dtype="fp8", c_dtype="fp32", m=16, n=16
         )
         self.assertIsNotNone(op_fp8)
         self.assertEqual(op_fp8.op_id, "mfma_f32_16x16x32_fp8")

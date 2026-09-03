@@ -108,7 +108,7 @@ typedef struct rocke_gemm_build_ctx
     /* ---- per-lane MMA fragment widths (_atom_frag_lengths(op)) -- */
     int a_per_lane;
     int b_per_lane;
-    int d_per_lane;
+    int c_per_lane;
 
     /* ---- block tile dims (aliases of spec->tile) -- */
     int block_m; /* t.tile_m */
@@ -256,11 +256,10 @@ typedef struct rocke_gemm_build_ctx
 /* _atom_frag_lengths(op) -> (a,b,c)_frag_len. Pure; fills out-params. */
 void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_frag, int* c_frag);
 
-/* _emit_zero_acc_op(b, op): construct the C-input zero from c_dtype and
- * c_frag_len, rejecting an op whose D result cannot recur as the next C. Used
- * to build acc_init. (The MFMA-only _emit_zero_acc / _mfma_atom_widths variants
- * are not reached by the contract-driven body; kept here for parity with the
- * Python module surface.) */
+/* _emit_zero_acc_op(b, op): zero_vec_f32(op->c_frag_len). Used to build
+ * acc_init. (The MFMA-only _emit_zero_acc / _mfma_atom_widths variants are not
+ * reached by the contract-driven body; kept here for parity with the Python
+ * module surface.) */
 rocke_value_t* rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b, const rocke_mmaop_t* op);
 
 /* _emit_mma(b, op, a, bb, c): target-neutral D = a*bb + c via rocke_b_mma. */
@@ -405,14 +404,14 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                                       int num_accs,
                                       rocke_value_t* m_base_off,
                                       rocke_value_t* n_base_off,
-                                      int d_per_lane,
+                                      int c_per_lane,
                                       const rocke_type_t* storage_dtype,
                                       rocke_gemm_per_cell_fn per_cell,
                                       void* user,
                                       bool n_base_first);
 
 /* _emit_epilogue_default(...): direct vector-store epilogue (incl. the WMMA
- * d_layout scatter branch). fused_epilogue is opaque (NULL = matmul-only). */
+ * c_layout scatter branch). fused_epilogue is opaque (NULL = matmul-only). */
 void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       const rocke_gemm_universal_spec_t* spec,
                                       const rocke_mmaop_t* op,
@@ -426,7 +425,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       rocke_value_t* M,
                                       rocke_value_t* N,
                                       rocke_value_t* C,
-                                      int d_per_lane,
+                                      int c_per_lane,
                                       rocke_value_t* batch_off_c,
                                       void* fused_epilogue,
                                       bool fused_is_mde);
@@ -448,7 +447,7 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
                                       rocke_value_t* M,
                                       rocke_value_t* N,
                                       rocke_value_t* Cf32,
-                                      int d_per_lane);
+                                      int c_per_lane);
 
 /* _emit_epilogue_cshuffle(...): LDS-staged cshuffle epilogue. */
 void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
@@ -466,7 +465,7 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                                        rocke_value_t* C,
                                        int a_per_lane,
                                        int b_per_lane,
-                                       int d_per_lane,
+                                       int c_per_lane,
                                        rocke_value_t* batch_off_c,
                                        void* fused_epilogue,
                                        bool fused_is_mde);

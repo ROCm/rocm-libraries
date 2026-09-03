@@ -3,11 +3,6 @@
 
 """Multiple-D GEMM kernel instance (CK Tile ``19_gemm_multi_d`` parity).
 
-Here ``D0`` through ``Dn`` are operator-level auxiliary epilogue tensors (for
-bias, residual, or gating inputs). They are not the instruction-level MMA D
-result in the atom contract ``D = A * B + C``. Accordingly, this module's
-``d_operands`` and ``d_dtype`` names always refer to epilogue D tensors.
-
 DSL counterpart of CK Tile's ``example/ck_tile/19_gemm_multi_d``. The
 kernel computes::
 
@@ -298,7 +293,7 @@ class GemmMultiDSpec:
     :func:`gemm_multi_d_signature` for the kernel-order signature
     the launcher must use.
 
-    ``d_dtype`` is the element type used for every epilogue D operand (CK Tile
+    ``d_dtype`` is the element type used for every D operand (CK Tile
     allows heterogeneous D dtypes via its template tuple; we ship the
     homogeneous case in v1 since it matches every shipped example).
 

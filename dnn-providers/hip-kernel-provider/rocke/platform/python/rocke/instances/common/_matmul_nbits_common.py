@@ -196,11 +196,7 @@ def validate_common_spec(
         t = spec.tile
         atom = (t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
         if not target.supports_dtype_combo(
-            _WMMA_AB_DTYPE,
-            _WMMA_AB_DTYPE,
-            _WMMA_C_DTYPE,
-            _WMMA_C_DTYPE,
-            family=family,
+            _WMMA_AB_DTYPE, _WMMA_AB_DTYPE, _WMMA_C_DTYPE, family=family
         ):
             return False, f"unsupported matmul_nbits dtype fp16 on {arch}"
         if (
@@ -209,7 +205,6 @@ def validate_common_spec(
                 a_dtype=_WMMA_AB_DTYPE,
                 b_dtype=_WMMA_AB_DTYPE,
                 c_dtype=_WMMA_C_DTYPE,
-                d_dtype=_WMMA_C_DTYPE,
                 m=t.warp_tile_m,
                 n=t.warp_tile_n,
                 k=t.warp_tile_k,

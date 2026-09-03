@@ -48,7 +48,7 @@
 #include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
-#include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom, make_d_warp_dstr_encoding */
+#include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom, make_c_warp_dstr_encoding */
 #include "rocke/helper_rocke.helpers.distribution.h" /* make_static_tile_distribution */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
@@ -101,9 +101,9 @@ static void rocke_attn3d_set_err_buf(char* err, size_t err_cap, const char* msg)
 static bool rocke_attn3d_narrow_k_available(const rocke_archtarget_t* t)
 {
     const rocke_mmaop_t* f16
-        = rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 16);
+        = rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 16);
     const rocke_mmaop_t* bf16
-        = rocke_archtarget_op_for_shape(t, "mma", "bf16", "bf16", "fp32", "fp32", 16, 16, 16);
+        = rocke_archtarget_op_for_shape(t, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
     return f16 != NULL && bf16 != NULL;
 }
 
@@ -112,8 +112,7 @@ static bool rocke_attn3d_narrow_k_available(const rocke_archtarget_t* t)
  * exposed by the C arch surface -- see the ARCH GATE NOTE above). */
 static bool rocke_attn3d_wide_k_available(const rocke_archtarget_t* t)
 {
-    return rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 32)
-           != NULL;
+    return rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 32) != NULL;
 }
 
 /* ===================================================================== *
@@ -812,7 +811,7 @@ bool rocke_gfx942_attention_tiled_3d_ctx_init(
     }
 
     /* _C16_DIST = make_static_tile_distribution(
-     *                 make_d_warp_dstr_encoding(MfmaAtom.f16_16x16x16()))
+     *                 make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16()))
      * (Python lines 74-76). The C accumulator layout is dtype/arch independent,
      * so the f16 atom drives it for both segment and reduce ctx. */
     c_atom = rocke_mfma_atom("f16", 16, 16, 16);
@@ -821,7 +820,7 @@ bool rocke_gfx942_attention_tiled_3d_ctx_init(
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "attn_tiled_3d: no f16 16x16x16 MFMA atom");
         return false;
     }
-    enc = rocke_make_d_warp_dstr_encoding(b, c_atom);
+    enc = rocke_make_c_warp_dstr_encoding(b, c_atom);
     if(enc == NULL)
     {
         return false;

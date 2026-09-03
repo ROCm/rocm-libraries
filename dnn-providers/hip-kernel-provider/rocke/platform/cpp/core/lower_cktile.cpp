@@ -369,7 +369,7 @@ rocke_status_t rocke_lower_universal_gemm_to_cktile(const rocke_cktile_gemm_spec
     }
     const char* a_layout = layouts[0];
     const char* b_layout = layouts[1];
-    const char* d_layout = layouts[2];
+    const char* c_layout = layouts[2];
 
     /* name override precedence: explicit arg > spec->kernel_name > computed. */
     char namebuf[ROCKE_ERR_MSG_CAP];
@@ -547,7 +547,7 @@ rocke_status_t rocke_lower_universal_gemm_to_cktile(const rocke_cktile_gemm_spec
     snprintf(line, sizeof line, "using BLayout = %s;", b_layout);
     L(out, line);
     L(out, "using DsLayout = ck_tile::tuple<>;");
-    snprintf(line, sizeof line, "using ELayout = %s;", d_layout);
+    snprintf(line, sizeof line, "using ELayout = %s;", c_layout);
     L(out, line);
     L(out, "using CDEElementWise = ck_tile::element_wise::PassThrough;");
     L(out, "");

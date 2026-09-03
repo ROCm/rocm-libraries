@@ -36,15 +36,11 @@
  *  Inline MfmaAtom method reproductions (atoms.py).
  * ====================================================================== */
 
-/* MfmaAtom.zero_acc: fresh C fragment; this path requires D -> C recurrence. */
+/* MfmaAtom.zero_acc: fresh <c_per_lane x float> accumulator (all zeros). */
 static rocke_value_t* rocke_moe_fp8_atom_zero_acc(rocke_ir_builder_t* b,
                                                   const rocke_mfma_atom_t* atom)
 {
-    if(rocke_mfma_atom_require_recurrence(b, atom, "moe_fused_mega_fp8") != ROCKE_OK)
-    {
-        return NULL;
-    }
-    return rocke_mfma_atom_zero_acc(b, atom);
+    return rocke_b_zero_vec_f32(b, atom->c_per_lane);
 }
 
 /* MfmaAtom.lane_to_output(b, lane, i): per-lane (row_in_atom, col_in_atom) of
@@ -65,9 +61,9 @@ static void rocke_moe_fp8_atom_lane_to_output(rocke_ir_builder_t* b,
         rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
         rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
         rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        /* Python: row = b.add(b.mul(m_blk, d_per_lane), b.const_i32(i)) -- the
+        /* Python: row = b.add(b.mul(m_blk, c_per_lane), b.const_i32(i)) -- the
          * mul is emitted FIRST, then the const_i32(i). Force C arg-eval order. */
-        rocke_value_t* mul_v = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, atom->d_per_lane));
+        rocke_value_t* mul_v = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, atom->c_per_lane));
         rocke_value_t* row = rocke_b_add(b, mul_v, rocke_b_const_i32(b, i));
         *out_row = row;
         *out_col = n_in_atom;
@@ -234,7 +230,7 @@ rocke_value_t* rocke_moe_fp8_emit_fp8_down_group_gemm(rocke_moe_fp8_build_ctx_t*
         /* D5 sgb: place the next-group W_down VMEM under this group's MFMA(s). */
         rocke_moe_fp8_emit_sgb_down_group(ctx, atoms_per_group, cadence);
 
-        rocke_value_t* scale_vec = rocke_b_vector_splat(b, ab_scale, atom->d_per_lane);
+        rocke_value_t* scale_vec = rocke_b_vector_splat(b, ab_scale, atom->c_per_lane);
         rocke_value_t* down_outer_new = rocke_b_vector_fma(b, group_acc, scale_vec, down_outer);
         rocke_value_t* yielded[1] = {down_outer_new};
         rocke_b_scf_yield(b, yielded, 1);
@@ -295,7 +291,7 @@ void rocke_moe_fp8_emit_down_atomic_reduce(rocke_moe_fp8_build_ctx_t* ctx,
          * masked atomics with the operands already resident. */
         rocke_moe_fp8_down_row_t rows[ROCKE_MOE_FP8_DOWN_MAX_C_PER_LANE];
         int num_rows = 0;
-        for(int i = 0; i < atom->d_per_lane; ++i)
+        for(int i = 0; i < atom->c_per_lane; ++i)
         {
             rocke_value_t* row_in = NULL;
             rocke_value_t* col_in = NULL;
@@ -314,7 +310,7 @@ void rocke_moe_fp8_emit_down_atomic_reduce(rocke_moe_fp8_build_ctx_t* ctx,
             rows[num_rows].w = w;
             num_rows++;
         }
-        /* One rolling drain covers all d_per_lane (token,weight) loads instead of
+        /* One rolling drain covers all c_per_lane (token,weight) loads instead of
          * one vmcnt(0) per row. */
         rocke_b_s_waitcnt(b, 0, -1, -1);
         for(int r = 0; r < num_rows; ++r)

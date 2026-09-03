@@ -370,8 +370,6 @@ class Gfx11RdnaBackend(ISABackend):
         self.emit_wmma(lowerer, legacy)
 
     def emit_wmma(self, lowerer, op) -> None:
-        from ..lower_llvm import _llvm_type
-
         int_spec = _RDNA_WMMA_INT.get(op.name)
         if int_spec is not None:
             self._emit_wmma_int(lowerer, op, int_spec)
@@ -384,8 +382,6 @@ class Gfx11RdnaBackend(ISABackend):
             )
         decl_key, intrinsic, ssa_elt, call_elt = spec
         a, b, c = op.operands
-        c_ty = _llvm_type(c.type)
-        d_ty = _llvm_type(op.result.type)
         lowerer._need(decl_key)
         a_arg = lowerer._operand(a)
         b_arg = lowerer._operand(b)
@@ -402,10 +398,10 @@ class Gfx11RdnaBackend(ISABackend):
             )
             a_arg, b_arg = a_cast, b_cast
         lowerer._current().emit(
-            f"  {op.result.name} = call {d_ty} @{intrinsic}("
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
             f"<16 x {call_elt}> {a_arg}, "
             f"<16 x {call_elt}> {b_arg}, "
-            f"{c_ty} {lowerer._operand(c)})"
+            f"<8 x float> {lowerer._operand(c)})"
         )
 
     def _emit_wmma_int(self, lowerer, op, spec) -> None:
@@ -422,21 +418,17 @@ class Gfx11RdnaBackend(ISABackend):
         ``<N x i32>`` in SSA (int8/int4 packed into i32), so no bitcast is
         needed; values stay within i32 range -> ``clamp = 0`` (exact wrap).
         """
-        from ..lower_llvm import _llvm_type
-
-        decl_key, intrinsic, op_vec, _acc_vec = spec
+        decl_key, intrinsic, op_vec, acc_vec = spec
         a, b, c = op.operands
         lowerer._need(decl_key)
         a_arg = lowerer._operand(a)
         b_arg = lowerer._operand(b)
         c_arg = lowerer._operand(c)
-        c_ty = _llvm_type(c.type)
-        d_ty = _llvm_type(op.result.type)
         lowerer._current().emit(
-            f"  {op.result.name} = call {d_ty} @{intrinsic}("
+            f"  {op.result.name} = call <{acc_vec} x i32> @{intrinsic}("
             f"i1 1, <{op_vec} x i32> {a_arg}, "
             f"i1 1, <{op_vec} x i32> {b_arg}, "
-            f"{c_ty} {c_arg}, i1 0)"
+            f"<{acc_vec} x i32> {c_arg}, i1 0)"
         )
 
     def encode_waitcnt(self, vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
@@ -462,8 +454,6 @@ class Gfx12RdnaBackend(Gfx11RdnaBackend):
     intrinsic mangling)."""
 
     def emit_wmma(self, lowerer, op) -> None:
-        from ..lower_llvm import _llvm_type
-
         spec = _RDNA_GFX12_WMMA.get(op.name)
         if spec is None:
             raise NotImplementedError(
@@ -472,8 +462,6 @@ class Gfx12RdnaBackend(Gfx11RdnaBackend):
             )
         decl_key, intrinsic, ssa_elt, call_elt = spec
         a, b, c = op.operands
-        c_ty = _llvm_type(c.type)
-        d_ty = _llvm_type(op.result.type)
         lowerer._need(decl_key)
         a_arg = lowerer._operand(a)
         b_arg = lowerer._operand(b)
@@ -489,10 +477,10 @@ class Gfx12RdnaBackend(Gfx11RdnaBackend):
             )
             a_arg, b_arg = a_cast, b_cast
         lowerer._current().emit(
-            f"  {op.result.name} = call {d_ty} @{intrinsic}("
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
             f"<8 x {call_elt}> {a_arg}, "
             f"<8 x {call_elt}> {b_arg}, "
-            f"{c_ty} {lowerer._operand(c)})"
+            f"<8 x float> {lowerer._operand(c)})"
         )
 
 
@@ -570,8 +558,6 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         lowerer._current().emit("  call void @llvm.amdgcn.s.wait.dscnt(i16 0)")
 
     def emit_wmma(self, lowerer, op) -> None:
-        from ..lower_llvm import _llvm_type
-
         fp8_spec = _GFX1250_WMMA_FP8.get(op.name)
         if fp8_spec is not None:
             self._emit_wmma_fp8(lowerer, op, fp8_spec)
@@ -584,18 +570,16 @@ class Gfx1250Backend(Gfx12RdnaBackend):
             )
         decl_key, intrinsic, elt = spec
         a, b, c = op.operands
-        c_ty = _llvm_type(c.type)
-        d_ty = _llvm_type(op.result.type)
         lowerer._need(decl_key)
         a_arg = lowerer._operand(a)
         b_arg = lowerer._operand(b)
         # gfx1250 8-operand form: (i1 negA, A, i1 negB, B, i16 fmt, C, i1, i1).
         # bf16 operands are <16 x bfloat> directly (no i16 bitcast).
         lowerer._current().emit(
-            f"  {op.result.name} = call {d_ty} @{intrinsic}("
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
             f"i1 false, <16 x {elt}> {a_arg}, "
             f"i1 false, <16 x {elt}> {b_arg}, "
-            f"i16 0, {c_ty} {lowerer._operand(c)}, "
+            f"i16 0, <8 x float> {lowerer._operand(c)}, "
             f"i1 false, i1 false)"
         )
 
@@ -606,18 +590,14 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         lane). The 6-operand form is ``(A, B, i16 fmt, C, i1, i1)`` with the
         format / reuse immediates pinned to 0 (plain unscaled MMA).
         """
-        from ..lower_llvm import _llvm_type
-
         decl_key, intrinsic = spec
         a, b, c = op.operands
-        c_ty = _llvm_type(c.type)
-        d_ty = _llvm_type(op.result.type)
         lowerer._need(decl_key)
         lowerer._current().emit(
-            f"  {op.result.name} = call {d_ty} @{intrinsic}("
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
             f"<8 x i32> {lowerer._operand(a)}, "
             f"<8 x i32> {lowerer._operand(b)}, "
-            f"i16 0, {c_ty} {lowerer._operand(c)}, "
+            f"i16 0, <8 x float> {lowerer._operand(c)}, "
             f"i1 false, i1 false)"
         )
 

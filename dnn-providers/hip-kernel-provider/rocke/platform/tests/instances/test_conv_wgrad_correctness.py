@@ -197,7 +197,6 @@ def _make_spec(
         a_dtype=dtype,
         b_dtype=dtype,
         c_dtype="fp32",
-        d_dtype="fp32",
         m=warp_tile_mn,
         n=warp_tile_mn,
         k_max=tile_k,

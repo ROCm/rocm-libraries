@@ -128,7 +128,7 @@ void rocke_moe_mega_emit_stage1_gate_up(rocke_moe_mega_build_ctx_t* ctx,
  *              _silu_mul_f32(b, g, up, one_f32=one_f32, c_neg_log2e=c_neg_log2e),
  *              storage_dtype)
  *      _emit_cshuffle_stage(b, u_gu, cdec, Hidden_smem, storage_dtype,
- *                           d_per_lane, _silu_cell)
+ *                           c_per_lane, _silu_cell)
  *      b.sync()
  *
  *  The Python `_silu_cell` closure captures b/mfmas_n/gate_res/up_res/one_f32/
@@ -189,7 +189,7 @@ void rocke_moe_mega_emit_stage2_silu_to_lds(rocke_moe_mega_build_ctx_t* ctx,
                                   &cdec,
                                   ctx->Hidden_smem,
                                   ctx->storage_dtype,
-                                  ctx->d_per_lane,
+                                  ctx->c_per_lane,
                                   rocke_moe_mega_silu_cell,
                                   &cell_ctx);
     rocke_b_sync(b);
@@ -227,7 +227,7 @@ void rocke_moe_mega_emit_stage3_reshape(rocke_moe_mega_build_ctx_t* ctx)
  *          _emit_down_reduce_epilogue_atomic(
  *              b, u_down, tuple(down_res), warp_m_idx, warp_n_idx, lane,
  *              block_m_off, ho, M, H_out, SortedTokenIds, SortedWeights, Y,
- *              d_per_lane, batch_bucket_off=c0, tokens=tokens)
+ *              c_per_lane, batch_bucket_off=c0, tokens=tokens)
  *          b.scf_yield()
  *
  *  The loop carries NO iter-args (empty list); the induction variable `ho` is
@@ -299,7 +299,7 @@ void rocke_moe_mega_emit_stage45_down_reduce(rocke_moe_mega_build_ctx_t* ctx)
                                                    ctx->SortedTokenIds,
                                                    ctx->SortedWeights,
                                                    ctx->Y,
-                                                   ctx->d_per_lane,
+                                                   ctx->c_per_lane,
                                                    ctx->c0, /* batch_bucket_off */
                                                    ctx->tokens);
 

@@ -35,19 +35,13 @@
 #include "rocke/helper_rocke.helpers.layouts.h" /* rocke_layout_map_coord (via arch_target.h) */
 #include "rocke/helper_rocke.helpers.schedule.h" /* rocke_schedule_policy_t + ROCKE_SCHED_DS_READ/MFMA */
 #include "rocke/instance_conv_implicit_gemm_internal.h" /* rocke_conv_emit_frag_smem_load (peer _emit_frag_smem_load) */
+
 /* ------------------------------------------------------------------ *
  * Module-pinned geometry constants (Python module-level names).
  * ------------------------------------------------------------------ */
 #define DFCP_WMMA ROCKE_GFX1151_DFCP_WMMA /* _WMMA      = 16 */
 #define DFCP_K_PER_I32 ROCKE_GFX1151_DFCP_K_PER_I32 /* _K_PER_I32 = 4 */
 #define DFCP_I4_PER_I32 ROCKE_GFX1151_DFCP_I4_PER_I32 /* _I4_PER_I32 = 8 */
-
-static rocke_value_t* dfcp_zero_recurrent_mma_acc(rocke_ir_builder_t* b, const rocke_mma_op_t* op)
-{
-    if(rocke_mmaop_require_recurrence(b, op, "gfx1151 deep_fused_conv_pool") != ROCKE_OK)
-        return NULL;
-    return rocke_mmaop_zero_c(b, op);
-}
 
 /* ------------------------------------------------------------------ *
  * Small local conveniences (1:1 with `b.<op>(...)` shorthands).
@@ -383,7 +377,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_from_lds(rocke_gfx1151_dfcp_build_ctx_t* ctx,
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
+        out_accs[i] = rocke_b_zero_vec_f32(b, op->c_frag_len);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -442,7 +436,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_from_lds_int(rocke_gfx1151_dfcp_build_ctx_t* c
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -500,7 +494,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv0_direct(rocke_gfx1151_dfcp_build_ctx_t* c
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
+        out_accs[i] = rocke_b_zero_vec_f32(b, op->c_frag_len);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -561,7 +555,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv0_direct_int(rocke_gfx1151_dfcp_build_ctx_
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -632,7 +626,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i4_from_lds(rocke_gfx1151_dfcp_build_ctx
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
 
     const void* per_step = sched_fuse ? NULL : policy;
 
@@ -740,7 +734,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i4_packed_from_lds(rocke_gfx1151_dfcp_bu
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -802,7 +796,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i4_from_regs(rocke_gfx1151_dfcp_build_ct
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
 
     const void* per_step = sched_fuse ? NULL : policy;
 
@@ -888,7 +882,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i8_from_regs(rocke_gfx1151_dfcp_build_ct
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
+        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->c_frag_len);
 
     const void* per_step = sched_fuse ? NULL : policy;
 
@@ -972,13 +966,13 @@ void rocke_gfx1151_dfcp_fuse_c0_to_conv1_a_regs(rocke_gfx1151_dfcp_build_ctx_t* 
         for(int kk = 0; kk < mfmas_n; ++kk)
         {
             rocke_value_t* acc = accs0[mi * mfmas_n + kk];
-            /* codes = [code_fn(b.vec_extract(acc, s)) for s in range(op0.d_frag_len)] */
+            /* codes = [code_fn(b.vec_extract(acc, s)) for s in range(op0.c_frag_len)] */
             rocke_value_t* codes[ROCKE_GFX1151_DFCP_MAX_ACCS];
-            for(int s = 0; s < op0->d_frag_len; ++s)
+            for(int s = 0; s < op0->c_frag_len; ++s)
                 codes[s] = rocke_gfx1151_dfcp_apply_code_fn(
                     ctx, code_fn, rocke_b_vec_extract(b, acc, s));
             /* words = b.bitcast(b.vec_pack(codes, I8), VectorType(I32, 2)) */
-            rocke_value_t* packed_i8 = rocke_b_vec_pack(b, codes, op0->d_frag_len, rocke_i8());
+            rocke_value_t* packed_i8 = rocke_b_vec_pack(b, codes, op0->c_frag_len, rocke_i8());
             rocke_value_t* words
                 = rocke_b_bitcast(b, packed_i8, rocke_vector_type(b, rocke_i32(), 2));
             rocke_value_t* lo = rocke_b_vec_extract(b, words, 0);

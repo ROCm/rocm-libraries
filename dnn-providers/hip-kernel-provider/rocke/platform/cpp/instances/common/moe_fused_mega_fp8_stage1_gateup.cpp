@@ -27,7 +27,7 @@
  * The atom @property/method calls that have no standalone C entry point are
  * reproduced inline byte-for-byte from atoms.py, identically to the rest of the
  * port:
- *   atom.zero_acc(b)         -> rocke_mfma_atom_zero_acc(b, atom)
+ *   atom.zero_acc(b)         -> rocke_b_zero_vec_f32(b, atom->c_per_lane)
  *   atom.lane_to_output(...) -> the 16x16 / 32x32 / 4x4 arith from atoms.py
  */
 
@@ -42,14 +42,10 @@
  * atom method reproductions (no standalone C symbol; inline per port)
  * ===================================================================== */
 
-/* atom.zero_acc(b) -> a C-typed fragment; these paths require D -> C recurrence. */
+/* atom.zero_acc(b) -> b.zero_vec_f32(self.c_per_lane). */
 static rocke_value_t* moe_fp8_atom_zero_acc(rocke_ir_builder_t* b, const rocke_mfma_atom_t* atom)
 {
-    if(rocke_mfma_atom_require_recurrence(b, atom, "moe_fused_mega_fp8") != ROCKE_OK)
-    {
-        return NULL;
-    }
-    return rocke_mfma_atom_zero_acc(b, atom);
+    return rocke_b_zero_vec_f32(b, atom->c_per_lane);
 }
 
 /* atom.lane_to_output(b, lane, i) -> (row_in_atom, col_in_atom). Writes both via
@@ -68,9 +64,9 @@ static void moe_fp8_atom_lane_to_output(rocke_ir_builder_t* b,
         rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
         rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
         rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        /* Python: row = b.add(b.mul(m_blk, d_per_lane), b.const_i32(i)) -- mul
+        /* Python: row = b.add(b.mul(m_blk, c_per_lane), b.const_i32(i)) -- mul
          * emitted FIRST. Force C arg-eval order with an ordered temporary. */
-        rocke_value_t* mul_v = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, atom->d_per_lane));
+        rocke_value_t* mul_v = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, atom->c_per_lane));
         rocke_value_t* row = rocke_b_add(b, mul_v, rocke_b_const_i32(b, i));
         *out_row = row;
         *out_col = n_in_atom;
@@ -178,7 +174,7 @@ rocke_value_t* rocke_moe_fp8_store_hidden_f32_pass(rocke_moe_fp8_build_ctx_t* ct
             int flat = mi * mfmas_n + ni;
             rocke_value_t* g_vec = gate_list[flat];
             rocke_value_t* u_vec = up_list[flat];
-            for(i = 0; i < atom->d_per_lane; ++i)
+            for(i = 0; i < atom->c_per_lane; ++i)
             {
                 rocke_value_t* row_in = NULL;
                 rocke_value_t* col_in = NULL;
@@ -344,8 +340,8 @@ void rocke_moe_fp8_emit_fp8_gateup_group_gemm(rocke_moe_fp8_build_ctx_t* ctx,
         {
             rocke_value_t* group_gate = (ginner.op != NULL) ? ginner.op->results[0] : NULL;
             rocke_value_t* group_up = (ginner.op != NULL) ? ginner.op->results[1] : NULL;
-            rocke_value_t* gate_scale_vec = rocke_b_vector_splat(b, gate_ab, atom->d_per_lane);
-            rocke_value_t* up_scale_vec = rocke_b_vector_splat(b, up_ab, atom->d_per_lane);
+            rocke_value_t* gate_scale_vec = rocke_b_vector_splat(b, gate_ab, atom->c_per_lane);
+            rocke_value_t* up_scale_vec = rocke_b_vector_splat(b, up_ab, atom->c_per_lane);
             rocke_value_t* gate_outer_new
                 = rocke_b_vector_fma(b, group_gate, gate_scale_vec, gate_outer);
             rocke_value_t* up_outer_new = rocke_b_vector_fma(b, group_up, up_scale_vec, up_outer);
@@ -812,8 +808,8 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
             rocke_value_t* new_up[ROCKE_MOE_FP8_MAX_NNI];
             for(ni = 0; ni < nni; ++ni)
             {
-                rocke_value_t* gvec = rocke_b_vector_splat(b, gate_ab[ni], atom->d_per_lane);
-                rocke_value_t* uvec = rocke_b_vector_splat(b, up_ab[ni], atom->d_per_lane);
+                rocke_value_t* gvec = rocke_b_vector_splat(b, gate_ab[ni], atom->c_per_lane);
+                rocke_value_t* uvec = rocke_b_vector_splat(b, up_ab[ni], atom->c_per_lane);
                 new_gate[ni] = rocke_b_vector_fma(b, g_acc[ni], gvec, gate_outer[ni]);
                 new_up[ni] = rocke_b_vector_fma(b, u_acc[ni], uvec, up_outer[ni]);
             }

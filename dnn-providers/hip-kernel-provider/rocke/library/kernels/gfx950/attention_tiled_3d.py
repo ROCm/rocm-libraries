@@ -41,7 +41,7 @@ from rocke.core.ir import (
     Type,
     Value,
 )
-from rocke.helpers.atoms import MfmaAtom, make_d_warp_dstr_encoding
+from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
@@ -74,7 +74,7 @@ MFMA_N = 16
 # lane math with the tile-distribution algebra (Phase-C adoption; the C layout
 # is dtype-independent so the f16 atom drives it for fp16 and bf16).
 _C16_DIST = make_static_tile_distribution(
-    make_d_warp_dstr_encoding(MfmaAtom.f16_16x16x16())
+    make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16())
 )
 
 

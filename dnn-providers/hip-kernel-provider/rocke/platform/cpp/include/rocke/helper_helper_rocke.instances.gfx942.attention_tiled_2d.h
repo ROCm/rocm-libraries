@@ -55,7 +55,7 @@
 
 #include <stdbool.h>
 
-#include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t, rocke_make_d_warp_dstr_encoding  */
+#include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t, rocke_make_c_warp_dstr_encoding  */
 #include "rocke/helper_rocke.helpers.distribution.h" /* rocke_tile_distribution_t, calculate_x            */
 #include "rocke/ir.h" /* rocke_ir_builder_t, rocke_value_t, rocke_kernel_def_t */
 

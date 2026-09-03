@@ -16,8 +16,8 @@ Two epilogues are exposed:
       pass would add a barrier without much coalescing win.
 
 * `CShuffleEpilogue` — the LDS-stage shuffle. Per the runbook §9.3:
-    1. Each warp converts its `<d_per_lane x f32>` accumulator vector
-       to `<d_per_lane x f16>` and writes the halves into a per-block
+    1. Each warp converts its `<c_per_lane x f32>` accumulator vector
+       to `<c_per_lane x f16>` and writes the halves into a per-block
        LDS region at the *MFMA output layout* (consecutive lanes hold
        consecutive N-direction elements).
     2. `block_sync_lds` (s_barrier).
@@ -29,7 +29,7 @@ Two epilogues are exposed:
       common case for 16x16 atoms; lane 0 holds N=0 but lane 1 holds
       N=1 which is 2 bytes away — fine — but lane 16 holds N=0 again,
       which is a different M row and *not* contiguous);
-    - direct vector stores would issue `d_per_lane` scalar
+    - direct vector stores would issue `c_per_lane` scalar
       `buffer_store_short`s per atom, none of which coalesce.
 
 Both helpers take three pieces of authoring input:
@@ -84,12 +84,12 @@ class DirectEpilogue:
                   d_rsrc=d_rsrc, bounds=(M, N))
 
     The store issues, per (mi, ni) MFMA-tile and per lane, one packed
-    `<d_per_lane x half>` value. When the atom's `lane_to_output` puts
-    those `d_per_lane` elements at consecutive positions along the *N*
+    `<c_per_lane x half>` value. When the atom's `lane_to_output` puts
+    those `c_per_lane` elements at consecutive positions along the *N*
     axis, we issue a single `buffer_store_vN_f16` per lane (the
     runbook §6.2 lever — `~95 -> ~213 TFLOPS` on the 16c direct conv).
     When they are not consecutive (16x16 / 32x32 atoms) we fall back to
-    `d_per_lane` scalar `buffer_store_short`s; for that case use
+    `c_per_lane` scalar `buffer_store_short`s; for that case use
     `CShuffleEpilogue` instead.
     """
 
@@ -101,11 +101,11 @@ class DirectEpilogue:
     def _row_stride_per_slot(self) -> int:
         """How many output ROWS the per-lane accumulator vector spans.
 
-        - 16x16: `d_per_lane = 4` and `acc[i]` lives at `row = m_blk*4 + i`,
+        - 16x16: `c_per_lane = 4` and `acc[i]` lives at `row = m_blk*4 + i`,
           so 4 distinct rows per lane (consecutive rows).
         - 32x32: 16 elements per lane spread over 8 distinct rows
           (rb=0..3 * 8 + ri=0..3 + m_blk*4); not row-contiguous.
-        - 4x4:   `d_per_lane = 4` and `acc[i]` lives at `row = i`,
+        - 4x4:   `c_per_lane = 4` and `acc[i]` lives at `row = i`,
           col fixed; 4 distinct rows per lane.
 
         For 4x4 the 4 elements ARE contiguous in N (col = lane_in_batch
@@ -121,7 +121,7 @@ class DirectEpilogue:
 
     @property
     def _is_col_contiguous(self) -> bool:
-        """True when acc[0..d_per_lane-1] are contiguous in *columns*.
+        """True when acc[0..c_per_lane-1] are contiguous in *columns*.
 
         For 4x4 atom: lane has 4 elements at (row=i, col=lane_in_batch).
         Each lane's 4 elements are at the *same col*, different rows.
@@ -161,10 +161,10 @@ class DirectEpilogue:
         `mfmas_per_warp_m * mfmas_per_warp_n`.
 
         `vec_in_acc=True`: the caller asserts that the
-        `d_per_lane` accumulator elements are contiguous in the global
+        `c_per_lane` accumulator elements are contiguous in the global
         output's fastest dim (true for the direct conv 4c case where
         `i` -> `k_out`). When true, we emit one `buffer_store_vN_f16`
-        per atom-tile per lane instead of `d_per_lane` scalar stores.
+        per atom-tile per lane instead of `c_per_lane` scalar stores.
 
         `bounds`: `(M, N)` i32 SSA values; if provided, per-element
         stores are guarded by `m < M && n < N`. Pass `None` for
@@ -205,13 +205,13 @@ class DirectEpilogue:
                     # Emit one wide vec store per lane (4 elements per
                     # 4x4 atom). The `addr_fn` is called at the
                     # *first* output element (i=0); the contiguous
-                    # `d_per_lane - 1` more elements come from the
+                    # `c_per_lane - 1` more elements come from the
                     # accumulator's vector layout.
                     row_off, col_off = atom.lane_to_output(b, grid.lane, 0)
                     m_val = b.add(atom_m_off, row_off)
                     n_val = b.add(atom_n_off, col_off)
                     ok = self._bounds_check(
-                        b, m_val, n_val, bounds, vec_n=atom.d_per_lane
+                        b, m_val, n_val, bounds, vec_n=atom.c_per_lane
                     )
                     off_elems, valid = addr_fn(b, m_val, n_val)
                     if ok is not None:
@@ -226,11 +226,11 @@ class DirectEpilogue:
                     )
                     if _fp32_out:
                         # fp32 output: store accumulator elements directly as f32.
-                        # d_per_lane elements = d_per_lane dwords.
-                        n_elems = atom.d_per_lane
+                        # c_per_lane elements = c_per_lane dwords.
+                        n_elems = atom.c_per_lane
                         if n_elems not in (1, 2, 4):
                             raise ValueError(
-                                f"vec_in_acc=True fp32 with d_per_lane={n_elems} unsupported"
+                                f"vec_in_acc=True fp32 with c_per_lane={n_elems} unsupported"
                             )
                         b.buffer_store_vN_f32(
                             d_rsrc, safe, b.const_i32(0), acc, n_elems
@@ -238,37 +238,37 @@ class DirectEpilogue:
                     elif _bf16_out:
                         acc_bf = b.vec_trunc_f32_to_bf16(acc)
                         # 4 bfloats -> 2 dwords; 8 -> 4.
-                        if atom.d_per_lane == 4:
+                        if atom.c_per_lane == 4:
                             b.buffer_store_vN_bf16(
                                 d_rsrc, safe, b.const_i32(0), acc_bf, 2
                             )
-                        elif atom.d_per_lane == 8:
+                        elif atom.c_per_lane == 8:
                             b.buffer_store_vN_bf16(
                                 d_rsrc, safe, b.const_i32(0), acc_bf, 4
                             )
                         else:
                             raise ValueError(
-                                f"vec_in_acc=True bf16 with d_per_lane={atom.d_per_lane} unsupported"
+                                f"vec_in_acc=True bf16 with c_per_lane={atom.c_per_lane} unsupported"
                             )
                     else:
                         acc_h = b.vec_trunc_f32_to_f16(acc)
-                        # Choose dword width based on d_per_lane.
+                        # Choose dword width based on c_per_lane.
                         # 4 halves -> 2 dwords; 8 -> 4; 16 -> not supported
                         # as a single store (the 32x32 atom is unreachable here).
-                        if atom.d_per_lane == 4:
+                        if atom.c_per_lane == 4:
                             b.buffer_store_vN_f16(
                                 d_rsrc, safe, b.const_i32(0), acc_h, 2
                             )
-                        elif atom.d_per_lane == 8:
+                        elif atom.c_per_lane == 8:
                             b.buffer_store_vN_f16(
                                 d_rsrc, safe, b.const_i32(0), acc_h, 4
                             )
                         else:
                             raise ValueError(
-                                f"vec_in_acc=True with d_per_lane={atom.d_per_lane} unsupported"
+                                f"vec_in_acc=True with c_per_lane={atom.c_per_lane} unsupported"
                             )
                 else:
-                    for i in range(atom.d_per_lane):
+                    for i in range(atom.c_per_lane):
                         row_off, col_off = atom.lane_to_output(b, grid.lane, i)
                         m_val = b.add(atom_m_off, row_off)
                         n_val = b.add(atom_n_off, col_off)
@@ -316,11 +316,11 @@ class DirectEpilogue:
         return b.land(m_ok, n_ok)
 
 
-def _cshuffle_acc_distribution(d_per_lane: int) -> TileDistribution:
+def _cshuffle_acc_distribution(c_per_lane: int) -> TileDistribution:
     """Register-container distribution for one warp tile's accumulator.
 
-    A single X dim is decomposed as ``(d_per_lane, 1)`` with one Y per
-    level: the outer Y (length ``d_per_lane``) enumerates the per-lane
+    A single X dim is decomposed as ``(c_per_lane, 1)`` with one Y per
+    level: the outer Y (length ``c_per_lane``) enumerates the per-lane
     accumulator register slots, and the inner Y (length 1) is the scalar
     publish unit. ``y_to_linear((i, 0)) == i`` so slot ``i`` maps to
     accumulator element ``i``. The distribution is used only as the
@@ -329,7 +329,7 @@ def _cshuffle_acc_distribution(d_per_lane: int) -> TileDistribution:
     output layout is not a clean ``unmerge`` of the lane id).
     """
     enc = TileDistributionEncoding(
-        Hs=((int(d_per_lane), 1),),
+        Hs=((int(c_per_lane), 1),),
         Ys2RHs_major=(1, 1),
         Ys2RHs_minor=(0, 1),
     )
@@ -341,12 +341,12 @@ class CShuffleEpilogue:
     """LDS-staged C-shuffle epilogue (runbook §9.3).
 
     Three-stage pattern:
-      1. Each lane converts its `<d_per_lane x f32>` accumulator to
-         `<d_per_lane x f16>` and writes the halves into LDS at the
+      1. Each lane converts its `<c_per_lane x f32>` accumulator to
+         `<c_per_lane x f16>` and writes the halves into LDS at the
          *MFMA output layout* positions:
            - 16x16: `LDS[m_blk*4 + i + warp_m_off + mi*16, n_in_atom + warp_n_off + ni*16]`
            - 32x32: `LDS[(i//4)*8 + m_blk*4 + (i%4) + warp_m_off + mi*32, n_in_atom + warp_n_off + ni*32]`
-         All threads write d_per_lane halves with one `ds_write_b16`
+         All threads write c_per_lane halves with one `ds_write_b16`
          per slot.
       2. `block_sync_lds` (`s_barrier`).
       3. A flat distribution of `block_size` threads reads
@@ -380,7 +380,7 @@ class CShuffleEpilogue:
     war_barriers: int = 1
     # MFMA path: set by from_grid(); drives lane_to_output in store().
     atom: Optional[MfmaAtom] = None
-    # WMMA path: set by from_grid_op(); uses d_frag_len / d_layout().coord() instead.
+    # WMMA path: set by from_grid_op(); uses c_frag_len / c_layout().coord() instead.
     mma_op: Optional["MmaOp"] = None
 
     @property
@@ -416,7 +416,7 @@ class CShuffleEpilogue:
     ) -> "CShuffleEpilogue":
         """Construct for a WMMA (``MmaOp``) accumulator layout.
 
-        Uses ``op.d_frag_len`` / ``op.d_layout()`` for the LDS scatter in
+        Uses ``op.c_frag_len`` / ``op.c_layout()`` for the LDS scatter in
         place of the MFMA-specific ``atom.lane_to_output``.
         """
         _fp32_out = out_dtype == "fp32"
@@ -490,12 +490,12 @@ class CShuffleEpilogue:
 
         # Resolve per-lane count and atom tile size from whichever ISA is active.
         if op is not None:
-            _d_per_lane = op.d_frag_len
+            _c_per_lane = op.c_frag_len
             _atom_m = op.m
             _atom_n = op.n
-            _c_layout = op.d_layout()
+            _c_layout = op.c_layout()
         else:
-            _d_per_lane = atom.d_per_lane
+            _c_per_lane = atom.c_per_lane
             _atom_m = atom.m
             _atom_n = atom.n
             _c_layout = None
@@ -517,13 +517,13 @@ class CShuffleEpilogue:
         #
         # The LDS staging region is a plain ``[tile_m, tile_n]`` row-major
         # buffer (``LdsLayout.cshuffle``); each lane writes its
-        # ``d_per_lane`` accumulator elements at the exact MMA *output*
+        # ``c_per_lane`` accumulator elements at the exact MMA *output*
         # coordinate the atom/op dictates, so the subsequent row-major
         # stage-3 read reconstructs the global tile. The per-warp-tile
         # accumulator is carried in a :class:`StaticDistributedTensor`
         # and published through :func:`store_tile_cshuffle`.
         #
-        # The MMA output layout (``atom.lane_to_output`` / ``op.d_layout().coord()``)
+        # The MMA output layout (``atom.lane_to_output`` / ``op.c_layout().coord()``)
         # is not a clean ``unmerge`` of the lane id, so the LDS coordinate is
         # supplied via an explicit ``coord_fn`` rather than ``calculate_x``.
         lds_layout = LdsLayout.cshuffle(tile_m=grid.tile_m, tile_n=grid.tile_n)
@@ -543,11 +543,11 @@ class CShuffleEpilogue:
         )
 
         # One distributed-tensor container per warp tile: a single X dim
-        # decomposed as ``(d_per_lane, 1)`` with one Y per level, so the
-        # outer Y enumerates the ``d_per_lane`` register slots and the
+        # decomposed as ``(c_per_lane, 1)`` with one Y per level, so the
+        # outer Y enumerates the ``c_per_lane`` register slots and the
         # inner (vector) Y is the scalar publish unit. ``y_to_linear`` of
         # ``(i, 0)`` is exactly the accumulator index ``i``.
-        dist = _cshuffle_acc_distribution(_d_per_lane)
+        dist = _cshuffle_acc_distribution(_c_per_lane)
         traits = LoadStoreTraits(distribution=dist, vector_dim_y=1, scalar_per_vector=1)
 
         # ---- step 0: reuse barrier(s). ----
@@ -578,14 +578,14 @@ class CShuffleEpilogue:
                 else:
                     acc_staged = b.vec_trunc_f32_to_f16(acc)
                     dt = make_static_distributed_tensor(dist, dtype=F16)
-                for i in range(_d_per_lane):
+                for i in range(_c_per_lane):
                     dt.set([i, 0], b.vec_extract(acc_staged, i))
 
                 tile_m_base = b.add(warp_m_off, b.const_i32(mi * _atom_m))
                 tile_n_base = b.add(warp_n_off, b.const_i32(ni * _atom_n))
 
                 if _c_layout is not None:
-                    # WMMA path: use op.d_layout().coord() for the LDS scatter.
+                    # WMMA path: use op.c_layout().coord() for the LDS scatter.
                     def coord_fn(
                         b_,
                         y_base,
@@ -738,12 +738,12 @@ class CShuffleEpilogue:
             )
 
         if op is not None:
-            _d_per_lane = op.d_frag_len
+            _c_per_lane = op.c_frag_len
             _atom_m = op.m
             _atom_n = op.n
-            _c_layout = op.d_layout()
+            _c_layout = op.c_layout()
         else:
-            _d_per_lane = atom.d_per_lane
+            _c_per_lane = atom.c_per_lane
             _atom_m = atom.m
             _atom_n = atom.n
             _c_layout = None
@@ -778,7 +778,7 @@ class CShuffleEpilogue:
             [b.const_i32(0), b.const_i32(0)],
         )
 
-        dist = _cshuffle_acc_distribution(_d_per_lane)
+        dist = _cshuffle_acc_distribution(_c_per_lane)
         traits = LoadStoreTraits(distribution=dist, vector_dim_y=1, scalar_per_vector=1)
 
         if not self.no_alias:
@@ -797,7 +797,7 @@ class CShuffleEpilogue:
                 else:
                     acc_staged = b.vec_trunc_f32_to_f16(acc)
                     dt = make_static_distributed_tensor(dist, dtype=F16)
-                for i in range(_d_per_lane):
+                for i in range(_c_per_lane):
                     dt.set([i, 0], b.vec_extract(acc_staged, i))
 
                 tile_m_base = b.add(warp_m_off, b.const_i32(mi * _atom_m))

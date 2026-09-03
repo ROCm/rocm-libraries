@@ -323,13 +323,12 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
 
     mma = rocke_archtarget_mma(target);
     /* if not target.mma.has_shape(f16,f16,fp32, 16,16,16): return False, ... */
-    if(!rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 16))
+    if(!rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 16))
     {
         CK_DCONV16C_REJECT("missing 16x16x16 f16 MFMA atom on %s", arch);
     }
     /* if spec.fold_k32 and not target.mma.has_shape(f16,f16,fp32, 16,16,32): ... */
-    if(spec->fold_k32
-       && !rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 32))
+    if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
     {
         CK_DCONV16C_REJECT("fold_k32=True needs the 16x16x32 f16 MFMA atom, absent on %s; use "
                            "fold_k32=False for a %s-capable kernel",

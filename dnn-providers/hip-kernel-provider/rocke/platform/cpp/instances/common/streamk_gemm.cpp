@@ -250,8 +250,7 @@ bool rocke_streamk_gemm_is_valid_spec(const rocke_streamk_gemm_spec_t* spec,
         return set_reason(reason, reason_cap, "unknown gfx target");
     }
     mma = rocke_archtarget_mma(target);
-    if(!rocke_mma_catalog_has_shape(
-           mma, NULL, "fp16", "fp16", "fp32", "fp32", atom->m, atom->n, atom->k))
+    if(!rocke_mma_catalog_has_shape(mma, NULL, "fp16", "fp16", "fp32", atom->m, atom->n, atom->k))
     {
         return set_reason(reason, reason_cap, "f16 MFMA atom not available on target");
     }

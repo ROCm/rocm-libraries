@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
 
 from ..core.ir import F16, F32, BF16, IRBuilder, Value
-from .atoms import MfmaAtom, require_mma_recurrence
+from .atoms import MfmaAtom
 
 
 __all__ = [
@@ -112,8 +112,7 @@ def validate_mfma_atom_in_catalog(atom: MfmaAtom, arch: str, *, where: str) -> N
     if not target.mma.has_shape(
         a_dtype=atom.dtype_in,
         b_dtype=atom.dtype_in,
-        c_dtype=atom.dtype_c,
-        d_dtype=atom.dtype_d,
+        c_dtype=atom.dtype_out,
         m=atom.m,
         n=atom.n,
         k=atom.k,
@@ -124,11 +123,6 @@ def validate_mfma_atom_in_catalog(atom: MfmaAtom, arch: str, *, where: str) -> N
             f"{arch} MMA catalog; this configuration requires a different "
             f"target."
         )
-
-
-def _require_recurrent_accumulator_contract(atom: MfmaAtom, *, where: str) -> None:
-    """Require a D result to be usable as the next MMA's C operand."""
-    require_mma_recurrence(atom, where=where)
 
 
 @dataclass(frozen=True)
@@ -400,11 +394,10 @@ def mfma_k_loop(
     initial value to chain multiple K-loops (e.g. across paged blocks)
     without leaving the f32 register accumulator.
 
-    Returns a per-lane ``<d_per_lane x f32>`` vector.
+    Returns a per-lane ``<c_per_lane x f32>`` vector.
     """
     if K % atom.k != 0:
         raise ValueError(f"mfma_k_loop: K={K} must be divisible by atom.k={atom.k}")
-    _require_recurrent_accumulator_contract(atom, where="mfma_k_loop")
     n_tiles = K // atom.k
     acc0 = initial_acc if initial_acc is not None else atom.zero_acc(b)
     kloop = b.scf_for_iter(
@@ -449,7 +442,6 @@ def mfma_k_loop_dynamic_K(
     multiple of ``atom.k`` at every group's runtime; the helper does
     not emit a divisibility check.
     """
-    _require_recurrent_accumulator_contract(atom, where="mfma_k_loop_dynamic_K")
     acc0 = initial_acc if initial_acc is not None else atom.zero_acc(b)
     n_tiles = b.div(K_runtime, b.const_i32(atom.k))
     kloop = b.scf_for_iter(
@@ -510,14 +502,14 @@ def store_acc_to_global(
 
     The atom's :meth:`lane_to_output` returns the per-lane
     (row_in_atom, col_in_atom) for accumulator slot ``i``; combined
-    with the tile base offsets, each lane writes ``d_per_lane`` output
+    with the tile base offsets, each lane writes ``c_per_lane`` output
     cells.
     """
     if epilogue is not None:
         epilogue(b, atom, lane_decode, C, m_tile_base, n_tile_base, acc, N, out_dtype)
         return
     out_dtype_ir = F32 if out_dtype == "f32" else _ir_type_for_dtype(out_dtype)
-    for i in range(atom.d_per_lane):
+    for i in range(atom.c_per_lane):
         row_in, col_in = atom.lane_to_output(b, lane_decode.lane, i)
         row = b.add(m_tile_base, row_in)
         col = b.add(n_tile_base, col_in)

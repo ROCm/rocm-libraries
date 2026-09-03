@@ -24,7 +24,6 @@ from __future__ import annotations
 from typing import Callable, List, Optional, Tuple
 
 from rocke.core.ir import BF16, F32, FP8E4M3, I32, IRBuilder, Type, Value, VectorType
-from rocke.helpers.atoms import require_mma_recurrence, zero_mma_c
 from rocke.helpers.attention import (
     dequant_fp8x8_to_dtype,
     wave_reduce_max,
@@ -80,12 +79,11 @@ def check_wmma_arch(arch: str) -> Tuple[bool, str]:
 
 
 def resolve_wmma(arch: str):
-    """Return ``(op, a_layout, d_layout, a_frag_len, d_frag_len)`` for the atom."""
+    """Return ``(op, a_layout, c_layout, a_frag_len, c_frag_len)`` for the atom."""
     from rocke.core.arch import ArchTarget
 
     op = ArchTarget.from_gfx(arch).mma.by_op_id(WMMA_OP_ID)
-    require_mma_recurrence(op, where="gfx1250 WMMA attention")
-    return op, op.a_layout(), op.d_layout(), op.a_frag_len, op.d_frag_len
+    return op, op.a_layout(), op.c_layout(), op.a_frag_len, op.c_frag_len
 
 
 def load_kv16(
@@ -138,14 +136,14 @@ def compute_qk_scores(
     kv_dtype: Type,
     k_scale: Value,
     dtype: Type,
-    op,
+    c_frag: int,
     phys_block: PhysBlockFn,
     spacing: int = 0,
 ) -> List[Value]:
     """Q*K^T for the two 16-token N-subtiles of a 32-token tile -> [score0, score1]."""
     scores = []
     for nsub in range(2):
-        score = zero_mma_c(b, op)
+        score = b.zero_vec_f32(c_frag)
         k_pos = b.add(b.add(tile_base, b.const_i32(nsub * WMMA_N)), lane_row)
         pblk = phys_block(k_pos)
         token_in_block = b.mod(k_pos, b.const_i32(block_size))
@@ -403,12 +401,12 @@ def compute_pv(
     accs: List[Value],
     *,
     a_map,
-    d_map,
+    c_map,
     lane: Value,
     lane_row: Value,
     col: Value,
     a_frag: int,
-    d_frag: int,
+    c_frag: int,
     head_size: int,
     dtype: Type,
     v_extra_idx: Optional[Value] = None,
@@ -536,11 +534,11 @@ def compute_pv_from_probs(
     accs: List[Value],
     *,
     a_map,
-    d_map,
+    c_map,
     lane: Value,
     col: Value,
     a_frag: int,
-    d_frag: int,
+    c_frag: int,
     head_size: int,
     dtype: Type,
     v_extra_idx: Optional[Value] = None,

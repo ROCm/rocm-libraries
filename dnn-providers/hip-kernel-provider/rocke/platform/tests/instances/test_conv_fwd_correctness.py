@@ -202,7 +202,6 @@ def _select_warp_tile_k(arch: str, dtype: str, warp_tile_mn: int, tile_k: int) -
         a_dtype=dtype,
         b_dtype=dtype,
         c_dtype="fp32",
-        d_dtype="fp32",
         m=warp_tile_mn,
         n=warp_tile_mn,
         k_max=tile_k,

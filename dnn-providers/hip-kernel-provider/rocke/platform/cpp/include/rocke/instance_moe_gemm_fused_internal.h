@@ -115,7 +115,7 @@ typedef struct rocke_moe_gate_up_build_ctx
     /* ---- geometry (aliases of spec.tile) ---- */
     int block_m, block_n, block_k;
     int mfmas_m, mfmas_n;
-    int d_per_lane; /* _mfma_atom_widths(u)[2]                     */
+    int c_per_lane; /* _mfma_atom_widths(u)[2]                     */
 
     /* ---- common SSA constants ---- */
     rocke_value_t* c0;
@@ -200,7 +200,7 @@ typedef struct rocke_moe_interleaved_build_ctx
     /* ---- geometry ---- */
     int block_m, block_n, block_k;
     int mfmas_m, mfmas_n;
-    int d_per_lane;
+    int c_per_lane;
 
     /* ---- SSA constants ---- */
     rocke_value_t* c0;
@@ -280,7 +280,7 @@ typedef struct rocke_moe_down_build_ctx
     /* ---- geometry ---- */
     int block_m, block_n, block_k;
     int mfmas_m, mfmas_n;
-    int d_per_lane;
+    int c_per_lane;
 
     /* ---- SSA constants ---- */
     rocke_value_t* c0_dr; /* Python `c0_dr`                            */
@@ -356,7 +356,7 @@ void rocke_moe_emit_gate_up_silu_epilogue_default(rocke_ir_builder_t* b,
                                                   rocke_value_t* M,
                                                   rocke_value_t* N,
                                                   rocke_value_t* Hidden,
-                                                  int d_per_lane,
+                                                  int c_per_lane,
                                                   rocke_value_t* batch_off_c);
 
 /* ----- INTERLEAVED GATE+UP+SILU ----- */
@@ -401,7 +401,7 @@ void rocke_moe_emit_interleaved_silu_epilogue(rocke_ir_builder_t* b,
                                               rocke_value_t* M,
                                               rocke_value_t* N,
                                               rocke_value_t* Hidden,
-                                              int d_per_lane,
+                                              int c_per_lane,
                                               rocke_value_t* batch_off_c);
 
 /* ----- DOWN+REDUCE ----- */

@@ -168,12 +168,12 @@ bool rocke_moe_down_build_ctx_init(rocke_moe_down_build_ctx_t* ctx,
         }
     }
 
-    /* t = spec.tile; _, _, d_per_lane = _mfma_atom_widths(u) */
+    /* t = spec.tile; _, _, c_per_lane = _mfma_atom_widths(u) */
     {
         const rocke_gemm_tile_spec_t* t = &ctx->u.tile;
         int a_per = 0, b_per = 0, c_per = 0;
         rocke_moe_mfma_atom_widths(&ctx->u, &a_per, &b_per, &c_per);
-        ctx->d_per_lane = c_per;
+        ctx->c_per_lane = c_per;
 
         ctx->block_m = t->tile_m;
         ctx->block_n = t->tile_n;
@@ -378,7 +378,7 @@ void rocke_moe_down_emit_compute(rocke_moe_down_build_ctx_t* ctx)
 
     /* _emit_down_reduce_epilogue_atomic(b, u, acc_res, warp_m_idx, warp_n_idx,
      *     lane, block_m_off, block_n_off, M, N, SortedTokenIds, SortedWeights,
-     *     Y, d_per_lane, batch_bucket_off=batch_bucket_off, tokens=tokens) */
+     *     Y, c_per_lane, batch_bucket_off=batch_bucket_off, tokens=tokens) */
     rocke_moe_emit_down_reduce_epilogue_atomic(b,
                                                &ctx->u,
                                                ctx->acc_res,
@@ -392,7 +392,7 @@ void rocke_moe_down_emit_compute(rocke_moe_down_build_ctx_t* ctx)
                                                ctx->SortedTokenIds,
                                                ctx->SortedWeights,
                                                ctx->Y,
-                                               ctx->d_per_lane,
+                                               ctx->c_per_lane,
                                                ctx->batch_bucket_off,
                                                ctx->tokens);
 }

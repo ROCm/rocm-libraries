@@ -19,7 +19,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "rocke/helper_rocke.helpers.atoms.h" /* mfma_atom / d_warp_params*/
+#include "rocke/helper_rocke.helpers.atoms.h" /* mfma_atom / c_warp_params*/
 #include "rocke/helper_rocke.helpers.distribution.h" /* tile distribution        */
 #include "rocke/helper_rocke.helpers.fuse.h" /* FusedEpilogue apply/decl */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_io_ir_type           */
@@ -173,7 +173,7 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                                       int num_accs,
                                       rocke_value_t* m_base_off,
                                       rocke_value_t* n_base_off,
-                                      int d_per_lane,
+                                      int c_per_lane,
                                       const rocke_type_t* storage_dtype,
                                       rocke_gemm_per_cell_fn per_cell,
                                       void* user,
@@ -186,8 +186,8 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
     (void)num_accs;
 
     /* atom = mfma_atom(dtype_a, warp_tile_m, warp_tile_n, warp_tile_k)
-     * _, _kc_mlane, kc_m1, kc_nlane = d_warp_params(atom)
-     * c_dist = make_static_tile_distribution(make_d_warp_dstr_encoding(atom)) */
+     * _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
+     * c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom)) */
     const rocke_mfma_atom_t* atom
         = rocke_b_mfma_atom(b, spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
     if(!rocke_ir_builder_ok(b))
@@ -195,10 +195,10 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
 
     int kc_m1 = 0;
     int kc_nlane = 0;
-    if(rocke_b_d_warp_params(b, atom, NULL, NULL, &kc_m1, &kc_nlane) != ROCKE_OK)
+    if(rocke_b_c_warp_params(b, atom, NULL, NULL, &kc_m1, &kc_nlane) != ROCKE_OK)
         return;
 
-    rocke_tile_distribution_encoding_t* c_enc = rocke_make_d_warp_dstr_encoding(b, atom);
+    rocke_tile_distribution_encoding_t* c_enc = rocke_make_c_warp_dstr_encoding(b, atom);
     rocke_tile_distribution_t* c_dist = rocke_make_static_tile_distribution(b, c_enc);
     (void)c_dist;
     if(!rocke_ir_builder_ok(b))
@@ -218,7 +218,7 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
      * calculate_x reconstructs row_in_atom (lane + slot) and col_in_atom
      * (= n_in_atom) from these. This mirrors the Python:
      *
-     *   for i in range(d_per_lane):
+     *   for i in range(c_per_lane):
      *     ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
      *     x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
      *     row_in_atom.append(x_row); col_in_atom = x_col
@@ -229,7 +229,7 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
         int i;
         rocke_value_t* const* ps[1] = {p_lane};
         int ps_counts[1] = {2};
-        for(i = 0; i < d_per_lane; ++i)
+        for(i = 0; i < c_per_lane; ++i)
         {
             rocke_value_t* ys[2]
                 = {rocke_b_const_i32(b, i / kc_m1), rocke_b_const_i32(b, i % kc_m1)};
@@ -249,7 +249,7 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
      *     acc_h = vec_cast_f32_to(acc, storage_dtype)
      *     c_n = (n_base_first) ? add(add(n_base_off, ni*wtn), col_in_atom)
      *                          : add(n_base_off, add(ni*wtn, col_in_atom))
-     *     for i in range(d_per_lane):
+     *     for i in range(c_per_lane):
      *       c_m = add(base_m, row_in_atom[i])
      *       per_cell(c_m, c_n, acc_h, i) */
     {
@@ -280,7 +280,7 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                         n_base_off,
                         rocke_b_add(b, rocke_b_const_i32(b, ni * t->warp_tile_n), col_in_atom));
                 }
-                for(i = 0; i < d_per_lane; ++i)
+                for(i = 0; i < c_per_lane; ++i)
                 {
                     rocke_value_t* c_m = rocke_b_add(b, base_m, row_in_atom[i]);
                     per_cell(b, c_m, c_n, acc_h, i, user);
@@ -375,7 +375,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       rocke_value_t* M,
                                       rocke_value_t* N,
                                       rocke_value_t* C,
-                                      int d_per_lane,
+                                      int c_per_lane,
                                       rocke_value_t* batch_off_c,
                                       void* fused_epilogue,
                                       bool fused_is_mde)
@@ -405,7 +405,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
     /* ---- WMMA (RDNA) accumulator scatter (op.family == "wmma"). ---- */
     if(op->family != NULL && strcmp(op->family, "wmma") == 0)
     {
-        const rocke_layout_map_t* c_map = rocke_mmaop_d_layout(op, b);
+        const rocke_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
         rocke_value_t* block_warp_m_off = rocke_b_add(b, block_m_off, warp_m_off);
         rocke_value_t* block_warp_n_off = rocke_b_add(b, block_n_off, warp_n_off);
         gemm_default_store_user_t u;
@@ -436,7 +436,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                 atom_n
                     = rocke_b_add(b, block_warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n));
                 acc_h = rocke_b_vec_cast_f32_to(b, acc, storage_dtype);
-                for(i = 0; i < d_per_lane; ++i)
+                for(i = 0; i < c_per_lane; ++i)
                 {
                     rocke_value_t* row_in_atom = NULL;
                     rocke_value_t* col_in_atom = NULL;
@@ -487,7 +487,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                          num_accs,
                                          block_warp_m_off,
                                          block_warp_n_off,
-                                         d_per_lane,
+                                         c_per_lane,
                                          storage_dtype,
                                          gemm_default_store_cell,
                                          &u,
@@ -523,7 +523,7 @@ static void gemm_cshuffle_smem_cell(rocke_ir_builder_t* b,
  * _emit_epilogue_split_k
  *
  * Faithful, byte-identical port of the Python _emit_epilogue_split_k. Each warp
- * owns a per-lane <d_per_lane x f32> accumulator; every slot is scattered to its
+ * owns a per-lane <c_per_lane x f32> accumulator; every slot is scattered to its
  * output (c_m, c_n) using the atom's CWarpDstrEncoding (exactly as the default
  * epilogue scatter) and the raw f32 value is atomic-added into Cf32[c_m, c_n].
  * Only the per-cell write differs from the direct epilogue (f32 atomicrmw fadd
@@ -541,7 +541,7 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
                                       rocke_value_t* M,
                                       rocke_value_t* N,
                                       rocke_value_t* Cf32,
-                                      int d_per_lane)
+                                      int c_per_lane)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
     int mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
@@ -565,8 +565,8 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
     block_warp_n_off = rocke_b_add(b, block_n_off, warp_n_off);
 
     /* atom = mfma_atom(dtype_a, warp_tile_m, warp_tile_n, warp_tile_k)
-     * _, _kc_mlane, kc_m1, kc_nlane = d_warp_params(atom)
-     * c_dist = make_static_tile_distribution(make_d_warp_dstr_encoding(atom)) */
+     * _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
+     * c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom)) */
     const rocke_mfma_atom_t* atom
         = rocke_b_mfma_atom(b, spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
     if(!rocke_ir_builder_ok(b))
@@ -574,10 +574,10 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
 
     int kc_m1 = 0;
     int kc_nlane = 0;
-    if(rocke_b_d_warp_params(b, atom, NULL, NULL, &kc_m1, &kc_nlane) != ROCKE_OK)
+    if(rocke_b_c_warp_params(b, atom, NULL, NULL, &kc_m1, &kc_nlane) != ROCKE_OK)
         return;
 
-    rocke_tile_distribution_encoding_t* c_enc = rocke_make_d_warp_dstr_encoding(b, atom);
+    rocke_tile_distribution_encoding_t* c_enc = rocke_make_c_warp_dstr_encoding(b, atom);
     rocke_tile_distribution_t* c_dist = rocke_make_static_tile_distribution(b, c_enc);
     if(!rocke_ir_builder_ok(b))
         return;
@@ -596,7 +596,7 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
         int i;
         rocke_value_t* const* ps[1] = {p_lane};
         int ps_counts[1] = {2};
-        for(i = 0; i < d_per_lane; ++i)
+        for(i = 0; i < c_per_lane; ++i)
         {
             rocke_value_t* ys[2]
                 = {rocke_b_const_i32(b, i / kc_m1), rocke_b_const_i32(b, i % kc_m1)};
@@ -617,7 +617,7 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
      *   for ni in range(mfmas_n):
      *     acc = accs[flat]; flat += 1
      *     c_n = add(block_warp_n_off, add(ni*warp_tile_n, col_in_atom))
-     *     for i in range(d_per_lane):
+     *     for i in range(c_per_lane):
      *       c_m = add(base_m, row_in_atom[i])
      *       c_off = add(mul(c_m, N), c_n)
      *       val = vec_extract(acc, i)
@@ -638,7 +638,7 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
                     b,
                     block_warp_n_off,
                     rocke_b_add(b, rocke_b_const_i32(b, ni * t->warp_tile_n), col_in_atom));
-                for(i = 0; i < d_per_lane; ++i)
+                for(i = 0; i < c_per_lane; ++i)
                 {
                     rocke_value_t* c_m = rocke_b_add(b, base_m, row_in_atom[i]);
                     rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, c_m, N), c_n);
@@ -686,7 +686,7 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                                        rocke_value_t* C,
                                        int a_per_lane,
                                        int b_per_lane,
-                                       int d_per_lane,
+                                       int c_per_lane,
                                        rocke_value_t* batch_off_c,
                                        void* fused_epilogue,
                                        bool fused_is_mde)
@@ -765,7 +765,7 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                                      num_accs,
                                      warp_m_off,
                                      warp_n_off,
-                                     d_per_lane,
+                                     c_per_lane,
                                      storage_dtype,
                                      gemm_cshuffle_smem_cell,
                                      &smem_user,
@@ -950,7 +950,7 @@ void rocke_gemm_emit_epilogue(rocke_gemm_build_ctx_t* ctx)
                                          ctx->M,
                                          ctx->N,
                                          ctx->C,
-                                         ctx->d_per_lane);
+                                         ctx->c_per_lane);
         return;
     }
 
@@ -971,7 +971,7 @@ void rocke_gemm_emit_epilogue(rocke_gemm_build_ctx_t* ctx)
                                           ctx->C,
                                           ctx->a_per_lane,
                                           ctx->b_per_lane,
-                                          ctx->d_per_lane,
+                                          ctx->c_per_lane,
                                           ctx->batch_off_c,
                                           fused_ep,
                                           fused_is_mde);
@@ -991,7 +991,7 @@ void rocke_gemm_emit_epilogue(rocke_gemm_build_ctx_t* ctx)
                                          ctx->M,
                                          ctx->N,
                                          ctx->C,
-                                         ctx->d_per_lane,
+                                         ctx->c_per_lane,
                                          ctx->batch_off_c,
                                          fused_ep,
                                          fused_is_mde);

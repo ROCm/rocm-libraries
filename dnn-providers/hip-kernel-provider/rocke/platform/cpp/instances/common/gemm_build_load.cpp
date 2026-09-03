@@ -56,8 +56,8 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
     const rocke_gemm_tile_spec_t* t = &spec->tile;
 
     /* t = spec.tile
-     * a_per_lane, b_per_lane, d_per_lane = _atom_frag_lengths(op) */
-    rocke_gemm_atom_frag_lengths(ctx->op, &ctx->a_per_lane, &ctx->b_per_lane, &ctx->d_per_lane);
+     * a_per_lane, b_per_lane, c_per_lane = _atom_frag_lengths(op) */
+    rocke_gemm_atom_frag_lengths(ctx->op, &ctx->a_per_lane, &ctx->b_per_lane, &ctx->c_per_lane);
 
     /* block_m / block_n / block_k = t.tile_m / t.tile_n / t.tile_k */
     ctx->block_m = t->tile_m;

@@ -63,7 +63,7 @@ typedef rocke_mma_role_t rocke_arch_mma_role_t;
 /* MmaOp.shape -> (m, n, k). Forwards to rocke_mma_op_shape. */
 void rocke_mmaop_shape(const rocke_mmaop_t* op, int* m, int* n, int* k);
 
-/* MmaOp.a_layout() / b_layout() / c_layout() / d_layout() / acc_layout(). Each returns the
+/* MmaOp.a_layout() / b_layout() / c_layout() / acc_layout(). Each returns the
  * verified lane/slot -> coord map for the role, or NULL when none is registered
  * for the op_id (Python raises NotImplementedError; here, when `b` is non-NULL,
  * the builder's sticky error is set -- pass b=NULL for a pure lookup). Forwards
@@ -71,17 +71,8 @@ void rocke_mmaop_shape(const rocke_mmaop_t* op, int* m, int* n, int* k);
 const rocke_arch_layout_map_t* rocke_mmaop_a_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
 const rocke_arch_layout_map_t* rocke_mmaop_b_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
 const rocke_arch_layout_map_t* rocke_mmaop_c_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
-const rocke_arch_layout_map_t* rocke_mmaop_d_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
 const rocke_arch_layout_map_t* rocke_mmaop_acc_layout(const rocke_mmaop_t* op,
                                                       rocke_ir_builder_t* b);
-
-/* Recurrent builders feed D back as the next C. Validate that the dtype,
- * fragment width, and any registered physical layout are directly compatible,
- * then construct a fresh zero using the C-input contract. */
-rocke_status_t rocke_mmaop_require_recurrence(rocke_ir_builder_t* b,
-                                              const rocke_mmaop_t* op,
-                                              const char* where);
-rocke_value_t* rocke_mmaop_zero_c(rocke_ir_builder_t* b, const rocke_mmaop_t* op);
 
 /* LayoutMap.coord(builder, lane, slot) -> (coord0, coord1). Forwards to
  * rocke_layout_map_coord (validates slot in [0, frag_len); emits arith via b). */
@@ -111,7 +102,6 @@ const rocke_mmaop_t* rocke_archtarget_op_for_shape(const rocke_archtarget_t* t,
                                                    const char* a_dtype,
                                                    const char* b_dtype,
                                                    const char* c_dtype,
-                                                   const char* d_dtype,
                                                    int m,
                                                    int n,
                                                    int k);
@@ -127,13 +117,9 @@ const char* rocke_archtarget_isa_triple(const rocke_archtarget_t* t, char* out, 
 /* ArchTarget.fits_lds(bytes_in_use). */
 bool rocke_archtarget_fits_lds(const rocke_archtarget_t* t, long bytes_in_use);
 
-/* ArchTarget.supports_dtype_combo(a, b, c, d, family). family NULL => "mma". */
-bool rocke_archtarget_supports_dtype_combo(const rocke_archtarget_t* t,
-                                           const char* a,
-                                           const char* b,
-                                           const char* c,
-                                           const char* d,
-                                           const char* family);
+/* ArchTarget.supports_dtype_combo(a, b, c, family). family NULL => "mma". */
+bool rocke_archtarget_supports_dtype_combo(
+    const rocke_archtarget_t* t, const char* a, const char* b, const char* c, const char* family);
 
 /* ArchTarget.max_vector_load_dwords(dtype) (dtype accepted for parity, ignored
  * as in Python: width gated by the buffer-load path). */

@@ -3,10 +3,6 @@
 
 """Multi A/B/D GEMM kernel instance (CK Tile ``22_gemm_multi_abd`` parity).
 
-The A/B/D names in this module describe operator-level input tensors. In
-particular, ``D0`` through ``Dn`` are auxiliary epilogue inputs, not the
-instruction-level MMA D result in ``D = A * B + C``.
-
 DSL counterpart of CK Tile's ``example/ck_tile/22_gemm_multi_abd``.
 Generalises :mod:`gemm_multi_d` to also accept multiple ``A`` and
 multiple ``B`` operands that get combined via an ``AElementWise`` /

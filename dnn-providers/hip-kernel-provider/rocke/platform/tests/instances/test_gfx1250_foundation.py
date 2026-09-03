@@ -57,21 +57,14 @@ class TestGfx1250Arch(unittest.TestCase):
         # A/B 16 elems per lane, accumulator 8 f32 per lane.
         self.assertEqual(op.a_frag_len, 16)
         self.assertEqual(op.b_frag_len, 16)
-        self.assertEqual(op.d_frag_len, 8)
+        self.assertEqual(op.c_frag_len, 8)
         # No plain 'mma' family; the wave32 WMMA fp16/bf16 atom is K=32 (not
         # gfx1201's K=16).
         self.assertEqual(
-            t.mma.enumerate(
-                a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", d_dtype="fp32"
-            ),
-            [],
+            t.mma.enumerate(a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"), []
         )
         wmma = t.mma.enumerate(
-            family="wmma",
-            a_dtype="fp16",
-            b_dtype="fp16",
-            c_dtype="fp32",
-            d_dtype="fp32",
+            family="wmma", a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"
         )
         self.assertEqual([o.shape for o in wmma], [(16, 16, 32)])
 

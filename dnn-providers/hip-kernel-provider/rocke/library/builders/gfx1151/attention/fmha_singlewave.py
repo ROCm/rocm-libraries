@@ -13,7 +13,7 @@ added address-arithmetic op costs TFLOP/s). The helper primitives it reuses:
     carries the per-head stride (which cannot fold into the token stride) and
     whose token axis folds the batch offset.
   * :class:`~rocke.helpers.WmmaAtom` (``wmma_f32_16x16x16_f16``) for the WMMA
-    contract, with its hardware-verified ``a_layout``/``b_layout``/``d_layout``
+    contract, with its hardware-verified ``a_layout``/``b_layout``/``c_layout``
     maps driving every lane decode.
   * :class:`~rocke.helpers.WmmaTensor` — a packed distributed tensor carrying
     one lane's fragment/accumulator as a single SSA vector — together with
@@ -56,7 +56,6 @@ from rocke.helpers import (
     make_global_view,
     make_lds_view,
     make_tile_window,
-    require_wmma_recurrence,
     store_wmma_tile,
     wmma_mma,
 )
@@ -149,12 +148,11 @@ def _declare_params(b: IRBuilder):
 
 def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> KernelDef:
     atom = WmmaAtom.f16_16x16x16()
-    require_wmma_recurrence(atom, where="wmma_fmha_singlewave")
     wave = atom.wave_size  # 32
     a_map = atom.a_layout(arch)
-    d_map = atom.d_layout(arch)
+    c_map = atom.c_layout(arch)
     a_frag = atom.a_per_lane  # 16
-    d_frag = atom.d_per_lane  # 8
+    c_frag = atom.c_per_lane  # 8
     n_dk = cfg.head_size // 16
     BM = cfg.bm_tiles
     dtype_ir = F16
@@ -240,12 +238,12 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
         # transposed: [d, k] so the B-operand column gather is contiguous in k.
         V_lds_t = make_lds_view(b, dtype=dtype_ir, shape=(hs, 16), name_hint="VwmmaT")
 
-    # ---- iter-args: per-tile m/l (d_frag each) then per-tile acc (n_dk vecs) ----
+    # ---- iter-args: per-tile m/l (c_frag each) then per-tile acc (n_dk vecs) ----
     iter_args = []
     for t in range(BM):
-        for r in range(d_frag):
+        for r in range(c_frag):
             iter_args.append((f"m{t}_{r}", neg_inf))
-        for r in range(d_frag):
+        for r in range(c_frag):
             iter_args.append((f"l{t}_{r}", zero_f))
     for t in range(BM):
         for d in range(n_dk):
@@ -256,10 +254,10 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
         ms = []
         ls = []
         for _ in range(BM):
-            ms.append(list(state[idx : idx + d_frag]))
-            idx += d_frag
-            ls.append(list(state[idx : idx + d_frag]))
-            idx += d_frag
+            ms.append(list(state[idx : idx + c_frag]))
+            idx += c_frag
+            ls.append(list(state[idx : idx + c_frag]))
+            idx += c_frag
         accs = []
         for _ in range(BM):
             accs.append(
@@ -326,7 +324,7 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
         new_ms = [list(ms[t]) for t in range(BM)]
         new_ls = [list(ls[t]) for t in range(BM)]
         new_accs = [list(accs[t]) for t in range(BM)]
-        ps = [[None] * d_frag for _ in range(BM)]
+        ps = [[None] * c_frag for _ in range(BM)]
 
         # ---- QK + online softmax for each Q-tile ----
         for t in range(BM):
@@ -347,7 +345,7 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
                     k_tile = k_frags[d]
                 score = wmma_mma(b, q_tile, k_tile, score)
             alpha_vec = atom.zero_acc(b)
-            for r in range(d_frag):
+            for r in range(c_frag):
                 row_rel, col_k = score.coord(b, lane, r)
                 s_r = b.fmul(score.slot(b, r), scale_log2)
                 s_r = apply_attention_mask(
@@ -373,7 +371,7 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
 
         # ---- transpose P (acc layout -> PV A-operand layout) ----
         p_a = _transpose_p(
-            b, cfg, ps, lane, a_row, d_map, a_frag, d_frag, dtype_ir, P_lds
+            b, cfg, ps, lane, a_row, c_map, a_frag, c_frag, dtype_ir, P_lds
         )
         p_tiles = [WmmaTensor(atom, "a", pa, arch) for pa in p_a]
 
@@ -403,9 +401,9 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
 
         yields = []
         for t in range(BM):
-            for r in range(d_frag):
+            for r in range(c_frag):
                 yields.append(new_ms[t][r])
-            for r in range(d_frag):
+            for r in range(c_frag):
                 yields.append(new_ls[t][r])
         for t in range(BM):
             yields.extend(a.value for a in new_accs[t])
@@ -419,7 +417,7 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
         owin = o_window(t)
         # inv_l depends only on (t,r); compute once instead of per-d (n_dk reloads).
         inv_l = []
-        for r in range(d_frag):
+        for r in range(c_frag):
             l_safe = ls_f[t][r]
             zmask = b.fcmp("oeq", l_safe, zero_f)
             inv_l.append(b.select(zmask, zero_f, b.rcp(l_safe)))
@@ -442,7 +440,7 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
     return b.kernel
 
 
-def _transpose_p(b, cfg, ps, lane, a_row, d_map, a_frag, d_frag, dtype_ir, P_lds):
+def _transpose_p(b, cfg, ps, lane, a_row, c_map, a_frag, c_frag, dtype_ir, P_lds):
     """Return a list of BM PV A-operand fragments (one per Q-tile).
 
     Uses the CK Tile :func:`make_lds_view` ``P_lds`` view: scatter each score
@@ -454,8 +452,8 @@ def _transpose_p(b, cfg, ps, lane, a_row, d_map, a_frag, d_frag, dtype_ir, P_lds
     if cfg.p_mode == "lds":
         for t in range(BM):
             ct = b.const_i32(t)
-            for r in range(d_frag):
-                row_rel, col_k = d_map.coord(b, lane, r)
+            for r in range(c_frag):
+                row_rel, col_k = c_map.coord(b, lane, r)
                 P_lds.store_scalar(
                     b, [ct, row_rel, col_k], b.cast_f32_to(ps[t][r], dtype_ir)
                 )

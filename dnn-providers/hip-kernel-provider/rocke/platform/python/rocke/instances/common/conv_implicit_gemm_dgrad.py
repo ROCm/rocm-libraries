@@ -63,7 +63,7 @@ from ...core.ir import (
     Type,
     Value,
 )
-from ...helpers.atoms import MfmaAtom, mfma_atom, require_mma_recurrence, zero_mma_c
+from ...helpers.atoms import MfmaAtom, mfma_atom
 from ...helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from ...helpers.geometry import WarpGrid
 from ...helpers.layouts import LdsLayout
@@ -783,7 +783,6 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         a_dtype=spec.data.dtype_a,
         b_dtype=spec.data.dtype_b,
         c_dtype="fp32",
-        d_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
@@ -895,7 +894,6 @@ def _resolve_dgrad_op(spec: DgradConvSpec, arch: str):
         a_dtype=spec.data.dtype_a,
         b_dtype=spec.data.dtype_b,
         c_dtype="fp32",
-        d_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
@@ -905,7 +903,6 @@ def _resolve_dgrad_op(spec: DgradConvSpec, arch: str):
             f"no MMA atom for dgrad warp_tile "
             f"({spec.warp_tile_m},{spec.warp_tile_n},{spec.warp_tile_k}) on {arch}"
         )
-    require_mma_recurrence(op, where="implicit_gemm_conv_dgrad")
     return op
 
 
@@ -1065,7 +1062,7 @@ def _build_tilde_dgrad(
     _smem_dtype: Optional[Type] = (
         BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
     )
-    d_per_lane = op.d_frag_len
+    c_per_lane = op.c_frag_len
 
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
 
@@ -1191,7 +1188,7 @@ def _build_tilde_dgrad(
     mfmas_n = spec.mfmas_per_warp_n
     k_atoms = spec.k_atoms_per_tile_k
 
-    acc_init = zero_mma_c(b, op)
+    acc_init = b.zero_vec_f32(c_per_lane)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
     ]
@@ -1515,7 +1512,7 @@ def _build_tilde_dgrad(
                 block_m_off_v,
                 block_n_off_v,
                 dX,
-                d_per_lane,
+                c_per_lane,
                 rec_gemm_m,
                 c_dg_N,
                 rec_h_tilde_slice,
@@ -1675,7 +1672,7 @@ def _emit_dgrad_tilde_atomic_epilogue(
     block_m_off: Value,
     block_n_off: Value,
     dx_ptr: Value,
-    d_per_lane: int,
+    c_per_lane: int,
     gemm_m: Value,
     gemm_n: Value,
     h_tilde_slice: Value,
@@ -1694,7 +1691,7 @@ def _emit_dgrad_tilde_atomic_epilogue(
     Computes the dX NHWC offset at runtime using the sub-GEMM record's
     d_h/d_w stride/offset fields, then issues atomic-add.
     """
-    from ...helpers.atoms import d_warp_params, make_d_warp_dstr_encoding
+    from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding
     from ...helpers.distribution import make_static_tile_distribution
 
     dtype_d = spec.data.dtype_d
@@ -1707,8 +1704,8 @@ def _emit_dgrad_tilde_atomic_epilogue(
     block_warp_m_off = b.add(block_m_off, warp_m_off)
     block_warp_n_off = b.add(block_n_off, warp_n_off)
 
-    _, __, kc_m1, kc_nlane = d_warp_params(atom)
-    c_dist = make_static_tile_distribution(make_d_warp_dstr_encoding(atom))
+    _, __, kc_m1, kc_nlane = c_warp_params(atom)
+    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
 
     c_nlane = b.const_i32(kc_nlane)
     n_in_atom = b.mod(lane, c_nlane)
@@ -1717,7 +1714,7 @@ def _emit_dgrad_tilde_atomic_epilogue(
 
     rows: List[Value] = []
     cols: List[Value] = []
-    for i in range(d_per_lane):
+    for i in range(c_per_lane):
         ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
         x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
         rows.append(x_row)
@@ -1734,7 +1731,7 @@ def _emit_dgrad_tilde_atomic_epilogue(
             flat += 1
             atom_n_base = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
 
-            for i in range(d_per_lane):
+            for i in range(c_per_lane):
                 c_m = b.add(atom_m_base, rows[i])
                 c_n = b.add(atom_n_base, cols[i])
                 # Absolute dX channel = g*cpg + c_n (group base is even, so the
@@ -1857,7 +1854,7 @@ def _emit_dgrad_direct_epilogue_wmma(
     c_M = b.const_i32(_dg_M(p))
     c_N = b.const_i32(_dg_N(p))
     dX_desc = make_dgrad_dx_descriptor(p, dtype=spec.data.dtype_d)
-    c_map = op.d_layout()
+    c_map = op.c_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
     _elem_bytes = 4 if _fp32_out else 2
@@ -1875,7 +1872,7 @@ def _emit_dgrad_direct_epilogue_wmma(
                 b.add(block_n_off, warp_n_off),
                 b.const_i32(ni * spec.warp_tile_n),
             )
-            for i in range(op.d_frag_len):
+            for i in range(op.c_frag_len):
                 row_off, col_off = c_map.coord(b, lane, i)
                 m_val = b.add(atom_m_off, row_off)
                 n_val = b.add(atom_n_off, col_off)
@@ -1936,7 +1933,7 @@ def _emit_dgrad_tilde_direct_epilogue_wmma(
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
 
-    c_map = op.d_layout()
+    c_map = op.c_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
     _elem_bytes = 4 if _fp32_out else 2
@@ -1952,7 +1949,7 @@ def _emit_dgrad_tilde_direct_epilogue_wmma(
             atom_n_off = b.add(
                 b.add(block_n_off, warp_n_off), b.const_i32(ni * spec.warp_tile_n)
             )
-            for i in range(op.d_frag_len):
+            for i in range(op.c_frag_len):
                 row_off, col_off = c_map.coord(b, lane, i)
                 m_val = b.add(atom_m_off, row_off)
                 n_val = b.add(atom_n_off, col_off)

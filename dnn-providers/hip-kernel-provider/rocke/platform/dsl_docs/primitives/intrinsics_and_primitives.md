@@ -4,12 +4,9 @@ This page documents the DSL primitives that map closely to GPU hardware behavior
 
 ## MFMA Atoms
 
-`helpers/atoms.py::MfmaAtom` packages one MFMA intrinsic's shape, independent
-A/B/C/D per-lane widths and dtypes, dispatch to `IRBuilder`, and D
-lane-to-output mapping. The logical contract is `D = A * B + C`; `tile.mma`
-keeps A, B, and C as its three source operands and returns D.
+`helpers/atoms.py::MfmaAtom` packages one MFMA intrinsic's shape, per-lane widths, accumulator width, dispatch to `IRBuilder`, and lane-to-output mapping.
 
-| Atom | A per lane | B per lane | D per lane | Output tile | Notes |
+| Atom | A per lane | B per lane | C per lane | Output tile | Notes |
 |---------------------|-----------:|-----------:|-----------:|------------:|--------------------------------|
 | `f16_16x16x16` | `<4xhalf>` | `<4xhalf>` | `<4xfloat>` | 16x16 | legacy CDNA, gfx940+ |
 | `f16_16x16x32` | `<8xhalf>` | `<8xhalf>` | `<4xfloat>` | 16x16 | K-packed, gfx950 only |
@@ -32,7 +29,7 @@ The bf16 family now has its own catalog `MFMA_BF16_ATOMS` (`bf16_16x16x16`, `bf1
 
 `MFMA_FP8_ATOMS` adds four FP8 / BF8 atoms paired with the f16 set:
 
-| Atom | A per lane | B per lane | D per lane | Output tile |
+| Atom | A per lane | B per lane | C per lane | Output tile |
 |--------------------|--------------------|--------------------|---------------|-------------|
 | `fp8_16x16x32` | `<8 x fp8e4m3>` | `<8 x fp8e4m3>` | `<4 x float>` | 16x16 |
 | `bf8_16x16x32` | `<8 x bf8e5m2>` | `<8 x bf8e5m2>` | `<4 x float>` | 16x16 |
@@ -62,7 +59,7 @@ for the `_DTYPE_ALIAS` map.
 
 These come from `helpers/atoms.py::MfmaAtom.lane_to_output`.
 
-`16x16x16` and `16x16x32` (`d_per_lane = 4`):
+`16x16x16` and `16x16x32` (`c_per_lane = 4`):
 
 ```text
 m_blk = lane / 16
@@ -71,7 +68,7 @@ output row = m_blk * 4 + i # i = 0..3
 output col = n_in_atom
 ```
 
-`32x32x8` and `32x32x16` (`d_per_lane = 16`):
+`32x32x8` and `32x32x16` (`c_per_lane = 16`):
 
 ```text
 m_blk = lane / 32 # 0 or 1
@@ -80,7 +77,7 @@ output row = (i // 4) * 8 + m_blk * 4 + (i % 4) # i = 0..15
 output col = n_in_atom
 ```
 
-`4x4x4` (`d_per_lane = 4`):
+`4x4x4` (`c_per_lane = 4`):
 
 ```text
 batch_idx = lane / 4 # 16 independent 4x4 matmuls per wave

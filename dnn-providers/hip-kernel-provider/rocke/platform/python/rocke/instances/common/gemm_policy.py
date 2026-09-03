@@ -53,8 +53,7 @@ class GemmPipelinePolicy:
         with no edit here)."""
         a, b, c = dtypes
         return sorted(
-            op.shape
-            for op in target.mma.enumerate(a_dtype=a, b_dtype=b, c_dtype=c, d_dtype=c)
+            op.shape for op in target.mma.enumerate(a_dtype=a, b_dtype=b, c_dtype=c)
         )
 
     def validate(self, target: ArchTarget, spec) -> ValidationResult:

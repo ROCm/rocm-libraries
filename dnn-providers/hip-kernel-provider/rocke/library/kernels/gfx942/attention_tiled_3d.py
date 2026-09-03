@@ -47,7 +47,7 @@ from rocke.core.ir import (
     Type,
     Value,
 )
-from rocke.helpers.atoms import MfmaAtom, make_d_warp_dstr_encoding
+from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
@@ -72,7 +72,7 @@ MFMA_N = 16
 # (lane == tid); the per-lane ``<4 x f32>`` accumulator row decode is
 # ``row = (lane // 16) * 4 + reg`` expressed through ``calculate_x``.
 _C16_DIST = make_static_tile_distribution(
-    make_d_warp_dstr_encoding(MfmaAtom.f16_16x16x16())
+    make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16())
 )
 
 

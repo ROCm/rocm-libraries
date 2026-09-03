@@ -153,7 +153,6 @@ def main() -> int:
         a_dtype=dtype,
         b_dtype=dtype,
         c_dtype="fp32",
-        d_dtype="fp32",
         m=args.warp_tile_m,
         n=args.warp_tile_n,
         k_max=args.tile_k,

@@ -50,7 +50,6 @@ from rocke.helpers import (
     make_global_view,
     make_lds_view,
     make_tile_window,
-    require_wmma_recurrence,
     store_wmma_tile,
     wmma_mma,
 )
@@ -142,12 +141,11 @@ def _declare_params(b: IRBuilder):
 
 def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> KernelDef:
     atom = WmmaAtom.f16_16x16x16()
-    require_wmma_recurrence(atom, where="wmma_fmha_pipelined")
     wave = atom.wave_size  # 32
     a_map = atom.a_layout(arch)
-    d_map = atom.d_layout(arch)
+    c_map = atom.c_layout(arch)
     a_frag = atom.a_per_lane  # 16
-    d_frag = atom.d_per_lane  # 8
+    c_frag = atom.c_per_lane  # 8
     n_dk = cfg.head_size // 16
     dtype_ir = F16
     fuse_k = cfg.fuse_k if cfg.fuse_k is not None else (cfg.head_size >= 128)
@@ -267,7 +265,7 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
         return score
 
     # ---- gfx11 register P-transpose (ck_tile PermuteWarpGemmCToA) ----
-    # Remap the d_frag (8 f32, C-distribution) softmax probabilities into the
+    # Remap the c_frag (8 f32, C-distribution) softmax probabilities into the
     # PV A-operand (16 f16) WITHOUT an LDS round-trip + s_barrier. Emulates
     # permlanex16 (lane<->lane^16 swap) with ds_bpermute, and v_perm_b32 byte
     # interleave with shift/and/or. 8 input f16 -> 4 u32 -> 8 u32 (16 f16).
@@ -279,7 +277,7 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
 
     def p_transpose_shuffle(ps):
         outs = []
-        for i in range(d_frag // 2):
+        for i in range(c_frag // 2):
             lo = b.zext(b.bitcast(b.cast_f32_to(ps[2 * i], dtype_ir), I16), I32)
             hi = b.zext(b.bitcast(b.cast_f32_to(ps[2 * i + 1], dtype_ir), I16), I32)
             v = b.lor(lo, b.shl(hi, c16c))  # {f16 slot 2i | f16 slot 2i+1}
@@ -300,9 +298,9 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
     # acc and the carried score thread as raw packed .value vectors and are
     # re-wrapped into WmmaTensor (role "c") on unpack.
     iter_args = []
-    for r in range(d_frag):
+    for r in range(c_frag):
         iter_args.append((f"m{r}", neg_inf))
-    for r in range(d_frag):
+    for r in range(c_frag):
         iter_args.append((f"l{r}", zero_f))
     for d in range(n_dk):
         iter_args.append((f"acc{d}", WmmaTensor.zero_acc(b, atom, arch=arch).value))
@@ -310,10 +308,10 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
 
     def unpack(state):
         idx = 0
-        ms = list(state[idx : idx + d_frag])
-        idx += d_frag
-        ls = list(state[idx : idx + d_frag])
-        idx += d_frag
+        ms = list(state[idx : idx + c_frag])
+        idx += c_frag
+        ls = list(state[idx : idx + c_frag])
+        idx += c_frag
         accs = [WmmaTensor(atom, "c", v, arch) for v in state[idx : idx + n_dk]]
         idx += n_dk
         score = WmmaTensor(atom, "c", state[idx], arch)
@@ -330,13 +328,13 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
         new_ms = list(ms)
         new_ls = list(ls)
         new_accs = list(accs)
-        ps = [None] * d_frag
+        ps = [None] * c_frag
 
         # ---- online softmax on the carried current-tile score ----
         # alpha_vec is a throwaway scratch vector (only vec_insert + .scale),
         # NOT an accumulator tile, so it stays a raw zero_acc vector.
         alpha_vec = atom.zero_acc(b)
-        for r in range(d_frag):
+        for r in range(c_frag):
             row_rel, col_k = score.coord(b, lane, r)
             s_r = b.fmul(score.slot(b, r), scale_log2)
             s_r = apply_attention_mask(
@@ -381,8 +379,8 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
             # scatter each score slot to its (row, col) LDS cell, barrier, then
             # read back row a_row as the contiguous <16 x half> A fragment (two
             # ds_read_b128 halves + concat -- WMMA a-slot j -> k=j).
-            for r in range(d_frag):
-                row_rel, col_k = d_map.coord(b, lane, r)
+            for r in range(c_frag):
+                row_rel, col_k = c_map.coord(b, lane, r)
                 P_lds.store_scalar(b, [row_rel, col_k], b.cast_f32_to(ps[r], dtype_ir))
             b.sync()
             lo = P_lds.load_vec(b, [a_row, b.const_i32(0)], n=8)
@@ -406,9 +404,9 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
             b.sync()  # P_lds reused next iter
 
         yields = []
-        for r in range(d_frag):
+        for r in range(c_frag):
             yields.append(new_ms[r])
-        for r in range(d_frag):
+        for r in range(c_frag):
             yields.append(new_ls[r])
         yields.extend(a.value for a in new_accs)
         yields.append(score_next.value)
@@ -420,7 +418,7 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
     # ---- Epilogue (CK Tile store_wmma_acc + TileWindow) ----
     # inv_l depends only on r; compute once instead of per-d (n_dk reloads).
     inv_l = []
-    for r in range(d_frag):
+    for r in range(c_frag):
         l_safe = ls_f[r]
         zmask = b.fcmp("oeq", l_safe, zero_f)
         inv_l.append(b.select(zmask, zero_f, b.rcp(l_safe)))

@@ -105,7 +105,7 @@ An instance builder owns the semantic contract of an operation. For example, `bu
 - LDS allocations and layout;
 - global-to-LDS copy plan (sync vs async, vector width);
 - K-loop structure (`scf.for_iter` with loop-carried accumulators);
-- accumulator initialization (zero `<d_per_lane x f32>` per warp tile);
+- accumulator initialization (zero `<c_per_lane x f32>` per warp tile);
 - epilogue mapping from per-lane accumulator slots to output coords (direct or cshuffle);
 - launch manifest metadata (`make_gemm_manifest`).
 

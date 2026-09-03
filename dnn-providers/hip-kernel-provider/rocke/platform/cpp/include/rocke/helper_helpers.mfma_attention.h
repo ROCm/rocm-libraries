@@ -31,7 +31,7 @@
  *     (MfmaAtom.f16_16x16x16 / bf16_16x16x16 / fp8_16x16x32 / bf8_16x16x32 /
  *     fp8_32x32x16 / bf8_32x32x16) and atom.zero_acc() are NOT separate symbols
  *     in atoms.h, so the body resolves each atom via rocke_mfma_atom(dtype,m,n,k)
- *     and inlines zero_acc -> rocke_b_zero_vec_f32(d_per_lane), byte-for-byte.
+ *     and inlines zero_acc -> rocke_b_zero_vec_f32(c_per_lane), byte-for-byte.
  *   - Arch / MMA catalog: rocke/arch_target.h (rocke_arch_target_from_gfx,
  *     target->wave_size, target->mma, rocke_mma_catalog_has_shape / by_op_id,
  *     rocke_mma_op_* fragment fields + layout maps, rocke_layout_map_coord).

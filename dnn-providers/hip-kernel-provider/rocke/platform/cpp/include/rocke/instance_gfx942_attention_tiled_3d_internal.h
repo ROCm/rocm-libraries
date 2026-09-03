@@ -189,7 +189,7 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_kernel_def_t* kernel; /* == b->kernel; returned by the driver */
 
     /* C-accumulator warp distribution for the 16x16x16 atom (_C16_DIST, line 74).
-     * Built once (make_static_tile_distribution of make_d_warp_dstr_encoding(
+     * Built once (make_static_tile_distribution of make_c_warp_dstr_encoding(
      * MfmaAtom.f16_16x16x16())); read by _mfma_16x16_c_row. */
     const rocke_tile_distribution_t* C16_DIST;
 

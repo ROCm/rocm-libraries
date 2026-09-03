@@ -56,7 +56,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from ..core.ir import F16, F32, BF16, IRBuilder, Value
-from .atoms import MfmaAtom, require_mma_recurrence, zero_mma_c
+from .atoms import MfmaAtom
 from .attention import (
     apply_attention_mask,
     safe_inv_l,
@@ -68,7 +68,6 @@ from .distribution import (
     make_static_distributed_tensor,
     make_static_tile_distribution,
 )
-from .mfma_gemm_inner import _require_recurrent_accumulator_contract
 
 
 # --- Distribution-driven softmax row reduce (CK Tile BlockReduce2dSync) -------
@@ -157,12 +156,10 @@ def _validate_attention_atom(atom: "MfmaAtom", arch: str) -> None:
 
     cat_dtype = _ATOM_DTYPE_TO_CATALOG.get(atom.dtype_in, atom.dtype_in)
     target = ArchTarget.from_gfx(arch)
-    _require_recurrent_accumulator_contract(atom, where="mfma_attention")
     if not target.mma.has_shape(
         a_dtype=cat_dtype,
         b_dtype=cat_dtype,
         c_dtype="fp32",
-        d_dtype="fp32",
         m=atom.m,
         n=atom.n,
         k=atom.k,
@@ -570,10 +567,10 @@ def mfma_attention_fwd_inner_body(
     # slot through the K-loop.
     neg_inf = b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
-    acc_zero = atom.zero_acc(b)
+    acc_zero = b.zero_vec_f32(atom.c_per_lane)
 
     iter_args = []
-    for r in range(atom.d_per_lane):
+    for r in range(atom.c_per_lane):
         iter_args.append((f"m{r}", neg_inf))
         iter_args.append((f"l{r}", zero_f))
     for n in range(n_pv_atoms):
@@ -592,9 +589,9 @@ def mfma_attention_fwd_inner_body(
     )
     with kloop as (kt, state_vals):
         # Unpack state.
-        ms = [state_vals[2 * r] for r in range(atom.d_per_lane)]
-        ls = [state_vals[2 * r + 1] for r in range(atom.d_per_lane)]
-        accs = list(state_vals[2 * atom.d_per_lane :])
+        ms = [state_vals[2 * r] for r in range(atom.c_per_lane)]
+        ls = [state_vals[2 * r + 1] for r in range(atom.c_per_lane)]
+        accs = list(state_vals[2 * atom.c_per_lane :])
 
         # P29: k_block_iter_fn maps the linear iter index to a real
         # K-tile index via a caller-supplied LUT. ``effective_kt`` is
@@ -690,7 +687,7 @@ def mfma_attention_fwd_inner_body(
         # m_blk reduce across cols 0..15).
         new_ms, new_ls, new_accs = [], [], list(accs)
         ps = []  # per-row scaled probabilities (per-lane f32)
-        for r in range(atom.d_per_lane):
+        for r in range(atom.c_per_lane):
             s_r_f32 = b.vec_extract(score, r)
             s_r_scaled = b.fmul(s_r_f32, scale_log2)
             # Per-row position for the mask check + extra transforms.
@@ -752,7 +749,7 @@ def mfma_attention_fwd_inner_body(
         # ---- P operand staging via LDS ----
         # Lane t holds p[m_blk*4+r, n_in_atom] for r in 0..3.
         # Write to P_lds[m_blk*4+r, n_in_atom] then sync.
-        for r in range(atom.d_per_lane):
+        for r in range(atom.c_per_lane):
             p_row = b.add(b.mul(m_blk, b.const_i32(4)), b.const_i32(r))
             p_col = m_in_atom
             p_f16 = b.cast_f32_to(ps[r], dtype_ir)
@@ -825,7 +822,7 @@ def mfma_attention_fwd_inner_body(
 
         # Yield updated state.
         yields = []
-        for r in range(atom.d_per_lane):
+        for r in range(atom.c_per_lane):
             yields.append(new_ms[r])
             yields.append(new_ls[r])
         yields.extend(new_accs)
@@ -838,15 +835,15 @@ def mfma_attention_fwd_inner_body(
     # ``ms_final`` is the per-lane row-max; the scaled-acc / l_final pair
     # already encodes everything the epilogue needs, so we only consume
     # the normalisation factors below.
-    ls_final = [final[2 * r + 1] for r in range(atom.d_per_lane)]
-    accs_final = list(final[2 * atom.d_per_lane :])
+    ls_final = [final[2 * r + 1] for r in range(atom.c_per_lane)]
+    accs_final = list(final[2 * atom.c_per_lane :])
 
     # ---- Epilogue: O[m, d] = acc[m, d] / l[m] in target dtype ----
     # Lane t writes to O[q_tile_base + m_blk*4 + r, head, n_blk*16 +
     # n_in_atom] for r in 0..3, n_blk in 0..n_pv_atoms.
     m_blk = b.div(lane, c16)
     for n_blk_atom in range(n_pv_atoms):
-        for r in range(atom.d_per_lane):
+        for r in range(atom.c_per_lane):
             o_row = b.add(
                 b.add(q_tile_base, b.mul(m_blk, b.const_i32(4))),
                 b.const_i32(r),
@@ -892,7 +889,7 @@ def mfma_attention_fwd_inner_body(
 #
 # The fundamental difference from the wave64 MFMA body is the fragment
 # distribution: a WMMA accumulator row spans the 16 lanes of one wave32 half and
-# each lane owns ``d_frag_len`` (=8) q-rows of one k-column. RDNA3/3.5 (gfx11)
+# each lane owns ``c_frag_len`` (=8) q-rows of one k-column. RDNA3/3.5 (gfx11)
 # and RDNA4 (gfx12) differ in the *operand* distribution: on gfx11 the A/B
 # fragment carries the full ``a_frag_len`` (=16) K row in every lane (cross-half
 # duplication); on gfx12 the duplication is gone -- the fragment is ``<8 x half>``
@@ -973,7 +970,6 @@ def _wmma_attention_fwd_inner_body(
     op = target.mma.by_op_id(op_id)
     if op is None or op.family != "wmma":
         raise ValueError(f"WMMA attention atom {op_id} absent on {arch}")
-    require_mma_recurrence(op, where="wmma_attention")
     wave = op.wave_size  # 32
     dtype_ir = _ir_type_for_dtype(dtype)
 
@@ -981,14 +977,14 @@ def _wmma_attention_fwd_inner_body(
     # atom, so the gfx11 (cross-half-duplicated, a_frag=16) and gfx12 (split-K,
     # a_frag=8) ABIs are both expressed through the same accessors.
     a_map = op.a_layout()  # (row, k): lane l -> (row l%16, k=lane-base+slot)
-    mma_d_layout = (
-        op.d_layout()
+    c_map = (
+        op.c_layout()
     )  # (row, col): gfx11 (2i+l//16, l%16); gfx12 ((l//16)*8+i, l%16)
     a_frag = op.a_frag_len  # 16 (gfx11) | 8 (gfx12) -- K elems per lane per step
-    mma_d_frag_len = op.d_frag_len  # 8 -- MMA result slots per lane
+    c_frag = op.c_frag_len  # 8  -- accumulator slots per lane (same both)
 
     # Number of WMMA steps along the head-dim axis (QK K-dim == PV N-dim).
-    num_head_dim_tiles = head_size // 16
+    n_dk = head_size // 16
 
     # Row reduction across the 16 lanes that share one accumulator row. The
     # stage count is derived from the atom geometry (log2(16) = 4), not
@@ -1028,8 +1024,8 @@ def _wmma_attention_fwd_inner_body(
         b.mul(head_idx, stride_q_head),
     )
     q_frags = []
-    for head_tile_idx in range(num_head_dim_tiles):
-        q_addr = b.add(q_addr_row_base, b.const_i32(head_tile_idx * 16))
+    for d in range(n_dk):
+        q_addr = b.add(q_addr_row_base, b.const_i32(d * 16))
         if k_half_off is not None:
             q_addr = b.add(q_addr, k_half_off)
         q_frags.append(b.global_load_vN(Q, q_addr, dtype_ir, a_frag, align=a_frag * 2))
@@ -1048,11 +1044,11 @@ def _wmma_attention_fwd_inner_body(
 
     # ---- Online-softmax + PV accumulator iter-args ----
     iter_args = []
-    for r in range(mma_d_frag_len):
+    for r in range(c_frag):
         iter_args.append((f"m{r}", neg_inf))
         iter_args.append((f"l{r}", zero_f))
-    for head_tile_idx in range(num_head_dim_tiles):
-        iter_args.append((f"acc{head_tile_idx}", zero_mma_c(b, op)))
+    for d in range(n_dk):
+        iter_args.append((f"acc{d}", b.zero_vec_f32(c_frag)))
 
     c_block_k = b.const_i32(MFMA_ATTN_BLOCK_K)
     loop_start = k_tile_start if k_tile_start is not None else b.const_i32(0)
@@ -1062,9 +1058,9 @@ def _wmma_attention_fwd_inner_body(
         loop_start, loop_stop, b.const_i32(1), iter_args=iter_args, iv_name="kt"
     )
     with kloop as (kt, state):
-        ms = [state[2 * r] for r in range(mma_d_frag_len)]
-        ls = [state[2 * r + 1] for r in range(mma_d_frag_len)]
-        accs = list(state[2 * mma_d_frag_len :])
+        ms = [state[2 * r] for r in range(c_frag)]
+        ls = [state[2 * r + 1] for r in range(c_frag)]
+        accs = list(state[2 * c_frag :])
 
         if k_block_iter_fn is not None:
             effective_kt = k_block_iter_fn(b, kt)
@@ -1098,21 +1094,21 @@ def _wmma_attention_fwd_inner_body(
                 k_off,
             )
 
-        # ---- QK^T WMMA chain: sum over head-dimension tiles ----
-        score = zero_mma_c(b, op)
-        for head_tile_idx in range(num_head_dim_tiles):
-            k_addr = b.add(k_addr_row_base, b.const_i32(head_tile_idx * 16))
+        # ---- QK^T WMMA chain: score = sum_d Q[d-tile] (x) K[d-tile] ----
+        score = b.zero_vec_f32(c_frag)
+        for d in range(n_dk):
+            k_addr = b.add(k_addr_row_base, b.const_i32(d * 16))
             if k_half_off is not None:
                 k_addr = b.add(k_addr, k_half_off)
             k_frag = b.global_load_vN(K, k_addr, dtype_ir, a_frag, align=a_frag * 2)
-            score = b.mma(op, q_frags[head_tile_idx], k_frag, score)
+            score = b.mma(op, q_frags[d], k_frag, score)
 
         # ---- Scale + mask + per-row online softmax ----
         new_ms, new_ls, new_accs = [], [], list(accs)
         ps = []  # per-slot scaled probabilities (acc layout)
         q_pos_for_mask = q_pos_base if q_pos_base is not None else q_tile_base
-        for r in range(mma_d_frag_len):
-            row_rel, col_k = mma_d_layout.coord(b, lane, r)  # (q-row in tile, k-col)
+        for r in range(c_frag):
+            row_rel, col_k = c_map.coord(b, lane, r)  # (q-row in tile, k-col)
             s_r = b.fmul(b.vec_extract(score, r), scale_log2)
             row_q_pos = b.add(q_pos_for_mask, row_rel)
             k_col_pos = b.add(k_tile_base, col_k)
@@ -1142,19 +1138,16 @@ def _wmma_attention_fwd_inner_body(
             new_ms.append(m_new)
             new_ls.append(l_new)
             ps.append(p_r)
-            for head_tile_idx in range(num_head_dim_tiles):
-                old = b.vec_extract(new_accs[head_tile_idx], r)
-                new_accs[head_tile_idx] = b.vec_insert(
-                    new_accs[head_tile_idx], b.fmul(old, alpha), r
-                )
+            for d in range(n_dk):
+                old = b.vec_extract(new_accs[d], r)
+                new_accs[d] = b.vec_insert(new_accs[d], b.fmul(old, alpha), r)
 
         # ---- V staging into LDS (vectorized load; transposed PV reads) ----
         # Each lane loads its own k-row's full head_size d-slice as 8-wide
         # vector global loads and writes it row-major into ``V_lds``. The PV
         # B-operand (V in d x k layout) is then a strided *LDS* read, replacing
         # the per-(d,k) scalar global gather the correctness-first version did
-        # (it issued ``num_head_dim_tiles * a_frag`` scalar global loads per
-        # lane per K-tile).
+        # (it issued ``n_dk * a_frag`` scalar global loads per lane per K-tile).
         # Both wave32 halves map to the same 16 rows (a_row == lane % 16), so
         # the store is redundant across halves but writes identical data.
         if v_lds_stage:
@@ -1176,8 +1169,8 @@ def _wmma_attention_fwd_inner_body(
                 b.smem_store_vN(V_lds, [a_row, b.const_i32(e * 8)], v_g, 8)
 
         # ---- P staging through LDS: acc layout -> A-operand layout ----
-        for r in range(mma_d_frag_len):
-            row_rel, col_k = mma_d_layout.coord(b, lane, r)
+        for r in range(c_frag):
+            row_rel, col_k = c_map.coord(b, lane, r)
             b.smem_store_vN(P_lds, [row_rel, col_k], b.cast_f32_to(ps[r], dtype_ir), 1)
         b.sync()
 
@@ -1197,15 +1190,13 @@ def _wmma_attention_fwd_inner_body(
             )
             p_a = b.vec_insert(p_a, p_v, j)
 
-        for head_tile_idx in range(num_head_dim_tiles):
-            head_col = b.add(
-                b.const_i32(head_tile_idx * 16), col
-            )  # this lane's V head-dimension column
+        for d in range(n_dk):
+            d_col = b.add(b.const_i32(d * 16), col)  # this lane's V d-column
             v_b = b.zero_vec(dtype_ir, a_frag)
             for j in range(a_frag):
-                # B-operand for output column ``head_col`` is V[k, head_col]. The
-                # K row this lane's slot j feeds is ``j`` on gfx11 (every lane
-                # covers the full K, byte-identical to the historical literal) and
+                # B-operand for d-column ``d_col`` is V[k, d_col]. The K row this
+                # lane's slot j feeds is ``j`` on gfx11 (every lane covers the full
+                # K, byte-identical to the historical literal) and
                 # ``(lane // 16) * a_frag + j`` on gfx12 (split-K halves). The
                 # gfx12 base is added via ``k_half_off`` so the gfx11 path emits
                 # exactly the previous IR.
@@ -1215,13 +1206,13 @@ def _wmma_attention_fwd_inner_body(
                     else b.const_i32(j)
                 )
                 if v_lds_stage:
-                    # Optimized: read from the staged LDS tile (V_lds[k, head_col]).
+                    # Optimized: read from the staged LDS tile (V_lds[k, d_col]).
                     v_elem = b.vec_extract(
-                        b.smem_load_vN(V_lds, b_k, head_col, dtype=dtype_ir, n=1),
+                        b.smem_load_vN(V_lds, b_k, d_col, dtype=dtype_ir, n=1),
                         0,
                     )
                 else:
-                    # Baseline: scalar global gather of V[k, head_col].
+                    # Baseline: per-(d,k) scalar global gather of V[k, d_col].
                     v_row = b.add(k_tile_base, b_k)
                     if v_row_base_fn is not None:
                         v_row_base = v_row_base_fn(b, v_row)
@@ -1234,36 +1225,34 @@ def _wmma_attention_fwd_inner_body(
                             v_off,
                         )
                     v_elem = b.global_load(
-                        V, b.add(v_row_base, head_col), dtype_ir, align=2
+                        V, b.add(v_row_base, d_col), dtype_ir, align=2
                     )
                 v_b = b.vec_insert(v_b, v_elem, j)
-            new_accs[head_tile_idx] = b.mma(op, p_a, v_b, new_accs[head_tile_idx])
+            new_accs[d] = b.mma(op, p_a, v_b, new_accs[d])
 
         yields = []
-        for r in range(mma_d_frag_len):
+        for r in range(c_frag):
             yields.append(new_ms[r])
             yields.append(new_ls[r])
         yields.extend(new_accs)
         b.scf_yield(*yields)
 
     final = kloop.results
-    ls_final = [final[2 * r + 1] for r in range(mma_d_frag_len)]
-    accs_final = list(final[2 * mma_d_frag_len :])
+    ls_final = [final[2 * r + 1] for r in range(c_frag)]
+    accs_final = list(final[2 * c_frag :])
 
     # ---- Epilogue: O[q,d] = acc[q,d] / l[q] (zero-denominator guarded) ----
-    for head_tile_idx in range(num_head_dim_tiles):
-        for r in range(mma_d_frag_len):
-            row_rel, col_n = mma_d_layout.coord(
-                b, lane, r
-            )  # (q-row in tile, output col)
+    for d in range(n_dk):
+        for r in range(c_frag):
+            row_rel, col_n = c_map.coord(b, lane, r)  # (q-row in tile, d-col)
             l_safe = ls_final[r]
             zero_mask = b.fcmp("oeq", l_safe, zero_f)
             inv_l = b.select(zero_mask, zero_f, b.rcp(l_safe))
-            v_f32 = b.fmul(b.vec_extract(accs_final[head_tile_idx], r), inv_l)
+            v_f32 = b.fmul(b.vec_extract(accs_final[d], r), inv_l)
             if v_scale is not None:
                 v_f32 = b.fmul(v_f32, v_scale)
             o_row = b.add(q_tile_base, row_rel)
-            o_col = b.add(b.const_i32(head_tile_idx * 16), col_n)
+            o_col = b.add(b.const_i32(d * 16), col_n)
             o_addr = b.add(
                 b.add(
                     b.mul(o_row, stride_o_token),

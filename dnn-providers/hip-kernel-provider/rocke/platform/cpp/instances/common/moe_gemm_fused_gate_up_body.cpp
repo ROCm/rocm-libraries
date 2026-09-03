@@ -145,12 +145,12 @@ bool rocke_moe_gate_up_build_ctx_init(rocke_moe_gate_up_build_ctx_t* ctx,
         }
     }
 
-    /* t = spec.tile; _, _, d_per_lane = _mfma_atom_widths(u) */
+    /* t = spec.tile; _, _, c_per_lane = _mfma_atom_widths(u) */
     {
         const rocke_gemm_tile_spec_t* t = &ctx->u.tile;
         int a_per = 0, b_per = 0, c_per = 0;
         rocke_moe_mfma_atom_widths(&ctx->u, &a_per, &b_per, &c_per);
-        ctx->d_per_lane = c_per;
+        ctx->c_per_lane = c_per;
 
         ctx->block_m = t->tile_m;
         ctx->block_n = t->tile_n;
@@ -368,7 +368,7 @@ void rocke_moe_gate_up_emit_compute(rocke_moe_gate_up_build_ctx_t* ctx)
 
     /* _emit_gate_up_silu_epilogue_default(b, u, gate_res, up_res, warp_m_idx,
      *     warp_n_idx, lane, block_m_off, block_n_off, M, N, Hidden,
-     *     d_per_lane, batch_off_c=batch_off_c) */
+     *     c_per_lane, batch_off_c=batch_off_c) */
     rocke_moe_emit_gate_up_silu_epilogue_default(b,
                                                  &ctx->u,
                                                  ctx->gate_res,
@@ -382,6 +382,6 @@ void rocke_moe_gate_up_emit_compute(rocke_moe_gate_up_build_ctx_t* ctx)
                                                  ctx->M,
                                                  ctx->N,
                                                  ctx->Hidden,
-                                                 ctx->d_per_lane,
+                                                 ctx->c_per_lane,
                                                  ctx->batch_off_c);
 }

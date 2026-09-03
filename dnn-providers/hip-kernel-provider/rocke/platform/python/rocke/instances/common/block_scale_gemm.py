@@ -389,16 +389,16 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Ke
         )
 
         # Tile-level scale-and-accumulate the group's MFMA result.
-        # ``group_acc`` and ``outer_acc`` are both ``<d_per_lane x f32>``
+        # ``group_acc`` and ``outer_acc`` are both ``<c_per_lane x f32>``
         # per-lane vectors; broadcast the scalar ``ab_scale`` to that
         # width and emit one vector fmul + one vector fadd, which lower
         # to packed ``v_pk_mul_f32`` / ``v_pk_add_f32`` (or a fused
-        # ``v_pk_fma_f32``) on AMDGPU instead of the d_per_lane scalar
+        # ``v_pk_fma_f32``) on AMDGPU instead of the c_per_lane scalar
         # fmul/fadd chain the prior implementation produced. The
         # ab_scale broadcast is correct under the spec's current
         # uniform-scale assumption (group_m=group_n=1 collapses to per-
         # row/col scales that map 1:1 to lane outputs).
-        ab_scale_vec = b.vector_splat(ab_scale, atom.d_per_lane)
+        ab_scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
         scaled_group = b.vector_mul(group_acc, ab_scale_vec)
         new_outer = b.vector_add(outer_acc, scaled_group)
         b.scf_yield(new_outer)
@@ -406,7 +406,7 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Ke
     acc_final = outer.results[0]
 
     # Output store via the shared MFMA epilogue helper: each lane
-    # writes its ``d_per_lane`` cells to global via the atom's
+    # writes its ``c_per_lane`` cells to global via the atom's
     # ``lane_to_output`` mapping. f32 out (no cast), no atomic add.
     # The per-cell stores stay scalar because the 16x16 atom places a
     # lane's 4 outputs at the same column across 4 consecutive rows

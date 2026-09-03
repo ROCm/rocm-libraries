@@ -756,7 +756,7 @@ rocke_kernel_def_t* rocke_build_fmha_fwd_splitkv_decode_reduce(
 
             int H_pow2;
             int H_shift;
-            rocke_value_t* acd_per_lane[8];
+            rocke_value_t* acc_per_lane[8];
             rocke_value_t* o_row;
             int k;
 
@@ -887,8 +887,8 @@ rocke_kernel_def_t* rocke_build_fmha_fwd_splitkv_decode_reduce(
                     rocke_b_scf_yield(b, &yld, 1);
                 }
                 rocke_b_region_leave(b);
-                /* acd_per_lane.append(fmul(acc_loop.results[0], inv_l)) */
-                acd_per_lane[k] = rocke_b_fmul(
+                /* acc_per_lane.append(fmul(acc_loop.results[0], inv_l)) */
+                acc_per_lane[k] = rocke_b_fmul(
                     b, (acc_loop.op != NULL) ? acc_loop.op->results[0] : NULL, inv_l);
             }
 
@@ -900,10 +900,10 @@ rocke_kernel_def_t* rocke_build_fmha_fwd_splitkv_decode_reduce(
                 rocke_value_t* o_mul_head = rocke_b_mul(b, head_idx, stride_o_head);
                 o_row = rocke_b_add(b, o_mul_seq, o_mul_head);
             }
-            /* _store_lane_slice_f32_packed(b, O, o_row, lane_d_base, acd_per_lane,
+            /* _store_lane_slice_f32_packed(b, O, o_row, lane_d_base, acc_per_lane,
              *                              dtype=s.dtype, ept=ept) */
             rocke_splitkv_store_lane_slice_f32_packed(
-                b, O, o_row, lane_d_base, acd_per_lane, s->dtype, ept);
+                b, O, o_row, lane_d_base, acc_per_lane, s->dtype, ept);
 
             rocke_b_ret(b);
         }

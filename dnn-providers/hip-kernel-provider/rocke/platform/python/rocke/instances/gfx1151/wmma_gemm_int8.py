@@ -80,7 +80,6 @@ def is_valid_spec(spec: WmmaGemmInt8Spec, arch: str = "gfx1151"):
         a_dtype="fp16",
         b_dtype="fp16",
         c_dtype="fp32",
-        d_dtype="fp32",
         m=_WMMA_M,
         n=_WMMA_N,
         k=_WMMA_K,

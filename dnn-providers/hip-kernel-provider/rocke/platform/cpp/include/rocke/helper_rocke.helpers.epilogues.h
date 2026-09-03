@@ -195,7 +195,7 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid(const rocke_mfma_ato
                                                             int max_store_vec);
 
 /* CShuffleEpilogue.from_grid_op(op, grid, max_store_vec=8): WMMA variant.
- * Uses op->d_frag_len / op->d_layout() for the LDS scatter in place of the
+ * Uses op->c_frag_len / op->c_layout() for the LDS scatter in place of the
  * MFMA-specific atom.lane_to_output. */
 rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid_op(const rocke_mmaop_t* op,
                                                                const rocke_warp_grid_t* grid,

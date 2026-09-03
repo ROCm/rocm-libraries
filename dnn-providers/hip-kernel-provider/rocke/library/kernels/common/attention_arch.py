@@ -52,13 +52,7 @@ def _wide_k_mfma_available(target: ArchTarget) -> bool:
     incomplete (the ``32x32x16`` bf16 atom).
     """
     if target.mma.has_shape(
-        a_dtype="f16",
-        b_dtype="f16",
-        c_dtype="fp32",
-        d_dtype="fp32",
-        m=16,
-        n=16,
-        k=32,
+        a_dtype="f16", b_dtype="f16", c_dtype="fp32", m=16, n=16, k=32
     ):
         return True
     return bool(target.memory.has_ds_read_tr)
@@ -83,21 +77,9 @@ def _narrow_k_mfma_available(target: ArchTarget) -> bool:
     must be present (bf16 lowers through the ``_1k`` intrinsic).
     """
     return target.mma.has_shape(
-        a_dtype="f16",
-        b_dtype="f16",
-        c_dtype="fp32",
-        d_dtype="fp32",
-        m=16,
-        n=16,
-        k=16,
+        a_dtype="f16", b_dtype="f16", c_dtype="fp32", m=16, n=16, k=16
     ) and target.mma.has_shape(
-        a_dtype="bf16",
-        b_dtype="bf16",
-        c_dtype="fp32",
-        d_dtype="fp32",
-        m=16,
-        n=16,
-        k=16,
+        a_dtype="bf16", b_dtype="bf16", c_dtype="fp32", m=16, n=16, k=16
     )
 
 

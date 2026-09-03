@@ -39,7 +39,6 @@ from rocke.helpers import (
     make_global_view,
     make_lds_view,
     make_tile_window,
-    require_wmma_recurrence,
     store_wmma_tile,
     wmma_mma,
 )
@@ -121,12 +120,11 @@ def _declare_params(b: IRBuilder):
 
 def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> KernelDef:
     atom = WmmaAtom.f16_16x16x16()
-    require_wmma_recurrence(atom, where="wmma_fmha_multiwave")
     wave = atom.wave_size  # 32
     a_map = atom.a_layout(arch)
-    d_map = atom.d_layout(arch)
+    c_map = atom.c_layout(arch)
     a_frag = atom.a_per_lane  # 16  # noqa: F841
-    d_frag = atom.d_per_lane  # 8
+    c_frag = atom.c_per_lane  # 8
     n_dk = cfg.head_size // 16
     hs = cfg.head_size
     W = cfg.n_waves
@@ -201,21 +199,21 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
     V_lds_t = make_lds_view(b, dtype=dtype_ir, shape=(hs, _BLOCK_K), name_hint="VshT")
     P_lds = make_lds_view(b, dtype=dtype_ir, shape=(W, 16, 16), name_hint="Psh")
 
-    # ---- iter-args: m/l (d_frag each) then acc (n_dk vecs) ----
+    # ---- iter-args: m/l (c_frag each) then acc (n_dk vecs) ----
     iter_args = []
-    for r in range(d_frag):
+    for r in range(c_frag):
         iter_args.append((f"m{r}", neg_inf))
-    for r in range(d_frag):
+    for r in range(c_frag):
         iter_args.append((f"l{r}", zero_f))
     for d in range(n_dk):
         iter_args.append((f"acc{d}", atom.zero_acc(b)))
 
     def unpack(state):
         idx = 0
-        ms = list(state[idx : idx + d_frag])
-        idx += d_frag
-        ls = list(state[idx : idx + d_frag])
-        idx += d_frag
+        ms = list(state[idx : idx + c_frag])
+        idx += c_frag
+        ls = list(state[idx : idx + c_frag])
+        idx += c_frag
         accs = [WmmaTensor(atom, "c", v, arch) for v in state[idx : idx + n_dk]]
         idx += n_dk
         return ms, ls, accs
@@ -286,7 +284,7 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
         new_ms = list(ms)
         new_ls = list(ls)
         new_accs = list(accs)
-        ps = [None] * d_frag
+        ps = [None] * c_frag
 
         # ---- QK: A = this wave's Q rows (global), B = shared K (LDS) ----
         score = WmmaTensor.zero_acc(b, atom, arch=arch)
@@ -298,8 +296,8 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
             score = wmma_mma(b, q_tile, k_tile, score)
 
         # ---- online softmax ----
-        alpha_vec = b.zero_vec_f32(d_frag)
-        for r in range(d_frag):
+        alpha_vec = b.zero_vec_f32(c_frag)
+        for r in range(c_frag):
             row_rel, col_k = score.coord(b, lane, r)
             s_r = b.fmul(score.slot(b, r), scale_log2)
             s_r = apply_attention_mask(
@@ -323,8 +321,8 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
             new_accs[d] = new_accs[d].scale(b, alpha_vec)
 
         # ---- transpose P (acc layout -> PV A-operand) via this wave's LDS slab ----
-        for r in range(d_frag):
-            row_rel, col_k = d_map.coord(b, lane, r)
+        for r in range(c_frag):
+            row_rel, col_k = c_map.coord(b, lane, r)
             P_lds.store_scalar(
                 b, [wave_id, row_rel, col_k], b.cast_f32_to(ps[r], dtype_ir)
             )
@@ -345,9 +343,9 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
         b.sync()
 
         yields = []
-        for r in range(d_frag):
+        for r in range(c_frag):
             yields.append(new_ms[r])
-        for r in range(d_frag):
+        for r in range(c_frag):
             yields.append(new_ls[r])
         yields.extend(a.value for a in new_accs)
         b.scf_yield(*yields)
@@ -357,7 +355,7 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
 
     # ---- Epilogue (CK Tile store_wmma_acc + TileWindow) ----
     inv_l = []
-    for r in range(d_frag):
+    for r in range(c_frag):
         l_safe = ls_f[r]
         zmask = b.fcmp("oeq", l_safe, zero_f)
         inv_l.append(b.select(zmask, zero_f, b.rcp(l_safe)))

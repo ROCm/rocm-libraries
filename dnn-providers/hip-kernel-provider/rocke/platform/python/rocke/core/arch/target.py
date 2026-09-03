@@ -66,8 +66,7 @@ def normalize_dtype(name: str) -> str:
 # returns them as a ``(Value, Value)`` pair. The coordinate *meaning* depends on
 # the operand role (see :class:`LayoutMap.role`):
 #
-#   * MMA C input        -> ``(row, col)``  in the atom's M x N tile
-#   * MMA D result       -> ``(row, col)``  in the atom's M x N tile
+#   * accumulator (C/D)  -> ``(row, col)``  in the atom's M x N output tile
 #   * A operand          -> ``(row, k)``    in the atom's M x K input tile
 #   * B operand          -> ``(k, col)``    in the atom's K x N input tile
 #
@@ -92,9 +91,9 @@ class LayoutMap:
     Attributes
     ----------
     role
-        ``"a"`` (A operand, coords are ``(row, k)``), ``"b"`` (B operand,
-        coords are ``(k, col)``), ``"c"`` (accumulator input, coords are
-        ``(row, col)``), or ``"d"`` (result, coords are ``(row, col)``).
+        ``"acc"`` (accumulator C/D, coords are ``(row, col)``), ``"a"`` (A
+        operand, coords are ``(row, k)``) or ``"b"`` (B operand, coords are
+        ``(k, col)``).
     frag_len
         Number of fragment slots per lane for this role (the per-lane vector
         length: e.g. 4 for an MFMA 16x16x16 accumulator, 8 for the WMMA
@@ -138,11 +137,6 @@ class MmaOp:
     ISA-named ``IRBuilder`` method (e.g. ``mfma_f32_16x16x16_f16``). It is **not**
     LLVM intrinsic text — the backend maps ``op_id`` to an intrinsic.
 
-    The A/B/C/D names in this class are instruction-level MMA roles. In
-    particular, ``d_dtype`` and ``d_layout()`` describe the value produced by
-    one MMA instruction. They are unrelated to operator-level auxiliary
-    tensors conventionally named ``D0`` through ``Dn`` by Multi-D GEMM.
-
     The ``*_frag_len`` fields and the layout-map accessors describe the
     *physical* register fragmentation of the atom: how many values of each
     operand a single lane holds, and where (in the logical M/N/K tile) each of
@@ -157,7 +151,6 @@ class MmaOp:
     a_dtype: str
     b_dtype: str
     c_dtype: str
-    d_dtype: str
     m: int
     n: int
     k: int
@@ -165,7 +158,6 @@ class MmaOp:
     a_frag_len: int = 0
     b_frag_len: int = 0
     c_frag_len: int = 0
-    d_frag_len: int = 0
     wave_size: int = 64
     # Layout maps are kept off the public field list (repr=False, compare=False)
     # so two MmaOps with the same shape still compare equal regardless of the
@@ -173,7 +165,6 @@ class MmaOp:
     _a_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
     _b_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
     _c_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
-    _d_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
 
     @property
     def shape(self) -> Tuple[int, int, int]:
@@ -189,16 +180,12 @@ class MmaOp:
         return self._require_layout(self._b_layout, "b")
 
     def c_layout(self) -> LayoutMap:
-        """The accumulator input C ``(row, col)`` lane/slot -> coordinate map."""
+        """The accumulator (C/D) ``(row, col)`` lane/slot -> coordinate map."""
         return self._require_layout(self._c_layout, "c")
 
-    def d_layout(self) -> LayoutMap:
-        """The result D ``(row, col)`` lane/slot -> coordinate map."""
-        return self._require_layout(self._d_layout, "d")
-
-    # Convenience alias for the produced accumulator/result fragment.
+    # Convenience aliases for the accumulator (the most-used map).
     def acc_layout(self) -> LayoutMap:
-        return self.d_layout()
+        return self.c_layout()
 
     def _require_layout(self, layout: Optional[LayoutMap], role: str) -> LayoutMap:
         if layout is None:
@@ -229,7 +216,7 @@ def _mfma_acc_16x16(builder, lane, slot):
     """MFMA 16x16 accumulator: slot ``i`` -> ``(m_blk*4 + i, lane % 16)``.
 
     Mirrors ``MfmaAtom.lane_to_output`` for the (16, 16) case with
-    ``d_per_lane == 4`` (``row = m_blk * 4 + i``, ``col = lane % 16``).
+    ``c_per_lane == 4`` (``row = m_blk * 4 + i``, ``col = lane % 16``).
     """
     c16 = builder.const_i32(16)
     n_in_atom = builder.mod(lane, c16)
@@ -239,7 +226,7 @@ def _mfma_acc_16x16(builder, lane, slot):
 
 
 def _mfma_acc_32x32(builder, lane, slot):
-    """MFMA 32x32 accumulator (``d_per_lane == 16``).
+    """MFMA 32x32 accumulator (``c_per_lane == 16``).
 
     Mirrors ``MfmaAtom.lane_to_output`` for the (32, 32) case:
     ``row = (i // 4) * 8 + (lane // 32) * 4 + (i % 4)``, ``col = lane % 32``.
@@ -581,51 +568,18 @@ def _wmma_gfx1250_b_16x16x32(builder, lane, slot):
     return k, col
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class _FragInfo:
     """Per-op_id fragment metadata: per-lane vector lengths, wave size, and the
-    (optional) lane/slot coordinate functions for A / B / C / D."""
+    (optional) lane/slot coordinate functions for A / B / accumulator."""
 
     a_frag_len: int
     b_frag_len: int
     c_frag_len: int
-    d_frag_len: int
     wave_size: int
     a_fn: _LaneCoordFn = None
     b_fn: _LaneCoordFn = None
     c_fn: _LaneCoordFn = None
-    d_fn: _LaneCoordFn = None
-
-    def __init__(
-        self,
-        a_frag_len: int,
-        b_frag_len: int,
-        d_frag_len: int,
-        wave_size: int,
-        a_fn: _LaneCoordFn = None,
-        b_fn: _LaneCoordFn = None,
-        d_fn: _LaneCoordFn = None,
-        *,
-        c_frag_len: Optional[int] = None,
-        c_fn: _LaneCoordFn = None,
-    ) -> None:
-        """Build four-role metadata while keeping table rows compact.
-
-        Existing hardware rows have tied C/D fragments, so their positional
-        result fragment metadata seeds both roles. Tests can pass explicit
-        ``c_frag_len``/``c_fn`` to model instructions whose C and D differ.
-        """
-        object.__setattr__(self, "a_frag_len", a_frag_len)
-        object.__setattr__(self, "b_frag_len", b_frag_len)
-        object.__setattr__(
-            self, "c_frag_len", d_frag_len if c_frag_len is None else c_frag_len
-        )
-        object.__setattr__(self, "d_frag_len", d_frag_len)
-        object.__setattr__(self, "wave_size", wave_size)
-        object.__setattr__(self, "a_fn", a_fn)
-        object.__setattr__(self, "b_fn", b_fn)
-        object.__setattr__(self, "c_fn", d_fn if c_fn is None else c_fn)
-        object.__setattr__(self, "d_fn", d_fn)
 
 
 # op_id -> physical fragment metadata. Frag lengths are populated for every
@@ -635,7 +589,7 @@ class _FragInfo:
 _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # --- MFMA fp32 (wave64) -----------------------------------------------
     # A/B are scalar float per lane (a_frag_len=b_frag_len=1); accumulator
-    # C/D share the standard 16x16 / 32x32 layout (frag_len=4 / 16).
+    # shares the standard 16x16 / 32x32 layout (c_frag_len=4 / 16).
     "mfma_f32_16x16x4_f32": _FragInfo(
         1, 1, 4, 64, _mfma_a_16x16x4_f32, _mfma_b_16x16x4_f32, _mfma_acc_16x16
     ),
@@ -729,7 +683,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # --- WMMA fp32 (wave32, gfx1250, CDNA) --------------------------------
     # K=4 atom: A/B are <2 x fp32> per lane (a_frag_len=b_frag_len=2).
     # kABKLane=2, kAK1PerLane=2: row=lane//2, K=(lane%2)*2+slot (slot ∈ {0,1}).
-    # C/D use the gfx12 column-distributed <8 x float> layout (frag_len=8).
+    # Accumulator is the gfx12 column-distributed <8 x float> (c_frag_len=8).
     # Intrinsic: __builtin_amdgcn_wmma_f32_16x16x4_f32 (verified in CK Tile
     # wmma_gfx12.hpp lines 355-373; amdgcn_mma_base kABKPerLane=2, kCMPerLane=8).
     "wmma_gfx1250_f32_16x16x4_f32": _FragInfo(
@@ -850,21 +804,19 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
-        d_dtype: str,
         m: Optional[int] = None,
         n: Optional[int] = None,
     ) -> List[MmaOp]:
-        a, b, c, d = (
+        a, b, c = (
             normalize_dtype(a_dtype),
             normalize_dtype(b_dtype),
             normalize_dtype(c_dtype),
-            normalize_dtype(d_dtype),
         )
         out = []
         for op in self._ops:
             if op.family != family:
                 continue
-            if (op.a_dtype, op.b_dtype, op.c_dtype, op.d_dtype) != (a, b, c, d):
+            if (op.a_dtype, op.b_dtype, op.c_dtype) != (a, b, c):
                 continue
             if m is not None and op.m != m:
                 continue
@@ -880,7 +832,6 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
-        d_dtype: str,
         m: int,
         n: int,
         k: int,
@@ -892,7 +843,6 @@ class MmaCatalog:
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
-                d_dtype=d_dtype,
                 m=m,
                 n=n,
             )
@@ -905,7 +855,6 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
-        d_dtype: str,
         m: int,
         n: int,
         k_max: Optional[int] = None,
@@ -917,7 +866,6 @@ class MmaCatalog:
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
-                d_dtype=d_dtype,
                 m=m,
                 n=n,
             )
@@ -941,7 +889,6 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
-        d_dtype: str,
         m: int,
         n: int,
         k: int,
@@ -951,7 +898,6 @@ class MmaCatalog:
             a_dtype=a_dtype,
             b_dtype=b_dtype,
             c_dtype=c_dtype,
-            d_dtype=d_dtype,
             m=m,
             n=n,
         ):
@@ -993,19 +939,10 @@ class ArchTarget:
         return bytes_in_use <= self.lds_capacity_bytes
 
     def supports_dtype_combo(
-        self, a: str, b: str, c: str, d: str, *, family: str = "mma"
+        self, a: str, b: str, c: str, *, family: str = "mma"
     ) -> bool:
         return (
-            len(
-                self.mma.enumerate(
-                    family=family,
-                    a_dtype=a,
-                    b_dtype=b,
-                    c_dtype=c,
-                    d_dtype=d,
-                )
-            )
-            > 0
+            len(self.mma.enumerate(family=family, a_dtype=a, b_dtype=b, c_dtype=c)) > 0
         )
 
     def max_vector_load_dwords(self, dtype: str) -> int:
@@ -1032,45 +969,23 @@ def _load_specs() -> Dict[str, dict]:
     # arch_specs.json contains non-ASCII bytes.
     with open(_DATA_FILE, encoding="utf-8") as fh:
         doc = json.load(fh)
-    _validate_specs_doc(doc)
     return doc["arches"]
 
 
-def _validate_specs_doc(doc: dict) -> None:
-    """Reject architecture catalogs that predate the four-role MMA schema."""
-    if doc.get("version") != 2:
-        raise ValueError(
-            f"{_DATA_FILE.name} must use schema version 2 with explicit C and D "
-            f"MMA roles; got version {doc.get('version')!r}"
-        )
-    arches = doc.get("arches")
-    if not isinstance(arches, dict):
-        raise ValueError(f"{_DATA_FILE.name} must contain an 'arches' object")
-    required = {"family", "a", "b", "c", "d", "m", "n", "k", "op_id"}
-    for gfx, arch in arches.items():
-        for index, op in enumerate(arch.get("mma", ())):
-            missing = required.difference(op)
-            if missing:
-                raise ValueError(
-                    f"{_DATA_FILE.name} arch {gfx!r} MMA row {index} is missing "
-                    f"required fields: {', '.join(sorted(missing))}"
-                )
-
-
 @lru_cache(maxsize=1)
-def _op_id_d_dtype() -> Dict[str, str]:
-    """``op_id -> normalized result dtype``, aggregated across every arch
+def _op_id_c_dtype() -> Dict[str, str]:
+    """``op_id -> normalized accumulator dtype``, aggregated across every arch
     row in the JSON catalog.
 
     An ``op_id`` names a specific atom, so its accumulator dtype is invariant
     across the arches that list it. This lets a caller that only has a bare
     ``op_id`` string (e.g. :meth:`rocke.core.ir.IRBuilder.mma`) recover the
-    result dtype from the SSOT without holding an :class:`ArchTarget`.
+    accumulator dtype from the SSOT without holding an :class:`ArchTarget`.
     Op_ids that are frag-registered but not yet in the JSON catalog are absent
     (callers should treat a miss as the default f32 accumulator).
 
     The **first** catalog hit for an op_id wins, matching the C implementation
-    (``rocke_arch_mma_op_id_d_dtype`` in ``query.cpp``, which returns the first
+    (``rocke_arch_mma_op_id_c_dtype`` in ``query.cpp``, which returns the first
     registry hit). If a later arch lists the same op_id with a *different*
     accumulator dtype we raise instead of silently overwriting: that would be
     SSOT drift (the invariant above is broken) and must be fixed in the catalog,
@@ -1081,16 +996,16 @@ def _op_id_d_dtype() -> Dict[str, str]:
     for row in _load_specs().values():
         for o in row["mma"]:
             op_id = o["op_id"]
-            d = normalize_dtype(o["d"])
+            c = normalize_dtype(o["c"])
             prev = out.get(op_id)
             if prev is None:
-                out[op_id] = d  # first hit wins
-            elif prev != d:
+                out[op_id] = c  # first hit wins
+            elif prev != c:
                 raise ValueError(
                     f"arch SSOT drift in {_DATA_FILE.name}: op_id {op_id!r} has "
                     f"inconsistent accumulator dtype across arches "
-                    f"({prev!r} vs {d!r}). An op_id names a specific atom, so its "
-                    f"result dtype must be invariant across the arches that "
+                    f"({prev!r} vs {c!r}). An op_id names a specific atom, so its "
+                    f"accumulator dtype must be invariant across the arches that "
                     f"list it; fix the catalog so every row agrees."
                 )
     return out
@@ -1112,7 +1027,6 @@ def _build_mma_op(o: dict) -> MmaOp:
         a_dtype=normalize_dtype(o["a"]),
         b_dtype=normalize_dtype(o["b"]),
         c_dtype=normalize_dtype(o["c"]),
-        d_dtype=normalize_dtype(o["d"]),
         m=o["m"],
         n=o["n"],
         k=o["k"],
@@ -1120,12 +1034,10 @@ def _build_mma_op(o: dict) -> MmaOp:
         a_frag_len=info.a_frag_len,
         b_frag_len=info.b_frag_len,
         c_frag_len=info.c_frag_len,
-        d_frag_len=info.d_frag_len,
         wave_size=info.wave_size,
         _a_layout=_mk("a", info.a_frag_len, info.a_fn),
         _b_layout=_mk("b", info.b_frag_len, info.b_fn),
         _c_layout=_mk("c", info.c_frag_len, info.c_fn),
-        _d_layout=_mk("d", info.d_frag_len, info.d_fn),
     )
 
 

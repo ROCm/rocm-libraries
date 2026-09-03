@@ -19,7 +19,7 @@ byte-for-byte identical to before the unification.
 Everything physical about the WMMA fragments — which lane holds which
 ``(row, k)`` / ``(k, col)`` / ``(row, col)`` element — is read inside the common
 body from the MMA contract's verified gfx1151 layout maps (``op.a_layout()`` /
-``op.b_layout()`` / ``op.d_layout()`` on the ``wmma_f32_16x16x16_f16``
+``op.b_layout()`` / ``op.c_layout()`` on the ``wmma_f32_16x16x16_f16``
 ``MmaOp``), and the matmul itself is emitted through the target-neutral
 ``b.mma(op, a, b, c)``. The wave size and the reduction stage count come from
 the contract so the kernel never hard-codes wave32 magic numbers.

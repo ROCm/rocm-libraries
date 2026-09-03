@@ -560,15 +560,8 @@ bool rocke_gfx1151_deep_fused_conv_pool_is_valid_spec(
     }
 
     /* WMMA 16x16x16 f16 atom present. */
-    if(!rocke_mma_catalog_has_shape(&target->mma,
-                                    "wmma",
-                                    "f16",
-                                    "f16",
-                                    "fp32",
-                                    "fp32",
-                                    GFX1151_WMMA,
-                                    GFX1151_WMMA,
-                                    GFX1151_WMMA))
+    if(!rocke_mma_catalog_has_shape(
+           &target->mma, "wmma", "f16", "f16", "fp32", GFX1151_WMMA, GFX1151_WMMA, GFX1151_WMMA))
     {
         if(reason != NULL && reason_cap > 0)
         {

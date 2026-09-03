@@ -81,7 +81,7 @@ static void rocke__reason(char* reason, size_t reason_cap, const char* m)
 /* _wide_k_mfma_available(target): 16x16x32 f16 atom OR has_ds_read_tr. */
 static bool rocke__wide_k_mfma_available(const rocke_arch_target_t* target)
 {
-    if(rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 32))
+    if(rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
         return true;
     return target->memory.has_ds_read_tr;
 }
@@ -89,10 +89,8 @@ static bool rocke__wide_k_mfma_available(const rocke_arch_target_t* target)
 /* _narrow_k_mfma_available(target): 16x16x16 f16 AND bf16 atoms. */
 static bool rocke__narrow_k_mfma_available(const rocke_arch_target_t* target)
 {
-    return rocke_mma_catalog_has_shape(
-               &target->mma, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 16)
-           && rocke_mma_catalog_has_shape(
-               &target->mma, "mma", "bf16", "bf16", "fp32", "fp32", 16, 16, 16);
+    return rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 16)
+           && rocke_mma_catalog_has_shape(&target->mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
 }
 
 /* arch in _NARROW_TILED_2D_ARCHES == frozenset({"gfx942"}). */

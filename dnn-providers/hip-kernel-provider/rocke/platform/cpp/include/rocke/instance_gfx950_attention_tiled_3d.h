@@ -72,7 +72,7 @@
  *   rocke/helper_rocke.helpers.layouts.h            -- TransposeLdsReader (the
  *       gfx950-only PV transpose-read lane formulas)
  *   rocke/helper_rocke.helpers.atoms.h              -- mfma_atom catalog
- *       (f16/bf16 16x16x32 wide-K + 16x16x16), make_d_warp_dstr_encoding
+ *       (f16/bf16 16x16x32 wide-K + 16x16x16), make_c_warp_dstr_encoding
  *   rocke/helper_rocke.helpers.distribution.h       -- make_static_tile_distribution,
  *       calculate_x (the _C16_DIST C-warp accumulator decode; the C layout is
  *       dtype-independent so the f16 16x16x16 atom drives it for fp16 and bf16)
