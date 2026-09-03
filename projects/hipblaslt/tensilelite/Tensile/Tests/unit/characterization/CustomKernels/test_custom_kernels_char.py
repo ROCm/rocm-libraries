@@ -13,7 +13,6 @@ import pytest
 
 from Tensile.CustomKernels import (
     isCustomKernelConfig,
-    getCustomKernelFilepath,
     getAllCustomKernelNames,
     getCustomKernelContents,
     getCustomKernelConfigAndAssembly,
@@ -58,10 +57,6 @@ def test_is_custom_kernel_config():
     assert isCustomKernelConfig({"CustomKernelName": "k"})
     assert not isCustomKernelConfig({})
     assert not isCustomKernelConfig({"CustomKernelName": ""})
-
-
-def test_get_custom_kernel_filepath(snapshot):
-    assert getCustomKernelFilepath("mykern", directory="/some/dir").endswith("/some/dir/mykern.s")
 
 
 def test_get_all_custom_kernel_names(tmp_path, snapshot):

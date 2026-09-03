@@ -29,7 +29,7 @@ import math
 import pytest
 
 from kernels.gfx942.attention_dense import (
-    Gfx942DenseTuning,
+    _as_gfx942_spec,
     run_attention_dense_torch,
 )
 
@@ -238,14 +238,16 @@ def test_exp2_fast_matches_plain_exp2(dtype, d, hq, hkv, persistent):
     outs = {}
     for use_fast in (False, True):
         out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+        # The dispatch factory hands back the SHARED spec; promote it to the gfx942
+        # subclass (at shipped defaults for every other private knob) so only
+        # use_exp2_fast moves between the two arms.
         run_attention_dense_torch(
-            spec=spec,
+            spec=dataclasses.replace(_as_gfx942_spec(spec), use_exp2_fast=use_fast),
             q=q,
             k=k,
             v=v,
             out=out,
             scale=scale,
-            tuning=Gfx942DenseTuning(use_exp2_fast=use_fast),
         )
         outs[use_fast] = out
     torch.cuda.synchronize()

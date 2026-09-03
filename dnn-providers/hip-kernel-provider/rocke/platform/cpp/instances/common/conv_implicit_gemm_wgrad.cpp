@@ -195,6 +195,12 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
         flag_on[n_flags] = 1;
         n_flags++;
     }
+    else if(s->split_k == 0)
+    {
+        flag_names[n_flags] = "spkrt";
+        flag_on[n_flags] = 1;
+        n_flags++;
+    }
 
     return rocke_kernel_name_join(
         s->name, parts, 5, flag_names, flag_on, n_flags, out, out_cap, NULL);
@@ -264,22 +270,24 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     }
 
     int sk = s->split_k;
-    if(sk < -1 || sk == 0)
+    if(sk < -1)
     {
         if(reason && reason_cap)
-            snprintf(reason, reason_cap, "split_k must be -1 (auto), 1, or >1 (got %d)", sk);
+            snprintf(reason,
+                     reason_cap,
+                     "split_k must be -1 (auto), 0 (runtime), 1, or >1 (got %d)",
+                     sk);
         return false;
     }
 
-    /* split_k > 1 requires a CDNA arch (ctx->atom != NULL at build time).
-     * On RDNA the op family is "wmma" and atom is NULL, so the split-K
-     * epilogue would dereference a null pointer.
+    /* split_k > 1 or split_k == 0 (runtime atomic) requires a MFMA arch
+     * (ctx->atom != NULL at build time).
      *
-     * TODO: gate on resolved wave_size == 64 / op->family == "mma" (matching Python
-     * which uses family == "wmma") instead of the arch string, so gfx10* and any
-     * future or unknown arch prefix cannot fall through.  This is not reachable
-     * on today's supported targets but would be more robust. */
-    if(sk > 1)
+     * TODO: gate on resolved wave_size == 64 / op->family == "mma" (matching
+     * Python which uses family == "wmma") instead of the arch string, so
+     * gfx10* and any future or unknown arch prefix cannot fall through.  This
+     * is not reachable on today's supported targets but would be more robust. */
+    if(sk > 1 || sk == 0)
     {
         /* Quick arch check: gfx11xx / gfx12xx are RDNA.
          * Note: gfx10* and any unknown prefix are not rejected here — they would
@@ -287,7 +295,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         if(arch && (strncmp(arch, "gfx11", 5) == 0 || strncmp(arch, "gfx12", 5) == 0))
         {
             if(reason && reason_cap)
-                snprintf(reason, reason_cap, "split_k > 1 is only supported on CDNA targets");
+                snprintf(reason, reason_cap, "split_k atomic is only supported on CDNA targets");
             return false;
         }
 
@@ -305,13 +313,32 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                 if(reason && reason_cap)
                     snprintf(reason,
                              reason_cap,
-                             "split_k > 1 with dtype_d=%s requires even C "
+                             "split_k atomic with dtype_d=%s requires even C "
                              "(packed <2 x dtype> atomic pairs must stay within one filter "
                              "position); got C=%d",
                              dt,
                              s->problem.C);
                 return false;
             }
+        }
+    }
+
+    /* For bf16/fp16 output the default epilogue emits zero-fill packed atomics
+     * at the scattered MFMA layout.  Matches Python is_valid_wgrad_spec and
+     * validate(): epilogue='cshuffle' is required for these dtypes. */
+    {
+        const char* dt = s->dtype_d ? s->dtype_d : "fp16";
+        bool is_default_epi = (s->epilogue == NULL || strcmp(s->epilogue, "default") == 0);
+        if(is_default_epi && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "split_k atomic with dtype_d=%s requires epilogue='cshuffle' "
+                         "(default emits zero-fill packed atomics with scattered MFMA "
+                         "layout; cshuffle produces contiguous pairs)",
+                         dt);
+            return false;
         }
     }
 
@@ -959,6 +986,64 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
 }
 
 // ---------------------------------------------------------------------------
+// Wgrad split-K cshuffle epilogue
+// Mirrors Python _emit_wgrad_split_k_cshuffle_epilogue:
+//   CShuffleEpilogue.from_grid(atom, grid, max_store_vec=vec_c)
+//       .atomic_store(b, accs, dw_ptr=dW, wg_N=wg_N_v, bounds=(wg_M_v, wg_N_v))
+// vec_c uses split_k=1 semantics (same as the non-atomic cshuffle path) because
+// the cshuffle atomic path is not contraindicated by wide store_vec.
+// groups > 1 is not supported for C++ wgrad (rejected by the validator).
+// ---------------------------------------------------------------------------
+static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
+                                                 const rocke_conv_build_ctx_t* ctx,
+                                                 const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
+                                                 rocke_value_t* dw_ptr,
+                                                 int wg_M,
+                                                 int wg_N)
+{
+    const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
+    bool is_fp32_vec = (strcmp(dtype_d, "fp32") == 0);
+    int C = spec->problem.C;
+    int vec_c;
+
+    /* default_vector_sizes(..., split_k=1): widest vec that divides C.
+     * fp32: cap at 4; fp16/bf16: cap at 8. */
+    if(is_fp32_vec)
+    {
+        if(C % 4 == 0)
+            vec_c = 4;
+        else if(C % 2 == 0)
+            vec_c = 2;
+        else
+            vec_c = 1;
+    }
+    else
+    {
+        if(C % 8 == 0)
+            vec_c = 8;
+        else if(C % 4 == 0)
+            vec_c = 4;
+        else if(C % 2 == 0)
+            vec_c = 2;
+        else
+            vec_c = 1;
+    }
+
+    rocke_cshuffle_epilogue_t cepi
+        = rocke_cshuffle_epilogue_from_grid(ctx->atom, &ctx->grid, vec_c);
+    cepi.out_dtype = dtype_d;
+
+    rocke_cshuffle_epilogue_atomic_store(b,
+                                         &cepi,
+                                         ctx->final_accs,
+                                         ctx->num_final_accs,
+                                         dw_ptr,
+                                         rocke_b_const_i32(b, wg_N),
+                                         rocke_b_const_i32(b, wg_M),
+                                         rocke_b_const_i32(b, wg_N));
+}
+
+// ---------------------------------------------------------------------------
 // Wgrad direct epilogue (split_k == 1, default path)
 // Mirrors Python _emit_wgrad_direct_epilogue:
 //   DirectEpilogue(atom, grid, out_dtype).store(b, accs, addr_fn=dw_addr,
@@ -1158,7 +1243,8 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
                                  const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
                                  const char* arch,
                                  int wg_K, /* rocke_wgrad_conv_spec_wg_K(spec) */
-                                 int split_k) /* resolved (>= 1) */
+                                 int split_k, /* resolved (>= 1, or 0 for runtime) */
+                                 rocke_value_t* ks_param) /* non-NULL iff split_k == 0 */
 {
     if(ctx == NULL || b == NULL || spec == NULL)
         return false;
@@ -1351,10 +1437,11 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* Geometry constants -- K-loop bound is wg_K (or split-K slice size).
      *
      * Creation order must mirror Python (build_implicit_gemm_conv_wgrad, after bind):
-     *   c0        = b.const_i32(0)         -- always (split_k=1: k_lo; split_k>1: unused 0)
+     *   c0        = b.const_i32(0)         -- always (split_k=1: k_lo; split_k>1/0: unused 0)
      *   c_block_k = b.const_i32(block_k)   -- always
      *   c_wg_K    = b.const_i32(wg_K)      -- always (used as loop bound when split_k=1)
      *   [split_k>1 only] c_ks, k_lo=to_sgpr(mul(block_id_z,c_ks)), k_hi=to_sgpr(add(k_lo,c_ks))
+     *   [split_k==0 only] c_ks=ks_param,   k_lo=to_sgpr(mul(block_id_z,c_ks)), k_hi=to_sgpr(add(k_lo,c_ks))
      */
     int wg_K_padded_val = rocke_wgrad_conv_spec_wg_K_padded(spec);
 
@@ -1371,6 +1458,16 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     {
         int ks = wg_K_padded_val / split_k;
         rocke_value_t* c_ks = rocke_b_const_i32(b, ks);
+        k_lo = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_block_id_z(b), c_ks));
+        k_hi_v = rocke_b_to_sgpr_u32(b, rocke_b_add(b, k_lo, c_ks));
+    }
+    else if(split_k == 0)
+    {
+        /* Runtime atomic: ks is a kernel argument passed at launch time.
+         * Mirrors Python: c_ks = _ks_param; k_lo = to_sgpr(mul(block_id_z, c_ks))
+         * groups==1 is the only supported path for C++ (grouped wgrad is rejected by
+         * the validator), so no ks_count / group decode is needed. */
+        rocke_value_t* c_ks = ks_param; /* i32 kernel arg */
         k_lo = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_block_id_z(b), c_ks));
         k_hi_v = rocke_b_to_sgpr_u32(b, rocke_b_add(b, k_lo, c_ks));
     }
@@ -1622,16 +1719,17 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
                         "resolve via select_split_k_wgrad and pass the explicit degree");
         return NULL;
     }
-    bool is_split_k = (split_k > 1);
+    bool is_split_k = (split_k > 1 || split_k == 0);
+    bool split_k_runtime = (split_k == 0);
 
-    /* split_k > 1 supported for fp32, fp16, bf16 output dtypes */
+    /* split_k atomic (>1 or ==0) supported for fp32, fp16, bf16 output dtypes */
     if(is_split_k)
     {
         const char* dt = spec->dtype_d ? spec->dtype_d : "fp16";
         if(strcmp(dt, "fp32") != 0 && strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
             rocke_i_set_err(
-                b, ROCKE_ERR_VALUE, "wgrad: split_k > 1 requires dtype_d in fp32/fp16/bf16");
+                b, ROCKE_ERR_VALUE, "wgrad: split_k atomic requires dtype_d in fp32/fp16/bf16");
             return NULL;
         }
     }
@@ -1657,10 +1755,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     memset(&d_opts, 0, sizeof(d_opts));
     d_opts.noalias = true;
     d_opts.noalias_set = true;
-    /* split_k>1: dW is read+write (atomic); split_k=1: writeonly.
-     * When split_k > 1 the caller MUST zero-init dW before launch
-     * (hipMemset(dW, 0, dW_bytes)) -- the kernel only issues atomic-adds.
-     * See the header contract note for details. */
+    /* split_k>1 or split_k==0: dW is read+write (atomic); split_k=1: writeonly.
+     * Caller MUST zero-init dW before launch for atomic paths -- the kernel only
+     * issues atomic-adds.  See the header contract note for details. */
     d_opts.writeonly = !is_split_k;
     d_opts.writeonly_set = true;
     d_opts.align = 16;
@@ -1676,10 +1773,14 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     rocke_value_t* dY_bytes = rocke_b_param(b, "dY_bytes", rocke_i32(), NULL);
     rocke_value_t* X_bytes = rocke_b_param(b, "X_bytes", rocke_i32(), NULL);
     rocke_value_t* dW_bytes = rocke_b_param(b, "dW_bytes", rocke_i32(), NULL);
+    /* Runtime split-K: ks = slice width, supplied by the launcher at dispatch.
+     * Only emitted when split_k == 0; fixed-degree kernels bake ks as a const.
+     * Mirrors Python: _ks_param = b.param("ks", I32) if _split_k_runtime else None */
+    rocke_value_t* ks_param = split_k_runtime ? rocke_b_param(b, "ks", rocke_i32(), NULL) : NULL;
 
     /* --- build wgrad ctx (with correct param names) --- */
     rocke_conv_build_ctx_t ctx;
-    if(!wgrad_build_ctx_init(&ctx, b, spec, arch, wg_K, split_k))
+    if(!wgrad_build_ctx_init(&ctx, b, spec, arch, wg_K, split_k, ks_param))
         return NULL;
 
     /* Wire the params we declared into the ctx slots the phases read */
@@ -1790,7 +1891,10 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         for(int i = 0; i < ctx.num_final_accs; ++i)
             ctx.final_accs[i] = post_accs[i];
 
-        wgrad_emit_split_k_epilogue_f32(b, &ctx, spec, dW, wg_M, wg_N);
+        if(spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0)
+            wgrad_emit_split_k_cshuffle_epilogue(b, &ctx, spec, dW, wg_M, wg_N);
+        else
+            wgrad_emit_split_k_epilogue_f32(b, &ctx, spec, dW, wg_M, wg_N);
     }
     else
     {

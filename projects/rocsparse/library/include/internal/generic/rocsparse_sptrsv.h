@@ -115,7 +115,7 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *
 *  \note The descriptor \p rocsparse_sptrsv_descr needs to be configured with \ref rocsparse_sptrsv_set_input.
 *  \note
-*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo, \ref rocsparse_format_csr, and \ref rocsparse_format_csc.
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo, \ref rocsparse_format_csr, \ref rocsparse_format_csc, and \ref rocsparse_format_ell.
 *
 *  \note
 *  the \ref rocsparse_sptrsv_stage_compute stage is non-blocking
@@ -126,6 +126,10 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *  Currently, only \p trans == \ref rocsparse_operation_none and \p trans == \ref rocsparse_operation_transpose are supported.
 *  Only the \ref rocsparse_sptrsv_stage_compute stage
 *  supports execution in a hipGraph context. The \ref rocsparse_sptrsv_stage_analysis stage does not support hipGraph.
+*
+*  \note
+*  \ref rocsparse_format_ell only supports \p trans == \ref rocsparse_operation_none. Transposing an ELL matrix does not
+*  preserve its width, so the transposed operations return \ref rocsparse_status_not_implemented for that format.
 *
 *  \note
 *  This routine does not support batched computation.

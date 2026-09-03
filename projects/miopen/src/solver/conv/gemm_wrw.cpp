@@ -3,6 +3,7 @@
 
 #include <miopen/conv/solvers.hpp>
 
+#include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/gemm_v2.hpp>
@@ -91,14 +92,19 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     int n_Im2ColGPU                      = 0;
 
     std::size_t in_n, in_c;
-    std::tie(in_n, in_c) = tie_pick<0, 1>()(xDesc.GetLengths());
+    std::tie(in_n, in_c)                 = tie_pick<0, 1>()(xDesc.GetLengths());
+    const auto prefer_point_output_shape = miopen::conv::IsWrwPointOutputStrideEqFilter(problem);
     const auto wei_spatial =
         dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
     // if not 1x1
-    if((miopen::any_of(wei_spatial, [](auto v) { return v != 1; }) ||
-        miopen::any_of(conv.GetConvPads(), [](auto v) { return v != 0; }) ||
-        miopen::any_of(conv.GetConvStrides(), [](auto v) { return v != 1; })))
+    if(prefer_point_output_shape)
+    {
+        n_gemm_runs = 1;
+    }
+    else if((miopen::any_of(wei_spatial, [](auto v) { return v != 1; }) ||
+             miopen::any_of(conv.GetConvPads(), [](auto v) { return v != 0; }) ||
+             miopen::any_of(conv.GetConvStrides(), [](auto v) { return v != 1; })))
     {
         n_Im2ColGPU            = in_n;
         n_gemm_strided_batched = conv.group_count;
@@ -352,16 +358,26 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
                                    std::multiplies<std::size_t>()) *
                    conv.group_count;
 
+    // Point-output wrw: no Im2Col workspace; bf16 batch>1 uses fp32 dw accum only.
+    if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
+        ws_size = 0;
+
     // For bf16: extra workspace for fp32 accumulation buffer (same shape as dw)
-    const auto xDesc           = problem.GetOut();
-    const auto in_n            = xDesc.GetLengths()[0];
+    const auto in_n            = problem.GetBatchSize();
     const auto need_fp32_accum = (dyDesc.GetType() == miopenBFloat16) && (in_n > 1);
     if(need_fp32_accum)
     {
         const auto fp32_accum_size = GetTypeSize(miopenFloat) * dwDesc.GetElementSize();
-        // Use padded layout: im2col buffer at offset 0, fp32 accum buffer at offset ws_size
-        // (aligned to 256 bytes)
-        ws_size = ((ws_size + 255) & ~std::size_t{255}) + fp32_accum_size;
+        if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
+        {
+            ws_size = fp32_accum_size;
+        }
+        else
+        {
+            // Use padded layout: im2col buffer at offset 0, fp32 accum buffer at offset ws_size
+            // (aligned to 256 bytes)
+            ws_size = ((ws_size + 255) & ~std::size_t{255}) + fp32_accum_size;
+        }
     }
 
     if(ws_size > handle.GetMaxMemoryAllocSize())
@@ -418,6 +434,36 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
                                     const ProblemDescription& problem) const
 {
 #if MIOPEN_USE_GEMM
+    if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
+    {
+        if(!problem.AllTensorsDimsFitIntoInt())
+            return false;
+        if(problem.HasNonPackedTensors())
+            return false;
+        if(problem.GetGroupCount() != 1)
+            return false;
+        if(!problem.IsDirectionBackwardWrW())
+            return false;
+        // Channel-last works in 2D and 3D alike: x and dw both enumerate C*Z*Y*X in (z,y,x,c)
+        // order instead of (c,z,y,x), so the GEMM pairs the same elements, and dy is contiguous
+        // over K because its spatial extent is 1.
+        if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
+            return false;
+
+        const auto& dyDesc = problem.GetIn();
+        const auto& dwDesc = problem.GetWeights();
+        const auto& xDesc  = problem.GetOut();
+        if(gemm::IsAnyBufferBf16(xDesc, dyDesc, dwDesc) && !gemm::IsBf16Supported)
+            return false;
+        if(gemm::IsAnyBufferFp16(xDesc, dyDesc, dwDesc) && !gemm::IsFp16Supported)
+            return false;
+
+        if(problem.IsBfp16() && problem.GetBatchSize() > 1)
+            return GetWorkspaceSize(context, problem) > 0;
+
+        return true;
+    }
+
     if(!GemmWrwBase::IsApplicable(context, problem))
         return false;
 
@@ -458,14 +504,19 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
         return tmp;
     }();
 
-    const auto spatial_dims   = conv.GetSpatialDimension();
-    const auto conv_pads      = conv.GetConvPads();
-    const auto conv_strides   = conv.GetConvStrides();
-    const auto conv_dilations = conv.GetConvDilations();
-    const auto workspace_req  = GetWorkspaceSize(context, problem);
-    const auto in_n           = xDesc.GetLengths()[0];
-    const auto in_c           = xDesc.GetLengths()[1];
-    const auto wei_k          = dwDesc.GetLengths()[0];
+    const auto spatial_dims     = conv.GetSpatialDimension();
+    const auto conv_pads        = conv.GetConvPads();
+    const auto conv_strides     = conv.GetConvStrides();
+    const auto conv_dilations   = conv.GetConvDilations();
+    const auto workspace_req    = GetWorkspaceSize(context, problem);
+    const auto in_n             = problem.GetBatchSize();
+    const auto wei_k            = problem.GetInChannels();
+    const auto in_c             = problem.GetOutChannels();
+    const auto wei_spatial_size = static_cast<std::size_t>(
+        problem.GetWeightsDepth() * problem.GetWeightsHeight() * problem.GetWeightsWidth());
+    const auto dy_spatial_size = static_cast<std::size_t>(
+        problem.GetInDepth() * problem.GetInHeight() * problem.GetInWidth());
+    const auto filter_col_size = in_c * wei_spatial_size * dy_spatial_size;
 
     // bf16: accumulate in fp32 workspace when batch_size > 1
     const auto data_type      = dyDesc.GetType();
@@ -488,8 +539,13 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
                conv.group_count;
     }();
     // Offset to fp32 accumulation buffer within workspace (256-byte aligned)
-    const auto fp32_accum_offset =
-        use_fp32_accum ? ((im2col_ws_size + 255) & ~std::size_t{255}) : std::size_t{0};
+    const auto fp32_accum_offset = [&]() {
+        if(!use_fp32_accum)
+            return std::size_t{0};
+        if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
+            return std::size_t{0};
+        return (im2col_ws_size + 255) & ~std::size_t{255};
+    }();
 
     const auto in_spatial_ =
         xDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
@@ -543,6 +599,82 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
                 tmp.gfx90a_alt_impl = conv_params.gfx90aFp16alt;
                 return tmp;
             }();
+
+            // Point-output wrw: dW[K,C*Z*Y*X] = dY^T[K,N] * X[N,C*Z*Y*X].
+            if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
+            {
+                float time = 0;
+
+                // The single GEMM below contracts the whole batch (k = N) with beta = 0, so it
+                // overwrites all K * C*Z*Y*X elements of the destination without reading it.
+                // That needs no pre-zeroing, unlike the accumulating per-batch loop further
+                // down, which relies on beta = 1.
+                Data_t accum_buf = dw;
+                if(use_fp32_accum)
+                {
+                    accum_buf =
+                        static_cast<Data_t>(static_cast<char*>(workspace) + fp32_accum_offset);
+                }
+
+                auto single_gemm_desc        = gemm_desc;
+                single_gemm_desc.batch_count = 1;
+                single_gemm_desc.strideA     = 0;
+                single_gemm_desc.strideB     = 0;
+                single_gemm_desc.strideC     = 0;
+                single_gemm_desc.m           = static_cast<int>(wei_k);
+                single_gemm_desc.n           = static_cast<int>(filter_col_size);
+                single_gemm_desc.k           = static_cast<int>(in_n);
+                single_gemm_desc.transA      = true;
+                single_gemm_desc.transB      = false;
+                single_gemm_desc.lda         = static_cast<int>(wei_k);
+                single_gemm_desc.ldb         = static_cast<int>(filter_col_size);
+                single_gemm_desc.ldc         = static_cast<int>(filter_col_size);
+                single_gemm_desc.alpha       = 1.f;
+                single_gemm_desc.beta        = 0.f;
+
+                constexpr auto point_output_backend =
+#if MIOPEN_USE_HIPBLASLT
+                    GemmBackend_t::hipblaslt;
+#else
+                    GemmBackend_t::rocblas;
+#endif
+
+                // The fp32-accumulation overload of CallGemm is rocBLAS-only.
+                const auto gemm_status =
+                    use_fp32_accum
+                        ? CallGemm(handle,
+                                   single_gemm_desc,
+                                   dy,
+                                   0,
+                                   x,
+                                   0,
+                                   accum_buf,
+                                   0,
+                                   miopenFloat,
+                                   GemmBackend_t::rocblas)
+                        : CallGemm(
+                              handle, single_gemm_desc, dy, 0, x, 0, dw, 0, point_output_backend);
+                if(gemm_status != miopenStatusSuccess)
+                    MIOPEN_THROW("GemmWrwUniversal point-output GEMM execution failure.");
+
+                if(handle.IsProfilingEnabled())
+                    time += handle.GetKernelTime();
+
+                if(use_fp32_accum)
+                {
+                    TensorDescriptor fp32Desc(miopenFloat, dw_lengths, dw_strides);
+                    CastTensor(handle, &lowp_quant, false, fp32Desc, accum_buf, dwDesc_, dw, 0, 0);
+                    if(handle.IsProfilingEnabled())
+                        time += handle.GetKernelTime();
+                }
+
+                if(handle.IsProfilingEnabled())
+                {
+                    handle.ResetKernelTime();
+                    handle.AccumKernelTime(time);
+                }
+                return;
+            }
 
             // Zeroing out the output buffer
             float zero = 0.0f;

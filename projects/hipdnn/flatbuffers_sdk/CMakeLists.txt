@@ -57,6 +57,25 @@ option(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
     ${_hipdnn_flatbuffers_sdk_skip_default})
 unset(_hipdnn_flatbuffers_sdk_skip_default)
 
+# The two flags are individually valid but the combination is not: SKIP_JSON_LIB compiles
+# GraphContentKey::toJson()/fromJson() out of existence (GraphContentKey.hpp's
+# #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB guard), while the ingestor's
+# WinnerCacheFile.hpp calls both unconditionally. In-tree this never surfaces because the
+# macro is scoped to $<INSTALL_INTERFACE:> below -- an in-tree build of the ingestor never
+# sees HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB regardless of this option's value, so CI cannot
+# catch it. Only an installed consumer that also enables the ingestor hits the missing
+# symbols, at their build time with no diagnostic pointing back here. Reject the pair now,
+# at hipDNN's own configure time, so a broken installed artifact is never produced.
+if(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB AND HIPDNN_ENABLE_KERNEL_INGESTOR)
+    message(FATAL_ERROR
+        "HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB and HIPDNN_ENABLE_KERNEL_INGESTOR cannot both "
+        "be enabled: the kernel ingestor's winner cache (WinnerCacheFile.hpp) calls "
+        "GraphContentKey::toJson()/fromJson() unconditionally, and SKIP_JSON_LIB compiles "
+        "those out of GraphContentKey.hpp. This combination fails to compile for any "
+        "consumer that installs this hipDNN build and links the ingestor."
+    )
+endif()
+
 if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB AND NOT TARGET nlohmann_json::nlohmann_json)
     hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 endif()

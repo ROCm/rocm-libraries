@@ -104,11 +104,13 @@ Legalized legalizeVCmpX(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArc
 
     StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, inst);
 
-    // Replace EXEC destination with VCC
-    StinkyRegister destReg = destRegs[0];
-    if (destReg.reg.type == RegType::EXEC || destReg.reg.type == RegType::EXEC_LO) {
-        destReg = StinkyRegister::getVCCRegister(wavefrontSize);
-    }
+    // Any v_cmpx that reaches here writes EXEC (CMPXWritesSGPR is false on this
+    // arch), so the split v_cmp must target VCC regardless of how the source path
+    // represented the EXEC destination. The rocisa->asm path types dest[0] as
+    // RegType::EXEC/EXEC_LO; the logical/adaptor path may encode EXEC as a plain
+    // SGPR (index 126/127), which a type-only check missed — leaving v_cmp writing
+    // EXEC and tripping the emulator's isVcmpX assertion. Remap unconditionally.
+    StinkyRegister destReg = StinkyRegister::getVCCRegister(wavefrontSize);
     cmpInst->addDestReg(destReg);
 
     // Copy source registers
