@@ -44,19 +44,40 @@ test_categories:
       - "pre-commit"
       - "smoke"
 
+  # The two suites need different pytest invocations — unit excludes the
+  # `gpu` marker; common selects `-m <arch>` and passes prebuilt-client args — which
+  # one `-m` expression cannot express. So `standard` is a list of sub-runs:
+  # pytest_runner.py runs each independently and aggregates (run-all, not fail-fast),
+  # writing one JUnit per sub-run. `{AMDGPU_TARGETS}` is substituted at runtime with
+  # the concrete gfx target (from AMDGPU_TARGETS env, falling back to AMDGPU_FAMILIES).
   standard:
-    description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
-    test_paths:
-      - "rocisa_tests"
-      - "Tensile/Tests/unit"
-    exclude_markers:
-      - "gpu"
-    pytest_args:
-      - "--snapshot-warn-unused"
+    description: "Pre-checkin validation (rocisa + unit host-only + common GEMM on GPU)"
     labels:
       - "standard"
       - "pr"
       - "precheckin"
+    runs:
+      - name: "host"
+        description: "rocisa + TensileLite unit, no GPU"
+        test_paths:
+          - "rocisa_tests"
+          - "Tensile/Tests/unit"
+        exclude_markers:
+          - "gpu"
+        pytest_args:
+          - "--snapshot-warn-unused"
+      - name: "common"
+        description: "Common GEMM tests on GPU via the prebuilt client"
+        test_paths:
+          - "Tensile/Tests/common"
+        pytest_markers:
+          - "{AMDGPU_TARGETS}"
+        # GEMM tests build/run independent kernels; spread across xdist workers.
+        parallel_workers: 16
+        pytest_args:
+          - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+          - "--global-parameters=LibraryFormat='msgpack'"
+          - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
 
   comprehensive:
     description: "Nightly comprehensive run (rocisa + TensileLite unit, incl. GPU)"
