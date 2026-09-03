@@ -9,9 +9,9 @@
 # while MIOpen CI moves to TheRock, and this lane is scaffolding that exists only
 # until the flag defaults on, so a separate file is removed in one move.
 #
-# The parity harness is built and its registration checked, but the doubled runs
-# are not executed: no entry point forwards yet, so the comparison would be a
-# guaranteed pass bought with GPU time.
+# This lane only checks that the parity harness is registered. Executing it needs
+# a GPU, which no runner here has, so the doubled runs happen wherever MIOpen's
+# ctest suite is run on hardware rather than being duplicated as a bespoke step.
 
 name: "MIOpen: hipDNN wrapper flag-on"
 

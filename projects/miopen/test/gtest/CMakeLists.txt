@@ -294,8 +294,9 @@ function(add_gtest TEST_NAME TEST_CPP)
       )
     endif()
 
-    # Forwarding parity harness: replay the suite twice, changing only which implementation
-    # serves each entry point, and require the two runs to agree test for test. Run it with
+    # Forwarding parity harness: replay the hipDNN shim surface twice, changing only which
+    # implementation serves each entry point, and require the two runs to agree test for
+    # test. Run it with
     # `ctest -j1 -L forwarding_parity`; DEPENDS orders the three entries under a serial run
     # only, and does not hold the comparison back when ctest runs tests concurrently.
     #
@@ -304,15 +305,17 @@ function(add_gtest TEST_NAME TEST_CPP)
     # across GTEST_PARALLEL_LEVEL files that would have to be stitched back together
     # before the two could be compared.
     if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
-      # Replaying the whole suite is only worth it while no entry point forwards, so the two
-      # runs execute identical code and any divergence is a harness bug. Once entry points do
-      # forward, narrow this to *Forwarding*.
+      # Only the tests written against the shim surface are replayed. The rest of the suite
+      # reaches compute through internal headers that bypass the wrapper entirely, so
+      # replaying it would cost two full runs to prove nothing, and any flaky test in it
+      # would surface as a parity failure indistinguishable from a real divergence.
+      # HipdnnShim rather than a generic word so the filter cannot pick up unrelated tests
+      # that happen to mention forwarding; see README.md.
       #
-      # Not a cache entry: it tracks the shard filter, which changes with MIOPEN_TEST_ALL and
-      # the negative filters above, so a cached copy would freeze whatever the first configure
-      # produced. A -D still wins, since that defines the variable before this point.
+      # Not a cache entry, so that a -D on the configure line wins and nothing freezes a
+      # stale value across reconfigures.
       if(NOT DEFINED MIOPEN_FORWARDING_PARITY_FILTER)
-        set(MIOPEN_FORWARDING_PARITY_FILTER "${MIOPEN_GTEST_FILTER}")
+        set(MIOPEN_FORWARDING_PARITY_FILTER "*HipdnnShim*")
       endif()
       # Published upwards for the install-tree mirror at directory scope.
       set(MIOPEN_FORWARDING_PARITY_FILTER "${MIOPEN_FORWARDING_PARITY_FILTER}" PARENT_SCOPE)
