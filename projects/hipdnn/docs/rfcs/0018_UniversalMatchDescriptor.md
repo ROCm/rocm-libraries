@@ -21,19 +21,18 @@
 6. [The Native-Matcher Escape Hatch](#6-the-native-matcher-escape-hatch)
 7. [Composite Criteria](#7-composite-criteria)
 8. [The Matcher: Compilation, Indexing, and Caching](#8-the-matcher-compilation-indexing-and-caching)
-9. [Static Matcher (Sketch)](#9-static-matcher-sketch)
-10. [Arbitration](#10-arbitration)
-11. [Serialization and Versioning](#11-serialization-and-versioning)
-12. [Security and Hostile Input](#12-security-and-hostile-input)
-13. [Observability and Diagnostics](#13-observability-and-diagnostics)
-14. [Testing and Performance](#14-testing-and-performance)
-15. [Migration](#15-migration)
-16. [Worked Example: SDPA Forward](#16-worked-example-sdpa-forward)
-17. [Risks](#17-risks)
-18. [Open Questions](#18-open-questions)
-19. [References and Prior Art](#19-references-and-prior-art)
-20. [Glossary](#20-glossary)
-21. [Appendix A: Schema Reference](#appendix-a-schema-reference)
+9. [Arbitration](#9-arbitration)
+10. [Serialization and Versioning](#10-serialization-and-versioning)
+11. [Security and Hostile Input](#11-security-and-hostile-input)
+12. [Observability and Diagnostics](#12-observability-and-diagnostics)
+13. [Testing and Performance](#13-testing-and-performance)
+14. [Migration](#14-migration)
+15. [Worked Example: SDPA Forward](#15-worked-example-sdpa-forward)
+16. [Risks](#16-risks)
+17. [Open Questions](#17-open-questions)
+18. [References and Prior Art](#18-references-and-prior-art)
+19. [Glossary](#19-glossary)
+20. [Appendix A: Schema Reference](#appendix-a-schema-reference)
 
 ---
 
@@ -102,7 +101,7 @@ evaluate over ([§2](#2-the-symbol-table-criteria-read)).
 | Composite criteria: `(A AND B) OR C` as one criteria expression, via JsonLogic `and`/`or`/`!`/`if` | Yes ([§7](#7-composite-criteria)) | None |
 | Stage two of matching: criteria evaluated per pack, memoized per `$kernel.*` projection, cached at applicability | Yes ([§8](#8-the-matcher-compilation-indexing-and-caching)) | None |
 | Stage one: pattern compilation, the root-opcode index over engines, and the bind step | None: [RFC 0020 § 7](0020_UniversalEngineDescriptor.md#7-pattern-matching-stage-one) | None |
-| Static (compile-time / AOT-lowered) matcher | Options sketched ([§9](#9-static-matcher-sketch)) | Full design |
+| Static (compile-time / AOT-lowered) matcher | None | Full design, including the interpreted-versus-lowered parity contract |
 | General N-ary commutative matching, unbounded variable-length chains | None | JIT follow-up ([RFC 0017 §9.3](0017_UniversalKernelDescriptor.md#93-future-jit-and-normalized-providers)) |
 
 ---
@@ -354,8 +353,8 @@ parallel to the one RFC 0017 already defines, differing only in grain. One hatch
 level, keeps the expression language closed: every operator it publishes
 ([Appendix A.3](#a3-the-expression-language)) is
 total, statically typed against the op-schema registry, and means the same thing in every provider
-that ships a UMD. A descriptor is then fully interpretable from the schema alone, which is what makes
-the drop-in path and the static-matcher lowering of [§9](#9-static-matcher-sketch) tractable.
+that ships a UMD. A descriptor is then fully interpretable from the schema alone, which is what keeps
+the drop-in path and any future static lowering tractable.
 
 **What this costs, and what the split already fixed.** A nested custom operation would have received
 *bound variables* (`["$q", "$k", "$v", "$o"]`). A `GraphCriterionFn` now receives
@@ -483,40 +482,7 @@ Architecture is not a match-time criterion at all for AOT: it is a pack property
 
 ---
 
-## 9. Static Matcher (Sketch)
-
-Whether a matcher can be pre-compiled into a static form that further cuts the runtime cost, while
-still supporting runtime (drop-in) matchers, is an open question. This iteration does not commit to
-a design; it records the options and the constraint they must satisfy.
-
-**The parity constraint.** However a static matcher is produced, it must be behaviorally identical to
-the runtime matcher on the same descriptors and graph — over **both** stages, the engine's pattern and
-the criteria evaluated against its binding, since a lowering that agreed on criteria while binding
-differently would be wrong in exactly the way that is hardest to see. For the criteria half this is
-the lowering-parity requirement that a compiled criteria form decide exactly as the interpreted one
-does; the pattern half
-is the UED's ([RFC 0020 § 7](0020_UniversalEngineDescriptor.md#7-pattern-matching-stage-one)), and neither lowers without the
-other. Build-time and drop-in descriptors run through one
-generic engine ([RFC 0017 §3](0017_UniversalKernelDescriptor.md#3-how-it-works)), so a kernel that is
-AOT-packed today and dropped in tomorrow must match the same graphs either way. Parity is testable as a
-cross-path equivalence check ([§14](#14-testing-and-performance)).
-
-The candidate lowerings for the criteria half — interpreted compiled IR as the baseline and parity
-oracle, a serializable bytecode that gives drop-in the same artifact AOT gets, and generated C++ for
-build-time descriptors only — belong to the language follow-up and are not
-re-argued here. The one option that is the matcher's own, layered over any of them, is a **shared
-decision tree**: combine many patterns rooted at the same opcode into one discrimination net, and
-likewise the criteria of packs on one engine, which changes throughput rather than per-descriptor
-semantics.
-
-Recommendation for a later iteration: make the interpreted compiled IR the contract and the parity
-oracle, add the bytecode form as the shared AOT/drop-in fast path, and treat generated C++ and the
-shared decision tree as opportunistic optimizations gated behind the parity test. The concrete choice
-is deferred.
-
----
-
-## 10. Arbitration
+## 9. Arbitration
 
 Today the first applicable plan builder wins, which is a documented latent bug when more than one
 matches (`HipMlopsEngine.cpp:34`). Descriptor-driven matching makes overlap explicit and resolves it
@@ -539,7 +505,7 @@ arbitrated here at all: that is ordinary engine selection, which hipDNN owns and
 
 ---
 
-## 11. Serialization and Versioning
+## 10. Serialization and Versioning
 
 - **Authoring form.** Human-readable, diffable JSONC (the examples here): the JsonLogic criteria
   expression of [§4](#4-the-shared-expression-language) with the `$`-variable convention.
@@ -597,11 +563,11 @@ arbitrated here at all: that is ordinary engine selection, which hipDNN owns and
   ([§8](#8-the-matcher-compilation-indexing-and-caching)), so a UED pattern edit that drops or
   renames a bound variable invalidates every matcher written against it. That is a load-time error
   naming both descriptors and the pack that paired them, not a silent behavior change
-  ([§17](#17-risks)).
+  ([§16](#16-risks)).
 
 ---
 
-## 12. Security and Hostile Input
+## 11. Security and Hostile Input
 
 On the drop-in path the loader, the matcher, and the expression interpreter parse input that may be
 untrusted or simply malformed, so they must be bounded and fail closed rather than crash
@@ -617,12 +583,12 @@ untrusted or simply malformed, so they must be bounded and fail closed rather th
 - **Quarantine, not cascade.** A bad descriptor is quarantined on load with a diagnostic; the rest load
   ([RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery)).
 - **Fuzzing.** A seed corpus of patterns, criteria, and graphs plus a fuzzer over the loader and
-  matcher run under the existing ASAN build ([§14](#14-testing-and-performance)), backing the
+  matcher run under the existing ASAN build ([§13](#13-testing-and-performance)), backing the
   fail-closed requirement.
 
 ---
 
-## 13. Observability and Diagnostics
+## 12. Observability and Diagnostics
 
 Because matching is data-driven, it is inspectable. The provider surfaces:
 
@@ -641,7 +607,7 @@ Because matching is data-driven, it is inspectable. The provider surfaces:
   [RFC 0017 §8](0017_UniversalKernelDescriptor.md#8-end-to-end-flow). It is the engine's, so one view
   serves every pack naming that engine.
 - **An arbitration trace.** Which UKDs matched, how the heuristic scored them, and where a tie fell to
-  `priority` or stable `id` ([§10](#10-arbitration)).
+  `priority` or stable `id` ([§9](#9-arbitration)).
 - **Load diagnostics.** Which patterns and criteria compiled, which were quarantined and why, which
   `(matcher, engine)` pairs failed symbol resolution and on which reference, and unresolved native
   predicates by name.
@@ -663,7 +629,7 @@ applicability for cases it no longer serves. The option is provided with that ri
 
 ---
 
-## 14. Testing and Performance
+## 13. Testing and Performance
 
 The split introduces no new testing strategy; it slots into hipDNN's existing tiers (`docs/Testing.md`,
 `docs/testing/TestingStrategy.md`) as RFC 0017 §14.1 requires. A descriptor-backed kernel runs through
@@ -679,18 +645,19 @@ Matcher-specific coverage:
   battery of graphs (accepting and rejecting) through both the hand-written builder and the
   pattern-plus-criteria pair and
   asserts identical accept/reject decisions and identical bound values. The SDPA-forward builder
-  ([§16](#16-worked-example-sdpa-forward)) is the first target.
+  ([§15](#15-worked-example-sdpa-forward)) is the first target.
 - **Symbol-resolution rejection.** A UMD referencing a symbol a given UED does not publish is rejected
   at pair-validation, naming the reference, both descriptors, and the pack that paired them, and a
   UED pattern edit that removes a
   bound variable is caught the same way
   ([§8](#8-the-matcher-compilation-indexing-and-caching)). This is the check the split exists to make
   possible, so it is tested directly rather than only through the descriptors that happen to be valid.
-- **Static/runtime parity.** The parity oracle of [§9](#9-static-matcher-sketch): the same UMD and
-  graph must decide identically on the interpreted and any lowered matcher.
+- **Static/runtime parity.** Should a matcher ever be lowered to a static form, the interpreted
+  matcher is the oracle: the same UMD and graph must decide identically on both, across the engine's
+  pattern and the criteria alike.
 - **Expression-language conformance.** The shared conformance suite the language follow-up will
   own, which this subsystem runs as a consumer of the language rather than re-specifying.
-- **Fuzzing.** The corpus and fuzzer of [§12](#12-security-and-hostile-input).
+- **Fuzzing.** The corpus and fuzzer of [§11](#11-security-and-hostile-input).
 - **Match overhead.** Plan-time match cost is measured against the hand-written baseline as
   benchmarking matures (`tools/dnn-benchmarking`, [RFC 0013](0013_Autotune.md)); the compiled matcher,
   root-opcode index, and applicability-time cache ([§8](#8-the-matcher-compilation-indexing-and-caching))
@@ -698,7 +665,7 @@ Matcher-specific coverage:
 
 ---
 
-## 15. Migration
+## 14. Migration
 
 Migration follows RFC 0017 §14: no engine is converted until a descriptor-backed kernel runs end to
 end, and a
@@ -710,14 +677,14 @@ exercises nearly the whole vocabulary (opcode, attribute gates, optional-operand
 relations, and cross-tensor dim relations) in one node, with its two non-declarative gates in the
 paired native matcher. It splits cleanly: the single `sdpa_fwd` node and its operands are the engine's
 pattern, and every gate is criteria. Its match-equivalence
-test ([§14](#14-testing-and-performance)) gates the cutover. The mlops builders follow, reusing the
+test ([§13](#13-testing-and-performance)) gates the cutover. The mlops builders follow, reusing the
 `IValidator` primitives (`dnn-providers/hip-kernel-provider/src/engines/hip_mlops_engine/plans/ApplicabilityChecks.cpp`) as the reference for their criteria
 lowering. The kernel-table lookups dissolve into the KDP as described in
 [§6](#6-the-native-matcher-escape-hatch).
 
 ---
 
-## 16. Worked Example: SDPA Forward
+## 15. Worked Example: SDPA Forward
 
 The SDPA-forward check collapses into one UED pattern, one UMD, and one native matcher. Compared to
 the hand-written
@@ -729,7 +696,7 @@ matcher the pack lists beside the criteria, not as criteria themselves
 positionally, not an attribute ([RFC 0020 § 5](0020_UniversalEngineDescriptor.md#5-the-graph-model-the-pattern-matches)).
 
 This example is grounded on the asm-SDPA builder because that builder is this RFC's first migration
-target ([§15](#15-migration)), so the mapping table below doubles as the cutover checklist. It is
+target ([§14](#14-migration)), so the mapping table below doubles as the cutover checklist. It is
 deliberately a different example from
 [RFC 0017 §13](0017_UniversalKernelDescriptor.md#13-worked-example-sdpa-as-a-ukd), which works the
 `attention_dense` kernel family end to end across all seven descriptor kinds; that one shows the pair in
@@ -797,7 +764,7 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
 
 ---
 
-## 17. Risks
+## 16. Risks
 
 - **Op-schema registry coupling, inherited.** Every symbol a criterion reads was auto-bound from a
   registry generated off the flatbuffer op schema, so a registry that drifts from the graph
@@ -821,9 +788,9 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
   graph arrives ([RFC 0020 § 13.2](0020_UniversalEngineDescriptor.md#132-semantic-validation-cross-descriptor)).
 - **Match overhead.** Per-candidate evaluation of the criteria expression is unbounded by the
   root-opcode index ([§8](#8-the-matcher-compilation-indexing-and-caching)). Mitigation: short-circuit
-  evaluation, applicability-time caching, and the overhead test of [§14](#14-testing-and-performance).
-- **Static-matcher parity.** A lowered matcher that diverges from the interpreter is a silent
-  correctness bug ([§9](#9-static-matcher-sketch)). Mitigation: the interpreter is the oracle and the
+  evaluation, applicability-time caching, and the overhead test of [§13](#13-testing-and-performance).
+- **Static-matcher parity.** Should a matcher ever be lowered to a static form, one that diverges
+  from the interpreter is a silent correctness bug. Mitigation: the interpreter is the oracle and the
   parity test gates any lowering.
 - **Matcher reuse is narrower than pack-scoped sharing suggests.** A UMD's criteria read symbols a
   particular engine's pattern published, so a matcher over tensor and attribute names is reusable
@@ -837,7 +804,7 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
   symbol table, dropping or renaming a bound variable breaks every UMD, UDD, and the
   UHD that read it. Mitigation: the break is a load-time error naming both descriptors, the
   unresolved reference, and the pack that paired them
-  ([§14](#14-testing-and-performance)), never a silent behavior change; a
+  ([§13](#13-testing-and-performance)), never a silent behavior change; a
   pattern is engine-wide and versioned like any descriptor, so a breaking edit is a coordinated
   change in the sense of [RFC 0017 §16](0017_UniversalKernelDescriptor.md#16-risks).
 - **Engine granularity is now forced by graph shape.** One pattern per UED
@@ -859,13 +826,13 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
   ([§5](#5-layout-and-stride-order-criteria)) and a transposed pair of entries is a legal
   permutation that silently names a different layout. Mitigation: pin `$x.rank` beside every
   positional read, comment the axis at each site, and rely on the match-equivalence tests of
-  [§14](#14-testing-and-performance) against the hand-written builder to catch what static
+  [§13](#13-testing-and-performance) against the hand-written builder to catch what static
   validation structurally cannot. Whether dims may be named at all is the shape-matching follow-up's
   ([RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs)).
 
 ---
 
-## 18. Open Questions
+## 17. Open Questions
 
 1. **Native-criterion bindings. SETTLED — the contract was extended.** A native criterion now takes
    `(const MatchContext&, const BoundTokens&)`, so it reads the binding the engine's `graph_match`
@@ -876,8 +843,9 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
    the question weighed — extend the signature, or accept the duplication — is answered in favor of
    extending it. The residual is representational, not structural: `BoundTokens` carries scalars,
    so whole-tensor access still goes through `MatchContext` by uid ([§6](#6-the-native-matcher-escape-hatch)).
-2. **Static-matcher form.** Which of the [§9](#9-static-matcher-sketch) options becomes the AOT fast
-   path, and does it also serve drop-in via a serialized bytecode?
+2. **Static-matcher form.** Should a matcher be pre-compiled into a static form that cuts runtime
+   cost — interpreted IR, a serializable bytecode, or generated C++ — and can one form serve both the
+   AOT and drop-in paths? Whatever is chosen must decide identically to the interpreted matcher.
 3. **Feature-vector overlap.** Largely settled by the split: the UED's pattern is engine-wide and
    publishes the tensor, dim, and attribute symbols a UHD's `features_signature` reads, so an
    engine's binding is the natural canonical feature source
@@ -887,7 +855,7 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
 
 ---
 
-## 19. References and Prior Art
+## 18. References and Prior Art
 
 The design borrows established ideas; none is a dependency. These informed the matcher specifically.
 
@@ -897,12 +865,12 @@ The design borrows established ideas; none is a dependency. These informed the m
 | **TVM Relax DFPattern** | Constraint vocabulary (op, dtype, symbolic shape, wildcard); dataflow use-def constraints; cross-tensor same-shape relations |
 | **XLA pattern matcher** | Exact-vs-compatible equality; a tensor virtual/internal flag gating fusion; layout as a distinct constraint; optional operands; capture-by-reference binding |
 | **PyTorch Inductor / torch.library** | Node/edge pattern vocabulary; serialized precompiled patterns; duplicate-pattern detection |
-| **LLVM ISel / discrimination nets** | Sharing common prefixes of many patterns rooted at one opcode into one decision structure ([§9](#9-static-matcher-sketch)) |
+| **LLVM ISel / discrimination nets** | Sharing common prefixes of many patterns rooted at one opcode into one decision structure |
 | **ONNX Runtime** | First-claim arbitration as the anti-pattern this RFC replaces with deterministic ranking; single-node versus fused-subgraph capability |
 
 ---
 
-## 20. Glossary
+## 19. Glossary
 
 - **UMD (Universal Match Descriptor) / matcher:** one criteria expression that decides whether a
   kernel applies, evaluated over the symbols its engine's pattern bound. A KDP lists a set of matcher
@@ -944,7 +912,7 @@ The design borrows established ideas; none is a dependency. These informed the m
 - **Composite criteria:** any boolean combination of tests within the one `criteria` expression
   ([§7](#7-composite-criteria)).
 - **Arbitration:** the deterministic resolution when several UKDs match: heuristic (UHD) score, then
-  `priority`, then stable `id` compared as raw bytes ([§10](#10-arbitration)).
+  `priority`, then stable `id` compared as raw bytes ([§9](#9-arbitration)).
 - **Catalog / bound token state:** the two products of matching a graph — the kernels whose full
   matcher set passed, and every `$`-prefixed value the matchers resolved. Both are cached by the
   provider during applicability and read by every later phase
@@ -962,7 +930,7 @@ set matching it publishes are specified with the UED and not here
 ([RFC 0020 § 4.3](0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative), [RFC 0020 § 6.1](0020_UniversalEngineDescriptor.md#61-the-published-field-set-normative)).
 Where the prose sections above describe a construct by example, the grammar and tables here fix its exact form. A descriptor that violates a
 **MUST** here is refused at compile ([§8](#8-the-matcher-compilation-indexing-and-caching)); it never
-matches by default ([§12](#12-security-and-hostile-input)). Grammar is EBNF; quoted terminals are JSON
+matches by default ([§11](#11-security-and-hostile-input)). Grammar is EBNF; quoted terminals are JSON
 tokens. The expression language's own normative reference — grammar, operator table, type rules, and
 static validation — belongs to the descriptor expression language follow-up; this
 appendix fixes the descriptor object and the hipDNN environment its criteria are evaluated over.
@@ -971,10 +939,10 @@ appendix fixes the descriptor object and the hipDNN environment its criteria are
 
 | Field | Type | Required | Default | Rule |
 |---|---|---|---|---|
-| `id` | string (UUID) | yes | — | A UUID; stable, globally unique identity ([§11](#11-serialization-and-versioning)) |
+| `id` | string (UUID) | yes | — | A UUID; stable, globally unique identity ([§10](#10-serialization-and-versioning)) |
 | `name` | string | yes | — | Diagnostics only; not semantic |
-| `version` | string | no | `"1.0"` | Matcher format version, `<major>.<minor>`, gated at load as a **ceiling**: a differing `major`, or a `minor` newer than the runtime's, is refused; an older minor always loads ([§11](#11-serialization-and-versioning)) |
-| `sdk_version` | string | no | `"1.0"` | The hipDNN graph schema version these criteria were authored against, `<major>.<minor>`. Refused at load when newer than the runtime's own schema, and declined at match time against the **floor the graph sets** — a matcher below what the graph requires is skipped instead of asked, declining its packs ([§11](#11-serialization-and-versioning)) |
+| `version` | string | no | `"1.0"` | Matcher format version, `<major>.<minor>`, gated at load as a **ceiling**: a differing `major`, or a `minor` newer than the runtime's, is refused; an older minor always loads ([§10](#10-serialization-and-versioning)) |
+| `sdk_version` | string | no | `"1.0"` | The hipDNN graph schema version these criteria were authored against, `<major>.<minor>`. Refused at load when newer than the runtime's own schema, and declined at match time against the **floor the graph sets** — a matcher below what the graph requires is skipped instead of asked, declining its packs ([§10](#10-serialization-and-versioning)) |
 | `allow_override_shape` | bool | no | `false` | The matcher's opt-in to accepting a graph that enables execute-time override shapes. When `false`, such a graph is declined before the criteria run. This is the matcher's own gate and is distinct from `$graph.is_override_shape_enabled`, which is the graph's state ([§2](#2-the-symbol-table-criteria-read), [RFC 0020 § 6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)). A prebuilt kernel that bakes its shape leaves this at the default rather than restating the condition as a criterion |
 | `criteria` | Expr | see below | — | A single expression whose static type is `Bool` (A.3) |
 | `scope` | `"graph"` \| `"kernel"` | yes | — | Which inputs the criteria read, and so what a failure prunes: `graph` is evaluated once per `(graph, device)` and disqualifies **every** kernel in the pack; `kernel` also reads `$kernel.*` and disqualifies **only the candidate** ([§8](#8-the-matcher-compilation-indexing-and-caching)). It is declared rather than inferred so the pruning level is a stated contract, not a consequence of which tokens an expression happens to name |
@@ -985,7 +953,7 @@ check; one that declares both hides a conjunction inside a descriptor that a pac
 two matcher ids ([§6](#6-the-native-matcher-escape-hatch)). Either is refused. No other top-level
 keys are permitted, and an unknown key is refused. In particular a UMD carries no
 `schema` member — the `.umd.json` filename already states the type, and a file whose name and body
-disagree has no correct reading, so the body does not restate it ([§11](#11-serialization-and-versioning)).
+disagree has no correct reading, so the body does not restate it ([§10](#10-serialization-and-versioning)).
 Nor does it carry `nodes`: the pattern is the engine's ([§2](#2-the-symbol-table-criteria-read)). Both version fields compare
 numerically by `(major, minor)`, so `1.10` is above `1.9`; a value that does not parse as exactly two
 decimal components is refused.
@@ -1010,7 +978,7 @@ of it.
   **propagates** through the enclosing expression rather than short-circuiting it: an `or` with a
   definite-`true` arm is `true`, and an `and` with a definite-`false` arm is `false`, whichever way
   the unknown arm would have gone. *At the root*, a criteria expression whose `Bool` root still holds
-  unknown fails closed and declines the match ([§12](#12-security-and-hostile-input)). The first
+  unknown fails closed and declines the match ([§11](#11-security-and-hostile-input)). The first
   level is what lets the "absent, or present and constrained" pair of
   [§3](#3-criteria-vocabulary) accept a graph without the operand; the second is what stops an
   undecided criterion from admitting one. This restates
@@ -1032,7 +1000,7 @@ belong to the descriptor expression language follow-up. Until it lands,
 is the interim authority for the operator vocabulary, and the semantics this document depends on
 are stated locally: unknown propagation in A.2, short-circuit order in
 [§8](#8-the-matcher-compilation-indexing-and-caching), and the interpreter's bounds in
-[§12](#12-security-and-hostile-input). Each moves out when the follow-up is written.
+[§11](#11-security-and-hostile-input). Each moves out when the follow-up is written.
 
 The operator set is closed in the sense that matters to a descriptor: there is no registry,
 namespace, dotted key, or provider hook by which one introduces an operator, so an unlisted
@@ -1062,7 +1030,7 @@ is refused at compile rather than declining silently at match time.
 
 A UMD MUST pass every check below to compile; a failure refuses (and, on the drop-in path,
 quarantines) the descriptor with a diagnostic ([§8](#8-the-matcher-compilation-indexing-and-caching),
-[§12](#12-security-and-hostile-input)). They fall into two groups, because a UMD's references cannot
+[§11](#11-security-and-hostile-input)). They fall into two groups, because a UMD's references cannot
 be resolved without an engine to resolve them against
 ([§8](#8-the-matcher-compilation-indexing-and-caching)). The pattern's own validation belongs to
 the UED ([§2](#2-the-symbol-table-criteria-read)).
@@ -1072,7 +1040,7 @@ the UED ([§2](#2-the-symbol-table-criteria-read)).
 1. `id` is a well-formed UUID, only the keys of A.1 at the top level, and each of `version` /
    `sdk_version`, when present, is a well-formed `<major>.<minor>` string the runtime can honor:
    same `major`, and a `minor` no newer than the runtime's
-   ([§11](#11-serialization-and-versioning)).
+   ([§10](#10-serialization-and-versioning)).
 2. `scope` is `"graph"` or `"kernel"`, and exactly one of `criteria` and `match_symbol` is
    present (A.1).
 3. `criteria`, when present, passes the expression language's static validation — operator
@@ -1100,7 +1068,7 @@ the UED ([§2](#2-the-symbol-table-criteria-read)).
 Checks 5 and 6 are cached on `(matcher, engine)` and re-run when either side changes; a failure
 names the unresolved reference, both descriptors, **and the pack that paired them**, without which
 the reader cannot tell which of an engine's packs to correct
-([§13](#13-observability-and-diagnostics)). The
+([§12](#12-observability-and-diagnostics)). The
 same two checks apply to a pack's UDD formulas and to the engine's UHD `features_signature`, which is
 what makes the engine's published set the single contract
 ([§2](#2-the-symbol-table-criteria-read)).

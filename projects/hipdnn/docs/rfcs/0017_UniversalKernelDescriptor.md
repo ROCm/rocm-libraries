@@ -140,7 +140,7 @@ diverge from this document; this one records what changed *here*.
 - **Dims are read positionally.** `{"shape": ["$q", ["batch", "num_heads", ...]]}` and the named
   dims it bound are gone; a criterion reads `$q.dims[3]` and relates tensors with explicit
   cross-tensor equalities. Axis meaning is carried by comment and convention, which
-  [RFC 0018 §17](0018_UniversalMatchDescriptor.md#17-risks) records as a risk.
+  [RFC 0018 §16](0018_UniversalMatchDescriptor.md#16-risks) records as a risk.
 - **`shape`, `rank`-as-binder, and `all` left the operator set.** With dims positional they bound
   nothing, and the variable-rank case they served is deferred to the shape-matching follow-up
   ([§14.2](#142-follow-up-rfcs)).

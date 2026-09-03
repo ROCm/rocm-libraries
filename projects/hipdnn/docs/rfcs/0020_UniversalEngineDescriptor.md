@@ -53,8 +53,8 @@ Concretely, this RFC delivers:
   FlatBuffers annotations that makes a UID-centric graph readable by name (§ 5, Appendix B).
 - The **symbol table matching publishes**: the five namespaces, the auto-binding formula, and the
   normative published field set every consumer's references are validated against (§ 6, § 6.1).
-- **Stage one of matching**: pattern compilation, the root-opcode index over engines, the bind
-  step, and the parity a lowered pattern must hold to (§ 7).
+- **Stage one of matching**: pattern compilation, the root-opcode index over engines, and the bind
+  step (§ 7).
 - The **engine-identity model**, including the two distinct id spaces a descriptor engine
   lives in: the descriptor-cross-reference UUID and the hipDNN 64-bit engine id (§ 3).
 - **Engine registration**: the process that instantiates the generic engine from UED data and
@@ -211,7 +211,7 @@ two arms (§ 4.3, § 4.5) this engine matches with.
 | `version` | yes | string | `<major>.<minor>`, both numeric, and one of the values the schema enumerates (§ 14.3), e.g. `1.0`. The compatibility field the accept rule gates on (§ 14). |
 | `id` | yes | string | A UUID (RFC 4122) in canonical `8-4-4-4-12` hex form. Unique across all loaded descriptors, except that content-identical UEDs may share an `id` (§ 13.2.1). The cross-reference key a KDP's `engine` field uses (§ 3a). |
 | `name` | yes | string | Globally-unique, scoped engine name matching `^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$` (a `namespace:local` form, e.g. `rocke:SDPA`). Hashed (FNV-1a, 64-bit) into the hipDNN engine-id space (§ 3b). Non-empty; unique by both literal name and by hash. |
-| `sdk_version` | no | string | `<major>.<minor>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0` when omitted. Compared numerically by `(major, minor)`: refused at load when newer than the runtime's own graph schema, and at match time the whole engine declines a graph whose reported floor is above it, before binding and taking every pack naming it ([RFC 0018 § 11](0018_UniversalMatchDescriptor.md#11-serialization-and-versioning)). Independent of `version`, which gates the UED *format*. |
+| `sdk_version` | no | string | `<major>.<minor>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0` when omitted. Compared numerically by `(major, minor)`: refused at load when newer than the runtime's own graph schema, and at match time the whole engine declines a graph whose reported floor is above it, before binding and taking every pack naming it ([RFC 0018 § 10](0018_UniversalMatchDescriptor.md#10-serialization-and-versioning)). Independent of `version`, which gates the UED *format*. |
 | `heuristic` | no | string | UUID of this engine's one UHD. Must resolve to a loadable UHD at load (§ 13.2). Absent => the engine ships no heuristic and its catalog is ordered by the declared fallback, `priority` then descriptor `id` (§ 8, RFC 0017 § 5). A key present but naming nothing is still an error. |
 | `metadata` | yes | string | UUID of this engine's one KMD. Must resolve to a loadable KMD at load (§ 13.2). |
 | `graph_match` | no | object | Stage one: how this engine decides a graph and binds the tokens every later stage reads (§ 6, § 7). Exactly one arm, and they are mutually exclusive: **`nodes`**, the declarative pattern of **§ 4.3**, or **`native`**, the escape-hatch symbol of **§ 4.5**. Absent => the engine binds nothing, publishes an empty symbol table, and is admitted or declined by its packs' UMDs alone. |
@@ -805,8 +805,8 @@ knowable at a given stage, which is the drift the shared order exists to prevent
 ## 7. Pattern Matching: Stage One
 
 Matching a graph is two stages, and the pattern is the first of them. This section specifies the
-pattern's half: when it is compiled, how engines are pruned before any pattern runs, what the bind
-step does, and the parity a lowered form must hold to. The second stage — a pack's criteria
+pattern's half: when it is compiled, how engines are pruned before any pattern runs, and what the
+bind step does. The second stage — a pack's criteria
 evaluated over the published table, its per-kernel memoization, and the applicability-time cache
 both stages share — is [RFC 0018 §
 8](0018_UniversalMatchDescriptor.md#8-the-matcher-compilation-indexing-and-caching).
@@ -843,18 +843,6 @@ laziness changes when the work happens, never how often. This is RFC 0017 § 8.1
 a re-ordering of it: its step 4 resolves the packs and applies the arch gate as it goes, and its
 step 5 runs the match lazily on the first pack that cleared that gate, reasoning the all-excluded
 case the same way.
-
-**Lowering parity, if the pattern is ever lowered.** [RFC 0018 §
-9](0018_UniversalMatchDescriptor.md#9-static-matcher-sketch) sketches pre-compiling a matcher into a
-static form. However a static matcher is produced, it must be behaviorally identical to the runtime
-one on the same descriptors and graph — over **both** stages, the engine's pattern and the criteria
-evaluated against its binding, since a lowering that agreed on criteria while binding differently
-would be wrong in exactly the way that is hardest to see. The criteria half of that requirement is
-the expression language's; **the pattern half is this document's, and neither lowers without the
-other.** Build-time and drop-in descriptors run through one generic engine ([RFC 0017 §
-3](0017_UniversalKernelDescriptor.md#3-how-it-works)), so a kernel that is AOT-packed today and
-dropped in tomorrow must match the same graphs either way. Parity is testable as a cross-path
-equivalence check (§ 16).
 
 ## 8. Knobs
 
@@ -1592,7 +1580,7 @@ graph is reported by `not_present` and is read only through a guarded reference 
   ([RFC 0018 A.5](0018_UniversalMatchDescriptor.md#a5-compile-time-validation-normative)).
 - **Unknown op or name at match compile.** The matcher fails closed: a pattern node whose opcode or
   name is absent from the registry is refused, never bound to a guessed field
-  ([RFC 0018 § 17](0018_UniversalMatchDescriptor.md#17-risks)).
+  ([RFC 0018 § 16](0018_UniversalMatchDescriptor.md#16-risks)).
 - **Generation is deterministic and diffable.** The generated registry is a build artifact; a schema
   change that alters bindings shows up as a registry diff, which is the review surface for a binding
   change.
