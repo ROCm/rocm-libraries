@@ -167,8 +167,21 @@ jobs:
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
       ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
-      # Pass external repo info for stage-impact analysis
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      # Pass external repo info for stage-impact analysis.
+      # extra_cmake_options is appended to the cmake configure line of every
+      # build stage, scoped to this repository's CI runs. TheRock keeps
+      # HIPKERNELPROVIDER_ENABLE_ROCKE OFF by default; enabling it here is what
+      # gives rocKE build and test signal while it is still in development.
+      # Keep the value constant: the flag state file participates in every
+      # subproject's configure fingerprint, and stage reuse does not key on
+      # flags (TheRock#3399), so a per-PR value would churn fingerprints and
+      # let baselines built with the opposite value look reusable.
+      external_repo: >-
+        {
+          "repository": "${{ github.repository }}",
+          "ref": "${{ github.sha }}",
+          "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
+        }
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}

@@ -52,6 +52,8 @@ inline const PointwiseModeBitset& getImplementedBinaryModesBitset()
         bitset.set(toBitPosition(data_objects::PointwiseMode::RELU_BWD));
         bitset.set(toBitPosition(data_objects::PointwiseMode::SIGMOID_BWD));
         bitset.set(toBitPosition(data_objects::PointwiseMode::TANH_BWD));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::MAX_OP));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::MIN_OP));
         return bitset;
     }();
     return s_implementedBinaryModes;

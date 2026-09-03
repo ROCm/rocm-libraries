@@ -8,6 +8,7 @@
 #include <miopen/generic_search.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/hipoc_kernel.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/tensor_ops.hpp>
 
@@ -16,6 +17,7 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <string>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_HIPCONV)
 
@@ -104,6 +106,73 @@ static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
         return nullptr;
     return cfgs[config.index];
 }
+
+// The kernel's identity as MIOPEN_PERFORMANCE_LOGS should report it.
+//
+// A perf-log kernel record carries a name and nothing else, so the name has to hold both
+// halves of a hipconv kernel's identity: the family (hipconv::name) and the config it was
+// compiled with (hipconv::describe_config), joined as family[field=value,...]. The
+// bracketed half is verbatim what hipconv::matches_descriptor() accepts, so a consumer
+// that splits on '[' can hand it back to hipconv to re-select this exact kernel. A family
+// that publishes no descriptor fields reports the bare family name.
+static std::string HipConvKernelLabel(hipconv::ConvKernelHandle kernel)
+{
+    const auto family = hipconv::name(kernel);
+    const auto config = hipconv::describe_config(kernel);
+    if(config.empty())
+        return std::string{family};
+    return std::string{family} + "[" + config + "]";
+}
+
+// Time one hipconv launch and file it under `label` in the performance log.
+//
+// hipconv launches through the HIP runtime instead of MIOpen's HIPOCKernel, so the
+// AddKernelToJsonAccumulator call in HIPOCKernelInvoke::run never fires for it. Without
+// this the JSON record carries an empty kernels[] and falls back to naming the config
+// after the solver, so the log says ConvHipConv ran but not which hipconv kernel or
+// tuning config produced the time, which is exactly what a heuristic keys on.
+//
+// Engaged only when performance logging is on and the handle is profiling, matching
+// HIPOCKernelInvoke::run, which logs MIOpen's own kernels from the event pair it records
+// under the same two conditions. A production run pays one env-var read and a branch,
+// and a non-profiling run keeps its asynchronous launches free of an added sync.
+class ScopedHipConvKernelLog
+{
+public:
+    // `label` must outlive the scope; callers pass an invoker-captured string.
+    ScopedHipConvKernelLog(const Handle& handle, const std::string& label)
+        : stream(handle.GetStream()),
+          name(label),
+          engaged(IsLoggingKernel() && handle.IsProfilingEnabled() && !label.empty())
+    {
+        if(!engaged)
+            return;
+        start = make_hip_event();
+        stop  = make_hip_event();
+        (void)hipEventRecord(start.get(), stream);
+    }
+
+    ~ScopedHipConvKernelLog()
+    {
+        if(!engaged)
+            return;
+        (void)hipEventRecord(stop.get(), stream);
+        (void)hipEventSynchronize(stop.get());
+        float elapsed_ms = 0.0f;
+        (void)hipEventElapsedTime(&elapsed_ms, start.get(), stop.get());
+        AddKernelToJsonAccumulator(name, elapsed_ms, false);
+    }
+
+    ScopedHipConvKernelLog(const ScopedHipConvKernelLog&)            = delete;
+    ScopedHipConvKernelLog& operator=(const ScopedHipConvKernelLog&) = delete;
+
+private:
+    hipStream_t stream;
+    const std::string& name;
+    HipEventPtr start;
+    HipEventPtr stop;
+    bool engaged;
+};
 
 // ===================== PerformanceConfigConvHipConv =====================
 
@@ -276,6 +345,11 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
 
     MIOPEN_LOG_I(hipconv::name(kernel) << ": " << hipconv::describe_config(kernel));
 
+    // Name the kernel for MIOPEN_PERFORMANCE_LOGS. Empty unless logging is on, which
+    // leaves ScopedHipConvKernelLog inert; each invoker below captures it by copy.
+    const std::string kernel_label =
+        IsPerformanceLoggingEnabled() ? HipConvKernelLabel(kernel) : std::string{};
+
     if(problem.IsDirectionBackwardWrW())
     {
         const auto workspace_size = GetWorkspaceSize(ctx, problem);
@@ -294,6 +368,7 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
                     const auto& tensors = wrw_ctx.tensors;
 
                     const HipEventProfiler profiler(handle);
+                    const ScopedHipConvKernelLog kernel_log(handle, kernel_label);
                     if(const auto status = hipconv::launch(kernel,
                                                            par,
                                                            tensors.x,
@@ -327,10 +402,21 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
                 const HipEventProfiler profiler(handle);
 
                 // wgrad kernel writes fp32 into the workspace...
-                if(const auto status = hipconv::launch(
-                       kernel, par, tensors.x, tensors.dy, workSpace, nullptr, handle.GetStream());
-                   status != hipSuccess)
-                    MIOPEN_THROW_HIP_STATUS(status, "ConvHipConv: wgrad launch failed.");
+                //
+                // Scoped so the perf log times the hipconv kernel alone; the cast below
+                // is logged separately by its own MIOpen kernel.
+                {
+                    const ScopedHipConvKernelLog kernel_log(handle, kernel_label);
+                    if(const auto status = hipconv::launch(kernel,
+                                                           par,
+                                                           tensors.x,
+                                                           tensors.dy,
+                                                           workSpace,
+                                                           nullptr,
+                                                           handle.GetStream());
+                       status != hipSuccess)
+                        MIOPEN_THROW_HIP_STATUS(status, "ConvHipConv: wgrad launch failed.");
+                }
 
                 // ...then cast fp32 workspace -> fp16 dw.
                 CastTensor(handle,
@@ -363,6 +449,7 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
                     MIOPEN_THROW("ConvHipConv: not enough workspace for direct kernel.");
 
                 const HipEventProfiler profiler(handle);
+                const ScopedHipConvKernelLog kernel_log(handle, kernel_label);
                 if(const auto status = hipconv::launch(kernel,
                                                        par,
                                                        tensors.in,
