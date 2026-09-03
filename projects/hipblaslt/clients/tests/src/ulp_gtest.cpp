@@ -62,8 +62,8 @@ namespace
             = hipblaslt::host_numerics::detail::comparisonLayout(M, N, lda, stride, batchCount);
         const size_t storageElements = storageBytesForLayout(scalarType<T>(), layout) / sizeof(T);
         ComparisonOptions options;
-        options.pointwise                  = false;
-        options.computePointwiseStatistics = false;
+        options.allClose                     = false;
+        options.computeElementwiseStatistics = false;
         options.computeFrobenius           = false;
         options.computeUlp                 = true;
         options.ulpType                    = scalarType<T>();
