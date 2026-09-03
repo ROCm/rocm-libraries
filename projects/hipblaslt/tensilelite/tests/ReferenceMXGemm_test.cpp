@@ -87,6 +87,63 @@ namespace
     }
 
 #ifdef TENSILE_USE_FP8_BF8
+    template <typename InputA, typename InputB, typename ScaleA, typename ScaleB>
+    std::vector<float> expectedMXGemm(const ContractionProblemGemm& problem,
+                                      const std::vector<InputA>&    a,
+                                      const std::vector<InputB>&    b,
+                                      const std::vector<float>&     c,
+                                      const std::vector<ScaleA>&    scaleA,
+                                      const std::vector<ScaleB>&    scaleB,
+                                      float                         alpha,
+                                      float                         beta,
+                                      const std::vector<float>*     bias = nullptr)
+    {
+        const size_t rows          = problem.freeSizeA(0);
+        const size_t columns       = problem.freeSizeB(0);
+        const size_t reductions    = problem.boundSize(0);
+        const size_t strideAM      = problem.a().strides()[problem.freeIndicesA()[0].i];
+        const size_t strideAK      = problem.a().strides()[problem.boundIndices()[0].a];
+        const size_t strideBN      = problem.b().strides()[problem.freeIndicesB()[0].i];
+        const size_t strideBK      = problem.b().strides()[problem.boundIndices()[0].b];
+        const size_t strideScaleAM = problem.mxsa().strides()[problem.freeIndicesA()[0].i];
+        const size_t strideScaleAK = problem.mxsa().strides()[problem.boundIndices()[0].a];
+        const size_t strideScaleBN = problem.mxsb().strides()[problem.freeIndicesB()[0].i];
+        const size_t strideScaleBK = problem.mxsb().strides()[problem.boundIndices()[0].b];
+
+        std::vector<float> expected(rows * columns);
+        for(size_t column = 0; column < columns; ++column)
+        {
+            for(size_t row = 0; row < rows; ++row)
+            {
+                float sum = 0.0f;
+                for(size_t blockBase = 0; blockBase < reductions;)
+                {
+                    const size_t remainingA = problem.mxBlockA() - blockBase % problem.mxBlockA();
+                    const size_t remainingB = problem.mxBlockB() - blockBase % problem.mxBlockB();
+                    const size_t blockEnd
+                        = blockBase + std::min({reductions - blockBase, remainingA, remainingB});
+                    float partial = 0.0f;
+                    for(size_t reduction = blockBase; reduction < blockEnd; ++reduction)
+                    {
+                        partial
+                            += static_cast<float>(a[row * strideAM + reduction * strideAK])
+                               * static_cast<float>(b[column * strideBN + reduction * strideBK]);
+                    }
+                    const size_t scaleAIndex
+                        = row * strideScaleAM + (blockBase / problem.mxBlockA()) * strideScaleAK;
+                    const size_t scaleBIndex
+                        = column * strideScaleBN + (blockBase / problem.mxBlockB()) * strideScaleBK;
+                    sum += partial * static_cast<float>(scaleA[scaleAIndex])
+                           * static_cast<float>(scaleB[scaleBIndex]);
+                    blockBase = blockEnd;
+                }
+                expected[row + column * rows] = alpha * sum + beta * c[row + column * rows]
+                                                + (bias == nullptr ? 0.0f : (*bias)[row]);
+            }
+        }
+        return expected;
+    }
+
     template <typename Scale>
     void expectBlockedNonE8MXScale(rocisa::DataType scaleType)
     {
@@ -116,7 +173,7 @@ namespace
 
 #ifndef _WIN32
 
-TEST(ReferenceMXFastPath, SupportsMixedInputTypesWithMXFP4)
+TEST(ReferenceMXGemm, SupportsMixedInputTypesWithMXFP4)
 {
     const size_t M       = 1;
     const size_t N       = 1;
@@ -144,13 +201,13 @@ TEST(ReferenceMXFastPath, SupportsMixedInputTypesWithMXFP4)
 
 #ifdef TENSILE_USE_FP8_BF8
 
-TEST(ReferenceMXFastPath, SupportsNonE8ScaleStorage)
+TEST(ReferenceMXGemm, SupportsNonE8ScaleStorage)
 {
     expectBlockedNonE8MXScale<E5M3>(rocisa::DataType::E5M3);
     expectBlockedNonE8MXScale<Float8>(rocisa::DataType::Float8);
 }
 
-TEST(ReferenceMXFastPath, TreatsE8RawZeroAsZero)
+TEST(ReferenceMXGemm, TreatsE8RawZeroAsZero)
 {
     constexpr size_t K       = 32;
     constexpr int    mxBlock = 32;
@@ -171,7 +228,7 @@ TEST(ReferenceMXFastPath, TreatsE8RawZeroAsZero)
     EXPECT_EQ(d[0], 0.0f);
 }
 
-TEST(ReferenceMXFastPath, MatchesPointwiseForScaledFP8Gemm)
+TEST(ReferenceMXGemm, ComputesScaledFP8Gemm)
 {
     const size_t M       = 64;
     const size_t N       = 64;
@@ -184,7 +241,6 @@ TEST(ReferenceMXFastPath, MatchesPointwiseForScaledFP8Gemm)
     std::vector<Float8> a(M * K);
     std::vector<Float8> b(K * N);
     std::vector<float>  c(M * N, 0.0f);
-    std::vector<float>  dPointwise(M * N, 0.0f);
     std::vector<float>  dBlocked(M * N, 0.0f);
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
@@ -202,27 +258,23 @@ TEST(ReferenceMXFastPath, MatchesPointwiseForScaledFP8Gemm)
     EXPECT_TRUE(std::ranges::any_of(mxsa, [](E8 value) { return float(value) != 0.0f; }));
     EXPECT_TRUE(std::ranges::any_of(mxsb, [](E8 value) { return float(value) != 0.0f; }));
 
-    ContractionInputs inputsPointwise(a.data(), b.data(), c.data(), dPointwise.data(), 1.0f, 0.0f);
-    inputsPointwise.mxsa = mxsa.data();
-    inputsPointwise.mxsb = mxsb.data();
-
     ContractionInputs inputsBlocked(a.data(), b.data(), c.data(), dBlocked.data(), 1.0f, 0.0f);
     inputsBlocked.mxsa = mxsa.data();
     inputsBlocked.mxsb = mxsb.data();
 
-    executeReferenceGemm(problem, inputsPointwise, /*elementsToValidate=*/-1);
     executeReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, requireBlockedExecution);
 
+    const auto expected   = expectedMXGemm(problem, a, b, c, mxsa, mxsb, 1.0f, 0.0f);
     const auto comparison = roc::host_numerics::compare(
         roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
-        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(dPointwise)),
+        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(expected)),
         roc::host_numerics::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
         << " max_absolute_difference=" << comparison.maxAbsoluteDifference;
 }
 
-TEST(ReferenceMXFastPath, MatchesPointwiseWithBetaAndBias)
+TEST(ReferenceMXGemm, ComputesScaledFP8GemmWithBetaAndBias)
 {
     const size_t M       = 48;
     const size_t N       = 32;
@@ -237,7 +289,6 @@ TEST(ReferenceMXFastPath, MatchesPointwiseWithBetaAndBias)
     std::vector<Float8> a(M * K);
     std::vector<Float8> b(K * N);
     std::vector<float>  c(M * N);
-    std::vector<float>  dPointwise(M * N, 0.0f);
     std::vector<float>  dBlocked(M * N, 0.0f);
     std::vector<float>  bias(M);
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
@@ -262,22 +313,17 @@ TEST(ReferenceMXFastPath, MatchesPointwiseWithBetaAndBias)
     EXPECT_EQ(c.front(), 0.25f);
     EXPECT_EQ(bias.front(), 0.5f);
 
-    ContractionInputs inputsPointwise(a.data(), b.data(), c.data(), dPointwise.data(), 1.0f, 0.5f);
-    inputsPointwise.mxsa = mxsa.data();
-    inputsPointwise.mxsb = mxsb.data();
-    inputsPointwise.bias = bias.data();
-
     ContractionInputs inputsBlocked(a.data(), b.data(), c.data(), dBlocked.data(), 1.0f, 0.5f);
     inputsBlocked.mxsa = mxsa.data();
     inputsBlocked.mxsb = mxsb.data();
     inputsBlocked.bias = bias.data();
 
-    executeReferenceGemm(problem, inputsPointwise, /*elementsToValidate=*/-1);
     executeReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, requireBlockedExecution);
 
+    const auto expected   = expectedMXGemm(problem, a, b, c, mxsa, mxsb, 1.0f, 0.5f, &bias);
     const auto comparison = roc::host_numerics::compare(
         roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
-        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(dPointwise)),
+        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(expected)),
         roc::host_numerics::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
@@ -286,7 +332,7 @@ TEST(ReferenceMXFastPath, MatchesPointwiseWithBetaAndBias)
 
 #else
 
-TEST(ReferenceMXFastPath, DisabledWithoutFP8Support)
+TEST(ReferenceMXGemm, DisabledWithoutFP8Support)
 {
     GTEST_SKIP() << "TENSILE_USE_FP8_BF8 not enabled";
 }

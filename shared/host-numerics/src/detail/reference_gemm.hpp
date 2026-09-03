@@ -271,6 +271,18 @@ inline void validateRuntimeGemm(const GemmInvocation& problem) {
 }
 
 template <typename Accumulator>
+RuntimeQuantizer<Accumulator> gemmAccumulatorQuantizer(const GemmSpecification& problem) {
+    const bool typeRoundsAfterEachStep = problem.accumulatorType == ScalarType::Float16 ||
+                                         problem.accumulatorType == ScalarType::BFloat16;
+    const bool roundAfterEachStep =
+        problem.accumulationRounding == AccumulationRounding::AfterProductAndSum ||
+        (problem.accumulationRounding == AccumulationRounding::TypeDefault &&
+         typeRoundsAfterEachStep);
+    return RuntimeQuantizer<Accumulator>(
+        roundAfterEachStep ? std::optional<ScalarType>(problem.accumulatorType) : std::nullopt);
+}
+
+template <typename Accumulator>
 class RuntimeGemmFinalizer {
    public:
     explicit RuntimeGemmFinalizer(
@@ -353,181 +365,5 @@ class RuntimeGemmFinalizer {
     bool m_betaIsZero;
 };
 
-template <typename Accumulator>
-GemmExecutionInfo runPointwiseGemmTyped(const GemmInvocation& problem,
-                                        Tensor* selectedOutput = nullptr) {
-    const RuntimeMatrixReader<Accumulator> a(problem.a);
-    const RuntimeMatrixReader<Accumulator> b(problem.b);
-    const RuntimeQuantizer<Accumulator> quantizeA(problem.computeTypeA);
-    const RuntimeQuantizer<Accumulator> quantizeB(problem.computeTypeB);
-    const bool typeRoundsAfterEachStep = problem.accumulatorType == ScalarType::Float16 ||
-                                         problem.accumulatorType == ScalarType::BFloat16;
-    const bool roundAfterEachStep =
-        problem.accumulationRounding == AccumulationRounding::AfterProductAndSum ||
-        (problem.accumulationRounding == AccumulationRounding::TypeDefault &&
-         typeRoundsAfterEachStep);
-    const RuntimeQuantizer<Accumulator> quantizeAccumulator(
-        roundAfterEachStep ? std::optional<ScalarType>(problem.accumulatorType) : std::nullopt);
-    const RuntimeGemmFinalizer<Accumulator> finalizer(problem, quantizeAccumulator);
-    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d, problem.outputConversion);
-    std::optional<RuntimeMatrixOutputWriter<Accumulator>> selectedOutputWriter;
-    if (selectedOutput != nullptr)
-        selectedOutputWriter.emplace(*selectedOutput, problem.outputConversion);
-    const RuntimeMathFunction<Accumulator> operandMath =
-        runtimeMathFunction<Accumulator>(problem.mathMode);
-
-    std::vector<RuntimeMatrixReader<Accumulator>> preScalesA;
-    std::vector<RuntimeMatrixReader<Accumulator>> preScalesB;
-    std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
-    std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
-    preScalesA.reserve(problem.preQuantizationScalesA.size());
-    for (const Tensor& scale : problem.preQuantizationScalesA)
-        preScalesA.emplace_back(scale.broadcastTo(problem.a.shape()));
-    preScalesB.reserve(problem.preQuantizationScalesB.size());
-    for (const Tensor& scale : problem.preQuantizationScalesB)
-        preScalesB.emplace_back(scale.broadcastTo(problem.b.shape()));
-    if (problem.blockScaleA) blockScaleA.emplace(*problem.blockScaleA);
-    if (problem.blockScaleB) blockScaleB.emplace(*problem.blockScaleB);
-
-    const size_t m = problem.a.shape()[0];
-    const size_t k = problem.a.shape()[1];
-    const size_t n = problem.b.shape()[1];
-
-    auto computeOutput = [&](size_t row, size_t column, size_t selectedIndex) {
-        Accumulator sum = Accumulator(0);
-
-        if (!finalizer.skipsProduct() && (blockScaleA || blockScaleB)) {
-            size_t blockBase = 0;
-            while (blockBase < k) {
-                const size_t remainingA = blockScaleA
-                                              ? problem.blockSizeA - blockBase % problem.blockSizeA
-                                              : k - blockBase;
-                const size_t remainingB = blockScaleB
-                                              ? problem.blockSizeB - blockBase % problem.blockSizeB
-                                              : k - blockBase;
-                const size_t blockLength = std::min({k - blockBase, remainingA, remainingB});
-                const size_t blockEnd = blockBase + blockLength;
-                Accumulator blockSum = Accumulator(0);
-                for (size_t reduction = blockBase; reduction < blockEnd; ++reduction) {
-                    Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.conjugateA);
-                    Accumulator bValue =
-                        conjugateIfNeeded(b(reduction, column), problem.conjugateB);
-                    for (const auto& scale : preScalesA)
-                        aValue = finalizer.multiply(aValue, scale(row, reduction));
-                    for (const auto& scale : preScalesB)
-                        bValue = finalizer.multiply(bValue, scale(reduction, column));
-                    aValue = operandMath(quantizeA(aValue));
-                    bValue = operandMath(quantizeB(bValue));
-                    blockSum = finalizer.add(blockSum, finalizer.multiply(aValue, bValue));
-                }
-
-                Accumulator scale = Accumulator(1);
-                if (blockScaleA)
-                    scale = finalizer.multiply(scale,
-                                               (*blockScaleA)(row, blockBase / problem.blockSizeA));
-                if (blockScaleB)
-                    scale = finalizer.multiply(
-                        scale, (*blockScaleB)(column, blockBase / problem.blockSizeB));
-                sum = finalizer.add(sum, finalizer.multiply(blockSum, scale));
-                blockBase = blockEnd;
-            }
-        } else if (!finalizer.skipsProduct()) {
-            for (size_t reduction = 0; reduction < k; ++reduction) {
-                Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.conjugateA);
-                Accumulator bValue = conjugateIfNeeded(b(reduction, column), problem.conjugateB);
-                for (const auto& scale : preScalesA)
-                    aValue = finalizer.multiply(aValue, scale(row, reduction));
-                for (const auto& scale : preScalesB)
-                    bValue = finalizer.multiply(bValue, scale(reduction, column));
-                aValue = operandMath(quantizeA(aValue));
-                bValue = operandMath(quantizeB(bValue));
-                sum = finalizer.add(sum, finalizer.multiply(aValue, bValue));
-            }
-        }
-
-        const Accumulator value = finalizer.finalize(row, column, sum);
-        if (selectedOutputWriter)
-            selectedOutputWriter->store(0, selectedIndex, value);
-        else
-            output.store(row, column, value);
-    };
-
-    const size_t logicalElements = problem.d.shape().elementCount();
-    size_t outputElementsWritten = 0;
-    const bool parallelOutput = canParallelizeGemmOutput(problem);
-    const size_t reductionWork = finalizer.skipsProduct() ? 0 : k;
-    if (problem.outputSelection.selectsAll()) {
-        outputElementsWritten = logicalElements;
-        forEachParallelIndex(logicalElements, saturatedProduct(logicalElements, reductionWork),
-                             parallelOutput, 500'000, [&](size_t logicalIndex) {
-                                 computeOutput(logicalIndex / n, logicalIndex % n, logicalIndex);
-                             });
-    } else {
-        const auto selected = problem.outputSelection.indices(logicalElements);
-        const auto& outputShape = problem.d.shape();
-        outputElementsWritten = selected.size();
-        forEachParallelIndex(selected.size(), saturatedProduct(selected.size(), reductionWork),
-                             parallelOutput, 500'000, [&](size_t selectionIndex) {
-                                 const size_t logicalIndex = selected[selectionIndex];
-                                 const auto coordinates = outputShape.coordinates(
-                                     logicalIndex, problem.outputSelection.indexOrder());
-                                 computeOutput(coordinates[0], coordinates[1], selectionIndex);
-                             });
-    }
-
-    return {
-        .backendUsed = GemmBackend::Pointwise,
-        .fallbackReason = std::nullopt,
-        .outputElementsWritten = outputElementsWritten,
-        .outputElementsCovered = outputElementsWritten,
-    };
-}
-
-inline GemmExecutionInfo runPointwiseGemm(const GemmInvocation& problem) {
-    switch (problem.accumulatorType) {
-        case ScalarType::Float16:
-        case ScalarType::BFloat16:
-        case ScalarType::Float32:
-            return runPointwiseGemmTyped<float>(problem);
-        case ScalarType::Float64:
-            return runPointwiseGemmTyped<double>(problem);
-        case ScalarType::Int32:
-            return runPointwiseGemmTyped<int32_t>(problem);
-        case ScalarType::ComplexFloat32:
-            return runPointwiseGemmTyped<std::complex<float>>(problem);
-        case ScalarType::ComplexFloat64:
-            return runPointwiseGemmTyped<std::complex<double>>(problem);
-        default:
-            throw std::invalid_argument("Unsupported runtime reference GEMM accumulator type.");
-    }
-}
-
-inline GemmExecutionInfo runPointwiseGemmToSelectedOutput(const GemmInvocation& problem,
-                                                          Tensor& selectedOutput) {
-    if (problem.outputSelection.selectsAll())
-        throw std::invalid_argument("Streaming pointwise GEMM requires a partial selection.");
-    const size_t selectedCount =
-        problem.outputSelection.selectedCount(problem.d.shape().elementCount());
-    if (selectedOutput.type() != problem.outputType ||
-        selectedOutput.shape() != Shape{1, selectedCount})
-        throw std::invalid_argument("Streaming pointwise GEMM output shape or type mismatch.");
-
-    switch (problem.accumulatorType) {
-        case ScalarType::Float16:
-        case ScalarType::BFloat16:
-        case ScalarType::Float32:
-            return runPointwiseGemmTyped<float>(problem, &selectedOutput);
-        case ScalarType::Float64:
-            return runPointwiseGemmTyped<double>(problem, &selectedOutput);
-        case ScalarType::Int32:
-            return runPointwiseGemmTyped<int32_t>(problem, &selectedOutput);
-        case ScalarType::ComplexFloat32:
-            return runPointwiseGemmTyped<std::complex<float>>(problem, &selectedOutput);
-        case ScalarType::ComplexFloat64:
-            return runPointwiseGemmTyped<std::complex<double>>(problem, &selectedOutput);
-        default:
-            throw std::invalid_argument("Unsupported runtime reference GEMM accumulator type.");
-    }
-}
 }  // namespace detail
 }  // namespace roc::host_numerics

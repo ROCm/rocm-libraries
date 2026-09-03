@@ -31,7 +31,7 @@ void testTransformingBlockScaleFallsBack(roc::host_numerics::ScalarType accumula
     const Layout layoutB(Shape{4, 2}, {1, 4});
     const Layout layoutD(Shape{2, 2}, {1, 2});
     const Layout scaleLayout = Layout::contiguousLastDimensionFastest(Shape{2, 2});
-    Tensor pointwiseD(nativeScalarType<T>, layoutD);
+    Tensor blockedD(nativeScalarType<T>, layoutD);
     Tensor transformingD(nativeScalarType<T>, layoutD);
 
     auto makeProblem = [&](Tensor output) {
@@ -48,8 +48,8 @@ void testTransformingBlockScaleFallsBack(roc::host_numerics::ScalarType accumula
         return problem;
     };
 
-    GemmTestCase pointwiseProblem = makeProblem(pointwiseD);
-    referenceGemm(pointwiseProblem);
+    GemmTestCase blockedProblem = makeProblem(blockedD);
+    referenceGemm(blockedProblem);
 
     GemmTestCase transformingProblem = makeProblem(transformingD);
     const GemmSupportInfo support =
@@ -59,16 +59,15 @@ void testTransformingBlockScaleFallsBack(roc::host_numerics::ScalarType accumula
                     "Transforming BLAS backend cannot preserve block-scale reduction boundaries.",
             "Transforming BLAS did not reject block scaling with a precise reason.");
     const GemmTestRunInfo runInfo = referenceGemmWithBlasBackend(transformingProblem);
-    require(runInfo.backendUsed == GemmBackend::Pointwise && runInfo.fallbackReason.has_value(),
-            "Transforming BLAS block scaling did not fall back to Pointwise.");
+    require(runInfo.backendUsed == GemmBackend::Blocked && runInfo.fallbackReason.has_value(),
+            "Transforming BLAS block scaling did not fall back to Blocked.");
 
     const std::array<T, 4> expected{20, 80, 80, 320};
     const Tensor expectedTensor =
         Tensor::copyNativeStorage<T>(layoutD, std::span<const T>(expected));
-    require(compare(pointwiseD, expectedTensor).passed(),
-            "Pointwise block-scale reference mismatch.");
-    require(compare(transformingD, pointwiseD).passed(),
-            "Transforming BLAS block-scale fallback differs from pointwise reference.");
+    require(compare(blockedD, expectedTensor).passed(), "Blocked block-scale reference mismatch.");
+    require(compare(transformingD, blockedD).passed(),
+            "Transforming BLAS block-scale fallback differs from the built-in reference.");
 }
 
 void testPartialOutputSelection() {
@@ -103,13 +102,13 @@ void testPartialOutputSelection() {
         "Rejected BLAS execution modified output.");
 
     const GemmTestRunInfo fallback = referenceGemmWithBlasBackend(problem);
-    require(fallback.backendUsed == GemmBackend::Pointwise &&
+    require(fallback.backendUsed == GemmBackend::Blocked &&
                 fallback.fallbackReason == support.reason && fallback.outputElementsWritten == 2 &&
-                fallback.outputElementsCovered == 2,
-            "Partial-output BLAS request did not report pointwise fallback.");
+                fallback.outputElementsCovered == 4,
+            "Partial-output BLAS request did not report Blocked fallback.");
     require(d.loadAs<float>({0, 0}) == 58 && d.loadAs<float>({1, 0}) == -99 &&
                 d.loadAs<float>({0, 1}) == -99 && d.loadAs<float>({1, 1}) == 154,
-            "Pointwise BLAS fallback did not preserve unselected outputs.");
+            "Blocked BLAS fallback did not preserve unselected outputs.");
 }
 
 void testTransformingAutomaticCostPolicy() {
@@ -218,7 +217,7 @@ int main() {
     d.copyLogicalElementsFrom(ones);
     problem.activation = Activation::Relu;
     const GemmTestRunInfo fallback = referenceGemmWithBlasBackend(problem);
-    require(fallback.backendUsed == GemmBackend::Pointwise && fallback.fallbackReason.has_value() &&
+    require(fallback.backendUsed == GemmBackend::Blocked && fallback.fallbackReason.has_value() &&
                 d.loadAs<float>({0, 0}) == 119 && d.loadAs<float>({1, 0}) == 281 &&
                 d.loadAs<float>({0, 1}) == 131 && d.loadAs<float>({1, 1}) == 311,
             "Automatic runtime backend fallback mismatch.");
@@ -285,15 +284,15 @@ int main() {
             "Transforming BLAS scalar A/B scale result mismatch.");
     const float transformedBlasResult = transformedD.loadAs<float>({0, 0});
     transformedD.storeFrom({0, 0}, 0.0f);
-    referenceGemm(transformedProblem, GemmBackend::Pointwise);
+    referenceGemm(transformedProblem, GemmBackend::Blocked);
     require(transformedD.loadAs<float>({0, 0}) == transformedBlasResult,
-            "Transforming BLAS scalar A/B scales differ from Pointwise.");
+            "Transforming BLAS scalar A/B scales differ from Blocked.");
     transformedProblem.scaleA.reset();
     transformedProblem.scaleB.reset();
 
     transformedD.storeFrom({0, 0}, 0.0f);
     const GemmTestRunInfo smallAutomatic = referenceGemmWithBlasBackend(transformedProblem);
-    require(smallAutomatic.backendUsed == GemmBackend::Pointwise &&
+    require(smallAutomatic.backendUsed == GemmBackend::Blocked &&
                 transformedD.loadAs<float>({0, 0}) == 25.0f,
             "Automatic GEMM did not avoid staging a tiny transformed request.");
 

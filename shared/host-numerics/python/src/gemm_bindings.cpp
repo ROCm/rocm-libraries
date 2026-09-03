@@ -23,8 +23,7 @@ namespace roc::host_numerics::python_bindings {
 namespace {
 void validatePythonGemmBackend(GemmBackend backend) {
     if (backend == GemmBackend::Blas)
-        throw std::invalid_argument(
-            "Python reference_gemm exposes Pointwise and Blocked backends.");
+        throw std::invalid_argument("Python reference_gemm exposes the Blocked backend.");
     if (backend == GemmBackend::Mixed)
         throw std::invalid_argument("Mixed is a reporting-only GEMM backend value.");
 }

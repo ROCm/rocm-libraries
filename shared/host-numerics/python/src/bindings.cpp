@@ -364,7 +364,6 @@ NB_MODULE(_roc_host_numerics, module) {
 
     nb::enum_<GemmBackend>(module, "GemmBackend")
         .value("Automatic", GemmBackend::Automatic)
-        .value("Pointwise", GemmBackend::Pointwise)
         .value("Blocked", GemmBackend::Blocked);
 
     nb::enum_<OutputConversion>(module, "OutputConversion")
