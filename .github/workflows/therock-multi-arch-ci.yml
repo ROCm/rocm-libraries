@@ -109,13 +109,18 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
+      test_projects: ${{ steps.test-projects.outputs.test_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github/repos-config.json
+          sparse-checkout: |
+            .github/repos-config.json
+            .github/scripts/ci_utils.py
+            .github/scripts/multi_arch_test_projects.py
+            .github/scripts/therock_matrix.py
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
@@ -138,6 +143,12 @@ jobs:
             --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
             --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
+
+      - name: Select multi-arch test projects
+        id: test-projects
+        run: |
+          python3 .github/scripts/multi_arch_test_projects.py \
+            --changed-projects "${{ steps.configure.outputs.changed_projects }}"
 
   setup:
     needs: [ci-env, configure]
@@ -209,7 +220,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
       ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
@@ -235,7 +246,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
       ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
