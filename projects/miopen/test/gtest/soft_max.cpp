@@ -1020,6 +1020,120 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::Values(0, 13),
                                           testing::Values(0, 17)));
 
+// --- Noncontiguous forward, beta != 0, CSR-Vector (NUM_BATCH==1) path -----
+// Regression test for a bug where the beta-blend term read the RAW POINTER `y`
+// instead of the indexed element `y[y_idx]` (CVT_FLOAT2ACCUM(y) instead of
+// CVT_FLOAT2ACCUM(y[y_idx])) in MIOpenSoftmaxNoncontiguous.cpp. Since `y` is a
+// `float* __restrict__`, casting the raw pointer to FLOAT_ACCUM does not
+// type-check, so with this bug present the kernel FAILS TO JIT-COMPILE
+// whenever beta != 0 (any test that hits this code path errors out rather
+// than producing a wrong answer). This only affects the CSR-Vector branch,
+// selected by SoftmaxNoncontiguous when vector_size (the softmax inner size)
+// is >= LOCAL_SIZE (1024, see PerformanceConfigSoftmax::max_local_size), so
+// the inner size below is intentionally >= 1024 (C*H*W == 1024).
+struct GPU_Softmax_NonContiguousBeta_FP32
+    : public testing::TestWithParam<std::tuple<std::tuple<std::vector<size_t>, std::vector<size_t>>,
+                                               miopenSoftmaxAlgorithm_t,
+                                               miopenSoftmaxMode_t>>
+{
+    void RunForward()
+    {
+        auto&& handle                        = get_handle();
+        auto [tensorDimsStrides, algo, mode] = GetParam();
+        auto [dims, strides]                 = tensorDimsStrides;
+
+        auto in_host   = tensor<float>{dims, strides}.generate(tensor_elem_gen_integer{5});
+        size_t n_elems = dims[0] * strides[0];
+
+        const float alpha = 1.0f, beta = 0.5f;
+
+        std::vector<float> xbuf(n_elems, 0.0f);
+        // Pre-seed y with a known, non-trivial value so the beta*y_old blend term
+        // is actually exercised (and must be read from the correct strided index).
+        std::vector<float> ybuf(n_elems, 0.0f);
+
+        auto off = [&](size_t n, size_t c, size_t h, size_t w) {
+            return n * strides[0] + c * strides[1] + h * strides[2] + w * strides[3];
+        };
+        for(size_t n = 0; n < dims[0]; ++n)
+            for(size_t c = 0; c < dims[1]; ++c)
+                for(size_t h = 0; h < dims[2]; ++h)
+                    for(size_t w = 0; w < dims[3]; ++w)
+                    {
+                        xbuf[off(n, c, h, w)] =
+                            static_cast<float>((n * 13 + c * 7 + h * 3 + w + 1) % 5);
+                        ybuf[off(n, c, h, w)] =
+                            static_cast<float>((n * 5 + c * 3 + h * 2 + w + 2) % 4);
+                    }
+
+        auto in_dev  = handle.Write(xbuf);
+        auto out_dev = handle.Write(ybuf);
+
+        miopen::SoftmaxForward(handle,
+                               &alpha,
+                               &beta,
+                               in_host.desc,
+                               in_dev.get(),
+                               in_host.desc,
+                               out_dev.get(),
+                               algo,
+                               mode);
+        auto res = handle.Read<float>(out_dev, ybuf.size());
+
+        // Strided CPU reference, INSTANCE mode only (inner = C*H*W), incl. the
+        // beta * y_old blend so the fix's y_idx indexing is actually checked.
+        double max_err = 0.0;
+        for(size_t n = 0; n < dims[0]; ++n)
+        {
+            float mx = std::numeric_limits<float>::lowest();
+            for(size_t c = 0; c < dims[1]; ++c)
+                for(size_t h = 0; h < dims[2]; ++h)
+                    for(size_t w = 0; w < dims[3]; ++w)
+                        mx = std::max(mx, xbuf[off(n, c, h, w)]);
+            double sum = 0.0;
+            for(size_t c = 0; c < dims[1]; ++c)
+                for(size_t h = 0; h < dims[2]; ++h)
+                    for(size_t w = 0; w < dims[3]; ++w)
+                        sum += std::exp(xbuf[off(n, c, h, w)] - mx);
+            for(size_t c = 0; c < dims[1]; ++c)
+            {
+                for(size_t h = 0; h < dims[2]; ++h)
+                {
+                    for(size_t w = 0; w < dims[3]; ++w)
+                    {
+                        double ref = alpha * (std::exp(xbuf[off(n, c, h, w)] - mx) / sum) +
+                                     beta * ybuf[off(n, c, h, w)];
+                        double err = std::abs(ref - res[off(n, c, h, w)]);
+                        max_err    = std::max(max_err, err);
+                    }
+                }
+            }
+        }
+        EXPECT_LT(max_err, 1e-4) << "Noncontiguous fwd beta!=0 (CSR-Vector, NUM_BATCH==1) gave "
+                                    "wrong result (max abs err "
+                                 << max_err << ").";
+    }
+};
+
+TEST_P(GPU_Softmax_NonContiguousBeta_FP32, ForwardTest) { RunForward(); }
+
+namespace {
+
+std::vector<std::tuple<std::vector<size_t>, std::vector<size_t>>> nonContiguousBetaTestCases()
+{
+    // inner = C*H*W == 1024 (>= LOCAL_SIZE => NUM_BATCH==1, CSR-Vector branch).
+    // N stride padded to 1088 (packed would be 1024) so the tensor is non-packed.
+    return {{{2, 1024, 1, 1}, {1088, 1, 1, 1}}};
+}
+
+} // namespace
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Softmax_NonContiguousBeta_FP32,
+                         testing::Combine(testing::ValuesIn(nonContiguousBetaTestCases()),
+                                          testing::Values(MIOPEN_SOFTMAX_ACCURATE),
+                                          testing::Values(MIOPEN_SOFTMAX_MODE_INSTANCE)));
+
 // --- Extra coverage: non-zero x/y offsets --
 // Findings from the tests below (both DISABLED -- see caveats):
 //   * The Softmax solver DOES honor offsets correctly.

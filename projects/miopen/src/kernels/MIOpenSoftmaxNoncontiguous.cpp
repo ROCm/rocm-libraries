@@ -301,7 +301,7 @@ __forceinline__ __device__ void softmaxfwd(const T* __restrict__ x,
                 value = value * CVT_FP32_2ACCUM(alpha);
                 if constexpr(!ZERO_BETA)
                 {
-                    value += CVT_FLOAT2ACCUM(y) * CVT_FP32_2ACCUM(beta);
+                    value += CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
                 }
                 y[y_idx] = CVT_ACCUM2FLOAT(value);
             });
