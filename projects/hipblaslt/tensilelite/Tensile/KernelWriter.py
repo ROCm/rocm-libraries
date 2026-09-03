@@ -7028,6 +7028,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.archCaps = ti.getArchCaps()
     self.states.regCaps  = ti.getRegCaps()
 
+    isa = kernel["ISA"]
+    isaInfo = getattr(kernel, 'isaInfoMap', {}).get(isa) if hasattr(kernel, 'isaInfoMap') else None
+    if isaInfo:
+      self.states.archCaps["EnableXnackReplay"] = isaInfo.archCaps["EnableXnackReplay"]
+
     # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
     # the build's arch name is the only signal here (empty for v1). Rebuild the
     # dict rather than mutate: some backends return the live cached cap dict.

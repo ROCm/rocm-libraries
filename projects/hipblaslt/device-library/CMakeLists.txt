@@ -26,20 +26,26 @@ if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${hipblaslt_SOURCE_DIR}/library")
 endif()
 
+set(_gfx1250_suffix "")
+
 # gfx1250's two ASIC revisions (v0/v1) need different tuned kernels; the runtime
 # picks library/gfx1250/ (v1) vs library/gfx1250v0/ by asicRevision. The default
 # builds both (v1 here, v0 by the second command below); HIPBLASLT_ASIC_REVISION
-# only prunes which. GPU_TARGETS is untouched (it also feeds extops/transform/
+# only prunes which. TENSILELITE_GPU_TARGETS is untouched (it also feeds extops/transform/
 # validation on the base name); only the bare gfx1250 reaches here.
-set(_main_arches ${GPU_TARGETS})
+set(_main_arches ${TENSILELITE_GPU_TARGETS})
 set(_build_gfx1250v0 OFF)
-if("gfx1250" IN_LIST GPU_TARGETS)
+if("gfx1250" IN_LIST TENSILELITE_GPU_TARGETS OR "gfx1250:xnack-" IN_LIST TENSILELITE_GPU_TARGETS)
     if(HIPBLASLT_ASIC_REVISION STREQUAL "v0")
-        list(TRANSFORM _main_arches REPLACE "^gfx1250$" "gfx1250v0")  # v0 in place of v1
+        list(TRANSFORM _main_arches REPLACE "^gfx1250$" "gfx1250v0")               # v0 in place of v1
+        list(TRANSFORM _main_arches REPLACE "^gfx1250:xnack-$" "gfx1250v0:xnack-") # v0 in place of v1
         message(STATUS "hipBLASLt: gfx1250 ASIC revision v0 only")
     elseif(HIPBLASLT_ASIC_REVISION STREQUAL "v1")
         message(STATUS "hipBLASLt: gfx1250 ASIC revision v1 only")
     else()
+        if("gfx1250:xnack-" IN_LIST TENSILELITE_GPU_TARGETS)
+            set(_gfx1250_suffix ":xnack-")
+        endif()    
         set(_build_gfx1250v0 ON)  # both
         message(STATUS "hipBLASLt: gfx1250 ASIC revisions v0 and v1 (runtime selects by asicRevision)")
     endif()
@@ -81,7 +87,7 @@ if(_build_gfx1250v0)
         TARGET tensilelite-device-libraries-gfx1250v0
         LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
         OUTPUT_DIR "${_gfx1250v0_output_dir}"
-        ARCHES gfx1250v0
+        ARCHES "gfx1250v0${_gfx1250_suffix}"
         CXX_COMPILER "${CMAKE_CXX_COMPILER}"
         OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
         JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"

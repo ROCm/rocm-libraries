@@ -68,10 +68,12 @@ architectureMap = {
     "gfx1200": "gfx1200",
     "gfx1201": "gfx1201",
     "gfx1250": "gfx1250",
+    "gfx1250:xnack-": "gfx1250",
     # gfx1250 v0 silicon; its capability deltas are in ARCH_CAP_OVERRIDES. It
     # shares gfx1250's ISA, so `all` -- built from SUPPORTED_ISA -- cannot name
     # it and it has to be asked for explicitly.
     "gfx1250v0": "gfx1250v0",
+    "gfx1250v0:xnack-": "gfx1250v0",
 }
 
 gfxVariantMap = {
@@ -100,13 +102,33 @@ ARCH_CAP_OVERRIDES = {
             "HasTDMMulticast": False,
         },
     },
+    # xnack- variants: XNACK replay is disabled at the hardware level, so full
+    # replay protection (EnableXnackReplay) is not needed.
+    # RequiresXCntForVolatileVMEM is NOT cleared: the s_waitcnt drain before
+    # atomics is still required for correct memory ordering regardless of the
+    # xnack mode. These overrides are layered on top of any base-name overrides
+    # (e.g. gfx1250v0:xnack- inherits gfx1250v0's stepping deltas first).
+    "gfx1250:xnack-": {
+        "archCaps": {
+            "EnableXnackReplay": False,
+        },
+    },
+    "gfx1250v0:xnack-": {   
+        "archCaps": {
+            "EnableXnackReplay": False,
+        },
+    },
 }
 
 # Compiler target for names that are not themselves valid targets. The compiler
 # does not model steppings, so gfx1250v0 has to reach `-mcpu` / `--offload-arch`
 # as gfx1250; otherwise clang fails with `unsupported HIP gpu architecture`.
+# gfx1250 also does not recognise `xnack` as a valid target feature in clang,
+# so all gfx1250 xnack variants compile to the bare `gfx1250` target.
 ARCH_COMPILER_TARGET = {
     "gfx1250v0": "gfx1250",
+    "gfx1250:xnack-": "gfx1250",
+    "gfx1250v0:xnack-": "gfx1250",
 }
 
 SUPPORTED_ISA = [
@@ -246,8 +268,16 @@ def expandAllArchitectures(archs: List[str]) -> List[str]:
 
 def baseArchName(spec: str) -> str:
     """The bare architecture name in a spec, without predicates or qualifiers."""
+    if spec == None or spec.strip() == "":
+        return ""
     return spec.split("[")[0].split(":")[0].strip()
 
+def suffixArchName(spec: str) -> str:
+    """The suffix in a spec, without predicates or qualifiers."""
+    if spec == None or spec.strip() == "":
+        return ""    
+    subspec = spec.split("[")[0].split(":")
+    return subspec[1].strip() if len(subspec) > 1 else ""
 
 def gfxToIsa(name: str) -> Optional[IsaVersion]:
     """Extracts the ISA version from a given gfx architecture name.

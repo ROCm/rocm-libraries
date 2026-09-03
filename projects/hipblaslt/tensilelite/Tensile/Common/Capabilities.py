@@ -59,11 +59,16 @@ def applyArchCapOverrides(isaInfoMap: Dict[IsaVersion, IsaInfo], archNames: List
     """
     _rejectConflictingArchNames(archNames)
     for name in archNames:
-        # Keyed on the bare name: --gpu-targets forwards a requested spec verbatim,
-        # predicates and all, and a lookup that missed gfx1250v0[cu=64] would build
-        # v0 with the shipping stepping's capabilities without saying so.
-        overrides = ARCH_CAP_OVERRIDES.get(baseArchName(name))
-        if not overrides:
+        # Two override layers are merged in order:
+        #   1. Base-name overrides (e.g. gfx1250v0 stepping deltas, keyed on the
+        #      bare name so gfx1250v0 still picks up the right entry).
+        #   2. Full-name overrides (e.g. gfx1250:xnack- disabling EnableXnackReplay,
+        #      keyed on the verbatim spec so the xnack suffix is visible).
+        # Layer 2 wins on any key present in both: the xnack mode is a stronger
+        # constraint than the stepping default.
+        base_overrides = ARCH_CAP_OVERRIDES.get(baseArchName(name), {})
+        full_overrides = ARCH_CAP_OVERRIDES.get(name, {})
+        if not base_overrides and not full_overrides:
             continue
         isa = gfxToIsa(name)
         info = isaInfoMap.get(isa)
@@ -76,8 +81,10 @@ def applyArchCapOverrides(isaInfoMap: Dict[IsaVersion, IsaInfo], archNames: List
                 f"{tuple(isa) if isa else isa} is absent from the capability map; "
                 "the requested architectures and the probed ISAs disagree."
             )
-        info.asmCaps.update(overrides.get("asmCaps", {}))
-        info.archCaps.update(overrides.get("archCaps", {}))
+        info.asmCaps.update(base_overrides.get("asmCaps", {}))
+        info.asmCaps.update(full_overrides.get("asmCaps", {}))
+        info.archCaps.update(base_overrides.get("archCaps", {}))
+        info.archCaps.update(full_overrides.get("archCaps", {}))
 
 
 def _rejectConflictingArchNames(archNames: List[str]) -> None:

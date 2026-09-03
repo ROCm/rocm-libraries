@@ -180,8 +180,12 @@ def test_every_architecture_resolves_to_a_supported_compiler_target():
         assert base in SUPPORTED_GFX, f"{name} has no compiler target clang accepts"
 
 
-def test_only_v0_needs_a_compiler_target_alias():
-    assert set(ARCH_COMPILER_TARGET) == {GFX1250V0}
+def test_compiler_target_aliases_cover_v0_and_xnack_variants():
+    assert set(ARCH_COMPILER_TARGET) == {
+        GFX1250V0,
+        "gfx1250:xnack-",
+        "gfx1250v0:xnack-",
+    }
 
 
 # =========================================================================== #
@@ -209,8 +213,12 @@ def test_v1_leaves_both_capabilities_at_their_default():
     assert CAP_FP4_32X16 not in iim[ISA_GFX1250].asmCaps
 
 
-def test_overrides_declared_only_for_v0():
-    assert set(ARCH_CAP_OVERRIDES) == {GFX1250V0}
+def test_overrides_declared_for_v0_and_xnack_variants():
+    assert set(ARCH_CAP_OVERRIDES) == {
+        GFX1250V0,
+        "gfx1250:xnack-",
+        "gfx1250v0:xnack-",
+    }
 
 
 def test_unknown_arch_name_is_ignored_by_the_override_step():
