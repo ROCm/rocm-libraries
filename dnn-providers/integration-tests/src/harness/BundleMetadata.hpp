@@ -30,6 +30,23 @@ enum class EnforcementLevel
     FULL ///< engine must additionally execute and numeric-verify (default)
 };
 
+/// The on-disk spelling of an enforcement level — the same token
+/// parseBundleMetadata() accepts, so a value written out reads back in.
+inline const char* toString(EnforcementLevel level)
+{
+    switch(level)
+    {
+    case EnforcementLevel::APPLICABILITY:
+        return "applicability";
+    case EnforcementLevel::BUILDABLE:
+        return "buildable";
+    case EnforcementLevel::FULL:
+        return "full";
+    default:
+        return "<invalid-enforcement-level>";
+    }
+}
+
 /// Metadata read from a {Name}.meta.json companion file alongside a golden
 /// reference bundle ({Name}.json + {Name}.tensor{uid}.bin).
 ///

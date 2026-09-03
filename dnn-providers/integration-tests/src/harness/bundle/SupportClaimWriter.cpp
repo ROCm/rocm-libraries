@@ -168,6 +168,15 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
     std::map<std::filesystem::path, SidecarTarget> targetsBySidecarPath;
     for(const auto& observation : observations)
     {
+        // An unresolved query says nothing about the engine, and everything
+        // below treats "not supported" as an instruction to erase. Letting one
+        // through would turn a driver fault into a deleted claim. Filtered here
+        // rather than at the erase site so an all-UNKNOWN bundle does not even
+        // open its sidecar.
+        if(!observation.isResolved())
+        {
+            continue;
+        }
         auto& target = targetsBySidecarPath[observation.claimLocator.sidecarPath];
         target.isSweep = observation.claimLocator.isSweep();
         target.observations.push_back(observation);
@@ -205,7 +214,7 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
             for(const auto& obs : fileObservations)
             {
                 const auto& caseId = obs.claimLocator.caseId;
-                if(obs.engineIsSupported)
+                if(obs.engineIsSupported())
                 {
                     flat[obs.engineName][caseId][obs.arch].insert(obs.platform);
                 }
@@ -286,7 +295,7 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
             for(const auto& obs : fileObservations)
             {
                 overlaySingleGraphCell(
-                    existing, obs.engineName, obs.arch, obs.platform, obs.engineIsSupported);
+                    existing, obs.engineName, obs.arch, obs.platform, obs.engineIsSupported());
             }
 
             if(!fileExisted && existing.claims.empty())

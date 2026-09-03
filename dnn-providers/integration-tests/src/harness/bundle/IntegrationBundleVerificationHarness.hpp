@@ -174,6 +174,18 @@ public:
         return _inputFillRecipes;
     }
 
+    // Records one observation per loaded engine into the process-wide
+    // SupportObservationLog, off the session's ranked engine list. Runs nothing
+    // and issues no verdict. An unresolvable query records UNKNOWN rather than
+    // nothing, so "we asked and it broke" stays distinguishable from "nobody
+    // asked".
+    void recordSupportObservations(const GraphSession& session);
+
+    // The same, with everything it can throw swallowed. Used on the harvest
+    // path, where observing is a side effect of a test that must keep its own
+    // pass/fail.
+    void recordSupportObservationsQuietly(const GraphSession& session);
+
 private:
     // The one place a graph is built and the ranked list is asked for.
     GraphSession openGraph();

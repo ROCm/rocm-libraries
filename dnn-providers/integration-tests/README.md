@@ -322,6 +322,70 @@ engine may reject it, or nobody has written the claim yet. The legend at the
 top of the generated document spells out the rest, including the `[multi_batch]`
 / `[grouped]` / `[stride]` / `[dilation]` / `[padding]` variant tags.
 
+### Populating support claims
+
+There are two workflows, one manual and one CI-assisted. Both end with a
+human reviewing a diff before anything is committed.
+
+**Bootstrap (new GPU, new op, or empty tree)** — run the test binary on the
+target machine with `--write-support-claims`. This queries every loaded engine
+for every registered bundle and writes `.support.json` sidecars in place:
+
+```bash
+./hipdnn_integration_tests \
+    --test-article path/to/article.so \
+    --write-support-claims
+# Review the diff, commit.
+```
+
+This is a single-machine, single-run tool. It sees one GPU on one OS, so the
+sidecars it writes reflect that one target. It is idempotent: re-running on the
+same machine with no engine changes produces zero git diff.
+
+**Ongoing (CI keeps claims current)** — nightly or per-PR runs pass
+`--emit-support-observations`, which emits a snapshot of every
+`(bundle, engine, verdict)` observation without touching any files:
+
+```bash
+# CI run (one shard, one GPU):
+./hipdnn_integration_tests \
+    --test-article path/to/article.so \
+    --allow-bundles \
+    --emit-support-observations \
+    --support-observations-dir /tmp/snapshots
+
+# Offline: union snapshots from every shard/GPU/OS and diff against the tree:
+python3 scripts/harvest_support_observations.py \
+    --observations /tmp/snapshots/*.snapshot.json \
+    --bundles-dir integration-test-bundles \
+    --output-dir /tmp/proposed
+
+# Review /tmp/proposed/, open a PR.
+```
+
+The harvest tool is **monotonic**: it only proposes additions (new targets, new
+engines). It never auto-removes or auto-downgrades a committed `supported`
+claim. When a run reports `declined` for a cell the tree already claims as
+`supported`, that is flagged as a conflict for a human to investigate — not
+silently applied.
+
+Without `--support-observations-dir`, snapshots are emitted to stdout only:
+
+```bash
+./hipdnn_integration_tests --allow-bundles --emit-support-observations
+# Snapshots appear as ##support-snapshot:{json} lines in stdout.
+# CI greps them into files for the harvest tool.
+```
+
+**When to use which:**
+
+| Scenario | Workflow |
+|----------|----------|
+| Brand-new GPU (e.g. gfx955) added to the lab | Bootstrap: `--write-support-claims` on that GPU, commit the sidecars |
+| New op or bundle added to the tree | Bootstrap: `--write-support-claims` on each target GPU |
+| Routine CI: engine gained support for a graph | Harvest: CI emits observations, harvest tool proposes the addition |
+| Engine dropped support for a graph | Human: harvest tool flags the conflict, engineer investigates |
+
 ## Test Tiers
 
 Tiers bound how long a run takes. They apply to both the C++ reference-executor

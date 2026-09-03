@@ -6,9 +6,14 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -20,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "common/PlatformUtils.hpp"
 #include "common/Utilities.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
@@ -29,6 +35,7 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
+#include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
@@ -160,7 +167,16 @@ int main(int argc, char** argv) noexcept
                   "Requires --test-article (mode B: all engines, or mode C with "
                   "--test-engine). Implies --allow-bundles, since bundles are what "
                   "carry the claims. Idempotent: no support change = zero git diff.");
-
+        parser.add_argument("--emit-support-observations")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Emit ##support-snapshot:{json} lines to stdout after the run. "
+                  "Pure side effect: never changes the verdict. "
+                  "Implies --allow-bundles.");
+        parser.add_argument("--support-observations-dir")
+            .default_value(std::string{})
+            .help("Write snapshot JSON files to this directory (one per target). "
+                  "Implies --emit-support-observations.");
         std::vector<std::string> remainingArgs;
         try
         {
@@ -314,6 +330,24 @@ int main(int argc, char** argv) noexcept
         opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
         opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
 
+        opts.emitSupportObservations = parser.get<bool>("--emit-support-observations");
+        const auto obsDir = parser.get<std::string>("--support-observations-dir");
+        if(!obsDir.empty())
+        {
+            opts.emitSupportObservations = true;
+            opts.supportObservationsDir = obsDir;
+        }
+
+        // The write path drains the log into sidecars and diverts every bundle
+        // away from actually running. Harvesting from that run would record
+        // observations of a run that verified nothing.
+        if(opts.writeSupportClaims && opts.emitSupportObservations)
+        {
+            std::cerr << "--write-support-claims and --emit-support-observations are "
+                      << "mutually exclusive.\n";
+            return 1;
+        }
+
         if(opts.writeSupportClaims && !opts.articlePath.has_value())
         {
             std::cerr << "--write-support-claims requires --test-article (mode B or C).\n"
@@ -460,6 +494,76 @@ int main(int argc, char** argv) noexcept
             if(!writeSummary.errors.empty())
             {
                 exitCode = 1;
+            }
+        }
+
+        if(hipdnn_integration_tests::TestConfig::get().emitSupportObservations())
+        {
+            auto snapshots
+                = hipdnn_integration_tests::bundle::SupportObservationLog::get().toSnapshotJsons(
+                    hipdnn_integration_tests::bundle::resolveDataDir());
+
+            if(!snapshots.empty())
+            {
+                auto envOr = [](const char* name) -> std::string {
+                    return hipdnn_data_sdk::utilities::getEnv(name, "");
+                };
+
+                const auto now
+                    = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                std::tm utc{};
+#ifdef _WIN32
+                gmtime_s(&utc, &now);
+#else
+                gmtime_r(&now, &utc);
+#endif
+                std::array<char, 32> tsBuf{};
+                std::strftime(tsBuf.data(), tsBuf.size(), "%Y-%m-%dT%H:%M:%SZ", &utc);
+
+                const nlohmann::json provenance = {{"rocm_version", envOr("ROCM_VERSION")},
+                                                   {"commit", envOr("CI_COMMIT_SHA")},
+                                                   {"run_id", envOr("CI_RUN_ID")},
+                                                   {"timestamp", std::string(tsBuf.data())}};
+
+                for(auto& snapshot : snapshots)
+                {
+                    snapshot["provenance"] = provenance;
+                    std::cout << "##support-snapshot:" << snapshot.dump() << '\n';
+                }
+
+                if(hipdnn_integration_tests::TestConfig::get().hasSupportObservationsDir())
+                {
+                    const auto& outDir
+                        = hipdnn_integration_tests::TestConfig::get().getSupportObservationsDir();
+                    try
+                    {
+                        std::filesystem::create_directories(outDir);
+                        for(const auto& snapshot : snapshots)
+                        {
+                            const auto arch = snapshot["target"]["arch"].get<std::string>();
+                            const auto platform = snapshot["target"]["platform"].get<std::string>();
+                            std::string filename;
+                            filename.reserve(arch.size() + 1 + platform.size() + 14);
+                            filename += arch;
+                            filename += '_';
+                            filename += platform;
+                            filename += ".snapshot.json";
+                            std::ofstream out(outDir / filename);
+                            if(!out.good())
+                            {
+                                std::cerr << "warning: could not write " << (outDir / filename)
+                                          << "\n";
+                                continue;
+                            }
+                            out << snapshot.dump(2) << "\n";
+                        }
+                    }
+                    catch(const std::exception& e)
+                    {
+                        std::cerr << "warning: snapshot directory write failed: " << e.what()
+                                  << " (observations still emitted to stdout)\n";
+                    }
+                }
             }
         }
 

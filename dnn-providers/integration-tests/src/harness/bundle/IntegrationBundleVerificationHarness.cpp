@@ -14,6 +14,7 @@
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
@@ -213,20 +214,6 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
 // engine table rather than the one engine under test.
 void IntegrationBundleVerificationHarness::observeSupportOnly(const GraphSession& session)
 {
-    if(!session.buildError.empty())
-    {
-        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: from_binary failed for " << _bundlePath << ": "
-                                                                             << session.buildError);
-        return;
-    }
-
-    if(!isResolved(session.engines.status.get_code()))
-    {
-        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: unresolved query for "
-                               << _bundlePath << ": " << session.engines.status.get_message());
-        return;
-    }
-
     auto engines = LoadedEngineTable::get().all();
     if(TestConfig::get().hasEngineName())
     {
@@ -238,15 +225,73 @@ void IntegrationBundleVerificationHarness::observeSupportOnly(const GraphSession
     }
 
     const std::string arch = baseArchToken(_deps.policy.arch);
-    const auto& rankedIds = session.engines.rankedIds;
 
+    const auto recordOne = [&](const LoadedEngine& engine, ObservedSupport support) {
+        SupportObservationLog::get().record({_claimLocator,
+                                             engine.name,
+                                             arch,
+                                             _deps.policy.platform,
+                                             support,
+                                             _bundle->metadata.enforcementLevel});
+    };
+
+    const auto recordAllAs = [&](ObservedSupport support) {
+        for(const auto& engine : engines)
+        {
+            recordOne(engine, support);
+        }
+    };
+
+    // A graph that would not load, or a query that did not resolve, is evidence of
+    // nothing about any engine. UNKNOWN rather than silence, so "we asked and it
+    // broke" stays distinguishable from "nobody asked".
+    if(!session.buildError.empty())
+    {
+        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: from_binary failed for " << _bundlePath << ": "
+                                                                             << session.buildError);
+        recordAllAs(ObservedSupport::UNKNOWN);
+        return;
+    }
+
+    if(!isResolved(session.engines.status.get_code()))
+    {
+        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: unresolved query for "
+                               << _bundlePath << ": " << session.engines.status.get_message());
+        recordAllAs(ObservedSupport::UNKNOWN);
+        return;
+    }
+
+    const auto& rankedIds = session.engines.rankedIds;
     for(const auto& engine : engines)
     {
         const bool engineIsSupported
             = std::find(rankedIds.begin(), rankedIds.end(), engine.id) != rankedIds.end();
 
-        SupportObservationLog::get().record(
-            {_claimLocator, engine.name, arch, _deps.policy.platform, engineIsSupported});
+        recordOne(engine,
+                  engineIsSupported ? ObservedSupport::SUPPORTED : ObservedSupport::DECLINED);
+    }
+}
+
+void IntegrationBundleVerificationHarness::recordSupportObservations(const GraphSession& session)
+{
+    observeSupportOnly(session);
+}
+
+void IntegrationBundleVerificationHarness::recordSupportObservationsQuietly(
+    const GraphSession& session)
+{
+    try
+    {
+        recordSupportObservations(session);
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_WARN("Support observation skipped for " << _claimLocator.diagnosticPath
+                                                                  << ": " << e.what());
+    }
+    catch(...)
+    {
+        HIPDNN_PLUGIN_LOG_WARN("Support observation skipped for " << _claimLocator.diagnosticPath);
     }
 }
 
@@ -272,6 +317,17 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
         return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                            FailureOrigin::ENGINE,
                                            "from_binary failed: " + session.buildError);
+    }
+
+    // Record which engines accept this graph BEFORE verification runs.
+    // Observations are about engine capability (graph acceptance), not numerical
+    // correctness — a graph the engine accepts but whose output mismatches the
+    // reference is still "supported" (RFC 0015 §12.1). The test then runs to
+    // whatever verdict it would have reached anyway; hence no early return, and
+    // the try/catch ensures a failed query never turns a green test red.
+    if(TestConfig::get().emitSupportObservations())
+    {
+        recordSupportObservationsQuietly(session);
     }
 
     if(_bundle->metadata.enforcementLevel != EnforcementLevel::FULL)

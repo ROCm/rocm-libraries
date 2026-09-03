@@ -140,6 +140,11 @@ struct TestConfigOptions
     std::optional<std::filesystem::path> captureDir;
     bool enforceSupportClaims = false;
     bool writeSupportClaims = false;
+    // When true, the harness prints ##support-snapshot: tagged lines to
+    // stdout after the run (RFC 0015 §12.1). When a directory is also given,
+    // snapshot JSON files are written there alongside.
+    bool emitSupportObservations = false;
+    std::optional<std::filesystem::path> supportObservationsDir;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -208,6 +213,8 @@ public:
 
         instance._enforceSupportClaims = opts.enforceSupportClaims;
         instance._writeSupportClaims = opts.writeSupportClaims;
+        instance._emitSupportObservations = opts.emitSupportObservations;
+        instance._supportObservationsDir = std::move(opts.supportObservationsDir);
 
         // Golden bundle configuration — default is ON; env var can override.
         instance._allowBundles = opts.allowBundles;
@@ -226,7 +233,7 @@ public:
         // still exit 0 — a silent no-op that reads as success. This sits after the
         // env override so that neither an omitted --allow-bundles nor a stray
         // HIPDNN_TEST_ALLOW_BUNDLES=0 in the environment can reintroduce it.
-        if(instance._writeSupportClaims)
+        if(instance._writeSupportClaims || instance._emitSupportObservations)
         {
             instance._allowBundles = true;
         }
@@ -443,6 +450,28 @@ public:
         return _captureDir.value();
     }
 
+    bool emitSupportObservations() const
+    {
+        throwIfNotInitialized();
+        return _emitSupportObservations;
+    }
+
+    bool hasSupportObservationsDir() const
+    {
+        throwIfNotInitialized();
+        return _supportObservationsDir.has_value();
+    }
+
+    const std::filesystem::path& getSupportObservationsDir() const
+    {
+        throwIfNotInitialized();
+        if(!_supportObservationsDir.has_value())
+        {
+            throw std::runtime_error("getSupportObservationsDir() called but no path was provided");
+        }
+        return _supportObservationsDir.value();
+    }
+
 private:
     TestConfig() = default;
 
@@ -461,6 +490,8 @@ private:
     std::optional<std::filesystem::path> _goldenDataDir;
     std::optional<VerificationMode> _verificationMode;
     std::optional<std::filesystem::path> _captureDir;
+    bool _emitSupportObservations = false;
+    std::optional<std::filesystem::path> _supportObservationsDir;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;

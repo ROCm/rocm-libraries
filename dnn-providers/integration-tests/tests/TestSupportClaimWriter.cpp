@@ -141,7 +141,7 @@ TEST(TestSupportClaimWriter, SingleGraphNetNewEmptyClaimsSkipped)
     const ScopedDirectory dir = makeScopedTestDir("test_writer");
     const auto bundlePath = dir.path() / "Small.json";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", false),
     };
 
@@ -290,7 +290,7 @@ TEST(TestSupportClaimWriter, SweepNetNewEmptyClaimsSkipped)
     const ScopedDirectory dir = makeScopedTestDir("test_writer");
     const auto sweepPath = dir.path() / "sweep.json";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         sweepCaseObservation(sweepPath, "case_a", "MIOPEN_ENGINE", "gfx942", "linux", false),
         sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx942", "linux", false),
     };
