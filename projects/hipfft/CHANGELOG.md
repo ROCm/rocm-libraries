@@ -8,6 +8,7 @@ Documentation for hipFFT is available at
 ### Added
 
 * Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+* `hipfftXtSetWorkArea` API for setting work areas on single-process, multi-device plans.
 
 * Implemented `hipfftXtSetJITCallback` API, to allow for user-defined device functions to be called when loading
   input or storing output of a transform.  These callback functions are specified after a plan is allocated with
@@ -40,6 +41,8 @@ Documentation for hipFFT is available at
 ### Resolved issues
 
 * Fixed a hang when creating a plan with a zero length or zero batch. These now return `HIPFFT_INVALID_SIZE`.
+* `hipfftGetSize*` work area estimates now account for the plan's pre-initialization
+  state (e.g. multi-device configuration) instead of ignoring it.
 
 ## hipFFT 1.0.25 for ROCm 10.0
 
