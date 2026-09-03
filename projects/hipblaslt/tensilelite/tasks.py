@@ -66,9 +66,10 @@ def get_gpu_revision_target(c):
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
         "stinkytofu_prefix": "Install prefix for the stinkytofu build (default: build_tmp/stinkytofu-install).",
         "static": "Build stinkytofu static (BUILD_SHARED_LIBS=OFF) instead of the default shared build.",
+        "rebuild_on_import": "Deprecated compatibility default: rebuild editable rocisa on its first import. Pass --no-rebuild-on-import to disable it.",
     }
 )
-def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, static=False):
+def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, static=False, rebuild_on_import=True):
     """Install rocisa as an editable pip package.
 
     Not required before `invoke build-client` — the client build enables
@@ -82,8 +83,19 @@ def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, static=False):
     Pass --static to build stinkytofu static instead of shared — useful for
     exercising the static-plugin path covered by
     rocisa/test/test_pass_plugin.py::TestHelloWorldPassIntegrationStatic.
+
+    Rebuild-on-import remains enabled by default for compatibility, but is
+    deprecated because an ordinary import should not perform a native build.
+    Pass --no-rebuild-on-import to opt out before the default changes in a
+    future release.
     """
-    _pip_install_rocisa(c, rocisa_dir, stinkytofu_prefix, shared=not static)
+    _pip_install_rocisa(
+        c,
+        rocisa_dir,
+        stinkytofu_prefix,
+        shared=not static,
+        rebuild_on_import=rebuild_on_import,
+    )
 
 
 def _load_stinkytofu_tasks():
@@ -151,7 +163,9 @@ def _build_and_install_stinkytofu(
     c.run(shlex.join(["cmake", "--install", str(build_dir)]))
 
 
-def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, shared=True):
+def _pip_install_rocisa(
+    c, rocisa_dir=None, stinkytofu_prefix=None, shared=True, rebuild_on_import=True
+):
     """Editable-install rocisa via scikit-build-core.
 
     Factored out of the `rocisa` task so `build_client` can reuse it to keep
@@ -165,6 +179,10 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, shared=True)
 
     shared=False builds and links a static stinkytofu instead of the default
     shared library.
+
+    rebuild_on_import=True preserves the deprecated compatibility behavior of
+    rebuilding on a first import. Explicit build-task rebuilds pass false: they
+    have already refreshed the extension and do not need another import build.
     """
     src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else _TASKS_DIR / "rocisa"
     rocm = _detect_rocm()
@@ -187,6 +205,14 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, shared=True)
     if shutil.which("ccache"):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     env = dict(os.environ, CMAKE_ARGS=cmake_args)
+    env["SKBUILD_EDITABLE_REBUILD"] = "true" if rebuild_on_import else "false"
+    if rebuild_on_import:
+        print(
+            "warning: rocisa rebuild-on-import is deprecated; use "
+            "'invoke rocisa --no-rebuild-on-import' to opt out before the "
+            "default changes in a future release.",
+            file=sys.stderr,
+        )
     # Append (don't clobber) the stinkytofu install prefix so find_package
     # resolves it, while preserving the CMAKE_PREFIX_PATH that scikit-build-core
     # injects for nanobind. find_package searches the env var and the cache var.
@@ -225,7 +251,7 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
 
     try:
         print("Rebuilding editable rocisa to pick up any C++ source changes...")
-        _pip_install_rocisa(c, rocisa_dir)
+        _pip_install_rocisa(c, rocisa_dir, rebuild_on_import=False)
     except Exception as e:
         print(
             f"warning: rocisa rebuild failed ({e}); continuing with the client build. "

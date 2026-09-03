@@ -47,9 +47,12 @@ Runs only Python unit tests.
 An opt-in git pre-commit hook runs the unit + characterization tests affected by
 your staged TensileLite changes and blocks the commit on real failures (it falls
 back to the full unit + characterization suite when it cannot narrow the set). It
-runs `uv run pytest`, which builds rocisa (a HIP native extension), so install and
+runs `uv run pytest`, which imports rocisa (a HIP native extension), so install and
 commit from inside a ROCm dev container (HIP at `/opt/rocm`, a Python with dev
-headers). Mount the repo at the same absolute path inside the container as on the
+headers). Editable rocisa currently rebuilds on import for compatibility, but
+that behavior is deprecated; use `invoke rocisa --no-rebuild-on-import` to opt
+out now, and use the explicit `invoke build --rebuild-rocisa` path after native
+changes. Mount the repo at the same absolute path inside the container as on the
 host — git worktrees use an absolute gitdir pointer, so a different mount breaks
 git.
 
