@@ -175,9 +175,17 @@ def main(argv: list[str] | None = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Loading data from %s", input_path)
-    if input_path.suffix == ".json":
+    if input_path.suffix == ".parquet":
+        # What tools/results_import publishes (RFC 0019.13 §8.3). Preferred over the collected
+        # CSV: the dataset carries its own types, so a column that is empty in one shard and
+        # populated in another cannot concatenate to `object` and change what the trainer sees.
+        df = pd.read_parquet(input_path)
+    elif input_path.suffix == ".json":
         df = pd.read_json(input_path)
     else:
+        # A collected CSV, read directly. Everything §8.3 checks is unchecked on this path --
+        # that is what the importer exists for -- so it is the escape hatch for a quick local
+        # run rather than the route a trained model should come by.
         df = pd.read_csv(input_path)
     logger.info("Loaded %d rows", len(df))
 
