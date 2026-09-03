@@ -210,6 +210,7 @@ def _dense_spec(req: OperatorRequest):
         num_persistent=np,
         persist_decode=req.dense_persist_decode.strip().lower(),
         ragged=ragged,
+        sliding_window=int(req.sliding_window),
         waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
     )
 
@@ -246,10 +247,10 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     ``builders/gfx942/attention/prefill/README.md``.
 
     Scope is delegated entirely to ``supports_attention_dense``, which rejects every
-    spec the builder cannot emit (varlen / ragged / sliding-window are later
-    follow-ups; plus block_n, LDS-budget and 32-bit-extent limits). That keeps
-    ``admits`` and ``build`` in agreement, so an out-of-scope request falls through
-    to another candidate instead of being selected and then failing to build.
+    spec the builder cannot emit (varlen / ragged / sinks are later follow-ups;
+    plus block_n, LDS-budget and 32-bit-extent limits). That keeps ``admits`` and
+    ``build`` in agreement, so an out-of-scope request falls through to another
+    candidate instead of being selected and then failing to build.
     """
     spec_id = "gfx942_attention_dense"
     name = "attention_gfx942_dense"
@@ -309,11 +310,11 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         capability=Capability(
             arches=("gfx942",),
             dtypes=("bf16", "fp16"),
-            # Dense: no sliding-window, no sinks. Causal is a mask, not a feature
-            # this path turns down. Head size stays out -- D64/D128 coverage is
-            # ``supports_attention_dense``'s call, and it reads the built spec
+            # Dense: causal + sliding-window; no sinks yet. Causal is a mask, not a
+            # feature this path turns down. Head size stays out -- D64/D128 coverage
+            # is ``supports_attention_dense``'s call, and it reads the built spec
             # (LDS budget, block_n divisibility), which a ShapeRange cannot.
-            supports_features=frozenset({"causal"}),
+            supports_features=frozenset({"causal", "sliding_window"}),
         ),
         _supports=support,
         select_spec=select,

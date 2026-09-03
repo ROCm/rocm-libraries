@@ -72,8 +72,25 @@ _COHORT = [
     ("fp16", 128, 16, 4, False, False),  # fp16 D128 non-causal default -- swizzle path
 ]
 
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, sliding_window) --
+# STANDALONE sliding-window (no sinks; gfx942 dense has no sink support yet). All rows
+# are causal (sliding_window > 0 requires causal). Window is a multiple of the shipped
+# block_n (64): 128, 256. Covers both dtypes, D64/D128, and BOTH grid variants -- the
+# persistent rows exercise the per-work-item start_tile prune that the default grid
+# does not.
+_SWA_COHORT = [
+    ("bf16", 128, 16, 4, False, 128),
+    ("bf16", 128, 16, 4, True, 128),
+    ("fp16", 128, 16, 4, False, 256),
+    ("fp16", 128, 16, 4, True, 256),
+    ("bf16", 64, 16, 4, False, 128),
+    ("bf16", 64, 16, 4, True, 128),
+]
 
-def _spec(dtype, d, hq, hkv, persistent, *, causal=True, batch=1, sq=512):
+
+def _spec(
+    dtype, d, hq, hkv, persistent, *, causal=True, batch=1, sq=512, sliding_window=0
+):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
     factory (``dispatch.attention.gfx942._dense_spec``) rather than hand-rolled.
 
@@ -115,6 +132,7 @@ def _spec(dtype, d, hq, hkv, persistent, *, causal=True, batch=1, sq=512):
             arch="gfx942",
             mask_type=1 if causal else 0,
             dtype=dtype,
+            sliding_window=sliding_window,
             algorithm="attention_dense",
             dense_persistent="on" if persistent else "off",
         )
@@ -166,6 +184,67 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
     max_abs = (ref - out.float()).abs().max().item()
     assert max_abs < tol, (
         f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
+        f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype,d,hq,hkv,persistent,sliding_window", _SWA_COHORT)
+def test_dense_swa_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, sliding_window):
+    """Sliding-window (SWA) numeric parity, standalone (no sinks), both grids.
+
+    The band is the same one the gfx950 sibling masks (``_sink_reference``: causal
+    ``ki > qi`` plus window ``ki <= qi - W`` masked out) and the kernel applies
+    (``cmp_le(ktok, q)`` + ``cmp_gt(ktok, q - SW)``): keep key k for query q iff
+    ``q - W < k <= q``. Expressed here as a boolean SDPA attn_mask -- matching this
+    file's SDPA-based base oracle -- rather than gfx950's manual masked-softmax,
+    which exists only because gfx950 also concatenates a sink column (gfx942 has no
+    sinks yet). The diagonal k==q is always kept (W>0), so no row is fully masked."""
+    import torch
+    import torch.nn.functional as F
+
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    B, S = 1, 512
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+
+    q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+    out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+
+    spec = _spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        causal=True,
+        batch=B,
+        sq=S,
+        sliding_window=sliding_window,
+    )
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+
+    qi = torch.arange(S, device="cuda").view(-1, 1)
+    ki = torch.arange(S, device="cuda").view(1, -1)
+    keep = (ki <= qi) & (ki > qi - sliding_window)  # [S, S] bool, True = attend
+    rep = hq // hkv
+    qf = q.transpose(1, 2).float()
+    kf = k.transpose(1, 2).float().repeat_interleave(rep, dim=1)
+    vf = v.transpose(1, 2).float().repeat_interleave(rep, dim=1)
+    ref = F.scaled_dot_product_attention(
+        qf, kf, vf, attn_mask=keep, scale=scale
+    ).transpose(
+        1, 2
+    )  # -> [B,S,Hq,D]
+
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, (
+        f"{dtype} D{d} GQA{hq}/{hkv} swa{sliding_window} "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
     )
 

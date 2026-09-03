@@ -189,7 +189,6 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
     {
         "varlen",
         "ragged",
-        "sliding_window",
         "paged",
         "block_size",
         "num_kv_blocks",
@@ -216,7 +215,7 @@ _SPEC_PERTURBATIONS = {
     "head_size": (64, 128),
     "causal": (False, True),
     "dtype": ("bf16", "fp16"),
-    "sliding_window": (),  # unbuildable -- see _UNBUILDABLE_SPEC_FIELDS
+    "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
     "ragged": (),  # unbuildable
     "varlen": (),  # unbuildable
     "paged": (),  # unbuildable (not yet supported)
@@ -422,11 +421,11 @@ def test_supports_rejects_non_gfx942():
 @pytest.mark.parametrize(
     "kw,marker",
     [
-        # persistent is NOT here anymore -- it is supported (P4). See the persistent
-        # build/decode tests below.
+        # persistent and sliding_window are NOT here anymore -- both are supported
+        # (persistent P4; sliding_window via start_tile prune + window mask). See
+        # the persistent build/decode tests and the SWA coverage below.
         (dict(varlen=True), "varlen"),
         (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
-        (dict(sliding_window=64), "sliding_window"),
         (dict(use_sinks=True), "sinks"),
     ],
 )
@@ -579,7 +578,10 @@ _CONTRACT_GRID = [
     dict(persistent=True, num_persistent=228),
     dict(varlen=True),
     dict(seqlen_q=1000, seqlen_kv=1000, ragged=True),
-    dict(sliding_window=64),
+    dict(sliding_window=64),  # accepted: SWA on the default grid
+    dict(
+        sliding_window=128, persistent=True, num_persistent=304
+    ),  # accepted: SWA persistent
     dict(batch=4),
     dict(batch=64, seqlen_q=16384, seqlen_kv=16384, num_kv_heads=8),
     dict(waves_per_eu=4),
