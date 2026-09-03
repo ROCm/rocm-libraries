@@ -16016,15 +16016,24 @@ class KernelWriterAssembly(KernelWriter):
               kernel["ActivationFuncCall"] = False
               activationLabelList = {}
 
+        # A MultipleBuffer write only stores raw partial sums to the workspace;
+        # beta*C is applied afterwards by the conversion kernel. Kernels compiled
+        # as MultipleBuffer never generate a beta variant here (hasBeta above is
+        # False), so a dual-path kernel must drop it on its MultipleBuffer path
+        # too, otherwise beta*C lands in the partials and gets applied twice.
+        modeBetas = betas
+        if globalWriteMode in ("MB", "OptNLL_MB"):
+          modeBetas = [beta for beta in betas if not beta] or [False]
+
         betaModules, currentInstLength = self.generateBetaModules(
-            kernel, tPA, tPB, activation, applyAlpha, betas, edge, atomic,
+            kernel, tPA, tPB, activation, applyAlpha, modeBetas, edge, atomic,
             vectorWidths, elements, activationLabelList, tmpVgpr, cvtVgprStruct,
             activationSetPCStruct, activationEnumStrList, actPCMaxTempSgpr,
             isInsertActFunctionCallAddrCalc, toActModuleList, writeLabels, endLabel,
             vectorDataTypes, factorDims, globalWriteMode, hasMultipleGlobalWriteModes)
 
         # Check if branch exceeds and add beta zero check
-        betaBranchCheckModule = self.checkBetaBranchExceeds(kernel, betas, betaModules, writeLabels, globalWriteMode)
+        betaBranchCheckModule = self.checkBetaBranchExceeds(kernel, modeBetas, betaModules, writeLabels, globalWriteMode)
 
         # Append the beta modules to the main module
         module.appendModule(betaBranchCheckModule)
