@@ -153,12 +153,6 @@ if(Python3_FOUND)
     set_tests_properties(hipdnn_support_claim_verifier_python_tests PROPERTIES LABELS "unit_test;quick")
 endif()
 
-# --write-support-claims writes back into the checkout, not into the snapshot
-# copied above — a sidecar written into the build tree is invisible to git and is
-# clobbered by the next configure. Baked in here (and inherited by tests/) so the
-# binary knows where it came from; see resolveDataDir() in BundleRegistration.hpp.
-set(HIPDNN_INTEGRATION_TEST_BUNDLES_SOURCE_DIR
-    "${CMAKE_CURRENT_SOURCE_DIR}/integration-test-bundles")
 
 # Install integration test bundles so installed tests can find them at
 # <exe_dir>/../lib/integration-test-bundles/
@@ -258,9 +252,6 @@ target_link_libraries(${INTEGRATION_TESTS_EXE}
 )
 
 target_compile_options(${INTEGRATION_TESTS_EXE} PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
-
-target_compile_definitions(${INTEGRATION_TESTS_EXE} PRIVATE
-    HIPDNN_INTEGRATION_TEST_BUNDLES_SOURCE_DIR="${HIPDNN_INTEGRATION_TEST_BUNDLES_SOURCE_DIR}")
 
 clang_tidy_check(${INTEGRATION_TESTS_EXE})
 
