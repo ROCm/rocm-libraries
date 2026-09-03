@@ -2173,3 +2173,88 @@ TEST(TestCpuReferencePointwiseTernary, UnsupportedTernaryModeThrows)
                      PointwiseMode::CMP_GT, output, in0, in1, mask)),
                  std::runtime_error);
 }
+
+// --- Binary MAX/MIN NaN behavior ---
+//
+// Max/Min use std::max/std::min, whose NaN handling is order-dependent
+// ((a < b) ? b : a): a NaN first operand propagates, but a NaN second
+// operand is silently dropped in favor of the finite first operand. These
+// tests pin that asymmetry down explicitly so a future change in behavior
+// (e.g. switching to std::fmax/std::fmin) is a visible, deliberate decision.
+template <typename T>
+class CpuReferencePointwiseNaNFixture : public ::testing::Test
+{
+};
+
+using NaNTestTypes = ::testing::Types<float, half, bfloat16, double>;
+TYPED_TEST_SUITE(CpuReferencePointwiseNaNFixture, NaNTestTypes, );
+
+TYPED_TEST(CpuReferencePointwiseNaNFixture, MaxNaNFirstOperandPropagates)
+{
+    using hipdnn_data_sdk::types::isnan;
+
+    Tensor<TypeParam> input1({1, 1, 1, 1});
+    Tensor<TypeParam> input2({1, 1, 1, 1});
+    Tensor<TypeParam> output({1, 1, 1, 1});
+
+    input1.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0, 0, 0);
+    input2.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_5), 0, 0, 0, 0);
+
+    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+        PointwiseMode::MAX_OP, output, input1, input2);
+
+    EXPECT_TRUE(isnan(output.getHostValue(0, 0, 0, 0)));
+}
+
+TYPED_TEST(CpuReferencePointwiseNaNFixture, MaxNaNSecondOperandReturnsFirst)
+{
+    using hipdnn_data_sdk::types::isnan;
+
+    Tensor<TypeParam> input1({1, 1, 1, 1});
+    Tensor<TypeParam> input2({1, 1, 1, 1});
+    Tensor<TypeParam> output({1, 1, 1, 1});
+
+    input1.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_5), 0, 0, 0, 0);
+    input2.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0, 0, 0);
+
+    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+        PointwiseMode::MAX_OP, output, input1, input2);
+
+    EXPECT_FALSE(isnan(output.getHostValue(0, 0, 0, 0)));
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), input1.getHostValue(0, 0, 0, 0));
+}
+
+TYPED_TEST(CpuReferencePointwiseNaNFixture, MinNaNFirstOperandPropagates)
+{
+    using hipdnn_data_sdk::types::isnan;
+
+    Tensor<TypeParam> input1({1, 1, 1, 1});
+    Tensor<TypeParam> input2({1, 1, 1, 1});
+    Tensor<TypeParam> output({1, 1, 1, 1});
+
+    input1.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0, 0, 0);
+    input2.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_5), 0, 0, 0, 0);
+
+    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+        PointwiseMode::MIN_OP, output, input1, input2);
+
+    EXPECT_TRUE(isnan(output.getHostValue(0, 0, 0, 0)));
+}
+
+TYPED_TEST(CpuReferencePointwiseNaNFixture, MinNaNSecondOperandReturnsFirst)
+{
+    using hipdnn_data_sdk::types::isnan;
+
+    Tensor<TypeParam> input1({1, 1, 1, 1});
+    Tensor<TypeParam> input2({1, 1, 1, 1});
+    Tensor<TypeParam> output({1, 1, 1, 1});
+
+    input1.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_5), 0, 0, 0, 0);
+    input2.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0, 0, 0);
+
+    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+        PointwiseMode::MIN_OP, output, input1, input2);
+
+    EXPECT_FALSE(isnan(output.getHostValue(0, 0, 0, 0)));
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), input1.getHostValue(0, 0, 0, 0));
+}
