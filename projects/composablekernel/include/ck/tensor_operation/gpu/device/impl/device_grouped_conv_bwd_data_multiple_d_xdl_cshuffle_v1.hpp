@@ -1507,8 +1507,10 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                 bool used_flat_desc = false;
                 if constexpr(NDimSpatial == 2 && !CTranspose && NumDTensor == 0)
                 {
+                    const index_t ConvK = arg.b_g_k_c_xs_lengths_[1];
                     if(arg.num_group_ == 1 && arg.k_batch_ == 1 && arg.gemms_count_ == 1 &&
-                       !arg.flat_a_container_.empty())
+                       !arg.flat_a_container_.empty() && arg.num_workgroups_per_Conv_N_ == 1 &&
+                       ConvK % AK1 == 0 && ConvK % BK1 == 0)
                     {
                         used_flat_desc          = true;
                         const index_t flat_idx  = gemm_set_id;
@@ -1987,6 +1989,46 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         }
         else
         {
+            return false;
+        }
+
+        // check descriptors sizes
+        bool is_size_valid = true;
+        for(std::size_t i = 0; i < arg.a_grid_desc_m_k_container_.size(); i++)
+        {
+            constexpr long_index_t TwoGB = (long_index_t{1} << 31);
+            const long_index_t a_element_space_size =
+                arg.a_grid_desc_m_k_container_[i].GetElementSpaceSize();
+            const long_index_t b_element_space_size =
+                arg.b_grid_desc_n_k_container_[i].GetElementSpaceSize();
+            const long_index_t e_element_space_size =
+                arg.e_grid_desc_m_n_container_[i].GetElementSpaceSize();
+            // element space size stored in int32_t so max value is TwoGB - 1, while
+            // element space size bytes stored in uint32_t so max value is TwoGB
+            static_for<0, NumDTensor, 1>{}([&](auto j) {
+                using DDataType = remove_cvref_t<tuple_element_t<j.value, DsDataType>>;
+                const long_index_t d_element_space_size =
+                    arg.ds_grid_desc_m_n_container_[i](j).GetElementSpaceSize();
+                if(d_element_space_size * sizeof(DDataType) > TwoGB ||
+                   d_element_space_size >= TwoGB)
+                {
+                    is_size_valid = false;
+                }
+            });
+
+            if(a_element_space_size * sizeof(ADataType) > TwoGB || a_element_space_size >= TwoGB ||
+               b_element_space_size * sizeof(BDataType) > TwoGB || b_element_space_size >= TwoGB ||
+               e_element_space_size * sizeof(EDataType) > TwoGB || e_element_space_size >= TwoGB)
+            {
+                is_size_valid = false;
+            }
+        }
+        if(!is_size_valid)
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Large tensor case." << std::endl;
+            }
             return false;
         }
 
