@@ -145,7 +145,7 @@ jobs:
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
