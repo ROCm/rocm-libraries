@@ -3541,7 +3541,7 @@ class LogicalScheduler:
         # all clusters, still before MT1), which srd_leftover handles.
         window_open = {t: last_mt0_atom[t] // cluster_size for t in last_mt0_atom}
 
-        # ── Greedy fill ──
+        # ── Proportional fill ──
         gap_fill = [[] for _ in range(n_gaps)]
         # SRD: place each tensor's whole group in the earliest legal gap of its window.
         # Tensors whose window opens at/after n_gaps (last MT0 load in the final
@@ -3554,21 +3554,32 @@ class LogicalScheduler:
             if grp and n_gaps > 0 and wo < n_gaps:
                 gap_fill[wo].extend(grp)
                 srd_by_tensor[t] = []
-        # Cycle budget for the free pools (LRA=1, MFMA=8, seed_out=1).
-        total_cycles = len(lra) + len(free_seed_out) + 8 * len(free_mfma)
+        # Pre-split free pools evenly across gaps so each gap gets a proportional
+        # share of LRA *and* MFMAs rather than front-loading LRA into gap 0.
+        # Each pool is split into n_gaps slices (floor/ceil); then within each gap
+        # the gap's LRA slice is emitted first (covers HBM latency), MFMAs second.
+        def _split(pool, n):
+            """Return list of n slices, distributing remainder to early gaps."""
+            base_n, rem_n = divmod(len(pool), n) if n else (0, 0)
+            slices, i = [], 0
+            for g in range(n):
+                cnt = base_n + (1 if g < rem_n else 0)
+                slices.append(pool[i:i + cnt])
+                i += cnt
+            return slices
+
+        lra_slices  = _split(lra,       n_gaps) if n_gaps else []
+        mfma_slices = _split(free_mfma, n_gaps) if n_gaps else []
         if n_gaps > 0:
-            base, rem = divmod(total_cycles, n_gaps)
+            lra[:] = []        # consumed into slices; clear to avoid double-emit
+            free_mfma[:] = []
+
         for g in range(n_gaps):
-            budget = base + (1 if g < rem else 0)
             if g == 0:
                 gap_fill[g] = pinned + gap_fill[g]  # pinned lead precedes all MFMA
                 pinned = []
-            while lra and budget > 0:
-                gap_fill[g].append(lra.pop(0)); budget -= 1
-            while free_mfma and budget >= 8:
-                gap_fill[g].append(free_mfma.pop(0)); budget -= 8
-            while free_seed_out and budget > 0:
-                gap_fill[g].append(free_seed_out.pop(0)); budget -= 1
+            gap_fill[g].extend(lra_slices[g])
+            gap_fill[g].extend(mfma_slices[g])
 
         # Leftovers (incl. the single-cluster n_gaps==0 case) → one trailing module
         # emitted before the (now empty) initC, still ahead of MT1 grs so any

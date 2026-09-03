@@ -1260,7 +1260,6 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PreloopGRClusterSize: 4
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
@@ -8598,7 +8597,6 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PreloopGRClusterSize: 4
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
@@ -8918,7 +8916,6 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PreloopGRClusterSize: 4
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
