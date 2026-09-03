@@ -21,6 +21,8 @@ sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
 from codegen_common import (  # noqa: E402
     TileConfig,
+    arch_config_supported,
+    arch_warp_tile_key,
     TraitConfigBase,
     CommonTypeMappings,
     generate_cpp_compilation_unit,
@@ -631,6 +633,85 @@ class TestArchWarpTileK(unittest.TestCase):
         # 128 on a non-gfx950 target compiles and then emits all zeros, so an
         # unrecognised arch must never fall through to it.
         self.assertEqual(fp8_warp_tile_k_for_arch("gfx90a"), 32)
+
+
+class TestCentralArchFilter(unittest.TestCase):
+    """arch_config_supported -- the single arch-validity gate every sweep uses.
+
+    Motivating measurement (gfx1250 / MI400, grouped rowcolquant + tensorquant
+    default_config sweep, 11,840 rows): 2,908 wrong-result rows were 100%
+    warp_tile 32x32x32 (a wave64 MFMA shape), 0 of 3,760 16x16x64 rows were
+    wrong, and 3,220 launch aborts were 100% warp_m*warp_n == 8.
+    """
+
+    def test_no_arch_disables_every_check(self):
+        for arch in (None, ""):
+            self.assertTrue(arch_config_supported(
+                arch, dtype="fp8", warp_m=2, warp_n=4, warp_k=1,
+                warp_tile_m=32, warp_tile_n=32, warp_tile_k=32,
+                pipeline="compv3", scheduler="intrawave"))
+
+    def test_unknown_arch_is_permissive(self):
+        self.assertTrue(arch_config_supported(
+            "gfx9999", dtype="fp8", warp_m=7, warp_n=7, warp_k=7,
+            warp_tile_m=1, warp_tile_n=1, warp_tile_k=1,
+            pipeline="compv3", scheduler="intrawave"))
+
+    def test_gfx1250_rejects_wave64_mfma_warp_tile(self):
+        self.assertFalse(arch_config_supported(
+            "gfx1250", dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+            warp_tile_m=32, warp_tile_n=32, warp_tile_k=32,
+            pipeline="compv3", scheduler="intrawave"))
+
+    def test_gfx1250_accepts_its_wmma_warp_tiles(self):
+        for wtk in (64, 128):
+            self.assertTrue(arch_config_supported(
+                "gfx1250", dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+                warp_tile_m=16, warp_tile_n=16, warp_tile_k=wtk,
+                pipeline="compv3", scheduler="intrawave"), wtk)
+
+    def test_gfx1250_rejects_eight_warp_compv3_intrawave(self):
+        for wm, wn in ((2, 4), (4, 2), (1, 8), (8, 1)):
+            self.assertFalse(arch_config_supported(
+                "gfx1250", dtype="fp8", warp_m=wm, warp_n=wn, warp_k=1,
+                warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+                pipeline="compv3", scheduler="intrawave"), (wm, wn))
+
+    def test_gfx1250_allows_four_warp_compv3_intrawave(self):
+        self.assertTrue(arch_config_supported(
+            "gfx1250", dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+            pipeline="compv3", scheduler="intrawave"))
+
+    def test_cdna_warp_tile_table_is_advisory_not_a_closure(self):
+        """The gfx9 MFMA rows are Old-TE whitelists, not the full instruction
+        set, so an absent entry must NOT reject -- that is what keeps the
+        gfx942/gfx950 emitted-kernel sets byte-identical."""
+        for arch in ("gfx942", "gfx950"):
+            self.assertTrue(arch_config_supported(
+                arch, dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+                warp_tile_m=4, warp_tile_n=64, warp_tile_k=16,
+                pipeline="compv3", scheduler="intrawave"), arch)
+
+    def test_cdna_has_no_warps_per_block_cap(self):
+        self.assertTrue(arch_config_supported(
+            "gfx950", dtype="fp8", warp_m=4, warp_n=4, warp_k=1,
+            warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+            pipeline="compv3", scheduler="intrawave"))
+
+    def test_warp_map_gate_uses_the_arch_table(self):
+        # [4, 4, 1] is listed for gfx950 but not for gfx942.
+        common = dict(dtype="fp16", warp_tile_m=32, warp_tile_n=32,
+                      warp_tile_k=16, pipeline="compv3", scheduler="intrawave")
+        self.assertTrue(arch_config_supported(
+            "gfx950", warp_m=4, warp_n=4, warp_k=1, **common))
+        self.assertFalse(arch_config_supported(
+            "gfx942", warp_m=4, warp_n=4, warp_k=1, **common))
+
+    def test_warp_tile_key(self):
+        self.assertEqual(arch_warp_tile_key("fp8"), "fp8_fp8_fp32")
+        self.assertEqual(arch_warp_tile_key("int8"), "int8_int8_int32")
+        self.assertEqual(arch_warp_tile_key("fp8", "bf8"), "fp8_bf8_fp32")
 
 
 if __name__ == "__main__":

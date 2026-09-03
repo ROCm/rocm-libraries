@@ -312,6 +312,7 @@ def _get_arch_data() -> Dict:
 
     try:
         from arch_specs_generated import (
+            ARCH_FAMILY_MAP,
             WARP_SUPPORTED_COMBINATIONS,
             WARP_TILE_SUPPORTED_COMBINATIONS,
             TRAIT_UNSUPPORTED_COMBINATIONS,
@@ -319,6 +320,7 @@ def _get_arch_data() -> Dict:
         )
 
         _arch_data_cache = {
+            "arch_family": ARCH_FAMILY_MAP,
             "warp_combos": WARP_SUPPORTED_COMBINATIONS,
             "warp_tile_combos": WARP_TILE_SUPPORTED_COMBINATIONS,
             "trait_unsupported": TRAIT_UNSUPPORTED_COMBINATIONS,
@@ -326,6 +328,7 @@ def _get_arch_data() -> Dict:
         }
     except ImportError:
         _arch_data_cache = {
+            "arch_family": {"gfx90a": "cdna2", "gfx942": "cdna3"},
             "warp_combos": {
                 "gfx942": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
                 "gfx90a": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
@@ -389,6 +392,152 @@ def needs_warp_expansion(config: dict) -> bool:
 def needs_pipeline_expansion(config: dict) -> bool:
     """True if pipeline is a wildcard (\"*\")."""
     return config.get("pipeline", "compv4") == "*"
+
+
+# ============================================================================
+# Central arch-validity filter (single source of truth for sweep expansion)
+# ============================================================================
+#
+# THE authoritative answer to "may this (arch, warp map, warp tile, dtype,
+# pipeline/scheduler) combination be emitted?". Every sweep expansion in the
+# dispatcher -- gemm_utils.expand_sweep, batched_contraction_utils.expand_sweep,
+# the quant codegens' _build_specs(), unified_contraction_multi_abd_codegen's
+# build_specs() -- must route its arch decision through arch_config_supported()
+# rather than re-deriving one. It lives here, next to valid_wave_configs() /
+# valid_warp_configs(), because this module is already the codegen-side owner of
+# the arch tables loaded from arch_specs_generated.py (which is generated from
+# arch_specs.json, the single data source). Nothing below hardcodes a gfx string:
+# every decision reads one of those tables.
+#
+# Why this exists (measured on gfx1250 / MI400, grouped rowcolquant+tensorquant
+# default_config sweep, 11,840 result rows):
+#
+#   * 2,908 rows returned wrong numbers. 100% of them were warp_tile 32x32x32 --
+#     a wave64 MFMA fragment shape. Every 16x16x64 row (the arch's real 8-bit
+#     WMMA fragment) was correct: 3,760 PASS / 0 FAIL. The sweep config lists
+#     warp_tile_m in {4,16,32} and warp_tile_n in {16,32,64}, which are gfx9
+#     values, and nothing filtered them per arch.
+#   * 3,220 rows aborted at launch ("device symbol missing from .so"). 100% of
+#     them were 8-warp blocks (warp_m*warp_n == 8), the known gfx1250 8-warp
+#     limitation.
+#
+# Both are enumeration defects, not kernel defects.
+
+
+def _arch_family(arch: str) -> str:
+    """Family tag ("cdna3", "rdna4", ...) for *arch* from the arch table."""
+    return _get_arch_data().get("arch_family", {}).get(arch, "")
+
+
+def _is_wave32_arch(arch: str) -> bool:
+    """True for the RDNA/WMMA families, which execute in wave32.
+
+    Read from ARCH_FAMILY_MAP rather than pattern-matching the gfx string, so a
+    new arch is classified by adding a row to arch_specs.json.
+    """
+    return _arch_family(arch).startswith("rdna")
+
+
+def _warp_tile_table_is_exhaustive(arch: str) -> bool:
+    """True when the arch's warp-tile table is a hardware closure rather than a
+    whitelist, i.e. a warp tile absent from it cannot exist on the hardware.
+
+    True for the wave32/WMMA families: WMMA has one fragment shape family,
+    M = N = 16, and every RDNA row of WARP_TILE_SUPPORTED_COMBINATIONS reflects
+    exactly that. A 32x32 warp tile is not a WMMA instruction, so emitting it is
+    always wrong.
+
+    False for CDNA/MFMA. Those rows were transcribed from Old-TE's supported
+    list, which is a curated whitelist rather than the full MFMA instruction
+    set, so treating an absent entry as "impossible" would silently delete
+    working kernels. On CDNA the table is therefore advisory only.
+    """
+    return _is_wave32_arch(arch)
+
+
+# Per-arch cap on the number of warps in a block for one (pipeline, scheduler).
+# A data table rather than an inline arch test, so a new limitation is one row.
+#
+# gfx1250 / compv3+intrawave: the compv3 intrawave pipeline is hand-scheduled for
+# wave64 MFMA. On gfx1250 (wave32) an 8-warp block either miscompiles
+# (ROCm/rocm-libraries#11161: on-device max_rel 0.14-0.87 against an fp32 CPU
+# reference) or fails to emit its device symbol -- the grouped rowcolquant/
+# tensorquant gfx1250 sweep aborted at launch on 3220 rows and every one of them
+# was warp_m*warp_n == 8. <= 4-warp compv3 is bit-accurate there. Deliberately NOT
+# applied to gfx1100/gfx1200/gfx1201: no measurement exists for those parts, and
+# their whole warp table is 8-warp, so a family-wide rule would silently delete
+# all of their compv3 kernels.
+PIPELINE_MAX_WARPS_PER_BLOCK: Dict[str, Dict[Tuple[str, str], int]] = {
+    "gfx1250": {("compv3", "intrawave"): 4},
+}
+
+
+def arch_warp_tile_key(dtype_a: str, dtype_b: Optional[str] = None) -> str:
+    """Table key for a dtype pair: ``{a}_{b}_{acc}`` with acc int32 for int8."""
+    b = dtype_b or dtype_a
+    acc = "int32" if dtype_a == "int8" else "fp32"
+    return f"{dtype_a}_{b}_{acc}"
+
+
+def arch_config_supported(
+    arch: Optional[str],
+    *,
+    dtype: Optional[str] = None,
+    dtype_b: Optional[str] = None,
+    warp_m: Optional[int] = None,
+    warp_n: Optional[int] = None,
+    warp_k: Optional[int] = None,
+    warp_tile_m: Optional[int] = None,
+    warp_tile_n: Optional[int] = None,
+    warp_tile_k: Optional[int] = None,
+    pipeline: Optional[str] = None,
+    scheduler: Optional[str] = None,
+) -> bool:
+    """Return True iff this configuration may be emitted for *arch*.
+
+    ``arch`` of None/empty disables every check, so a caller that genuinely has
+    no arch keeps its current behaviour. Unknown arch or missing table entry is
+    likewise permissive -- the gate never rejects on absence of data.
+
+    Three rules, in order:
+
+    1. **Warp map.** ``[warp_m, warp_n, warp_k]`` must appear in
+       WARP_SUPPORTED_COMBINATIONS[arch] (Old-TE's validate_warp_configuration).
+    2. **Warp tile.** ``[warp_tile_m, warp_tile_n, warp_tile_k]`` must appear in
+       WARP_TILE_SUPPORTED_COMBINATIONS[arch][dtype_key] -- enforced only where
+       that table is a hardware closure (see _warp_tile_table_is_exhaustive).
+    3. **Warps-per-block cap.** ``warp_m * warp_n`` must not exceed
+       PIPELINE_MAX_WARPS_PER_BLOCK[arch][(pipeline, scheduler)] where one is
+       recorded. See that table for the measurement behind each row.
+    """
+    if not arch:
+        return True
+
+    data = _get_arch_data()
+
+    if warp_m is not None and warp_n is not None and warp_k is not None:
+        allowed = data["warp_combos"].get(arch)
+        if allowed and [warp_m, warp_n, warp_k] not in allowed:
+            return False
+
+    if (
+        dtype is not None
+        and warp_tile_m is not None
+        and warp_tile_n is not None
+        and warp_tile_k is not None
+        and _warp_tile_table_is_exhaustive(arch)
+    ):
+        key = arch_warp_tile_key(dtype, dtype_b)
+        table = data["warp_tile_combos"].get(arch, {}).get(key)
+        if table and [warp_tile_m, warp_tile_n, warp_tile_k] not in table:
+            return False
+
+    if warp_m is not None and warp_n is not None and pipeline and scheduler:
+        cap = PIPELINE_MAX_WARPS_PER_BLOCK.get(arch, {}).get((pipeline, scheduler))
+        if cap is not None and warp_m * warp_n > cap:
+            return False
+
+    return True
 
 
 # ============================================================================
@@ -754,6 +903,25 @@ def iter_quant_axes(
         tile = tile_config_from_dict(tile_dict)
         if not tile.is_valid():
             logger.debug("Invalid tile config %s -- skipping", tile)
+            continue
+
+        # Central arch gate, shared by every quant family that routes through
+        # this iterator. tile.is_valid() above is pure divisibility and knows
+        # nothing about the target; this is the one place that does. Disabled
+        # when ``config`` carries no "arch", so existing callers are unaffected.
+        if not arch_config_supported(
+            config.get("arch") or None,
+            dtype=variant_key,
+            warp_m=tile.warp_m, warp_n=tile.warp_n, warp_k=tile.warp_k,
+            warp_tile_m=tile.warp_tile_m,
+            warp_tile_n=tile.warp_tile_n,
+            warp_tile_k=tile.warp_tile_k,
+            pipeline=pipeline,
+            scheduler=config.get("scheduler"),
+        ):
+            logger.debug(
+                "Tile %s invalid for arch %s -- skipping", tile, config.get("arch")
+            )
             continue
 
         yield variant_key, layout, tile, extra
