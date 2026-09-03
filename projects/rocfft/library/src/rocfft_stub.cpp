@@ -20,6 +20,34 @@
 
 #include "rocfft/rocfft.h"
 
+#ifdef ROCFFT_BUILD_INTERNAL_TEST
+
+#include "plan.h"
+#include "transform.h"
+
+// The internal test builds the planning sources but leaves out powX.cpp,
+// which carries device code.  Planning never calls these.
+bool PlanPowX(ExecPlan&)
+{
+    return false;
+}
+
+bool GetTuningKernelInfo(ExecPlan&)
+{
+    return false;
+}
+
+void TransformPowX(const ExecPlan&,
+                   void*[],
+                   void*[],
+                   const rocfft_execution_info_internal&,
+                   size_t,
+                   const std::map<int, device_callback_t>&)
+{
+}
+
+#else
+
 // declare things that RTC needs to link a standalone executable
 // without the rest of rocFFT
 int log_trace_fd    = -1;
@@ -42,4 +70,6 @@ extern "C" rocfft_status rocfft_plan_create(rocfft_plan*                  plan,
 {
     return rocfft_status_failure;
 }
+#endif
+
 #endif

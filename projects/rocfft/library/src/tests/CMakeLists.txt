@@ -20,15 +20,59 @@
 
 include( ../../../cmake/sqlite.cmake )
 
-add_executable( rocfft-internal-test
-  function_pool_test.cpp
-  rtc_test.cpp
+# The planning core is compiled into the rocfft shared library rather than an
+# object library, so build those sources here to reach them.
+set( rocfft_planning_source
+  ../assignment_policy.cpp
+  ../auxiliary.cpp
+  ../callback_map.cpp
+  ../chirp.cpp
+  ../data_layout.cpp
+  ../enum_printer.cpp
+  ../exec_info.cpp
+  ../fuse_shim.cpp
+  ../kargs.cpp
+  ../node_factory.cpp
+  ../plan.cpp
+  ../rccl_wrapper.cpp
+  ../repo.cpp
   ../rocfft_stub.cpp
+  ../rtc_exports.cpp
+  ../transform.cpp
+  ../tree_node.cpp
+  ../tree_node_1D.cpp
+  ../tree_node_2D.cpp
+  ../tree_node_3D.cpp
+  ../tree_node_bluestein.cpp
+  ../tree_node_real.cpp
+  ../tuning_kernel_tuner.cpp
+  ../tuning_plan_tuner.cpp
+  ../twiddles.cpp
+)
+
+add_executable( rocfft-internal-test
+  data_layout_test.cpp
+  function_map_key_test.cpp
+  function_pool_test.cpp
+  kernel_name_test.cpp
+  plan_test.cpp
+  repo_test.cpp
+  rtc_test.cpp
+  solution_map_test.cpp
+  ${rocfft_planning_source}
+)
+
+# ROCFFT_BUILD_INTERNAL_TEST picks the powX stubs out of rocfft_stub.cpp.
+target_compile_definitions( rocfft-internal-test PRIVATE
+  ROCFFT_BUILD_INTERNAL_TEST
+  ROCFFT_TEST_SOLUTION_MAP_DIR="${ROCFFT_SOLUTION_MAP_DIR}"
 )
 
 target_include_directories( rocfft-internal-test PRIVATE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/include>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/device>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/device/generator>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/library/src/device>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/shared>
   $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
@@ -41,14 +85,19 @@ set_target_properties( rocfft-internal-test PROPERTIES
 
 target_compile_options( rocfft-internal-test PRIVATE ${WARNING_FLAGS} )
 
-# Link rocfft-function-pool directly, not roc::rocfft, to avoid a duplicate function_pool_data singleton.
+# Link tests directly, not roc::*, to avoid duplication.
 target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-function-pool
   rocfft-rtc-cache
   rocfft-rtc-common
   rocfft-rtc-compile
+  rocfft-rtc-gen
+  rocfft-rtc-launch
   rocfft-rtc-subprocess
-  hip::host
+  rocfft-solution-map
+  rocfft-tuning-helper
+  generator
+  hip::device
   ${ROCFFT_SQLITE_LIB}
 )
 
