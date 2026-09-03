@@ -244,19 +244,20 @@ namespace TensileLite
                                 * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
                                    * value[2] * value[4] * value[3] * problem.d().sizes()[2];
 
+                    // This guards the GSU (MBSK) region, which is sized per
+                    // problem and unchanged from before.
+                    bool ret = synchronizerUsage <= GsuSynchronizerElements;
+                    // A group wider than the block cannot be given a private
+                    // region per problem, so it must not run a solution that
+                    // uses these flags at all.
                     if(problem.groupedGemm())
-                        return synchronizerUsage <= 409600 * 16 / problem.groupedGemmCount();
-                    else
-                        return synchronizerUsage <= 409600 * 16;
+                        ret = ret && (problem.groupedGemmCount() <= SynchronizerGroupedSlots);
+                    return ret;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    uint32_t synchronizerSize = 409600 * 16;
-                    if(problem.groupedGemm())
-                        synchronizerSize /= problem.groupedGemmCount();
-
                     return debugEvalCmp(
                         problem,
                         stream,
@@ -266,7 +267,7 @@ namespace TensileLite
                             * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2],
                         ">=",
                         "limit",
-                        synchronizerSize);
+                        GsuSynchronizerElements);
                 }
             };
 
@@ -2821,6 +2822,85 @@ namespace TensileLite
                 {
                     return debugEvalCmp(
                         problem, stream, "prob", problem.swizzleTensorB(), "==", "sol", value);
+                }
+            };
+
+            struct FusedGemmA2A : public Predicate_CRTP<FusedGemmA2A, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                FusedGemmA2A() = default;
+                FusedGemmA2A(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "FusedGemmA2A";
+                }
+
+                bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.fusedGemmA2A() == value;
+                }
+
+                bool debugEval(ContractionProblemGemm const& problem,
+                               std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.fusedGemmA2A(), "==", "sol", value);
+                }
+            };
+
+            // value is the solution's MacroTile0.
+            struct FusedA2ATileDivisible
+                : public Predicate_CRTP<FusedA2ATileDivisible, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int64_t value;
+
+                FusedA2ATileDivisible() = default;
+                FusedA2ATileDivisible(int64_t value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "FusedA2ATileDivisible";
+                }
+
+                bool divisible(ContractionProblemGemm const& problem) const
+                {
+                    if(!problem.fusedGemmA2A())
+                        return true;
+                    if(value <= 0 || problem.fusedA2AWorld() == 0)
+                        return false;
+                    const int64_t am    = problem.fusedA2AExtent();
+                    const int64_t width = value * (int64_t)problem.fusedA2AWorld();
+                    return am % width == 0 && (int64_t)problem.freeSizeA(0) % value == 0;
+                }
+
+                bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return divisible(problem);
+                }
+
+                bool debugEval(ContractionProblemGemm const& problem,
+                               std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", divisible(problem), "==", "sol", true);
                 }
             };
 

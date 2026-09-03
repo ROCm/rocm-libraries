@@ -174,15 +174,15 @@ TEST_F(InstructionSizeCostingTest, VCvtF16F32_Src383_Mod256_Logical127_Stays4Byt
     EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
 }
 
-TEST_F(InstructionSizeCostingTest, VCvtF16F32_Src384_Mod256_Logical128_PromotesTo8Bytes) {
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Src384_Mod256_Logical128_Stays4ByteBase) {
     auto b = makeBuilder();
     const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
     ASSERT_NE(d, nullptr);
     StinkyInstruction* inst = b.create(d);
     inst->addDestReg(StinkyRegister("v", 0, 1));
     inst->addSrcReg(StinkyRegister("v", 384, 1));
-    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
-    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
 }
 
 TEST_F(InstructionSizeCostingTest, VCvtF32F16_V132_PromotesTo8Bytes) {
@@ -207,26 +207,48 @@ TEST_F(InstructionSizeCostingTest, VCvtF32F16_V12_Stays4ByteBase) {
     EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
 }
 
-TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst128_Src127_OnlySrcCounts_Stays4ByteBase) {
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst128_Src127_DestCounts_PromotesTo8Bytes) {
     auto b = makeBuilder();
     const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
     ASSERT_NE(d, nullptr);
     StinkyInstruction* inst = b.create(d);
     inst->addDestReg(StinkyRegister("v", 128, 1));
     inst->addSrcReg(StinkyRegister("v", 127, 1));
-    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
-    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
 }
 
-TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst127_Src128_OnlySrcCounts_PromotesTo8Bytes) {
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst127_Src128_DestCounts_Stays4ByteBase) {
     auto b = makeBuilder();
     const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
     ASSERT_NE(d, nullptr);
     StinkyInstruction* inst = b.create(d);
     inst->addDestReg(StinkyRegister("v", 127, 1));
     inst->addSrcReg(StinkyRegister("v", 128, 1));
-    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
-    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst0_Src132_DestCounts_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 132, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst256_Src132_DestCounts_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 256, 1));
+    inst->addSrcReg(StinkyRegister("v", 132, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
 }
 
 TEST_F(InstructionSizeCostingTest, VCndmask_LastSrcVcc_Stays4ByteBase) {

@@ -1,0 +1,57 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# Fused GEMM+A2A (FusedGemmA2A=1) config for gfx950.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: -1
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  Device: 0
+  PrintSolutionRejectionReason: True
+  Architecture: gfx950
+  ISA: [[9, 5, 0]]
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      FusedGemmA2A: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]   # MT 256x256
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - WorkGroupMapping: [1]
+        - MIArchVgpr: [False]
+        - UseSubtileImpl: [True, False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # AM is not expressible here; the client defaults it to M, which for
+          # these shapes satisfies AM%W==0, (AM/W)%MT0==0, AM%MT0==0 and AM<=M
+          # at both W=2 and W=4. Override with --fused-a2a-am to leave a local
+          # tail. M is the feature (A2A) dim, N the token dim.
+          - Exact: [3072, 512, 1, 2048]
+          - Exact: [3072, 511, 1, 2048]

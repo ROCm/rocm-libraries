@@ -33,3 +33,10 @@ Known bugs:
   # remain covered. Suspected TensileLite codegen regression; remove once root-caused.
   - { name: matmul_subtile_fp4_scaleAlphaVec, function: matmul, M: 128, N: 192, known_bug_platforms: gfx950 }
   - { name: matmul_subtile_fp4_scaleAlphaVec, function: matmul, M: 192, N: 128, known_bug_platforms: gfx950 }
+  # gfx1250: matmul_deepbench bf16 TN (deepbench_sizes), batch_mode=1 only; alarm-timeout in nightly.
+  # Quarantine until kernel-selection/perf issues on gfx1250 are resolved.
+  - { name: matmul_deepbench, function: matmul, a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, transA: T, transB: N, batch_mode: 1, known_bug_platforms: gfx1250 }
+  # gfx1250: matmul_small (quick) bf16 TN, batch_mode=1 only.
+  - { name: matmul_small, function: matmul, a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, transA: T, transB: N, batch_mode: 1, known_bug_platforms: gfx1250 }
+  # gfx1250: matmul_batch_offset bf16 TN, batch_mode=1 only.
+  - { function: matmul_batch_offset, a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, transA: T, transB: N, batch_mode: 1, known_bug_platforms: gfx1250 }

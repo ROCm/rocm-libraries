@@ -105,6 +105,37 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
         HIPDNN_TEST_DESCRIPTOR_DIR="${HIPDNN_DESCRIPTOR_BUILD_DIR}")
+
+    # The kpack adapter's tests. Gated with the sources they exercise, and kept together
+    # here -- including the dispatch one, which sits under engines/ -- so all three sit
+    # between the two defines they read. Those are HIPDNN_TEST_DESCRIPTOR_DIR above, under
+    # which the device cases find the archive this build packed for the local arch, and
+    # HIPDNN_TEST_KPACK_ARCHIVE below, which the parse-level cases open because they need
+    # a real container rather than a matching device.
+    target_sources(hip_kernel_provider_tests PRIVATE
+        compilation/TestKpackKernelLoader.cpp
+        compilation/TestKpackModuleCache.cpp
+        engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp
+        ingestor/TestPackedDescriptorLoad.cpp
+    )
+
+    # A real archive to open, so the arch-mismatch and missing-toc_key cases meet the
+    # actual reader rather than a hand-forged header. Vendored from rocm-kpack's own
+    # test assets: the reader is now the platform's shared library, so there is no
+    # fetched source tree to take it from, and a 518-byte container is cheaper to carry
+    # than a build-time dependency on one.
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPDNN_TEST_KPACK_ARCHIVE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack")
+
+    # The device cases above read the per-arch archive the packaging roots stage under
+    # HIPDNN_TEST_DESCRIPTOR_DIR, and that target is reachable only through ALL.
+    # Building this binary by name -- what `ninja check` does -- otherwise runs them
+    # against a directory that does not exist yet, and they skip rather than fail.
+    # Guarded for the same reason as the integration side: a root skips with a warning
+    # when hipcc is absent, and a hard dependency would make that fatal.
+    if(TARGET hkp_descriptor_staging)
+        add_dependencies(hip_kernel_provider_tests hkp_descriptor_staging)
+    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

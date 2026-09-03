@@ -104,13 +104,6 @@ struct Softmax final : SoftmaxTunableSolver<PerformanceConfigSoftmax>
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::softmax::ProblemDescription& problem,
                              const PerformanceConfigSoftmax& config) const override;
-    std::size_t GetWorkspaceSize(const ExecutionContext&,
-                                 const miopen::softmax::ProblemDescription&) const override
-    {
-        return 0;
-    }
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 struct AttnSoftmax final : SoftmaxSolver
@@ -122,11 +115,6 @@ struct AttnSoftmax final : SoftmaxSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::softmax::ProblemDescription& problem) const override;
-
-    std::size_t GetWorkspaceSize(const ExecutionContext& context,
-                                 const miopen::softmax::ProblemDescription& problem) const override;
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 } // namespace softmax

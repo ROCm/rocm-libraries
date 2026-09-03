@@ -3,4 +3,5 @@
 
 add_cpp_graph_test_sources(
     IntegrationGpuMoeGroupedMatmul.cpp
+    IntegrationGpuMoeGroupedMatmulBwd.cpp
 )

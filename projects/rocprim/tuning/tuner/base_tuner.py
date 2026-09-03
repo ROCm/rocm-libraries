@@ -358,7 +358,7 @@ class BaseTuner(ABC):
 
     def generate_wrapper(
         self,
-        tune_params: OrderedDict,
+        config: OrderedDict,
         key_type: str,
         value_type: Optional[str] = None,
     ) -> str:
@@ -377,7 +377,7 @@ class BaseTuner(ABC):
         context = {
             "algo_type": self.algo_type,
             "algo_name": self.algo_name,
-            "config": dict(zip(tune_params.keys(), tune_params.keys())),
+            "config": config,
             "key_type": key_type,
             "value_type": value_type,
         }
@@ -394,13 +394,14 @@ class BaseTuner(ABC):
         """Returns base arguments for kernel_tuner.tune_kernel()."""
         np.random.seed(self.seed)
 
-        wrapper_string = self.generate_wrapper(
-            tune_params=self._get_tune_params(),
+        wrapper_string = lambda config: self.generate_wrapper(
+            config=config,
             key_type=key_type,
             value_type=value_type,
         )
 
         tune_kernel_args = {
+            "defines": {},
             "kernel_name": f"{self.algo_full_name}_wrapper",
             "kernel_source": wrapper_string,
             "problem_size": self._get_problem_size(key_type, value_type),
