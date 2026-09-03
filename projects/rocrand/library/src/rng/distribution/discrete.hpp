@@ -182,6 +182,7 @@ private:
         return &s_dist;
     }
 
+    // Keeps the LDS usage comfortably under the per-wavegroup ceiling at max occupancy
     static constexpr unsigned int    LDS_DISTR_MAX = 128;
     rocrand_discrete_distribution_st m_distribution;
 };
@@ -192,9 +193,8 @@ constexpr bool is_discrete_distribution_v
                         Distribution>
       || std::is_base_of_v<discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
                            Distribution>
-      || std::is_base_of_v<
-          discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
-          Distribution>; // TODO: I want to do this for all distributions that inherite discrete or only poisson?
+      || std::is_base_of_v<discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
+                           Distribution>;
 
 /// \brief A collection of static methods for constructing and destroying
 /// instances of `rocrand_discrete_distribution_st`.
