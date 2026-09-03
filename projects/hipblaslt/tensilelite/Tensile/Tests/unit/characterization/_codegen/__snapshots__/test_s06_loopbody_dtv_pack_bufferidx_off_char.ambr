@@ -2,11 +2,11 @@
 # name: test_s06_loopbody_dtv_pack_bufferidx_off_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT128x128x32_MI16URE8b2CwqwGbcKexBrcypnSx-bxYhbVEa0q0BxYa7xw=',
+      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT128x128x32_MI16s9TrEsSQdJ62-COz4JittwCpjbVLsx8bvX0Xjr7s-NE=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT192x192x32_MI16ny2y6jJFGMfF1RQ_prpKuaJ4kLUYZrXnh3pk65vqq2Y=',
+      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT192x192x32_MI161wdwsLiOTsjpQKCsEsm8IZmgXbFes64uiVPLAO-q848=',
       'err': 0,
     }),
   ])

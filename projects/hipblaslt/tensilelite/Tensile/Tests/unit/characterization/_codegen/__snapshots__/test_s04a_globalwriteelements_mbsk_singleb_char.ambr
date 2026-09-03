@@ -2,15 +2,15 @@
 # name: test_s04a_globalwriteelements_mbsk_singleb_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x1K8W9F32l6QsyKJ92x7dDUSQ1S0493JuEc52H3p0J4cM=',
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x1A1LnaflVLu-tUcowuXfGo5BZQvfNK1L52htQ5Nqph4I=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x1POMtEOEOMkRp0M1U9z_3asqMGQnRC3wfJHLIAqMukIA=',
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x1Z2DqlW44D0e8MbhIsuAvjuhAqWWyD-J3ZOfGGRKv7hw=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x1cS-TPocZWT-Lf8k2-hgmTss_3-3m24fWtIccbxBp10w=',
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x1hRnDZ4dk92lbfBU4ywocLlwMAP16FDF1AX6vruWS99E=',
       'err': 0,
     }),
   ])

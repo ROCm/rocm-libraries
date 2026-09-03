@@ -2,11 +2,11 @@
 # name: test_s00_gratileoffsets_packed_index_extr_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_HSS_STA_BH_UserArgs_MT128x128x64_7k2uycr-ddALOf6YzKlOwWkj9k4k5PpIwRICOZJ9TEk=',
+      'basename': 'Cijk_Alik_Bljk_HSS_STA_BH_UserArgs_MT128x128x64_4wPXwSlaN7OewctZc0UcV7XWupKEaNGVPeVkEoEuYoE=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_HSS_STA_BH_UserArgs_MT64x128x64_MmwEH3hOj44Whdk_mtmB7_vbbdmxSq9u2gQoGkaW-WEM=',
+      'basename': 'Cijk_Alik_Bljk_HSS_STA_BH_UserArgs_MT64x128x64_MCzBAZ_yfYGEVl-D1h8MyqXqT_cF6w7WTZFjOZxCpRjw=',
       'err': 0,
     }),
   ])

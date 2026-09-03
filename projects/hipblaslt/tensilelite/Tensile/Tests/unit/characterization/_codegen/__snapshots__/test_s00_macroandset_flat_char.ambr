@@ -2,7 +2,7 @@
 # name: test_s00_macroandset_flat_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bljk_S_B_UserArgs_MT64x64x16_MI16x16x14Hz2m0CbZmUgUiZ_5vb2B8QODZCYDmsYKPkyYFfbzFk=',
+      'basename': 'Cijk_Ailk_Bljk_S_B_UserArgs_MT64x64x16_MI16x16x11gKS_X_MAFGiuK2h0s6XcugPxlhuL80XmVl_qqFyKlg=',
       'err': 0,
     }),
   ])

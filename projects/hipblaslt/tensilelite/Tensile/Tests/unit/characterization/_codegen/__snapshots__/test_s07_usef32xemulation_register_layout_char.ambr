@@ -2,7 +2,7 @@
 # name: test_s07_usef32xemulation_register_layout_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_S_MX_B_UserArgs_MT128x192x32_MI16lpFAOkBMxFBwNblTDoXbeYbJl_VnURmvjC7LjrSdBrk=',
+      'basename': 'Cijk_Alik_Bljk_S_MX_B_UserArgs_MT128x192x32_MI16DDOcFrngvPnEPSTntf-OyuGO8LbsqDH5fv8Zu1Ipya0=',
       'err': 0,
     }),
   ])
