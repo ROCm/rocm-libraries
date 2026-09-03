@@ -190,8 +190,7 @@ static __global__
                 if(ipiv(i) > 0)
                 {
                     auto const alpha = one / A(i, i);
-                    I krow = i;
-                    scale_row(krow = i, alpha);
+                    scale_row(i, alpha);
                 }
                 else if(i > 1)
                 {
