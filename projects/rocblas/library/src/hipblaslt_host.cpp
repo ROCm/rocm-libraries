@@ -573,8 +573,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     size_t                      max_workspace_size = prob.handle->get_available_workspace();
     void*                       workspace          = nullptr;
     int                         row_dim, col_dim;
-    hipblasOperation_t          transA           = (hipblasOperation_t)prob.trans_a;
-    hipblasOperation_t          transB           = (hipblasOperation_t)prob.trans_b;
+    hipblasOperation_t          transA = (hipblasOperation_t)prob.trans_a;
+    hipblasOperation_t          transB = (hipblasOperation_t)prob.trans_b;
     hipblasLtMatmulDesc_t       matmulDesc{};
     hipblasLtMatmulPreference_t pref{};
     size_t                      workspaceSize = 0;
@@ -649,22 +649,26 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               sizeof(int64_t)));
         if(!prob.strided_batch)
         {
-            if (prob.buffer_offset_a != 0) {
+            if (prob.buffer_offset_a != 0)
+            {
                 const int64_t offset_a = static_cast<int64_t>(prob.buffer_offset_a);
                 THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
                     matA, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &offset_a, sizeof(offset_a)));
             }
-            if (prob.buffer_offset_b != 0) {
+            if (prob.buffer_offset_b != 0)
+            {
                 const int64_t offset_b = static_cast<int64_t>(prob.buffer_offset_b);
                 THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
                     matB, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &offset_b, sizeof(offset_b)));
             }
-            if (prob.buffer_offset_c != 0) {
+            if (prob.buffer_offset_c != 0)
+            {
                 const int64_t offset_c = static_cast<int64_t>(prob.buffer_offset_c);
                 THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
                     matC, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &offset_c, sizeof(offset_c)));
             }
-            if (prob.buffer_offset_d != 0) {
+            if (prob.buffer_offset_d != 0)
+            {
                 const int64_t offset_d = static_cast<int64_t>(prob.buffer_offset_d);
                 THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
                     matD, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &offset_d, sizeof(offset_d)));
