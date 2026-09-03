@@ -888,6 +888,10 @@ struct hipfftHandle_t
     };
     callback_info_t load_callback, store_callback;
 
+    // Streams set before plan initialization, keyed by
+    // device ID (not owned by the hipfft plan)
+    std::map<int, hipStream_t> pending_streams;
+
     // Multi-processing communicator
     rocfft_comm_type comm_type   = rocfft_comm_none;
     void*            comm_handle = nullptr;
@@ -1416,6 +1420,15 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_store_callback_data(
             plan->info, plan->store_callback.data, plan->device_contexts.size()));
     }
+    // Apply streams that were set before plan initialization, if any
+    for(const auto& [dev_id, stream] : plan->pending_streams)
+    {
+        // Note: the plan is now initialized, so the following call is
+        // actually applying the stream to the plan's execution info and
+        // the device contexts (e.g. for hipfftXtMemcpy)
+        HIPFFT_EXPECT_SUCCESS(hipfftSetStream(plan, stream));
+    }
+    plan->pending_streams.clear();
 
     return HIPFFT_SUCCESS;
 }
@@ -2010,24 +2023,29 @@ hipfftResult hipfftExecZ2D(hipfftHandle plan, hipfftDoubleComplex* idata, hipfft
 hipfftResult hipfftSetStream(hipfftHandle plan, hipStream_t stream)
 try
 {
-    if(!plan || !plan->initialized())
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
+
     auto stream_dev_id = hipInvalidDeviceId;
     HIP_EXPECT_SUCCESS(hipStreamGetDevice(stream, &stream_dev_id));
     if(stream_dev_id == hipInvalidDeviceId)
         return HIPFFT_INTERNAL_ERROR;
-
+    if(!plan->initialized())
+    {
+        plan->pending_streams[stream_dev_id] = stream;
+        return HIPFFT_SUCCESS;
+    }
+    // plan is initialized: attach the stream to all relevant device contexts
+    // Note: the given stream is irrelevant if attached to a device that is
+    // _not_ used by the plan
     for(auto& dev_info : plan->device_contexts)
     {
         if(dev_info.device_id != stream_dev_id)
             continue;
-        rocfft_scoped_device scoped_dev(dev_info.device_id);
         dev_info.stream = hipStream_wrapper_t::make_nonowned(stream);
-        ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_stream(plan->info, dev_info.stream));
-        return HIPFFT_SUCCESS;
     }
-    // given stream is not on a device that is part of the plan's device list
-    return HIPFFT_INVALID_VALUE;
+    ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_stream(plan->info, stream));
+    return HIPFFT_SUCCESS;
 }
 catch(...)
 {
