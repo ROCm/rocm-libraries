@@ -203,19 +203,21 @@ private:
         switch(operation)
         {
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD:
-            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Add{});
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Add<ComputeType>{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB:
-            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Subtract{});
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::Subtract<ComputeType>{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL:
-            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Multiply{});
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::Multiply<ComputeType>{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MAX_OP:
-            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Max{});
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Max<ComputeType>{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MIN_OP:
-            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Min{});
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Min<ComputeType>{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GT:
             policy.executeBinaryBroadcast(
