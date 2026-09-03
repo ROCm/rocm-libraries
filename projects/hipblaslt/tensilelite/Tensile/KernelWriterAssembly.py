@@ -2575,10 +2575,10 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["ProblemType"]["SupportUserArgs"]:
             moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=2, comment="ArgType == 2 ?"))
             moduleArgs.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
-          moduleArgs.addComment1("Grouped Gemm: Load address of external kernel arguments")
-          moduleArgs.add(self.argLoader.loadKernArg("AddressTD", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+16), dword=2))
-          moduleArgs.add(self.argLoader.loadKernArg("Synchronizer", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+8), dword=2))
-          moduleArgs.add(extReadEpilogueLabeltmp)
+            moduleArgs.addComment1("Grouped Gemm: Load address of external kernel arguments")
+            moduleArgs.add(self.argLoader.loadKernArg("AddressTD", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+16), dword=2))
+            moduleArgs.add(self.argLoader.loadKernArg("Synchronizer", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+8), dword=2))
+            moduleArgs.add(extReadEpilogueLabeltmp)
 
         #moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))
         labelHBM = Label("HBMArgs", comment="")
@@ -2631,11 +2631,11 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["ProblemType"]["SupportUserArgs"]:
             moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=2, comment="ArgType == 2 ?"))
             moduleArgs.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
-          moduleArgs.add(SMovB32(dst=sgpr("Synchronizer+1"), src=sgpr(preloadSgprStartIdx+7), comment="Load Synchronizer data"))
-          moduleArgs.add(SMovB32(dst=sgpr("Synchronizer"), src=sgpr(preloadSgprStartIdx+6), comment="Load Synchronizer data"))
-          moduleArgs.add(SMovB32(dst=sgpr("AddressTD+1"), src=sgpr(preloadSgprStartIdx+9), comment="Load AddressTD data"))
-          moduleArgs.add(SMovB32(dst=sgpr("AddressTD"), src=sgpr(preloadSgprStartIdx+8), comment="Load AddressTD data"))
-          moduleArgs.add(extReadEpilogueLabeltmp)
+            moduleArgs.add(SMovB32(dst=sgpr("Synchronizer+1"), src=sgpr(preloadSgprStartIdx+7), comment="Load Synchronizer data"))
+            moduleArgs.add(SMovB32(dst=sgpr("Synchronizer"), src=sgpr(preloadSgprStartIdx+6), comment="Load Synchronizer data"))
+            moduleArgs.add(SMovB32(dst=sgpr("AddressTD+1"), src=sgpr(preloadSgprStartIdx+9), comment="Load AddressTD data"))
+            moduleArgs.add(SMovB32(dst=sgpr("AddressTD"), src=sgpr(preloadSgprStartIdx+8), comment="Load AddressTD data"))
+            moduleArgs.add(extReadEpilogueLabeltmp)
 
         moduleArgs.add(SMovB32(dst=sgpr(sgprPackedArgs), src=sgpr(preloadSgprStartIdx+1), comment="Preload internal args"))
         # Routing the General Batched GEMM to Strided Batched GEMM path
@@ -2846,12 +2846,29 @@ class KernelWriterAssembly(KernelWriter):
         moduleWg.add(self.localWriteAddresses(kernel, tPA, tPB, tPM))
 
       def waitForArgsToLoad():
+        # numSgprPreload spans the common args header, argLoader offsets start past it.
+        preloadedArgs = max(0, self.states.numSgprPreload - self.states.userArgsInfo.commonArgsNum)
+        pendingBytes = self.argLoader.getOffset() - preloadedArgs * self.states.bpr        
         if kernel["ProblemType"]["SupportUserArgs"]:
-          moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u/%u bytes of kern args" % \
-                        (self.argLoader.getOffset() - (self.states.numSgprPreload*4), self.externalArgLoader.getOffset())))
+          # if self.states.numSgprPreload <= (self.sgprs["Alpha"] - self.sgprs["SizesFree"]):
+          if preloadedArgs <= (self.sgprs["Alpha"] - self.sgprs["SizesFree"]):
+            moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u/%u bytes of kern args over preload" % \
+                          (pendingBytes, self.externalArgLoader.getOffset())))
+          else:
+            # Only ArgType == 2 loads the external user args at runtime, so the wait
+            # for kern args is only required in that case; skip it otherwise.
+            skipWaitLabel = Label(label=self.labels.getNameInc("SkipWaitForUserArgs"), comment="skip kern args wait if ArgType != 2")
+            self.cmpNamedArgTypeEq(moduleWg, 2, "ArgType == 2 ?")
+            moduleWg.add(SCBranchSCC0(labelName=skipWaitLabel.getLabelName(), comment="skip wait if ArgType != 2"))
+            moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u/%u bytes of kern args" % \
+                          (pendingBytes, self.externalArgLoader.getOffset())))
+            moduleWg.add(skipWaitLabel)
         else:
-          moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u bytes of kern args" % \
-                              (self.argLoader.getOffset() - (self.states.numSgprPreload*4))))
+          # if self.states.numSgprPreload <= (self.sgprs["Alpha"] - self.sgprs["SizesFree"]):
+          if preloadedArgs <= (self.sgprs["Alpha"] - self.sgprs["SizesFree"]):
+            moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u bytes of kern args" % pendingBytes))
+          else:
+            moduleWg.add(SNop(1, comment="alpha <= numSgprPreload, wait for kern args after"))
 
         if kernel["ExpertSchedulingMode"] > 0 and kernel["ESMRuntimeGate"]:
           moduleWg.add(VMovB32(dst=vgpr(self.states.esmRuntimeFlagVgpr), src=sgpr(self.states.esmRuntimeFlagSgpr), comment="move ESM runtime flag sgpr -> vgpr"))
@@ -2992,7 +3009,10 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SMovB64(dst=sgpr(tmpSgprArgAddress0,2), src=sgpr("KernArgAddress",2)))
           module.add(extValidLabelEnd)
         else:
-          module.add(SMovB32(dst=sgpr(tmpSgprArgOffsett), src=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4))))
+          if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel' or kernel["AdaptiveGemmGSUA"] == 1)):
+            module.add(SMovB32(dst=sgpr(tmpSgprArgOffsett), src=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4) + (self.states.numSgprAddressGSUSync)*4), comment="KernArgAddressOffset"))
+          else:
+            module.add(SMovB32(dst=sgpr(tmpSgprArgOffsett), src=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4)), comment="KernArgAddressOffset"))
           module.add(SMulI32(dst=sgpr(tmpSgprAddrM), src0=sgpr(sgprNumsOfGemm), src1=4)) # offset wgTable
           module.add(SMovB64(dst=sgpr(tmpSgprArgAddress0,2), src=sgpr("KernArgAddress",2)))
 
@@ -3098,7 +3118,39 @@ class KernelWriterAssembly(KernelWriter):
           moduleExternalArgs = Module("Load external Arguments")
         # Here alpha and beta in user args are fixed sizes, so we need to exclude beta and read it with a different offset
           load = load - self.states.numSgprBeta
-          moduleExternalArgs.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(sgprStart, "KernArgAddress", load, 4))
+          if kernel["InternalSupportParams"]["KernArgsVersion"] < 3:
+            # Legacy layout: DeviceUserArguments field order matches the kernel
+            # arg (defineSgpr) order, so a single sequential load is correct.
+            moduleExternalArgs.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(sgprStart, "KernArgAddress", load, 4))
+          else:
+            # KernArgsVersion >= 3: the kernel arg order was reordered, but
+            # DeviceUserArguments (ContractionSolution.hpp) is still the fixed
+            # legacy layout. Read each field from its fixed struct byte offset
+            # into the correctly-named sgpr (same approach as the Beta
+            # special-case below), so struct order and sgpr order no longer need
+            # to match. Each sgpr is loaded exactly once (no double-load race).
+            # Offsets are measured from the per-gemm struct start:
+            #   d@16 c@24 a@32 b@40 |
+            #   strideD@48 strideC@56 strideA@64 strideB@72 |
+            #   alpha@80 (beta@96 is handled below).
+            base = self.externalArgLoader.getOffset()
+            numSgprAddress = self.states.rpga
+            def _loadUserArg(name, structOffset, dword):
+              if dword > 0:
+                moduleExternalArgs.add(self.externalArgLoader.loadKernArg(
+                    name, "KernArgAddress", sgprOffset=hex(base + structOffset), dword=dword))
+            _loadUserArg("AddressD", 16, numSgprAddress)
+            _loadUserArg("AddressC", 24, numSgprAddress)
+            _loadUserArg("AddressA", 32, numSgprAddress)
+            _loadUserArg("AddressB", 40, numSgprAddress)
+            _loadUserArg("StridesD", 48, self.states.d.numSgprStrides)
+            _loadUserArg("StridesC", 56, self.states.c.numSgprStrides)
+            _loadUserArg("StridesA", 64, self.states.a.numSgprStrides)
+            _loadUserArg("StridesB", 72, self.states.b.numSgprStrides)
+            _loadUserArg("Alpha",    80, self.states.numSgprAlpha)
+            # Restore the running offset to where a sequential load would have
+            # left it, so the Beta / scale bookkeeping below stays unchanged.
+            self.externalArgLoader.setOffset(base + load * 4)
           offset = self.externalArgLoader.getOffset() + self.states.bpr * (self.states.userArgsInfo.alphaMaxRegisterSize - self.states.numSgprAlpha)
           self.externalArgLoader.setOffset(offset)
           if kernel["ProblemType"]["UseBeta"]:
@@ -13728,6 +13780,18 @@ class KernelWriterAssembly(KernelWriter):
 
   def globalWriteWorkGroupInit(self, kernel):
     module = Module("globalWriteWorkGroupInit")
+    # The SrdC/SrdD setup below is the first consumer of the kern arg tail
+    # (AddressC/D, StridesC/D), and is reached on both the ShadowInit and the
+    # endSummation path, so waiting here dominates every use.
+    if self.states.numSgprPreload > 0:
+      # numSgprPreload spans the common args header, argLoader offsets start past it.
+      preloadedArgs = max(0, self.states.numSgprPreload - self.states.userArgsInfo.commonArgsNum)
+      if preloadedArgs >= (self.sgprs["Alpha"] - self.sgprs["SizesFree"]):
+        module.add(SWaitCnt(kmcnt=0, comment="wait for %u bytes of kern args over preload" % \
+                            (self.argLoader.getOffset() - preloadedArgs * self.states.bpr)))
+                            # (self.argLoader.getOffset() - max(0, (self.states.numSgprPreload - self.states.userArgsInfo.commonArgsNum) * self.states.bpr))))
+      else:
+        module.add(SNop(1, comment="alpha >= numSgprPreload, wait for kern args before"))
     if kernel["BufferStore"]:
       module.add(self.allocPostLoopSrd("D", kernel))
       module.add(self.allocPostLoopSrd("C", kernel))
