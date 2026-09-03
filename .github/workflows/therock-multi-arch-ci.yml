@@ -14,7 +14,7 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit 3c4ec014374d4d32243334ef229093fe7b38c5b2.
+# TheRock ref: pinned to ROCm/TheRock commit 2160ee4c6fe45ceccb07fc21a01feb7269ac93c8.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -122,7 +122,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+          ref: 2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-08-31
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -138,10 +138,23 @@ jobs:
             --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
             --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
+          # Hardcoded for testing rpp
+          echo ""
+          echo "=============================================="
+          echo "OVERWRITING GITHUB_OUTPUT FOR TESTING"
+          echo "=============================================="
+          echo "changed_projects=projects/rpp"
+          echo "run_all_tests=false"
+          echo "skip_tests=false"
+          echo "=============================================="
+          echo ""
+          echo 'changed_projects=projects/rpp' >> $GITHUB_OUTPUT
+          echo 'run_all_tests=false' >> $GITHUB_OUTPUT
+          echo 'skip_tests=false' >> $GITHUB_OUTPUT
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-08-31
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
@@ -149,6 +162,7 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
+      changed_projects: ${{ needs.configure.outputs.changed_projects }}
       # Copy all stages except math-libs and ml-libs from TheRock baseline
       # rocm-libraries only affects math-libs and ml-libs source sets
       # RPP owns cv-libs, so rebuild that stage when projects/rpp changes.
@@ -166,7 +180,7 @@ jobs:
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
-      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+      ref: 2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-08-31
       # Pass external repo info for stage-impact analysis.
       # extra_cmake_options is appended to the cmake configure line of every
       # build stage, scoped to this repository's CI runs. TheRock keeps
@@ -192,7 +206,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-08-31
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -206,7 +220,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+      ref: 2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-08-31
     permissions:
       contents: read
       id-token: write
@@ -220,7 +234,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-08-31
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -232,7 +246,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+      ref: 2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-08-31
     permissions:
       contents: read
       id-token: write
@@ -253,7 +267,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+          ref: 2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-08-31
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
