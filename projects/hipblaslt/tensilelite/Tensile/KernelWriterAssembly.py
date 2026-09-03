@@ -11354,22 +11354,7 @@ class KernelWriterAssembly(KernelWriter):
       # if kernel["enableTDMMetadata"] and tP["is_sparse"]:
       #     imod.middle.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
       if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
-        if numWaves > 1:
-          # Multi-wave: recompute the LDS split boundary and global split increment
-          # transiently per use (see _tdmSplitMultiWaveInc).
-          with self.allocTmpSgpr(2, tag="tdmSplitInc") as incTmp:
-            gIncIdx = incTmp.idx
-            scratchIdx = incTmp.idx + 1
-            ldsIncOp = self._tdmSplitMultiWaveInc(imod.middle, kernel, gIncIdx, scratchIdx, self.tPA, self.tPB)
-            imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), ldsIncOp))
-            imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(gIncIdx)))
-            imod.middle.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
-        else:
-          ldsIncSgprName = f"tdm{tc}LdsSplitIncs"
-          globalIncSgprName = f"tdm{tc}GlobalSplitIncs"
-          imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), sgpr(ldsIncSgprName)))
-          imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(globalIncSgprName)))
-          imod.middle.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
+        self._tdmSplitApplyParkOffset(imod.middle, kernel, tc, self.tPA, self.tPB)
         if numWaves > 1:
           # Recompute the two per-half dim1 boundaries from the live descriptor.
           # halfRows is per-wave: even waves load A (MacroTile0//2), odd load B
@@ -11469,11 +11454,8 @@ class KernelWriterAssembly(KernelWriter):
         # if kernel["enableTDMMetadata"] and tP["is_sparse"]:
         #     imod.middle.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
         if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
-          ldsIncSgprName = f"tdm{tc}LdsSplitIncs"
-          globalIncSgprName = f"tdm{tc}GlobalSplitIncs"
-          imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), sgpr(ldsIncSgprName)))
-          imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(globalIncSgprName)))
-          imod.middle.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
+          # numWaves == 1 here, so this takes the per-tensor SGPR path.
+          self._tdmSplitApplyParkOffset(imod.middle, kernel, tc)
           comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
           imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3))
       return imod
@@ -19393,6 +19375,34 @@ class KernelWriterAssembly(KernelWriter):
     selectByParity(scratchIdx, ldsBoundB, ldsBoundA, "ldsSplit = parity ? B : A")
     return sgpr(scratchIdx)
 
+  def _tdmSplitApplyParkOffset(self, module: Module, kernel: Mapping, tc: str,
+                               tPA=None, tPB=None, comment: str = "") -> None:
+    """Advance tdm{tc}Group0 to its TDMSplit half-1 parking offset.
+
+    The "add" half of the TDMSplit pair whose subtract lives in `tdmIncrementAB` /
+    `tdmIncrementABWaveSperated`. Multi-wave recomputes both increments from wave
+    parity; single-wave reads the persistent per-tensor SGPRs, which only exist in
+    that case. Appends to `module` to keep the instruction stream flat, like
+    `_tdmSplitMultiWaveInc`.
+    """
+    grp = f"tdm{tc}Group0"
+    ldsComment = f"{comment} tdm{tc} Lds Split Incs" if comment else ""
+    gblComment = f"{comment} tdm{tc} Global Split Incs" if comment else ""
+    if kernel["NumWaves"] > 1:
+      # Multi-wave: recompute the LDS split boundary and global split increment
+      # transiently per use (see _tdmSplitMultiWaveInc).
+      with self.allocTmpSgpr(2, tag="tdmSplitInc") as incTmp:
+        gIncIdx = incTmp.idx
+        scratchIdx = incTmp.idx + 1
+        ldsIncOp = self._tdmSplitMultiWaveInc(module, kernel, gIncIdx, scratchIdx, tPA, tPB)
+        module.add(SAddU32(sgpr(f"{grp}+1"), sgpr(f"{grp}+1"), ldsIncOp, ldsComment))
+        module.add(SAddU32(sgpr(f"{grp}+2"), sgpr(f"{grp}+2"), sgpr(gIncIdx), gblComment))
+        module.add(SAddCU32(sgpr(f"{grp}+3"), sgpr(f"{grp}+3"), 0, f"tdm{tc} split carry"))
+    else:
+      module.add(SAddU32(sgpr(f"{grp}+1"), sgpr(f"{grp}+1"), sgpr(f"tdm{tc}LdsSplitIncs"), ldsComment))
+      module.add(SAddU32(sgpr(f"{grp}+2"), sgpr(f"{grp}+2"), sgpr(f"tdm{tc}GlobalSplitIncs"), gblComment))
+      module.add(SAddCU32(sgpr(f"{grp}+3"), sgpr(f"{grp}+3"), 0, f"tdm{tc} split carry"))
+
   def initTDMDescriptor(self, kernel: Mapping, tP: Mapping) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
@@ -20168,6 +20178,44 @@ class KernelWriterAssembly(KernelWriter):
         tcMX = tPB["MX"]["tensorChar"]
         mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
                         src1=sgpr(tailBankSgpr), comment=f"shift tail LocalReadAddr{tcMX} to TDM write bank"))
+    return mod
+
+  def papTdmRebalanceSkippedSplitIncrement(self, kernel: Mapping, tPA, tPB) -> Module:
+    """Re-apply the TDMSplit park offset the PAP primed-skip branch jumped over.
+
+    `globalReadDo` parks the descriptor at its half-1 offset and the following
+    `globalReadIncrementAB` subtracts it back. On a persistent workgroup's 2nd and
+    later tiles `setupNewTile` branches over that whole `globalReadDo` block on
+    `SkPrefetchPrimed`, so the add is skipped while the subtract still runs and the
+    descriptor lands one split increment below the tile base -- reading outside the
+    A/B allocation. Re-emit the add, predicated on `SkPrefetchPrimed`.
+    """
+    mod = Module("PAP TDMSplit rebalance")
+    if not (kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]):
+      return mod
+
+    # Keyed off globalReadDo's emission conditions: PGR2+DTV may null tPA/tPB to
+    # suppress the increment, but globalReadDo still ran with the real tensors, so
+    # the add is missing either way. Both enables are required -- the aliased AB
+    # descriptor and the per-tensor SplitIncs SGPRs each need them, as does the add
+    # site consuming them.
+    if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
+      return mod
+    # Multi-wave aliases B onto tdmAGroup0 and emits no B-side add. Always ["A"]
+    # today: Solution.py rejects TDM + PAP unless prod(MIWaveGroup) > 1.
+    tcList = ["A"] if kernel["NumWaves"] > 1 else ["A", "B"]
+
+    # Clobbers SCC; safe because globalReadIncrementAB recomputes it before use.
+    skipLabel = Label(self.labels.getNameInc("SK_SkipPapSplitRebalance"), "")
+    mod.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0,
+                      comment="did the primed-skip branch bypass the first PGR group?"))
+    mod.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
+                         comment="not primed: globalReadDo already applied the TDMSplit increment"))
+    for tc in tcList:
+      # A None tP falls back to self.tPA/self.tPB, as globalReadDo's add site uses.
+      self._tdmSplitApplyParkOffset(mod, kernel, tc, tPA, tPB,
+                                    comment="PAP primed: re-apply skipped")
+    mod.add(skipLabel)
     return mod
 
   def tdmIncrementAB(self, kernel, tP, loopIdx=None, prefetchIndex=0) -> Module:

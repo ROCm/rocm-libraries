@@ -3190,9 +3190,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
           moduleTmp = self.directToLdsM0Update(kernel, 0, tPM)
           module.add(replaceHolder(moduleTmp, 0))
           module.add(self.globalReadDo(kernel, 0, tPM))
-        if usePrimedSkip:
-          module.add(lbl_prefetchPrimedMerge)
-          module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="clear after first PGR group merge"))
         tPA = tensorParametersA
         tPB = tensorParametersB
         if kernel["PrefetchGlobalRead"] == 2:
@@ -3201,6 +3198,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
             tPA = None
           if kernel["DirectToVgprB"]:
             tPB = None
+        if usePrimedSkip:
+          module.add(lbl_prefetchPrimedMerge)
+          # TDMSplit parks the descriptor in the first-PGR group we may have branched
+          # over, and globalReadIncrementAB below subtracts it unconditionally. Must
+          # precede the clear -- the rebalance is predicated on SkPrefetchPrimed.
+          module.add(self.papTdmRebalanceSkippedSplitIncrement(kernel, tPA, tPB))
+          module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="clear after first PGR group merge"))
         module.add(self.globalReadIncrementAB(kernel, tPA, tPB, self.states.unrollIdx, pfi))
         # swap Tensor memToken
         self.states.ldsTensorTokenIdx = \
@@ -11454,6 +11458,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     assert False, "Should be overrided"
 
   def papTdmShiftTailLdsBank(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def papTdmRebalanceSkippedSplitIncrement(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def tdmIncrementAB(self, kernel, tP, loopIdx=None, prefetchIndex=0) -> Module:
