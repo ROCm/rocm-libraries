@@ -347,6 +347,21 @@ class RowColQuantGpuGemmRunner:
         BQ      shape: (N,)       dtype: float    (per-col B scale)
         c_dtype numpy dtype for the output C buffer. Defaults to np.float16.
         Returns RowColQuantGemmResult with C shape (M, N).
+
+        Shape constraints enforced by the bridge (validated on gfx1250 with the
+        default config). Violations raise RuntimeError; no output is written:
+
+          K % 16 == 0     Required even though the default config sets pad_k=True --
+                          pad_k covers the K-loop tail, not the global-load vector
+                          width.
+          N % 64 == 0     Required because the default config sets pad_n=False, so N
+                          must be a whole number of N-tiles (tile_n=64).
+          M % 4 == 0      gfx12 targets only. The per-row A-scale (AQ) tile window is
+                          built without a padding transform, so row M-1 of C comes
+                          back as zero while every other row is correct. The bridge
+                          refuses these shapes rather than returning a silently wrong
+                          result. gfx942/gfx950 are not restricted. TensorQuant uses
+                          scalar scales and has no M constraint.
         """
         import numpy as np
 
@@ -407,9 +422,17 @@ class RowColQuantGpuGemmRunner:
         )
 
         if rc != 0:
+            # rc alone is not actionable, and the C++ explanation goes to stderr, which
+            # a caller capturing only the exception never sees. Restate the constraints
+            # here so the traceback is self-contained.
             raise RuntimeError(
                 f"dispatcher_run_gemm failed with code {rc} "
-                f"for kernel {self.kernel_name}"
+                f"for kernel {self.kernel_name} at M={M} N={N} K={K}. "
+                f"(-1 = rejected by the bridge, -2 = rejected by the kernel, "
+                f"-3 = launch threw.) Shape constraints: K % 16 == 0 (required even "
+                f"with pad_k=True); N % 64 == 0 when pad_n=False; and on gfx12 targets "
+                f"M % 4 == 0, because the per-row AQ tile window is unpadded in M and "
+                f"would zero row M-1 of C. See stderr for the exact reason."
             )
 
         return RowColQuantGemmResult(C=C, time_ms=time_ms, kernel_name=self.kernel_name)

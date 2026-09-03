@@ -53,14 +53,40 @@ def _has_hipcc() -> bool:
     return shutil.which("hipcc") is not None
 
 
+def normalize_gfx_arch(arch: str) -> str:
+    """Strip feature suffixes from a gfx target string.
+
+    ``rocm_agent_enumerator`` and ``hipDeviceProp_t::gcnArchName`` may report the
+    target with trailing feature flags, e.g. ``"gfx942:sramecc+:xnack-"``. Every
+    comparison we do here (and the ``--offload-arch`` we hand to hipcc) wants the
+    bare target, so normalize once at the boundary.
+    """
+    return arch.split(":", 1)[0]
+
+
+def arch_is_supported(arch: str, supported=None) -> bool:
+    """True if `arch` names a supported target, ignoring feature suffixes.
+
+    An exact ``arch in _SUPPORTED_ARCHES`` test returns False for
+    ``"gfx942:sramecc+:xnack-"``, so on a machine whose enumerator reports
+    suffixes these GPU tests would SKIP on a fully supported device. A skip reads
+    as a green run, so the regression would be invisible -- the bug is the silent
+    skip, not the missing coverage. The C++ bridge already prefix-matches in
+    ``is_supported_arch()``; this keeps the Python gate consistent with it.
+    """
+    if supported is None:
+        supported = _SUPPORTED_ARCHES
+    return normalize_gfx_arch(arch) in supported
+
+
 def _detect_gfx_arch() -> str:
     """Return the first usable GPU arch, or empty string if none found."""
     try:
         r = subprocess.run(["rocm_agent_enumerator"], capture_output=True, text=True, timeout=10)
         for line in r.stdout.splitlines():
             arch = line.strip()
-            if arch.startswith("gfx") and arch != "gfx000":
-                return arch
+            if arch.startswith("gfx") and normalize_gfx_arch(arch) != "gfx000":
+                return normalize_gfx_arch(arch)
     except Exception:
         pass
     return ""
@@ -73,7 +99,7 @@ _GFX_ARCH = _detect_gfx_arch()
 _SUPPORTED_ARCHES = ("gfx942", "gfx950", "gfx1250")
 
 requires_gpu = pytest.mark.skipif(
-    not (_has_hipcc() and _GFX_ARCH in _SUPPORTED_ARCHES),
+    not (_has_hipcc() and arch_is_supported(_GFX_ARCH)),
     reason=(
         f"GPU test: requires hipcc and native fp8 GPU ({', '.join(_SUPPORTED_ARCHES)}); "
         f"detected arch='{_GFX_ARCH}'"

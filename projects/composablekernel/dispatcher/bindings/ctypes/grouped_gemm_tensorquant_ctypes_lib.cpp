@@ -165,7 +165,19 @@ int dispatcher_init() { return dispatcher_initialize(); }
  *   k_batch          - split-K factor (1 = no split)
  *   time_ms          - output: kernel execution time in ms (may be NULL)
  *
- * Returns 0 on success, negative on error.
+ * Shape constraints (validated on gfx1250 with the default config; violations are
+ * rejected with an explanatory message and no output is written):
+ *   K % 16 == 0      - required even when the kernel was generated with pad_k=true.
+ *                      pad_k covers the K-loop tail, not the global-load vector width.
+ *   N % TileN == 0   - required whenever the kernel was generated with pad_n=false.
+ *                      TileN is 64 in the default config.
+ * There is no M constraint: TensorQuant applies scalar A/B scales rather than a
+ * per-row scale vector, and is correct at every M tested on gfx1250.
+ *
+ * Returns 0 on success, negative on error:
+ *   -1  argument rejected by this bridge (including the constraints above)
+ *   -2  argument rejected by the kernel's own IsSupportedArgument()
+ *   -3  kernel launch threw
  */
 int dispatcher_run_gemm(const void* A,
                         const void* B,
@@ -217,6 +229,17 @@ int dispatcher_run_gemm(const void* A,
     if(QK_B != 1)
     {
         std::cerr << "dispatcher_run_gemm: TensorQuant requires QK_B=1, got QK_B=" << QK_B << "\n";
+        return -1;
+    }
+
+    // N must be a whole number of N-tiles unless the kernel pads N. Derived from the
+    // kernel's own constants rather than hardcoded, so it stays correct if the tile or
+    // the padding trait changes. Without this the caller only sees a bare -2.
+    if(!SelectedKernel::kPadN && (N % SelectedKernel::TileN) != 0)
+    {
+        std::cerr << "dispatcher_run_gemm: N must be a multiple of " << SelectedKernel::TileN
+                  << " for this kernel (it was generated with pad_n=false, so N has to be a "
+                  << "whole number of N-tiles); got N=" << N << "\n";
         return -1;
     }
 
@@ -416,7 +439,17 @@ int dispatcher_run_gemm(const void* A,
 
     if(exec_time < 0.0f)
     {
-        std::cerr << "dispatcher_run_gemm: kernel reported unsupported args\n";
+        // IsSupportedArgument() is a boolean inside ck_tile and gives no reason, so
+        // enumerate the constraints a caller is realistically violating. Observed on
+        // gfx1250 with the default config: K must be a multiple of 16 (this holds even
+        // with pad_k=true -- padding covers the K-loop tail, not the global-load vector
+        // width), and N a multiple of the N-tile when pad_n is false.
+        std::cerr << "dispatcher_run_gemm: kernel reported unsupported args for M=" << M
+                  << " N=" << N << " K=" << K << " k_batch=" << k_batch
+                  << ". Known constraints for this kernel: K must be a multiple of 16 "
+                  << "(required even though pad_k=" << (SelectedKernel::kPadK ? "true" : "false")
+                  << "); N must be a multiple of " << SelectedKernel::TileN
+                  << " when pad_n is false. No output was written.\n";
         cleanup();
         return -2;
     }
