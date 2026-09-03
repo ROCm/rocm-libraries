@@ -1014,11 +1014,16 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     ),
 }
 
-# LLVM 23 (ROCm 7.13+): empirically identical to LLVM 22 for the declares rocke
-# emits today. Split entries here if an LLVM 23 host proves drift.
-_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = dict(
-    _INTRINSIC_DECLS_LLVM22_OVERRIDES
-)
+# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides except where an
+# intrinsic's ABI changed again.
+_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
+    **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
+    "mfma.scale.f32.16x16x128.f8f6f4": (
+        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+        "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
+        "i32 immarg, i32, i32 immarg, i32)"
+    ),
+}
 
 
 def _llvm_type(t: Type) -> str:
@@ -3248,14 +3253,24 @@ class _Lowerer:
             )
         else:
             b_packed = self._operand(b)
-        self._current().emit(
-            f"  {op.result.name} = call <4 x float> "
-            f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-            f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
-            f"<4 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
-            f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
-        )
+        if self._flavor == LLVM_FLAVOR_LLVM23:
+            self._current().emit(
+                f"  {op.result.name} = call <4 x float> "
+                f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
+                f"<4 x float> {self._operand(c)}, "
+                f"i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
+                f"i32 0, i32 {self._operand(b_scale)})"
+            )
+        else:
+            self._current().emit(
+                f"  {op.result.name} = call <4 x float> "
+                f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
+                f"<4 x float> {self._operand(c)}, "
+                f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
+                f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
+            )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
         a, b, c = op.operands
@@ -3322,9 +3337,8 @@ class _Lowerer:
         value 0 (exponent 0 => 2^0 == 1.0), making it numerically a plain
         unscaled fp8 MFMA. ``cbsz=0`` / ``blgp=0`` select fp8e4m3 for A and
         B; ``op_sel`` scale-byte selectors are 0. This is ADDITIVE — it
-        reuses the existing scaled intrinsic decl and emits the same call
-        shape as :meth:`_op_tile_mfma_scale_f32_16x16x128_f8f6f4`, but with
-        constant zero scales (so no scale registers are loaded).
+        uses a dedicated declaration key for the nine-argument form and pins
+        both scale operands to zero (so no scale registers are loaded).
 
         A / B arrive as ``<32 x fp8e4m3>`` (== ``<32 x i8>``, 32 f8 bytes
         per lane) and are bitcast to the intrinsic's ``<8 x i32>``.
@@ -3332,9 +3346,8 @@ class _Lowerer:
         """
         a, b, c = op.operands
         # ADDITIVE: a dedicated decl key for the unscaled hero atom (the
-        # 9-arg LLVM22 f8f6f4 scale-MFMA signature). We do NOT touch the
-        # existing ``mfma.scale.f32.16x16x128.f8f6f4`` decl (different,
-        # frozen, 11-arg form used by the MX-scaled lowering).
+        # 9-arg f8f6f4 scale-MFMA signature). The separate key preserves the
+        # LLVM20/22 MX-scaled declaration, which remains the 11-arg form.
         self._need("mfma.f32.16x16x128.fp8.hero")
         a_packed = self._fresh("a_fp8_128")
         b_packed = self._fresh("b_fp8_128")
