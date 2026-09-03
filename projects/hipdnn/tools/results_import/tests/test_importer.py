@@ -119,7 +119,24 @@ def test_shards_concatenate_and_round_trip_through_parquet(tmp_path, matmul):
 
     destination = tmp_path / "out" / "results.parquet"
     write_parquet(out, destination)
-    assert pd.read_parquet(destination).equals(out)
+    back = pd.read_parquet(destination)
+
+    # Values, not dtype identity. pyarrow normalises pandas' object column to a real string
+    # dtype on the way back, which is more correct rather than less -- asserting frame equality
+    # would be testing pandas/pyarrow's type mapping instead of anything this module does.
+    pd.testing.assert_frame_equal(back, out, check_dtype=False)
+
+    # What the round trip actually has to preserve: a null stays null rather than becoming an
+    # empty string or a zero, since null is the whole signal that a row has no measurement.
+    nulled = build_dataset(
+        rows(minTimeMs=[1.0, None], avgTimeMs=[1.1, None], stddevMs=[0.01, None],
+             iters=[10, None], error=["", "HIP error 700"]),
+        matmul,
+    )
+    write_parquet(nulled, destination)
+    reread = pd.read_parquet(destination)
+    assert reread["tflops"].isna().tolist() == [False, True]
+    assert reread["minTimeMs"].isna().tolist() == [False, True]
 
 
 def test_an_empty_csv_field_reads_back_as_a_null_metric(tmp_path, matmul):
