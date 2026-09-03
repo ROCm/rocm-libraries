@@ -50,6 +50,12 @@ inline constexpr HazardRule kCdna5HazardRules[] = {
      HazardDir::WriteThenRead, HazardUnit::Cycles, nullptr},
     {"ValuVgprToVmemAddr", isVectorALU, isVmemAddrHazardConsumer, RegType::V, 32,
      HazardDir::WriteThenRead, HazardUnit::Cycles, nullptr},
+    // Same producer/consumer pair, distance -1 = hoist as far as possible. The rule
+    // above still supplies the gate; this one only pulls the deadline to 0 so the
+    // address is computed early and its consumer's va_vdst is already satisfied by
+    // the matrix ops that land in between. The prefetch itself is never held back.
+    {"ValuVgprToVmemAddrHoist", isVectorALU, isVmemAddrHazardConsumer, RegType::V, -1,
+     HazardDir::WriteThenRead, HazardUnit::Cycles, nullptr},
     // mode2 WAR: a WMMA reads a vgpr, a later ds_load overwrites it. The gap is the
     // va_vdst follower count, which only grows when another matrix op issues -- elapsing
     // time cannot pay it, hence PipeOps. Distance 0: CDNA5Config supplies it per arch.

@@ -57,7 +57,7 @@ TEST(HWModel, Gfx1250HazardRules) {
     const HWModel& hw = hwModelForArch(kGfx1250);
 
     ASSERT_EQ(hw.hazards.numRules, kNumCdna5HazardRules);
-    ASSERT_EQ(hw.hazards.numRules, 3);
+    ASSERT_EQ(hw.hazards.numRules, 4);
     ASSERT_NE(hw.hazards.rules, nullptr);
 
     // The model points at the shared table rather than carrying a copy.
@@ -75,13 +75,20 @@ TEST(HWModel, Gfx1250HazardRules) {
     EXPECT_EQ(hw.hazards.rules[1].dir, HazardDir::WriteThenRead);
     EXPECT_EQ(hw.hazards.rules[1].unit, HazardUnit::Cycles);
 
-    // PipeOps rule: distance 0 in the table means the arch policy supplies it.
-    EXPECT_STREQ(hw.hazards.rules[2].name, "WmmaVgprSrcToDsWrite");
+    // Same pair as rule[1]; -1 means "hoist as far as possible", so it contributes a
+    // deadline of 0 and no gate. rule[1] remains the one that enforces the gap.
+    EXPECT_STREQ(hw.hazards.rules[2].name, "ValuVgprToVmemAddrHoist");
     EXPECT_EQ(hw.hazards.rules[2].regType, RegType::V);
-    EXPECT_EQ(hw.hazards.rules[2].distance, 0);
-    EXPECT_EQ(hw.hazards.rules[2].dir, HazardDir::ReadThenWrite);
-    EXPECT_EQ(hw.hazards.rules[2].unit, HazardUnit::PipeOps);
-    EXPECT_NE(hw.hazards.rules[2].isPipeOp, nullptr);
+    EXPECT_EQ(hw.hazards.rules[2].distance, -1);
+    EXPECT_EQ(hw.hazards.rules[2].dir, HazardDir::WriteThenRead);
+    EXPECT_EQ(hw.hazards.rules[2].unit, HazardUnit::Cycles);
+
+    EXPECT_STREQ(hw.hazards.rules[3].name, "WmmaVgprSrcToDsWrite");
+    EXPECT_EQ(hw.hazards.rules[3].regType, RegType::V);
+    EXPECT_EQ(hw.hazards.rules[3].distance, 0);
+    EXPECT_EQ(hw.hazards.rules[3].dir, HazardDir::ReadThenWrite);
+    EXPECT_EQ(hw.hazards.rules[3].unit, HazardUnit::PipeOps);
+    EXPECT_NE(hw.hazards.rules[3].isPipeOp, nullptr);
 }
 
 // gfx1250v0 currently aliases gfx1250 field-for-field. This pins that it is a
