@@ -247,18 +247,23 @@ class OpOverride:
                     )
 
             if tuning:
-                # ALL, not the default: the sweep ranks compiled plans, so every
-                # candidate has to be compiled before it can be timed. check_support()
-                # belongs to the compiled-plan path and is skipped here -- an
-                # unsupported candidate simply fails to compile and drops out.
-                err = g.build_plans(st.hipdnn.BuildPlanPolicy.ALL)
+                # NO build_plans() HERE, deliberately. On the plan-spec path
+                # autotune() compiles the specs itself as it benchmarks them --
+                # that is the whole call. Adding build_plans() fails with "No
+                # execution plans to build. Call create_execution_plans() first.",
+                # because build_plans belongs to the OTHER path. The canonical
+                # order is samples/autotune.py: get_engine_configs ->
+                # add_all_engines -> get_estimated_max_workspace_size -> autotune.
+                # check_support() is likewise compiled-plan-only; an unsupported
+                # candidate simply fails to compile and drops out of the ranking.
+                pass
             else:
                 err = g.check_support()
                 if err.is_bad():
                     raise NotApplicable(f"check_support: {err.get_message()}")
                 err = g.build_plans()
-            if err.is_bad():
-                raise NotApplicable(f"build_plans: {err.get_message()}")
+                if err.is_bad():
+                    raise NotApplicable(f"build_plans: {err.get_message()}")
 
             # Ground-truth winner of the (built) plan -- the engine that will run.
             # Under tuning this is provisional; _maybe_tune re-reads it after the
