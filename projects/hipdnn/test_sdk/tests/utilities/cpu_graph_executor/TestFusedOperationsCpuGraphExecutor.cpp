@@ -210,8 +210,12 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
     const std::vector<int64_t> dilation = {1, 1};
     const std::vector<int64_t> padding = {0, 0};
 
-    const float maxConstant = 5.0f;
-    const float minConstant = 2.0f;
+    // Conv output = x * w with x, w drawn from [0, 1), so the output lies in [0, 1).
+    // These constants form a clamp window inside that range so max/min actually
+    // discriminate between the clamped-low, passthrough, and clamped-high cases
+    // instead of both stages collapsing to a fixed constant.
+    const float maxConstant = 0.25f;
+    const float minConstant = 0.75f;
     const unsigned int seed = getGlobalTestSeed();
 
     // DIRECT TENSOR MANAGEMENT - Expert Architecture
@@ -288,7 +292,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
     convOutputTensorAttr->set_dim(yDims);
     convOutputTensorAttr->set_stride(generateStrides(yDims, TensorLayout::NHWC.strideOrder));
 
-    // Step 2: POINTWISE MAX OPERATION (max(conv, 5.0))
+    // Step 2: POINTWISE MAX OPERATION (max(conv, 0.25))
     hipdnn_frontend::graph::PointwiseAttributes maxAttrs;
     maxAttrs.set_name("PointwiseMax");
     maxAttrs.set_mode(hipdnn_frontend::PointwiseMode::MAX);
@@ -304,7 +308,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
     maxOutputTensorAttr->set_dim(yDims);
     maxOutputTensorAttr->set_stride(generateStrides(yDims, TensorLayout::NHWC.strideOrder));
 
-    // Step 3: POINTWISE MIN OPERATION (min(max(conv, 5.0), 2.0))
+    // Step 3: POINTWISE MIN OPERATION (min(max(conv, 0.25), 0.75))
     hipdnn_frontend::graph::PointwiseAttributes minAttrs;
     minAttrs.set_name("PointwiseMin");
     minAttrs.set_mode(hipdnn_frontend::PointwiseMode::MIN);
@@ -338,13 +342,13 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
     CpuReferenceGraphExecutor{}.execute(
         serializedGraph.data(), serializedGraph.size(), variantPack);
 
-    // Compute reference result manually: min(max(conv(X, W), 5.0), 2.0)
+    // Compute reference result manually: min(max(conv(X, W), 0.25), 0.75)
     // Step 1: Perform convolution
     Tensor<float> tempConvOutput(yDims, TensorLayout::NHWC);
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         refXTensor, refWTensor, tempConvOutput, strides, dilation, padding);
 
-    // Step 2: Max with constant (5.0) applied to convolution result
+    // Step 2: Max with constant (0.25) applied to convolution result
     Tensor<float> tempMaxOutput(yDims, TensorLayout::NHWC);
     auto* convOutputData = static_cast<float*>(tempConvOutput.memory().hostData());
     auto* maxOutputData = static_cast<float*>(tempMaxOutput.memory().hostData());
@@ -358,7 +362,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
         maxOutputData[i] = std::max(convOutputData[i], maxConstant);
     }
 
-    // Step 3: Min with constant (2.0)
+    // Step 3: Min with constant (0.75)
     auto* finalOutputData = static_cast<float*>(refYTensor.memory().hostData());
     for(size_t i = 0; i < elementCount; ++i)
     {
