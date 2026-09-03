@@ -182,6 +182,33 @@ rocke_value_t* rocke_b_mov_dpp8(rocke_ir_builder_t* b, rocke_value_t* data, int 
     return rocke_i_op1(b, ROCKE_OP_TILE_MOV_DPP8, &data, 1, data->type, &attrs, "dpp8");
 }
 
+rocke_value_t* rocke_b_quad_perm(
+    rocke_ir_builder_t* b, rocke_value_t* data, int p0, int p1, int p2, int p3)
+{
+    rocke_attr_map_t attrs;
+    int ctrl;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!data)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "quad_perm: NULL data");
+    if(!rocke_flow_is_i32(data->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "quad_perm requires i32 data");
+    if(p0 < 0 || p0 > 3 || p1 < 0 || p1 > 3 || p2 < 0 || p2 > 3 || p3 < 0 || p3 > 3)
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "quad_perm lane selectors must be in 0..3, got [%d,%d,%d,%d]",
+            p0,
+            p1,
+            p2,
+            p3);
+    ctrl = p0 | (p1 << 2) | (p2 << 4) | (p3 << 6);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "ctrl", (int64_t)ctrl);
+    return rocke_i_op1(b, ROCKE_OP_TILE_QUAD_PERM, &data, 1, rocke_i32(), &attrs, "qperm");
+}
+
 static bool flow_wave_reduce_allowed(const char* reduce_op, const char* ty)
 {
     if(!reduce_op || !ty)

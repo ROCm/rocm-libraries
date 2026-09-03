@@ -3207,6 +3207,64 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         # does not exist, so the declare was silently omitted.
         self.assertIn("declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)", ll)
 
+    # ---- quad_perm ----
+    def test_quad_perm_encodes_lane_selection(self):
+        # [1,0,3,2] -> 1 | (0 << 2) | (3 << 4) | (2 << 6) == 177.
+        ll = self._lower(
+            "qperm", lambda b: b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
+        )
+        self.assertIn("declare i32 @llvm.amdgcn.update.dpp.i32(", ll)
+        self.assertIn(
+            "call i32 @llvm.amdgcn.update.dpp.i32("
+            "i32 1, i32 1, i32 177, i32 15, i32 15, i1 true)",
+            ll,
+        )
+
+    def test_quad_perm_emits_hip_builtin(self):
+        from rocke.core.ir import IRBuilder
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        b = IRBuilder("qperm_hip")
+        b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
+        hip = lower_kernel_to_hip(b.kernel)
+        self.assertIn(
+            "__builtin_amdgcn_update_dpp(c1, c1, 177, 15, 15, 1)",
+            hip,
+        )
+
+    def test_quad_perm_is_pure(self):
+        from rocke.core.ir import is_pure_op_name
+
+        b = self._builder("qperm_pure")
+        value = b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
+        self.assertTrue(value.op.is_pure)
+        self.assertTrue(is_pure_op_name("tile.quad_perm"))
+
+    def test_quad_perm_rejects_bad_perm_and_type(self):
+        b = self._builder("qperm_bad")
+        with self.assertRaises(ValueError):
+            b.quad_perm(b.const_i32(1), [0, 1, 2])
+        with self.assertRaises(ValueError):
+            b.quad_perm(b.const_i32(1), [0, 1, 2, 4])
+        with self.assertRaises(ValueError):
+            b.quad_perm(b.const_f32(1.0), [0, 1, 2, 3])
+
+    def test_warp_shuffle_xor_quad_maps_masks(self):
+        ll = self._lower(
+            "qperm_xor",
+            lambda b: (
+                b.warp_shuffle_xor_quad(b.const_i32(1), 1),
+                b.warp_shuffle_xor_quad(b.const_i32(1), 2),
+            ),
+        )
+        self.assertIn("i32 177, i32 15, i32 15, i1 true)", ll)
+        self.assertIn("i32 78, i32 15, i32 15, i1 true)", ll)
+
+    def test_warp_shuffle_xor_quad_rejects_out_of_quad_mask(self):
+        b = self._builder("qperm_xor_bad")
+        with self.assertRaises(ValueError):
+            b.warp_shuffle_xor_quad(b.const_i32(1), 4)
+
     # ---- mov_dpp8 ----
     def test_mov_dpp8_i32_emits_typed_intrinsic(self):
         ll = self._lower("dpp8i", lambda b: b.mov_dpp8(b.const_i32(1), 0x765432))
