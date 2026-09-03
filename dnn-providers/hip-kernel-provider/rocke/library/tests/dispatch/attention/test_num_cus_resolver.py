@@ -14,6 +14,7 @@ override: when > 0 it replaces ``num_cus * 4`` for routing/segmentation without 
 device CU count. These tests mock the device query/arch (no GPU) and assert the
 resolution order plus the downstream routing/segment effects.
 """
+
 from __future__ import annotations
 
 import dispatch.attention as A
@@ -343,9 +344,13 @@ def test_gfx942_partition_routing_matches_develop():
         p.attr(AC, "_device_num_cus", lambda: 38)  # CPX partition
         for shape in (
             dict(nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=8192, batch=1),
-            dict(nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=8192, batch=16),
+            dict(
+                nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=8192, batch=16
+            ),
             dict(nhead_q=32, nhead_k=4, hdim_q=64, hdim_v=64, seqlen_k=32768, batch=4),
-            dict(nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=4096, batch=32),
+            dict(
+                nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=4096, batch=32
+            ),
         ):
             resolved = A._problem(_req(num_cus=0, arch="gfx942", **shape))
             unfloored = A._problem(_req(num_cus=38, arch="gfx942", **shape))
