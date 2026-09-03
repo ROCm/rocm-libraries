@@ -34,13 +34,18 @@ namespace hipdnn_integration_tests::bundle
 namespace detail
 {
 
-inline std::filesystem::path sidecarPathFor(const DiscoveredBundle& disc)
+// Where this bundle's support claim lives. Delegates to the SupportClaims
+// factories rather than re-deriving the paths, so the writer, the enforcer and
+// the round-trip tests all name a bundle's sidecar by one rule -- a second
+// derivation here could drift from that rule and have the writer overwrite a
+// file the enforcer never reads.
+inline SupportClaimLocator claimLocatorFor(const DiscoveredBundle& disc)
 {
     if(disc.isTemplateSweepCase())
     {
-        return disc.jsonPath.parent_path() / "support.json";
+        return sweepCaseClaimLocator(disc.jsonPath, disc.sweep->caseId);
     }
-    return supportJsonPath(disc.diagnosticPath());
+    return singleGraphClaimLocator(disc.jsonPath);
 }
 
 // A discovered bundle paired with its eagerly-loaded contents. The bundle is
@@ -154,20 +159,12 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc)
         return SkippedLoad{"Skipping bundle " + diagnosticPath.string() + ": " + toString(*error)};
     }
 
-    SupportClaimLocator locator;
-    locator.sidecarPath = sidecarPathFor(disc);
-    locator.diagnosticPath = diagnosticPath.string();
-    if(disc.isTemplateSweepCase())
-    {
-        locator.caseId = disc.sweep->caseId;
-    }
-
     return LoadedBundle{diagnosticPath,
                         disc.suiteName,
                         disc.testName,
                         std::make_shared<IntegrationTestBundle>(
                             std::move(std::get<IntegrationTestBundle>(loadResult))),
-                        locator};
+                        claimLocatorFor(disc)};
 }
 
 // Registers one GTest test per preloaded bundle, run by the Engine executor.
@@ -423,7 +420,9 @@ inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool coun
         if(countClaimCoverage)
         {
             supportClaimCoverage().graphsFound++;
-            if(std::filesystem::exists(sidecarPathFor(disc)))
+            // The locator the registered test will carry, not a second derivation
+            // of it -- the coverage number has to count the file the run reads.
+            if(std::filesystem::exists(std::get<LoadedBundle>(outcome).claimLocator.sidecarPath))
             {
                 supportClaimCoverage().graphsWithClaims++;
             }
