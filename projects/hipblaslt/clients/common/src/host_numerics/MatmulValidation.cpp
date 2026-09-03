@@ -27,20 +27,20 @@ namespace hipblaslt::host_numerics
             request.findAllCloseTolerance          = searchAllClose;
             request.computeUnitsInLastPlace        = computeUlp;
 
-            if(options.comparePointwise)
+            if(options.compareAllClose)
             {
-                if(validationCase.pointwiseTolerance.symmetricRelative != 0)
+                if(validationCase.allCloseTolerance.symmetricRelative != 0)
                 {
-                    request.pointwise = HostPointwiseComparison::SymmetricRelative;
+                    request.allCloseMode = HostAllCloseMode::SymmetricRelative;
                     request.symmetricRelativeTolerance
-                        = validationCase.pointwiseTolerance.symmetricRelative;
+                        = validationCase.allCloseTolerance.symmetricRelative;
                 }
                 else
                 {
-                    request.pointwise = validationCase.pointwiseTolerance.absolute != 0
-                                            ? HostPointwiseComparison::Near
-                                            : HostPointwiseComparison::Unit;
-                    request.absoluteTolerance = validationCase.pointwiseTolerance.absolute;
+                    request.allCloseMode      = validationCase.allCloseTolerance.absolute != 0
+                                                    ? HostAllCloseMode::Near
+                                                    : HostAllCloseMode::Unit;
+                    request.absoluteTolerance = validationCase.allCloseTolerance.absolute;
                 }
             }
             return compareHost(request);
@@ -73,17 +73,17 @@ namespace hipblaslt::host_numerics
                     compareMatmulOutput(output,
                                         validationCase,
                                         options,
-                                        options.comparePointwise || options.compareNorm,
+                                        options.compareAllClose || options.compareNorm,
                                         options.searchAllClose,
                                         options.computeUlp));
             }
 
-            if(options.comparePointwise || options.compareNorm)
+            if(options.compareAllClose || options.compareNorm)
             {
                 for(const auto& report : outputReports)
                     record(report.comparison.nonFiniteMismatches == 0);
             }
-            if(options.comparePointwise)
+            if(options.compareAllClose)
             {
                 for(const auto& report : outputReports)
                     record(report.comparison.passed());
@@ -143,13 +143,13 @@ namespace hipblaslt::host_numerics
                 = [&](const std::optional<MatmulValidationCase::SideOutput>& output) {
                       if(!output)
                           return;
-                      if(options.comparePointwise)
+                      if(options.compareAllClose)
                       {
-                          auto pointwiseOptions        = options;
-                          pointwiseOptions.compareNorm = false;
-                          const auto report            = compareMatmulOutput(output->pointwise,
+                          auto selectedOptions        = options;
+                          selectedOptions.compareNorm = false;
+                          const auto report           = compareMatmulOutput(output->selected,
                                                                   validationCase,
-                                                                  pointwiseOptions,
+                                                                  selectedOptions,
                                                                   false,
                                                                   false,
                                                                   false);
@@ -158,7 +158,7 @@ namespace hipblaslt::host_numerics
                       if(options.compareNorm)
                       {
                           auto normOptions             = options;
-                          normOptions.comparePointwise = false;
+                          normOptions.compareAllClose  = false;
                           const auto report            = compareMatmulOutput(
                               output->norm, validationCase, normOptions, false, false, false);
                           const double normError = std::abs(report.relativeFrobeniusError);

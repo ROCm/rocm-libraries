@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
     const Tensor observedView =
         Tensor::copyNativeStorage<float>(layout, std::span<const float>(observed));
     ComparisonOptions options = defaultComparisonOptions(ScalarType::Float32);
-    options.computePointwiseStatistics = false;
+    options.computeElementwiseStatistics = false;
     options.computeFrobenius = false;
     options.maxReportedMismatches = 0;
     options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);

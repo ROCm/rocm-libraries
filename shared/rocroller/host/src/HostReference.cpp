@@ -176,8 +176,8 @@ namespace rocRoller::HostNumerics
         using namespace roc::host_numerics;
 
         ComparisonOptions options;
-        options.pointwise                              = false;
-        options.computePointwiseStatistics             = true;
+        options.allClose                               = false;
+        options.computeElementwiseStatistics           = true;
         options.computeFrobenius                       = true;
         options.computeUlp                             = false;
         options.maxReportedMismatches                  = 0;

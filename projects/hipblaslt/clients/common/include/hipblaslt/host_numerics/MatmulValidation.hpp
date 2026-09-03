@@ -12,7 +12,7 @@ namespace hipblaslt::host_numerics
 {
     struct MatmulValidationOptions
     {
-        bool                comparePointwise = false;
+        bool                 compareAllClose  = false;
         bool                compareNorm      = false;
         bool                searchAllClose   = false;
         bool                computeUlp       = false;
@@ -24,7 +24,7 @@ namespace hipblaslt::host_numerics
 
     struct MatmulValidationCase
     {
-        struct PointwiseTolerance
+        struct AllCloseTolerance
         {
             double absolute          = 0.0;
             double symmetricRelative = 0.0;
@@ -33,14 +33,14 @@ namespace hipblaslt::host_numerics
         std::vector<HostComparisonRequest> outputs;
         struct SideOutput
         {
-            HostComparisonRequest pointwise;
+            HostComparisonRequest selected;
             HostComparisonRequest norm;
             bool useComputeNormPolicy = false;
         };
         std::optional<SideOutput> maximum;
         std::optional<SideOutput> auxiliary;
         std::optional<SideOutput> bias;
-        PointwiseTolerance pointwiseTolerance;
+        AllCloseTolerance         allCloseTolerance;
     };
 
     struct MatmulValidationMetrics

@@ -19,13 +19,13 @@ void registerComparisonBindings(nb::module_& module) {
         .value("RelativeSpacing", UlpComparisonMode::RelativeSpacing)
         .value("EncodedDistance", UlpComparisonMode::EncodedDistance);
 
-    nb::enum_<ComplexPointwiseMode>(module, "ComplexPointwiseMode")
-        .value("Componentwise", ComplexPointwiseMode::Componentwise)
-        .value("Magnitude", ComplexPointwiseMode::Magnitude);
+    nb::enum_<ComplexComparisonMode>(module, "ComplexComparisonMode")
+        .value("Componentwise", ComplexComparisonMode::Componentwise)
+        .value("Magnitude", ComplexComparisonMode::Magnitude);
 
     nb::class_<ComparisonOptions>(module, "ComparisonOptions")
         .def(nb::init<>())
-        .def_rw("pointwise", &ComparisonOptions::pointwise)
+        .def_rw("all_close", &ComparisonOptions::allClose)
         .def_rw("absolute_tolerance", &ComparisonOptions::absoluteTolerance)
         .def_rw("relative_tolerance", &ComparisonOptions::relativeTolerance)
         .def_rw("symmetric_relative_tolerance", &ComparisonOptions::symmetricRelativeTolerance)
@@ -35,8 +35,8 @@ void registerComparisonBindings(nb::module_& module) {
         .def_rw("zero_expected_norm_is_nan", &ComparisonOptions::zeroExpectedNormIsNaN)
         .def_rw("non_finite_values_invalidate_relative_norms",
                 &ComparisonOptions::nonFiniteValuesInvalidateRelativeNorms)
-        .def_rw("complex_pointwise_mode", &ComparisonOptions::complexPointwiseMode)
-        .def_rw("compute_pointwise_statistics", &ComparisonOptions::computePointwiseStatistics)
+        .def_rw("complex_comparison_mode", &ComparisonOptions::complexComparisonMode)
+        .def_rw("compute_elementwise_statistics", &ComparisonOptions::computeElementwiseStatistics)
         .def_rw("compute_frobenius", &ComparisonOptions::computeFrobenius)
         .def_rw("compute_ulp", &ComparisonOptions::computeUlp)
         .def_rw("ulp_type", &ComparisonOptions::ulpType)
@@ -87,7 +87,7 @@ void registerComparisonBindings(nb::module_& module) {
         .def_ro("sum_ulp", &ComparisonReport::sumUlp)
         .def_ro("average_ulp", &ComparisonReport::averageUlp)
         .def_ro("ulp_compared", &ComparisonReport::ulpCompared)
-        .def_ro("pointwise_passed", &ComparisonReport::pointwisePassed)
+        .def_ro("all_close_passed", &ComparisonReport::allClosePassed)
         .def_ro("frobenius_passed", &ComparisonReport::frobeniusPassed)
         .def_ro("ulp_passed", &ComparisonReport::ulpPassed)
         .def_ro("reported_mismatches", &ComparisonReport::reportedMismatches)
