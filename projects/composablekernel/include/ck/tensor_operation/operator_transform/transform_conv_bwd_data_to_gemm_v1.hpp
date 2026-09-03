@@ -104,10 +104,10 @@ struct TransformConvBwdDataToGemm_v1
 
         const IndexType N = a_g_n_k_wos_lengths[I1];
 
-        if(element_space_size >= TwoGB)
+        if(element_space_size > TwoGB)
         {
             // Minimum divisor of N to not exceed 2GB
-            const auto divisor = math::integer_divide_ceil(element_space_size, TwoGB - 1);
+            const auto divisor = math::integer_divide_ceil(element_space_size, TwoGB);
 
             if(divisor <= static_cast<double>(N))
             {

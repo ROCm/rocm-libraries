@@ -576,7 +576,13 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
     static bool IsSupportedArgument(const Argument& arg)
     {
         if(arg.stride_overflow)
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Stride overflow." << std::endl;
+            }
             return false;
+        }
 
         if(arg.k_batch_ != 1)
         {
@@ -744,8 +750,17 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
                  const AElementwiseOp& a_element_op,
                  const BElementwiseOp& b_element_op,
                  const CDEElementwiseOp& cde_element_op,
-                 const ck::index_t split_k = 1)
+                 const index_t split_k = 1)
     {
+        bool ds_ovf = false;
+        static_for<0, NumDTensor, 1>{}([&](auto i) {
+            using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+            ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_c_wis_lengths[i]);
+        });
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<EDataType>(e_g_n_c_wis_lengths) || ds_ovf;
+
         return Argument{p_a,
                         p_b,
                         p_ds,
@@ -765,7 +780,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
                         a_element_op,
                         b_element_op,
                         cde_element_op,
-                        split_k};
+                        split_k,
+                        stride_ovf};
     }
 
     static auto MakeArgument(
@@ -790,7 +806,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
         const AElementwiseOp& a_element_op,
         const BElementwiseOp& b_element_op,
         const CDEElementwiseOp& cde_element_op,
-        const ck::index_t split_k = 1)
+        const index_t split_k = 1)
     {
         bool ds_ovf = false;
         static_for<0, NumDTensor, 1>{}([&](auto i) {
@@ -876,8 +892,17 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
         const AElementwiseOp& a_element_op,
         const BElementwiseOp& b_element_op,
         const CDEElementwiseOp& cde_element_op,
-        const ck::index_t split_k = 1) override
+        const index_t split_k = 1) override
     {
+        bool ds_ovf = false;
+        static_for<0, NumDTensor, 1>{}([&](auto i) {
+            using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+            ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_c_wis_lengths[i]);
+        });
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<EDataType>(e_g_n_c_wis_lengths) || ds_ovf;
+
         return std::make_unique<Argument>(p_a,
                                           p_b,
                                           p_ds,
@@ -897,7 +922,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
                                           a_element_op,
                                           b_element_op,
                                           cde_element_op,
-                                          split_k);
+                                          split_k,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseArgument> MakeArgumentPointer(
@@ -922,7 +948,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
         const AElementwiseOp& a_element_op,
         const BElementwiseOp& b_element_op,
         const CDEElementwiseOp& cde_element_op,
-        const ck::index_t split_k = 1) override
+        const index_t split_k = 1) override
     {
         bool ds_ovf = false;
         static_for<0, NumDTensor, 1>{}([&](auto i) {
