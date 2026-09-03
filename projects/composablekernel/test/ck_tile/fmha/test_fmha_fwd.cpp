@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <string_view>
 #include <vector>
 
 #include "example/ck_tile/01_fmha/fmha_fwd.hpp"
@@ -45,6 +46,7 @@ struct TestConfigs
     static constexpr auto ModeValues        = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues = std::array{true};
     static constexpr auto qscale_str        = "n";
+    static constexpr auto QScaleValues      = std::array{"n"};
     static constexpr bool def_lse           = true;
     static constexpr bool def_is_v_rowmajor = true;
     static constexpr auto init_method       = "uf";
@@ -65,6 +67,7 @@ struct TestConfigs<FmhaFwdFp8Bf16>
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{true};
     static constexpr auto qscale_str         = "pt";
+    static constexpr auto QScaleValues       = std::array{"n", "pt", "ph", "bs"};
     static constexpr bool def_lse            = false;
     static constexpr bool def_is_v_rowmajor  = true;
     static constexpr auto init_method        = "3";
@@ -77,6 +80,39 @@ struct TestConfigs<FmhaFwdFp8Bf16>
     }
 };
 
+// d=128 is the only head dim the whole fp8 family shares; fp8fp32 has no d=64 tile. No
+// splitkv/appendkv instances are generated, and all four quantization scales exist here.
+struct Fp8FamilyTestConfigs
+{
+    static constexpr auto HDimValues         = std::array{std::tuple{128, -1}};
+    static constexpr auto SplitKVHDimValues  = std::array<std::tuple<int, int>, 0>{};
+    static constexpr auto AppendKVHDimValues = std::array<std::tuple<int, int>, 0>{};
+    static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
+    static constexpr auto IsVRowmajorValues  = std::array{true};
+    static constexpr auto qscale_str         = "pt";
+    static constexpr auto QScaleValues       = std::array{"n", "pt", "ph", "bs"};
+    static constexpr bool def_lse            = false;
+    static constexpr bool def_is_v_rowmajor  = true;
+    static constexpr auto init_method        = "3";
+    static int adjust_seqlen(int seqlen) { return seqlen; }
+    static int adjust_hdim(int hdim)
+    {
+        return hdim < 0 ? hdim : ck_tile::integer_least_multiple(hdim, 16);
+    }
+};
+
+// fp8 output leaves rtol=0, atol=16 (see get_elimit), so these cases are close to
+// unfalsifiable. They still catch dispatch and crash regressions.
+template <>
+struct TestConfigs<FmhaFwdFp8> : Fp8FamilyTestConfigs
+{
+};
+
+template <>
+struct TestConfigs<FmhaFwdFp8Fp32> : Fp8FamilyTestConfigs
+{
+};
+
 template <>
 struct TestConfigs<FmhaFwdMxFp8>
 {
@@ -86,6 +122,7 @@ struct TestConfigs<FmhaFwdMxFp8>
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{false};
     static constexpr auto qscale_str         = "mx";
+    static constexpr auto QScaleValues       = std::array{"mx"};
     static constexpr bool def_lse            = true;
     static constexpr bool def_is_v_rowmajor  = false;
     static constexpr auto init_method        = "3";
@@ -105,6 +142,7 @@ struct TestConfigs<FmhaFwdMxFp4>
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{false};
     static constexpr auto qscale_str         = "mx";
+    static constexpr auto QScaleValues       = std::array{"mx"};
     static constexpr bool def_lse            = true;
     static constexpr bool def_is_v_rowmajor  = false;
     static constexpr auto init_method        = "3";
@@ -135,6 +173,7 @@ struct TestConfigs<FmhaFwdFp32>
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{true};
     static constexpr auto qscale_str         = "n";
+    static constexpr auto QScaleValues       = std::array{"n"};
     static constexpr bool def_lse            = true;
     static constexpr bool def_is_v_rowmajor  = true;
     static constexpr auto init_method        = "uf";
@@ -142,11 +181,14 @@ struct TestConfigs<FmhaFwdFp32>
     static int adjust_hdim(int hdim) { return hdim; }
 };
 
-static auto HDimValues           = ValuesIn(TestConfigs<DataTypeConfig>::HDimValues);
-static auto SplitKVHDimValues    = ValuesIn(TestConfigs<DataTypeConfig>::SplitKVHDimValues);
-static auto AppendKVHDimValues   = ValuesIn(TestConfigs<DataTypeConfig>::AppendKVHDimValues);
-static auto ModeValues           = ValuesIn(TestConfigs<DataTypeConfig>::ModeValues);
-static auto IsVRowmajorValues    = ValuesIn(TestConfigs<DataTypeConfig>::IsVRowmajorValues);
+static auto HDimValues         = ValuesIn(TestConfigs<DataTypeConfig>::HDimValues);
+static auto SplitKVHDimValues  = ValuesIn(TestConfigs<DataTypeConfig>::SplitKVHDimValues);
+static auto AppendKVHDimValues = ValuesIn(TestConfigs<DataTypeConfig>::AppendKVHDimValues);
+static auto ModeValues         = ValuesIn(TestConfigs<DataTypeConfig>::ModeValues);
+static auto IsVRowmajorValues  = ValuesIn(TestConfigs<DataTypeConfig>::IsVRowmajorValues);
+#ifdef CK_TILE_TEST_FMHA_QSCALE_SWEEP
+static auto QScaleValues = ValuesIn(TestConfigs<DataTypeConfig>::QScaleValues);
+#endif
 constexpr static auto qscale_str = TestConfigs<DataTypeConfig>::qscale_str;
 constexpr bool def_lse           = TestConfigs<DataTypeConfig>::def_lse;
 constexpr bool def_is_v_rowmajor = TestConfigs<DataTypeConfig>::def_is_v_rowmajor;
@@ -179,9 +221,11 @@ const ck_tile::stream_config stream_config{
     1,       // rotating_count_
 };
 
-#define COMMON_ARGS                                                                              \
-    init_method, static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))), 1, 0, \
-        1, stream_config
+#define COMMON_ARGS_INIT(init)                                                               \
+    init, static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))), 1, 0, 1, \
+        stream_config
+
+#define COMMON_ARGS COMMON_ARGS_INIT(init_method)
 
 auto EnableTestIf(bool condition)
 {
@@ -432,6 +476,79 @@ TEST_P(General, DataTypeConfig)
                                                COMMON_ARGS);
     CHECK_RESULT(result);
 }
+
+// Every other suite pins the scale to TestConfigs<T>::qscale_str, leaving the rest untested.
+// Only gfx125x has more than one, so the sweep is compiled in there alone.
+#ifdef CK_TILE_TEST_FMHA_QSCALE_SWEEP
+class QuantScale
+    : public TestWithParam<
+          std::tuple<mode_enum, const char*, std::tuple<int, int, int, int, int, std::string>>>
+{
+};
+
+// hdim 128 is where perhead and blockscale exist; every seqlen is a non-multiple of the tile
+// so the seqlen-padded instances get selected. No fp8 pipeline is generated with bias.
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScale,
+    Combine(ModeValues,
+            QScaleValues,
+            Values(std::tuple{2, 2, 1, 55, 256, "0"},      // GQA, seqlen_q << seqlen_k
+                   std::tuple{1, 3, -1, 100, 51, "0"},     // plain MHA, seqlen_q > seqlen_k
+                   std::tuple{2, 1, -1, 99, 256, "1"},     // causal
+                   std::tuple{1, 2, 1, 1024, 256, "2"}))); // GQA, causal bottom-right
+
+// init=3 fills Q/K/V up to the fp8 maximum, which only stands for a real tensor when a
+// descale maps that maximum back to qkv_max. Without a descale the values stay at the fp8
+// scale, the logits reach ~3e5 in the exp2 domain and the softmax collapses to an argmax.
+// There half an fp32 ulp of the row max is worth 1% of the exponential, and the fp8 P
+// operand snaps that factor out of the numerator while the row sum keeps it, so the whole
+// row lands 1% off. Anchor the no-scale inputs on qkv_max, as the three descales do.
+const char* qscale_init_method(std::string_view qscale)
+{
+    return qscale == "n" ? "0" : init_method;
+}
+
+TEST_P(QuantScale, DataTypeConfig)
+{
+    auto [mode, qscale, dims_mask]                             = GetParam();
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                               batch,
+                                               nhead,
+                                               nhead_k,
+                                               {adjust_seqlen(seqlen_q)},
+                                               {adjust_seqlen(seqlen_k)},
+                                               adjust_hdim(128),
+                                               adjust_hdim(128),
+                                               0,    // seqlen_knew
+                                               {-1}, // seqlen_qpads
+                                               {-1}, // seqlen_kpads
+                                               {},   // q_eff_lens_per_batch
+                                               {},   // kv_eff_lens_per_batch
+                                               0,    // rotary_dim
+                                               true, // i_perm
+                                               true, // o_perm
+                                               0,    // scale_s
+                                               0,    // logits_soft_cap
+                                               def_is_v_rowmajor,
+                                               def_lse,
+                                               0,     // page_block_size
+                                               false, // use_cache_batch_idx
+                                               "n",   // bias_str
+                                               0.0f,  // p_drop
+                                               0,     // drop_seed
+                                               0,     // drop_offset
+                                               false, // drop_prefs
+                                               mask_str,
+                                               qscale,
+                                               true, // is_rotary_interleaved
+                                               1,    // num_splits
+                                               COMMON_ARGS_INIT(qscale_init_method(qscale)));
+    CHECK_RESULT(result);
+}
+#endif
 
 // ---------------------------------------------------------------
 // Negative tests: padding not supported with appendkv/splitkv/pagedkv

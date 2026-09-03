@@ -10,12 +10,14 @@
 #include "utils.hpp"
 #include "ck_tile/utility/json_dump.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <cmath>
 #include <numeric>
+#include <stdexcept>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -289,8 +291,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
     // Note: block_scale_size_q_ and block_scale_size_kv_ should be greater than or equal to the
     // compute block size
-    constexpr ck_tile::index_t block_scale_size_q_  = 128;
-    constexpr ck_tile::index_t block_scale_size_kv_ = 128;
+    constexpr ck_tile::index_t block_scale_size_q_ = 128;
 
     const std::string data_type = []() {
         if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp32>)
@@ -565,6 +566,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
     }
 #endif
 
+    const ck_tile::index_t block_scale_size_kv_ =
+        fmha_fwd_block_scale_size_kv(data_type, hdim_q, hdim_v);
+
     const auto seqstart_q_host              = to_seqstarts(seqlen_qs);
     const auto seqstart_k_host              = to_seqstarts(seqlen_ks);
     const auto seqstart_q_with_padding_host = to_seqstarts(seqlen_qpads);
@@ -716,8 +720,24 @@ fwd_result fmha_fwd_run(mode_enum mode,
        q_eff_lens_per_batch.empty() && kv_eff_lens_per_batch.empty() &&
        qscale.type != quant_scale_enum::mx)
     {
-        pack_gqa_nhead    = nhead_k;
-        pack_gqa_seqlen_q = nhead_ratio * shape_seqlen_q;
+        if(qscale.type == quant_scale_enum::perhead)
+        {
+            std::cerr << "pack_gqa is not supported with the perhead quant scale. ignoring the "
+                         "'pack_gqa' option"
+                      << std::endl;
+        }
+        else if(qscale.type == quant_scale_enum::blockscale &&
+                shape_seqlen_q % block_scale_size_q_ != 0)
+        {
+            std::cerr << "pack_gqa needs seqlen_q to be a multiple of block_scale_size_q ("
+                      << shape_seqlen_q << " % " << block_scale_size_q_
+                      << "). ignoring the 'pack_gqa' option" << std::endl;
+        }
+        else
+        {
+            pack_gqa_nhead    = nhead_k;
+            pack_gqa_seqlen_q = nhead_ratio * shape_seqlen_q;
+        }
     }
 
     const ck_tile::index_t num_block_scale_q =
@@ -804,6 +824,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
             std::array<ck_tile::index_t, 3>{shape_batch, nhead_k, num_block_scale_kv});
         v_descale_host = ck_tile::HostTensor<VScaleDataType>(
             std::array<ck_tile::index_t, 3>{shape_batch, nhead_k, num_block_scale_kv});
+    }
+    else if(qscale.type == quant_scale_enum::perhead)
+    {
+        q_descale_host = ck_tile::HostTensor<QScaleDataType>(
+            std::array<ck_tile::index_t, 2>{shape_batch, nhead});
+        k_descale_host = ck_tile::HostTensor<KScaleDataType>(
+            std::array<ck_tile::index_t, 2>{shape_batch, nhead_k});
+        v_descale_host = ck_tile::HostTensor<VScaleDataType>(
+            std::array<ck_tile::index_t, 2>{shape_batch, nhead_k});
     }
 
     // batch mode of lse data layout is [batch, nhead, seqlen_q]
@@ -952,7 +981,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
         float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
         float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
 
-        float qkv_max     = 3.f;
+        float qkv_max = 3.f;
+
         q_descale_host(0) = qkv_max / q_dtype_max;
         k_descale_host(0) = qkv_max / k_dtype_max;
         v_descale_host(0) = qkv_max / v_dtype_max;
@@ -961,19 +991,54 @@ fwd_result fmha_fwd_run(mode_enum mode,
     {
         float q_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<QDataType>::max());
         float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
+
+        float qkv_max = 3.f;
+
+        // Powers of two because v_descale ends up in an E8M0 scale operand.
+        // Neighbouring entries differ so an index off-by-one changes the answer.
+        constexpr int kCycle = 4;
+        auto fill_blockscale = [](auto& t, int e_top, int phase) {
+            const auto lens = t.get_lengths();
+            t.ForEach([&](auto& self, auto i) {
+                const int flat = static_cast<int>((i[0] * lens[1] + i[1]) * lens[2] + i[2]);
+                self(i)        = std::ldexp(1.f, e_top - (flat + phase) % kCycle);
+            });
+        };
+        auto top_exp = [](float v) { return static_cast<int>(std::floor(std::log2(v))); };
+
+        const float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
+        const int e_v_top       = (init_method == "3") ? top_exp(qkv_max / v_dtype_max) : 2;
+
+        fill_blockscale(q_descale_host, top_exp(qkv_max / q_dtype_max), 0);
+        fill_blockscale(k_descale_host, top_exp(qkv_max / k_dtype_max), 1);
+        fill_blockscale(v_descale_host, e_v_top, 2);
+    }
+    else if(qscale.type == quant_scale_enum::perhead)
+    {
+        float q_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<QDataType>::max());
+        float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
         float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
 
-        float qkv_max       = 3.f;
-        float max_descale_q = qkv_max / q_dtype_max;
-        float max_descale_k = qkv_max / k_dtype_max;
-        float max_descale_v = qkv_max / v_dtype_max;
+        float qkv_max = 3.f;
 
-        ck_tile::FillUniformDistribution<float>{max_descale_q * 0.8f, max_descale_q, next_seed()}(
-            q_descale_host);
-        ck_tile::FillUniformDistribution<float>{max_descale_k * 0.8f, max_descale_k, next_seed()}(
-            k_descale_host);
-        ck_tile::FillUniformDistribution<float>{max_descale_v * 0.8f, max_descale_v, next_seed()}(
-            v_descale_host);
+        // A descale is dequantized_max/dtype_max, so these are anchored on qkv_max/dtype_max
+        // like the other granularities. Neighbouring entries differ; no mantissa is a power
+        // of two.
+        constexpr int kCycle = 8;
+        auto fill_perhead    = [](auto& t, int e_top, int phase) {
+            const auto lens = t.get_lengths();
+            t.ForEach([&](auto& self, auto i) {
+                const int flat   = static_cast<int>(i[0] * lens[1] + i[1]);
+                const int step   = (flat + phase) % kCycle;
+                const float mant = 1.f + static_cast<float>(2 * step + 1) / 16.f;
+                self(i)          = std::ldexp(mant, e_top + step % 2 - 1);
+            });
+        };
+        auto top_exp = [](float v) { return static_cast<int>(std::floor(std::log2(v))); };
+
+        fill_perhead(q_descale_host, top_exp(qkv_max / q_dtype_max), 0);
+        fill_perhead(k_descale_host, top_exp(qkv_max / k_dtype_max), 3);
+        fill_perhead(v_descale_host, top_exp(qkv_max / v_dtype_max), 5);
     }
 
     iota_shuffle(block_table_host.begin(), block_table_host.end(), 0, random_engine);
@@ -1047,6 +1112,21 @@ fwd_result fmha_fwd_run(mode_enum mode,
     bias_buf.ToDevice(bias_host.data());
     q_descale_buf.ToDevice(q_descale_host.data());
     k_descale_buf.ToDevice(k_descale_host.data());
+    if(qscale.type == quant_scale_enum::blockscale)
+    {
+        // v_descale rides an E8M0 operand, which truncates towards zero.
+        const bool v_descale_is_pow2 =
+            std::all_of(v_descale_host.begin(), v_descale_host.end(), [](auto v) {
+                const float f = ck_tile::type_convert<float>(v);
+                const float r =
+                    ck_tile::type_convert<float>(ck_tile::type_convert<ck_tile::e8m0_t>(f));
+                return ck_tile::bit_cast<uint32_t>(f) == ck_tile::bit_cast<uint32_t>(r);
+            });
+        if(!v_descale_is_pow2)
+        {
+            throw std::runtime_error("v_descale must be a power of two with -qscale=bs");
+        }
+    }
     v_descale_buf.ToDevice(v_descale_host.data());
     block_scale_seqstart_q_buf.ToDevice(block_scale_seqstart_q_host.data());
     block_scale_seqstart_k_buf.ToDevice(block_scale_seqstart_k_host.data());
@@ -1268,7 +1348,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
         const ck_tile::index_t nhead_stride_lse_acc = (num_splits * pack_gqa_seqlen_q_);
         const ck_tile::index_t nhead_stride_o_acc   = (num_splits * pack_gqa_seqlen_q_ * hdim_v);
         const ck_tile::index_t nhead_stride_o = (o_perm ? pack_gqa_seqlen_q_ * hdim_v : hdim_v);
-        const ck_tile::index_t nhead_stride_q_descale = num_block_scale_q;
+        const ck_tile::index_t nhead_stride_q_descale =
+            (nhead / pack_gqa_nhead_) * num_block_scale_q;
         const ck_tile::index_t nhead_stride_k_descale = num_block_scale_kv;
         const ck_tile::index_t nhead_stride_v_descale = num_block_scale_kv;
         // setup batch_stride_* arguments
@@ -1446,6 +1527,23 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         args.batch_stride_k_descale = (nhead_k * shape_seqlen_k * hdim_q_scale);
                         args.batch_stride_v_descale = (nhead_k * hdim_v * shape_seqlen_v_scale);
                     }
+                }
+                else if(qscale.type == quant_scale_enum::perhead)
+                {
+                    args.q_descale_ptr =
+                        reinterpret_cast<const float*>(q_descale_buf.GetDeviceBuffer());
+                    args.k_descale_ptr =
+                        reinterpret_cast<const float*>(k_descale_buf.GetDeviceBuffer());
+                    args.v_descale_ptr =
+                        reinterpret_cast<const float*>(v_descale_buf.GetDeviceBuffer());
+
+                    args.nhead_stride_q_descale = 1;
+                    args.nhead_stride_k_descale = 1;
+                    args.nhead_stride_v_descale = 1;
+
+                    args.batch_stride_q_descale = nhead;
+                    args.batch_stride_k_descale = nhead_k;
+                    args.batch_stride_v_descale = nhead_k;
                 }
 
                 args.rand_val_ptr = randval_buf.GetDeviceBuffer();
@@ -1884,7 +1982,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                          std::is_same_v<DataTypeConfig, FmhaFwdFp8Fp32>;
 
         float scale_s_host = scale_s;
-        float scale_p_host = 1.0f;
         float scale_o_host = 1.0f;
 
         if constexpr(!is_mx)
@@ -1892,17 +1989,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
             if(qscale.type == quant_scale_enum::pertensor)
             {
                 scale_s_host = scale_s * q_descale_host(0) * k_descale_host(0);
-                scale_p_host = ck_tile::type_convert<float>(ck_tile::numeric<PDataType>::max());
-                scale_o_host = v_descale_host(0) / scale_p_host;
+                scale_o_host = v_descale_host(0);
             }
         }
 
-        auto p_compute_element_func = [&]() {
-            if constexpr(supports_qscale)
-                return ck_tile::scales{scale_p_host};
-            else
-                return ck_tile::identity{};
-        }();
+        auto p_compute_element_func = ck_tile::identity{};
 
         auto oacc_element_func = [&]() {
             if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t> && supports_qscale)
@@ -2110,6 +2201,20 @@ fwd_result fmha_fwd_run(mode_enum mode,
 #endif
 
             // reference
+            // Condition scale (P|V|)/l, in the same units as o_host_ref. Quantizing P
+            // perturbs O by at most u_P times this, per element. Not saturated: it is a
+            // magnitude bound, and clamping it would understate the tolerance.
+            ck_tile::HostTensor<OaccDataType> absmag_ref(o_host_ref.get_lengths());
+            bool have_absmag = false;
+            auto abs_of_v    = [&] {
+                auto t = v_host_ref;
+                t.ForEach([&](auto& self, auto i) {
+                    self(i) = ck_tile::type_convert<VDataType>(
+                        std::abs(ck_tile::type_convert<float>(self(i))));
+                });
+                return t;
+            };
+
             if constexpr(is_mx)
             {
                 ck_tile::HostTensor<QScaleDataType> q_descale_host_ref(
@@ -2171,6 +2276,22 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                k_descale_host(b_idx,
                                               std::get<0>(idx) / nr,
                                               k_offset + std::get<2>(idx) / block_scale_size_kv_);
+                    });
+            }
+            else if(qscale.type == quant_scale_enum::perhead)
+            {
+                ck_tile::reference_batched_quant_gemm<QDataType,
+                                                      KDataType,
+                                                      SaccDataType,
+                                                      SMPLComputeDataType>(
+                    q_host_ref,
+                    k_host_ref,
+                    s_host_ref,
+                    ck_tile::idx_identity{},
+                    ck_tile::idx_identity{},
+                    [&](auto idx, auto value) {
+                        return value * scale_s * q_descale_host(b_idx, std::get<0>(idx)) *
+                               k_descale_host(b_idx, std::get<0>(idx) / nr);
                     });
             }
             else
@@ -2503,11 +2624,31 @@ fwd_result fmha_fwd_run(mode_enum mode,
             {
                 const ck_tile::index_t v_offset =
                     (mode == mode_enum::batch) ? 0 : block_scale_seqstart_k_host[wb];
-                ck_tile::
-                    reference_batched_quant_gemm<PDataType, VDataType, OaccDataType, ODataType>(
-                        p_host_ref,
-                        v_host_ref,
-                        o_host_ref,
+                // fp32 P, for the reason spelled out in the pertensor branch below.
+                ck_tile::reference_batched_quant_gemm<SMPLComputeDataType,
+                                                      VDataType,
+                                                      OaccDataType,
+                                                      ODataType>(
+                    p_host_ref_f32,
+                    v_host_ref,
+                    o_host_ref,
+                    ck_tile::idx_identity{},
+                    [&](auto idx, auto value) {
+                        return ck_tile::type_convert<float>(value) *
+                               v_descale_host(b_idx,
+                                              std::get<0>(idx) / nr,
+                                              v_offset + std::get<2>(idx) / block_scale_size_kv_);
+                    },
+                    ck_tile::idx_identity{});
+                {
+                    const auto v_abs = abs_of_v();
+                    ck_tile::reference_batched_quant_gemm<SMPLComputeDataType,
+                                                          VDataType,
+                                                          OaccDataType,
+                                                          OaccDataType>(
+                        p_host_ref_f32,
+                        v_abs,
+                        absmag_ref,
                         ck_tile::idx_identity{},
                         [&](auto idx, auto value) {
                             return ck_tile::type_convert<float>(value) *
@@ -2517,6 +2658,44 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                                       std::get<2>(idx) / block_scale_size_kv_);
                         },
                         ck_tile::idx_identity{});
+                    have_absmag = true;
+                }
+            }
+            else if(qscale.type == quant_scale_enum::perhead)
+            {
+                // fp32 P, for the reason spelled out in the pertensor branch below.
+                ck_tile::reference_batched_quant_gemm<SMPLComputeDataType,
+                                                      VDataType,
+                                                      OaccDataType,
+                                                      ODataType>(
+                    p_host_ref_f32,
+                    v_host_ref,
+                    o_host_ref,
+                    ck_tile::idx_identity{},
+                    ck_tile::idx_identity{},
+                    [&](auto idx, auto value) {
+                        const float scaled = value * v_descale_host(b_idx, std::get<0>(idx) / nr);
+                        if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t>)
+                            return ck_tile::saturates<ck_tile::fp8_t>{}(scaled);
+                        else
+                            return scaled;
+                    });
+                {
+                    const auto v_abs = abs_of_v();
+                    ck_tile::reference_batched_quant_gemm<SMPLComputeDataType,
+                                                          VDataType,
+                                                          OaccDataType,
+                                                          OaccDataType>(
+                        p_host_ref_f32,
+                        v_abs,
+                        absmag_ref,
+                        ck_tile::idx_identity{},
+                        ck_tile::idx_identity{},
+                        [&](auto idx, auto value) {
+                            return value * v_descale_host(b_idx, std::get<0>(idx) / nr);
+                        });
+                    have_absmag = true;
+                }
             }
             else if(qscale.type == quant_scale_enum::pertensor && !(p_drop > 0))
             {
@@ -2535,6 +2714,19 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         ck_tile::identity{},
                         ck_tile::identity{},
                         oacc_element_func);
+                {
+                    const auto v_abs = abs_of_v();
+                    ck_tile::reference_batched_gemm<SMPLComputeDataType,
+                                                    VDataType,
+                                                    OaccDataType,
+                                                    OaccDataType>(p_host_ref_f32,
+                                                                  v_abs,
+                                                                  absmag_ref,
+                                                                  ck_tile::identity{},
+                                                                  ck_tile::identity{},
+                                                                  ck_tile::scales{scale_o_host});
+                    have_absmag = true;
+                }
             }
             else
             {
@@ -2545,6 +2737,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     ck_tile::identity{},
                     ck_tile::identity{},
                     oacc_element_func);
+                // No condition scale here: without a descale the reference itself
+                // quantizes P, so both sides deviate from exact independently, and the
+                // near-argmax softmax this path produces drives P subnormal. The
+                // derived bound below models a quantized-descale path, so no_scale
+                // keeps the original tolerance.
             }
 
             ck_tile::HostTensor<ODataType> o_host_result({nhead, real_seqlen_q, hdim_v});
@@ -2562,12 +2759,83 @@ fwd_result fmha_fwd_run(mode_enum mode,
             else if(o_perm) o_host_result.ForEach([&](auto& self, auto idx) { self(idx) = o_host(b_idx, idx[0], idx[1] + query_offset, idx[2]); });
             else       o_host_result.ForEach([&](auto& self, auto idx) { self(idx) = o_host(b_idx, idx[1] + query_offset, idx[0], idx[2]); });
             // clang-format on
-            auto [rtol, atol] = get_elimit<DataTypeConfig>(init_method);
-            bool cur_pass     = ck_tile::check_err(o_host_result,
-                                               o_host_ref,
-                                               std::string("OUT Error: Incorrect results!"),
-                                               rtol,
-                                               atol);
+            // The shipped tolerance cannot fail when ODataType is fp8_t: check_err
+            // then takes its fp8 overload, whose criterion is |out - ref| <= atol or
+            // code_distance <= rtol, and get_elimit returns an atol of 16 or 32 while
+            // O, being a convex combination of V, stays within max|V|. For the
+            // quantized paths two derived checks replace it.
+            auto stock_check = [&] {
+                auto [rtol, atol] = get_elimit<DataTypeConfig>(init_method);
+                return ck_tile::check_err(o_host_result,
+                                          o_host_ref,
+                                          std::string("OUT Error: Incorrect results!"),
+                                          rtol,
+                                          atol);
+            };
+            bool cur_pass = true;
+            if constexpr(supports_qscale)
+            {
+                if(!have_absmag)
+                {
+                    cur_pass = stock_check();
+                }
+                else
+                {
+                    // A full ULP rather than half: the device quantizes P against a per-32
+                    // group scale and that scale is itself rounded, so P carries two
+                    // roundings. The reference keeps P in fp32, so all of that error lands
+                    // here. u_o likewise, since out and ref are both rounded to ODataType.
+                    const double u_p = std::pow(2.0, -ck_tile::numeric_traits<PDataType>::mant);
+                    const double u_o = std::pow(2.0, -ck_tile::numeric_traits<ODataType>::mant);
+                    // u_o * |r| is the ULP only while r is normal; subnormal spacing is fixed.
+                    const double u_o_floor = u_o * static_cast<double>(ck_tile::type_convert<float>(
+                                                       ck_tile::numeric<ODataType>::min()));
+
+                    const ck_tile::index_t n_head = o_host_result.get_lengths()[0];
+                    std::vector<double> num(n_head, 0.0), den(n_head, 0.0);
+                    int over     = 0;
+                    double worst = 0;
+                    o_host_result.ForEach([&](auto& self, auto idx) {
+                        const double o   = ck_tile::type_convert<float>(self(idx));
+                        const double r   = ck_tile::type_convert<float>(o_host_ref(idx));
+                        const double c   = std::abs(ck_tile::type_convert<float>(absmag_ref(idx)));
+                        const double lim = u_p * c + std::max(u_o * std::abs(r), u_o_floor);
+                        const double err = std::abs(o - r);
+                        if(lim > 0 && err / lim > worst)
+                            worst = err / lim;
+                        // Negated so that a NaN, which compares false either way, is caught.
+                        if(!(err <= lim))
+                            ++over;
+                        num[idx[0]] += (o - r) * r;
+                        den[idx[0]] += r * r;
+                    });
+                    // The bound is blind to a systematic gain, which scales with |O| while
+                    // the bound scales with (P|V|)/l >= |O|. alpha is (g - 1) exactly for a
+                    // uniform gain. Taken per head, so that a fault confined to one head is
+                    // not averaged away by the others.
+                    double worst_alpha = 0;
+                    for(ck_tile::index_t h = 0; h < n_head; ++h)
+                    {
+                        const double a = (den[h] > 0 ? num[h] / den[h] : 0.0);
+                        if(!(std::abs(a) <= std::abs(worst_alpha)))
+                            worst_alpha = a;
+                    }
+                    // The largest per-head |alpha| a correct kernel produced over the
+                    // forward matrix, measured on this base, was 2.3e-3.
+                    constexpr double alpha_max = 1e-2;
+                    cur_pass = (over == 0) && (std::abs(worst_alpha) <= alpha_max);
+                    if(over != 0)
+                        std::cerr << "OUT accuracy bound: " << over << " elements over, worst "
+                                  << worst << "x" << std::endl;
+                    if(!(std::abs(worst_alpha) <= alpha_max))
+                        std::cerr << "OUT systematic gain: per-head alpha " << worst_alpha
+                                  << " exceeds " << alpha_max << std::endl;
+                }
+            }
+            else
+            {
+                cur_pass = stock_check();
+            }
             pass &= cur_pass;
             if(!cur_pass)
             {
@@ -2600,6 +2868,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
              : qscale.type == quant_scale_enum::pertensor     ? "pertensor"
              : qscale.type == quant_scale_enum::blockscale    ? "blockscale"
              : qscale.type == quant_scale_enum::kv_blockscale ? "kv_blockscale"
+             : qscale.type == quant_scale_enum::perhead       ? "perhead"
              : qscale.type == quant_scale_enum::mx            ? "mx"
                                                               : "unknown");
         dump_fmha_fwd_json_results(*json,
