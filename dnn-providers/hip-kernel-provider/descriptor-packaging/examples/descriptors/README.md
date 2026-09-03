@@ -73,10 +73,17 @@ for every nested one.
 
 ## Why this rocKE builder
 
-`build_unified_attention_2d_tiled` rather than `build_attention_dense`: the
-latter takes a keyword-only `tuning: Gfx942DenseTuning` that no descriptor can
-set, so the packer refuses it by design. That refusal has its own regression test
-(`test_real_gfx942_attention_dense_is_refused`); this tree covers the happy path.
+`build_unified_attention_2d_tiled` rather than `build_attention_dense`. Both
+carry the `(spec, *, arch)` signature the packer requires, and each has a
+regression test holding it there (`test_real_gfx942_tiled_2d_is_accepted`,
+`test_real_gfx942_attention_dense_is_accepted`), so the choice is about which
+one models a shipped descriptor. The tiled builder's spec is compile-time
+shape only — head size, KV block size, head counts, dtype, feature flags — with
+sequence count and lengths arriving at runtime through `cu_q` and the block
+tables, so one authored descriptor covers every problem size. `AttentionDenseSpec`
+bakes `batch`, `seqlen_q` and `seqlen_kv` in as constants, so a descriptor naming
+it pins its kernel to one exact problem shape and the tree would need another
+descriptor for the next one.
 
 **The rocKE half borrows the pointwise pack's native symbols, and that bounds what
 this tree proves.** A descriptor only resolves to something a compiled native pack

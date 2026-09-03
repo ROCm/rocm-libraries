@@ -160,6 +160,15 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($sitePackages)) { throw "empty rocm_kpack python dir" }
           echo "KPACK_PYTHON_DIR=$sitePackages" >> $env:GITHUB_ENV
 
+      # Must precede configure: the descriptor-packaging ctest entries register
+      # DISABLED if pytest is not importable at configure time. The interpreter
+      # is named explicitly because it must be the one passed as
+      # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
+      # setup-python tool-cache interpreter instead.
+      - name: Install pytest
+        run: |
+          "$VENV_PATH/Scripts/python.exe" -m pip install pytest
+
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
@@ -376,6 +385,15 @@ jobs:
           KPACK_PYTHON_DIR=$("$VENV_PATH/bin/python" -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
           test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
           echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
+
+      # Must precede configure: the descriptor-packaging ctest entries register
+      # DISABLED if pytest is not importable at configure time. The interpreter
+      # is named explicitly because it must be the one passed as
+      # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
+      # setup-python tool-cache interpreter instead.
+      - name: Install pytest
+        run: |
+          "$VENV_PATH/bin/python" -m pip install pytest
 
       - name: Configure superbuild
         run: |
