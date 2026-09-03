@@ -181,8 +181,15 @@ def _make_spec(
     split_k: int,
     lds_k_outer: bool = False,
     async_dma: bool = False,
+    warp_tile_mn: "int | None" = None,
+    tile_k: "int | None" = None,
 ):
-    """Build a (spec, problem, warp_tile_k) triple, or (None, None, reason)."""
+    """Build a (spec, problem, warp_tile_k) triple, or (None, None, reason).
+
+    ``warp_tile_mn`` / ``tile_k`` override the module-level tile constants so a
+    caller can pin a specific MMA atom. Left as ``None`` (the default) the
+    historical values are used and the emitted IR is unchanged.
+    """
     from rocke.core.arch import ArchTarget
     from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
     from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
@@ -194,11 +201,13 @@ def _make_spec(
     # its emitted IR / goldens are unchanged; WMMA uses a 16x16-shaped tile.
     family = "wmma" if target.wave_size == 32 else "mma"
     if family == "wmma":
-        tile_m, tile_n, tile_k = 32, 32, 32
-        warp_m, warp_n, warp_tile_mn = 1, 1, 16
+        tile_m, tile_n, _tk_default = 32, 32, 32
+        warp_m, warp_n, _wt_default = 1, 1, 16
     else:
-        tile_m, tile_n, tile_k = _TILE_M, _TILE_N, _TILE_K
-        warp_m, warp_n, warp_tile_mn = _WARP_M, _WARP_N, _WARP_TILE_MN
+        tile_m, tile_n, _tk_default = _TILE_M, _TILE_N, _TILE_K
+        warp_m, warp_n, _wt_default = _WARP_M, _WARP_N, _WARP_TILE_MN
+    tile_k = _tk_default if tile_k is None else tile_k
+    warp_tile_mn = _wt_default if warp_tile_mn is None else warp_tile_mn
     atom = target.mma.select_largest_k(
         family=family,
         a_dtype=dtype,
@@ -248,6 +257,11 @@ def _make_spec(
             f"test_wgrad_{shape.id}_{dtype}_{pipeline}_{epilogue}_spk{split_k}"
             + ("_kouter" if lds_k_outer else "")
             + ("_async" if async_dma else "")
+            + (
+                f"_a{warp_tile_mn}k{tile_k}"
+                if (warp_tile_mn, tile_k) != (_wt_default, _tk_default)
+                else ""
+            )
         ),
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
         tile_m=tile_m,
@@ -278,6 +292,8 @@ def _run_one(
     split_k: int = 1,
     lds_k_outer: bool = False,
     async_dma: bool = False,
+    warp_tile_mn: "int | None" = None,
+    tile_k: "int | None" = None,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
 
@@ -295,7 +311,16 @@ def _run_one(
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     spec, problem, _wtk = _make_spec(
-        arch, shape, dtype, pipeline, epilogue, split_k, lds_k_outer, async_dma
+        arch,
+        shape,
+        dtype,
+        pipeline,
+        epilogue,
+        split_k,
+        lds_k_outer,
+        async_dma,
+        warp_tile_mn=warp_tile_mn,
+        tile_k=tile_k,
     )
     if spec is None:
         return True, f"skip (no atom): {_wtk}"
@@ -409,9 +434,20 @@ class TestConvWgradCorrectness(unittest.TestCase):
         split_k=1,
         lds_k_outer=False,
         async_dma=False,
+        warp_tile_mn=None,
+        tile_k=None,
     ) -> None:
         passed, reason = _run_one(
-            GPU_ARCH, shape, dtype, pipeline, epilogue, split_k, lds_k_outer, async_dma
+            GPU_ARCH,
+            shape,
+            dtype,
+            pipeline,
+            epilogue,
+            split_k,
+            lds_k_outer,
+            async_dma,
+            warp_tile_mn=warp_tile_mn,
+            tile_k=tile_k,
         )
         if reason.startswith("skip"):
             self.skipTest(reason)
@@ -445,6 +481,31 @@ class TestConvWgradCorrectness(unittest.TestCase):
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
                     self._check(shape, dtype, "mem", "cshuffle", lds_k_outer=True)
+
+    def test_lds_k_outer_atom_16x16x16(self):
+        """K-outer with the 4-element-per-lane atom.
+
+        The transpose-read lane mapping steps the k index by the MFMA operand
+        length: lane ``l`` owns ``k = (l // MN)*n .. +n-1``. ``n`` is 8 for
+        32x32x16 and 16x16x32 but 4 for 16x16x16, and every other test in this
+        file pins ``_WARP_TILE_MN = 32``, so nothing exercised the n=4 stride.
+        With the stride hardcoded at 8 this config read past the end of a
+        16-row K-outer tile and produced NaN.
+        """
+        if not _IS_MFMA:
+            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+        for dtype in _DTYPES:
+            for shape in _SHAPES:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(
+                        shape,
+                        dtype,
+                        "mem",
+                        "cshuffle",
+                        lds_k_outer=True,
+                        warp_tile_mn=16,
+                        tile_k=16,
+                    )
 
     def test_lds_k_outer_split_k(self):
         """K-outer under split-K atomics (the shipping configuration)."""
@@ -892,6 +953,99 @@ class TestConvWgradVectorLoad(unittest.TestCase):
             "odd C/K should not admit a free-axis vector width > 1, but a "
             "vectorised buffer load was emitted",
         )
+
+
+class TestWgradDefaultLdsKOuter(unittest.TestCase):
+    """The K-outer selection policy (CPU-only; no GPU, no lowering).
+
+    ``WgradConvSpec.lds_k_outer`` itself stays default-False so the goldens are
+    layout-stable. This policy is what a dispatch-side caller asks instead, and
+    it must agree exactly with the ``validate()`` gate -- a policy that returned
+    True for a spec ``validate()`` rejects would turn a tuning default into a
+    hard build failure.
+    """
+
+    def _sel(self, **kw):
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        base = dict(
+            arch="gfx950",
+            dtype_a="bf16",
+            dtype_b="bf16",
+            warp_tile_m=32,
+            warp_tile_n=32,
+            wave_size=64,
+        )
+        base.update(kw)
+        return WgradConvSpec.default_lds_k_outer(**base)
+
+    def test_on_for_supported_gfx950(self):
+        for wt in (16, 32):
+            for dt in ("bf16", "fp16"):
+                with self.subTest(warp_tile=wt, dtype=dt):
+                    self.assertTrue(
+                        self._sel(
+                            warp_tile_m=wt, warp_tile_n=wt, dtype_a=dt, dtype_b=dt
+                        )
+                    )
+
+    def test_off_outside_the_gate(self):
+        self.assertFalse(self._sel(arch="gfx942"))
+        self.assertFalse(self._sel(dtype_a="fp32", dtype_b="fp32"))
+        self.assertFalse(self._sel(warp_tile_m=64))
+        self.assertFalse(self._sel(wave_size=32))
+
+    def test_env_override(self):
+        prev = os.environ.get("ROCKE_WGRAD_LDS_K_OUTER")
+        try:
+            os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = "off"
+            self.assertFalse(self._sel())
+            os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = "on"
+            self.assertTrue(self._sel())
+            # "on" still respects the gate rather than producing a spec that
+            # validate() would reject.
+            self.assertFalse(self._sel(arch="gfx942"))
+            os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = "nonsense"
+            with self.assertRaises(ValueError):
+                self._sel()
+        finally:
+            os.environ.pop("ROCKE_WGRAD_LDS_K_OUTER", None)
+            if prev is not None:
+                os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = prev
+
+    def test_policy_agrees_with_validate(self):
+        """Anything the policy turns on must actually construct."""
+        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+        from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        p = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        for wt in (16, 32):
+            for dt in ("bf16", "fp16"):
+                on = WgradConvSpec.default_lds_k_outer(
+                    arch="gfx950",
+                    dtype_a=dt,
+                    dtype_b=dt,
+                    warp_tile_m=wt,
+                    warp_tile_n=wt,
+                )
+                with self.subTest(warp_tile=wt, dtype=dt):
+                    # Constructing runs validate() in __post_init__.
+                    WgradConvSpec(
+                        problem=p,
+                        data=ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt),
+                        tile_m=64,
+                        tile_n=64,
+                        tile_k=32,
+                        warp_m=2,
+                        warp_n=2,
+                        warp_tile_m=wt,
+                        warp_tile_n=wt,
+                        warp_tile_k=16,
+                        pipeline="mem",
+                        epilogue="cshuffle",
+                        lds_k_outer=on,
+                    )
 
 
 if __name__ == "__main__":

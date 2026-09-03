@@ -330,6 +330,30 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    if idx == 13:
+        # K-outer with the 16x16x16 atom: the only 16-bit atom whose MFMA
+        # operand is 4 elements per lane rather than 8, so the transpose-read
+        # k-stride between lane groups is 4. Configs 11 and 12 both use
+        # 32x32x16 (8 per lane) and cannot catch a stride hardcoded to 8.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=16,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
     # ----------------------------------------------------------------
     # Negative cases: these specs must be REJECTED by the validator.
     # The harness (run_emit) expects a ValueError / SystemExit when

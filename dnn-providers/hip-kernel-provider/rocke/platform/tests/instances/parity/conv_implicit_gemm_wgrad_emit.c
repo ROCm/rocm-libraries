@@ -143,6 +143,19 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->split_k = 4;
         *arch = "gfx950";
         return 0;
+    case 13:
+        /* K-outer with the 16x16x16 atom: 4 MFMA operand elements per lane
+         * rather than 8, so the transpose-read k-stride between lane groups
+         * is 4. Cases 11 and 12 both use 32x32x16 (8 per lane). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_k = 16;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

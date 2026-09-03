@@ -378,9 +378,11 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
-    /* lds_k_outer: ds_read_b64_tr_b16 is a gfx950 wave64 16-bit transpose read,
-     * and the validated fragment formula assumes an 8-element fragment drawn
-     * from a 16- or 32-wide atom edge.  Mirrors WgradConvSpec.validate(). */
+    /* lds_k_outer: ds_read_b64_tr_b16 is a gfx950 wave64 16-bit transpose read.
+     * The fragment formula is derived per 16-lane group over a 16- or 32-wide
+     * atom edge; it carries the per-lane fragment length (4 for 16x16x16, 8 for
+     * 16x16x32 and 32x32x16) rather than assuming 8, so every 16-bit atom on
+     * those edges is covered.  Mirrors WgradConvSpec.validate(). */
     if(s->lds_k_outer)
     {
         const char* da = s->dtype_a ? s->dtype_a : "fp16";

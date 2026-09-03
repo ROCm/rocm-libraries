@@ -148,6 +148,7 @@ def _verify_kernel(
     extra_tensors: "dict | None" = None,
     u8,
     arch: str,
+    compute_dtype: "str | None" = None,
 ) -> bool:
     """Launch a kernel, compare against reference, optionally dump on failure.
 
@@ -197,7 +198,16 @@ def _verify_kernel(
     # reductions over K_wg ~ 25k.  A mean/L2 relative check or a tighter bf16
     # bound would catch subtler reduction bugs -- revisit when verify is
     # re-enabled after the fwd fixes in #9824.
-    tol = 5e-2 if out_t.dtype in (torch.float16, torch.bfloat16) else 1e-3
+    # Tolerance follows the *compute* dtype, not the storage dtype: an fp32 dW
+    # holding the result of bf16 MFMAs is no more accurate than bf16 math, so
+    # keying off out_t.dtype would apply the 1e-3 fp32 bound to a 16-bit result
+    # and fail every kernel. compute_dtype is the A/B dtype when the caller
+    # separates them; without it, fall back to the output dtype.
+    if compute_dtype is not None:
+        _lowp = compute_dtype in ("fp16", "bf16")
+    else:
+        _lowp = out_t.dtype in (torch.float16, torch.bfloat16)
+    tol = 5e-2 if _lowp else 1e-3
     err = rel_err
     status = "PASS" if err < tol else f"FAIL(rel_err={err:.2e})"
     print(f"  verify {kernel_name}: {status}", flush=True)
@@ -687,6 +697,18 @@ def main() -> int:
         default="fp16",
         choices=["fp16", "bf16", "fp32"],
         help="data type (default: fp16)",
+    )
+    parser.add_argument(
+        "--dtype-d",
+        default=None,
+        choices=["fp16", "bf16", "fp32"],
+        help=(
+            "wgrad only: output (dW) dtype when it differs from --dtype; "
+            "defaults to --dtype. fp32 is what reaches split-K on a shape the "
+            "packed 16-bit atomic cannot serve: that epilogue pairs (c, c+1) "
+            "within one filter position and so needs an even cpg=C/groups, "
+            "while the fp32 path uses a scalar atomic with no pairing rule."
+        ),
     )
     parser.add_argument(
         "--top",
@@ -1328,7 +1350,7 @@ def _build_wgrad_one(args_tuple):
     Returns ``(combo, spec, resolved_split_k, kernel)`` on success, or ``None``.
     Must live at module level for pickle.
     """
-    combo, problem, dtype, arch, lds_k_outer, async_dma = args_tuple
+    combo, problem, dtype, arch, lds_k_outer, async_dma, dtype_d = args_tuple
     (
         tile_m,
         tile_n,
@@ -1383,7 +1405,7 @@ def _build_wgrad_one(args_tuple):
     spec = WgradConvSpec(
         problem=problem,
         name="rocke_bench_igemm_wgrad",
-        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype_d or dtype),
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
@@ -1976,11 +1998,18 @@ def _run_wgrad_sweep(
     _u8 = u8
     p = problem
 
-    _torch_dtype = {
+    _TORCH_DT = {
         "fp16": torch.float16,
         "bf16": torch.bfloat16,
         "fp32": torch.float32,
-    }[dtype]
+    }
+    _torch_dtype = _TORCH_DT[dtype]
+    # dW may be wider than A/B. The packed 16-bit atomic in the split-K epilogue
+    # pairs (c, c+1) inside one filter position and so requires an even
+    # cpg=C/groups; an fp32 dW uses a scalar atomic with no pairing rule, which
+    # is the only way to reach split-K at all on an odd-cpg shape.
+    dtype_d = getattr(args, "dtype_d", None) or dtype
+    _torch_dtype_d = _TORCH_DT[dtype_d]
     torch.manual_seed(42)
 
     def _make(*shape):
@@ -1993,11 +2022,11 @@ def _run_wgrad_sweep(
     if p.is_3d:
         _X_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
         _dY_f32 = _make(p.N, p.Do, p.Ho, p.Wo, p.K)
-        dW_t = torch.empty(p.K, p.Z, p.Y, p.X, p.C, dtype=_torch_dtype)
+        dW_t = torch.empty(p.K, p.Z, p.Y, p.X, p.C, dtype=_torch_dtype_d)
     else:
         _X_f32 = _make(p.N, p.Hi, p.Wi, p.C)
         _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
-        dW_t = torch.empty(p.K, p.Y, p.X, p.C, dtype=_torch_dtype)
+        dW_t = torch.empty(p.K, p.Y, p.X, p.C, dtype=_torch_dtype_d)
 
     X_t = _X_f32.to(_torch_dtype)
     dY_t = _dY_f32.to(_torch_dtype)
@@ -2006,6 +2035,11 @@ def _run_wgrad_sweep(
     flop = float(p.flops)
 
     sig = conv_args_signature(dtype)
+    if dtype_d != dtype:
+        _d_ir = {"fp16": "f16", "bf16": "bf16", "fp32": "f32"}[dtype_d]
+        for _arg in sig:
+            if _arg["name"] == "D":
+                _arg["type"] = f"ptr<{_d_ir}, global>"
     # Extended signature for runtime split-K kernels (split_k=0): adds ks i32 arg.
     sig_rt = sig + [{"name": "ks", "type": "i32", "size_bytes": 4}]
 
@@ -2073,6 +2107,7 @@ def _run_wgrad_sweep(
             arch,
             bool(getattr(args, "lds_k_outer", False)),
             bool(getattr(args, "async_dma", False)),
+            dtype_d,
         )
         for combo in combos
     ]
@@ -2112,7 +2147,7 @@ def _run_wgrad_sweep(
             from rocke.benchmark.conv_reference import wgrad_reference_gfx1250
 
             ref_out = wgrad_reference_gfx1250(
-                _X_f32, _dY_f32, p, out_dtype=_torch_dtype
+                _X_f32, _dY_f32, p, out_dtype=_torch_dtype_d
             )
             print(
                 f"Wgrad reference computed via gfx1250 hand-written wgrad "
@@ -2235,6 +2270,7 @@ def _run_wgrad_sweep(
                     extra_tensors={"dY": dY_t, "X": X_t},
                     u8=_u8,
                     arch=arch,
+                    compute_dtype=dtype,
                 )
                 if stopped:
                     rt.free(dY_dev)
@@ -2269,7 +2305,7 @@ def _run_wgrad_sweep(
             n_run += 1
 
             _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
-                p.C, p.K, dtype, split_k=_launch_sk
+                p.C, p.K, dtype_d, split_k=_launch_sk
             )
             results.append(
                 Result(

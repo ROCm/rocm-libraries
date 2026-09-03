@@ -83,6 +83,7 @@ When ``split_k == 1`` the kernel writes ``dW`` normally (no atomics).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field, replace as dc_replace
 from typing import List, Optional, Sequence, Tuple
 
@@ -508,8 +509,10 @@ class WgradConvSpec:
             )
         if self.lds_k_outer:
             # ds_read_b64_tr_b16 is a gfx950 MFMA-class instruction operating on
-            # 16-bit lanes; the validated fragment formula assumes an 8-element
-            # fragment drawn from a 16- or 32-wide atom edge.
+            # 16-bit lanes. The fragment formula is derived per 16-lane group
+            # over a 16- or 32-wide atom edge; it carries the per-lane fragment
+            # length (4 for 16x16x16, 8 for 16x16x32 and 32x32x16) rather than
+            # assuming 8, so every 16-bit atom on those edges is covered.
             if self.data.dtype_a not in ("bf16", "fp16") or self.data.dtype_b not in (
                 "bf16",
                 "fp16",
@@ -580,6 +583,54 @@ class WgradConvSpec:
 
         vec_c = 1 if split_k != 1 else _vec(C)
         return _vec(K), _vec(C), vec_c
+
+    @staticmethod
+    def default_lds_k_outer(
+        *,
+        arch: str,
+        dtype_a: str,
+        dtype_b: str,
+        warp_tile_m: int,
+        warp_tile_n: int,
+        wave_size: int = 64,
+    ) -> bool:
+        """Whether a wgrad spec should default to the K-outer LDS layout.
+
+        Selection policy only -- it never touches the frozen kernel body, and
+        the ``lds_k_outer`` field itself still defaults to ``False`` so the
+        goldens stay layout-stable. Callers that build specs for dispatch (as
+        opposed to for a golden) ask this what to pass.
+
+        The M-outer tile transposes on *store*: one ``smem_store_vN`` per
+        free-axis element, so a ``load_vec``-wide global load becomes
+        ``load_vec`` narrow LDS writes plus their address arithmetic. The
+        K-outer tile is contiguous in LDS along the same axis the global load
+        is contiguous in, so that store collapses to a single wide write and
+        the transpose moves to the ``ds_read_b64_tr_b16`` operand fetch. It is
+        a strict instruction-count win wherever the transpose read exists,
+        which is the whole of the gate below; there is no shape regime where
+        the scatter is preferable.
+
+        ``ROCKE_WGRAD_LDS_K_OUTER`` overrides: ``auto`` (default), ``on``,
+        ``off``. ``on`` still respects the gate -- an unsupported spec would
+        raise in ``validate()``.
+        """
+        override = os.environ.get("ROCKE_WGRAD_LDS_K_OUTER", "auto").strip().lower()
+        if override in ("0", "off", "false", "no"):
+            return False
+        if override not in ("1", "on", "true", "yes", "auto", ""):
+            raise ValueError(
+                f"ROCKE_WGRAD_LDS_K_OUTER must be auto/on/off; got {override!r}"
+            )
+        # Mirrors the validate() gate: a 16-bit wave64 transpose read over a
+        # 16- or 32-wide atom edge, which today is gfx950 only.
+        if arch != "gfx950":
+            return False
+        if dtype_a not in ("bf16", "fp16") or dtype_b not in ("bf16", "fp16"):
+            return False
+        if warp_tile_m not in (16, 32) or warp_tile_n not in (16, 32):
+            return False
+        return wave_size == 64
 
 
 # ---------------------------------------------------------------------
@@ -1316,14 +1367,19 @@ def build_implicit_gemm_conv_wgrad(
 
     # ---- K-outer transpose-read fragment feed -------------------------------
     # For a K-outer tile ``T[k][mn]`` the MFMA operand of lane ``l`` is obtained
-    # with two ``ds_read_b64_tr_b16`` at
-    #     row(r) = k_base + (l // MN)*8 + ((l % 16)//4) + 4*r     r in {0,1}
+    # with ``n//4`` ``ds_read_b64_tr_b16`` at
+    #     row(r) = k_base + (l // MN)*n + ((l % 16)//4) + 4*r   r in [0, n//4)
     #     col    = mn_base + ((l % MN)//16)*16 + (l % 4)*4
-    # after which lane ``l`` holds ``T[k_base .. k_base+7][mn_base + l % MN]`` --
-    # exactly the 8 K-contiguous elements the atom wants for its column.
-    # The mapping is exact for both 16-bit atoms (32x32x16 and 16x16x32) at any
-    # k/mn offset; test_lds_k_outer_matches_default pins it against the M-outer
-    # path.
+    # after which lane ``l`` holds ``T[k_base .. k_base+n-1][mn_base + l % MN]``
+    # -- exactly the ``n`` K-contiguous elements the atom wants for its column.
+    #
+    # ``n`` is the per-lane operand length, which is what sets the k-stride
+    # between lane groups: MFMA lane ``l`` owns ``k = (l // MN)*n .. +n-1``.
+    # It is 8 for 32x32x16 and 16x16x32, and 4 for 16x16x16. Hardcoding the
+    # stride at 8 made the 16x16x16 atom read k rows 8..27 of a 16-row tile --
+    # past the end of the K-outer tile, so the fragment was garbage. The
+    # emitted IR is unchanged for the two 8-element atoms.
+    # test_lds_k_outer_matches_default pins the mapping against the M-outer path.
     # These are only materialised on the K-outer path: emitting them
     # unconditionally would add IR ops to every existing config and move the
     # golden. Guarded so the default path stays byte-identical.
@@ -1341,7 +1397,7 @@ def build_implicit_gemm_conv_wgrad(
                 _tr_lane_mod4,
             ),
         )
-        row0 = b.add(k_base, b.add(b.mul(b.div(lane, c_mn), b.const_i32(8)), _tr_grp16))
+        row0 = b.add(k_base, b.add(b.mul(b.div(lane, c_mn), b.const_i32(n)), _tr_grp16))
         # ``_smem_dtype`` is None for fp16 (the legacy "default is F16"
         # convention used by _emit_smem_load); ds_read_tr16_b64 needs a concrete
         # element type, so resolve it here.

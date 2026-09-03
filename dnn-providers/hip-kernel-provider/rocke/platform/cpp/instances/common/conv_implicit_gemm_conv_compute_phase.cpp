@@ -59,11 +59,17 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
 
 /* K-outer transpose-read fragment feed (wgrad's lds_k_outer path).
  *
- * For a K-outer tile T[k][mn] the MFMA operand of lane l is two
+ * For a K-outer tile T[k][mn] the MFMA operand of lane l is n/4
  * ds_read_b64_tr_b16 at
- *     row(r) = k_base  + (l // MN)*8 + ((l % 16)//4) + 4*r    r in {0,1}
+ *     row(r) = k_base  + (l // MN)*n + ((l % 16)//4) + 4*r    r in [0, n/4)
  *     col    = mn_base + ((l % MN)//16)*16 + (l % 4)*4
- * after which lane l holds T[k_base .. k_base+7][mn_base + l % MN].
+ * after which lane l holds T[k_base .. k_base+n-1][mn_base + l % MN].
+ *
+ * n is the per-lane operand length, which is what sets the k-stride between
+ * lane groups: MFMA lane l owns k = (l // MN)*n .. +n-1. It is 8 for 32x32x16
+ * and 16x16x32, and 4 for 16x16x16. Hardcoding the stride at 8 made the
+ * 16x16x16 atom read k rows 8..27 of a 16-row tile -- past the end of the
+ * K-outer tile. The emitted IR is unchanged for the two 8-element atoms.
  * Mirrors _tr_frag() in conv_implicit_gemm_wgrad.py. */
 static rocke_value_t* conv_tr_frag(rocke_ir_builder_t* b,
                                    rocke_conv_build_ctx_t* ctx,
@@ -88,10 +94,10 @@ static rocke_value_t* conv_tr_frag(rocke_ir_builder_t* b,
     rocke_value_t* col_inner = rocke_b_add(b, col_mul, ctx->tr_lane_mod4);
     rocke_value_t* col = rocke_b_add(b, mn_base, col_inner);
 
-    /* row0 = k_base + ((lane / MN) * 8 + tr_grp16) */
+    /* row0 = k_base + ((lane / MN) * n + tr_grp16) */
     rocke_value_t* lane_div_mn = rocke_b_div(b, ctx->lane, c_mn);
-    rocke_value_t* c8 = rocke_b_const_i32(b, 8);
-    rocke_value_t* row_mul = rocke_b_mul(b, lane_div_mn, c8);
+    rocke_value_t* c_n = rocke_b_const_i32(b, n);
+    rocke_value_t* row_mul = rocke_b_mul(b, lane_div_mn, c_n);
     rocke_value_t* row_inner = rocke_b_add(b, row_mul, ctx->tr_grp16);
     rocke_value_t* row0 = rocke_b_add(b, k_base, row_inner);
 

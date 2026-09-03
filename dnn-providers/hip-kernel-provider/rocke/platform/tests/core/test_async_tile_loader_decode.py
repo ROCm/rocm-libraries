@@ -105,9 +105,9 @@ class TestDecodeCoversTileExactlyOnce:
                 assert key not in seen, f"element {key} written twice"
                 seen.add(key)
 
-        assert len(seen) == tile_rows * tile_cols, (
-            f"decode covered {len(seen)} of {tile_rows * tile_cols} elements"
-        )
+        assert (
+            len(seen) == tile_rows * tile_cols
+        ), f"decode covered {len(seen)} of {tile_rows * tile_cols} elements"
 
     def test_lane_payload_is_lds_contiguous(self):
         """Adjacent chunk indices must land at adjacent LDS byte offsets.
