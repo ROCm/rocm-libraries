@@ -1744,11 +1744,12 @@ def store_wmma_acc(
 class WmmaTensor:
     """Packed distributed tensor for one lane's WMMA fragment or accumulator.
 
-    ``role`` is ``"a"``/``"b"`` for multiplicands, ``"c"`` for the accumulator
-    input, or ``"d"`` for the produced result. ``value`` is the single
-    packed SSA vector — the form :meth:`WmmaAtom.emit` consumes and produces.
-    Carrying the packed vector (rather than a per-element list) is what keeps
-    the issue-bound kernel at one instruction per tile op.
+    ``role`` uses instruction-level MMA terminology: ``"a"``/``"b"`` are the
+    multiplicands, ``"c"`` is the accumulator input, and ``"d"`` is the
+    produced result. This ``"d"`` is not a GEMM epilogue D tensor. ``value`` is
+    the single packed SSA vector — the form :meth:`WmmaAtom.emit` consumes and
+    produces. Carrying the packed vector (rather than a per-element list) is
+    what keeps the issue-bound kernel at one instruction per tile op.
     """
 
     atom: object  # WmmaAtom (duck-typed to avoid an atoms<->distribution cycle)

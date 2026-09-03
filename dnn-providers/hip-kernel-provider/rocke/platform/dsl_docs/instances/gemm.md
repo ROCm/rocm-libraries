@@ -321,10 +321,12 @@ This is multi-launch grouped GEMM: one HSACO, one persistent `KernelLauncher`, o
 ## Multi-D GEMM `instances/gemm_multi_d.py::GemmMultiDSpec` and `build_gemm_multi_d`
 match CK Tile `19_gemm_multi_d`. The kernel computes
 ``E = f(A * B, D_0, D_1, ..., D_{n-1})`` where ``f`` is a fused
-elementwise chain over the GEMM accumulator and N D tensors of the
-same ``(M, N)`` shape. Implementation re-uses
+elementwise chain over the GEMM accumulator and N auxiliary epilogue D tensors
+of the same ``(M, N)`` shape. These operator-level D tensors are bias,
+residual, or gate inputs; they are unrelated to the D result of an individual
+MMA atom. Implementation re-uses
 `build_universal_gemm` + a `FusedEpilogue` whose op chain is one
-`ResidualAdd` / `ResidualMul` per D operand.
+`ResidualAdd` / `ResidualMul` per epilogue D operand.
 
 Per-D op is chosen from ``{"add", "mul"}``; ``num_d`` up to 8.
 Requires `epilogue="cshuffle"` on the base spec (the default epilogue

@@ -10,6 +10,11 @@ modeled independently, although every currently shipped atom uses matching C
 and D representations. The emitted `tile.mma` operation therefore remains
 three source operands `(A, B, C)` with one D result.
 
+Here C and D are strictly MMA atom roles. They do not rename higher-level
+operator tensors: for example, Multi-D GEMM's `D0` through `Dn` are auxiliary
+epilogue inputs, and attention's D axis is head dimension. See
+[MMA operand roles versus operator tensors](glossary.md#mma-operand-roles-versus-operator-tensors).
+
 ## Atom Table
 
 | Atom             | (m, n, k) | A per lane  | B per lane  | D per lane   | Output tile | Target  | Notes                              |

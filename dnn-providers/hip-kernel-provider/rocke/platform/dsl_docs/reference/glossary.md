@@ -92,6 +92,19 @@ The ROCm HIP runtime library. Used by `runtime/hip_module.py` via ctypes for mod
 
 Matrix Fused Multiply-Add. AMD matrix instruction (`v_mfma_f32_*`). Used by GEMM, convolution (implicit and direct), and attention.
 
+## MMA operand roles versus operator tensors
+
+For one MFMA or WMMA atom, rocKE follows the machine-readable ISA contract
+`D = A * B + C`: A and B are multiplicands, C is the accumulator input, and D
+is the produced result. Atom fields such as `c_dtype`, `d_dtype`, `c_layout`,
+and `d_layout` always use this instruction-level meaning.
+
+Higher-level operators have their own established tensor names. In Multi-D
+GEMM, `D0` through `Dn` are auxiliary epilogue inputs such as bias, residual,
+or gate tensors, and E is the operator output. In attention documentation, D
+may also denote the head-dimension axis. These operator-level uses are not MMA
+operand roles and should be qualified in nearby names or prose.
+
 ## MfmaAtom
 
 DSL helper that packages one MFMA shape (`m, n, k`), per-lane operand widths (`a_per_lane`, `b_per_lane`, `c_per_lane`, `d_per_lane`), independent C-input and D-result dtypes, intrinsic dispatch (`D = atom.emit(b, A, B, C)`), and D lane-to-output mapping (`atom.lane_to_output(b, lane, i)`).

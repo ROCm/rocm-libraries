@@ -935,11 +935,13 @@ def d_warp_params(atom: "MfmaAtom") -> Tuple[int, int, int, int]:
     """Return ``(kCM0PerLane, kCMLane, kCM1PerLane, kCNLane)`` for ``atom``.
 
     These are the four CK Tile ``WarpGemmAttributeMfmaImpl`` constants
-    that fully describe the MFMA C-fragment layout. ``kCM0PerLane *
-    kCM1PerLane`` is the per-lane accumulator count (``d_per_lane``) and
-    ``kCMLane * kCNLane`` is the wavefront size that participates in the
-    M/N spatial tiling (64 on wave64). Raises for atom shapes CK Tile
-    does not give a ``CWarpDstrEncoding`` for (the batched 4x4 atom).
+    named by CK as the MFMA C-fragment layout. In rocKE's instruction-level
+    A/B/C/D model this helper is consumed as the MMA D-result layout.
+    ``kCM0PerLane * kCM1PerLane`` is the per-lane result count
+    (``d_per_lane``), and ``kCMLane * kCNLane`` is the wavefront size that
+    participates in the M/N spatial tiling (64 on wave64). Raises for atom
+    shapes CK Tile does not give a ``CWarpDstrEncoding`` for (the batched 4x4
+    atom).
     """
     key = (atom.m, atom.n)
     if key not in _C_WARP_PARAMS:
@@ -957,14 +959,15 @@ def d_warp_params(atom: "MfmaAtom") -> Tuple[int, int, int, int]:
 
 
 def make_d_warp_dstr_encoding(atom: "MfmaAtom") -> TileDistributionEncoding:
-    """Build the MFMA C-tile :class:`TileDistributionEncoding` for ``atom``.
+    """Build the MMA D-result :class:`TileDistributionEncoding` for ``atom``.
 
     Port of CK Tile's ``CWarpDstrEncoding``
     (``ops/gemm/warp/warp_gemm_attribute_mfma.hpp``) /
-    ``make_embed_tile_distribution_encoding`` for the C accumulator. The
-    returned encoding describes, for one wavefront, how the (lane,
-    per-lane register slot) pair maps onto the (row, col) of the warp's
-    output tile -- i.e. it expresses the accumulator layout as a
+    ``make_embed_tile_distribution_encoding``. CK calls this the C accumulator
+    distribution; rocKE uses it here for the produced MMA D result. The returned
+    encoding describes, for one wavefront, how the (lane, per-lane register
+    slot) pair maps onto the (row, col) of the warp's output tile -- i.e. it
+    expresses the result layout as a
     :class:`TileDistribution` instead of the hand-rolled lane arithmetic
     in :meth:`MfmaAtom.lane_to_output`.
 

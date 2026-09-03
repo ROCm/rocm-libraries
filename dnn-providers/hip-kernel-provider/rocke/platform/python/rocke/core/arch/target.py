@@ -66,7 +66,8 @@ def normalize_dtype(name: str) -> str:
 # returns them as a ``(Value, Value)`` pair. The coordinate *meaning* depends on
 # the operand role (see :class:`LayoutMap.role`):
 #
-#   * accumulator (C/D)  -> ``(row, col)``  in the atom's M x N output tile
+#   * MMA C input        -> ``(row, col)``  in the atom's M x N tile
+#   * MMA D result       -> ``(row, col)``  in the atom's M x N tile
 #   * A operand          -> ``(row, k)``    in the atom's M x K input tile
 #   * B operand          -> ``(k, col)``    in the atom's K x N input tile
 #
@@ -136,6 +137,11 @@ class MmaOp:
     ``op_id`` is the opaque handle the backend consumes; today it matches the
     ISA-named ``IRBuilder`` method (e.g. ``mfma_f32_16x16x16_f16``). It is **not**
     LLVM intrinsic text — the backend maps ``op_id`` to an intrinsic.
+
+    The A/B/C/D names in this class are instruction-level MMA roles. In
+    particular, ``d_dtype`` and ``d_layout()`` describe the value produced by
+    one MMA instruction. They are unrelated to operator-level auxiliary
+    tensors conventionally named ``D0`` through ``Dn`` by Multi-D GEMM.
 
     The ``*_frag_len`` fields and the layout-map accessors describe the
     *physical* register fragmentation of the atom: how many values of each
