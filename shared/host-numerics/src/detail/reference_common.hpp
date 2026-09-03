@@ -162,11 +162,32 @@ template <typename Accumulator>
 using RuntimeLoadFunction = Accumulator (*)(std::span<const std::byte>, ptrdiff_t);
 
 template <typename Accumulator>
+using RuntimeLoadMatrixBlockFunction = void (*)(std::span<const std::byte>, ptrdiff_t, ptrdiff_t,
+                                                ptrdiff_t, size_t, size_t, size_t, size_t,
+                                                std::span<Accumulator>);
+
+template <typename Accumulator>
 using RuntimeStoreFunction = void (*)(std::span<std::byte>, ptrdiff_t, Accumulator);
 
 template <typename Accumulator, typename Tag>
 Accumulator runtimeLoadScalar(std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
     return decodeScalarKnown<Tag::type, Accumulator>(storage, logicalOffset);
+}
+
+template <typename Accumulator, typename Tag>
+void runtimeLoadMatrixBlock(std::span<const std::byte> storage, ptrdiff_t offset,
+                            ptrdiff_t rowStride, ptrdiff_t columnStride, size_t rowBase,
+                            size_t columnBase, size_t rows, size_t columns,
+                            std::span<Accumulator> destination) {
+    for (size_t row = 0; row < rows; ++row) {
+        const ptrdiff_t sourceRow = offset + static_cast<ptrdiff_t>(rowBase + row) * rowStride;
+        for (size_t column = 0; column < columns; ++column) {
+            const ptrdiff_t sourceOffset =
+                sourceRow + static_cast<ptrdiff_t>(columnBase + column) * columnStride;
+            destination[row * columns + column] =
+                decodeScalarKnown<Tag::type, Accumulator>(storage, sourceOffset);
+        }
+    }
 }
 
 template <typename Accumulator, typename Tag>
@@ -178,6 +199,12 @@ template <typename Accumulator>
 RuntimeLoadFunction<Accumulator> runtimeLoadFunction(ScalarType type) {
     return visitScalarType(type,
                            []<typename Tag>() { return &runtimeLoadScalar<Accumulator, Tag>; });
+}
+
+template <typename Accumulator>
+RuntimeLoadMatrixBlockFunction<Accumulator> runtimeLoadMatrixBlockFunction(ScalarType type) {
+    return visitScalarType(
+        type, []<typename Tag>() { return &runtimeLoadMatrixBlock<Accumulator, Tag>; });
 }
 
 template <typename Accumulator>
@@ -207,6 +234,34 @@ class RuntimeMatrixReader {
     ptrdiff_t m_rowStride;
     ptrdiff_t m_columnStride;
     RuntimeLoadFunction<Accumulator> m_load;
+};
+
+template <typename Accumulator>
+class RuntimeMatrixBlockReader {
+   public:
+    // Resolve the encoded storage type once so a whole tile can be decoded without an indirect
+    // function call for every scalar.
+    explicit RuntimeMatrixBlockReader(const Tensor& view)
+        : m_storage(view.rawEncodedBackingStorage()),
+          m_offset(view.layout().offset()),
+          m_rowStride(view.layout().strides()[0]),
+          m_columnStride(view.layout().strides()[1]),
+          m_load(runtimeLoadMatrixBlockFunction<Accumulator>(view.type())) {}
+
+    void load(size_t rowBase, size_t columnBase, size_t rows, size_t columns,
+              std::span<Accumulator> destination) const {
+        if (rows != 0 && columns > destination.size() / rows)
+            throw std::invalid_argument("Runtime matrix block destination is too small.");
+        m_load(m_storage, m_offset, m_rowStride, m_columnStride, rowBase, columnBase, rows, columns,
+               destination);
+    }
+
+   private:
+    std::span<const std::byte> m_storage;
+    ptrdiff_t m_offset;
+    ptrdiff_t m_rowStride;
+    ptrdiff_t m_columnStride;
+    RuntimeLoadMatrixBlockFunction<Accumulator> m_load;
 };
 
 template <typename Accumulator>

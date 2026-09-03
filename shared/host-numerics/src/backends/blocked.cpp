@@ -134,6 +134,8 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
 
     const RuntimeMatrixReader<Accumulator> a(problem.a);
     const RuntimeMatrixReader<Accumulator> b(problem.b);
+    const RuntimeMatrixBlockReader<Accumulator> aBlockReader(problem.a);
+    const RuntimeMatrixBlockReader<Accumulator> bBlockReader(problem.b);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.computeTypeA);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.computeTypeB);
     const RuntimeGemmFinalizer<Accumulator> finalizer =
@@ -170,45 +172,65 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
     if (problem.blockScaleB) blockScaleB.emplace(*problem.blockScaleB);
 
     const bool hasBlockScale = blockScaleA.has_value() || blockScaleB.has_value();
+    const bool loadAWithoutTransforms = !problem.conjugateA && preScalesA.empty() &&
+                                        !problem.computeTypeA &&
+                                        problem.mathMode == MathMode::Default;
+    const bool loadBWithoutTransforms = !problem.conjugateB && preScalesB.empty() &&
+                                        !problem.computeTypeB &&
+                                        problem.mathMode == MathMode::Default;
 
     const auto executeBlock = [&](size_t rowBase, size_t columnBase, bool storeAllOutputs,
                                   std::span<const SelectedOutputLocation> selectedOutputs) {
         const size_t rows = std::min(outputBlockRows, m - rowBase);
         const size_t columns = std::min(outputBlockColumns, n - columnBase);
-        std::vector<Accumulator> accumulator(rows * columns, Accumulator(0));
+        const size_t accumulatorElements = rows * columns;
         const size_t maximumReductions = std::min(reductionBlockElements, k);
-        std::vector<Accumulator> aBlock(rows * maximumReductions);
-        std::vector<Accumulator> bBlock(maximumReductions * columns);
-        std::vector<Accumulator> partial(hasBlockScale ? rows * columns : 0);
+        const size_t aBlockElements = rows * maximumReductions;
+        const size_t bBlockElements = maximumReductions * columns;
+        const size_t partialElements = hasBlockScale ? accumulatorElements : 0;
+        std::vector<Accumulator> scratch(accumulatorElements + aBlockElements + bBlockElements +
+                                         partialElements);
+        std::span<Accumulator> accumulator(scratch.data(), accumulatorElements);
+        std::span<Accumulator> aBlock(scratch.data() + accumulatorElements, aBlockElements);
+        std::span<Accumulator> bBlock(aBlock.data() + aBlockElements, bBlockElements);
+        std::span<Accumulator> partial(bBlock.data() + bBlockElements, partialElements);
 
-        const auto accumulateTile = [&](std::vector<Accumulator>& destination, size_t reductionBase,
+        const auto accumulateTile = [&](std::span<Accumulator> destination, size_t reductionBase,
                                         size_t reductions) {
-            for (size_t row = 0; row < rows; ++row) {
-                for (size_t reduction = 0; reduction < reductions; ++reduction) {
-                    Accumulator value = conjugateIfNeeded(
-                        a(rowBase + row, reductionBase + reduction), problem.conjugateA);
-                    for (const auto& scale : preScalesA) {
-                        if constexpr (needsExplicitArithmetic)
-                            value =
-                                multiply(value, scale(rowBase + row, reductionBase + reduction));
-                        else
-                            value *= scale(rowBase + row, reductionBase + reduction);
+            if (loadAWithoutTransforms) {
+                aBlockReader.load(rowBase, reductionBase, rows, reductions, aBlock);
+            } else {
+                for (size_t row = 0; row < rows; ++row) {
+                    for (size_t reduction = 0; reduction < reductions; ++reduction) {
+                        Accumulator value = conjugateIfNeeded(
+                            a(rowBase + row, reductionBase + reduction), problem.conjugateA);
+                        for (const auto& scale : preScalesA) {
+                            if constexpr (needsExplicitArithmetic)
+                                value = multiply(value,
+                                                 scale(rowBase + row, reductionBase + reduction));
+                            else
+                                value *= scale(rowBase + row, reductionBase + reduction);
+                        }
+                        aBlock[row * reductions + reduction] = operandMath(quantizeA(value));
                     }
-                    aBlock[row * reductions + reduction] = operandMath(quantizeA(value));
                 }
             }
-            for (size_t reduction = 0; reduction < reductions; ++reduction) {
-                for (size_t column = 0; column < columns; ++column) {
-                    Accumulator value = conjugateIfNeeded(
-                        b(reductionBase + reduction, columnBase + column), problem.conjugateB);
-                    for (const auto& scale : preScalesB) {
-                        if constexpr (needsExplicitArithmetic)
-                            value = multiply(value,
-                                             scale(reductionBase + reduction, columnBase + column));
-                        else
-                            value *= scale(reductionBase + reduction, columnBase + column);
+            if (loadBWithoutTransforms) {
+                bBlockReader.load(reductionBase, columnBase, reductions, columns, bBlock);
+            } else {
+                for (size_t reduction = 0; reduction < reductions; ++reduction) {
+                    for (size_t column = 0; column < columns; ++column) {
+                        Accumulator value = conjugateIfNeeded(
+                            b(reductionBase + reduction, columnBase + column), problem.conjugateB);
+                        for (const auto& scale : preScalesB) {
+                            if constexpr (needsExplicitArithmetic)
+                                value = multiply(
+                                    value, scale(reductionBase + reduction, columnBase + column));
+                            else
+                                value *= scale(reductionBase + reduction, columnBase + column);
+                        }
+                        bBlock[reduction * columns + column] = operandMath(quantizeB(value));
                     }
-                    bBlock[reduction * columns + column] = operandMath(quantizeB(value));
                 }
             }
 
