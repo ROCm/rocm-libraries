@@ -7,7 +7,27 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#define HIPDNN_CUSTOM_LIBRARY_DEFINED_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#define HIPDNN_CUSTOM_LIBRARY_DEFINED_NOMINMAX
+#endif
+#include <windows.h>
+#ifdef HIPDNN_CUSTOM_LIBRARY_DEFINED_LEAN_AND_MEAN
+#undef WIN32_LEAN_AND_MEAN
+#undef HIPDNN_CUSTOM_LIBRARY_DEFINED_LEAN_AND_MEAN
+#endif
+#ifdef HIPDNN_CUSTOM_LIBRARY_DEFINED_NOMINMAX
+#undef NOMINMAX
+#undef HIPDNN_CUSTOM_LIBRARY_DEFINED_NOMINMAX
+#endif
+#else
 #include <dlfcn.h> // POSIX dlopen / dlsym / dlclose
+#endif
 
 #include <cstddef>
 #include <memory>
@@ -27,6 +47,70 @@
 /// construct it.
 namespace hipdnn_plugin_sdk::ingestor::uhd
 {
+
+namespace detail
+{
+
+/// The three dynamic-loading calls this adapter needs, on both platforms it builds for.
+///
+/// A shim rather than `#ifdef`s at the call sites: the POSIX error protocol (clear
+/// `dlerror()`, call, read it back) and the Windows one (`GetLastError()`) do not
+/// interleave, so spelling them inline three times invites getting one of them subtly
+/// wrong. The handle stays `void*` in the member, which both platforms can carry.
+
+inline void* sharedLibraryOpen(const char* path)
+{
+#ifdef _WIN32
+    return static_cast<void*>(::LoadLibraryA(path));
+#else
+    // RTLD_NOW so a missing symbol surfaces at load rather than at the first score() call,
+    // and RTLD_LOCAL so a third-party scorer cannot export names into the global scope.
+    return ::dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#endif
+}
+
+/// Clears any pending error, so the caller's error check is about this lookup only.
+inline void* sharedLibrarySymbol(void* handle, const char* name)
+{
+#ifdef _WIN32
+    ::SetLastError(0);
+    return reinterpret_cast<void*>(::GetProcAddress(static_cast<HMODULE>(handle), name));
+#else
+    ::dlerror();
+    return ::dlsym(handle, name);
+#endif
+}
+
+/// True when the handle was released.
+inline bool sharedLibraryClose(void* handle)
+{
+#ifdef _WIN32
+    return ::FreeLibrary(static_cast<HMODULE>(handle)) != 0;
+#else
+    return ::dlclose(handle) == 0;
+#endif
+}
+
+/// The last failure, or empty when the platform reports none. Empty is not "succeeded":
+/// POSIX only guarantees a message after a call that failed.
+inline std::string sharedLibraryError()
+{
+#ifdef _WIN32
+    const auto code = ::GetLastError();
+    if(code == 0)
+    {
+        return {};
+    }
+    std::ostringstream text;
+    text << "system error " << code;
+    return text.str();
+#else
+    const char* err = ::dlerror();
+    return err != nullptr ? std::string(err) : std::string();
+#endif
+}
+
+} // namespace detail
 
 /// @brief Custom library adapter for compiled scorers (RFC 0019 §7.2).
 ///
@@ -60,16 +144,16 @@ public:
     {
         if(_libHandle != nullptr)
         {
-            if(dlclose(_libHandle) != 0)
+            if(!detail::sharedLibraryClose(_libHandle))
             {
-                const char* err = dlerror();
-                HIPDNN_SDK_LOG_WARN("CustomLibraryAdapter: dlclose failed for "
-                                    << _libraryPath << ": " << (err != nullptr ? err : "unknown"));
+                const auto err = detail::sharedLibraryError();
+                HIPDNN_SDK_LOG_WARN("CustomLibraryAdapter: unload failed for "
+                                    << _libraryPath << ": " << (err.empty() ? "unknown" : err));
             }
         }
     }
 
-    /// Non-copyable and non-movable: the handle is owned and dlclose'd exactly once.
+    /// Non-copyable and non-movable: the handle is owned and unloaded exactly once.
     CustomLibraryAdapter(const CustomLibraryAdapter&) = delete;
     CustomLibraryAdapter& operator=(const CustomLibraryAdapter&) = delete;
     CustomLibraryAdapter(CustomLibraryAdapter&&) = delete;
@@ -151,27 +235,25 @@ inline std::unique_ptr<CustomLibraryAdapter>
         return nullptr;
     }
 
-    // RTLD_NOW so a missing symbol surfaces here rather than at the first score() call, and
-    // RTLD_LOCAL so a third-party scorer cannot export names into the process's global scope.
-    void* libHandle = dlopen(libraryPath.c_str(), RTLD_NOW | RTLD_LOCAL);
+    void* libHandle = detail::sharedLibraryOpen(libraryPath.c_str());
     if(libHandle == nullptr)
     {
-        const char* err = dlerror();
-        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: dlopen failed for "
-                             << libraryPath << ": " << (err != nullptr ? err : "unknown"));
+        const auto err = detail::sharedLibraryError();
+        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: load failed for "
+                             << libraryPath << ": " << (err.empty() ? "unknown" : err));
         return nullptr;
     }
 
-    dlerror(); // POSIX: clear before dlsym so the error check below is about this lookup
-
-    void* symbol = dlsym(libHandle, symbolName.c_str());
-    const char* err = dlerror();
-    if(err != nullptr || symbol == nullptr)
+    void* symbol = detail::sharedLibrarySymbol(libHandle, symbolName.c_str());
+    if(symbol == nullptr)
     {
-        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: dlsym failed for symbol '"
+        // Only consulted once the symbol is known missing: a null result is the failure,
+        // and on POSIX a non-null symbol may legitimately leave a stale message behind.
+        const auto err = detail::sharedLibraryError();
+        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: symbol lookup failed for '"
                              << symbolName << "' in " << libraryPath << ": "
-                             << (err != nullptr ? err : "symbol not found"));
-        dlclose(libHandle);
+                             << (err.empty() ? "symbol not found" : err));
+        detail::sharedLibraryClose(libHandle);
         return nullptr;
     }
 

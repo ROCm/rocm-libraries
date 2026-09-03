@@ -1885,7 +1885,9 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         }
         for(const auto& [arch, candidate] : heuristicsByArch)
         {
-            if(&candidate != heuristic)
+            // By id, not by address. heuristicsByArch holds *copies*, so comparing addresses
+            // never matched: the default was version-checked twice and its skew reported twice.
+            if(heuristic == nullptr || candidate.id != heuristic->id)
             {
                 versioned.push_back(&candidate);
             }
