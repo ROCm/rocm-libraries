@@ -299,7 +299,6 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
 namespace
 {
     constexpr size_t kGfx950AnalyticalCuCount = 256;
-    constexpr size_t kMaxTileCountBeforeCap   = 16777216;
 
     struct StreamKHostPack
     {
@@ -1126,20 +1125,20 @@ TEST(SKLaunchGridLimitsTest, CapsGridWhenTilesReach2Pow24)
 {
     ContractionSolution solution;
     initBenchStreamK5Solution(solution, TensileLite::dim3(32, 96, 1), 32);
+    const size_t tpg = threadsPerWorkGroup(solution);
+    const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1)/ tpg;
 
     auto   problem       = makeGemmProblem(524288, 98304, 128);
     AMDGPU device        = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
     device.skDynamicGrid = 0;
 
     auto tiles = problem.getNumTiles(solution.sizeMapping, 1);
-    ASSERT_EQ(tiles, kMaxTileCountBeforeCap);
+    ASSERT_EQ(tiles, maxTilesBeforeCap);
 
     size_t grid = solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree);
     EXPECT_EQ(grid, static_cast<size_t>(_SPX_CU))
         << "Tree-fixup must cap skGrid to cuCount*occupancy, not full tile count";
     EXPECT_NE(grid, tiles);
-
-    const size_t tpg = threadsPerWorkGroup(solution);
     EXPECT_LE(totalWorkItems(grid, tpg),
               static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
 }
@@ -1151,10 +1150,11 @@ TEST(SKLaunchGridLimitsTest, CapsGridWithAnalyticalOrigamiPath)
 
     ContractionSolution solution;
     initBenchStreamK5Solution(solution, TensileLite::dim3(32, 96, 1), 32);
-
+    const size_t tpg = threadsPerWorkGroup(solution);
+    const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1) / tpg;
     auto problem = makeGemmProblem(524288, 98304, 128);
     auto tiles   = problem.getNumTiles(solution.sizeMapping, 1);
-    ASSERT_EQ(tiles, kMaxTileCountBeforeCap);
+    ASSERT_EQ(tiles, maxTilesBeforeCap);
 
     size_t grid = solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree);
     EXPECT_EQ(grid, kGfx950AnalyticalCuCount)
@@ -1165,22 +1165,25 @@ TEST(SKLaunchGridLimitsTest, CapsGridWithAnalyticalOrigamiPath)
 TEST(SKLaunchGridLimitsTest, StillUsesDpFallbackBelowTileThreshold)
 {
     ContractionSolution solution;
-    initBenchStreamK5Solution(solution, TensileLite::dim3(32, 32, 1), 32);
+    solution.sizeMapping.workGroupSize = TensileLite::dim3(128, 1, 1);
+    initBenchStreamK5Solution(solution, TensileLite::dim3(16, 16, 1), 128);
+    const size_t tpg = threadsPerWorkGroup(solution);
+    const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1) / tpg;
 
-    auto   problem       = makeGemmProblem(65536, 65536, 128);
+    auto   problem       = makeGemmProblem(65536, 65552, 128);
     AMDGPU device        = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
     device.skDynamicGrid = 0;
 
     auto tiles = problem.getNumTiles(solution.sizeMapping, 1);
-    ASSERT_EQ(tiles, 4194304u);
-    ASSERT_LT(tiles, kMaxTileCountBeforeCap);
+    ASSERT_EQ(tiles, 16781312u);
+    ASSERT_LT(tiles, maxTilesBeforeCap);
 
     size_t itersPerTile = problem.getItersPerTile(solution.sizeMapping);
-    ASSERT_GE(tiles * itersPerTile, kMaxTileCountBeforeCap)
+    ASSERT_GE(tiles * itersPerTile, maxTilesBeforeCap)
         << "Tree-fixup trigger must fire even below the tile cap threshold";
 
     size_t grid = solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree);
-    EXPECT_EQ(grid, tiles) << "Sub-2^24 tile count must keep the DP fallback (skGrid=tiles)";
+    EXPECT_EQ(grid, tiles) << "Non-overflow tile count must keep the DP fallback (skGrid=tiles)";
 }
 
 struct BenchLaunchLimitCase
@@ -1189,6 +1192,7 @@ struct BenchLaunchLimitCase
     size_t      mt0;
     size_t      mt1;
     size_t      depthU;
+    size_t      workGroupSizeX;
 };
 
 class SKLaunchGridLimitsParamTest : public ::testing::TestWithParam<BenchLaunchLimitCase>
@@ -1200,6 +1204,7 @@ TEST_P(SKLaunchGridLimitsParamTest, FailingMacroTilesStayWithinWorkItemLimit)
     auto const& param = GetParam();
 
     ContractionSolution solution;
+    solution.sizeMapping.workGroupSize = TensileLite::dim3(param.workGroupSizeX, 1, 1);
     initBenchStreamK5Solution(solution, TensileLite::dim3(param.mt0, param.mt1, 1), param.depthU);
 
     origami::hardware_t hw     = makeGfx950AnalyticalHardware();
@@ -1219,9 +1224,10 @@ TEST_P(SKLaunchGridLimitsParamTest, FailingMacroTilesStayWithinWorkItemLimit)
 
 INSTANTIATE_TEST_SUITE_P(BenchSweep,
                          SKLaunchGridLimitsParamTest,
-                         ::testing::Values(BenchLaunchLimitCase{"MT32x96x32", 32, 96, 32},
-                                           BenchLaunchLimitCase{"MT32x96x64", 32, 96, 64},
-                                           BenchLaunchLimitCase{"MT256x256x32", 256, 256, 32}),
+                         ::testing::Values(BenchLaunchLimitCase{"MT32x96x32", 32, 96, 32, 256},
+                                           BenchLaunchLimitCase{"MT32x96x64", 32, 96, 64, 256},
+                                           BenchLaunchLimitCase{"MT256x256x32", 256, 256, 32, 256},
+                                           BenchLaunchLimitCase{"MT16x16x128", 16, 16, 128, 128}),
                          [](::testing::TestParamInfo<BenchLaunchLimitCase> const& info) {
                              return info.param.label;
                          });
