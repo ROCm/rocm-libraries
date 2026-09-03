@@ -52,7 +52,7 @@ using hipdnn_frontend::ErrorCode;
 using hipdnn_integration_tests::bundle::enginesAccept;
 using hipdnn_integration_tests::bundle::formatVerdictMessage;
 using hipdnn_integration_tests::bundle::LoadedEngine;
-using hipdnn_integration_tests::bundle::ObservedSupportCell;
+using hipdnn_integration_tests::bundle::ObservedGraphSupport;
 using hipdnn_integration_tests::bundle::observeSupport;
 using hipdnn_integration_tests::bundle::RankedEngines;
 using hipdnn_integration_tests::bundle::SidecarState;
@@ -167,7 +167,7 @@ TEST(TestSupportClaimRoundTrip, SingleGraphBootstrapAppendAndReRun)
     const auto sidecarPath = dir.path() / "Small.support.json";
 
     // --- Run 1: gfx942, one engine (mode C). Nothing on disk yet. ---
-    const std::vector<ObservedSupportCell> firstRun = {
+    const std::vector<ObservedGraphSupport> firstRun = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
     };
     ASSERT_EQ(writeObservedSupportClaims(firstRun).filesWritten, 1u);
@@ -185,7 +185,7 @@ TEST(TestSupportClaimRoundTrip, SingleGraphBootstrapAppendAndReRun)
     }
 
     // --- Run 2: a second machine (gfx90a) where both engines answer yes. ---
-    const std::vector<ObservedSupportCell> secondRun = {
+    const std::vector<ObservedGraphSupport> secondRun = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx90a", "linux", true),
         singleGraphObservation(bundlePath, "HIP_KERNEL_ENGINE", "gfx90a", "linux", true),
     };
@@ -264,7 +264,7 @@ TEST(TestSupportClaimRoundTrip, SweepBootstrapAppendAndReRun)
     const auto sidecarPath = dir.path() / "support.json";
 
     // --- Run 1: gfx942, both engines queried (mode B); only MIOPEN answers. ---
-    const std::vector<ObservedSupportCell> firstRun = {
+    const std::vector<ObservedGraphSupport> firstRun = {
         sweepCaseObservation(sweepPath, "case_a", "MIOPEN_ENGINE", "gfx942", "linux", true),
         sweepCaseObservation(sweepPath, "case_a", "HIP_KERNEL_ENGINE", "gfx942", "linux", false),
         sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx942", "linux", true),
@@ -285,7 +285,7 @@ TEST(TestSupportClaimRoundTrip, SweepBootstrapAppendAndReRun)
     }
 
     // --- Run 2: gfx90a, where both engines answer yes for both cases. ---
-    const std::vector<ObservedSupportCell> secondRun = {
+    const std::vector<ObservedGraphSupport> secondRun = {
         sweepCaseObservation(sweepPath, "case_a", "MIOPEN_ENGINE", "gfx90a", "linux", true),
         sweepCaseObservation(sweepPath, "case_a", "HIP_KERNEL_ENGINE", "gfx90a", "linux", true),
         sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx90a", "linux", true),

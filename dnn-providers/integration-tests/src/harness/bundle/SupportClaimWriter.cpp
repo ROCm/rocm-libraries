@@ -116,25 +116,25 @@ SweepSupportClaims regroupSweepClaims(const FlatSweepMap& flat, int version)
     return result;
 }
 
-// "" is a legal JSON key, so a cell with an empty engine, arch, or platform
-// serializes without complaint and lands an entry in a checked-in sidecar that
-// no enforcement run can ever match or clear. An empty arch is the realistic
-// one: it is what a failed device probe leaves behind in the policy.
-std::string cellDefect(const ObservedSupportCell& cell)
+// "" is a legal JSON key, so an observation with an empty engine, arch, or
+// platform serializes without complaint and lands an entry in a checked-in
+// sidecar that no enforcement run can ever match or clear. An empty arch is the
+// realistic one: it is what a failed device probe leaves behind in the policy.
+std::string observationDefect(const ObservedGraphSupport& observation)
 {
-    if(cell.claimLocator.sidecarPath.empty())
+    if(observation.claimLocator.sidecarPath.empty())
     {
         return "empty sidecar path";
     }
-    if(cell.engineName.empty())
+    if(observation.engineName.empty())
     {
         return "empty engine name";
     }
-    if(cell.arch.empty())
+    if(observation.arch.empty())
     {
         return "empty arch";
     }
-    if(cell.platform.empty())
+    if(observation.platform.empty())
     {
         return "empty platform";
     }
@@ -178,7 +178,7 @@ bool writeIfChanged(const std::filesystem::path& filePath,
 
 } // namespace
 
-WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& observations)
+WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>& observations)
 {
     WriteSummary summary;
 
@@ -190,7 +190,7 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
     {
         bool isSweep = false;
         bool skip = false;
-        std::vector<ObservedSupportCell> observations;
+        std::vector<ObservedGraphSupport> observations;
     };
 
     // Keyed on the normalized path so that two spellings of one file ("d/x.json"
@@ -218,7 +218,7 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
             target.skip = true;
         }
 
-        const std::string defect = cellDefect(observation);
+        const std::string defect = observationDefect(observation);
         if(!defect.empty())
         {
             summary.errors.push_back("refusing to write from a malformed observation (" + defect

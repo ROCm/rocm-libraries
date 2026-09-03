@@ -19,6 +19,6 @@ struct WriteSummary
     std::vector<std::string> errors;
 };
 
-WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& observations);
+WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>& observations);
 
 } // namespace hipdnn_integration_tests::bundle

@@ -12,15 +12,15 @@
 namespace hipdnn_integration_tests::bundle
 {
 
-// One (graph, engine, arch, platform) cell of observed support, as seen on the
-// hardware the run happened on.
+// One resolved answer to "did this engine take this graph", for the arch and
+// platform the run happened on.
 //
 // Not SupportVerdict.hpp's SupportObservation, which is the enforcing side: what a
 // sidecar promised and whether we got to read it. This one is the authoring side --
 // what the engines actually took, with no sidecar involved.
-struct ObservedSupportCell
+struct ObservedGraphSupport
 {
-    // Says which sidecar this cell belongs in and, for a sweep, which case
+    // Says which sidecar this observation belongs in and, for a sweep, which case
     // within it. Carried rather than re-derived: the writer must agree with the
     // enforcer about the target file, and this is the value the enforcer used.
     SupportClaimLocator claimLocator;
@@ -39,7 +39,7 @@ struct ObservedSupportCell
 // --write-support-claims runs and drained once after RUN_ALL_TESTS() to
 // produce .support.json sidecars.
 //
-// Precondition on every recorded cell: the query that produced it resolved (OK
+// Precondition on every recorded observation: the query that produced it resolved (OK
 // or GRAPH_NOT_SUPPORTED). An unresolved query is not an observation of
 // "unsupported" and must never null an existing claim. The type cannot express
 // this -- the guard is the early return in
@@ -59,13 +59,13 @@ public:
     SupportObservationLog(SupportObservationLog&&) = delete;
     SupportObservationLog& operator=(SupportObservationLog&&) = delete;
 
-    void record(ObservedSupportCell observation)
+    void record(ObservedGraphSupport observation)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         _observations.push_back(std::move(observation));
     }
 
-    std::vector<ObservedSupportCell> all() const
+    std::vector<ObservedGraphSupport> all() const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         return _observations;
@@ -87,7 +87,7 @@ private:
     SupportObservationLog() = default;
 
     mutable std::mutex _mutex;
-    std::vector<ObservedSupportCell> _observations;
+    std::vector<ObservedGraphSupport> _observations;
 };
 
 } // namespace hipdnn_integration_tests::bundle

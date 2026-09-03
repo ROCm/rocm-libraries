@@ -205,7 +205,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
 }
 
-// Records raw ObservedSupportCells (does this engine take the graph, yes or no)
+// Records raw ObservedGraphSupport facts (does this engine take the graph, yes or no)
 // rather than the SupportResults the claim path produces, so it reads the session's
 // ranked list itself instead of going through the claim observer.
 //
