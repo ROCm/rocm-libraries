@@ -273,4 +273,23 @@ inline void saturate_pixel(Rpp32f& pixel, Rpp16f* dst) {
     *dst = static_cast<Rpp16f>(RPPPIXELCHECKF32(pixel));
 }
 
+// Host-only utility function for calculating optimal thread count for intra-image parallelization
+// This function determines whether to use batch-level or intra-image parallelization based on
+// batch size and image dimensions
+inline Rpp32u GetIntraImageNumThreads(const rpp::Handle& handle, Rpp32u batchSize,
+                                      Rpp32u imageHeight) {
+    const Rpp32u MIN_ROWS_PER_THREAD = 8;
+
+    Rpp32u numThreads = handle.GetNumThreads();
+
+    if (batchSize >= numThreads) {
+        return 1;
+    }
+
+    Rpp32u maxThreads = numThreads / batchSize;
+    Rpp32u optimalThreads = imageHeight / MIN_ROWS_PER_THREAD;
+
+    return std::min(maxThreads, std::max(1u, optimalThreads));
+}
+
 #endif  // RPP_CPU_COMMON_HPP
