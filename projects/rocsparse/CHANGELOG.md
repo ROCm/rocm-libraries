@@ -19,7 +19,7 @@ Documentation for rocSPARSE is available at
 ### Resolved issues
 * Fixed an integer overflow in `rocsparse_prune_dense2csr_by_percentage` and `rocsparse_prune_csr2csr_by_percentage`, which computed the matrix element count in 32-bit arithmetic. For matrices with more than `INT32_MAX` (~2.1 billion) elements the count overflowed to a negative value, resulting in out-of-bounds pointer construction and an invalid kernel launch grid. The element count is now computed in 64-bit arithmetic.
 * Fixed `rocsparse_spmm` with the segmented COO, atomic COO, segmented-atomic COO, and row-split CSR algorithms, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum supported grid dimension.
-* Fixed an out-of-bounds write in the CSR to CSC conversion performed by `rocsparse_sparse_to_sparse` when the row pointer and column index types differ, for example 64-bit row pointers with 32-bit column indices.
+* Fixed an out-of-bounds write caused by an incorrectly sized temporary buffer in the CSR-to-CSC conversion performed by `rocsparse_sparse_to_sparse` when the row pointer and column index types differ (for example,  64-bit row pointers with 32-bit column indices).
 * Fixed an issue with `rocsparse_spmm` when using the nnz-split algorithm with the CSR or CSC format. The operation produced incorrect results because the segmented-block-reduction helper had shared-memory pointer parameters marked `__restrict__`, while threads in the block must read values written by other threads. The `__restrict__` attribute has now been removed.
 
 ## rocSPARSE 5.0.0 for ROCm 10.0
