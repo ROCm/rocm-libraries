@@ -6,11 +6,11 @@
 #include <memory>
 #include <optional>
 
+#include "MiopenApi.hpp"
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <miopen/miopen.h>
 
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
