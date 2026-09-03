@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: MIT
 
 import hashlib
+import json
 import re
+import shutil
+import subprocess
 import tempfile
 import unittest
 from collections import Counter
@@ -17,6 +20,17 @@ _D192_PIPELINE = "qr_tdm_d192_v128"
 _D192_ESM2_FILENAME = re.compile(
     r"^fmha_fwd_d192_bf16_.*_qr_tdm_d192_v128_.*_gfx125\.cpp$"
 )
+_D192_BATCH_NMASK_WWM_FAST_FILENAME = re.compile(
+    r"^fmha_fwd_d192_bf16_batch_.*_qr_tdm_d192_v128_.*_nmask_.*_gfx125\.cpp$"
+)
+_D192_BATCH_NMASK_FILENAME = (
+    "fmha_fwd_d192_bf16_batch_b128x128x32x128x32x192_"
+    "r4x1x1_r4x1x1_w16x16x32_w16x16x32_o1_qr_tdm_d192_v128_"
+    "vr_pddv_nlogits_nbias_nmask_nlse_ndropout_nskip_nqscale_"
+    "ntrload_nsink_gfx125.cpp"
+)
+_D192_BATCH_MASK_FILENAME = _D192_BATCH_NMASK_FILENAME.replace("_nmask_", "_mask_")
+_D192_GROUP_NMASK_FILENAME = _D192_BATCH_NMASK_FILENAME.replace("_batch_", "_group_")
 _D192_SELECTOR = (
     "is_gfx125_d192_tdm_enabled() && a.hdim_q == 192 && "
     "a.hdim_v == 128 && a.max_seqlen_q >= 128"
@@ -34,6 +48,82 @@ def _generate(receipt, optdim_list=None):
 
 
 class TestGfx125D192Codegen(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
+    def test_cmake_scopes_wwm_fast_to_batch_nmask(self):
+        source_flags = Path(__file__).with_name("cmake") / "fmha_fwd_source_flags.cmake"
+        d256_source = (
+            "fmha_fwd_d256_bf16_batch_b64x64x32x256x32x256_"
+            "r4x1x1_r4x1x1_w16x16x32_w16x16x32_qr_"
+            "vr_npad_nlogits_nbias_nmask_nlse_ndropout_nskip_nqscale_"
+            "ntrload_nsink_gfx125.cpp"
+        )
+        sources = (
+            _D192_BATCH_NMASK_FILENAME,
+            _D192_BATCH_MASK_FILENAME,
+            _D192_GROUP_NMASK_FILENAME,
+            d256_source,
+        )
+
+        def configure(wwm_fast):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for source in sources:
+                    (root / source).touch()
+                source_list = "\n  ".join(
+                    f'"${{CMAKE_CURRENT_LIST_DIR}}/{x}"' for x in sources
+                )
+                (root / "CMakeLists.txt").write_text(
+                    f"""cmake_minimum_required(VERSION 3.20)
+project(fmha_source_flags LANGUAGES CXX)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(FMHA_FWD_GFX1250_D192_TDM_ESM2 ON)
+set(FMHA_FWD_GFX1250_D192_BATCH_NMASK_WWM_FAST {wwm_fast})
+include(\"{source_flags}\")
+set(sources
+  {source_list}
+)
+add_library(fmha_source_flags OBJECT ${{sources}})
+foreach(source IN LISTS sources)
+  get_filename_component(source_name \"${{source}}\" NAME)
+  ck_tile_fmha_fwd_get_source_compile_options(
+    \"${{source_name}}\" source_compile_options)
+  if(source_compile_options)
+    set_property(SOURCE \"${{source}}\" APPEND PROPERTY COMPILE_OPTIONS
+      ${{source_compile_options}})
+  endif()
+endforeach()
+"""
+                )
+                subprocess.run(
+                    ["cmake", "-S", str(root), "-B", str(root / "build")],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                commands = json.loads(
+                    (root / "build" / "compile_commands.json").read_text()
+                )
+                return {
+                    Path(entry["file"]).name: entry["command"] for entry in commands
+                }
+
+        enabled = configure("ON")
+        self.assertIn(
+            "-amdgpu-expert-scheduling-mode", enabled[_D192_BATCH_NMASK_FILENAME]
+        )
+        self.assertIn("-wwm-regalloc=fast", enabled[_D192_BATCH_NMASK_FILENAME])
+        for source in (_D192_BATCH_MASK_FILENAME, _D192_GROUP_NMASK_FILENAME):
+            self.assertIn("-amdgpu-expert-scheduling-mode", enabled[source])
+            self.assertNotIn("-wwm-regalloc=fast", enabled[source])
+        self.assertNotIn("-amdgpu-expert-scheduling-mode", enabled[d256_source])
+        self.assertNotIn("-wwm-regalloc=fast", enabled[d256_source])
+
+        disabled = configure("OFF")
+        self.assertIn(
+            "-amdgpu-expert-scheduling-mode", disabled[_D192_BATCH_NMASK_FILENAME]
+        )
+        self.assertNotIn("-wwm-regalloc=fast", disabled[_D192_BATCH_NMASK_FILENAME])
+
     def test_receipts_emit_only_the_dedicated_pipeline_for_d192(self):
         for receipt in (100, 200, 600):
             with self.subTest(receipt=receipt):
@@ -59,10 +149,24 @@ class TestGfx125D192Codegen(unittest.TestCase):
                     self.assertEqual(kernel.F_pipeline.F_skip, "f")
                     self.assertEqual(kernel.F_pipeline.F_sink, "f")
                     self.assertRegex(kernel.filename, _D192_ESM2_FILENAME)
+                    should_use_wwm_fast = (
+                        kernel.F_mode == "batch" and "_nmask_" in kernel.filename
+                    )
+                    if should_use_wwm_fast:
+                        self.assertRegex(
+                            kernel.filename, _D192_BATCH_NMASK_WWM_FAST_FILENAME
+                        )
+                    else:
+                        self.assertNotRegex(
+                            kernel.filename, _D192_BATCH_NMASK_WWM_FAST_FILENAME
+                        )
 
                 for kernel in kernels:
                     if kernel not in candidates:
                         self.assertNotRegex(kernel.filename, _D192_ESM2_FILENAME)
+                        self.assertNotRegex(
+                            kernel.filename, _D192_BATCH_NMASK_WWM_FAST_FILENAME
+                        )
 
                 self.assertFalse(
                     any(

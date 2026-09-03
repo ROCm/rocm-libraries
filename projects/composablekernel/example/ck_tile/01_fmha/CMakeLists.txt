@@ -49,6 +49,9 @@ set(FMHA_FWD_CODEGEN_FILTER "" CACHE STRING
   "optional --filter argument forwarded to generate.py for the fwd API")
 option(FMHA_FWD_GFX1250_D192_TDM_ESM2
   "Enable ESM2 for gfx1250 D192 BF16 QR/TDM generated instances" ON)
+option(FMHA_FWD_GFX1250_D192_BATCH_NMASK_WWM_FAST
+  "Use the fast WWM register allocator for gfx1250 D192 BF16 batch no-mask instances" ON)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/fmha_fwd_source_flags.cmake)
 set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
@@ -108,6 +111,7 @@ add_custom_command(
   --output_dir ${CMAKE_CURRENT_BINARY_DIR}
   DEPENDS ${CODE_GEN_SCRIPTS}
   COMMENT "Generate CK Tile FMHA FWD kernels"
+  VERBATIM
 )
 
 add_custom_command(
@@ -127,13 +131,14 @@ add_library(${FMHA_FWD_INSTANCES} OBJECT EXCLUDE_FROM_ALL)
 target_include_directories(${FMHA_FWD_INSTANCES} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_sources(${FMHA_FWD_INSTANCES} PRIVATE ${FMHA_FWD_GEN_BLOBS})
 set_source_files_properties(${FMHA_FWD_GEN_BLOBS} PROPERTIES LANGUAGE HIP)
-if(FMHA_FWD_GFX1250_D192_TDM_ESM2 AND "gfx1250" IN_LIST INST_TARGETS)
+if("gfx1250" IN_LIST INST_TARGETS)
   foreach(fwd_blob IN LISTS FMHA_FWD_GEN_BLOBS)
     get_filename_component(fwd_blob_name "${fwd_blob}" NAME)
-    if(fwd_blob_name MATCHES
-       "^fmha_fwd_d192_bf16_.*_qr_tdm_d192_v128_.*_gfx125\\.cpp$")
+    ck_tile_fmha_fwd_get_source_compile_options(
+      "${fwd_blob_name}" fwd_blob_compile_options)
+    if(fwd_blob_compile_options)
       set_property(SOURCE "${fwd_blob}" APPEND PROPERTY COMPILE_OPTIONS
-        -mllvm -amdgpu-expert-scheduling-mode)
+        ${fwd_blob_compile_options})
     endif()
   endforeach()
 endif()
