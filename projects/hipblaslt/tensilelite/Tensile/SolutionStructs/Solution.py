@@ -2261,12 +2261,17 @@ class Solution(collections.abc.Mapping):
       state["DirectToLdsMetadata"] = 0
       state["MIWaveTileMetadata"] = 0
 
+    if not state["ProblemType"]["UseGateResidual"] and state["NonTemporalGate"] != 0:
+      reject(state, printRejectionReason, "NonTemporalGate requires UseGateResidual=True")
+      return
+
     if state["NonTemporal"] != -1:
       state["NonTemporalA"] = state["NonTemporal"]
       state["NonTemporalB"] = state["NonTemporal"]
       state["NonTemporalC"] = state["NonTemporal"]
       state["NonTemporalD"] = state["NonTemporal"]
-      state["NonTemporalGate"] = state["NonTemporal"]
+      if state["ProblemType"]["UseGateResidual"]:
+        state["NonTemporalGate"] = state["NonTemporal"]
       state["NonTemporalMetadata"] = state["NonTemporal"]
 
     if isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
