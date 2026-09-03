@@ -21,19 +21,21 @@
 namespace hipdnn_plugin_sdk::ingestor::jsonexpr::detail
 {
 // ---- operator implementations ---------------------------------------------
-// Null means "unresolved": reading an absent optional field must neither pass
-// nor fail a predicate. OpNode::eval therefore declines before calling any
-// eager operator, so none of them ever sees a null. Without that, a null would
-// read as 0, false, or not-equal, and a narrowing check on an absent operand
-// would pass.
+// An operator *declines* when it returns null, meaning it could not answer.
+// Null is the language's unresolved marker, not a value of its own, so reading
+// an absent optional field must neither pass nor fail a predicate.
 //
-// The lazy operators are the deliberate exceptions. `present`, `not_present`
-// and `value_or_default` exist to answer "did this resolve?", and `and` / `or`
-// are three-valued. Each evaluates its own arguments and may return a real
-// value even when an argument is unresolved.
+// Three rules follow from that:
 //
-// A caller that treats an expression's result as a boolean rejects an
-// unresolved rule, since Value::truthy() reads null as false.
+//   - An eager operator never sees a null. OpNode::eval declines first.
+//     Otherwise a null would read as 0, false, or not-equal, and a narrowing
+//     check on an absent operand would pass.
+//   - The lazy operators are the deliberate exceptions. `present`,
+//     `not_present` and `value_or_default` answer "did this resolve?", and
+//     `and` / `or` are three-valued. Each evaluates its own arguments and may
+//     return a real value even when an argument is unresolved.
+//   - A caller that reads an expression's result as a boolean rejects an
+//     unresolved rule, because Value::truthy() reads null as false.
 namespace ops
 {
 /// An eager operator: every argument is already evaluated and none is null.
@@ -91,12 +93,12 @@ inline Value subtract(const std::vector<Value>& v)
     return finiteOrNull(v[0].toNumber() - v[1].toNumber());
 }
 
-/// What a division operator does with a numerator and a denominator that is
-/// already known to be non-zero.
+/// Completes a division, given a numerator and a denominator already known to
+/// be non-zero.
 using DivisionResult = Value (*)(double, double);
 
-/// Shared by the four division-based operators. They all decline on a zero
-/// divisor; only what they do afterwards differs.
+/// Declines on a zero divisor, then hands the operands to `combine`. Shared by
+/// the four division-based operators, which differ only in `combine`.
 inline Value divide(const std::vector<Value>& v, DivisionResult combine)
 {
     const double num = v[0].toNumber();
@@ -136,10 +138,11 @@ inline Value divisible(const std::vector<Value>& v)
     });
 }
 
-/// Smallest or largest argument. Declines unless every argument is finite.
+/// Returns the smallest or largest argument. Declines unless every argument is
+/// finite.
 ///
 /// `haveBest` tracks "nothing chosen yet" instead of seeding `best` with NaN.
-/// A NaN seed would be indistinguishable from a NaN argument and simply be
+/// A NaN seed is indistinguishable from a NaN argument and would just be
 /// overwritten, so the operator would answer from fewer operands than were
 /// written, with nothing to signal it.
 inline Value extremum(const std::vector<Value>& v, bool wantMax)
@@ -197,9 +200,11 @@ constexpr bool acceptsGreaterOrEqual(Value::Ordering c)
     return c == Value::Ordering::GREATER || c == Value::Ordering::EQUAL;
 }
 
-/// A non-finite operand compares UNORDERED, which makes the result null rather
-/// than false. A surrounding `!` must not turn "could not compare" into a
-/// pass.
+/// Applies `accepts` to a comparison outcome, but declines on UNORDERED.
+///
+/// A non-finite operand compares UNORDERED, which must make the result null
+/// rather than false: a surrounding `!` must not turn "could not compare" into
+/// a pass.
 inline Value comparePairResult(Value::Ordering c, OrderingAccepts accepts)
 {
     return c == Value::Ordering::UNORDERED ? Value() : Value(accepts(c));
@@ -208,8 +213,8 @@ inline Value comparePairResult(Value::Ordering c, OrderingAccepts accepts)
 inline Value compareValues(const std::vector<Value>& v, OrderingAccepts accepts)
 {
     // The 3-argument form is the chained comparison a < b < c. Both links are
-    // checked before answering, because an unordered link makes the whole
-    // chain unanswerable even if the other link is already false.
+    // checked before answering, because an unordered link leaves the whole
+    // chain undecided even when the other link is already false.
     if(v.size() >= 3)
     {
         const Value::Ordering first = Value::compare(v[0], v[1]);
@@ -241,7 +246,7 @@ inline Value greaterOrEqual(const std::vector<Value>& v)
 }
 
 // OpNode::eval declines before either of these runs, so two unresolved
-// references never compare equal here; the question is simply unanswerable.
+// references never compare equal here. Neither operator can answer that case.
 inline Value equal(const std::vector<Value>& v)
 {
     return {v[0] == v[1]};
@@ -260,8 +265,8 @@ inline Value toBoolean(const std::vector<Value>& v)
     return {v[0].truthy()};
 }
 
-/// Element containment in an array, substring containment in a string.
-/// Anything else as the haystack contains nothing.
+/// Searches for an element in an array, or a substring in a string. Any other
+/// haystack contains nothing.
 inline Value membership(const std::vector<Value>& v)
 {
     const Value& needle = v[0];
@@ -339,9 +344,9 @@ inline Value conditional(const std::vector<NodePtr>& args, const IDataSource& d)
     return i < args.size() ? args[i]->eval(d) : Value();
 }
 
-/// Three-valued `and`. A definite false wins even when another argument is
-/// unresolved, so combining an inapplicable check with a failing one still
-/// rejects. Otherwise an unresolved argument makes the whole result
+/// Three-valued `and`. A definite false decides the result even when another
+/// argument is unresolved, so combining an inapplicable check with a failing
+/// one still rejects. Otherwise an unresolved argument makes the whole result
 /// unresolved.
 inline Value conjunction(const std::vector<NodePtr>& args, const IDataSource& d)
 {
@@ -363,8 +368,8 @@ inline Value conjunction(const std::vector<NodePtr>& args, const IDataSource& d)
     return sawNull ? Value() : cur;
 }
 
-/// Three-valued `or`. A definite true wins even when another argument is
-/// unresolved. That is what lets
+/// Three-valued `or`. A definite true decides the result even when another
+/// argument is unresolved. That is what lets
 /// `{"or": [{"not_present": ["$bias"]}, {"==": ["$bias.dtype", ...]}]}`
 /// accept input with no `bias`, where the second arm cannot run.
 inline Value disjunction(const std::vector<NodePtr>& args, const IDataSource& d)

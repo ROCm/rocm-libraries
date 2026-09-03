@@ -22,11 +22,11 @@
 //     jexpr::Value r1 = expr(dataA);              // evaluate, no re-parse
 //     jexpr::Value r2 = expr(dataB);              // reuse for other data
 //
-// Two conventions drive most of the design. Each is documented where it is
+// Two conventions shape the design. Each is documented where it is
 // implemented:
 //
 //   - A string prefixed with '$' is a variable reference, and it is the only
-//     way to read data; there is no `var` operator. See Compiler.hpp.
+//     way to read data; there is no `var` operator. See Syntax.hpp.
 //   - Null means "unresolved" rather than being a value of its own. An
 //     unresolved path means the field is absent, so operators return null
 //     instead of coercing it to false/0/not-equal, which would let a narrowing
@@ -69,9 +69,7 @@
 
 namespace hipdnn_plugin_sdk::ingestor::jsonexpr
 {
-// ===========================================================================
-// Expression - a compiled, reusable expression
-// ===========================================================================
+// ---- compiled, reusable expression ----------------------------------------
 template <class DataT>
 class Expression
 {
@@ -102,10 +100,12 @@ public:
         return static_cast<bool>(_root);
     }
 
-    /// A lazy, pre-order range over every variable path referenced in the
-    /// expression. References point into the live tree, so the range must not
-    /// outlive this Expression. Duplicates are yielded as they occur;
-    /// construct a std::set from the range for the unique, sorted set.
+    /// Yield every variable path referenced in the expression, lazily and in
+    /// pre-order. Two caveats:
+    ///   - the references point into the live tree, so the range must not
+    ///     outlive this Expression
+    ///   - duplicates are yielded as they occur; construct a std::set from the
+    ///     range for the unique, sorted set
     detail::VarRange variables() const
     {
         return detail::VarRange(_root.get());

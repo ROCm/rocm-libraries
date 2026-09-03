@@ -47,7 +47,7 @@ struct LayoutAlias
     std::array<std::int64_t, MAX_LAYOUT_RANK> dims;
     std::size_t rank;
 
-    /// The first `rank` entries of `dims`, which is the layout itself.
+    /// Return the first `rank` entries of `dims`, which are the layout itself.
     [[nodiscard]] std::vector<std::int64_t> order() const
     {
         return {dims.begin(), dims.begin() + static_cast<std::ptrdiff_t>(rank)};
@@ -73,8 +73,8 @@ inline const LayoutAlias* lookupLayoutAlias(const std::string& name)
     return nullptr;
 }
 
-/// The accepted names, for use in the error message that lists them. Built
-/// from the table so a new alias always appears in the diagnostic.
+/// List the accepted names for the error message that reports them. Built from
+/// the table, so a new alias always appears in the diagnostic.
 inline std::string knownLayoutAliases()
 {
     std::string s;
@@ -89,7 +89,8 @@ inline std::string knownLayoutAliases()
     return s;
 }
 
-/// The variable path in a sigil-prefixed string, or nullptr if `j` is not one.
+/// Return the variable path in a sigil-prefixed string, or nullptr if `j` is
+/// not one.
 inline const std::string* variablePath(const nlohmann::json& j)
 {
     if(!j.is_string())
@@ -135,8 +136,8 @@ inline bool isStrideOrderRef(const nlohmann::json& j)
     return s != nullptr && pathEndsWithSegment(*s, ".stride_order");
 }
 
-/// The tensor a `.rank` / `.stride_order` reference is about: the whole path
-/// ahead of that final segment, sigil dropped. "$q.stride_order" -> "q",
+/// Return the tensor a `.rank` / `.stride_order` reference is about: the whole
+/// path ahead of that final segment, sigil dropped. "$q.stride_order" -> "q",
 /// "$inputs[1].rank" -> "inputs[1]", "$a.b.c.rank" -> "a.b.c".
 ///
 /// The whole prefix is used rather than the path's first segment, because two
@@ -152,9 +153,12 @@ inline std::string tensorKey(const std::string& sigilPath)
     return path.substr(0, path.rfind('.'));
 }
 
-/// True when `j` is a numeric rank literal that fits an int64_t pin exactly.
+/// True when `j` is a numeric literal usable as a rank pin: a rank the
+/// expression fixes for one tensor, collected by collectRankPins below and
+/// checked against a layout alias's own rank.
+///
 /// A floating-point input is accepted only when it is finite, integral, and
-/// exactly representable.
+/// exactly representable as an int64_t.
 inline bool rankPinLiteral(const nlohmann::json& j, std::int64_t& value)
 {
     if(j.is_number_unsigned())
@@ -194,10 +198,12 @@ inline bool rankPinLiteral(const nlohmann::json& j, std::int64_t& value)
     return false;
 }
 
-/// Collect `{"==": ["$x.rank", N]}` rank pins that always hold: those at the
-/// root, and those reachable from it through `and` alone. A pin inside an
-/// `or`, `if`, or `!` arm is conditional and cannot contradict an alias, so it
-/// is deliberately skipped.
+/// Collect the rank pins that always hold: those at the root of the
+/// expression, and those reachable from it through `and` alone. A pin is
+/// written `{"==": ["$x.rank", N]}`, in either operand order.
+///
+/// A pin inside an `or`, `if`, or `!` arm is conditional and cannot contradict
+/// an alias, so it is deliberately skipped.
 inline void collectRankPins(const nlohmann::json& j,
                             std::map<std::string, std::int64_t>& pins,
                             std::size_t depth = 0)
@@ -239,8 +245,9 @@ inline void collectRankPins(const nlohmann::json& j,
         }
         if(pathEndsWithSegment(*s, ".rank"))
         {
-            // First pin wins. A second, contradictory pin makes the criteria
-            // unsatisfiable on their own, which is not this pass's problem.
+            // The first pin for a tensor is kept. A second, contradictory pin
+            // makes the criteria unsatisfiable on their own, which this pass
+            // does not diagnose.
             pins.emplace(tensorKey(*s), rank);
         }
     }
@@ -252,8 +259,9 @@ inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
                                          const std::map<std::string, std::int64_t>& rankPins)
 {
     // A stride_order is an array of integers, so a string in this position can
-    // only be an alias. An unknown one is a typo, which would otherwise
-    // compare unequal forever and decline silently at match time.
+    // only be an alias. An unknown one is a typo. Left alone it would compare
+    // unequal against every tensor, so the criteria would decline silently at
+    // match time.
     const auto& name = aliasNode.get_ref<const nlohmann::json::string_t&>();
     const LayoutAlias* alias = lookupLayoutAlias(name);
     if(alias == nullptr)

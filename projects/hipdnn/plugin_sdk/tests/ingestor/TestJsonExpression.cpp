@@ -262,8 +262,8 @@ TEST(TestJsonExpression, LayoutAliasesOnlyExpandOppositeStrideOrder)
 TEST(TestJsonExpression, UnknownLayoutAliasRejected)
 {
     // A stride_order is an array of integers, so a string opposite one can only
-    // be an alias. A typo would otherwise compare unequal forever and decline
-    // silently on every graph.
+    // be an alias. Left alone, a typo would compare unequal against every
+    // tensor and decline silently on every graph.
     EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(
                      json({{"==", json::array({"$x.stride_order", "nhcw"})}})),
                  jexpr::JsonExpressionCompileError);
@@ -518,7 +518,7 @@ TEST(TestJsonExpression, NullPropagatesThroughEveryOtherOperator)
     {
         EXPECT_TRUE(eval(rule).isNull()) << rule.dump();
     }
-    // Two unresolved references are not equal; the question is unanswerable.
+    // Two unresolved references are not equal; neither operator can answer.
     EXPECT_TRUE(eval(json({{"==", json::array({"$nope", "$missing"})}})).isNull());
     EXPECT_TRUE(eval(json({{"!=", json::array({"$nope", "$missing"})}})).isNull());
     // An array literal is unresolved if any element is, however deeply nested.

@@ -30,9 +30,8 @@
 
 namespace hipdnn_plugin_sdk::ingestor::jsonexpr
 {
-// ===========================================================================
-// Value - standalone runtime value (json-like, no nlohmann dependency)
-// ===========================================================================
+// ---- runtime value --------------------------------------------------------
+// Json-like, with no nlohmann dependency.
 class Value
 {
 public:
@@ -234,8 +233,8 @@ public:
         return !(*this == o);
     }
 
-    /// Result of `compare`. UNORDERED means at least one operand was not
-    /// finite, which makes the ordering operators decline.
+    /// Reports the outcome of `compare`. UNORDERED means at least one operand
+    /// was not finite, which makes the ordering operators decline.
     enum class Ordering
     {
         LESS,

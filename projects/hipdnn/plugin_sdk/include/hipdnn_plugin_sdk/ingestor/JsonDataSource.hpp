@@ -18,23 +18,17 @@
 //     auto expr = jexpr::compile<jexpr::JsonDataSource>(rule);
 //     jexpr::Value r = expr(src);
 //
-// It also offers the inverse, setData, which writes a jexpr::Value back into
-// the document at a path, creating intermediate objects and arrays as needed:
-//
-//     src.setData("$q.dims[0]", 2);   // -> {"q":{"dims":[2, 16]}}
-//
-// Path syntax (shared by getData and setData):
+// Path syntax:
 //   - dotted keys:            a.b.c
 //   - [N] array subscripts:   arr[0], rows[2].name, grid[0][1]
 //   - dot-form array indices: arr.1 (resolves as an index only against an
-//                             existing array; use arr[1] to force array creation)
+//                             existing array)
 //   - an optional leading variable sigil (VARIABLE_SIGIL) is stripped, so both
 //     "q.dims[0]" and "$q.dims[0]" address the same location
-//   - the empty path (or a bare variable sigil) names nothing and is malformed
+//   - the empty path (or a bare variable sigil) names nothing
 //
-// getData follows the language convention: an unresolved path reads as null
-// (Value()). setData is a mutation and reports a malformed path or an
-// incompatible index by throwing std::invalid_argument.
+// getData follows the language convention: an unresolved path, including a
+// malformed one, reads as null (Value()).
 //
 // This is a sample accessor. Objects and null in the document both convert to
 // a null jexpr::Value, since Value models scalars and arrays only and has no
@@ -49,9 +43,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <limits>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -67,7 +59,7 @@ public:
     {
     }
 
-    /// The backing document, for inspection or bulk replacement.
+    /// Access the backing document, for inspection or bulk replacement.
     const nlohmann::json& document() const
     {
         return _doc;
@@ -77,9 +69,12 @@ public:
         return _doc;
     }
 
-    /// Data-source contract: resolve a variable path to a Value.
-    /// An unresolved path returns null: a missing key, an out-of-range or
-    /// non-numeric index, or a subscript applied to a non-array.
+    /// Data-source contract: resolve a variable path to a Value. Any of the
+    /// following is unresolved and returns null:
+    ///   - a missing key
+    ///   - an out-of-range index
+    ///   - a non-numeric index
+    ///   - a subscript applied to a non-array
     Value getData(const std::string& path) const
     {
         std::vector<Segment> segs;
@@ -120,68 +115,6 @@ public:
         return toValue(*cur);
     }
 
-    /// Write a Value into the document at a path, creating intermediate
-    /// containers as needed. A `[N]` subscript, or a dot-form index against an
-    /// existing array, grows an array and fills any gap with null; any other
-    /// key creates or descends into an object. Throws std::invalid_argument on
-    /// a malformed path, a non-numeric index applied to an array, or an index
-    /// at or above MAX_ARRAY_INDEX.
-    ///
-    /// The path is fully validated before anything is written, so a throwing
-    /// call leaves the document unchanged. Validating as it went would let a
-    /// rejected write destroy data it had already passed over: on `{"q":5}`,
-    /// `setData("q.dims[999999999]")` would replace the 5 with `{"dims":null}`
-    /// before reaching the throw.
-    void setData(const std::string& path, const Value& value)
-    {
-        std::vector<Segment> segs;
-        if(!tokenize(path, segs))
-        {
-            throw std::invalid_argument("JsonDataSource::setData: malformed path '" + path + "'");
-        }
-        validatePath(segs, path);
-
-        // Every failure mode is now ruled out, so this loop cannot throw and
-        // the document cannot be left half-written.
-        nlohmann::json* cur = &_doc;
-        for(std::size_t i = 0; i < segs.size(); ++i)
-        {
-            const Segment& seg = segs[i];
-            nlohmann::json* target = nullptr;
-            std::size_t idx = 0;
-            if(seg.subscript)
-            {
-                parseIndex(seg.text, idx);
-                if(!cur->is_array())
-                {
-                    *cur = nlohmann::json::array();
-                }
-                target = &(*cur)[idx]; // grows the array, filling gaps with null
-            }
-            else if(cur->is_array())
-            {
-                parseIndex(seg.text, idx);
-                target = &(*cur)[idx];
-            }
-            else
-            {
-                if(!cur->is_object())
-                {
-                    *cur = nlohmann::json::object();
-                }
-                target = &(*cur)[seg.text];
-            }
-            if(i + 1 == segs.size())
-            {
-                *target = toJson(value);
-            }
-            else
-            {
-                cur = target;
-            }
-        }
-    }
-
 private:
     struct Segment
     {
@@ -189,58 +122,16 @@ private:
         std::string text;
     };
 
-    /// Reject every index setData's write walk would reject, without touching
-    /// the document. It mirrors that walk's branching: a subscript always
-    /// indexes, while a dotted segment indexes only where the document already
-    /// holds an array, so this has to descend the existing structure to know
-    /// which segments are index positions. Descent stops at the first segment
-    /// that is not already present, because from there on the write creates
-    /// objects, and only an explicit subscript can be an index position.
-    void validatePath(const std::vector<Segment>& segs, const std::string& path) const
-    {
-        const nlohmann::json* cur = &_doc;
-        for(const Segment& seg : segs)
-        {
-            std::size_t idx = 0;
-            if(seg.subscript)
-            {
-                if(!parseIndex(seg.text, idx))
-                {
-                    throw std::invalid_argument("JsonDataSource::setData: bad array index '"
-                                                + seg.text + "' in path '" + path + "'");
-                }
-                cur = (cur != nullptr && cur->is_array() && idx < cur->size()) ? &(*cur)[idx]
-                                                                               : nullptr;
-            }
-            else if(cur != nullptr && cur->is_array())
-            {
-                if(!parseIndex(seg.text, idx))
-                {
-                    throw std::invalid_argument("JsonDataSource::setData: non-numeric key '"
-                                                + seg.text + "' on array in path '" + path + "'");
-                }
-                cur = idx < cur->size() ? &(*cur)[idx] : nullptr;
-            }
-            else if(cur != nullptr && cur->is_object() && cur->contains(seg.text))
-            {
-                cur = &(*cur)[seg.text];
-            }
-            else
-            {
-                // Not present: the write creates objects from here down, so no
-                // later segment can land on an array unless it says so itself.
-                cur = nullptr;
-            }
-        }
-    }
-
-    /// Split a path into segments, stripping one optional leading variable
-    /// sigil. Returns false for a malformed path: an empty path (or a bare
-    /// sigil, which names no location), an unterminated subscript, a
-    /// leading dot after the optional sigil, an empty segment (`a..b` or a
-    /// trailing `.`), or text between a `]` and the next separator
-    /// (`q.dims[0]bogus`). Accepting any of those would have setData create a
-    /// key the caller never wrote, when its contract says it throws instead.
+    /// Split a path into segments, stripping one optional leading sigil.
+    /// Returns false for a malformed path:
+    ///   - an empty path, or a bare sigil, which names no location
+    ///   - an unterminated subscript
+    ///   - a leading dot after the optional sigil
+    ///   - an empty segment (`a..b`, or a trailing `.`)
+    ///   - text between a `]` and the next separator (`q.dims[0]bogus`)
+    ///
+    /// A malformed path resolves as not found rather than as a guess at the
+    /// location the caller meant.
     static bool tokenize(const std::string& raw, std::vector<Segment>& out)
     {
         std::size_t pos = 0;
@@ -296,16 +187,9 @@ private:
         return true;
     }
 
-    /// The largest index a path may name. A `[N]` subscript in setData grows
-    /// the array to N, so an unbounded index would turn a one-character typo in
-    /// a descriptor path into an allocation of arbitrary size. No document this
-    /// addresses comes close to this length. getData resolves an index at or
-    /// above the bound to null, just as it already did for any index past the
-    /// end.
-    static constexpr std::size_t MAX_ARRAY_INDEX = (1U << 20U);
-
-    /// Parse a decimal index below MAX_ARRAY_INDEX. Rejects empty text, any
-    /// non-digit character, and an out-of-bounds value.
+    /// Parse a decimal index. Rejects empty text, any non-digit character, and
+    /// any text too long to index a document this addresses. A rejected index
+    /// resolves as not found, the same as an index past the end of an array.
     static bool parseIndex(const std::string& s, std::size_t& idx)
     {
         if(s.empty())
@@ -323,9 +207,10 @@ private:
                 return false;
             }
         }
-        // Check the digit count first, so an absurdly long string never reaches
-        // a conversion that would overflow.
-        constexpr std::size_t MAX_INDEX_DIGITS = 7; // MAX_ARRAY_INDEX is 7 digits
+        // Bound the digit count, so an absurdly long string never reaches a
+        // conversion that would overflow. No document this addresses holds an
+        // array anywhere near seven digits long.
+        constexpr std::size_t MAX_INDEX_DIGITS = 7;
         if(s.size() > MAX_INDEX_DIGITS)
         {
             return false;
@@ -334,10 +219,6 @@ private:
         for(const char c : s)
         {
             val = (val * 10U) + static_cast<std::size_t>(c - '0');
-        }
-        if(val >= MAX_ARRAY_INDEX)
-        {
-            return false;
         }
         idx = val;
         return true;
@@ -381,36 +262,6 @@ private:
             return {std::move(a)};
         }
         return {}; // null or object -> not representable, treated as null
-    }
-
-    static nlohmann::json toJson(const Value& v)
-    {
-        if(v.isBool())
-        {
-            return v.asBool();
-        }
-        if(v.isInt())
-        {
-            return v.asInt();
-        }
-        if(v.isDouble())
-        {
-            return v.asDouble();
-        }
-        if(v.isString())
-        {
-            return v.asString();
-        }
-        if(v.isArray())
-        {
-            nlohmann::json a = nlohmann::json::array();
-            for(const auto& e : v.asArray())
-            {
-                a.push_back(toJson(e));
-            }
-            return a;
-        }
-        return nullptr; // null
     }
 
     nlohmann::json _doc;

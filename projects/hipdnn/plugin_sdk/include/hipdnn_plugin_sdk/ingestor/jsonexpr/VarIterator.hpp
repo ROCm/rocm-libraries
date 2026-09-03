@@ -7,8 +7,7 @@
 
 // VarIterator.hpp - a lazy pre-order range over a compiled tree's variables.
 //
-// References point into the live VarNode::path, so nothing is copied and the
-// range must not outlive the Expression.
+// Backs Expression::variables(), which states the contract callers rely on.
 
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/Node.hpp>
 
@@ -20,10 +19,9 @@
 namespace hipdnn_plugin_sdk::ingestor::jsonexpr::detail
 {
 // ---- variable iteration ---------------------------------------------------
-// Lazily yields, in pre-order, a reference to every variable path in a
-// compiled node tree. The references point at the live VarNode::path, so no
-// strings are copied. Duplicates are yielded as they occur; build a std::set
-// from the range if you need the unique, sorted set.
+// Walks the compiled node tree in pre-order, yielding a reference to each
+// VarNode::path as it is reached. Nothing is copied and no set is built, so an
+// iterator holds only the pending-node stack.
 class VarIterator
 {
 public:

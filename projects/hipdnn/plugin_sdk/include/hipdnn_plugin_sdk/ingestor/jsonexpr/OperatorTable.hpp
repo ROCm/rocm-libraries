@@ -44,13 +44,24 @@ struct OpSpec
     ops::LazyFn lazy;
 };
 
-/// Builders that keep the table rows readable. An operator is eager unless it
-/// needs to control its own argument evaluation.
+/// Build an eager table row. `OpNode::eval` evaluates every argument once, and
+/// short-circuits to null if any result is unresolved, so `fn` only ever sees
+/// fully resolved values in argument order. This is the default: use it unless
+/// the operator needs one of the properties `lazyOp` provides.
 constexpr OpSpec
     eagerOp(std::string_view key, std::size_t minArity, std::size_t maxArity, ops::EagerFn fn)
 {
     return OpSpec{key, minArity, maxArity, fn, nullptr};
 }
+
+/// Build a lazy table row. `fn` receives the unevaluated argument nodes plus
+/// the data source and drives evaluation itself, which is what an operator
+/// needs when it must either
+///   - skip arguments, as `if` / `and` / `or` do when they short-circuit, or
+///   - treat an unresolved argument as data rather than as a reason to give
+///     up, as `present` / `value_or_default` do.
+/// The cost is that `fn` owns the null handling that `eagerOp` would have done
+/// for it.
 constexpr OpSpec
     lazyOp(std::string_view key, std::size_t minArity, std::size_t maxArity, ops::LazyFn fn)
 {
@@ -149,7 +160,8 @@ struct OpNode final : Node
     }
 };
 
-/// The spec for an operator key, or nullptr if the key names no operator.
+/// Return the spec for an operator key, or nullptr if the key names no
+/// operator.
 inline const OpSpec* lookupOp(const std::string& key)
 {
     for(const OpSpec& e : OP_TABLE)
