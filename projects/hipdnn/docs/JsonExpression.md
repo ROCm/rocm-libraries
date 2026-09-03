@@ -99,8 +99,8 @@ above `MAX_ARRAY_INDEX` — a `[N]` subscript grows the array to `N`, so an
 unbounded index would turn a typo into an allocation of arbitrary size. A path
 may not be empty and may not start with `.` (after the optional sigil), and
 `getData` reads any malformed path as null rather than guessing at it. It
-validates the whole path before writing anything, so a
-throwing call leaves the document unchanged rather than part-way written.
+validates the whole path before writing anything, so a throwing call leaves the
+document unchanged rather than part-way written.
 Objects and null in the document read back as `Value` null, matching `Value`'s
 scalar/array-only model — as does an unsigned integer too large for `int64_t`,
 since narrowing it would silently answer from a number the document does not
