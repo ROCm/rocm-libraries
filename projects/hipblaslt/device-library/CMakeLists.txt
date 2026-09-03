@@ -56,10 +56,6 @@ if(NOT HIPBLASLT_CODEGEN_ROOT)
     set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
 endif()
 
-# The Python process imports host libraries such as _rocisa, so it must use the
-# host sanitizer runtime selected by either a standalone hipBLASLt build or its
-# parent build. Keep this separate from the ASAN argument below, which controls
-# instrumentation of generated device code.
 set(_codegen_host_sanitizer_args "")
 if(HIPBLASLT_ENABLE_ASAN
         OR THEROCK_SANITIZER STREQUAL "ASAN"

@@ -152,8 +152,6 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     set(_stinkytofu_src_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
     set(_stinkytofu_from_subdirectory OFF)
 
-    # An explicitly supplied package remains usable; otherwise the source
-    # provider is required and add_subdirectory reports a missing tree itself.
     if(NOT TARGET stinkytofu::stinkytofu)
         find_package(stinkytofu QUIET)
         if(NOT stinkytofu_FOUND)

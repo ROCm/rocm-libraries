@@ -363,8 +363,6 @@ block(SCOPE_FOR VARIABLES)
     add_subdirectory(tensilelite)
 endblock()
 
-# hipBLASLt owns this directory's library and package policy. Dependencies have
-# already been configured in their own scopes above.
 set(BUILD_SHARED_LIBS "${HIPBLASLT_BUILD_SHARED_LIBS}")
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -774,9 +772,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
             COMPONENT tests
         )
     endif()
-    # Co-install stinkytofu shared library next to _rocisa. TARGET_FILE lands on
-    # all platforms (stinkytofu.dll on Windows); the soname symlink is Linux-only
-    # and invalid for a .dll, so it is guarded.
     if(TARGET stinkytofu)
         get_target_property(_hipblaslt_stinkytofu_type stinkytofu TYPE)
         if(_hipblaslt_stinkytofu_type STREQUAL "SHARED_LIBRARY")
@@ -888,7 +883,6 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
 endif()
 
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
-    # rocm_create_package uses BUILD_SHARED_LIBS to select the package layout.
     set(HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
     rocm_create_package(
         NAME hipblaslt
