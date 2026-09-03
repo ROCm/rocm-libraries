@@ -564,11 +564,6 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
         deviceLDS = 327680;
 
     rv["DeviceLDS"]          = deviceLDS;
-    // LDS allocation granule: a workgroup occupies a whole number of granules, so this
-    // rounding can cost a resident workgroup at a boundary. gfx11 allocates 1024 bytes
-    // at a time, other targets 256. TODO: gfx10/gfx12 might also need a different
-    // granularity.
-    rv["LdsGranularity"]     = isaVersion[0] == 11 ? 1024 : 256;
     rv["CMPXWritesSGPR"]     = checkNotInList(isaVersion[0], {10, 11, 12});
     rv["HasWave32"]          = checkInList(isaVersion[0], {10, 11, 12});
     rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
