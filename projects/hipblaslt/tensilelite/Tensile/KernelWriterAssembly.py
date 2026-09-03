@@ -245,8 +245,7 @@ class KernelWriterAssembly(KernelWriter):
   def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
 
     deviceLdsSize = self.states.archCaps["DeviceLDS"]
-    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(
-        deviceLdsSize, ldsSize, self.states.archCaps["LdsGranularity"])
+    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(deviceLdsSize, ldsSize)
 
     if not doubleVgpr:
       vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr)
@@ -280,20 +279,14 @@ class KernelWriterAssembly(KernelWriter):
     return lastVgprs, initOccupancy
 
   @staticmethod
-  def getLdsLimitedOccupancy(deviceLdsSize, ldsSize, granularity):
-    """Max. number of workgroups that can run on the same CU due to LDS size
-
-    granularity is the archCaps["LdsGranularity"] allocation granule: a workgroup
-    occupies a whole number of granules, so the rounding can cost a workgroup at a
-    boundary.
-    """
+  def getLdsLimitedOccupancy(deviceLdsSize, ldsSize):
     if ldsSize == 0:
       # No LDS usage: LDS is not the binding constraint.
       # Return a large sentinel so other limits (VGPR, wave cap) win in min().
-      return deviceLdsSize // granularity
+      return deviceLdsSize // 256
     # As ldsSize gets large, rounding might push us slightly higher than deviceLdsSize.
     # Clamp at deviceLdsSize
-    ldsSize = min(ldsSize + granularity - 1, deviceLdsSize) & ~(granularity - 1)
+    ldsSize = min(ldsSize + 255, deviceLdsSize) & 0xffffff00 # 256-byte granularity
 
     ldsLimitedOccupancy = deviceLdsSize//ldsSize
     return ldsLimitedOccupancy
