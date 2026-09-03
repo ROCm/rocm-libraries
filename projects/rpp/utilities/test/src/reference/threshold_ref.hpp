@@ -60,15 +60,21 @@ Per-type form
 */
 inline double threshold_white(DType dt) {
     switch (dt) {
-        case DType::U8: return 255.0;
-        case DType::I8: return 127.0;
+        case DType::U8:
+            return 255.0;
+        case DType::I8:
+            return 127.0;
         case DType::F16:
-        case DType::F32: return 1.0;
-        default: return 0.0;
+        case DType::F32:
+            return 1.0;
+        default:
+            return 0.0;
     }
 }
 
-inline double threshold_black(DType dt) { return dt == DType::I8 ? -128.0 : 0.0; }
+inline double threshold_black(DType dt) {
+    return dt == DType::I8 ? -128.0 : 0.0;
+}
 
 template <typename T>
 void threshold_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
@@ -78,20 +84,20 @@ void threshold_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDes
     const double black = threshold_black(dt);
     for_each_roi_pixel(sd, dd, roi, roiType,
                        [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
-        bool inRange = true;
-        for (Rpp32u c = 0; c < sd.c; ++c) {
-            const double v = to_double(src[channel_index(sd, srcPix, c)]);
-            const double lo = minTensor[n * sd.c + c];
-            const double hi = maxTensor[n * sd.c + c];
-            if (v < lo || v > hi) {
-                inRange = false;
-                break;
-            }
-        }
-        const double out = inRange ? white : black;
-        for (Rpp32u c = 0; c < sd.c; ++c)
-            dst[channel_index(dd, dstPix, c)] = from_double<T>(out);
-    });
+                           bool inRange = true;
+                           for (Rpp32u c = 0; c < sd.c; ++c) {
+                               const double v = to_double(src[channel_index(sd, srcPix, c)]);
+                               const double lo = minTensor[n * sd.c + c];
+                               const double hi = maxTensor[n * sd.c + c];
+                               if (v < lo || v > hi) {
+                                   inRange = false;
+                                   break;
+                               }
+                           }
+                           const double out = inRange ? white : black;
+                           for (Rpp32u c = 0; c < sd.c; ++c)
+                               dst[channel_index(dd, dstPix, c)] = from_double<T>(out);
+                       });
 }
 
 }  // namespace rpptest

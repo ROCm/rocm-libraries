@@ -53,9 +53,15 @@ enum class WaterKind { Flat, Wave };
 
 struct WaterParams {
     WaterKind kind;
-    std::string name() const { return kind == WaterKind::Flat ? "Flat" : "Wave"; }
-    float amplitudeX() const { return kind == WaterKind::Wave ? 2.0f : 0.0f; }
-    float amplitudeY() const { return kind == WaterKind::Wave ? 5.0f : 0.0f; }
+    std::string name() const {
+        return kind == WaterKind::Flat ? "Flat" : "Wave";
+    }
+    float amplitudeX() const {
+        return kind == WaterKind::Wave ? 2.0f : 0.0f;
+    }
+    float amplitudeY() const {
+        return kind == WaterKind::Wave ? 5.0f : 0.0f;
+    }
 };
 
 constexpr float kFreqX = 5.8f, kFreqY = 1.2f, kPhaseX = 10.0f, kPhaseY = 15.0f;
@@ -113,27 +119,26 @@ void run_water(const TestConfig& cfg, const WaterParams& op) {
 
 }  // namespace
 
-// Full name: Image_Effects/WaterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Kind>
+// Full name:
+// Image_Effects/WaterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Kind>
 class WaterTest : public SkipListTest<WithParams<WaterParams>> {};
 
 TEST_P(WaterTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32>(p.cfg.dtype, [&](auto tag) {
-        run_water<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32>(
+        p.cfg.dtype, [&](auto tag) { run_water<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // I8 is off the grid for now, pending the suite-wide decision on whether the image ops need it.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, WaterTest,
-    ::testing::ValuesIn(with_params<WaterParams>(
-        concat_configs({
-            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
-            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFull,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {WaterParams{WaterKind::Flat}, WaterParams{WaterKind::Wave}})),
-    op_config_name<WaterParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, WaterTest,
+                         ::testing::ValuesIn(with_params<WaterParams>(
+                             concat_configs({
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
+                                              {presets::kTailWidthSize}),
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {WaterParams{WaterKind::Flat}, WaterParams{WaterKind::Wave}})),
+                         op_config_name<WaterParams>);

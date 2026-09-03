@@ -51,9 +51,12 @@ struct NoiseShotParams {
     Check check;
     std::string name() const {
         switch (check) {
-            case Check::Identity: return "Identity";
-            case Check::ValidRange: return "ValidRange";
-            case Check::Seed: return "Seed";
+            case Check::Identity:
+                return "Identity";
+            case Check::ValidRange:
+                return "ValidRange";
+            case Check::Seed:
+                return "Seed";
         }
         return "UNK";
     }
@@ -208,8 +211,7 @@ std::vector<WithParams<NoiseShotParams>> noise_shot_configs() {
     std::vector<WithParams<NoiseShotParams>> configs = with_params<NoiseShotParams>(
         concat_configs({
             make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
             make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
                          {Roi::Full, Roi::Partial},
                          {presets::kDefaultSize, presets::kSubVectorSize}),
@@ -240,9 +242,8 @@ TEST_P(NoiseShotTest, Correctness) {
 
     switch (p.op.check) {
         case Check::Identity:
-            dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
-                run_noise_shot_identity<Element<decltype(tag)>>(cfg);
-            });
+            dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+                cfg.dtype, [&](auto tag) { run_noise_shot_identity<Element<decltype(tag)>>(cfg); });
             break;
         case Check::ValidRange:
             if (cfg.dtype == DType::U8)
@@ -256,6 +257,5 @@ TEST_P(NoiseShotTest, Correctness) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Image_Effects, NoiseShotTest,
-                         ::testing::ValuesIn(noise_shot_configs()),
+INSTANTIATE_TEST_SUITE_P(Image_Effects, NoiseShotTest, ::testing::ValuesIn(noise_shot_configs()),
                          op_config_name<NoiseShotParams>);

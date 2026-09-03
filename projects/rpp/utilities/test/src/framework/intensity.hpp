@@ -74,15 +74,20 @@ inline double to_unit(double v, DType dt) {
 }
 inline double from_unit(double x, DType dt) {
     switch (dt) {
-        case DType::U8: return clampd(std::nearbyint(x * 255.0), 0.0, 255.0);
-        case DType::I8: return clampd(std::nearbyint(x * 255.0) - 128.0, -128.0, 127.0);
-        default:        return clampd(x, 0.0, 1.0);  // F16/F32
+        case DType::U8:
+            return clampd(std::nearbyint(x * 255.0), 0.0, 255.0);
+        case DType::I8:
+            return clampd(std::nearbyint(x * 255.0) - 128.0, -128.0, 127.0);
+        default:
+            return clampd(x, 0.0, 1.0);  // F16/F32
     }
 }
 
 // The dtype's "black" (zero intensity) in stored units: 0 for U8/F16/F32, -128 for I8. Geometric
 // ops use this as the out-of-frame border fill.
-inline double dtype_black(DType dt) { return dt == DType::I8 ? -128.0 : 0.0; }
+inline double dtype_black(DType dt) {
+    return dt == DType::I8 ? -128.0 : 0.0;
+}
 
 // Quantizes a value already expressed in stored units back into the dtype's storable range:
 // integers round to nearest and clamp, floats clamp to [0,1]. Round-to-nearest is the intended
@@ -90,9 +95,12 @@ inline double dtype_black(DType dt) { return dt == DType::I8 ? -128.0 : 0.0; }
 // Distinct from from_unit(), which additionally maps [0,1] -> stored.
 inline double quantize_stored(double v, DType dt) {
     switch (dt) {
-        case DType::U8: return clampd(std::nearbyint(v), 0.0, 255.0);
-        case DType::I8: return clampd(std::nearbyint(v), -128.0, 127.0);
-        default:        return clampd(v, 0.0, 1.0);  // F16/F32
+        case DType::U8:
+            return clampd(std::nearbyint(v), 0.0, 255.0);
+        case DType::I8:
+            return clampd(std::nearbyint(v), -128.0, 127.0);
+        default:
+            return clampd(v, 0.0, 1.0);  // F16/F32
     }
 }
 

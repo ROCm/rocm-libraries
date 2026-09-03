@@ -43,7 +43,9 @@ namespace {
 // threshold 0.5 is the midpoint so both branches (invert / passthrough) are hit.
 struct SolarizeParams {
     float threshold;
-    std::string name() const { return "t" + num_token(threshold); }
+    std::string name() const {
+        return "t" + num_token(threshold);
+    }
 };
 
 // Integer inversion is exact; only the float paths carry rounding error.
@@ -89,27 +91,26 @@ void run_solarize(const TestConfig& cfg, const SolarizeParams& op) {
 
 }  // namespace
 
-// Full name: Image_Effects/SolarizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Threshold>
+// Full name:
+// Image_Effects/SolarizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Threshold>
 class SolarizeTest : public SkipListTest<WithParams<SolarizeParams>> {};
 
 TEST_P(SolarizeTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_solarize<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_solarize<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, SolarizeTest,
-    ::testing::ValuesIn(with_params<SolarizeParams>(
-        concat_configs({
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {SolarizeParams{0.5f}})),
-    op_config_name<SolarizeParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, SolarizeTest,
+                         ::testing::ValuesIn(with_params<SolarizeParams>(
+                             concat_configs({
+                                 make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                              presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
+                                              {presets::kTailWidthSize}),
+                                 make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                              presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {SolarizeParams{0.5f}})),
+                         op_config_name<SolarizeParams>);

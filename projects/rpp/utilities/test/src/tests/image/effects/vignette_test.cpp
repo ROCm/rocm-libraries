@@ -49,13 +49,15 @@ namespace {
 // U8 is given 1 rather than 0 only to absorb a rounding tie, not observed error.
 constexpr Tolerance kVignetteTolerance = tolerance(1.0, 1e-6, 1e-3);
 
-// 6 is the intensity the legacy harness uses: on a 48-wide ROI it puts sigma at 8 px, so the corners
-// are driven essentially to black while the centre is untouched. 1 is the opposite end -- sigma is
-// the full extent, so the corners keep ~78% of their value and the whole region stays close to the
-// source, which separates a wrong falloff shape from a wrong overall scale.
+// 6 is the intensity the legacy harness uses: on a 48-wide ROI it puts sigma at 8 px, so the
+// corners are driven essentially to black while the centre is untouched. 1 is the opposite end --
+// sigma is the full extent, so the corners keep ~78% of their value and the whole region stays
+// close to the source, which separates a wrong falloff shape from a wrong overall scale.
 struct VignetteParams {
     float intensity;
-    std::string name() const { return "i" + num_token(intensity); }
+    std::string name() const {
+        return "i" + num_token(intensity);
+    }
 };
 
 template <typename T>
@@ -101,28 +103,27 @@ void run_vignette(const TestConfig& cfg, const VignetteParams& op) {
 
 }  // namespace
 
-// Full name: Image_Effects/VignetteTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Intensity>
+// Full name:
+// Image_Effects/VignetteTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Intensity>
 class VignetteTest : public SkipListTest<WithParams<VignetteParams>> {};
 
 TEST_P(VignetteTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32>(p.cfg.dtype, [&](auto tag) {
-        run_vignette<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32>(
+        p.cfg.dtype, [&](auto tag) { run_vignette<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // I8 is off the grid for now, pending the suite-wide decision on whether the image ops need it.
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, VignetteTest,
-    ::testing::ValuesIn(with_params<VignetteParams>(
-        concat_configs({
-            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
-            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFull,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {VignetteParams{6.0f}, VignetteParams{1.0f}})),
-    op_config_name<VignetteParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, VignetteTest,
+                         ::testing::ValuesIn(with_params<VignetteParams>(
+                             concat_configs({
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
+                                              {presets::kTailWidthSize}),
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {VignetteParams{6.0f}, VignetteParams{1.0f}})),
+                         op_config_name<VignetteParams>);

@@ -176,10 +176,9 @@ class ConciseReporter : public ::testing::EmptyTestEventListener {
             const ::testing::TestPartResult& part = result.GetTestPartResult(i);
             if (!part.failed()) continue;
             if (part.file_name() != nullptr)
-                std::printf("     %s\n",
-                            dim(std::string(part.file_name()) + ":" +
-                                std::to_string(part.line_number()))
-                                .c_str());
+                std::printf("     %s\n", dim(std::string(part.file_name()) + ":" +
+                                             std::to_string(part.line_number()))
+                                             .c_str());
             print_clipped(part.summary());
         }
         std::printf("\n");
@@ -247,10 +246,10 @@ class ConciseReporter : public ::testing::EmptyTestEventListener {
             for (std::size_t i = 0; i < cases.size() && i < kMaxListedFailuresPerSuite; ++i)
                 std::printf("           %s\n", dim(cases[i]).c_str());
             if (cases.size() > kMaxListedFailuresPerSuite)
-                std::printf("           %s\n",
-                            dim("+" + std::to_string(cases.size() - kMaxListedFailuresPerSuite) +
-                                " more")
-                                .c_str());
+                std::printf(
+                    "           %s\n",
+                    dim("+" + std::to_string(cases.size() - kMaxListedFailuresPerSuite) + " more")
+                        .c_str());
         }
     }
 
@@ -268,8 +267,7 @@ class ConciseReporter : public ::testing::EmptyTestEventListener {
 // Swaps GTest's default console printer for the one above. The XML/JSON generators, if
 // requested with --gtest_output, are left in place.
 inline void install_concise_reporter() {
-    ::testing::TestEventListeners& listeners =
-        ::testing::UnitTest::GetInstance()->listeners();
+    ::testing::TestEventListeners& listeners = ::testing::UnitTest::GetInstance()->listeners();
     delete listeners.Release(listeners.default_result_printer());
     listeners.Append(new ConciseReporter);
 }

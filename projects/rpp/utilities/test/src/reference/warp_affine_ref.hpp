@@ -71,16 +71,16 @@ template <typename T>
 void warp_affine_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
                            const RpptROI* roi, RpptRoiType roiType, const Rpp32f* affineTensor,
                            RpptInterpolationType interp) {
-    geometric_reference<T>(
-        src, sd, dst, dd, dt, roi, roiType, roi_out_sizes(sd, roi, roiType), interp,
-        [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
-            const Rpp32f* m = affineTensor + static_cast<std::size_t>(n) * 6;
-            const RoiBounds b = roi_bounds(roi[n], roiType);
-            const double cx = static_cast<double>(b.w / 2), cy = static_cast<double>(b.h / 2);
-            const double dx = ox - cx, dy = oy - cy;
-            sx = m[0] * dx + m[1] * dy + m[2] + cx;
-            sy = m[3] * dx + m[4] * dy + m[5] + cy;
-        });
+    geometric_reference<T>(src, sd, dst, dd, dt, roi, roiType, roi_out_sizes(sd, roi, roiType),
+                           interp, [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
+                               const Rpp32f* m = affineTensor + static_cast<std::size_t>(n) * 6;
+                               const RoiBounds b = roi_bounds(roi[n], roiType);
+                               const double cx = static_cast<double>(b.w / 2),
+                                            cy = static_cast<double>(b.h / 2);
+                               const double dx = ox - cx, dy = oy - cy;
+                               sx = m[0] * dx + m[1] * dy + m[2] + cx;
+                               sy = m[3] * dx + m[4] * dy + m[5] + cy;
+                           });
 }
 
 }  // namespace rpptest

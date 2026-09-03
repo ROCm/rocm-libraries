@@ -44,7 +44,9 @@ namespace {
 // The source channel order the op is told to assume; both values are exercised.
 struct ColorToGreyscaleParams {
     RpptSubpixelLayout subpixel;
-    std::string name() const { return subpixel == BGRtype ? "BGRtype" : "RGBtype"; }
+    std::string name() const {
+        return subpixel == BGRtype ? "BGRtype" : "RGBtype";
+    }
 };
 
 // A single 3-term dot product, so the only legitimate error is float-vs-double accumulation.
@@ -99,7 +101,8 @@ void run_color_to_greyscale(const TestConfig& cfg, const ColorToGreyscaleParams&
 
 }  // namespace
 
-// Full name: Image_DataExchange/ColorToGreyscaleTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Subpixel>
+// Full name:
+// Image_DataExchange/ColorToGreyscaleTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Subpixel>
 class ColorToGreyscaleTest : public SkipListTest<WithParams<ColorToGreyscaleParams>> {};
 
 TEST_P(ColorToGreyscaleTest, Correctness) {

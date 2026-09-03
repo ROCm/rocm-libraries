@@ -62,11 +62,15 @@ Per-type form
 inline double blend_scalar(double s1, double s2, DType dt, double alpha) {
     const double v = (s1 - s2) * alpha + s2;
     switch (dt) {
-        case DType::U8: return clampd(std::nearbyint(v), 0.0, 255.0);
-        case DType::I8: return clampd(std::nearbyint(v), -128.0, 127.0);
+        case DType::U8:
+            return clampd(std::nearbyint(v), 0.0, 255.0);
+        case DType::I8:
+            return clampd(std::nearbyint(v), -128.0, 127.0);
         case DType::F16:
-        case DType::F32: return clampd(v, 0.0, 1.0);
-        default: return v;
+        case DType::F32:
+            return clampd(v, 0.0, 1.0);
+        default:
+            return v;
     }
 }
 

@@ -81,10 +81,14 @@ enum class ArithmeticTensorOp { Add, Subtract, Multiply, Divide };
 
 inline double arithmetic_tensor_scalar(double a, double b, ArithmeticTensorOp op) {
     switch (op) {
-        case ArithmeticTensorOp::Add:      return a + b;
-        case ArithmeticTensorOp::Subtract: return a - b;
-        case ArithmeticTensorOp::Multiply: return a * b;
-        case ArithmeticTensorOp::Divide:   return a / b;
+        case ArithmeticTensorOp::Add:
+            return a + b;
+        case ArithmeticTensorOp::Subtract:
+            return a - b;
+        case ArithmeticTensorOp::Multiply:
+            return a * b;
+        case ArithmeticTensorOp::Divide:
+            return a / b;
     }
     return 0.0;
 }
@@ -94,7 +98,9 @@ inline double arithmetic_tensor_scalar(double a, double b, ArithmeticTensorOp op
 // non-integral branch.
 template <typename T, bool Integral = std::is_integral<T>::value>
 struct ArithmeticTensorStore {
-    static T apply(double v) { return from_double<T>(v); }
+    static T apply(double v) {
+        return from_double<T>(v);
+    }
 };
 
 template <typename T>
@@ -110,13 +116,12 @@ template <typename T>
 void arithmetic_tensor_reference(const T* src1, const T* src2, T* dst, const RpptGenericDesc& out,
                                  const RpptGenericDesc& s1, const RpptGenericDesc& s2,
                                  ArithmeticTensorOp op) {
-    for_each_nd_element(out, s1, s2,
-                        [&](std::size_t outIdx, std::size_t idx1, std::size_t idx2,
-                            const NdDims&) {
-                            const double v = arithmetic_tensor_scalar(
-                                to_double(src1[idx1]), to_double(src2[idx2]), op);
-                            dst[outIdx] = ArithmeticTensorStore<T>::apply(v);
-                        });
+    for_each_nd_element(
+        out, s1, s2, [&](std::size_t outIdx, std::size_t idx1, std::size_t idx2, const NdDims&) {
+            const double v =
+                arithmetic_tensor_scalar(to_double(src1[idx1]), to_double(src2[idx2]), op);
+            dst[outIdx] = ArithmeticTensorStore<T>::apply(v);
+        });
 }
 
 }  // namespace rpptest

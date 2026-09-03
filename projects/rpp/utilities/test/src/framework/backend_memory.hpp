@@ -35,12 +35,12 @@ SOFTWARE.
 
 #if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
 #include <hip/hip_runtime.h>
-#define RPP_TEST_CHECK_HIP(cmd)                                                          \
-    do {                                                                                 \
-        hipError_t rpp_test_hip_err = (cmd);                                             \
-        if (rpp_test_hip_err != hipSuccess)                                              \
-            throw std::runtime_error(std::string("HIP error: ") +                        \
-                                     hipGetErrorString(rpp_test_hip_err));               \
+#define RPP_TEST_CHECK_HIP(cmd)                                            \
+    do {                                                                   \
+        hipError_t rpp_test_hip_err = (cmd);                               \
+        if (rpp_test_hip_err != hipSuccess)                                \
+            throw std::runtime_error(std::string("HIP error: ") +          \
+                                     hipGetErrorString(rpp_test_hip_err)); \
     } while (0)
 #endif
 
@@ -59,7 +59,9 @@ class RppHandle {
     RppHandle(const RppHandle&) = delete;
     RppHandle& operator=(const RppHandle&) = delete;
 
-    rppHandle_t get() const { return handle_; }
+    rppHandle_t get() const {
+        return handle_;
+    }
 
     // Blocks the host until all work on this handle's accelerator stream completes; no-op for
     // HOST. Mirrors what a downstream user does before reading results back: synchronize the
@@ -106,9 +108,15 @@ class PinnedArray {
     PinnedArray(const PinnedArray&) = delete;
     PinnedArray& operator=(const PinnedArray&) = delete;
 
-    T* data() { return data_; }
-    std::size_t size() const { return count_; }
-    T& operator[](std::size_t i) { return data_[i]; }
+    T* data() {
+        return data_;
+    }
+    std::size_t size() const {
+        return count_;
+    }
+    T& operator[](std::size_t i) {
+        return data_[i];
+    }
 
    private:
     RppBackend backend_;
@@ -143,7 +151,9 @@ class DeviceTensor {
     DeviceTensor(const DeviceTensor&) = delete;
     DeviceTensor& operator=(const DeviceTensor&) = delete;
 
-    void* ptr() const { return data_; }
+    void* ptr() const {
+        return data_;
+    }
 
     void write(const void* host, std::size_t bytes) {
         if (backend_ == RPP_HIP_BACKEND) {

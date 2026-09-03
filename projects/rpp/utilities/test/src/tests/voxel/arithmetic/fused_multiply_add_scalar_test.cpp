@@ -43,12 +43,16 @@ namespace {
 
 struct FmaddScalarParams {
     float mul, add;
-    std::string name() const { return "mul" + num_token(mul) + "_add" + num_token(add); }
+    std::string name() const {
+        return "mul" + num_token(mul) + "_add" + num_token(add);
+    }
 };
 
 // The golden accumulates in double and stores float; a hardware FMA and a separate
 // multiply-then-add differ by far less than this.
-Bound scalar_tolerance(DType) { return {1e-5, 1e-6}; }
+Bound scalar_tolerance(DType) {
+    return {1e-5, 1e-6};
+}
 
 template <typename T>
 void run_fused_multiply_add_scalar(const VoxelConfig& cfg, const FmaddScalarParams& p) {
@@ -88,10 +92,9 @@ void run_fused_multiply_add_scalar(const VoxelConfig& cfg, const FmaddScalarPara
     dst.write(actual.data(), bytes);
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_fused_multiply_add_scalar(src.ptr(), desc.get(), dst.ptr(), desc.get(),
-                                             mul.data(), add.data(), roi.data(),
-                                             to_rpp_roi3d_type(cfg.roiType), handle.get(),
-                                             cfg.backend),
+    ASSERT_EQ(rppt_fused_multiply_add_scalar(
+                  src.ptr(), desc.get(), dst.ptr(), desc.get(), mul.data(), add.data(), roi.data(),
+                  to_rpp_roi3d_type(cfg.roiType), handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back
@@ -106,8 +109,7 @@ void run_fused_multiply_add_scalar(const VoxelConfig& cfg, const FmaddScalarPara
 
 // Full name:
 // Voxel_Arithmetic/FusedMultiplyAddScalarTest.Correctness/<Backend>_F32toF32_<Layout>_<Roi>_<Roi3DType>_<Shape>_<Mul>_<Add>
-class FusedMultiplyAddScalarTest
-    : public SkipListTest<VoxelWithParams<FmaddScalarParams>> {};
+class FusedMultiplyAddScalarTest : public SkipListTest<VoxelWithParams<FmaddScalarParams>> {};
 
 TEST_P(FusedMultiplyAddScalarTest, Correctness) {
     const auto& p = GetParam();
@@ -120,13 +122,12 @@ TEST_P(FusedMultiplyAddScalarTest, Correctness) {
 // mul 80 / add 5 are the values the legacy voxel harness uses. With a [0, 1] fill the two terms are
 // far apart in magnitude, so a kernel that swapped mulTensor and addTensor, or dropped either, is
 // caught; and every result leaves [0, 1], so a clamp to the image-intensity range would show.
-INSTANTIATE_TEST_SUITE_P(Voxel_Arithmetic, FusedMultiplyAddScalarTest,
-                         ::testing::ValuesIn(voxel_with_params<FmaddScalarParams>(
-                             make_voxel_configs({DType::F32},
-                                                {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3,
-                                                 VoxelLayout::NDHWC3},
-                                                {Roi::Full, Roi::Partial},
-                                                {Roi3D::XYZWHD, Roi3D::LTFRBB},
-                                                {presets::kDefaultVolume, presets::kTailVolume}),
-                             {{80.0f, 5.0f}})),
-                         voxel_op_config_name<FmaddScalarParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Voxel_Arithmetic, FusedMultiplyAddScalarTest,
+    ::testing::ValuesIn(voxel_with_params<FmaddScalarParams>(
+        make_voxel_configs({DType::F32},
+                           {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3, VoxelLayout::NDHWC3},
+                           {Roi::Full, Roi::Partial}, {Roi3D::XYZWHD, Roi3D::LTFRBB},
+                           {presets::kDefaultVolume, presets::kTailVolume}),
+        {{80.0f, 5.0f}})),
+    voxel_op_config_name<FmaddScalarParams>);

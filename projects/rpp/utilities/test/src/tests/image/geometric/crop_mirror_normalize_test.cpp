@@ -49,7 +49,9 @@ struct CmnParams {
     double stdDev;
     Rpp32u mirror;
     std::string tag;
-    std::string name() const { return tag; }
+    std::string name() const {
+        return tag;
+    }
 };
 
 // mean 0 / stdDev 1 is the identity normalize, i.e. a pure crop (+mirror): no arithmetic, so those
@@ -136,19 +138,18 @@ TEST_P(CropMirrorNormalizeTest, Correctness) {
 // 30 of the 192 are red against two kernel defects, both left red on purpose: every {F16,F32} x
 // Normalize case adds offsetTensor unscaled to a [0,1] pixel, and HOST x I8 x PartialRoi x
 // {Scale, Normalize} drops the multiplier in the scalar remainder.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Geometric, CropMirrorNormalizeTest,
-    ::testing::ValuesIn(with_params<CmnParams>(
-        concat_configs({
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {CmnParams{{0.0, 0.0, 0.0}, 1.0, 0, "Identity"},
-         CmnParams{{0.0, 0.0, 0.0}, 1.0, 1, "MirrorOnly"},
-         CmnParams{{0.0, 0.0, 0.0}, 2.0, 0, "Scale"},
-         CmnParams{{60.0, 80.0, 100.0}, 0.9, 1, "Normalize"}})),
-    op_config_name<CmnParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Geometric, CropMirrorNormalizeTest,
+                         ::testing::ValuesIn(with_params<CmnParams>(
+                             concat_configs({
+                                 make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                              presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
+                                              {presets::kTailWidthSize}),
+                                 make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                              presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {CmnParams{{0.0, 0.0, 0.0}, 1.0, 0, "Identity"},
+                              CmnParams{{0.0, 0.0, 0.0}, 1.0, 1, "MirrorOnly"},
+                              CmnParams{{0.0, 0.0, 0.0}, 2.0, 0, "Scale"},
+                              CmnParams{{60.0, 80.0, 100.0}, 0.9, 1, "Normalize"}})),
+                         op_config_name<CmnParams>);

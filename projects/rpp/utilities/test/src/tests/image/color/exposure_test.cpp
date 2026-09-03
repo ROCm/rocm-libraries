@@ -94,21 +94,20 @@ class ExposureTest : public SkipListTest<WithParams<ExposureParams>> {};
 
 TEST_P(ExposureTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_exposure<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_exposure<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, ExposureTest,
-    ::testing::ValuesIn(with_params<ExposureParams>(
-        concat_configs({
-            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFull,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {ExposureParams{0.5f}})),
-    op_config_name<ExposureParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, ExposureTest,
+                         ::testing::ValuesIn(with_params<ExposureParams>(
+                             concat_configs({
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
+                                              {presets::kTailWidthSize}),
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {ExposureParams{0.5f}})),
+                         op_config_name<ExposureParams>);

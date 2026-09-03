@@ -92,7 +92,7 @@ Notes
 // gather_roi_window() produces. Only the sizes the test grids are provided.
 inline std::vector<double> emboss_kernel(Rpp32u kernelSize, double strength) {
     static const double k3[9] = {2, 1, 0, 1, 1, -1, 0, -1, -2};
-    static const double k5[25] = {3, 3, 2,  1,  0,  3, 2, 1,  0,  -1, 2, 1, 1,
+    static const double k5[25] = {3,  3,  2, 1, 0,  3,  2,  1, 0,  -1, 2,  1, 1,
                                   -1, -2, 1, 0, -1, -2, -3, 0, -1, -2, -3, -3};
     const double* base = (kernelSize == 3) ? k3 : k5;
     const std::size_t count = static_cast<std::size_t>(kernelSize) * kernelSize;

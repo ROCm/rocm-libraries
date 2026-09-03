@@ -43,7 +43,9 @@ namespace {
 // adjustment is an integer pixel offset within the documented range -100 <= adjustment <= 100.
 struct ColorTemperatureParams {
     int adjustment;
-    std::string name() const { return "adj" + num_token(static_cast<float>(adjustment)); }
+    std::string name() const {
+        return "adj" + num_token(static_cast<float>(adjustment));
+    }
 };
 
 // Pure integer additive offset: no rounding, so I8 is bit-exact too (the systemic
@@ -96,25 +98,25 @@ void run_color_temperature(const TestConfig& cfg, const ColorTemperatureParams& 
 }  // namespace
 
 // color_temperature operates on RGB only (3 channels), so PLN1 is not instantiated.
-// Full name: Image_Color/ColorTemperatureTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Adj>
+// Full name:
+// Image_Color/ColorTemperatureTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Adj>
 class ColorTemperatureTest : public SkipListTest<WithParams<ColorTemperatureParams>> {};
 
 TEST_P(ColorTemperatureTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_color_temperature<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_color_temperature<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, ColorTemperatureTest,
-    ::testing::ValuesIn(with_params<ColorTemperatureParams>(
-        concat_configs({
-            make_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv,
-                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-            make_configs(presets::kDefaultDTypes, presets::kLayouts3Ch, {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {ColorTemperatureParams{40}})),
-    op_config_name<ColorTemperatureParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, ColorTemperatureTest,
+                         ::testing::ValuesIn(with_params<ColorTemperatureParams>(
+                             concat_configs({
+                                 make_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv,
+                                              {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+                                 make_configs(presets::kDefaultDTypes, presets::kLayouts3Ch,
+                                              {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {ColorTemperatureParams{40}})),
+                         op_config_name<ColorTemperatureParams>);

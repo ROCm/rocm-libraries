@@ -49,7 +49,9 @@ namespace rpptest {
 // kernels store a full 8-element vector for a row's tail and expect the caller to have allocated
 // the slack. It is the *width* axis that gets it -- innermost for planar layouts, one in from the
 // end for packed ones, whose innermost axis is the channel axis.
-inline Rpp32u nd_padded_width(Rpp32u w) { return (w / 8) * 8 + 8; }
+inline Rpp32u nd_padded_width(Rpp32u w) {
+    return (w / 8) * 8 + 8;
+}
 
 // dims stay logical; padAxis (-1 = none) widens only the strides. layout matters to the ops that
 // dispatch on it and require it to agree with the rank (slice); the rest ignore it.
@@ -100,8 +102,12 @@ class GenericDescriptor {
     GenericDescriptor(const GenericDescriptor&) = delete;
     GenericDescriptor& operator=(const GenericDescriptor&) = delete;
 
-    RpptGenericDescPtr get() const { return desc_; }
-    const RpptGenericDesc& operator*() const { return *desc_; }
+    RpptGenericDescPtr get() const {
+        return desc_;
+    }
+    const RpptGenericDesc& operator*() const {
+        return *desc_;
+    }
 
    private:
     RppBackend backend_;
@@ -199,11 +205,15 @@ void for_each_nd_element(const RpptGenericDesc& out, const RpptGenericDesc& s1,
 template <typename T>
 inline T nd_slack_poison(DType dt) {
     switch (dt) {
-        case DType::I8:  return static_cast<T>(-91);
-        case DType::I16: return static_cast<T>(-21931);
+        case DType::I8:
+            return static_cast<T>(-91);
+        case DType::I16:
+            return static_cast<T>(-21931);
         case DType::F16:
-        case DType::F32: return from_double<T>(-1.0);  // the pattern only spans [0, 1]
-        default:         return static_cast<T>(0xA5);
+        case DType::F32:
+            return from_double<T>(-1.0);  // the pattern only spans [0, 1]
+        default:
+            return static_cast<T>(0xA5);
     }
 }
 

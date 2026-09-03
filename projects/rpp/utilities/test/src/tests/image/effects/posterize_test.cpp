@@ -44,7 +44,9 @@ namespace {
 // reduces harder to the top two bits -- both drop low bits so most pixels change.
 struct PosterizeParams {
     int levelBits;
-    std::string name() const { return "b" + num_token(static_cast<float>(levelBits)); }
+    std::string name() const {
+        return "b" + num_token(static_cast<float>(levelBits));
+    }
 };
 
 // The integer bit-mask is exact; only the float paths carry rounding error.
@@ -90,27 +92,26 @@ void run_posterize(const TestConfig& cfg, const PosterizeParams& op) {
 
 }  // namespace
 
-// Full name: Image_Effects/PosterizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<LevelBits>
+// Full name:
+// Image_Effects/PosterizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<LevelBits>
 class PosterizeTest : public SkipListTest<WithParams<PosterizeParams>> {};
 
 TEST_P(PosterizeTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_posterize<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_posterize<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, PosterizeTest,
-    ::testing::ValuesIn(with_params<PosterizeParams>(
-        concat_configs({
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {PosterizeParams{4}, PosterizeParams{2}})),
-    op_config_name<PosterizeParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, PosterizeTest,
+                         ::testing::ValuesIn(with_params<PosterizeParams>(
+                             concat_configs({
+                                 make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                              presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
+                                              {presets::kTailWidthSize}),
+                                 make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                              presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {PosterizeParams{4}, PosterizeParams{2}})),
+                         op_config_name<PosterizeParams>);

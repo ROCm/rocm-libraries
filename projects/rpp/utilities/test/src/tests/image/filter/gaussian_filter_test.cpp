@@ -47,7 +47,9 @@ namespace {
 struct GaussianFilterParams {
     Rpp32u kernelSize;
     float stdDev;
-    std::string name() const { return "k" + std::to_string(kernelSize) + "_sd" + num_token(stdDev); }
+    std::string name() const {
+        return "k" + std::to_string(kernelSize) + "_sd" + num_token(stdDev);
+    }
 };
 
 // Tolerances reflect legitimate numeric error only (weighted-sum rounding); U8/I8 allow one LSB for
@@ -107,8 +109,8 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), imageBytes);
 
-    // (4) Compare within tolerance over the ROI. The golden matches HIP across the whole grid, so it
-    // is correct; known HOST-only reds kept red by design: PKD3 k3 diverges at the row edge, and
+    // (4) Compare within tolerance over the ROI. The golden matches HIP across the whole grid, so
+    // it is correct; known HOST-only reds kept red by design: PKD3 k3 diverges at the row edge, and
     // PLN PartialRoi k5 bleeds out-of-ROI neighbors. Both are real kernel defects.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kGaussianFilterTolerance(cfg.dtype)));
@@ -116,27 +118,27 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
 
 }  // namespace
 
-// Full name: Image_Filter/GaussianFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>_sd<StdDev>
+// Full name:
+// Image_Filter/GaussianFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>_sd<StdDev>
 class GaussianFilterTest : public SkipListTest<WithParams<GaussianFilterParams>> {};
 
 TEST_P(GaussianFilterTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_gaussian_filter<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_gaussian_filter<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Filter, GaussianFilterTest,
-    ::testing::ValuesIn(with_params<GaussianFilterParams>(
-        concat_configs({
-            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {GaussianFilterParams{3, 1.0f}, GaussianFilterParams{5, 1.0f},
-         GaussianFilterParams{7, 1.0f}, GaussianFilterParams{9, 1.0f},
-         GaussianFilterParams{5, 0.25f}, GaussianFilterParams{5, 5.0f}})),
-    op_config_name<GaussianFilterParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Filter, GaussianFilterTest,
+                         ::testing::ValuesIn(with_params<GaussianFilterParams>(
+                             concat_configs({
+                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                                              {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFull,
+                                              {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {GaussianFilterParams{3, 1.0f}, GaussianFilterParams{5, 1.0f},
+                              GaussianFilterParams{7, 1.0f}, GaussianFilterParams{9, 1.0f},
+                              GaussianFilterParams{5, 0.25f}, GaussianFilterParams{5, 5.0f}})),
+                         op_config_name<GaussianFilterParams>);

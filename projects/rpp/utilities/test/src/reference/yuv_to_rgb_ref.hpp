@@ -89,12 +89,17 @@ struct YuvLumaWeights {
 // The luma coefficients each standard defines.
 inline YuvLumaWeights yuv_luma_weights(RpptColorStandard standard) {
     switch (standard) {
-        case RpptColorStandard_FCC:         return {0.30, 0.11};
+        case RpptColorStandard_FCC:
+            return {0.30, 0.11};
         case RpptColorStandard_BT470BG:
-        case RpptColorStandard_BT601:       return {0.299, 0.114};
-        case RpptColorStandard_SMPTE240M:   return {0.212, 0.087};
-        case RpptColorStandard_BT2020_NCL:  return {0.2627, 0.0593};
-        default:                            return {0.2126, 0.0722};  // BT.709
+        case RpptColorStandard_BT601:
+            return {0.299, 0.114};
+        case RpptColorStandard_SMPTE240M:
+            return {0.212, 0.087};
+        case RpptColorStandard_BT2020_NCL:
+            return {0.2627, 0.0593};
+        default:
+            return {0.2126, 0.0722};  // BT.709
     }
 }
 
@@ -217,9 +222,9 @@ inline ChromaTaps chroma_taps_v(YuvChromaUpsample mode, Rpp32u lumaRow, Rpp32u c
 // Rows are addressed only through the byte pitches (never a tight row width), so pitch slack is
 // neither read nor written. width and height must be even (NV12).
 inline void yuv_to_rgb_reference(const Rpp8u* srcY, const Rpp8u* srcUV, Rpp8u* dst,
-                                 Rpp32u srcYPitch, Rpp32u srcUVPitch, Rpp32u dstPitch,
-                                 Rpp32u width, Rpp32u height, RpptColorStandard standard,
-                                 RpptColorRange range, YuvChromaUpsample upsample) {
+                                 Rpp32u srcYPitch, Rpp32u srcUVPitch, Rpp32u dstPitch, Rpp32u width,
+                                 Rpp32u height, RpptColorStandard standard, RpptColorRange range,
+                                 YuvChromaUpsample upsample) {
     const Rpp32u chromaHeight = height / 2;
 
     for (Rpp32u y = 0; y < height; ++y) {
@@ -231,8 +236,7 @@ inline void yuv_to_rgb_reference(const Rpp8u* srcY, const Rpp8u* srcUV, Rpp8u* d
             const Rpp32u cc = x / 2;  // horizontal upsampling is nearest in all three ops
             double u = 0.0, v = 0.0;
             for (int t = 0; t < taps.count; ++t) {
-                const Rpp8u* chromaRow =
-                    srcUV + static_cast<std::size_t>(taps.row[t]) * srcUVPitch;
+                const Rpp8u* chromaRow = srcUV + static_cast<std::size_t>(taps.row[t]) * srcUVPitch;
                 u += taps.weight[t] * static_cast<double>(chromaRow[2 * cc]);
                 v += taps.weight[t] * static_cast<double>(chromaRow[2 * cc + 1]);
             }

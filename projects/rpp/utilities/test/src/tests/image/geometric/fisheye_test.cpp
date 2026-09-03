@@ -69,8 +69,8 @@ void run_fisheye(const TestConfig& cfg) {
     dst.write(dstInit.data(), bytes);
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_fisheye(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, roi.data(), XYWH,
-                           handle.get(), cfg.backend),
+    ASSERT_EQ(rppt_fisheye(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, roi.data(), XYWH, handle.get(),
+                           cfg.backend),
               RPP_SUCCESS);
 
     handle.sync();
@@ -79,32 +79,31 @@ void run_fisheye(const TestConfig& cfg) {
     // Compared against the caller's own ROI copy, not the tensor handed to the op: the HIP paths
     // rewrite that tensor from XYWH to LTRB in place, which would make the comparison walk a
     // different region than the golden wrote.
-    EXPECT_TRUE(
-        compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH, kTol));
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH, kTol));
 }
 
 }  // namespace
 
-// Full name: Image_Geometric/FisheyeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
+// Full name:
+// Image_Geometric/FisheyeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
 class FisheyeTest : public SkipListTest<TestConfig> {};
 
 TEST_P(FisheyeTest, Correctness) {
     const TestConfig cfg = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
-        run_fisheye<Element<decltype(tag)>>(cfg);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        cfg.dtype, [&](auto tag) { run_fisheye<Element<decltype(tag)>>(cfg); });
 }
 
 // I8 is off the grid for now, pending the suite-wide decision on whether the image ops need it.
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Geometric, FisheyeTest,
-    ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32},
-                                     {{Layout::PKD3, Layout::PKD3},
-                                      {Layout::PLN3, Layout::PLN3},
-                                      {Layout::PLN1, Layout::PLN1},
-                                      {Layout::PKD3, Layout::PLN3},
-                                      {Layout::PLN3, Layout::PKD3}},
-                                     {Roi::Full, Roi::Partial},
-                                     {presets::kDefaultSize, presets::kTailWidthSize})),
-    config_param_name);
+INSTANTIATE_TEST_SUITE_P(Image_Geometric, FisheyeTest,
+                         ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32},
+                                                          {{Layout::PKD3, Layout::PKD3},
+                                                           {Layout::PLN3, Layout::PLN3},
+                                                           {Layout::PLN1, Layout::PLN1},
+                                                           {Layout::PKD3, Layout::PLN3},
+                                                           {Layout::PLN3, Layout::PKD3}},
+                                                          {Roi::Full, Roi::Partial},
+                                                          {presets::kDefaultSize,
+                                                           presets::kTailWidthSize})),
+                         config_param_name);

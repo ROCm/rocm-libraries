@@ -99,10 +99,10 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
     dst.write(image, imageBytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_emboss(srcDev.ptr(), &srcDesc, dst.ptr(), &dstDesc, strength.data(),
-                          op.kernelSize, RpptImageBorderType::REPLICATE, roi.data(), XYWH,
-                          handle.get(), cfg.backend),
-              RPP_SUCCESS);
+    ASSERT_EQ(
+        rppt_emboss(srcDev.ptr(), &srcDesc, dst.ptr(), &dstDesc, strength.data(), op.kernelSize,
+                    RpptImageBorderType::REPLICATE, roi.data(), XYWH, handle.get(), cfg.backend),
+        RPP_SUCCESS);
 
     handle.sync();
     dst.read(actual.data(), imageBytes);
@@ -122,21 +122,20 @@ class EmbossTest : public SkipListTest<WithParams<EmbossParams>> {};
 
 TEST_P(EmbossTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_emboss<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_emboss<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Filter, EmbossTest,
-    ::testing::ValuesIn(with_params<EmbossParams>(
-        concat_configs({
-            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {EmbossParams{1.0f, 3}, EmbossParams{1.0f, 5}, EmbossParams{2.0f, 3},
-         EmbossParams{2.0f, 5}})),
-    op_config_name<EmbossParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Filter, EmbossTest,
+                         ::testing::ValuesIn(with_params<EmbossParams>(
+                             concat_configs({
+                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                                              {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFull,
+                                              {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {EmbossParams{1.0f, 3}, EmbossParams{1.0f, 5}, EmbossParams{2.0f, 3},
+                              EmbossParams{2.0f, 5}})),
+                         op_config_name<EmbossParams>);

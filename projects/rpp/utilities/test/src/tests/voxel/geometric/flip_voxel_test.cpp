@@ -101,8 +101,8 @@ void run_flip_voxel(const VoxelConfig& cfg, const FlipVoxelParams& p) {
 
     // (3) Compare the voxels inside the ROI box. Flip only permutes source elements -- it computes
     // nothing -- so every dtype must be bit-exact and the tolerance is zero.
-    EXPECT_TRUE(
-        compare_voxel_roi<T>(actual.data(), golden.data(), *desc, roiHost.data(), cfg.roiType, 0.0));
+    EXPECT_TRUE(compare_voxel_roi<T>(actual.data(), golden.data(), *desc, roiHost.data(),
+                                     cfg.roiType, 0.0));
 }
 
 }  // namespace
@@ -121,9 +121,8 @@ TEST_P(FlipVoxelTest, Correctness) {
         GTEST_SKIP() << "HOST U8 flip_voxel reads past the start of the buffer and segfaults on a "
                         "horizontal flip with a partial ROI";
 
-    dispatch_dtype<DType::U8, DType::F32>(p.cfg.dtype, [&](auto tag) {
-        run_flip_voxel<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F32>(
+        p.cfg.dtype, [&](auto tag) { run_flip_voxel<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // u8 -> u8 and f32 -> f32 are the op's only documented conversions.

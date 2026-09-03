@@ -63,8 +63,8 @@ void run_tensor_or_tensor(const NdConfig& cfg, Broadcast broadcast) {
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
     fill_input_nd<T>(input1.data(), *desc1, cfg.dtypeIn, 0);
     fill_input_nd<T>(input2.data(), *desc2, cfg.dtypeIn, 1);
-    bitwise_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1, *desc2,
-                                BitwiseTensorOp::Or);
+    bitwise_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1,
+                                *desc2, BitwiseTensorOp::Or);
 
     // (2) roiTensors live in host-accessible (pinned for HIP) memory.
     const std::vector<Rpp32u> roiVec1 = make_nd_roi_tensor(dims1);
@@ -83,9 +83,9 @@ void run_tensor_or_tensor(const NdConfig& cfg, Broadcast broadcast) {
     src2.write(input2.data(), bytes2);
 
     RppHandle handle(cfg.backend, outDims[0]);
-    ASSERT_EQ(rppt_tensor_or_tensor(src1.ptr(), src2.ptr(), desc1.get(), desc2.get(), dst.ptr(), descOut.get(),
-                                    to_rpp_broadcast(broadcast), roi1.data(), roi2.data(),
-                                    handle.get(), cfg.backend),
+    ASSERT_EQ(rppt_tensor_or_tensor(src1.ptr(), src2.ptr(), desc1.get(), desc2.get(), dst.ptr(),
+                                    descOut.get(), to_rpp_broadcast(broadcast), roi1.data(),
+                                    roi2.data(), handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back

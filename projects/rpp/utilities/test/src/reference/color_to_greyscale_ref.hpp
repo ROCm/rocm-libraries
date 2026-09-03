@@ -81,8 +81,7 @@ void color_to_greyscale_reference(const T* src, const RpptDesc& srcDesc, T* dst,
                                   const RpptDesc& dstDesc, DType dt, const RpptROI* roi,
                                   RpptRoiType roiType, RpptSubpixelLayout subpixel) {
     for_each_roi_pixel(
-        srcDesc, roi, roiType,
-        [&](Rpp32u n, Rpp32u j, Rpp32u i, std::size_t srcPix, std::size_t) {
+        srcDesc, roi, roiType, [&](Rpp32u n, Rpp32u j, Rpp32u i, std::size_t srcPix, std::size_t) {
             const double c0 = to_double(src[channel_index(srcDesc, srcPix, 0)]);
             const double c1 = to_double(src[channel_index(srcDesc, srcPix, 1)]);
             const double c2 = to_double(src[channel_index(srcDesc, srcPix, 2)]);

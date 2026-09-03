@@ -55,17 +55,17 @@ Per-type form
 template <typename T>
 void flip_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
                     const RpptROI* roi, RpptRoiType roiType, Rpp32u horizontal, Rpp32u vertical) {
-    for_each_roi_plane(sd, dd, roi, roiType,
-                       [&](Rpp32u, const RoiBounds& b, Rpp32u, std::size_t srcBase,
-                           std::size_t dstBase) {
-        for (Rpp32u j = 0; j < b.h; ++j)
-            for (Rpp32u i = 0; i < b.w; ++i) {
-                const Rpp32u srcRow = b.y0 + (vertical ? (b.h - 1 - j) : j);
-                const Rpp32u srcCol = b.x0 + (horizontal ? (b.w - 1 - i) : i);
-                dst[plane_index(dd, dstBase, j, i)] =
-                    src[plane_index(sd, srcBase, srcRow, srcCol)];
-            }
-    });
+    for_each_roi_plane(
+        sd, dd, roi, roiType,
+        [&](Rpp32u, const RoiBounds& b, Rpp32u, std::size_t srcBase, std::size_t dstBase) {
+            for (Rpp32u j = 0; j < b.h; ++j)
+                for (Rpp32u i = 0; i < b.w; ++i) {
+                    const Rpp32u srcRow = b.y0 + (vertical ? (b.h - 1 - j) : j);
+                    const Rpp32u srcCol = b.x0 + (horizontal ? (b.w - 1 - i) : i);
+                    dst[plane_index(dd, dstBase, j, i)] =
+                        src[plane_index(sd, srcBase, srcRow, srcCol)];
+                }
+        });
 }
 
 }  // namespace rpptest

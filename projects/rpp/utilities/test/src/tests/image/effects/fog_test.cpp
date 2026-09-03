@@ -105,17 +105,16 @@ void run_fog(const TestConfig& cfg) {
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
                         const double v = to_double(actual[dstIdx]);
                         if (to_double(input[srcIdx]) != v) changed = true;
-                        if (storable &&
-                            (!std::isfinite(v) ||
-                             std::fabs(v - quantize_stored(v, cfg.dtype)) > 1e-6)) {
+                        if (storable && (!std::isfinite(v) ||
+                                         std::fabs(v - quantize_stored(v, cfg.dtype)) > 1e-6)) {
                             storable = false;
                             firstBad = v;
                         }
                     });
     EXPECT_TRUE(changed) << "fog left the ROI unchanged at intensityFactor " << kIntensity
                          << " / greyFactor " << kGrey;
-    EXPECT_TRUE(storable) << "fog produced " << firstBad << ", outside the storable range for dtype "
-                          << dtype_name(cfg.dtype);
+    EXPECT_TRUE(storable) << "fog produced " << firstBad
+                          << ", outside the storable range for dtype " << dtype_name(cfg.dtype);
 }
 
 // One out-of-range parameter pair per case. Both bounds of both ranges are covered; the parameter
@@ -124,7 +123,9 @@ void run_fog(const TestConfig& cfg) {
 struct FogNegativeParams {
     float intensity;
     float grey;
-    std::string name() const { return "i" + num_token(intensity) + "_g" + num_token(grey); }
+    std::string name() const {
+        return "i" + num_token(intensity) + "_g" + num_token(grey);
+    }
 };
 
 // The header constrains both parameters (0 <= intensityFactor <= 0.5, 0 <= greyFactor <= 1), so a
@@ -157,9 +158,8 @@ void run_fog_negative(const TestConfig& cfg, const FogNegativeParams& op) {
     const RppStatus status = rppt_fog(src.ptr(), &desc, dst.ptr(), &desc, intensity.data(),
                                       grey.data(), roi.data(), XYWH, handle.get(), cfg.backend);
     handle.sync();
-    EXPECT_NE(status, RPP_SUCCESS)
-        << "fog accepted out-of-range parameters (intensityFactor " << op.intensity
-        << ", greyFactor " << op.grey << ")";
+    EXPECT_NE(status, RPP_SUCCESS) << "fog accepted out-of-range parameters (intensityFactor "
+                                   << op.intensity << ", greyFactor " << op.grey << ")";
 }
 
 }  // namespace
@@ -169,9 +169,8 @@ class FogTest : public SkipListTest<TestConfig> {};
 
 TEST_P(FogTest, Correctness) {
     const TestConfig& cfg = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
-        run_fog<Element<decltype(tag)>>(cfg);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        cfg.dtype, [&](auto tag) { run_fog<Element<decltype(tag)>>(cfg); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
@@ -179,11 +178,9 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Effects, FogTest,
     ::testing::ValuesIn(concat_configs({
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                     {Roi::Full, Roi::Partial},
-                     {presets::kTailWidthSize}),
+                     {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
-                     {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kSubVectorSize}),
+                     {Roi::Full, Roi::Partial}, {presets::kDefaultSize, presets::kSubVectorSize}),
     })),
     config_param_name);
 
@@ -197,10 +194,9 @@ TEST_P(FogNegativeTest, Negative) {
 }
 
 // Argument validation is dtype- and layout-independent, so it runs on one representative config.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, FogNegativeTest,
-    ::testing::ValuesIn(with_params<FogNegativeParams>(
-        make_configs({DType::U8}, {Layout::PKD3}, {Roi::Full}),
-        {FogNegativeParams{-0.1f, 0.5f}, FogNegativeParams{0.6f, 0.5f},
-         FogNegativeParams{0.25f, -0.1f}, FogNegativeParams{0.25f, 1.1f}})),
-    op_config_name<FogNegativeParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, FogNegativeTest,
+                         ::testing::ValuesIn(with_params<FogNegativeParams>(
+                             make_configs({DType::U8}, {Layout::PKD3}, {Roi::Full}),
+                             {FogNegativeParams{-0.1f, 0.5f}, FogNegativeParams{0.6f, 0.5f},
+                              FogNegativeParams{0.25f, -0.1f}, FogNegativeParams{0.25f, 1.1f}})),
+                         op_config_name<FogNegativeParams>);

@@ -101,7 +101,9 @@ void run_gaussian_noise_voxel(const VoxelConfig& cfg) {
 struct GaussianNoiseVoxelNegativeParams {
     float mean;
     float stdDev;
-    std::string name() const { return "m" + num_token(mean) + "_s" + num_token(stdDev); }
+    std::string name() const {
+        return "m" + num_token(mean) + "_s" + num_token(stdDev);
+    }
 };
 
 // A negative mean or standard deviation is not a legal call and must be reported rather than

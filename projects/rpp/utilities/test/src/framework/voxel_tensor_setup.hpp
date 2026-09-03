@@ -43,11 +43,17 @@ namespace rpptest {
 // GenericDescriptor (dense strides, as the legacy voxel harness uses), so only the 3D layout
 // mapping, the ROI3D box and an in-box traversal are added here.
 
-inline Rpp32u voxel_channels(VoxelLayout l) { return l == VoxelLayout::NCDHW1 ? 1 : 3; }
+inline Rpp32u voxel_channels(VoxelLayout l) {
+    return l == VoxelLayout::NCDHW1 ? 1 : 3;
+}
 
-inline bool voxel_is_packed(VoxelLayout l) { return l == VoxelLayout::NDHWC3; }
+inline bool voxel_is_packed(VoxelLayout l) {
+    return l == VoxelLayout::NDHWC3;
+}
 
-inline bool voxel_is_packed(const RpptGenericDesc& d) { return d.layout == RpptLayout::NDHWC; }
+inline bool voxel_is_packed(const RpptGenericDesc& d) {
+    return d.layout == RpptLayout::NDHWC;
+}
 
 inline RpptLayout to_rpp_layout_3d(VoxelLayout l) {
     return voxel_is_packed(l) ? RpptLayout::NDHWC : RpptLayout::NCDHW;
@@ -110,10 +116,10 @@ struct VoxelBox {
 // (roi_bounds() in tensor_setup.hpp).
 inline VoxelBox voxel_box(const RpptROI3D& r, Roi3D type) {
     if (type == Roi3D::XYZWHD)
-        return {static_cast<Rpp32u>(r.xyzwhdROI.xyz.x), static_cast<Rpp32u>(r.xyzwhdROI.xyz.y),
-                static_cast<Rpp32u>(r.xyzwhdROI.xyz.z), static_cast<Rpp32u>(r.xyzwhdROI.roiWidth),
-                static_cast<Rpp32u>(r.xyzwhdROI.roiHeight),
-                static_cast<Rpp32u>(r.xyzwhdROI.roiDepth)};
+        return {
+            static_cast<Rpp32u>(r.xyzwhdROI.xyz.x),     static_cast<Rpp32u>(r.xyzwhdROI.xyz.y),
+            static_cast<Rpp32u>(r.xyzwhdROI.xyz.z),     static_cast<Rpp32u>(r.xyzwhdROI.roiWidth),
+            static_cast<Rpp32u>(r.xyzwhdROI.roiHeight), static_cast<Rpp32u>(r.xyzwhdROI.roiDepth)};
     return {static_cast<Rpp32u>(r.ltfrbbROI.ltf.x),
             static_cast<Rpp32u>(r.ltfrbbROI.ltf.y),
             static_cast<Rpp32u>(r.ltfrbbROI.ltf.z),

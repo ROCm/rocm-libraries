@@ -59,15 +59,18 @@ enum class LensKind { NoDistortion, Barrel };
 // description names).
 struct LensParams {
     LensKind kind;
-    std::string name() const { return kind == LensKind::NoDistortion ? "NoDistortion" : "Barrel"; }
+    std::string name() const {
+        return kind == LensKind::NoDistortion ? "NoDistortion" : "Barrel";
+    }
 };
 
 // NoDistortion deliberately uses IDENTITY intrinsics (fx = fy = 1, cx = cy = 0) rather than the
 // scaled sample ones. With zero coefficients the map reduces to srcX = fx*((outX-cx)/fx)+cx, which
-// is only exactly outX when fx and cx are exact: with the scaled intrinsics it lands on outX +/- 1e-7,
-// putting the frame border on a float knife-edge where the sign decides whether the low tap is
-// in-frame. Identity intrinsics make the map exactly the identity for every pixel, so this set is a
-// clean plumbing check and any diff is a real defect. Determinant is 1, so the matrix is valid.
+// is only exactly outX when fx and cx are exact: with the scaled intrinsics it lands on outX +/-
+// 1e-7, putting the frame border on a float knife-edge where the sign decides whether the low tap
+// is in-frame. Identity intrinsics make the map exactly the identity for every pixel, so this set
+// is a clean plumbing check and any diff is a real defect. Determinant is 1, so the matrix is
+// valid.
 void fill_camera_matrix(Rpp32f* m, Rpp32u w, Rpp32u h, LensKind kind) {
     const bool identity = kind == LensKind::NoDistortion;
     const double sx = static_cast<double>(w) / kRefW, sy = static_cast<double>(h) / kRefH;
@@ -126,7 +129,8 @@ void run_lens_correction(const TestConfig& cfg, const LensParams& op) {
     PinnedArray<Rpp32f> cameraMatrix(cfg.backend, static_cast<std::size_t>(N) * 9);
     PinnedArray<Rpp32f> distortion(cfg.backend, static_cast<std::size_t>(N) * 8);
     for (Rpp32u n = 0; n < N; ++n) {
-        fill_camera_matrix(cameraMatrix.data() + static_cast<std::size_t>(n) * 9, imgW, imgH, op.kind);
+        fill_camera_matrix(cameraMatrix.data() + static_cast<std::size_t>(n) * 9, imgW, imgH,
+                           op.kind);
         fill_distortion(distortion.data() + static_cast<std::size_t>(n) * 8, op.kind);
     }
 
@@ -174,16 +178,15 @@ class LensCorrectionTest : public SkipListTest<WithParams<LensParams>> {};
 
 TEST_P(LensCorrectionTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_lens_correction<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_lens_correction<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Geometric, LensCorrectionTest,
-    ::testing::ValuesIn(with_params<LensParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kTailWidthSize}),
-        {LensParams{LensKind::NoDistortion}, LensParams{LensKind::Barrel}})),
-    op_config_name<LensParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Geometric, LensCorrectionTest,
+                         ::testing::ValuesIn(with_params<LensParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial},
+                                          {presets::kDefaultSize, presets::kTailWidthSize}),
+                             {LensParams{LensKind::NoDistortion}, LensParams{LensKind::Barrel}})),
+                         op_config_name<LensParams>);

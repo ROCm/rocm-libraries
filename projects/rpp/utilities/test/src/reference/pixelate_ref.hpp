@@ -77,8 +77,7 @@ Notes
 // extent is carried in. Floored at 1: a zero extent has no pixels to sample and the second resize
 // would divide by it (no test configuration reaches this -- it needs p at or near 100).
 inline Rpp32u pixelate_intermediate_extent(Rpp32u extent, double pixelationPercentage) {
-    const double scaled =
-        (static_cast<double>(extent) * (100.0 - pixelationPercentage)) / 100.0;
+    const double scaled = (static_cast<double>(extent) * (100.0 - pixelationPercentage)) / 100.0;
     return std::max(1u, static_cast<Rpp32u>(scaled));
 }
 
@@ -92,8 +91,8 @@ void pixelate_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const
         interSizes[n] = {pixelate_intermediate_extent(b.w, pixelationPercentage),
                          pixelate_intermediate_extent(b.h, pixelationPercentage)};
         roiSizes[n] = {b.w, b.h};
-        interRoi[n].xywhROI = {{0, 0}, static_cast<int>(interSizes[n].width),
-                               static_cast<int>(interSizes[n].height)};
+        interRoi[n].xywhROI = {
+            {0, 0}, static_cast<int>(interSizes[n].width), static_cast<int>(interSizes[n].height)};
     }
 
     std::vector<T> inter(element_count(d), from_double<T>(dtype_black(dt)));

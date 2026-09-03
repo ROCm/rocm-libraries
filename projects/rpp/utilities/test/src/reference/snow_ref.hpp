@@ -172,18 +172,24 @@ inline void snow_gray(float& pixel, float brightnessCoefficient, float snowCoeff
 
 inline float load_norm(double v, DType dt) {
     switch (dt) {
-        case DType::U8: return static_cast<float>(v) * kOneOver255;
-        case DType::I8: return (static_cast<float>(v) + 128.0f) * kOneOver255;
-        default:        return static_cast<float>(v);  // F16/F32 already [0,1]
+        case DType::U8:
+            return static_cast<float>(v) * kOneOver255;
+        case DType::I8:
+            return (static_cast<float>(v) + 128.0f) * kOneOver255;
+        default:
+            return static_cast<float>(v);  // F16/F32 already [0,1]
     }
 }
 
 inline double store_denorm(float x, DType dt) {
     switch (dt) {
-        case DType::U8: return clampd(std::nearbyint(static_cast<double>(x) * 255.0), 0.0, 255.0);
+        case DType::U8:
+            return clampd(std::nearbyint(static_cast<double>(x) * 255.0), 0.0, 255.0);
         // I8 truncates toward zero on the static_cast (no round) -- the kernel's behavior.
-        case DType::I8: return clampd(static_cast<double>(x * 255.0f - 128.0f), -128.0, 127.0);
-        default:        return clampd(static_cast<double>(x), 0.0, 1.0);  // F16/F32
+        case DType::I8:
+            return clampd(static_cast<double>(x * 255.0f - 128.0f), -128.0, 127.0);
+        default:
+            return clampd(static_cast<double>(x), 0.0, 1.0);  // F16/F32
     }
 }
 
@@ -195,8 +201,7 @@ void snow_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd
                     const RpptROI* roi, RpptRoiType roiType, double brightnessCoefficient,
                     double snowThreshold, int darkMode) {
     const float bc = static_cast<float>(brightnessCoefficient);
-    const float snowCoefficient =
-        std::fmaf(static_cast<float>(snowThreshold), 0.5f, 0.333333333f);
+    const float snowCoefficient = std::fmaf(static_cast<float>(snowThreshold), 0.5f, 0.333333333f);
 
     if (sd.c == 3) {
         for_each_roi_pixel(

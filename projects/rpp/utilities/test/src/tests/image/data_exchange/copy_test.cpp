@@ -80,24 +80,24 @@ void run_copy(const TestConfig& cfg) {
 
 }  // namespace
 
-// Full name: Image_DataExchange/CopyTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
+// Full name:
+// Image_DataExchange/CopyTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
 class CopyTest : public SkipListTest<TestConfig> {};
 
 TEST_P(CopyTest, Correctness) {
     const TestConfig cfg = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
-        run_copy<Element<decltype(tag)>>(cfg);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        cfg.dtype, [&](auto tag) { run_copy<Element<decltype(tag)>>(cfg); });
 }
 
 // copy has no ROI argument (it copies the whole buffer), so only Roi::Full is instantiated.
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_DataExchange, CopyTest,
-    ::testing::ValuesIn(concat_configs({
-        make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv, {Roi::Full},
-                     {presets::kTailWidthSize}),
-        make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full},
-                     {presets::kDefaultSize, presets::kSubVectorSize}),
-    })),
-    config_param_name);
+INSTANTIATE_TEST_SUITE_P(Image_DataExchange, CopyTest,
+                         ::testing::ValuesIn(concat_configs({
+                             make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                                          {Roi::Full}, {presets::kTailWidthSize}),
+                             make_configs(presets::kDefaultDTypes, presets::kLayoutsFull,
+                                          {Roi::Full},
+                                          {presets::kDefaultSize, presets::kSubVectorSize}),
+                         })),
+                         config_param_name);

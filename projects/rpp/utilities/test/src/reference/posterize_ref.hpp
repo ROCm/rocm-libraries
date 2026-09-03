@@ -60,7 +60,9 @@ Per-type form
     I8      i = round(v) + 128;             out = (i & mask) - 128
     F16/F32 i = round(v * 255) in [0,255];  out = (i & mask) / 255
 */
-inline int posterize_mask(int levelBits) { return (0xFF << (8 - levelBits)) & 0xFF; }
+inline int posterize_mask(int levelBits) {
+    return (0xFF << (8 - levelBits)) & 0xFF;
+}
 
 inline double posterize_scalar(double v, DType dt, int levelBits) {
     const int mask = posterize_mask(levelBits);
@@ -78,7 +80,8 @@ inline double posterize_scalar(double v, DType dt, int levelBits) {
             const int i = static_cast<int>(clampd(std::lround(v * 255.0), 0.0, 255.0));
             return static_cast<double>(i & mask) / 255.0;
         }
-        default: return v;
+        default:
+            return v;
     }
 }
 

@@ -115,17 +115,15 @@ class TensorStddevTest : public SkipListTest<TestConfig> {};
 
 TEST_P(TensorStddevTest, Correctness) {
     const TestConfig cfg = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
-        run_tensor_stddev<Element<decltype(tag)>>(cfg);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        cfg.dtype, [&](auto tag) { run_tensor_stddev<Element<decltype(tag)>>(cfg); });
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Statistical, TensorStddevTest,
-    ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                     {Layout::PKD3, Layout::PLN3, Layout::PLN1},
-                                     {Roi::Full, Roi::Partial},
-                                     // Kept in step with tensor_min/max's shapes so the
-                                     // reduction ops share one grid.
-                                     {{2, 160, 160}, {2, 137, 167}})),
-    config_param_name);
+INSTANTIATE_TEST_SUITE_P(Image_Statistical, TensorStddevTest,
+                         ::testing::ValuesIn(make_configs(
+                             {DType::U8, DType::F16, DType::F32, DType::I8},
+                             {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
+                             // Kept in step with tensor_min/max's shapes so the
+                             // reduction ops share one grid.
+                             {{2, 160, 160}, {2, 137, 167}})),
+                         config_param_name);

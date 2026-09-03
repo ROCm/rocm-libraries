@@ -43,7 +43,8 @@ namespace {
 
 // The destination size every case resizes to. From the full ROI (48x36) that is an exact 2x
 // downscale; from the half-size partial ROI it is scale 1, i.e. a verbatim resize whose source
-// coordinates are all integers -- the configuration where interpolation contributes no error at all.
+// coordinates are all integers -- the configuration where interpolation contributes no error at
+// all.
 constexpr Rpp32u kDstW = 24, kDstH = 18;
 
 // mean is in [0,255] intensity units (see resize_mirror_normalize_ref.hpp); {60, 80, 100} is what
@@ -57,7 +58,9 @@ struct RmnParams {
     Rpp32u mirror;
     RpptInterpolationType interp;
     std::string tag;
-    std::string name() const { return tag; }
+    std::string name() const {
+        return tag;
+    }
 };
 
 double rmn_tolerance(DType dt, const TestConfig& cfg, const RmnParams& op) {
@@ -116,10 +119,9 @@ void run_resize_mirror_normalize(const TestConfig& cfg, const RmnParams& op) {
     dst.write(dstInit.data(), dstBytes);
 
     RppHandle handle(cfg.backend, N);
-    ASSERT_EQ(rppt_resize_mirror_normalize(src.ptr(), &srcDesc, dst.ptr(), &dstDesc,
-                                           dstSizes.data(), op.interp, mean.data(), stdDev.data(),
-                                           mirror.data(), roi.data(), XYWH, handle.get(),
-                                           cfg.backend),
+    ASSERT_EQ(rppt_resize_mirror_normalize(
+                  src.ptr(), &srcDesc, dst.ptr(), &dstDesc, dstSizes.data(), op.interp, mean.data(),
+                  stdDev.data(), mirror.data(), roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     handle.sync();
@@ -150,19 +152,18 @@ TEST_P(ResizeMirrorNormalizeTest, Correctness) {
 // finally the stdDev divide on top of the mirror. MirrorOnly is the exact control -- under the
 // partial ROI the destination size equals the ROI, so the resize is scale 1, every source
 // coordinate is an integer and bilinear is exact.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Geometric, ResizeMirrorNormalizeTest,
-    ::testing::ValuesIn(with_params<RmnParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PLN1, Layout::PLN1},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kTailWidthSize}),
-        {RmnParams{{0.0, 0.0, 0.0}, 1.0, 0, NEAREST_NEIGHBOR, "IdentityNN"},
-         RmnParams{{0.0, 0.0, 0.0}, 1.0, 1, BILINEAR, "MirrorOnly"},
-         RmnParams{{60.0, 80.0, 100.0}, 1.0, 0, BILINEAR, "Mean"},
-         RmnParams{{60.0, 80.0, 100.0}, 2.0, 1, BILINEAR, "MeanStdMirror"}})),
-    op_config_name<RmnParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Geometric, ResizeMirrorNormalizeTest,
+                         ::testing::ValuesIn(with_params<RmnParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {{Layout::PKD3, Layout::PKD3},
+                                           {Layout::PLN3, Layout::PLN3},
+                                           {Layout::PLN1, Layout::PLN1},
+                                           {Layout::PKD3, Layout::PLN3},
+                                           {Layout::PLN3, Layout::PKD3}},
+                                          {Roi::Full, Roi::Partial},
+                                          {presets::kDefaultSize, presets::kTailWidthSize}),
+                             {RmnParams{{0.0, 0.0, 0.0}, 1.0, 0, NEAREST_NEIGHBOR, "IdentityNN"},
+                              RmnParams{{0.0, 0.0, 0.0}, 1.0, 1, BILINEAR, "MirrorOnly"},
+                              RmnParams{{60.0, 80.0, 100.0}, 1.0, 0, BILINEAR, "Mean"},
+                              RmnParams{{60.0, 80.0, 100.0}, 2.0, 1, BILINEAR, "MeanStdMirror"}})),
+                         op_config_name<RmnParams>);

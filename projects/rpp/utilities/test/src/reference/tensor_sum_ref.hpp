@@ -61,8 +61,7 @@ std::vector<double> tensor_sum_reference(const T* src, const RpptDesc& d, const 
                        [&](Rpp32u n, Rpp32u c, double v) { out[n * stride + c] += v; });
     if (d.c == 3)
         for (Rpp32u n = 0; n < d.n; ++n)
-            out[n * stride + 3] =
-                out[n * stride + 0] + out[n * stride + 1] + out[n * stride + 2];
+            out[n * stride + 3] = out[n * stride + 0] + out[n * stride + 1] + out[n * stride + 2];
     return out;
 }
 

@@ -41,7 +41,9 @@ namespace {
 
 // U8-only op. Grayscale equalization is exact integer; the 3-channel YCbCr round-trip picks up a
 // little fp rounding, so 1 LSB is allowed (not enough to hide a convention/clamp bug).
-double histogram_equalize_tolerance(DType) { return 1.0; }
+double histogram_equalize_tolerance(DType) {
+    return 1.0;
+}
 
 template <typename T>
 void run_histogram_equalize(const TestConfig& cfg) {
@@ -79,11 +81,12 @@ void run_histogram_equalize(const TestConfig& cfg) {
 
 }  // namespace
 
-// Full name: Image_Color/HistogramEqualizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>
+// Full name:
+// Image_Color/HistogramEqualizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>
 //
-// HOST is green on the full grid. The two HIP 3-channel PartialRoi cases (PKD3, PLN3) are documented
-// reds: the HIP 3-channel partial-ROI path is broken (grayscale-partial and 3-channel-full pass).
-// The golden matches HOST and stays correct.
+// HOST is green on the full grid. The two HIP 3-channel PartialRoi cases (PKD3, PLN3) are
+// documented reds: the HIP 3-channel partial-ROI path is broken (grayscale-partial and
+// 3-channel-full pass). The golden matches HOST and stays correct.
 class HistogramEqualizeTest : public SkipListTest<TestConfig> {};
 
 TEST_P(HistogramEqualizeTest, Correctness) {
@@ -93,12 +96,12 @@ TEST_P(HistogramEqualizeTest, Correctness) {
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, HistogramEqualizeTest,
-    ::testing::ValuesIn(concat_configs({
-        make_configs({DType::U8}, presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
-                     {presets::kTailWidthSize}),
-        make_configs({DType::U8}, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kSubVectorSize}),
-    })),
-    config_param_name);
+INSTANTIATE_TEST_SUITE_P(Image_Color, HistogramEqualizeTest,
+                         ::testing::ValuesIn(concat_configs({
+                             make_configs({DType::U8}, presets::kLayoutsFullConv,
+                                          {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+                             make_configs({DType::U8}, presets::kLayoutsFull,
+                                          {Roi::Full, Roi::Partial},
+                                          {presets::kDefaultSize, presets::kSubVectorSize}),
+                         })),
+                         config_param_name);

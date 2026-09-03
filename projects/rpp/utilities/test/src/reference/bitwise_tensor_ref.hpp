@@ -70,9 +70,15 @@ inline T bitwise_tensor_scalar(T a, T b, BitwiseTensorOp op) {
     const Bits y = static_cast<Bits>(b);
     Bits r = 0;
     switch (op) {
-        case BitwiseTensorOp::And: r = static_cast<Bits>(x & y); break;
-        case BitwiseTensorOp::Or:  r = static_cast<Bits>(x | y); break;
-        case BitwiseTensorOp::Xor: r = static_cast<Bits>(x ^ y); break;
+        case BitwiseTensorOp::And:
+            r = static_cast<Bits>(x & y);
+            break;
+        case BitwiseTensorOp::Or:
+            r = static_cast<Bits>(x | y);
+            break;
+        case BitwiseTensorOp::Xor:
+            r = static_cast<Bits>(x ^ y);
+            break;
     }
     return static_cast<T>(r);
 }
@@ -82,8 +88,7 @@ void bitwise_tensor_reference(const T* src1, const T* src2, T* dst, const RpptGe
                               const RpptGenericDesc& s1, const RpptGenericDesc& s2,
                               BitwiseTensorOp op) {
     for_each_nd_element(out, s1, s2,
-                        [&](std::size_t outIdx, std::size_t idx1, std::size_t idx2,
-                            const NdDims&) {
+                        [&](std::size_t outIdx, std::size_t idx1, std::size_t idx2, const NdDims&) {
                             dst[outIdx] = bitwise_tensor_scalar<T>(src1[idx1], src2[idx2], op);
                         });
 }

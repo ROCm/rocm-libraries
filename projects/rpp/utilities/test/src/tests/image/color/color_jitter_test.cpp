@@ -135,9 +135,8 @@ class ColorJitterTest : public SkipListTest<WithParams<ColorJitterParams>> {};
 
 TEST_P(ColorJitterTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_color_jitter<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_color_jitter<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // One parameter set per axis rather than a combined one, so a failure names the axis that broke
@@ -156,9 +155,9 @@ INSTANTIATE_TEST_SUITE_P(
             make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
                          {presets::kDefaultSize, presets::kSubVectorSize}),
         })),
-        {ColorJitterParams{0.0f, 0.0f, 0.0f, 1.0f},     // neutral
-         ColorJitterParams{0.0f, 0.0f, 0.0f, 0.0f},     // desaturate to grey
-         ColorJitterParams{0.0f, 0.0f, 90.0f, 1.0f},    // hue rotation
-         ColorJitterParams{0.0f, 0.25f, 0.0f, 1.0f},    // contrast scale
+        {ColorJitterParams{0.0f, 0.0f, 0.0f, 1.0f},      // neutral
+         ColorJitterParams{0.0f, 0.0f, 0.0f, 0.0f},      // desaturate to grey
+         ColorJitterParams{0.0f, 0.0f, 90.0f, 1.0f},     // hue rotation
+         ColorJitterParams{0.0f, 0.25f, 0.0f, 1.0f},     // contrast scale
          ColorJitterParams{0.25f, 0.0f, 0.0f, 1.0f}})),  // brightness translation
     op_config_name<ColorJitterParams>);

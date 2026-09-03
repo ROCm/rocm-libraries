@@ -76,13 +76,15 @@ inline double color_temperature_scalar(double v, DType dt, double delta) {
 
 template <typename T>
 void color_temperature_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
-                                 DType dt, const RpptROI* roi, RpptRoiType roiType, int adjustment) {
+                                 DType dt, const RpptROI* roi, RpptRoiType roiType,
+                                 int adjustment) {
     for_each_roi_io(
         sd, dd, roi, roiType,
         [&](Rpp32u, Rpp32u c, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
             const double delta = c == 0 ? static_cast<double>(adjustment)
                                         : (c == 2 ? -static_cast<double>(adjustment) : 0.0);
-            dst[dstIdx] = from_double<T>(color_temperature_scalar(to_double(src[srcIdx]), dt, delta));
+            dst[dstIdx] =
+                from_double<T>(color_temperature_scalar(to_double(src[srcIdx]), dt, delta));
         });
 }
 

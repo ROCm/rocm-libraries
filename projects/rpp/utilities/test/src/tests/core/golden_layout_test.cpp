@@ -56,17 +56,20 @@ using namespace rpptest;
 // row padding where the others expect dense strides -- without the golden silently following the
 // buffer layout instead of the descriptor.
 //
-// Each case below computes a golden twice from identical logical input -- once dense, once padded --
-// and requires the logical results to be bit-identical. No RPP op is called: this guards the
+// Each case below computes a golden twice from identical logical input -- once dense, once padded
+// -- and requires the logical results to be bit-identical. No RPP op is called: this guards the
 // references themselves. For a reduction (normalize) it additionally pins that padding slack stays
 // out of the statistics.
 
 namespace {
 
-// The innermost extent is deliberately not a multiple of 8, so padding actually changes the strides.
+// The innermost extent is deliberately not a multiple of 8, so padding actually changes the
+// strides.
 const NdDims kDims = {2, 3, 5, 20};
 
-int pad_axis(const NdDims& dims) { return static_cast<int>(dims.size()) - 1; }
+int pad_axis(const NdDims& dims) {
+    return static_cast<int>(dims.size()) - 1;
+}
 
 template <typename T>
 std::vector<double> logical_values(const std::vector<T>& buf, const RpptGenericDesc& d) {
@@ -79,7 +82,8 @@ std::vector<double> logical_values(const std::vector<T>& buf, const RpptGenericD
 
 // Which tensors carry padding. Mixed is the case with teeth: a golden that walks a buffer flat
 // still lands on the right addresses when input and output share a layout, and only gives itself
-// away when they differ -- which RpptGenericDesc allows, since src and dst are separate descriptors.
+// away when they differ -- which RpptGenericDesc allows, since src and dst are separate
+// descriptors.
 struct PadPlan {
     int src, dst;
 };
@@ -276,8 +280,7 @@ void expect_image_layout_agnostic(Layout layout, Fn body) {
     for (bool pad : {true, false}) {
         const RpptDesc d = make_descriptor(kShape, DType::U8, layout, pad);
         const std::vector<RpptROI> roi = make_roi(d, Roi::Partial);
-        std::vector<Rpp8u> src1(element_count(d)), src2(element_count(d)),
-            dst(element_count(d), 0);
+        std::vector<Rpp8u> src1(element_count(d)), src2(element_count(d)), dst(element_count(d), 0);
         fill_input_image<Rpp8u>(src1.data(), d, DType::U8, 0);
         fill_input_image<Rpp8u>(src2.data(), d, DType::U8, 1);
         body(src1, src2, dst, d, roi.data());
@@ -296,51 +299,51 @@ void expect_image_layout_agnostic(Layout layout, Fn body) {
 
 // for_each_roi_io: source read at the ROI offset, output packed at the destination origin.
 TEST(GoldenLayoutTest, ImagePointwise) {
-    expect_image_layout_agnostic(Layout::PKD3, [](const std::vector<Rpp8u>& s1,
-                                                  const std::vector<Rpp8u>&, std::vector<Rpp8u>& o,
-                                                  const RpptDesc& d, const RpptROI* roi) {
-        brightness_reference<Rpp8u>(s1.data(), d, o.data(), d, DType::U8, roi, XYWH, 1.4, 12.0);
-    });
+    expect_image_layout_agnostic(
+        Layout::PKD3, [](const std::vector<Rpp8u>& s1, const std::vector<Rpp8u>&,
+                         std::vector<Rpp8u>& o, const RpptDesc& d, const RpptROI* roi) {
+            brightness_reference<Rpp8u>(s1.data(), d, o.data(), d, DType::U8, roi, XYWH, 1.4, 12.0);
+        });
 }
 
 // for_each_roi_pixel: a whole pixel's channels reached through cStride.
 TEST(GoldenLayoutTest, ImagePerPixel) {
-    expect_image_layout_agnostic(Layout::PKD3, [](const std::vector<Rpp8u>& s1,
-                                                  const std::vector<Rpp8u>&, std::vector<Rpp8u>& o,
-                                                  const RpptDesc& d, const RpptROI* roi) {
-        hue_reference<Rpp8u>(s1.data(), d, o.data(), d, DType::U8, roi, XYWH, 45.0);
-    });
+    expect_image_layout_agnostic(
+        Layout::PKD3, [](const std::vector<Rpp8u>& s1, const std::vector<Rpp8u>&,
+                         std::vector<Rpp8u>& o, const RpptDesc& d, const RpptROI* roi) {
+            hue_reference<Rpp8u>(s1.data(), d, o.data(), d, DType::U8, roi, XYWH, 45.0);
+        });
 }
 
 // filter_reference: a KxK neighbourhood gathered around each output pixel.
 TEST(GoldenLayoutTest, ImageWindowFilter) {
-    expect_image_layout_agnostic(Layout::PLN3, [](const std::vector<Rpp8u>& s1,
-                                                  const std::vector<Rpp8u>&, std::vector<Rpp8u>& o,
-                                                  const RpptDesc& d, const RpptROI* roi) {
-        box_filter_reference<Rpp8u>(s1.data(), d, o.data(), d, DType::U8, roi, XYWH, 3);
-    });
+    expect_image_layout_agnostic(
+        Layout::PLN3, [](const std::vector<Rpp8u>& s1, const std::vector<Rpp8u>&,
+                         std::vector<Rpp8u>& o, const RpptDesc& d, const RpptROI* roi) {
+            box_filter_reference<Rpp8u>(s1.data(), d, o.data(), d, DType::U8, roi, XYWH, 3);
+        });
 }
 
 // geometric_reference: fractional source coordinates resolved through the shared sampler.
 TEST(GoldenLayoutTest, ImageGeometric) {
     const std::vector<Rpp32f> angle(kShape.n, 17.0f);
-    expect_image_layout_agnostic(Layout::PLN3, [&](const std::vector<Rpp8u>& s1,
-                                                   const std::vector<Rpp8u>&, std::vector<Rpp8u>& o,
-                                                   const RpptDesc& d, const RpptROI* roi) {
-        rotate_reference<Rpp8u>(s1.data(), o.data(), d, DType::U8, roi, XYWH, angle.data(),
-                                BILINEAR);
-    });
+    expect_image_layout_agnostic(Layout::PLN3,
+                                 [&](const std::vector<Rpp8u>& s1, const std::vector<Rpp8u>&,
+                                     std::vector<Rpp8u>& o, const RpptDesc& d, const RpptROI* roi) {
+                                     rotate_reference<Rpp8u>(s1.data(), o.data(), d, DType::U8, roi,
+                                                             XYWH, angle.data(), BILINEAR);
+                                 });
 }
 
 // Two independent descriptors: the source and destination strides must not be interchangeable.
 TEST(GoldenLayoutTest, ImageResize) {
     const std::vector<RpptImagePatch> sizes(kShape.n, {kShape.w, kShape.h});
-    expect_image_layout_agnostic(Layout::PKD3, [&](const std::vector<Rpp8u>& s1,
-                                                   const std::vector<Rpp8u>&, std::vector<Rpp8u>& o,
-                                                   const RpptDesc& d, const RpptROI* roi) {
-        resize_reference<Rpp8u>(s1.data(), d, o.data(), d, DType::U8, roi, XYWH, sizes.data(),
-                                BILINEAR);
-    });
+    expect_image_layout_agnostic(Layout::PKD3,
+                                 [&](const std::vector<Rpp8u>& s1, const std::vector<Rpp8u>&,
+                                     std::vector<Rpp8u>& o, const RpptDesc& d, const RpptROI* roi) {
+                                     resize_reference<Rpp8u>(s1.data(), d, o.data(), d, DType::U8,
+                                                             roi, XYWH, sizes.data(), BILINEAR);
+                                 });
 }
 
 // Whole-frame placement (absolute coordinates) rather than the ROI-relative walk.
@@ -351,9 +354,8 @@ TEST(GoldenLayoutTest, ImageCropAndPatch) {
         patch[n].xywhROI = {{3, 2}, 6, 4};
     }
     expect_image_layout_agnostic(
-        Layout::PKD3,
-        [&](const std::vector<Rpp8u>& s1, const std::vector<Rpp8u>& s2, std::vector<Rpp8u>& o,
-            const RpptDesc& d, const RpptROI* roi) {
+        Layout::PKD3, [&](const std::vector<Rpp8u>& s1, const std::vector<Rpp8u>& s2,
+                          std::vector<Rpp8u>& o, const RpptDesc& d, const RpptROI* roi) {
             crop_and_patch_reference<Rpp8u>(s1.data(), s2.data(), o.data(), d, roi, crop.data(),
                                             patch.data(), XYWH);
         });
@@ -364,12 +366,12 @@ TEST(GoldenLayoutTest, ImageCropAndPatch) {
 // the way out with an unstrided buffer in between, where a stride/width mix-up would cancel itself
 // in the op's own test because source and destination share a descriptor.
 TEST(GoldenLayoutTest, ImageBlockTransform) {
-    expect_image_layout_agnostic(
-        Layout::PLN3, [&](const std::vector<Rpp8u>& s1, const std::vector<Rpp8u>&,
-                          std::vector<Rpp8u>& o, const RpptDesc& d, const RpptROI* roi) {
-            jpeg_compression_distortion_reference<Rpp8u>(s1.data(), o.data(), d, DType::U8, roi,
-                                                         XYWH, 50);
-        });
+    expect_image_layout_agnostic(Layout::PLN3,
+                                 [&](const std::vector<Rpp8u>& s1, const std::vector<Rpp8u>&,
+                                     std::vector<Rpp8u>& o, const RpptDesc& d, const RpptROI* roi) {
+                                     jpeg_compression_distortion_reference<Rpp8u>(
+                                         s1.data(), o.data(), d, DType::U8, roi, XYWH, 50);
+                                 });
 }
 
 // The input the cases above compare against must itself be layout-independent, or a golden could

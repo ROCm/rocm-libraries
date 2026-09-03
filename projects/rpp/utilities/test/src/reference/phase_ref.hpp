@@ -64,8 +64,8 @@ inline double phase_scalar(double a, double b, DType dt) {
         case DType::U8:
             return clampd(std::nearbyint(kTwoOverPi * std::atan2(a, b) * 255.0), 0.0, 255.0);
         case DType::I8:
-            return clampd(std::nearbyint(kTwoOverPi * std::atan2(a + 128.0, b + 128.0) * 255.0), 0.0,
-                          255.0) -
+            return clampd(std::nearbyint(kTwoOverPi * std::atan2(a + 128.0, b + 128.0) * 255.0),
+                          0.0, 255.0) -
                    128.0;
         case DType::F16:
         case DType::F32:

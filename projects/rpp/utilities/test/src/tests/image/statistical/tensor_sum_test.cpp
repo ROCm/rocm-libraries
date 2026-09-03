@@ -109,12 +109,11 @@ TEST_P(TensorSumTest, Correctness) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Statistical, TensorSumTest,
-    ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                     {Layout::PKD3, Layout::PLN3, Layout::PLN1},
-                                     {Roi::Full, Roi::Partial},
-                                     // Kept in step with tensor_min/max's shapes so the
-                                     // reduction ops share one grid.
-                                     {{2, 160, 160}, {2, 137, 167}})),
-    config_param_name);
+INSTANTIATE_TEST_SUITE_P(Image_Statistical, TensorSumTest,
+                         ::testing::ValuesIn(make_configs(
+                             {DType::U8, DType::F16, DType::F32, DType::I8},
+                             {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
+                             // Kept in step with tensor_min/max's shapes so the
+                             // reduction ops share one grid.
+                             {{2, 160, 160}, {2, 137, 167}})),
+                         config_param_name);

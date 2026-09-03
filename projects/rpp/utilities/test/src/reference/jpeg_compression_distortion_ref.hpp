@@ -111,18 +111,17 @@ Notes
 namespace jpeg_detail {
 
 // ITU-T T.81 Annex K, Table K.1 -- luminance quantization table.
-constexpr int kLumaTable[64] = {16, 11, 10, 16,  24,  40,  51,  61,  12,  12, 14, 19, 26,
-                                58, 60, 55, 14,  13,  16,  24,  40,  57,  69, 56, 14, 17,
-                                22, 29, 51, 87,  80,  62,  18,  22,  37,  56, 68, 109, 103,
-                                77, 24, 35, 55,  64,  81,  104, 113, 92,  49, 64, 78, 87,
-                                103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99};
+constexpr int kLumaTable[64] = {16,  11,  10,  16,  24, 40, 51,  61,  12,  12,  14,  19,  26,
+                                58,  60,  55,  14,  13, 16, 24,  40,  57,  69,  56,  14,  17,
+                                22,  29,  51,  87,  80, 62, 18,  22,  37,  56,  68,  109, 103,
+                                77,  24,  35,  55,  64, 81, 104, 113, 92,  49,  64,  78,  87,
+                                103, 121, 120, 101, 72, 92, 95,  98,  112, 100, 103, 99};
 
 // ITU-T T.81 Annex K, Table K.2 -- chrominance quantization table.
-constexpr int kChromaTable[64] = {17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99,
-                                  99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99, 47, 66,
-                                  99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
-                                  99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
-                                  99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99};
+constexpr int kChromaTable[64] = {17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99,
+                                  24, 26, 56, 99, 99, 99, 99, 99, 47, 66, 99, 99, 99, 99, 99, 99,
+                                  99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
+                                  99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99};
 
 // IJG quality -> table scaling percentage (libjpeg's jpeg_quality_scaling).
 inline int quality_scaling(int quality) {
@@ -146,14 +145,15 @@ inline const std::array<double, 64>& cos_table() {
     static const std::array<double, 64> t = [] {
         std::array<double, 64> c{};
         for (int x = 0; x < 8; ++x)
-            for (int u = 0; u < 8; ++u)
-                c[x * 8 + u] = std::cos((2.0 * x + 1.0) * u * M_PI / 16.0);
+            for (int u = 0; u < 8; ++u) c[x * 8 + u] = std::cos((2.0 * x + 1.0) * u * M_PI / 16.0);
         return c;
     }();
     return t;
 }
 
-inline double dct_norm(int u) { return u == 0 ? 0.70710678118654752440 : 1.0; }  // 1/sqrt(2)
+inline double dct_norm(int u) {
+    return u == 0 ? 0.70710678118654752440 : 1.0;
+}  // 1/sqrt(2)
 
 // Quantization round-trip of one level-shifted 8x8 block: forward DCT (T.81 eq. 8-3), quantize,
 // dequantize, inverse DCT (eq. 8-2). in/out are 64 samples in row-major order.
@@ -191,8 +191,8 @@ inline void plane_roundtrip(const std::vector<double>& in, std::vector<double>& 
             for (int j = 0; j < 8; ++j) {
                 const int y = std::min(by + j, h - 1);
                 for (int i = 0; i < 8; ++i)
-                    blk[j * 8 + i] = in[static_cast<std::size_t>(y) * w + std::min(bx + i, w - 1)] -
-                                     128.0;
+                    blk[j * 8 + i] =
+                        in[static_cast<std::size_t>(y) * w + std::min(bx + i, w - 1)] - 128.0;
             }
             block_roundtrip(blk, res, q);
             for (int j = 0; j < 8 && by + j < h; ++j)
@@ -205,12 +205,18 @@ inline void plane_roundtrip(const std::vector<double>& in, std::vector<double>& 
 // [0,255] intensity space is where the whole pipeline works, so a stored pixel is lifted into it
 // on load and quantized back on store. Both compose the shared per-dtype rules rather than
 // restating them: U8 v, I8 v+128, F16/F32 v*255.
-inline double load_intensity(double stored, DType dt) { return to_unit(stored, dt) * 255.0; }
-inline double store_intensity(double v, DType dt) { return from_unit(v / 255.0, dt); }
+inline double load_intensity(double stored, DType dt) {
+    return to_unit(stored, dt) * 255.0;
+}
+inline double store_intensity(double v, DType dt) {
+    return from_unit(v / 255.0, dt);
+}
 
 // Chroma plane extent per axis: the image padded out to whole 16x16 MCUs, halved. Always a
 // multiple of 8, so the subsampled plane tiles into whole 8x8 blocks.
-inline int chroma_extent(int dim) { return ((dim + 15) / 16) * 8; }
+inline int chroma_extent(int dim) {
+    return ((dim + 15) / 16) * 8;
+}
 
 // The 4:2:0 counterpart of plane_roundtrip, same contract on a full-resolution plane: each chroma
 // sample is the 2x2 box average of the edge-replicated plane, the subsampled plane makes the same
@@ -244,7 +250,8 @@ template <typename T>
 void jpeg_compression_distortion_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
                                            const RpptROI* roi, RpptRoiType roiType, int quality) {
     const bool rgb = d.c == 3;
-    const std::array<double, 64> lumaQ = jpeg_detail::scaled_table(jpeg_detail::kLumaTable, quality);
+    const std::array<double, 64> lumaQ =
+        jpeg_detail::scaled_table(jpeg_detail::kLumaTable, quality);
     const std::array<double, 64> chromaQ =
         jpeg_detail::scaled_table(jpeg_detail::kChromaTable, quality);
 

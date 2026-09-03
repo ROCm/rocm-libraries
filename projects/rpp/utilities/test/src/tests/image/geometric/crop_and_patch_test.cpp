@@ -45,7 +45,9 @@ namespace {
 struct CropAndPatchParams {
     Rpp32u cropX, cropY, w, h, patchX, patchY;
     std::string tag;
-    std::string name() const { return tag; }
+    std::string name() const {
+        return tag;
+    }
 };
 
 template <typename T>
@@ -109,26 +111,25 @@ void run_crop_and_patch(const TestConfig& cfg, const CropAndPatchParams& op) {
 
 }  // namespace
 
-// Full name: Image_Geometric/CropAndPatchTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Case>
+// Full name:
+// Image_Geometric/CropAndPatchTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Case>
 class CropAndPatchTest : public SkipListTest<WithParams<CropAndPatchParams>> {};
 
 TEST_P(CropAndPatchTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_crop_and_patch<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_crop_and_patch<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Only {Roi::Full} on the roi axis: crop_and_patch has no standard source ROI (its regions are the
 // crop/patch params) and its destination region is always the full image. Cases (default size
 // 2x36x48): inplace patches back onto its own crop location [8,24)x[6,18); moved patches the same
 // crop to [24,40)x[18,30) -- both rectangles fit within 48x36.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Geometric, CropAndPatchTest,
-    ::testing::ValuesIn(with_params<CropAndPatchParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full},
-                     {presets::kDefaultSize, presets::kTailWidthSize}),
-        {CropAndPatchParams{8, 6, 16, 12, 8, 6, "inplace"},
-         CropAndPatchParams{8, 6, 16, 12, 24, 18, "moved"}})),
-    op_config_name<CropAndPatchParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Geometric, CropAndPatchTest,
+                         ::testing::ValuesIn(with_params<CropAndPatchParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full},
+                                          {presets::kDefaultSize, presets::kTailWidthSize}),
+                             {CropAndPatchParams{8, 6, 16, 12, 8, 6, "inplace"},
+                              CropAndPatchParams{8, 6, 16, 12, 24, 18, "moved"}})),
+                         op_config_name<CropAndPatchParams>);

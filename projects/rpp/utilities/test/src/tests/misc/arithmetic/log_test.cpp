@@ -108,7 +108,8 @@ void run_log(const NdConfig& cfg) {
     dst.read(actual.data(), dstBytes);
 
     // (4) Compare the whole output tensor.
-    EXPECT_TRUE(compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, log_tolerance(cfg.dtypeOut)));
+    EXPECT_TRUE(
+        compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, log_tolerance(cfg.dtypeOut)));
 }
 
 }  // namespace
@@ -145,12 +146,11 @@ TEST_P(LogTest, Correctness) {
 //
 // Note the ND descriptors must be device-addressable on HIP (GenericDescriptor pins them): at
 // rank >= 4 the ND kernels read dims/strides on the device. Undocumented and rank-dependent.
-INSTANTIATE_TEST_SUITE_P(Misc_Arithmetic, LogTest,
-                         ::testing::ValuesIn(make_nd_configs({{DType::U8, DType::F32},
-                                                              {DType::I8, DType::F32},
-                                                              {DType::F16, DType::F16},
-                                                              {DType::F32, DType::F32}},
-                                                             {2, 3, 4},
-                                                             {NdShape::VectorAligned,
-                                                              NdShape::Tail})),
-                         nd_config_param_name);
+INSTANTIATE_TEST_SUITE_P(
+    Misc_Arithmetic, LogTest,
+    ::testing::ValuesIn(make_nd_configs({{DType::U8, DType::F32},
+                                         {DType::I8, DType::F32},
+                                         {DType::F16, DType::F16},
+                                         {DType::F32, DType::F32}},
+                                        {2, 3, 4}, {NdShape::VectorAligned, NdShape::Tail})),
+    nd_config_param_name);

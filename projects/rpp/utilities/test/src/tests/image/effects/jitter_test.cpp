@@ -54,9 +54,12 @@ struct JitterParams {
     std::string name() const {
         std::string token = "k" + std::to_string(kernelSize);
         switch (check) {
-            case Check::Identity: return token + "_Identity";
-            case Check::Window: return token + "_Window";
-            case Check::Seed: return token + "_Seed";
+            case Check::Identity:
+                return token + "_Identity";
+            case Check::Window:
+                return token + "_Window";
+            case Check::Seed:
+                return token + "_Seed";
         }
         return token;
     }
@@ -162,10 +165,9 @@ void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
                         const int csx = clamp_coord(sx + dx, xlo, xhi);
                         bool allMatch = true;
                         for (Rpp32u c = 0; c < srcDesc.c; ++c) {
-                            const std::size_t srcIdx =
-                                plane_index(srcDesc, plane_base(srcDesc, n, c),
-                                           static_cast<std::size_t>(csy),
-                                           static_cast<std::size_t>(csx));
+                            const std::size_t srcIdx = plane_index(
+                                srcDesc, plane_base(srcDesc, n, c), static_cast<std::size_t>(csy),
+                                static_cast<std::size_t>(csx));
                             const std::size_t dstIdx = channel_index(dstDesc, dstPix, c);
                             if (to_double(actual[dstIdx]) != to_double(input[srcIdx])) {
                                 allMatch = false;
@@ -249,8 +251,7 @@ std::vector<WithParams<JitterParams>> jitter_configs() {
     std::vector<WithParams<JitterParams>> configs = with_params<JitterParams>(
         concat_configs({
             make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
             make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
                          {Roi::Full, Roi::Partial},
                          {presets::kDefaultSize, presets::kSubVectorSize}),

@@ -118,7 +118,8 @@ inline auto quantizing_store(DType dt) {
 // this keeps the driver's sampling model uniform.
 //
 // invMap signature: void(Rpp32u n, double outX, double outY, double& srcX, double& srcY)
-//   outX/outY are origin-based output pixel indices; the op owns any pixel-center (+0.5) convention.
+//   outX/outY are origin-based output pixel indices; the op owns any pixel-center (+0.5)
+//   convention.
 // sd and dd differ only when the op converts layout; the source is sampled through sd's strides
 // and the result written through dd's, so the transpose needs no special-casing here.
 template <typename T, typename InvMap>
@@ -127,21 +128,21 @@ void geometric_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDes
                          const std::vector<OutSize>& outSize, RpptInterpolationType interp,
                          InvMap invMap) {
     const double border = dtype_black(dt);
-    for_each_roi_plane(sd, dd, roi, roiType,
-                       [&](Rpp32u n, const RoiBounds& b, Rpp32u, std::size_t srcBase,
-                           std::size_t dstBase) {
-        const int rx0 = static_cast<int>(b.x0), ry0 = static_cast<int>(b.y0);
-        const int rx1 = rx0 + static_cast<int>(b.w), ry1 = ry0 + static_cast<int>(b.h);
-        const OutSize os = outSize[n];
-        for (Rpp32u j = 0; j < os.h; ++j)
-            for (Rpp32u i = 0; i < os.w; ++i) {
-                double sx, sy;
-                invMap(n, static_cast<double>(i), static_cast<double>(j), sx, sy);
-                const double v =
-                    sample(src, sd, srcBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
-                dst[plane_index(dd, dstBase, j, i)] = from_double<T>(quantize_stored(v, dt));
-            }
-    });
+    for_each_roi_plane(
+        sd, dd, roi, roiType,
+        [&](Rpp32u n, const RoiBounds& b, Rpp32u, std::size_t srcBase, std::size_t dstBase) {
+            const int rx0 = static_cast<int>(b.x0), ry0 = static_cast<int>(b.y0);
+            const int rx1 = rx0 + static_cast<int>(b.w), ry1 = ry0 + static_cast<int>(b.h);
+            const OutSize os = outSize[n];
+            for (Rpp32u j = 0; j < os.h; ++j)
+                for (Rpp32u i = 0; i < os.w; ++i) {
+                    double sx, sy;
+                    invMap(n, static_cast<double>(i), static_cast<double>(j), sx, sy);
+                    const double v =
+                        sample(src, sd, srcBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
+                    dst[plane_index(dd, dstBase, j, i)] = from_double<T>(quantize_stored(v, dt));
+                }
+        });
 }
 
 }  // namespace rpptest

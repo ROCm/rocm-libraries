@@ -63,9 +63,12 @@ void fill_multiply_operand(T* buf, const RpptGenericDesc& d, DType dt, unsigned 
 // float tolerances model legitimate fp rounding of a single multiply only.
 Bound tolerance_for(DType dt) {
     switch (dt) {
-        case DType::F32: return {1e-5, 1e-6};
-        case DType::F16: return {2e-3, 2e-3};
-        default:         return {0.0, 0.0};
+        case DType::F32:
+            return {1e-5, 1e-6};
+        case DType::F16:
+            return {2e-3, 2e-3};
+        default:
+            return {0.0, 0.0};
     }
 }
 
@@ -105,8 +108,7 @@ void run_tensor_multiply_tensor(const NdConfig& cfg, Broadcast broadcast) {
     const std::size_t bytes1 = generic_byte_size(*desc1, cfg.dtypeIn);
     const std::size_t bytes2 = generic_byte_size(*desc2, cfg.dtypeIn);
     const std::size_t bytesOut = generic_byte_size(*descOut, cfg.dtypeIn);
-    DeviceTensor src1(cfg.backend, bytes1), src2(cfg.backend, bytes2),
-        dst(cfg.backend, bytesOut);
+    DeviceTensor src1(cfg.backend, bytes1), src2(cfg.backend, bytes2), dst(cfg.backend, bytesOut);
     src1.write(input1.data(), bytes1);
     src2.write(input2.data(), bytes2);
 
@@ -125,7 +127,8 @@ void run_tensor_multiply_tensor(const NdConfig& cfg, Broadcast broadcast) {
 
 }  // namespace
 
-// Full name: Misc_Arithmetic/TensorMultiplyTensorTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Broadcast>_<Shape>
+// Full name:
+// Misc_Arithmetic/TensorMultiplyTensorTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Broadcast>_<Shape>
 class TensorMultiplyTensorTest : public SkipListTest<NdWithParams<BroadcastParams>> {};
 
 TEST_P(TensorMultiplyTensorTest, Correctness) {

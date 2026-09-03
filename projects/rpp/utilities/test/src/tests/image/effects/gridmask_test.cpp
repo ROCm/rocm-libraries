@@ -85,18 +85,18 @@ void run_gridmask(const TestConfig& cfg, const GridmaskParams& op) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_gridmask(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, op.tileWidth, op.gridRatio,
-                            op.gridAngle, translateVector, roi.data(), XYWH, handle.get(),
-                            cfg.backend),
-              RPP_SUCCESS);
+    ASSERT_EQ(
+        rppt_gridmask(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, op.tileWidth, op.gridRatio,
+                      op.gridAngle, translateVector, roi.data(), XYWH, handle.get(), cfg.backend),
+        RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
-                               kExact(cfg.dtype)));
+    EXPECT_TRUE(
+        compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, kExact(cfg.dtype)));
 }
 
 }  // namespace
@@ -107,9 +107,8 @@ class GridmaskTest : public SkipListTest<WithParams<GridmaskParams>> {};
 
 TEST_P(GridmaskTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_gridmask<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_gridmask<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Four param sets. gridRatio is chosen so the black-square edge l = gridRatio * tileWidth lands
@@ -120,19 +119,17 @@ TEST_P(GridmaskTest, Correctness) {
 //   "wide"  -- a different tileWidth/gridRatio, still axis-aligned.
 //   "rot"   -- rotation only (translateVector {0,0}), so the rotate/translate order -- which the
 //              API doc does not specify -- cannot affect the result.
-INSTANTIATE_TEST_SUITE_P(Image_Effects, GridmaskTest,
-                         ::testing::ValuesIn(with_params<GridmaskParams>(
-                             concat_configs({
-                                 make_configs({DType::U8, DType::F16, DType::F32},
-                                              presets::kLayoutsFullConv,
-                                              {Roi::Full, Roi::Partial},
-                                              {presets::kTailWidthSize}),
-                                 make_configs({DType::U8, DType::F16, DType::F32},
-                                              presets::kLayoutsFull, {Roi::Full, Roi::Partial},
-                                              {presets::kDefaultSize, presets::kSubVectorSize}),
-                             }),
-                             {GridmaskParams{8, 0.5f, 0.0f, 0, 0, "axis"},
-                              GridmaskParams{8, 0.5f, 0.0f, 3, 2, "shift"},
-                              GridmaskParams{10, 0.55f, 0.0f, 0, 0, "wide"},
-                              GridmaskParams{10, 0.55f, 0.5f, 0, 0, "rot"}})),
-                         op_config_name<GridmaskParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Image_Effects, GridmaskTest,
+    ::testing::ValuesIn(with_params<GridmaskParams>(
+        concat_configs({
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFull,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {GridmaskParams{8, 0.5f, 0.0f, 0, 0, "axis"}, GridmaskParams{8, 0.5f, 0.0f, 3, 2, "shift"},
+         GridmaskParams{10, 0.55f, 0.0f, 0, 0, "wide"},
+         GridmaskParams{10, 0.55f, 0.5f, 0, 0, "rot"}})),
+    op_config_name<GridmaskParams>);

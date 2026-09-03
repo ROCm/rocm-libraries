@@ -88,10 +88,10 @@ void run_rain(const TestConfig& cfg, const RainParams& op) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_rain(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, rainPercentage, rainWidth,
-                        rainHeight, slantAngle, alpha.data(), roi.data(), XYWH, handle.get(),
-                        cfg.backend),
-              RPP_SUCCESS);
+    ASSERT_EQ(
+        rppt_rain(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, rainPercentage, rainWidth, rainHeight,
+                  slantAngle, alpha.data(), roi.data(), XYWH, handle.get(), cfg.backend),
+        RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
@@ -108,22 +108,20 @@ class RainTest : public SkipListTest<WithParams<RainParams>> {};
 
 TEST_P(RainTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_rain<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_rain<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, RainTest,
-    ::testing::ValuesIn(with_params<RainParams>(
-        concat_configs({
-            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
-            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFull,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {RainParams{0.4f}})),
-    op_config_name<RainParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, RainTest,
+                         ::testing::ValuesIn(with_params<RainParams>(
+                             concat_configs({
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
+                                              {presets::kTailWidthSize}),
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {RainParams{0.4f}})),
+                         op_config_name<RainParams>);

@@ -73,8 +73,7 @@ void warp_perspective_reference(const T* src, const RpptDesc& sd, T* dst, const 
                                 DType dt, const RpptROI* roi, RpptRoiType roiType,
                                 const Rpp32f* perspectiveTensor, RpptInterpolationType interp) {
     geometric_reference<T>(src, sd, dst, dd, dt, roi, roiType, roi_out_sizes(sd, roi, roiType),
-                           interp,
-                           [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
+                           interp, [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
                                const Rpp32f* m =
                                    perspectiveTensor + static_cast<std::size_t>(n) * 9;
                                const RoiBounds b = roi_bounds(roi[n], roiType);

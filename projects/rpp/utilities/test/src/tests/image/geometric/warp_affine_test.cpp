@@ -54,7 +54,9 @@ struct WarpAffineParams {
     std::array<float, 6> m;
     RpptInterpolationType interp;
     std::string tag;
-    std::string name() const { return tag + "_" + interp_token(interp); }
+    std::string name() const {
+        return tag + "_" + interp_token(interp);
+    }
 };
 
 // Tolerances are set from legitimate numeric error only; they are deliberately NOT loosened to
@@ -114,14 +116,14 @@ void run_warp_affine(const TestConfig& cfg, const WarpAffineParams& op) {
 
 }  // namespace
 
-// Full name: Image_Geometric/WarpAffineTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Matrix>_<Interp>
+// Full name:
+// Image_Geometric/WarpAffineTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Matrix>_<Interp>
 class WarpAffineTest : public SkipListTest<WithParams<WarpAffineParams>> {};
 
 TEST_P(WarpAffineTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_warp_affine<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_warp_affine<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // identity: output == source. shift: integer translation (exercises the border fill). halfshift:
@@ -135,8 +137,7 @@ INSTANTIATE_TEST_SUITE_P(
                       {Layout::PLN1, Layout::PLN1},
                       {Layout::PKD3, Layout::PLN3},
                       {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kTailWidthSize}),
+                     {Roi::Full, Roi::Partial}, {presets::kDefaultSize, presets::kTailWidthSize}),
         {WarpAffineParams{{1, 0, 0, 0, 1, 0}, NEAREST_NEIGHBOR, "identity"},
          WarpAffineParams{{1, 0, 0, 0, 1, 0}, BILINEAR, "identity"},
          WarpAffineParams{{1, 0, 5, 0, 1, -3}, NEAREST_NEIGHBOR, "shift"},

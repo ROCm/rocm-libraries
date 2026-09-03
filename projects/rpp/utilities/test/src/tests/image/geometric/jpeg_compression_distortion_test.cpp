@@ -55,7 +55,9 @@ namespace {
 // halves of the grid are the standing evidence of that defect. q50 must stay green.
 struct JpegParams {
     int quality;
-    std::string name() const { return "q" + std::to_string(quality); }
+    std::string name() const {
+        return "q" + std::to_string(quality);
+    }
 };
 
 // The distortion is a DCT round-trip, so the only legitimate error is fp rounding in the two
@@ -134,11 +136,11 @@ TEST_P(JpegCompressionDistortionTest, Correctness) {
     });
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Geometric, JpegCompressionDistortionTest,
-    ::testing::ValuesIn(with_params<JpegParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kTailWidthSize}),
-        {JpegParams{50}, JpegParams{10}, JpegParams{90}})),
-    op_config_name<JpegParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Geometric, JpegCompressionDistortionTest,
+                         ::testing::ValuesIn(with_params<JpegParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial},
+                                          {presets::kDefaultSize, presets::kTailWidthSize}),
+                             {JpegParams{50}, JpegParams{10}, JpegParams{90}})),
+                         op_config_name<JpegParams>);

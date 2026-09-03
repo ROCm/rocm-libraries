@@ -43,12 +43,16 @@ namespace {
 
 struct AddScalarParams {
     float add;
-    std::string name() const { return "add" + num_token(add); }
+    std::string name() const {
+        return "add" + num_token(add);
+    }
 };
 
 // The op is exact in float; the only per-element error is the golden accumulating in double and
 // storing float.
-Bound scalar_tolerance(DType) { return {1e-5, 1e-6}; }
+Bound scalar_tolerance(DType) {
+    return {1e-5, 1e-6};
+}
 
 template <typename T>
 void run_add_scalar(const VoxelConfig& cfg, const AddScalarParams& p) {
@@ -111,13 +115,12 @@ TEST_P(AddScalarTest, Correctness) {
 //
 // The fill spans [0, 1] and the addend is 40 (the value the legacy voxel harness uses), so every
 // result lands far outside [0, 1]: a kernel that clamped to the image-intensity range would show.
-INSTANTIATE_TEST_SUITE_P(Voxel_Arithmetic, AddScalarTest,
-                         ::testing::ValuesIn(voxel_with_params<AddScalarParams>(
-                             make_voxel_configs({DType::F32},
-                                                {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3,
-                                                 VoxelLayout::NDHWC3},
-                                                {Roi::Full, Roi::Partial},
-                                                {Roi3D::XYZWHD, Roi3D::LTFRBB},
-                                                {presets::kDefaultVolume, presets::kTailVolume}),
-                             {{40.0f}})),
-                         voxel_op_config_name<AddScalarParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Voxel_Arithmetic, AddScalarTest,
+    ::testing::ValuesIn(voxel_with_params<AddScalarParams>(
+        make_voxel_configs({DType::F32},
+                           {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3, VoxelLayout::NDHWC3},
+                           {Roi::Full, Roi::Partial}, {Roi3D::XYZWHD, Roi3D::LTFRBB},
+                           {presets::kDefaultVolume, presets::kTailVolume}),
+        {{40.0f}})),
+    voxel_op_config_name<AddScalarParams>);

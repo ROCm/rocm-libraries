@@ -55,8 +55,8 @@ constexpr Rpp32u kMaxBoxesPerImage = 2;
 // Per-(box, channel) fill intensity in [0,255]. Distinct colors verify channel handling; PLN1 uses
 // index 0 only.
 constexpr std::array<std::array<double, 3>, 2> kBoxIntensity = {{
-    {{200.0, 60.0, 120.0}},   // box 0
-    {{30.0, 220.0, 90.0}},    // box 1
+    {{200.0, 60.0, 120.0}},  // box 0
+    {{30.0, 220.0, 90.0}},   // box 1
 }};
 
 template <typename T>
@@ -111,7 +111,7 @@ void run_cutout_dropout(const TestConfig& cfg) {
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
     cutout_dropout_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                               boxes.data(), numBoxes.data(), kMaxBoxesPerImage, colors.data());
+                                boxes.data(), numBoxes.data(), kMaxBoxesPerImage, colors.data());
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -129,8 +129,8 @@ void run_cutout_dropout(const TestConfig& cfg) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
-                               kExact(cfg.dtype)));
+    EXPECT_TRUE(
+        compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH, kExact(cfg.dtype)));
 }
 
 }  // namespace
@@ -141,9 +141,8 @@ class CutoutDropoutTest : public SkipListTest<TestConfig> {};
 
 TEST_P(CutoutDropoutTest, Correctness) {
     const auto& cfg = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
-        run_cutout_dropout<Element<decltype(tag)>>(cfg);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        cfg.dtype, [&](auto tag) { run_cutout_dropout<Element<decltype(tag)>>(cfg); });
 }
 
 // FullRoi passes the full grid on both backends (validates the erase + per-channel color + I8

@@ -71,22 +71,22 @@ void remap_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& d
                      const Rpp32f* rowRemapTable, const Rpp32f* colRemapTable, const RpptDesc& td,
                      const RpptROI* roi, RpptRoiType roiType, RpptInterpolationType interp) {
     const double border = dtype_black(dt);
-    for_each_roi_plane(sd, dd, roi, roiType,
-                       [&](Rpp32u n, const RoiBounds& b, Rpp32u, std::size_t srcBase,
-                           std::size_t dstBase) {
-        const int rx0 = static_cast<int>(b.x0), ry0 = static_cast<int>(b.y0);
-        const int rx1 = rx0 + static_cast<int>(b.w), ry1 = ry0 + static_cast<int>(b.h);
-        const std::size_t tblBase = plane_base(td, n, 0);
-        for (Rpp32u j = 0; j < b.h; ++j)
-            for (Rpp32u i = 0; i < b.w; ++i) {
-                const std::size_t tblIdx = plane_index(td, tblBase, j, i);
-                const double sx = colRemapTable[tblIdx];
-                const double sy = rowRemapTable[tblIdx];
-                const double v =
-                    sample(src, sd, srcBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
-                dst[plane_index(dd, dstBase, j, i)] = from_double<T>(quantize_stored(v, dt));
-            }
-    });
+    for_each_roi_plane(
+        sd, dd, roi, roiType,
+        [&](Rpp32u n, const RoiBounds& b, Rpp32u, std::size_t srcBase, std::size_t dstBase) {
+            const int rx0 = static_cast<int>(b.x0), ry0 = static_cast<int>(b.y0);
+            const int rx1 = rx0 + static_cast<int>(b.w), ry1 = ry0 + static_cast<int>(b.h);
+            const std::size_t tblBase = plane_base(td, n, 0);
+            for (Rpp32u j = 0; j < b.h; ++j)
+                for (Rpp32u i = 0; i < b.w; ++i) {
+                    const std::size_t tblIdx = plane_index(td, tblBase, j, i);
+                    const double sx = colRemapTable[tblIdx];
+                    const double sy = rowRemapTable[tblIdx];
+                    const double v =
+                        sample(src, sd, srcBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
+                    dst[plane_index(dd, dstBase, j, i)] = from_double<T>(quantize_stored(v, dt));
+                }
+        });
 }
 
 }  // namespace rpptest

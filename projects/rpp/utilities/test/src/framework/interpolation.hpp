@@ -49,8 +49,8 @@ template <typename T>
 inline double src_texel(const T* src, const RpptDesc& d, std::size_t base, int x, int y, int x0,
                         int y0, int x1, int y1, double border) {
     if (x < x0 || y < y0 || x >= x1 || y >= y1) return border;
-    return to_double(src[plane_index(d, base, static_cast<std::size_t>(y),
-                                     static_cast<std::size_t>(x))]);
+    return to_double(
+        src[plane_index(d, base, static_cast<std::size_t>(y), static_cast<std::size_t>(x))]);
 }
 
 // Samples the plane at fractional (x,y) (texel centers at integer coords) using `interp`.
@@ -75,8 +75,8 @@ inline double sample(const T* src, const RpptDesc& d, std::size_t base, double x
             const double v01 = src_texel(src, d, base, xa + 1, ya, x0, y0, x1, y1, border);
             const double v10 = src_texel(src, d, base, xa, ya + 1, x0, y0, x1, y1, border);
             const double v11 = src_texel(src, d, base, xa + 1, ya + 1, x0, y0, x1, y1, border);
-            return v00 * (1.0 - dx) * (1.0 - dy) + v01 * dx * (1.0 - dy) +
-                   v10 * (1.0 - dx) * dy + v11 * dx * dy;
+            return v00 * (1.0 - dx) * (1.0 - dy) + v01 * dx * (1.0 - dy) + v10 * (1.0 - dx) * dy +
+                   v11 * dx * dy;
         }
         default:
             assert(false && "interpolation mode not implemented in the test sampler");

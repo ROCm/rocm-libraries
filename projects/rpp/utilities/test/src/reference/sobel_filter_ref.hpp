@@ -85,8 +85,9 @@ void sobel_filter_reference(const T* src, T* dst, const RpptDesc& d, DType dt, c
             gx += Gx[k] * w[k];
             gy += Gy[k] * w[k];
         }
-        const double result =
-            sobelType == 0 ? gx : sobelType == 1 ? gy : std::sqrt(gx * gx + gy * gy);
+        const double result = sobelType == 0   ? gx
+                              : sobelType == 1 ? gy
+                                               : std::sqrt(gx * gx + gy * gy);
         return quantize_stored(result, dt);
     });
 }

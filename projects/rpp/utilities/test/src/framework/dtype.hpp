@@ -42,11 +42,16 @@ namespace rpptest {
 
 inline RpptDataType to_rpp_dtype(DType d) {
     switch (d) {
-        case DType::U8: return U8;
-        case DType::F16: return F16;
-        case DType::F32: return F32;
-        case DType::I8: return I8;
-        case DType::I16: return I16;
+        case DType::U8:
+            return U8;
+        case DType::F16:
+            return F16;
+        case DType::F32:
+            return F32;
+        case DType::I8:
+            return I8;
+        case DType::I16:
+            return I16;
     }
     return U8;
 }
@@ -54,17 +59,24 @@ inline RpptDataType to_rpp_dtype(DType d) {
 inline std::size_t dtype_size(DType d) {
     switch (d) {
         case DType::U8:
-        case DType::I8: return 1;
+        case DType::I8:
+            return 1;
         case DType::F16:
-        case DType::I16: return 2;
-        case DType::F32: return 4;
+        case DType::I16:
+            return 2;
+        case DType::F32:
+            return 4;
     }
     return 1;
 }
 
-inline int channels_of(Layout l) { return l == Layout::PLN1 ? 1 : 3; }
+inline int channels_of(Layout l) {
+    return l == Layout::PLN1 ? 1 : 3;
+}
 
-inline RpptLayout to_rpp_layout(Layout l) { return l == Layout::PKD3 ? NHWC : NCHW; }
+inline RpptLayout to_rpp_layout(Layout l) {
+    return l == Layout::PKD3 ? NHWC : NCHW;
+}
 
 // ---- DType -> C++ storage type --------------------------------------------
 // Maps a DType to the C++ storage type RPP uses for it.

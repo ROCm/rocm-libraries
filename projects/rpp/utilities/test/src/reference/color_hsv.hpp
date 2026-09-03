@@ -57,10 +57,14 @@ inline void rgb_to_hsv(double r, double g, double b, double& h, double& s, doubl
     const double cmin = std::min({r, g, b});
     const double delta = cmax - cmin;
 
-    if (delta <= 0.0)   h = 0.0;
-    else if (cmax == r) h = 60.0 * std::fmod((g - b) / delta, 6.0);
-    else if (cmax == g) h = 60.0 * (((b - r) / delta) + 2.0);
-    else                h = 60.0 * (((r - g) / delta) + 4.0);
+    if (delta <= 0.0)
+        h = 0.0;
+    else if (cmax == r)
+        h = 60.0 * std::fmod((g - b) / delta, 6.0);
+    else if (cmax == g)
+        h = 60.0 * (((b - r) / delta) + 2.0);
+    else
+        h = 60.0 * (((r - g) / delta) + 4.0);
     if (h < 0.0) h += 360.0;
 
     s = (cmax <= 0.0) ? 0.0 : delta / cmax;
@@ -75,12 +79,36 @@ inline void hsv_to_rgb(double h, double s, double v, double& r, double& g, doubl
     const double m = v - c;
     double rp, gp, bp;
     switch (static_cast<int>(hp)) {
-        case 0:  rp = c; gp = x; bp = 0.0; break;
-        case 1:  rp = x; gp = c; bp = 0.0; break;
-        case 2:  rp = 0.0; gp = c; bp = x; break;
-        case 3:  rp = 0.0; gp = x; bp = c; break;
-        case 4:  rp = x; gp = 0.0; bp = c; break;
-        default: rp = c; gp = 0.0; bp = x; break;  // hp in [5,6)
+        case 0:
+            rp = c;
+            gp = x;
+            bp = 0.0;
+            break;
+        case 1:
+            rp = x;
+            gp = c;
+            bp = 0.0;
+            break;
+        case 2:
+            rp = 0.0;
+            gp = c;
+            bp = x;
+            break;
+        case 3:
+            rp = 0.0;
+            gp = x;
+            bp = c;
+            break;
+        case 4:
+            rp = x;
+            gp = 0.0;
+            bp = c;
+            break;
+        default:
+            rp = c;
+            gp = 0.0;
+            bp = x;
+            break;  // hp in [5,6)
     }
     r = rp + m;
     g = gp + m;

@@ -62,7 +62,9 @@ Notes
   precision for small |x|, where 1 + x loses the low bits of x.
 */
 
-inline double log1p_scalar(double v) { return std::log1p(std::fabs(v)); }
+inline double log1p_scalar(double v) {
+    return std::log1p(std::fabs(v));
+}
 
 template <typename Tin, typename Tout>
 void log1p_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDesc,

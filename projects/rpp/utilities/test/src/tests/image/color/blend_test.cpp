@@ -97,20 +97,19 @@ class BlendTest : public SkipListTest<WithParams<BlendParams>> {};
 
 TEST_P(BlendTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_blend<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_blend<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, BlendTest,
-    ::testing::ValuesIn(with_params<BlendParams>(
-        concat_configs({
-            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {BlendParams{0.75f}})),
-    op_config_name<BlendParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, BlendTest,
+                         ::testing::ValuesIn(with_params<BlendParams>(
+                             concat_configs({
+                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                                              {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFull,
+                                              {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {BlendParams{0.75f}})),
+                         op_config_name<BlendParams>);

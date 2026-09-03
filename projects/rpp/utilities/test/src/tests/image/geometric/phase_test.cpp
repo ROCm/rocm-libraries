@@ -84,9 +84,8 @@ class PhaseTest : public SkipListTest<TestConfig> {};
 
 TEST_P(PhaseTest, Correctness) {
     const TestConfig cfg = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
-        run_phase<Element<decltype(tag)>>(cfg);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        cfg.dtype, [&](auto tag) { run_phase<Element<decltype(tag)>>(cfg); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
@@ -94,10 +93,8 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, PhaseTest,
     ::testing::ValuesIn(concat_configs({
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                     {Roi::Full, Roi::Partial},
-                     {presets::kTailWidthSize}),
+                     {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
-                     {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kSubVectorSize}),
+                     {Roi::Full, Roi::Partial}, {presets::kDefaultSize, presets::kSubVectorSize}),
     })),
     config_param_name);

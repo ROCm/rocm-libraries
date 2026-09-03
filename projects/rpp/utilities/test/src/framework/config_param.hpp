@@ -155,9 +155,9 @@ inline const std::vector<Layout> kLayoutsFull{Layout::PKD3, Layout::PLN3, Layout
 // The same map for an operator whose maths needs all three colour channels, so PLN1 is not
 // part of its interface (hue, saturation, colour twist, colour temperature).
 inline const std::vector<LayoutConv> kLayouts3ChConv{{Layout::PKD3, Layout::PKD3},
-                                                    {Layout::PLN3, Layout::PLN3},
-                                                    {Layout::PKD3, Layout::PLN3},
-                                                    {Layout::PLN3, Layout::PKD3}};
+                                                     {Layout::PLN3, Layout::PLN3},
+                                                     {Layout::PKD3, Layout::PLN3},
+                                                     {Layout::PLN3, Layout::PKD3}};
 
 // The non-converting subset of kLayouts3ChConv.
 inline const std::vector<Layout> kLayouts3Ch{Layout::PKD3, Layout::PLN3};

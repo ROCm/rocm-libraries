@@ -56,13 +56,14 @@ Per-type form
 template <typename T>
 void channel_permute_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
                                const Rpp32u* perm, const RpptROI* roi, RpptRoiType roiType) {
-    for_each_roi_pixel(
-        sd, dd, roi, roiType, [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
-            for (Rpp32u c = 0; c < sd.c; ++c) {
-                const Rpp32u srcC = perm[n * 3 + c];
-                dst[channel_index(dd, dstPix, c)] = src[channel_index(sd, srcPix, srcC)];
-            }
-        });
+    for_each_roi_pixel(sd, dd, roi, roiType,
+                       [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
+                           for (Rpp32u c = 0; c < sd.c; ++c) {
+                               const Rpp32u srcC = perm[n * 3 + c];
+                               dst[channel_index(dd, dstPix, c)] =
+                                   src[channel_index(sd, srcPix, srcC)];
+                           }
+                       });
 }
 
 }  // namespace rpptest

@@ -58,11 +58,15 @@ struct ThresholdParams {
 // receives): U8 raw, I8 shifted by -128, F16/F32 normalized to [0,1].
 float cutoff_in_dtype(float raw, DType dt) {
     switch (dt) {
-        case DType::U8: return raw;
-        case DType::I8: return raw - 128.0f;
+        case DType::U8:
+            return raw;
+        case DType::I8:
+            return raw - 128.0f;
         case DType::F16:
-        case DType::F32: return raw / 255.0f;
-        default: return raw;
+        case DType::F32:
+            return raw / 255.0f;
+        default:
+            return raw;
     }
 }
 
@@ -114,20 +118,20 @@ void run_threshold(const TestConfig& cfg, const ThresholdParams& op) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
-                               kExact(cfg.dtype)));
+    EXPECT_TRUE(
+        compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, kExact(cfg.dtype)));
 }
 
 }  // namespace
 
-// Full name: Image_Statistical/ThresholdTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Min>_<Max>
+// Full name:
+// Image_Statistical/ThresholdTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Min>_<Max>
 class ThresholdTest : public SkipListTest<WithParams<ThresholdParams>> {};
 
 TEST_P(ThresholdTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_threshold<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_threshold<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
@@ -136,8 +140,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(with_params<ThresholdParams>(
         concat_configs({
             make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
             make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
                          {Roi::Full, Roi::Partial},
                          {presets::kDefaultSize, presets::kSubVectorSize}),

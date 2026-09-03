@@ -65,8 +65,8 @@ std::vector<double> tensor_min_reference(const T* src, const RpptDesc& d, const 
     });
     if (d.c == 3)
         for (Rpp32u n = 0; n < d.n; ++n)
-            out[n * stride + 3] = std::min({out[n * stride + 0], out[n * stride + 1],
-                                            out[n * stride + 2]});
+            out[n * stride + 3] =
+                std::min({out[n * stride + 0], out[n * stride + 1], out[n * stride + 2]});
     return out;
 }
 

@@ -37,10 +37,11 @@ struct Bound {
     double abs = 0.0;
     double rel = 0.0;
 
-    constexpr Bound(double absolute = 0.0, double relative = 0.0)
-        : abs(absolute), rel(relative) {}
+    constexpr Bound(double absolute = 0.0, double relative = 0.0) : abs(absolute), rel(relative) {}
 
-    double operator()(double reference) const { return abs + rel * std::fabs(reference); }
+    double operator()(double reference) const {
+        return abs + rel * std::fabs(reference);
+    }
 };
 
 // A per-dtype absolute comparison bound. Plain data: an op names the numbers it needs and
@@ -53,11 +54,16 @@ struct Tolerance {
 
     constexpr double operator()(DType dt) const {
         switch (dt) {
-            case DType::U8: return u8;
-            case DType::I8: return i8;
-            case DType::I16: return i16;
-            case DType::F16: return f16;
-            case DType::F32: return f32;
+            case DType::U8:
+                return u8;
+            case DType::I8:
+                return i8;
+            case DType::I16:
+                return i16;
+            case DType::F16:
+                return f16;
+            case DType::F32:
+                return f32;
         }
         return 0.0;
     }
@@ -65,7 +71,9 @@ struct Tolerance {
     // A copy with one field replaced, for the ops that differ from a named constant in a
     // single dtype (C++17 has no designated initializers). Sibling with_*() overloads are
     // added when an op needs one.
-    constexpr Tolerance with_i8(double v) const { return {u8, v, i16, f16, f32}; }
+    constexpr Tolerance with_i8(double v) const {
+        return {u8, v, i16, f16, f32};
+    }
 };
 
 // The common shape: the integer dtypes share one bound, each float dtype has its own.

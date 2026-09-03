@@ -79,10 +79,10 @@ void run_grid_dropout(const TestConfig& cfg) {
             for (Rpp32u col = 0; col < kGridW; ++col) {
                 const int x1 = static_cast<int>(rb.x0 + col * cellW);
                 const int y1 = static_cast<int>(rb.y0 + row * cellH);
-                const int x2 = std::min(x1 + static_cast<int>(holeW) - 1,
-                                        static_cast<int>(rb.x0 + rb.w - 1));
-                const int y2 = std::min(y1 + static_cast<int>(holeH) - 1,
-                                        static_cast<int>(rb.y0 + rb.h - 1));
+                const int x2 =
+                    std::min(x1 + static_cast<int>(holeW) - 1, static_cast<int>(rb.x0 + rb.w - 1));
+                const int y2 =
+                    std::min(y1 + static_cast<int>(holeH) - 1, static_cast<int>(rb.y0 + rb.h - 1));
                 boxes[n * kBoxesInEachImage + (row * kGridW + col)] =
                     RpptRoiLtrb{{x1, y1}, {x2, y2}};
             }
@@ -103,30 +103,30 @@ void run_grid_dropout(const TestConfig& cfg) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_grid_dropout(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, boxes.data(),
-                                kBoxesInEachImage, maxHoleW, maxHoleH, roi.data(), XYWH,
-                                handle.get(), cfg.backend),
-              RPP_SUCCESS);
+    ASSERT_EQ(
+        rppt_grid_dropout(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, boxes.data(), kBoxesInEachImage,
+                          maxHoleW, maxHoleH, roi.data(), XYWH, handle.get(), cfg.backend),
+        RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
-                               kExact(cfg.dtype)));
+    EXPECT_TRUE(
+        compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, kExact(cfg.dtype)));
 }
 
 }  // namespace
 
-// Full name: Image_Effects/GridDropoutTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
+// Full name:
+// Image_Effects/GridDropoutTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
 class GridDropoutTest : public SkipListTest<TestConfig> {};
 
 TEST_P(GridDropoutTest, Correctness) {
     const TestConfig cfg = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
-        run_grid_dropout<Element<decltype(tag)>>(cfg);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        cfg.dtype, [&](auto tag) { run_grid_dropout<Element<decltype(tag)>>(cfg); });
 }
 
 // FullRoi passes the full grid on both backends (validates the hole-erase + I8 black semantics).
@@ -139,10 +139,8 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Effects, GridDropoutTest,
     ::testing::ValuesIn(concat_configs({
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                     {Roi::Full, Roi::Partial},
-                     {presets::kTailWidthSize}),
+                     {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
-                     {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kSubVectorSize}),
+                     {Roi::Full, Roi::Partial}, {presets::kDefaultSize, presets::kSubVectorSize}),
     })),
     config_param_name);

@@ -41,8 +41,8 @@ using namespace rpptest;
 namespace {
 
 struct NormalizeParams {
-    Rpp32u axisMask;     // bit i set => axis i is reduced
-    Rpp8u computeMode;   // bit 0 => compute mean, bit 1 => compute stddev, 0 => caller-supplied
+    Rpp32u axisMask;    // bit i set => axis i is reduced
+    Rpp8u computeMode;  // bit 0 => compute mean, bit 1 => compute stddev, 0 => caller-supplied
     std::string name() const {
         return "axis" + std::to_string(axisMask) + "_cms" + std::to_string(computeMode);
     }
@@ -55,8 +55,12 @@ constexpr Rpp32f kShift = 0.25f;
 
 // Caller-supplied mean/stddev for the modes that do not compute them. Deterministic, and
 // the stddev is always non-zero so the reference never divides by zero.
-Rpp32f supplied_mean(std::size_t i) { return 0.25f * static_cast<Rpp32f>(i % 7); }
-Rpp32f supplied_stddev(std::size_t i) { return 1.0f + 0.5f * static_cast<Rpp32f>(i % 3); }
+Rpp32f supplied_mean(std::size_t i) {
+    return 0.25f * static_cast<Rpp32f>(i % 7);
+}
+Rpp32f supplied_stddev(std::size_t i) {
+    return 1.0f + 0.5f * static_cast<Rpp32f>(i % 3);
+}
 
 // Tolerances reflect legitimate floating-point error only: the golden accumulates in double
 // while the kernel reduces in float (and stores half for F16), so the bound is dominated by
@@ -113,17 +117,22 @@ void run_normalize(const NdConfig& cfg, const NormalizeParams& p) {
     dst.read(actual.data(), dstBytes);
 
     // (3) Compare the whole output tensor.
-    EXPECT_TRUE(compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, normalize_tolerance(cfg.dtypeOut)));
+    EXPECT_TRUE(compare_nd<Tout>(actual.data(), golden.data(), *dstDesc,
+                                 normalize_tolerance(cfg.dtypeOut)));
 }
 
 // Representative reduction masks per rank: innermost axis only, every axis, and one mixed
 // mask. These are the three distinct param-tensor shapes (per-element, scalar, partial).
 std::vector<Rpp32u> masks_for(Rpp32u nDim) {
     switch (nDim) {
-        case 2:  return {2, 3, 1};
-        case 3:  return {4, 7, 6};
-        case 4:  return {8, 15, 12};
-        default: return {1};
+        case 2:
+            return {2, 3, 1};
+        case 3:
+            return {4, 7, 6};
+        case 4:
+            return {8, 15, 12};
+        default:
+            return {1};
     }
 }
 

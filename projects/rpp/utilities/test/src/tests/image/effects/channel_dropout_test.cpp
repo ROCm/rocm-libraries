@@ -97,8 +97,8 @@ void run_channel_dropout(const TestConfig& cfg, const ChannelDropoutParams& op) 
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
-                               kExact(cfg.dtype)));
+    EXPECT_TRUE(
+        compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, kExact(cfg.dtype)));
 }
 
 }  // namespace
@@ -109,23 +109,21 @@ class ChannelDropoutTest : public SkipListTest<WithParams<ChannelDropoutParams>>
 
 TEST_P(ChannelDropoutTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_channel_dropout<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_channel_dropout<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, ChannelDropoutTest,
-    ::testing::ValuesIn(with_params<ChannelDropoutParams>(
-        concat_configs({
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {ChannelDropoutParams{{0, 1, 1}}, ChannelDropoutParams{{1, 0, 1}},
-         ChannelDropoutParams{{0, 0, 0}}, ChannelDropoutParams{{1, 1, 1}}})),
-    op_config_name<ChannelDropoutParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, ChannelDropoutTest,
+                         ::testing::ValuesIn(with_params<ChannelDropoutParams>(
+                             concat_configs({
+                                 make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                              presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
+                                              {presets::kTailWidthSize}),
+                                 make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                              presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {ChannelDropoutParams{{0, 1, 1}}, ChannelDropoutParams{{1, 0, 1}},
+                              ChannelDropoutParams{{0, 0, 0}}, ChannelDropoutParams{{1, 1, 1}}})),
+                         op_config_name<ChannelDropoutParams>);

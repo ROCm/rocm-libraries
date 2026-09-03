@@ -57,7 +57,9 @@ struct WarpPerspectiveParams {
     std::array<float, 9> m;
     RpptInterpolationType interp;
     std::string tag;
-    std::string name() const { return tag + "_" + interp_token(interp); }
+    std::string name() const {
+        return tag + "_" + interp_token(interp);
+    }
 };
 
 // Tolerances are set from legitimate numeric error only; they are NOT loosened to hide the real
@@ -116,14 +118,14 @@ void run_warp_perspective(const TestConfig& cfg, const WarpPerspectiveParams& op
 
 }  // namespace
 
-// Full name: Image_Geometric/WarpPerspectiveTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Matrix>_<Interp>
+// Full name:
+// Image_Geometric/WarpPerspectiveTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Matrix>_<Interp>
 class WarpPerspectiveTest : public SkipListTest<WithParams<WarpPerspectiveParams>> {};
 
 TEST_P(WarpPerspectiveTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_warp_perspective<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_warp_perspective<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // identity: output == source. shift: integer translation (w==1). halfshift: half-pixel translation,
@@ -137,8 +139,7 @@ INSTANTIATE_TEST_SUITE_P(
                       {Layout::PLN1, Layout::PLN1},
                       {Layout::PKD3, Layout::PLN3},
                       {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kTailWidthSize}),
+                     {Roi::Full, Roi::Partial}, {presets::kDefaultSize, presets::kTailWidthSize}),
         {WarpPerspectiveParams{{1, 0, 0, 0, 1, 0, 0, 0, 1}, NEAREST_NEIGHBOR, "identity"},
          WarpPerspectiveParams{{1, 0, 0, 0, 1, 0, 0, 0, 1}, BILINEAR, "identity"},
          WarpPerspectiveParams{{1, 0, 5, 0, 1, -3, 0, 0, 1}, NEAREST_NEIGHBOR, "shift"},

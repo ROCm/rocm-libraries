@@ -55,7 +55,7 @@ void run_coarse_dropout(const TestConfig& cfg) {
 
     // anchorBoxInfoTensor stride is maxBoxesPerImage; numBoxesTensor holds active counts.
     PinnedArray<RpptRoiLtrb> boxes(cfg.backend,
-                                  static_cast<std::size_t>(cfg.size.n) * maxBoxesPerImage);
+                                   static_cast<std::size_t>(cfg.size.n) * maxBoxesPerImage);
     PinnedArray<Rpp32u> numBoxes(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
@@ -113,18 +113,18 @@ void run_coarse_dropout(const TestConfig& cfg) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_coarse_dropout(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, boxes.data(),
-                                  numBoxes.data(), maxBoxesPerImage, roi.data(), XYWH, handle.get(),
-                                  cfg.backend),
-              RPP_SUCCESS);
+    ASSERT_EQ(
+        rppt_coarse_dropout(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, boxes.data(), numBoxes.data(),
+                            maxBoxesPerImage, roi.data(), XYWH, handle.get(), cfg.backend),
+        RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
-                               kExact(cfg.dtype)));
+    EXPECT_TRUE(
+        compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, kExact(cfg.dtype)));
 }
 
 }  // namespace
@@ -135,26 +135,22 @@ class CoarseDropoutTest : public SkipListTest<TestConfig> {};
 
 TEST_P(CoarseDropoutTest, Correctness) {
     const TestConfig cfg = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
-        run_coarse_dropout<Element<decltype(tag)>>(cfg);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        cfg.dtype, [&](auto tag) { run_coarse_dropout<Element<decltype(tag)>>(cfg); });
 }
 
 // FullRoi (both backends) and HOST PartialRoi pass the full grid -- this end-to-end validates the
-// shared packed-origin + absolute-frame box + I8-black golden model (the same model cutout/grid use).
-// The 12 HIP PartialRoi cases are red as a documented kernel finding
-// HIP leaves the erased region unwritten under a non-full ROI (same class as the warp/rotate/remap
-// HIP partial-ROI placement bug). Do not weaken
-// the golden to force green.
-// Same-layout cases plus both directions of the fused output-layout conversion.
+// shared packed-origin + absolute-frame box + I8-black golden model (the same model cutout/grid
+// use). The 12 HIP PartialRoi cases are red as a documented kernel finding HIP leaves the erased
+// region unwritten under a non-full ROI (same class as the warp/rotate/remap HIP partial-ROI
+// placement bug). Do not weaken the golden to force green. Same-layout cases plus both directions
+// of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, CoarseDropoutTest,
     ::testing::ValuesIn(concat_configs({
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                     {Roi::Full, Roi::Partial},
-                     {presets::kTailWidthSize}),
+                     {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
-                     {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kSubVectorSize}),
+                     {Roi::Full, Roi::Partial}, {presets::kDefaultSize, presets::kSubVectorSize}),
     })),
     config_param_name);

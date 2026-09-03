@@ -54,7 +54,9 @@ struct RemapParams {
     RemapKind kind;
     RpptInterpolationType interp;
     std::string tag;
-    std::string name() const { return tag + "_" + interp_token(interp); }
+    std::string name() const {
+        return tag + "_" + interp_token(interp);
+    }
 };
 
 // Tolerances are set from legitimate numeric error only; they are NOT loosened to hide integer
@@ -158,32 +160,31 @@ void run_remap(const TestConfig& cfg, const RemapParams& op) {
 
 }  // namespace
 
-// Full name: Image_Geometric/RemapTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Tag>_<Interp>
+// Full name:
+// Image_Geometric/RemapTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Tag>_<Interp>
 class RemapTest : public SkipListTest<WithParams<RemapParams>> {};
 
 TEST_P(RemapTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_remap<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_remap<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // identity: verbatim copy of the ROI region. hflip: horizontal mirror within the ROI. halfshift:
-// half-texel column offset, bilinear only, exercises the 4-tap blend (including the black-border tap
-// at the right edge) deterministically.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Geometric, RemapTest,
-    ::testing::ValuesIn(with_params<RemapParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PLN1, Layout::PLN1},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kTailWidthSize}),
-        {RemapParams{RemapKind::Identity, NEAREST_NEIGHBOR, "identity"},
-         RemapParams{RemapKind::Hflip, NEAREST_NEIGHBOR, "hflip"},
-         RemapParams{RemapKind::Identity, BILINEAR, "identity"},
-         RemapParams{RemapKind::Halfshift, BILINEAR, "halfshift"}})),
-    op_config_name<RemapParams>);
+// half-texel column offset, bilinear only, exercises the 4-tap blend (including the black-border
+// tap at the right edge) deterministically.
+INSTANTIATE_TEST_SUITE_P(Image_Geometric, RemapTest,
+                         ::testing::ValuesIn(with_params<RemapParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {{Layout::PKD3, Layout::PKD3},
+                                           {Layout::PLN3, Layout::PLN3},
+                                           {Layout::PLN1, Layout::PLN1},
+                                           {Layout::PKD3, Layout::PLN3},
+                                           {Layout::PLN3, Layout::PKD3}},
+                                          {Roi::Full, Roi::Partial},
+                                          {presets::kDefaultSize, presets::kTailWidthSize}),
+                             {RemapParams{RemapKind::Identity, NEAREST_NEIGHBOR, "identity"},
+                              RemapParams{RemapKind::Hflip, NEAREST_NEIGHBOR, "hflip"},
+                              RemapParams{RemapKind::Identity, BILINEAR, "identity"},
+                              RemapParams{RemapKind::Halfshift, BILINEAR, "halfshift"}})),
+                         op_config_name<RemapParams>);

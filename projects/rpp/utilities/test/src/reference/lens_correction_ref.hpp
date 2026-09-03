@@ -112,16 +112,13 @@ template <typename T>
 void lens_correction_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
                                const RpptROI* roi, RpptRoiType roiType,
                                const Rpp32f* cameraMatrixTensor,
-                               const Rpp32f* distortionCoeffsTensor,
-                               RpptInterpolationType interp) {
-    geometric_reference<T>(src, d, dst, d, dt, roi, roiType, roi_out_sizes(d, roi, roiType), interp,
-                           [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
-                               lens_correction_map(ox, oy,
-                                                   cameraMatrixTensor + static_cast<std::size_t>(n) * 9,
-                                                   distortionCoeffsTensor +
-                                                       static_cast<std::size_t>(n) * 8,
-                                                   sx, sy);
-                           });
+                               const Rpp32f* distortionCoeffsTensor, RpptInterpolationType interp) {
+    geometric_reference<T>(
+        src, d, dst, d, dt, roi, roiType, roi_out_sizes(d, roi, roiType), interp,
+        [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
+            lens_correction_map(ox, oy, cameraMatrixTensor + static_cast<std::size_t>(n) * 9,
+                                distortionCoeffsTensor + static_cast<std::size_t>(n) * 8, sx, sy);
+        });
 }
 
 }  // namespace rpptest

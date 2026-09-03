@@ -70,23 +70,23 @@ inline RpptPoint2D glitch_channel_offset(const RpptChannelOffsets& o, Rpp32u c) 
 template <typename T>
 void glitch_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* roi,
                       RpptRoiType roiType, const RpptChannelOffsets* offsets) {
-    for_each_roi_plane(d, roi, roiType, [&](Rpp32u n, const RoiBounds& b, Rpp32u c,
-                                            std::size_t base) {
-        const RpptPoint2D off = glitch_channel_offset(offsets[n], c);
-        for (Rpp32u j = 0; j < b.h; ++j)
-            for (Rpp32u i = 0; i < b.w; ++i) {
-                const int sx = static_cast<int>(b.x0 + i) + off.x;
-                const int sy = static_cast<int>(b.y0 + j) + off.y;
-                const bool inside = sx >= static_cast<int>(b.x0) && sy >= static_cast<int>(b.y0) &&
-                                    sx < static_cast<int>(b.x0 + b.w) &&
-                                    sy < static_cast<int>(b.y0 + b.h);
-                const std::size_t srcIdx =
-                    inside ? plane_index(d, base, static_cast<std::size_t>(sy),
-                                         static_cast<std::size_t>(sx))
-                           : plane_index(d, base, b.y0 + j, b.x0 + i);
-                dst[plane_index(d, base, j, i)] = src[srcIdx];
-            }
-    });
+    for_each_roi_plane(
+        d, roi, roiType, [&](Rpp32u n, const RoiBounds& b, Rpp32u c, std::size_t base) {
+            const RpptPoint2D off = glitch_channel_offset(offsets[n], c);
+            for (Rpp32u j = 0; j < b.h; ++j)
+                for (Rpp32u i = 0; i < b.w; ++i) {
+                    const int sx = static_cast<int>(b.x0 + i) + off.x;
+                    const int sy = static_cast<int>(b.y0 + j) + off.y;
+                    const bool inside =
+                        sx >= static_cast<int>(b.x0) && sy >= static_cast<int>(b.y0) &&
+                        sx < static_cast<int>(b.x0 + b.w) && sy < static_cast<int>(b.y0 + b.h);
+                    const std::size_t srcIdx =
+                        inside ? plane_index(d, base, static_cast<std::size_t>(sy),
+                                             static_cast<std::size_t>(sx))
+                               : plane_index(d, base, b.y0 + j, b.x0 + i);
+                    dst[plane_index(d, base, j, i)] = src[srcIdx];
+                }
+        });
 }
 
 }  // namespace rpptest

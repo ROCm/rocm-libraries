@@ -231,9 +231,8 @@ TEST_P(SliceTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const SliceParams p = GetParam().op;
     if (p.layout == SliceLayout::Planar) GTEST_SKIP() << kPlanarSkip;
-    dispatch_dtype<DType::U8, DType::F32>(cfg.dtypeIn, [&](auto tag) {
-        run_slice<Element<decltype(tag)>>(cfg, p);
-    });
+    dispatch_dtype<DType::U8, DType::F32>(
+        cfg.dtypeIn, [&](auto tag) { run_slice<Element<decltype(tag)>>(cfg, p); });
 }
 
 // Scoped to U8 and F32: the header documents exactly "Support added for f32 -> f32 and u8 -> u8

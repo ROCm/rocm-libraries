@@ -73,8 +73,8 @@ template <typename T>
 void run_resize(const TestConfig& cfg, const ResizeParams& op) {
     const TensorShape srcShape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)),
                                cfg.size.h, cfg.size.w};
-    const TensorShape dstShape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutOut)),
-                               op.dstH, op.dstW};
+    const TensorShape dstShape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutOut)), op.dstH,
+                               op.dstW};
     RpptDesc srcDesc = make_descriptor(srcShape, cfg.dtype, cfg.layoutIn);
     RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layoutOut);
     const std::size_t srcCount = element_count(srcDesc), dstCount = element_count(dstDesc);
@@ -122,14 +122,14 @@ void run_resize(const TestConfig& cfg, const ResizeParams& op) {
 
 }  // namespace
 
-// Full name: Image_Geometric/ResizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Tag>_<DstWxDstH>_<Interp>
+// Full name:
+// Image_Geometric/ResizeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Tag>_<DstWxDstH>_<Interp>
 class ResizeTest : public SkipListTest<WithParams<ResizeParams>> {};
 
 TEST_P(ResizeTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_resize<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_resize<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // up: enlarge the source ROI. down: shrink it (from the partial ROI this is scale 1, a verbatim
@@ -144,10 +144,8 @@ INSTANTIATE_TEST_SUITE_P(
                       {Layout::PLN1, Layout::PLN1},
                       {Layout::PKD3, Layout::PLN3},
                       {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kTailWidthSize}),
-        {ResizeParams{72, 54, NEAREST_NEIGHBOR, "up"},
-         ResizeParams{72, 54, BILINEAR, "up"},
+                     {Roi::Full, Roi::Partial}, {presets::kDefaultSize, presets::kTailWidthSize}),
+        {ResizeParams{72, 54, NEAREST_NEIGHBOR, "up"}, ResizeParams{72, 54, BILINEAR, "up"},
          ResizeParams{24, 18, NEAREST_NEIGHBOR, "down"},
          ResizeParams{37, 53, NEAREST_NEIGHBOR, "oddratio"},
          ResizeParams{24, 18, BILINEAR, "down"}})),

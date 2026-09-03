@@ -49,9 +49,12 @@ struct ConcatParams {
     AxisKind kind;
     std::string name() const {
         switch (kind) {
-            case AxisKind::First:  return "AxisFirst";
-            case AxisKind::Middle: return "AxisMiddle";
-            case AxisKind::Last:   return "AxisLast";
+            case AxisKind::First:
+                return "AxisFirst";
+            case AxisKind::Middle:
+                return "AxisMiddle";
+            case AxisKind::Last:
+                return "AxisLast";
         }
         return "UNK";
     }
@@ -62,9 +65,12 @@ struct ConcatParams {
 // dstRoi[nDim + axisMask] = roi1[nDim + axisMask] + roi2[nDim + axisMask].
 Rpp32u concat_axis(AxisKind kind, Rpp32u nDim) {
     switch (kind) {
-        case AxisKind::First:  return 0;
-        case AxisKind::Middle: return nDim / 2;
-        case AxisKind::Last:   return nDim - 1;
+        case AxisKind::First:
+            return 0;
+        case AxisKind::Middle:
+            return nDim / 2;
+        case AxisKind::Last:
+            return nDim - 1;
     }
     return 0;
 }
@@ -148,9 +154,8 @@ class ConcatTest : public SkipListTest<NdWithParams<ConcatParams>> {};
 TEST_P(ConcatTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const AxisKind kind = GetParam().op.kind;
-    dispatch_dtype<DType::U8, DType::I8, DType::F16, DType::F32>(cfg.dtypeIn, [&](auto tag) {
-        run_concat<Element<decltype(tag)>>(cfg, kind);
-    });
+    dispatch_dtype<DType::U8, DType::I8, DType::F16, DType::F32>(
+        cfg.dtypeIn, [&](auto tag) { run_concat<Element<decltype(tag)>>(cfg, kind); });
 }
 
 // 72 cases: U8/F16/F32/I8 (what the op accepts) x ranks 2/3/4 x 3 axis kinds x HOST/HIP.

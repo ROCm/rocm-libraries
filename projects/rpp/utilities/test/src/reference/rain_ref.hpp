@@ -77,9 +77,12 @@ inline double blend_store(double v, DType dt, double alpha) {
     const float out = (static_cast<float>(bg) - static_cast<float>(v)) * static_cast<float>(alpha) +
                       static_cast<float>(v);
     switch (dt) {
-        case DType::U8: return clampd(std::nearbyint(static_cast<double>(out)), 0.0, 255.0);
-        case DType::I8: return clampd(std::nearbyint(static_cast<double>(out)), -128.0, 127.0);
-        default:        return clampd(static_cast<double>(out), 0.0, 1.0);  // F16/F32
+        case DType::U8:
+            return clampd(std::nearbyint(static_cast<double>(out)), 0.0, 255.0);
+        case DType::I8:
+            return clampd(std::nearbyint(static_cast<double>(out)), -128.0, 127.0);
+        default:
+            return clampd(static_cast<double>(out), 0.0, 1.0);  // F16/F32
     }
 }
 
@@ -91,8 +94,8 @@ void rain_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd
                     const RpptROI* roi, RpptRoiType roiType, double alpha) {
     for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
-                        dst[dstIdx] =
-                            from_double<T>(rain_detail::blend_store(to_double(src[srcIdx]), dt, alpha));
+                        dst[dstIdx] = from_double<T>(
+                            rain_detail::blend_store(to_double(src[srcIdx]), dt, alpha));
                     });
 }
 

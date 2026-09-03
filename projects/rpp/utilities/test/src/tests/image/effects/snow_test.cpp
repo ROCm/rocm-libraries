@@ -88,10 +88,10 @@ void run_snow(const TestConfig& cfg, const SnowParams& op) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_snow(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, brightness.data(),
-                        threshold.data(), darkMode.data(), roi.data(), XYWH, handle.get(),
-                        cfg.backend),
-              RPP_SUCCESS);
+    ASSERT_EQ(
+        rppt_snow(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, brightness.data(), threshold.data(),
+                  darkMode.data(), roi.data(), XYWH, handle.get(), cfg.backend),
+        RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
@@ -102,27 +102,26 @@ void run_snow(const TestConfig& cfg, const SnowParams& op) {
 
 }  // namespace
 
-// Full name: Image_Effects/SnowTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Params>
+// Full name:
+// Image_Effects/SnowTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Params>
 class SnowTest : public SkipListTest<WithParams<SnowParams>> {};
 
 TEST_P(SnowTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_snow<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_snow<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, SnowTest,
-    ::testing::ValuesIn(with_params<SnowParams>(
-        concat_configs({
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
-            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {SnowParams{2.5f, 0.5f, 0}, SnowParams{2.5f, 0.5f, 1}})),
-    op_config_name<SnowParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, SnowTest,
+                         ::testing::ValuesIn(with_params<SnowParams>(
+                             concat_configs({
+                                 make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                              presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
+                                              {presets::kTailWidthSize}),
+                                 make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                              presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {SnowParams{2.5f, 0.5f, 0}, SnowParams{2.5f, 0.5f, 1}})),
+                         op_config_name<SnowParams>);

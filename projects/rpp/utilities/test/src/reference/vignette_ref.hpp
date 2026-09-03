@@ -102,14 +102,13 @@ void vignette_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc
     std::vector<RoiBounds> bounds(sd.n);
     for (Rpp32u n = 0; n < sd.n; ++n) bounds[n] = roi_bounds(roi[n], roiType);
 
-    for_each_roi_io(sd, dd, roi, roiType,
-                    [&](Rpp32u n, Rpp32u, Rpp32u j, Rpp32u i, std::size_t srcIdx,
-                        std::size_t dstIdx) {
-                        const RoiBounds& b = bounds[n];
-                        const double g = vignette_weight(i, j, b.w, b.h, intensityTensor[n]);
-                        dst[dstIdx] =
-                            from_double<T>(vignette_scalar(to_double(src[srcIdx]), g, dt));
-                    });
+    for_each_roi_io(
+        sd, dd, roi, roiType,
+        [&](Rpp32u n, Rpp32u, Rpp32u j, Rpp32u i, std::size_t srcIdx, std::size_t dstIdx) {
+            const RoiBounds& b = bounds[n];
+            const double g = vignette_weight(i, j, b.w, b.h, intensityTensor[n]);
+            dst[dstIdx] = from_double<T>(vignette_scalar(to_double(src[srcIdx]), g, dt));
+        });
 }
 
 }  // namespace rpptest

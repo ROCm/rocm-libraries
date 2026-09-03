@@ -47,7 +47,9 @@ namespace {
 // diff at each rather than one unexplained failure.
 struct PixelateParams {
     float percentage;
-    std::string name() const { return "p" + num_token(percentage); }
+    std::string name() const {
+        return "p" + num_token(percentage);
+    }
 };
 
 // pixelate is a bilinear downscale followed by a nearest-neighbour upscale. NN copies a texel
@@ -114,16 +116,15 @@ class PixelateTest : public SkipListTest<WithParams<PixelateParams>> {};
 
 TEST_P(PixelateTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_pixelate<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_pixelate<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, PixelateTest,
-    ::testing::ValuesIn(with_params<PixelateParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kTailWidthSize}),
-        {PixelateParams{87.5f}, PixelateParams{50.0f}})),
-    op_config_name<PixelateParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, PixelateTest,
+                         ::testing::ValuesIn(with_params<PixelateParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial},
+                                          {presets::kDefaultSize, presets::kTailWidthSize}),
+                             {PixelateParams{87.5f}, PixelateParams{50.0f}})),
+                         op_config_name<PixelateParams>);

@@ -54,8 +54,10 @@ struct SpatterParams {
     Check check;
     std::string name() const {
         switch (check) {
-            case Check::Identity: return "Identity";
-            case Check::ChannelBand: return "ChannelBand";
+            case Check::Identity:
+                return "Identity";
+            case Check::ChannelBand:
+                return "ChannelBand";
         }
         return "UNK";
     }
@@ -132,24 +134,23 @@ template <typename T>
                                               RpptRGB color, double eps) {
     ::testing::AssertionResult result = ::testing::AssertionSuccess();
     bool failed = false;
-    for_each_roi_io(sd, dd, roi, XYWH,
-                    [&](Rpp32u n, Rpp32u c, Rpp32u j, Rpp32u i, std::size_t srcIdx,
-                        std::size_t dstIdx) {
-                        if (failed) return;
-                        const double s = to_double(src[srcIdx]);
-                        const double v = spatter_color_stored(color, sd.c, c, dt);
-                        const double a = to_double(actual[dstIdx]);
-                        const double lo = std::min(s, v) - eps;
-                        const double hi = std::max(s, v) + eps;
-                        if (a < lo || a > hi) {
-                            failed = true;
-                            result = ::testing::AssertionFailure()
-                                     << "outside the src/colour band at n=" << n << " c=" << c
-                                     << " row=" << j << " col=" << i << ": actual=" << a
-                                     << " src=" << s << " spatterValue=" << v << " band=[" << lo
-                                     << ", " << hi << "]";
-                        }
-                    });
+    for_each_roi_io(
+        sd, dd, roi, XYWH,
+        [&](Rpp32u n, Rpp32u c, Rpp32u j, Rpp32u i, std::size_t srcIdx, std::size_t dstIdx) {
+            if (failed) return;
+            const double s = to_double(src[srcIdx]);
+            const double v = spatter_color_stored(color, sd.c, c, dt);
+            const double a = to_double(actual[dstIdx]);
+            const double lo = std::min(s, v) - eps;
+            const double hi = std::max(s, v) + eps;
+            if (a < lo || a > hi) {
+                failed = true;
+                result = ::testing::AssertionFailure()
+                         << "outside the src/colour band at n=" << n << " c=" << c << " row=" << j
+                         << " col=" << i << ": actual=" << a << " src=" << s
+                         << " spatterValue=" << v << " band=[" << lo << ", " << hi << "]";
+            }
+        });
     return result;
 }
 
@@ -186,11 +187,20 @@ void run_spatter_channel_band(const TestConfig& cfg) {
 template <typename Fn>
 void dispatch(DType dt, Fn fn) {
     switch (dt) {
-        case DType::U8: fn(Rpp8u{}); break;
-        case DType::F16: fn(Rpp16f{}); break;
-        case DType::F32: fn(Rpp32f{}); break;
-        case DType::I8: fn(Rpp8s{}); break;
-        default: FAIL() << "unsupported dtype for spatter";
+        case DType::U8:
+            fn(Rpp8u{});
+            break;
+        case DType::F16:
+            fn(Rpp16f{});
+            break;
+        case DType::F32:
+            fn(Rpp32f{});
+            break;
+        case DType::I8:
+            fn(Rpp8s{});
+            break;
+        default:
+            FAIL() << "unsupported dtype for spatter";
     }
 }
 
@@ -199,8 +209,7 @@ std::vector<WithParams<SpatterParams>> spatter_configs() {
     return with_params<SpatterParams>(
         concat_configs({
             make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kTailWidthSize}),
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
             make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
                          {Roi::Full, Roi::Partial},
                          {presets::kDefaultSize, presets::kSubVectorSize}),

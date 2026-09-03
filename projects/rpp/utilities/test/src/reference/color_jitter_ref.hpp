@@ -106,8 +106,8 @@ constexpr double kWr = 0.299, kWg = 0.587, kWb = 0.114;  // RGB_TO_GREY_WEIGHT_{
 
 // Haeberli's hue-rotation generator. Unlike the saturation basis this has no simpler closed form
 // in the luma weights, so the published constants stand.
-constexpr double kRot[9] = {0.168,  0.330, -0.497,   //
-                            -0.328, 0.035, 0.292,    //
+constexpr double kRot[9] = {0.168,  0.330,  -0.497,  //
+                            -0.328, 0.035,  0.292,   //
                             1.250,  -1.050, -0.203};
 
 // Row-major 3x3: L + sch*(I - L) + ssh*kRot. Row c of the result produces output channel c.
@@ -127,8 +127,8 @@ inline void hue_saturation_matrix(double hueDeg, double satFactor, double m[9]) 
 }  // namespace color_jitter_detail
 
 // The full colour transform: `m` is the 3x3 applied to RGB, `translation` the additive term.
-inline void color_jitter_matrix(double brightness, double contrast, double hueDeg,
-                                double satFactor, double m[9], double& translation) {
+inline void color_jitter_matrix(double brightness, double contrast, double hueDeg, double satFactor,
+                                double m[9], double& translation) {
     color_jitter_detail::hue_saturation_matrix(hueDeg, satFactor, m);
     const double scale = contrast + 1.0;
     for (int i = 0; i < 9; ++i) m[i] *= scale;
@@ -141,26 +141,26 @@ void color_jitter_reference(const T* src, const RpptDesc& sd, T* dst, const Rppt
                             double contrast, double hueDeg, double satFactor) {
     double m[9], translation;
     color_jitter_matrix(brightness, contrast, hueDeg, satFactor, m, translation);
-    for_each_roi_pixel(sd, dd, roi, roiType,
-                       [&](Rpp32u, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
-        if (sd.c == 3) {
-            double rgb[3];
-            for (int c = 0; c < 3; ++c)
-                rgb[c] = to_unit(to_double(src[channel_index(sd, srcPix, c)]), dt);
-            for (int c = 0; c < 3; ++c) {
+    for_each_roi_pixel(
+        sd, dd, roi, roiType, [&](Rpp32u, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
+            if (sd.c == 3) {
+                double rgb[3];
+                for (int c = 0; c < 3; ++c)
+                    rgb[c] = to_unit(to_double(src[channel_index(sd, srcPix, c)]), dt);
+                for (int c = 0; c < 3; ++c) {
+                    const double x = m[c * 3] * rgb[0] + m[c * 3 + 1] * rgb[1] +
+                                     m[c * 3 + 2] * rgb[2] + translation;
+                    dst[channel_index(dd, dstPix, c)] = from_double<T>(from_unit(x, dt));
+                }
+            } else {
+                // 1-channel: hue and saturation have no meaning on a single channel, and every row
+                // of the hue/saturation matrix sums to 1, so a grey pixel reduces to the contrast
+                // scale plus the translation whatever hue/saturation are set to.
                 const double x =
-                    m[c * 3] * rgb[0] + m[c * 3 + 1] * rgb[1] + m[c * 3 + 2] * rgb[2] + translation;
-                dst[channel_index(dd, dstPix, c)] = from_double<T>(from_unit(x, dt));
+                    (contrast + 1.0) * to_unit(to_double(src[srcPix]), dt) + translation;
+                dst[dstPix] = from_double<T>(from_unit(x, dt));
             }
-        } else {
-            // 1-channel: hue and saturation have no meaning on a single channel, and every row of
-            // the hue/saturation matrix sums to 1, so a grey pixel reduces to the contrast scale
-            // plus the translation whatever hue/saturation are set to.
-            const double x =
-                (contrast + 1.0) * to_unit(to_double(src[srcPix]), dt) + translation;
-            dst[dstPix] = from_double<T>(from_unit(x, dt));
-        }
-    });
+        });
 }
 
 }  // namespace rpptest

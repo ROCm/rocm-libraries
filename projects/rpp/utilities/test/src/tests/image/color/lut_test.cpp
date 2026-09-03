@@ -47,8 +47,8 @@ template <typename T>
 void fill_lut(T* lut, DType dt) {
     for (std::size_t j = 0; j < 65536; ++j) {
         int value = 0;
-        if (j < 256) value = 255 - static_cast<int>(j);          // inverted intensity in [0,255]
-        if (dt == DType::I8) value -= 128;                       // shift into I8's signed range
+        if (j < 256) value = 255 - static_cast<int>(j);  // inverted intensity in [0,255]
+        if (dt == DType::I8) value -= 128;               // shift into I8's signed range
         lut[j] = static_cast<T>(value);
     }
 }
@@ -101,21 +101,20 @@ class LutTest : public SkipListTest<TestConfig> {};
 
 TEST_P(LutTest, Correctness) {
     const auto& cfg = GetParam();
-    dispatch_dtype<DType::U8, DType::I8>(cfg.dtype, [&](auto tag) {
-        run_lut<Element<decltype(tag)>>(cfg);
-    });
+    dispatch_dtype<DType::U8, DType::I8>(cfg.dtype,
+                                         [&](auto tag) { run_lut<Element<decltype(tag)>>(cfg); });
 }
 
 // Restricted to the integer dtypes (U8/I8): the 256-entry intensity index is unambiguous
 // there, whereas the float dtypes' table-index semantics are not defined by the public API.
 // All layouts (c = 1/3) are supported.
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, LutTest,
-    ::testing::ValuesIn(concat_configs({
-        make_configs({DType::U8, DType::I8}, presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
-                     {presets::kTailWidthSize}),
-        make_configs({DType::U8, DType::I8}, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kSubVectorSize}),
-    })),
-    config_param_name);
+INSTANTIATE_TEST_SUITE_P(Image_Color, LutTest,
+                         ::testing::ValuesIn(concat_configs({
+                             make_configs({DType::U8, DType::I8}, presets::kLayoutsFullConv,
+                                          {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+                             make_configs({DType::U8, DType::I8}, presets::kLayoutsFull,
+                                          {Roi::Full, Roi::Partial},
+                                          {presets::kDefaultSize, presets::kSubVectorSize}),
+                         })),
+                         config_param_name);

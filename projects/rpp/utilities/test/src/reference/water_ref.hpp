@@ -84,14 +84,13 @@ void water_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& d
                      const RpptROI* roi, RpptRoiType roiType, const Rpp32f* amplitudeX,
                      const Rpp32f* amplitudeY, const Rpp32f* frequencyX, const Rpp32f* frequencyY,
                      const Rpp32f* phaseX, const Rpp32f* phaseY) {
-    geometric_reference<T>(src, sd, dst, dd, dt, roi, roiType, roi_out_sizes(sd, roi, roiType),
-                           NEAREST_NEIGHBOR,
-                           [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
-                               const RoiBounds b = roi_bounds(roi[n], roiType);
-                               water_map(ox, oy, b.x0, b.y0, amplitudeX[n], amplitudeY[n],
-                                         frequencyX[n], frequencyY[n], phaseX[n], phaseY[n], sx,
-                                         sy);
-                           });
+    geometric_reference<T>(
+        src, sd, dst, dd, dt, roi, roiType, roi_out_sizes(sd, roi, roiType), NEAREST_NEIGHBOR,
+        [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
+            const RoiBounds b = roi_bounds(roi[n], roiType);
+            water_map(ox, oy, b.x0, b.y0, amplitudeX[n], amplitudeY[n], frequencyX[n],
+                      frequencyY[n], phaseX[n], phaseY[n], sx, sy);
+        });
 }
 
 }  // namespace rpptest

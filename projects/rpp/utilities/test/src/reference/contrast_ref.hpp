@@ -72,7 +72,8 @@ inline double contrast_scalar(double v, DType dt, double factor, double center) 
             const double c = center / 255.0;
             return clampd((v - c) * factor + c, 0.0, 1.0);
         }
-        default: return v;
+        default:
+            return v;
     }
 }
 

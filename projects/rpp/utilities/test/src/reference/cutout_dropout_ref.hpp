@@ -59,34 +59,32 @@ Per-type form
   source value, stored directly -- so every type is bit-exact.
 */
 template <typename T>
-void cutout_dropout_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
-                              const RpptROI* roi, RpptRoiType roiType,
-                              const RpptRoiLtrb* boxes, const Rpp32u* numBoxes,
+void cutout_dropout_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
+                              RpptRoiType roiType, const RpptRoiLtrb* boxes, const Rpp32u* numBoxes,
                               Rpp32u maxBoxesPerImage, const T* colors) {
     (void)dt;
     const Rpp32u channels = d.c;
     std::vector<RoiBounds> b(d.n);
     for (Rpp32u n = 0; n < d.n; ++n) b[n] = roi_bounds(roi[n], roiType);
-    for_each_roi_io(d, roi, roiType,
-                    [&](Rpp32u n, Rpp32u c, Rpp32u j, Rpp32u i, std::size_t srcIdx,
-                        std::size_t dstIdx) {
-                        const int sx = static_cast<int>(b[n].x0 + i);
-                        const int sy = static_cast<int>(b[n].y0 + j);
-                        int hit = -1;
-                        for (Rpp32u k = 0; k < numBoxes[n]; ++k) {
-                            const RpptRoiLtrb& bx = boxes[n * maxBoxesPerImage + k];
-                            if (sx >= bx.lt.x && sx <= bx.rb.x && sy >= bx.lt.y && sy <= bx.rb.y) {
-                                hit = static_cast<int>(k);
-                                break;
-                            }
-                        }
-                        if (hit >= 0)
-                            dst[dstIdx] =
-                                colors[(n * maxBoxesPerImage + static_cast<Rpp32u>(hit)) * channels +
-                                       c];
-                        else
-                            dst[dstIdx] = src[srcIdx];
-                    });
+    for_each_roi_io(
+        d, roi, roiType,
+        [&](Rpp32u n, Rpp32u c, Rpp32u j, Rpp32u i, std::size_t srcIdx, std::size_t dstIdx) {
+            const int sx = static_cast<int>(b[n].x0 + i);
+            const int sy = static_cast<int>(b[n].y0 + j);
+            int hit = -1;
+            for (Rpp32u k = 0; k < numBoxes[n]; ++k) {
+                const RpptRoiLtrb& bx = boxes[n * maxBoxesPerImage + k];
+                if (sx >= bx.lt.x && sx <= bx.rb.x && sy >= bx.lt.y && sy <= bx.rb.y) {
+                    hit = static_cast<int>(k);
+                    break;
+                }
+            }
+            if (hit >= 0)
+                dst[dstIdx] =
+                    colors[(n * maxBoxesPerImage + static_cast<Rpp32u>(hit)) * channels + c];
+            else
+                dst[dstIdx] = src[srcIdx];
+        });
 }
 
 }  // namespace rpptest

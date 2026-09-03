@@ -111,22 +111,21 @@ class ChannelPermuteTest : public SkipListTest<WithParams<ChannelPermuteParams>>
 
 TEST_P(ChannelPermuteTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_channel_permute<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_channel_permute<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // channel_permute is 3-channel only (c = 3) and takes no ROI, so PLN1 and Partial are not
 // instantiated. A rotation {2,0,1} moves every channel and is sensitive to the mapping direction.
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_DataExchange, ChannelPermuteTest,
-    ::testing::ValuesIn(with_params<ChannelPermuteParams>(
-        concat_configs({
-            make_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv,
-                         {Roi::Full}, {presets::kTailWidthSize}),
-            make_configs(presets::kDefaultDTypes, presets::kLayouts3Ch, {Roi::Full},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {ChannelPermuteParams{{2, 0, 1}}})),
-    op_config_name<ChannelPermuteParams>);
+INSTANTIATE_TEST_SUITE_P(Image_DataExchange, ChannelPermuteTest,
+                         ::testing::ValuesIn(with_params<ChannelPermuteParams>(
+                             concat_configs({
+                                 make_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv,
+                                              {Roi::Full}, {presets::kTailWidthSize}),
+                                 make_configs(presets::kDefaultDTypes, presets::kLayouts3Ch,
+                                              {Roi::Full},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {ChannelPermuteParams{{2, 0, 1}}})),
+                         op_config_name<ChannelPermuteParams>);

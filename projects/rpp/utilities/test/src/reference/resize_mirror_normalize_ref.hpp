@@ -92,36 +92,43 @@ Notes
 // Stores a normalized value: integers round to nearest and saturate, floats pass through unclamped.
 inline double resize_mirror_normalize_store(double v, DType dt) {
     switch (dt) {
-        case DType::U8: return clampd(std::nearbyint(v), 0.0, 255.0);
-        case DType::I8: return clampd(std::nearbyint(v), -128.0, 127.0);
-        default:        return v;  // F16/F32 -- a normalized result is legitimately signed
+        case DType::U8:
+            return clampd(std::nearbyint(v), 0.0, 255.0);
+        case DType::I8:
+            return clampd(std::nearbyint(v), -128.0, 127.0);
+        default:
+            return v;  // F16/F32 -- a normalized result is legitimately signed
     }
 }
 
 // Normalizes one sampled value, taking and returning STORED units.
 inline double resize_mirror_normalize_scalar(double v, DType dt, double mean, double stdDev) {
     switch (dt) {
-        case DType::U8: return (v - mean) / stdDev;
-        case DType::I8: return ((v + 128.0) - mean) / stdDev - 128.0;
+        case DType::U8:
+            return (v - mean) / stdDev;
+        case DType::I8:
+            return ((v + 128.0) - mean) / stdDev - 128.0;
         case DType::F16:
-        case DType::F32: return (v - mean / 255.0) / stdDev;
-        default: return v;
+        case DType::F32:
+            return (v - mean / 255.0) / stdDev;
+        default:
+            return v;
     }
 }
 
 // meanTensor / stdDevTensor hold one value per channel per image; mirrorTensor one flag per image.
 template <typename T>
-void resize_mirror_normalize_reference(const T* src, const RpptDesc& sd, T* dst,
-                                       const RpptDesc& dd, DType dt, const RpptROI* roi,
-                                       RpptRoiType roiType, const RpptImagePatch* dstSizes,
-                                       const Rpp32f* meanTensor, const Rpp32f* stdDevTensor,
-                                       const Rpp32u* mirrorTensor, RpptInterpolationType interp) {
+void resize_mirror_normalize_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
+                                       DType dt, const RpptROI* roi, RpptRoiType roiType,
+                                       const RpptImagePatch* dstSizes, const Rpp32f* meanTensor,
+                                       const Rpp32f* stdDevTensor, const Rpp32u* mirrorTensor,
+                                       RpptInterpolationType interp) {
     const Rpp32u channels = sd.c;
     resize_driver<T>(src, sd, dst, dd, dt, roi, roiType, dstSizes, mirrorTensor, interp,
                      [&](double v, Rpp32u n, Rpp32u c) {
                          const std::size_t k = static_cast<std::size_t>(n) * channels + c;
-                         const double norm = resize_mirror_normalize_scalar(
-                             v, dt, meanTensor[k], stdDevTensor[k]);
+                         const double norm =
+                             resize_mirror_normalize_scalar(v, dt, meanTensor[k], stdDevTensor[k]);
                          return from_double<T>(resize_mirror_normalize_store(norm, dt));
                      });
 }

@@ -69,22 +69,22 @@ void color_twist_reference(const T* src, const RpptDesc& sd, T* dst, const RpptD
                            const RpptROI* roi, RpptRoiType roiType, double brightness,
                            double contrast, double hueDeg, double satFactor) {
     const double beta = contrast / 255.0;
-    for_each_roi_pixel(sd, dd, roi, roiType,
-                       [&](Rpp32u, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
-        if (sd.c == 3) {
-            double rgb[3];
-            for (int c = 0; c < 3; ++c)
-                rgb[c] = to_unit(to_double(src[channel_index(sd, srcPix, c)]), dt);
-            hue_rotate_rgb(rgb[0], rgb[1], rgb[2], hueDeg);                    // Stage 1
-            saturation_scale_rgb(rgb[0], rgb[1], rgb[2], satFactor);           // Stage 2
-            for (int c = 0; c < 3; ++c) rgb[c] = brightness * rgb[c] + beta;  // Stage 3
-            for (int c = 0; c < 3; ++c)
-                dst[channel_index(dd, dstPix, c)] = from_double<T>(from_unit(rgb[c], dt));
-        } else {  // 1-channel: only the Stage 3 affine (hue/saturation are no-ops)
-            const double x = brightness * to_unit(to_double(src[srcPix]), dt) + beta;
-            dst[dstPix] = from_double<T>(from_unit(x, dt));
-        }
-    });
+    for_each_roi_pixel(
+        sd, dd, roi, roiType, [&](Rpp32u, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
+            if (sd.c == 3) {
+                double rgb[3];
+                for (int c = 0; c < 3; ++c)
+                    rgb[c] = to_unit(to_double(src[channel_index(sd, srcPix, c)]), dt);
+                hue_rotate_rgb(rgb[0], rgb[1], rgb[2], hueDeg);                   // Stage 1
+                saturation_scale_rgb(rgb[0], rgb[1], rgb[2], satFactor);          // Stage 2
+                for (int c = 0; c < 3; ++c) rgb[c] = brightness * rgb[c] + beta;  // Stage 3
+                for (int c = 0; c < 3; ++c)
+                    dst[channel_index(dd, dstPix, c)] = from_double<T>(from_unit(rgb[c], dt));
+            } else {  // 1-channel: only the Stage 3 affine (hue/saturation are no-ops)
+                const double x = brightness * to_unit(to_double(src[srcPix]), dt) + beta;
+                dst[dstPix] = from_double<T>(from_unit(x, dt));
+            }
+        });
 }
 
 }  // namespace rpptest

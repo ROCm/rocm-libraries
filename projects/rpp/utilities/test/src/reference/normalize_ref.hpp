@@ -77,8 +77,7 @@ Notes
 inline std::vector<Rpp32u> normalize_param_dims(const NdDims& dims, Rpp32u axisMask) {
     const Rpp32u nDim = nd_rank(dims);
     std::vector<Rpp32u> paramDims(nDim);
-    for (Rpp32u i = 0; i < nDim; ++i)
-        paramDims[i] = ((axisMask >> i) & 1u) ? 1u : dims[i + 1];
+    for (Rpp32u i = 0; i < nDim; ++i) paramDims[i] = ((axisMask >> i) & 1u) ? 1u : dims[i + 1];
     return paramDims;
 }
 
@@ -99,9 +98,9 @@ inline Rpp32u normalize_param_size(const std::vector<Rpp32u>& paramDims) {
 
 template <typename Tin, typename Tout>
 void normalize_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDesc,
-                         const RpptGenericDesc& dstDesc, Rpp32u axisMask,
-                         const Rpp32f* meanTensor, const Rpp32f* stdDevTensor,
-                         Rpp8u computeMeanStddev, Rpp32f scale, Rpp32f shift) {
+                         const RpptGenericDesc& dstDesc, Rpp32u axisMask, const Rpp32f* meanTensor,
+                         const Rpp32f* stdDevTensor, Rpp8u computeMeanStddev, Rpp32f scale,
+                         Rpp32f shift) {
     const NdDims dims = nd_dims(srcDesc);
     const Rpp32u nDim = nd_rank(dims);
     const Rpp32u batch = dims[0];

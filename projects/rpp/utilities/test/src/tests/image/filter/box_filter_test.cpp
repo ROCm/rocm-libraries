@@ -43,7 +43,9 @@ namespace {
 // kernelSize is an odd square window size (3/5/7/9 per the API doc); each has its own SIMD path.
 struct BoxFilterParams {
     Rpp32u kernelSize;
-    std::string name() const { return "k" + std::to_string(kernelSize); }
+    std::string name() const {
+        return "k" + std::to_string(kernelSize);
+    }
 };
 
 // Tolerances reflect legitimate numeric error only (weighted-sum rounding); U8/I8 allow one LSB
@@ -107,14 +109,14 @@ void run_box_filter(const TestConfig& cfg, const BoxFilterParams& op) {
 
 }  // namespace
 
-// Full name: Image_Filter/BoxFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
+// Full name:
+// Image_Filter/BoxFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
 class BoxFilterTest : public SkipListTest<WithParams<BoxFilterParams>> {};
 
 TEST_P(BoxFilterTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_box_filter<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_box_filter<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.

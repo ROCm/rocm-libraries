@@ -121,9 +121,8 @@ template <typename T>
     Mismatches mismatches(bound);
     for_each_roi_io(d, roi, roiType,
                     [&](Rpp32u n, Rpp32u c, Rpp32u j, Rpp32u i, std::size_t, std::size_t dstIdx) {
-                        mismatches.check(
-                            to_double(actual[dstIdx]), to_double(reference[dstIdx]),
-                            named_coord({{"n", n}, {"c", c}, {"row", j}, {"col", i}}));
+                        mismatches.check(to_double(actual[dstIdx]), to_double(reference[dstIdx]),
+                                         named_coord({{"n", n}, {"c", c}, {"row", j}, {"col", i}}));
                     });
     return mismatches.result();
 }
@@ -132,8 +131,8 @@ template <typename T>
 
 // Compares the logical elements only -- padding slack is not data.
 template <typename T>
-::testing::AssertionResult compare_nd(const T* actual, const T* reference,
-                                      const RpptGenericDesc& d, Bound bound) {
+::testing::AssertionResult compare_nd(const T* actual, const T* reference, const RpptGenericDesc& d,
+                                      Bound bound) {
     Mismatches mismatches(bound);
     for_each_nd_coord(d, [&](const NdDims& coord) {
         const std::size_t i = nd_offset(d, coord);

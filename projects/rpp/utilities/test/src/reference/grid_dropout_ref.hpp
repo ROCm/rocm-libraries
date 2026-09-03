@@ -71,24 +71,22 @@ inline double grid_dropout_scalar(double v, DType dt, bool erased) {
 // Hole membership is tested against the ABSOLUTE source coordinate (x0 + i, y0 + j).
 template <typename T>
 void grid_dropout_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
-                            const RpptROI* roi, RpptRoiType roiType,
-                            const RpptRoiLtrb* boxes, Rpp32u boxesInEachImage) {
+                            const RpptROI* roi, RpptRoiType roiType, const RpptRoiLtrb* boxes,
+                            Rpp32u boxesInEachImage) {
     std::vector<RoiBounds> b(sd.n);
     for (Rpp32u n = 0; n < sd.n; ++n) b[n] = roi_bounds(roi[n], roiType);
-    for_each_roi_io(sd, dd, roi, roiType,
-                    [&](Rpp32u n, Rpp32u, Rpp32u j, Rpp32u i, std::size_t srcIdx,
-                        std::size_t dstIdx) {
-                        const int sx = static_cast<int>(b[n].x0 + i);
-                        const int sy = static_cast<int>(b[n].y0 + j);
-                        bool erased = false;
-                        for (Rpp32u k = 0; k < boxesInEachImage && !erased; ++k) {
-                            const RpptRoiLtrb& bx = boxes[n * boxesInEachImage + k];
-                            if (sx >= bx.lt.x && sx <= bx.rb.x && sy >= bx.lt.y && sy <= bx.rb.y)
-                                erased = true;
-                        }
-                        dst[dstIdx] = from_double<T>(
-                            grid_dropout_scalar(to_double(src[srcIdx]), dt, erased));
-                    });
+    for_each_roi_io(
+        sd, dd, roi, roiType,
+        [&](Rpp32u n, Rpp32u, Rpp32u j, Rpp32u i, std::size_t srcIdx, std::size_t dstIdx) {
+            const int sx = static_cast<int>(b[n].x0 + i);
+            const int sy = static_cast<int>(b[n].y0 + j);
+            bool erased = false;
+            for (Rpp32u k = 0; k < boxesInEachImage && !erased; ++k) {
+                const RpptRoiLtrb& bx = boxes[n * boxesInEachImage + k];
+                if (sx >= bx.lt.x && sx <= bx.rb.x && sy >= bx.lt.y && sy <= bx.rb.y) erased = true;
+            }
+            dst[dstIdx] = from_double<T>(grid_dropout_scalar(to_double(src[srcIdx]), dt, erased));
+        });
 }
 
 }  // namespace rpptest

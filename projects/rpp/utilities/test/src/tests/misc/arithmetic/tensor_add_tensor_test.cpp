@@ -104,7 +104,8 @@ void run_tensor_add_tensor(const NdConfig& cfg, Broadcast broadcast) {
 
 }  // namespace
 
-// Full name: Misc_Arithmetic/TensorAddTensorTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Broadcast>_<Shape>
+// Full name:
+// Misc_Arithmetic/TensorAddTensorTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Broadcast>_<Shape>
 class TensorAddTensorTest : public SkipListTest<NdWithParams<BroadcastParams>> {};
 
 TEST_P(TensorAddTensorTest, Correctness) {

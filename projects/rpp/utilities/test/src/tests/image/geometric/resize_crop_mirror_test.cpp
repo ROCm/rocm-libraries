@@ -45,9 +45,9 @@ std::string interp_token(RpptInterpolationType i) {
     return i == NEAREST_NEIGHBOR ? "NN" : "BILINEAR";
 }
 
-// A per-image destination size, interpolation, and mirror flag. The scale is derived from the source
-// ROI (same target size is a bigger upscale from the half-size partial ROI); mirror flips the output
-// horizontally.
+// A per-image destination size, interpolation, and mirror flag. The scale is derived from the
+// source ROI (same target size is a bigger upscale from the half-size partial ROI); mirror flips
+// the output horizontally.
 struct ResizeCropMirrorParams {
     Rpp32u dstW, dstH;
     RpptInterpolationType interp;
@@ -71,8 +71,8 @@ template <typename T>
 void run_resize_crop_mirror(const TestConfig& cfg, const ResizeCropMirrorParams& op) {
     const TensorShape srcShape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)),
                                cfg.size.h, cfg.size.w};
-    const TensorShape dstShape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutOut)),
-                               op.dstH, op.dstW};
+    const TensorShape dstShape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutOut)), op.dstH,
+                               op.dstW};
     RpptDesc srcDesc = make_descriptor(srcShape, cfg.dtype, cfg.layoutIn);
     RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layoutOut);
     const std::size_t srcCount = element_count(srcDesc), dstCount = element_count(dstDesc);
@@ -134,19 +134,18 @@ TEST_P(ResizeCropMirrorTest, Correctness) {
 
 // Cover the {mirror on/off} x {NN/bilinear} x {up/down} axes: up-NN-nomirror, up-bilinear-mirror,
 // down-NN-mirror, down-bilinear-nomirror.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Geometric, ResizeCropMirrorTest,
-    ::testing::ValuesIn(with_params<ResizeCropMirrorParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PLN1, Layout::PLN1},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kTailWidthSize}),
-        {ResizeCropMirrorParams{72, 54, NEAREST_NEIGHBOR, 0, "up"},
-         ResizeCropMirrorParams{72, 54, BILINEAR, 1, "upmir"},
-         ResizeCropMirrorParams{24, 18, NEAREST_NEIGHBOR, 1, "downmir"},
-         ResizeCropMirrorParams{24, 18, BILINEAR, 0, "down"}})),
-    op_config_name<ResizeCropMirrorParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Geometric, ResizeCropMirrorTest,
+                         ::testing::ValuesIn(with_params<ResizeCropMirrorParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {{Layout::PKD3, Layout::PKD3},
+                                           {Layout::PLN3, Layout::PLN3},
+                                           {Layout::PLN1, Layout::PLN1},
+                                           {Layout::PKD3, Layout::PLN3},
+                                           {Layout::PLN3, Layout::PKD3}},
+                                          {Roi::Full, Roi::Partial},
+                                          {presets::kDefaultSize, presets::kTailWidthSize}),
+                             {ResizeCropMirrorParams{72, 54, NEAREST_NEIGHBOR, 0, "up"},
+                              ResizeCropMirrorParams{72, 54, BILINEAR, 1, "upmir"},
+                              ResizeCropMirrorParams{24, 18, NEAREST_NEIGHBOR, 1, "downmir"},
+                              ResizeCropMirrorParams{24, 18, BILINEAR, 0, "down"}})),
+                         op_config_name<ResizeCropMirrorParams>);

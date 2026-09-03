@@ -51,7 +51,9 @@ enum class GlitchKind { Identity, Shift };
 
 struct GlitchParams {
     GlitchKind kind;
-    std::string name() const { return kind == GlitchKind::Identity ? "Identity" : "Shift"; }
+    std::string name() const {
+        return kind == GlitchKind::Identity ? "Identity" : "Shift";
+    }
 };
 
 RpptChannelOffsets make_offsets(GlitchKind kind) {
@@ -106,14 +108,14 @@ void run_glitch(const TestConfig& cfg, const GlitchParams& op) {
 
 }  // namespace
 
-// Full name: Image_Effects/GlitchTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Kind>
+// Full name:
+// Image_Effects/GlitchTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Kind>
 class GlitchTest : public SkipListTest<WithParams<GlitchParams>> {};
 
 TEST_P(GlitchTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32>(p.cfg.dtype, [&](auto tag) {
-        run_glitch<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32>(
+        p.cfg.dtype, [&](auto tag) { run_glitch<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Three channels only: the op takes an R/G/B offset triple and PLN1 is not part of its contract.

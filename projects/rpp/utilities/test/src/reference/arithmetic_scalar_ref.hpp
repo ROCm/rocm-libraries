@@ -73,10 +73,14 @@ enum class ScalarArithmeticOp { Add, Subtract, Multiply, FusedMultiplyAdd };
 // p0 is the addend / subtrahend / multiplier; p1 is fmadd's addend and is ignored otherwise.
 inline double apply_scalar_arithmetic(double v, double p0, double p1, ScalarArithmeticOp op) {
     switch (op) {
-        case ScalarArithmeticOp::Add:              return v + p0;
-        case ScalarArithmeticOp::Subtract:         return v - p0;
-        case ScalarArithmeticOp::Multiply:         return v * p0;
-        case ScalarArithmeticOp::FusedMultiplyAdd: return v * p0 + p1;
+        case ScalarArithmeticOp::Add:
+            return v + p0;
+        case ScalarArithmeticOp::Subtract:
+            return v - p0;
+        case ScalarArithmeticOp::Multiply:
+            return v * p0;
+        case ScalarArithmeticOp::FusedMultiplyAdd:
+            return v * p0 + p1;
     }
     return 0.0;
 }

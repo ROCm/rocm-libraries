@@ -48,7 +48,9 @@ struct RicapParams {
     Rpp32u cropX[4], cropY[4];
     bool distinctSources;  // true: region k of image n draws from image (n+k); false: all from 0
     std::string tag;
-    std::string name() const { return tag; }
+    std::string name() const {
+        return tag;
+    }
 };
 
 template <typename T>
@@ -109,14 +111,14 @@ void run_ricap(const TestConfig& cfg, const RicapParams& op) {
 
 }  // namespace
 
-// Full name: Image_Effects/RicapTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Case>
+// Full name:
+// Image_Effects/RicapTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Case>
 class RicapTest : public SkipListTest<WithParams<RicapParams>> {};
 
 TEST_P(RicapTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_ricap<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_ricap<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Only {Roi::Full} on the roi axis: ricap has no standard source-ROI argument (its four crop
@@ -135,18 +137,17 @@ TEST_P(RicapTest, Correctness) {
 //   bound  - single's degenerate crops/permutation with quad's boundary (20, 16): isolates the
 //            vertical split as the only variable.
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, RicapTest,
-    ::testing::ValuesIn(with_params<RicapParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PLN1, Layout::PLN1},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full}, {{4, 36, 48}}),
-        {RicapParams{20, 16, {2, 10, 6, 14}, {3, 5, 12, 8}, true, "quad"},
-         RicapParams{24, 18, {0, 0, 0, 0}, {0, 0, 0, 0}, false, "single"},
-         RicapParams{24, 16, {2, 10, 6, 14}, {3, 5, 12, 8}, true, "quad8"},
-         RicapParams{20, 16, {0, 0, 0, 0}, {0, 0, 0, 0}, false, "bound"}})),
-    op_config_name<RicapParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, RicapTest,
+                         ::testing::ValuesIn(with_params<RicapParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {{Layout::PKD3, Layout::PKD3},
+                                           {Layout::PLN3, Layout::PLN3},
+                                           {Layout::PLN1, Layout::PLN1},
+                                           {Layout::PKD3, Layout::PLN3},
+                                           {Layout::PLN3, Layout::PKD3}},
+                                          {Roi::Full}, {{4, 36, 48}}),
+                             {RicapParams{20, 16, {2, 10, 6, 14}, {3, 5, 12, 8}, true, "quad"},
+                              RicapParams{24, 18, {0, 0, 0, 0}, {0, 0, 0, 0}, false, "single"},
+                              RicapParams{24, 16, {2, 10, 6, 14}, {3, 5, 12, 8}, true, "quad8"},
+                              RicapParams{20, 16, {0, 0, 0, 0}, {0, 0, 0, 0}, false, "bound"}})),
+                         op_config_name<RicapParams>);

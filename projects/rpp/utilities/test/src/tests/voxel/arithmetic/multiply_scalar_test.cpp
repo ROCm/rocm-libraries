@@ -43,12 +43,16 @@ namespace {
 
 struct MultiplyScalarParams {
     float mul;
-    std::string name() const { return "mul" + num_token(mul); }
+    std::string name() const {
+        return "mul" + num_token(mul);
+    }
 };
 
 // The op is exact in float; the only per-element error is the golden accumulating in double and
 // storing float.
-Bound scalar_tolerance(DType) { return {1e-5, 1e-6}; }
+Bound scalar_tolerance(DType) {
+    return {1e-5, 1e-6};
+}
 
 template <typename T>
 void run_multiply_scalar(const VoxelConfig& cfg, const MultiplyScalarParams& p) {
@@ -84,10 +88,10 @@ void run_multiply_scalar(const VoxelConfig& cfg, const MultiplyScalarParams& p) 
     dst.write(actual.data(), bytes);
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_multiply_scalar(src.ptr(), desc.get(), dst.ptr(), desc.get(), mul.data(),
-                                   roi.data(), to_rpp_roi3d_type(cfg.roiType), handle.get(),
-                                   cfg.backend),
-              RPP_SUCCESS);
+    ASSERT_EQ(
+        rppt_multiply_scalar(src.ptr(), desc.get(), dst.ptr(), desc.get(), mul.data(), roi.data(),
+                             to_rpp_roi3d_type(cfg.roiType), handle.get(), cfg.backend),
+        RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
@@ -101,8 +105,7 @@ void run_multiply_scalar(const VoxelConfig& cfg, const MultiplyScalarParams& p) 
 
 // Full name:
 // Voxel_Arithmetic/MultiplyScalarTest.Correctness/<Backend>_F32toF32_<Layout>_<Roi>_<Roi3DType>_<Shape>_<Mul>
-class MultiplyScalarTest : public SkipListTest<VoxelWithParams<MultiplyScalarParams>> {
-};
+class MultiplyScalarTest : public SkipListTest<VoxelWithParams<MultiplyScalarParams>> {};
 
 TEST_P(MultiplyScalarTest, Correctness) {
     const auto& p = GetParam();
@@ -115,13 +118,12 @@ TEST_P(MultiplyScalarTest, Correctness) {
 // The fill spans [0, 1] and the multiplier is 80 (the value the legacy voxel harness uses), so
 // results reach ~160 for the second sample: a kernel that clamped to the image-intensity range
 // would show.
-INSTANTIATE_TEST_SUITE_P(Voxel_Arithmetic, MultiplyScalarTest,
-                         ::testing::ValuesIn(voxel_with_params<MultiplyScalarParams>(
-                             make_voxel_configs({DType::F32},
-                                                {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3,
-                                                 VoxelLayout::NDHWC3},
-                                                {Roi::Full, Roi::Partial},
-                                                {Roi3D::XYZWHD, Roi3D::LTFRBB},
-                                                {presets::kDefaultVolume, presets::kTailVolume}),
-                             {{80.0f}})),
-                         voxel_op_config_name<MultiplyScalarParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Voxel_Arithmetic, MultiplyScalarTest,
+    ::testing::ValuesIn(voxel_with_params<MultiplyScalarParams>(
+        make_voxel_configs({DType::F32},
+                           {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3, VoxelLayout::NDHWC3},
+                           {Roi::Full, Roi::Partial}, {Roi3D::XYZWHD, Roi3D::LTFRBB},
+                           {presets::kDefaultVolume, presets::kTailVolume}),
+        {{80.0f}})),
+    voxel_op_config_name<MultiplyScalarParams>);

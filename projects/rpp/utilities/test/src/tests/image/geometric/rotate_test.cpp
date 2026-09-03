@@ -45,23 +45,24 @@ std::string interp_token(RpptInterpolationType i) {
     return i == NEAREST_NEIGHBOR ? "NN" : "BILINEAR";
 }
 
-// A rotation angle (degrees, positive = anticlockwise) plus the interpolation. Angles are restricted
-// to the cardinal set {0,90,180,270}: those map every output pixel to an integer source coordinate,
-// so the golden is bit-exact and independent of the double-vs-float coordinate pipeline. General
-// angles are deferred -- with fractional coords the golden's double
-// maths diverges from the kernel's float pipeline at texel boundaries, producing diffs that cannot
-// be cleanly attributed to a kernel defect. The shared bilinear 4-tap blend is already validated by
+// A rotation angle (degrees, positive = anticlockwise) plus the interpolation. Angles are
+// restricted to the cardinal set {0,90,180,270}: those map every output pixel to an integer source
+// coordinate, so the golden is bit-exact and independent of the double-vs-float coordinate
+// pipeline. General angles are deferred -- with fractional coords the golden's double maths
+// diverges from the kernel's float pipeline at texel boundaries, producing diffs that cannot be
+// cleanly attributed to a kernel defect. The shared bilinear 4-tap blend is already validated by
 // warp_affine's halfshift case.
 struct RotateParams {
     float angle;
     RpptInterpolationType interp;
-    std::string name() const { return "a" + num_token(angle) + "_" + interp_token(interp); }
+    std::string name() const {
+        return "a" + num_token(angle) + "_" + interp_token(interp);
+    }
 };
 
-// Tolerances are set from legitimate numeric error only; they are NOT loosened to hide the real warp
-// kernel defects this test surfaces (shared machinery): HOST
-// bilinear last col/row off-by-one, I8 out-of-bounds fill = 0 (not -128), and HIP partial-ROI
-// placement divergence.
+// Tolerances are set from legitimate numeric error only; they are NOT loosened to hide the real
+// warp kernel defects this test surfaces (shared machinery): HOST bilinear last col/row off-by-one,
+// I8 out-of-bounds fill = 0 (not -128), and HIP partial-ROI placement divergence.
 double rotate_tolerance(DType dt, RpptInterpolationType interp) {
     // Nearest-neighbour copies a texel verbatim; bit-exact at cardinal angles (integer coords).
     if (interp == NEAREST_NEIGHBOR) return 0.0;
@@ -92,8 +93,8 @@ void run_rotate(const TestConfig& cfg, const RotateParams& op) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    rotate_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH, angle.data(),
-                        op.interp);
+    rotate_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
+                        angle.data(), op.interp);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -116,14 +117,14 @@ void run_rotate(const TestConfig& cfg, const RotateParams& op) {
 
 }  // namespace
 
-// Full name: Image_Geometric/RotateTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Angle>_<Interp>
+// Full name:
+// Image_Geometric/RotateTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Angle>_<Interp>
 class RotateTest : public SkipListTest<WithParams<RotateParams>> {};
 
 TEST_P(RotateTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_rotate<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_rotate<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Cardinal angles: 0 (identity), 90/270 (both rotation directions), 180. All map to integer source

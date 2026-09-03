@@ -42,7 +42,9 @@ namespace {
 // kernelSize is an odd square window size (3/5/7/9 per the API doc).
 struct MedianFilterParams {
     Rpp32u kernelSize;
-    std::string name() const { return "k" + std::to_string(kernelSize); }
+    std::string name() const {
+        return "k" + std::to_string(kernelSize);
+    }
 };
 
 template <typename T>
@@ -50,9 +52,9 @@ void run_median_filter(const TestConfig& cfg, const MedianFilterParams& op) {
     const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
                             cfg.size.w};
     // src carries a leading border pad: the HIP filter kernel requires
-    // srcDesc.offsetInBytes >= 12 * (kernelSize/2) (read-slack for the KxK window; the border itself
-    // is computed by clamping indices to the image, i.e. replicate). dst keeps offset 0, so the
-    // golden and comparator index destination elements from 0.
+    // srcDesc.offsetInBytes >= 12 * (kernelSize/2) (read-slack for the KxK window; the border
+    // itself is computed by clamping indices to the image, i.e. replicate). dst keeps offset 0, so
+    // the golden and comparator index destination elements from 0.
     RpptDesc srcDesc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
     RpptDesc dstDesc = srcDesc;  // same dims/strides; only src gets the pad offset
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
@@ -77,18 +79,17 @@ void run_median_filter(const TestConfig& cfg, const MedianFilterParams& op) {
                                op.kernelSize);
 
     // (2) Run RPP on the configured backend. median_filter is a single symbol carrying the backend
-    // arg (no separate _host variant). RPP adds srcDesc.offsetInBytes to the src pointer internally,
-    // landing on the image base.
+    // arg (no separate _host variant). RPP adds srcDesc.offsetInBytes to the src pointer
+    // internally, landing on the image base.
     DeviceTensor srcDev(cfg.backend, src.size() * dtype_size(cfg.dtype));
     DeviceTensor dst(cfg.backend, imageBytes);
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
     dst.write(image, imageBytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, shape.n);
-    RppStatus status =
-        rppt_median_filter(srcDev.ptr(), &srcDesc, dst.ptr(), &dstDesc, op.kernelSize,
-                           RpptImageBorderType::REPLICATE, roi.data(), XYWH, handle.get(),
-                           cfg.backend);
+    RppStatus status = rppt_median_filter(srcDev.ptr(), &srcDesc, dst.ptr(), &dstDesc,
+                                          op.kernelSize, RpptImageBorderType::REPLICATE, roi.data(),
+                                          XYWH, handle.get(), cfg.backend);
     ASSERT_EQ(status, RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
@@ -103,14 +104,14 @@ void run_median_filter(const TestConfig& cfg, const MedianFilterParams& op) {
 
 }  // namespace
 
-// Full name: Image_Filter/MedianFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
+// Full name:
+// Image_Filter/MedianFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
 class MedianFilterTest : public SkipListTest<WithParams<MedianFilterParams>> {};
 
 TEST_P(MedianFilterTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_median_filter<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_median_filter<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 INSTANTIATE_TEST_SUITE_P(

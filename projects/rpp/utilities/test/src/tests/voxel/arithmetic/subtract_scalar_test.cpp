@@ -43,12 +43,16 @@ namespace {
 
 struct SubtractScalarParams {
     float sub;
-    std::string name() const { return "sub" + num_token(sub); }
+    std::string name() const {
+        return "sub" + num_token(sub);
+    }
 };
 
 // Subtraction is exact; the only per-element error is the golden accumulating in double and
 // storing float.
-Bound scalar_tolerance(DType) { return {1e-5, 1e-6}; }
+Bound scalar_tolerance(DType) {
+    return {1e-5, 1e-6};
+}
 
 template <typename T>
 void run_subtract_scalar(const VoxelConfig& cfg, const SubtractScalarParams& p) {
@@ -84,10 +88,10 @@ void run_subtract_scalar(const VoxelConfig& cfg, const SubtractScalarParams& p) 
     dst.write(actual.data(), bytes);
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_subtract_scalar(src.ptr(), desc.get(), dst.ptr(), desc.get(), sub.data(),
-                                   roi.data(), to_rpp_roi3d_type(cfg.roiType), handle.get(),
-                                   cfg.backend),
-              RPP_SUCCESS);
+    ASSERT_EQ(
+        rppt_subtract_scalar(src.ptr(), desc.get(), dst.ptr(), desc.get(), sub.data(), roi.data(),
+                             to_rpp_roi3d_type(cfg.roiType), handle.get(), cfg.backend),
+        RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
@@ -101,8 +105,7 @@ void run_subtract_scalar(const VoxelConfig& cfg, const SubtractScalarParams& p) 
 
 // Full name:
 // Voxel_Arithmetic/SubtractScalarTest.Correctness/<Backend>_F32toF32_<Layout>_<Roi>_<Roi3DType>_<Shape>_<Sub>
-class SubtractScalarTest : public SkipListTest<VoxelWithParams<SubtractScalarParams>> {
-};
+class SubtractScalarTest : public SkipListTest<VoxelWithParams<SubtractScalarParams>> {};
 
 TEST_P(SubtractScalarTest, Correctness) {
     const auto& p = GetParam();
@@ -113,13 +116,12 @@ TEST_P(SubtractScalarTest, Correctness) {
 // F32 only, per the API header. The fill spans [0, 1] and the subtrahend is 40 (the value the
 // legacy voxel harness drives this op with), so every result is strongly negative: a kernel that
 // clamped at 0 would show up on every voxel.
-INSTANTIATE_TEST_SUITE_P(Voxel_Arithmetic, SubtractScalarTest,
-                         ::testing::ValuesIn(voxel_with_params<SubtractScalarParams>(
-                             make_voxel_configs({DType::F32},
-                                                {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3,
-                                                 VoxelLayout::NDHWC3},
-                                                {Roi::Full, Roi::Partial},
-                                                {Roi3D::XYZWHD, Roi3D::LTFRBB},
-                                                {presets::kDefaultVolume, presets::kTailVolume}),
-                             {{40.0f}})),
-                         voxel_op_config_name<SubtractScalarParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Voxel_Arithmetic, SubtractScalarTest,
+    ::testing::ValuesIn(voxel_with_params<SubtractScalarParams>(
+        make_voxel_configs({DType::F32},
+                           {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3, VoxelLayout::NDHWC3},
+                           {Roi::Full, Roi::Partial}, {Roi3D::XYZWHD, Roi3D::LTFRBB},
+                           {presets::kDefaultVolume, presets::kTailVolume}),
+        {{40.0f}})),
+    voxel_op_config_name<SubtractScalarParams>);

@@ -63,13 +63,12 @@ void channel_dropout_reference(const T* src, const RpptDesc& sd, T* dst, const R
                                DType dt, const RpptROI* roi, RpptRoiType roiType,
                                const Rpp8u* dropout) {
     const Rpp32u channels = sd.c;
-    for_each_roi_io(sd, dd, roi, roiType,
-                    [&](Rpp32u n, Rpp32u c, Rpp32u, Rpp32u, std::size_t srcIdx,
-                        std::size_t dstIdx) {
-                        const bool keep = dropout[n * channels + c] != 0;
-                        dst[dstIdx] = from_double<T>(
-                            channel_dropout_scalar(to_double(src[srcIdx]), dt, keep));
-                    });
+    for_each_roi_io(
+        sd, dd, roi, roiType,
+        [&](Rpp32u n, Rpp32u c, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
+            const bool keep = dropout[n * channels + c] != 0;
+            dst[dstIdx] = from_double<T>(channel_dropout_scalar(to_double(src[srcIdx]), dt, keep));
+        });
 }
 
 }  // namespace rpptest

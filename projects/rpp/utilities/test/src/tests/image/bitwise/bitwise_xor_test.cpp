@@ -60,8 +60,8 @@ void run_bitwise_xor(const TestConfig& cfg) {
     for (std::size_t i = 0; i < count; ++i)
         input2[i] = from_double<T>(static_cast<double>((i * 53u + 97u) & 0xFFu));
     golden = input1;
-    bitwise_binary_reference<T>(input1.data(), input2.data(), srcDesc, golden.data(),
-                                dstDesc, roi.data(), XYWH, BitwiseOp::Xor);
+    bitwise_binary_reference<T>(input1.data(), input2.data(), srcDesc, golden.data(), dstDesc,
+                                roi.data(), XYWH, BitwiseOp::Xor);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src1(cfg.backend, bytes), src2(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -70,8 +70,8 @@ void run_bitwise_xor(const TestConfig& cfg) {
     dst.write(input1.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_bitwise_xor(src1.ptr(), src2.ptr(), &srcDesc, dst.ptr(), &dstDesc, roi.data(), XYWH,
-                               handle.get(), cfg.backend),
+    ASSERT_EQ(rppt_bitwise_xor(src1.ptr(), src2.ptr(), &srcDesc, dst.ptr(), &dstDesc, roi.data(),
+                               XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
@@ -94,12 +94,12 @@ TEST_P(BitwiseXorTest, Correctness) {
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Bitwise, BitwiseXorTest,
-    ::testing::ValuesIn(concat_configs({
-        make_configs({DType::U8}, presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
-                     {presets::kTailWidthSize}),
-        make_configs({DType::U8}, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
-                     {presets::kDefaultSize, presets::kSubVectorSize}),
-    })),
-    config_param_name);
+INSTANTIATE_TEST_SUITE_P(Image_Bitwise, BitwiseXorTest,
+                         ::testing::ValuesIn(concat_configs({
+                             make_configs({DType::U8}, presets::kLayoutsFullConv,
+                                          {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+                             make_configs({DType::U8}, presets::kLayoutsFull,
+                                          {Roi::Full, Roi::Partial},
+                                          {presets::kDefaultSize, presets::kSubVectorSize}),
+                         })),
+                         config_param_name);

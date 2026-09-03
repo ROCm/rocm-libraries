@@ -117,14 +117,14 @@ void run_sobel_filter(const TestConfig& cfg, const SobelFilterParams& op) {
 
 }  // namespace
 
-// Full name: Image_Filter/SobelFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<grad>_k<KernelSize>
+// Full name:
+// Image_Filter/SobelFilterTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<grad>_k<KernelSize>
 class SobelFilterTest : public SkipListTest<WithParams<SobelFilterParams>> {};
 
 TEST_P(SobelFilterTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_sobel_filter<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_sobel_filter<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 INSTANTIATE_TEST_SUITE_P(

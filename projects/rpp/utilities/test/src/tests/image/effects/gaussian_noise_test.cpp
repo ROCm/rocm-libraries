@@ -91,7 +91,9 @@ void run_gaussian_noise(const TestConfig& cfg) {
 struct GaussianNoiseNegativeParams {
     float mean;
     float stdDev;
-    std::string name() const { return "m" + num_token(mean) + "_s" + num_token(stdDev); }
+    std::string name() const {
+        return "m" + num_token(mean) + "_s" + num_token(stdDev);
+    }
 };
 
 // A negative mean or standard deviation is not a legal call and must be reported rather than
@@ -137,23 +139,21 @@ class GaussianNoiseTest : public SkipListTest<TestConfig> {};
 
 TEST_P(GaussianNoiseTest, Correctness) {
     const TestConfig& cfg = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
-        run_gaussian_noise<Element<decltype(tag)>>(cfg);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        cfg.dtype, [&](auto tag) { run_gaussian_noise<Element<decltype(tag)>>(cfg); });
 }
 
-INSTANTIATE_TEST_SUITE_P(Image_Effects, GaussianNoiseTest,
-                         ::testing::ValuesIn(make_configs(
-                             {DType::U8, DType::F16, DType::F32, DType::I8},
-                             presets::kLayoutsFull, {Roi::Full, Roi::Partial},
-                             {presets::kDefaultSize, presets::kTailWidthSize,
-                              presets::kSubVectorSize})),
-                         config_param_name);
+INSTANTIATE_TEST_SUITE_P(
+    Image_Effects, GaussianNoiseTest,
+    ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                     presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                                     {presets::kDefaultSize, presets::kTailWidthSize,
+                                      presets::kSubVectorSize})),
+    config_param_name);
 
 // Full name:
 // Image_Effects/GaussianNoiseNegativeTest.Negative/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_m<M>_s<S>
-class GaussianNoiseNegativeTest
-    : public SkipListTest<WithParams<GaussianNoiseNegativeParams>> {};
+class GaussianNoiseNegativeTest : public SkipListTest<WithParams<GaussianNoiseNegativeParams>> {};
 
 TEST_P(GaussianNoiseNegativeTest, Negative) {
     const auto& p = GetParam();

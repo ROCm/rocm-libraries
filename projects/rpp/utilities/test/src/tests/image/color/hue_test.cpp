@@ -98,22 +98,21 @@ class HueTest : public SkipListTest<WithParams<HueParams>> {};
 
 TEST_P(HueTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_hue<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_hue<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Restricted to the 3-channel layouts: hue is an RGB (c = 3) op. Same-layout cases plus both
 // directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, HueTest,
-    ::testing::ValuesIn(with_params<HueParams>(
-        concat_configs({
-            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayouts3ChConv,
-                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayouts3Ch,
-                         {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {HueParams{90.0f}})),
-    op_config_name<HueParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, HueTest,
+                         ::testing::ValuesIn(with_params<HueParams>(
+                             concat_configs({
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayouts3ChConv, {Roi::Full, Roi::Partial},
+                                              {presets::kTailWidthSize}),
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayouts3Ch, {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {HueParams{90.0f}})),
+                         op_config_name<HueParams>);

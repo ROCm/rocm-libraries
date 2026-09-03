@@ -49,9 +49,12 @@ struct TransposeParams {
     PermKind kind;
     std::string name() const {
         switch (kind) {
-            case PermKind::Identity:   return "Identity";
-            case PermKind::Reverse:    return "Reverse";
-            case PermKind::RotateLeft: return "RotateLeft";
+            case PermKind::Identity:
+                return "Identity";
+            case PermKind::Reverse:
+                return "Reverse";
+            case PermKind::RotateLeft:
+                return "RotateLeft";
         }
         return "UNK";
     }
@@ -61,9 +64,15 @@ std::vector<Rpp32u> make_perm(PermKind kind, Rpp32u nDim) {
     std::vector<Rpp32u> perm(nDim);
     for (Rpp32u k = 0; k < nDim; ++k) {
         switch (kind) {
-            case PermKind::Identity:   perm[k] = k; break;
-            case PermKind::Reverse:    perm[k] = nDim - 1 - k; break;
-            case PermKind::RotateLeft: perm[k] = (k + 1) % nDim; break;
+            case PermKind::Identity:
+                perm[k] = k;
+                break;
+            case PermKind::Reverse:
+                perm[k] = nDim - 1 - k;
+                break;
+            case PermKind::RotateLeft:
+                perm[k] = (k + 1) % nDim;
+                break;
         }
     }
     return perm;
@@ -115,16 +124,16 @@ void run_transpose(const NdConfig& cfg, const TransposeParams& p) {
 
 }  // namespace
 
-// Full name: Misc_Geometric/TransposeTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Perm>_<Shape>
-// (the shape token is the *source* shape; the destination shape is that shape permuted).
+// Full name:
+// Misc_Geometric/TransposeTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Perm>_<Shape> (the
+// shape token is the *source* shape; the destination shape is that shape permuted).
 class TransposeTest : public SkipListTest<NdWithParams<TransposeParams>> {};
 
 TEST_P(TransposeTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const TransposeParams p = GetParam().op;
-    dispatch_dtype<DType::U8, DType::I8, DType::F16, DType::F32>(cfg.dtypeIn, [&](auto tag) {
-        run_transpose<Element<decltype(tag)>>(cfg, p);
-    });
+    dispatch_dtype<DType::U8, DType::I8, DType::F16, DType::F32>(
+        cfg.dtypeIn, [&](auto tag) { run_transpose<Element<decltype(tag)>>(cfg, p); });
 }
 
 // Every case is bit-exact (tolerance 0 on both terms, every dtype): transpose performs no
@@ -146,6 +155,5 @@ INSTANTIATE_TEST_SUITE_P(Misc_Geometric, TransposeTest,
                          ::testing::ValuesIn(nd_with_params<TransposeParams>(
                              make_nd_configs({DType::U8, DType::F16, DType::F32, DType::I8},
                                              {2, 3, 4}, {NdShape::VectorAligned, NdShape::Tail}),
-                             {{PermKind::Identity}, {PermKind::Reverse},
-                              {PermKind::RotateLeft}})),
+                             {{PermKind::Identity}, {PermKind::Reverse}, {PermKind::RotateLeft}})),
                          nd_op_config_name<TransposeParams>);

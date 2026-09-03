@@ -88,15 +88,15 @@ void filter_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& 
     const int r = static_cast<int>(kernelSize / 2);
     const int kk = static_cast<int>(kernelSize * kernelSize);
     std::vector<double> window(kk);
-    for_each_roi_plane(sd, dd, roi, type,
-                       [&](Rpp32u, const RoiBounds& b, Rpp32u, std::size_t srcBase,
-                           std::size_t dstBase) {
-        for (int j = 0; j < static_cast<int>(b.h); ++j)
-            for (int i = 0; i < static_cast<int>(b.w); ++i) {
-                gather_roi_window(src, sd, b, srcBase, j, i, r, window.data());
-                dst[plane_index(dd, dstBase, j, i)] = from_double<T>(reduce(window.data(), kk));
-            }
-    });
+    for_each_roi_plane(
+        sd, dd, roi, type,
+        [&](Rpp32u, const RoiBounds& b, Rpp32u, std::size_t srcBase, std::size_t dstBase) {
+            for (int j = 0; j < static_cast<int>(b.h); ++j)
+                for (int i = 0; i < static_cast<int>(b.w); ++i) {
+                    gather_roi_window(src, sd, b, srcBase, j, i, r, window.data());
+                    dst[plane_index(dd, dstBase, j, i)] = from_double<T>(reduce(window.data(), kk));
+                }
+        });
 }
 
 // Applies a KxK linear filter (kernel row-major, length kernelSize*kernelSize, same dy/dx order as

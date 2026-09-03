@@ -51,7 +51,9 @@ struct YuvParams {
     RpptColorStandard standard;
     RpptColorRange range;
     const char* token;
-    std::string name() const { return token; }
+    std::string name() const {
+        return token;
+    }
 };
 
 // NV12 requires even width and height, and these ops take a single image rather than a batch, so
@@ -161,8 +163,7 @@ void run_yuv_to_rgb(const TestConfig& cfg, const YuvParams& op, YuvToRgbFn fn,
                          width, height, op.standard, op.range, upsample);
 
     // (2) Run RPP (HIP only for these ops).
-    DeviceTensor srcY(cfg.backend, yBytes), srcUV(cfg.backend, uvBytes),
-        dst(cfg.backend, dstBytes);
+    DeviceTensor srcY(cfg.backend, yBytes), srcUV(cfg.backend, uvBytes), dst(cfg.backend, dstBytes);
     srcY.write(hostY.data(), yBytes);
     srcUV.write(hostUV.data(), uvBytes);
     dst.write(dstInit.data(), dstBytes);
@@ -177,13 +178,14 @@ void run_yuv_to_rgb(const TestConfig& cfg, const YuvParams& op, YuvToRgbFn fn,
     dst.read(actual.data(), dstBytes);
 
     // (4) Compare the logical RGB bytes only.
-    EXPECT_TRUE(compare_rgb_pitched(actual.data(), golden.data(), width, height, dstPitch,
-                                    kTolerance));
+    EXPECT_TRUE(
+        compare_rgb_pitched(actual.data(), golden.data(), width, height, dstPitch, kTolerance));
 }
 
 }  // namespace
 
-// Full name: Image_DataExchange/<Suite>.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Standard>_<Range>
+// Full name:
+// Image_DataExchange/<Suite>.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Standard>_<Range>
 class YuvToRgbTest : public SkipListTest<WithParams<YuvParams>> {};
 class YuvToRgbCubicVTest : public SkipListTest<WithParams<YuvParams>> {};
 class YuvToRgbLinearVTest : public SkipListTest<WithParams<YuvParams>> {};

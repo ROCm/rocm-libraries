@@ -60,9 +60,15 @@ inline double bitwise_binary_scalar(double a, double b, BitwiseOp op) {
     const Rpp8u y = static_cast<Rpp8u>(b);
     Rpp8u r = 0;
     switch (op) {
-        case BitwiseOp::And: r = x & y; break;
-        case BitwiseOp::Or: r = x | y; break;
-        case BitwiseOp::Xor: r = x ^ y; break;
+        case BitwiseOp::And:
+            r = x & y;
+            break;
+        case BitwiseOp::Or:
+            r = x | y;
+            break;
+        case BitwiseOp::Xor:
+            r = x ^ y;
+            break;
     }
     return static_cast<double>(r);
 }

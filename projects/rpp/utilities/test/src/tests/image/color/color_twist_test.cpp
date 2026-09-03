@@ -113,23 +113,22 @@ class ColorTwistTest : public SkipListTest<WithParams<ColorTwistParams>> {};
 
 TEST_P(ColorTwistTest, Correctness) {
     const auto& p = GetParam();
-    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(p.cfg.dtype, [&](auto tag) {
-        run_color_twist<Element<decltype(tag)>>(p.cfg, p.op);
-    });
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_color_twist<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
 // Restricted to the 3-channel layouts. The API doc claims c = 1/3, but rppt_color_twist rejects
 // 1-channel (PLN1) input with RPP_ERROR_INVALID_CHANNELS (-19) on both backends -- a real
 // doc/kernel discrepancy; hue/saturation are
 // undefined on greyscale, so 3-channel is the op's genuine support.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, ColorTwistTest,
-    ::testing::ValuesIn(with_params<ColorTwistParams>(
-        concat_configs({
-            make_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv,
-                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-            make_configs(presets::kDefaultDTypes, presets::kLayouts3Ch, {Roi::Full, Roi::Partial},
-                         {presets::kDefaultSize, presets::kSubVectorSize}),
-        }),
-        {ColorTwistParams{1.5f, 20.0f, 90.0f, 1.2f}})),
-    op_config_name<ColorTwistParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, ColorTwistTest,
+                         ::testing::ValuesIn(with_params<ColorTwistParams>(
+                             concat_configs({
+                                 make_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv,
+                                              {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+                                 make_configs(presets::kDefaultDTypes, presets::kLayouts3Ch,
+                                              {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
+                             {ColorTwistParams{1.5f, 20.0f, 90.0f, 1.2f}})),
+                         op_config_name<ColorTwistParams>);

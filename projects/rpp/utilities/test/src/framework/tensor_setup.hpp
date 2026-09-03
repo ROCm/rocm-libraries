@@ -49,7 +49,9 @@ struct TensorShape {
 // applies this padding to every op; some kernels tolerate a tight width but others (e.g.
 // color_temperature) corrupt memory without it. d.w stays the logical width (so ROIs and
 // the reference walk the real image); only the strides carry the padded row stride.
-inline Rpp32u padded_width(Rpp32u w) { return (w / 8) * 8 + 8; }
+inline Rpp32u padded_width(Rpp32u w) {
+    return (w / 8) * 8 + 8;
+}
 
 // Builds a 4D descriptor for the given layout, with the padded row stride RPP expects. pad=false
 // gives the densely packed strides instead: no op is run that way, but the goldens must agree
@@ -90,7 +92,8 @@ inline RpptDesc make_src_descriptor(const TestConfig& c, bool pad = true) {
 }
 
 inline RpptDesc make_dst_descriptor(const TestConfig& c, bool pad = true) {
-    const TensorShape s{c.size.n, static_cast<Rpp32u>(channels_of(c.layoutOut)), c.size.h, c.size.w};
+    const TensorShape s{c.size.n, static_cast<Rpp32u>(channels_of(c.layoutOut)), c.size.h,
+                        c.size.w};
     return make_descriptor(s, c.dtype, c.layoutOut, pad);
 }
 
@@ -264,11 +267,19 @@ void fill_input(T* buf, std::size_t count, DType dt, unsigned salt = 0) {
     for (std::size_t i = 0; i < count; ++i) {
         const unsigned v = static_cast<unsigned>((i * 37u + 11u + salt * 101u) & 0xFFu);  // 0..255
         switch (dt) {
-            case DType::U8: buf[i] = static_cast<T>(v); break;
-            case DType::I8: buf[i] = static_cast<T>(static_cast<int>(v) - 128); break;
-            case DType::I16: buf[i] = static_cast<T>((static_cast<int>(v) - 128) * 256); break;
+            case DType::U8:
+                buf[i] = static_cast<T>(v);
+                break;
+            case DType::I8:
+                buf[i] = static_cast<T>(static_cast<int>(v) - 128);
+                break;
+            case DType::I16:
+                buf[i] = static_cast<T>((static_cast<int>(v) - 128) * 256);
+                break;
             case DType::F16:
-            case DType::F32: buf[i] = from_double<T>(static_cast<double>(v) / 255.0); break;
+            case DType::F32:
+                buf[i] = from_double<T>(static_cast<double>(v) / 255.0);
+                break;
         }
     }
 }

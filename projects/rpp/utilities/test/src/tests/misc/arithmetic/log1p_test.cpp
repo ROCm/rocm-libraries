@@ -42,7 +42,9 @@ namespace {
 // Tolerances reflect legitimate floating-point error only: the golden evaluates log1p in
 // double while the kernel works in float. Kept as helpers for consistency with the other ND
 // tests, even though log1p documents a single output dtype.
-Bound log1p_tolerance(DType) { return {1e-5, 1e-6}; }
+Bound log1p_tolerance(DType) {
+    return {1e-5, 1e-6};
+}
 
 template <typename Tin, typename Tout>
 void run_log1p(const NdConfig& cfg) {
@@ -81,7 +83,8 @@ void run_log1p(const NdConfig& cfg) {
     dst.read(actual.data(), dstBytes);
 
     // (4) Compare the whole output tensor.
-    EXPECT_TRUE(compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, log1p_tolerance(cfg.dtypeOut)));
+    EXPECT_TRUE(
+        compare_nd<Tout>(actual.data(), golden.data(), *dstDesc, log1p_tolerance(cfg.dtypeOut)));
 }
 
 }  // namespace
@@ -105,8 +108,8 @@ TEST_P(Log1pTest, Correctness) {
 // and rank-dependent.
 // (The DTypeConv vector is spelled out: a single-element {{a, b}} is ambiguous between the
 // two make_nd_configs overloads.)
-INSTANTIATE_TEST_SUITE_P(Misc_Arithmetic, Log1pTest,
-                         ::testing::ValuesIn(make_nd_configs(
-                             std::vector<DTypeConv>{{DType::I16, DType::F32}}, {2, 3, 4},
-                             {NdShape::VectorAligned, NdShape::Tail})),
-                         nd_config_param_name);
+INSTANTIATE_TEST_SUITE_P(
+    Misc_Arithmetic, Log1pTest,
+    ::testing::ValuesIn(make_nd_configs(std::vector<DTypeConv>{{DType::I16, DType::F32}}, {2, 3, 4},
+                                        {NdShape::VectorAligned, NdShape::Tail})),
+    nd_config_param_name);
