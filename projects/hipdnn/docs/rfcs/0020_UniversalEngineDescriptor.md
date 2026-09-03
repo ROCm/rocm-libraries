@@ -98,7 +98,9 @@ a follow-up, filling 0017's deferred scope is expected and is not itself a diver
   than a first-graph surprise.
 - **The graph-schema floor on the engine (§ 4.2).** 0017 § 4 requires a UED to declare the hipDNN
   schema version its pattern was authored against; this RFC gives it a field (`sdk_version`), a
-  default, and a comparison rule.
+  default, and a comparison rule. It is also the sole such floor: RFC 0018 § 10 keeps no
+  `sdk_version` on the UMD, so a matcher runs under the floor of the engine of each pack that
+  lists it.
 
 **Divergences (this RFC departs from an 0017 convention):**
 
@@ -211,7 +213,7 @@ two arms (§ 4.3, § 4.5) this engine matches with.
 | `version` | yes | string | `<major>.<minor>`, both numeric, and one of the values the schema enumerates (§ 14.3), e.g. `1.0`. The compatibility field the accept rule gates on (§ 14). |
 | `id` | yes | string | A UUID (RFC 4122) in canonical `8-4-4-4-12` hex form. Unique across all loaded descriptors, except that content-identical UEDs may share an `id` (§ 13.2.1). The cross-reference key a KDP's `engine` field uses (§ 3a). |
 | `name` | yes | string | Globally-unique, scoped engine name matching `^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$` (a `namespace:local` form, e.g. `rocke:SDPA`). Hashed (FNV-1a, 64-bit) into the hipDNN engine-id space (§ 3b). Non-empty; unique by both literal name and by hash. |
-| `sdk_version` | no | string | `<major>.<minor>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0` when omitted. Compared numerically by `(major, minor)`: refused at load when newer than the runtime's own graph schema, and at match time the whole engine declines a graph whose reported floor is above it, before binding and taking every pack naming it ([RFC 0018 § 10](0018_UniversalMatchDescriptor.md#10-serialization-and-versioning)). Independent of `version`, which gates the UED *format*. |
+| `sdk_version` | no | string | `<major>.<minor>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0` when omitted. Compared numerically by `(major, minor)`: refused at load when newer than the runtime's own graph schema, and at match time the whole engine declines a graph whose reported floor is above it, before binding and taking every pack naming it ([RFC 0018 § 10](0018_UniversalMatchDescriptor.md#10-serialization-and-versioning)). This is the **only** graph-schema floor in the system: no UMD carries one, and a matcher runs under the floor of the engine of each pack that lists it, so raising this field is a review point for every matcher on the engine. Independent of `version`, which gates the UED *format*. |
 | `heuristic` | no | string | UUID of this engine's one UHD. Must resolve to a loadable UHD at load (§ 13.2). Absent => the engine ships no heuristic and its catalog is ordered by the declared fallback, `priority` then descriptor `id` (§ 8, RFC 0017 § 5). A key present but naming nothing is still an error. |
 | `metadata` | yes | string | UUID of this engine's one KMD. Must resolve to a loadable KMD at load (§ 13.2). |
 | `graph_match` | no | object | Stage one: how this engine decides a graph and binds the tokens every later stage reads (§ 6, § 7). Exactly one arm, and they are mutually exclusive: **`nodes`**, the declarative pattern of **§ 4.3**, or **`native`**, the escape-hatch symbol of **§ 4.5**. Absent => the engine binds nothing, publishes an empty symbol table, and is admitted or declined by its packs' UMDs alone. |

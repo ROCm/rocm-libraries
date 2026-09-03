@@ -127,7 +127,7 @@ stays a full provider, one per dependency. This complements build-time codegen.
 
 This document was revised alongside its first two follow-ups, [RFC 0018](0018_UniversalMatchDescriptor.md)
 and [RFC 0020](0020_UniversalEngineDescriptor.md), so a reader of the original finds the model
-moved in seven places. RFC 0020 § 2 keeps the converse ledger, of where those follow-ups tighten or
+moved in eight places. RFC 0020 § 2 keeps the converse ledger, of where those follow-ups tighten or
 diverge from this document; this one records what changed *here*.
 
 - **The pattern moved from the UMD to the UED.** A matcher no longer carries `nodes`. The engine
@@ -155,6 +155,12 @@ diverge from this document; this one records what changed *here*.
 - **Fused and unfused kernels separate by engine, not by `node_count`.** Each topology is its own
   pattern and therefore its own engine, so the two never share a candidate set by construction
   rather than by a criterion.
+- **The graph-schema floor moved onto the engine alone.** A UMD no longer carries `sdk_version`;
+  the UED declares it, and a matcher runs under the floor of the engine of each pack that lists it
+  ([§4](#4-descriptor-formats)). The per-matcher floor an earlier revision described — a stale
+  matcher skipped while other packs on the same engine carried on — is given up for one gate at the
+  level that owns the symbol table the criteria read, so a matcher and its engine can no longer
+  state contradictory floors.
 
 Two conventions changed with them: the in-band `schema` type tag is gone from every example, the
 kind being carried by the filename and compatibility by `version`
@@ -388,33 +394,39 @@ versions should move rarely in practice, since the formats carry expressions rat
 fixed fields, so new behavior is usually authored in the expression language instead of a
 schema change.
 
-**The graph-schema floor applies to both descriptors that read the graph.** Besides its own
-format version, a UED and a UMD each declare the hipDNN schema (SDK) version they were
-authored against. Every other descriptor needs only its own version.
+**The graph-schema floor is declared once, by the engine.** Besides its own format version,
+a UED declares the hipDNN schema (SDK) version its pattern was authored against. No other
+descriptor carries one — a UMD included — and every other descriptor needs only its own
+format version.
 
 The rule takes the same reject-what-you-do-not-understand shape, applied to the graph. A
 graph reports the schema version its own contents require, computed from the optional fields
-it sets. A descriptor declaring a version below that floor is declined before it runs: the
-graph uses a feature its author never accounted for.
+it sets. An engine declaring a version below that floor is declined before it runs, before it
+binds anything and taking every pack that names it: the graph uses a feature its author never
+accounted for.
 
-The two are scoped differently, because they read the graph differently. A UED reads graph
-*structure*, the op tables, operand names, and UID fields its pattern walks, so below the
-floor the **engine declines** before it binds anything. A UMD reads graph *values* through
-its criteria, and because binding is registry-driven a newly added attribute is bound whether
-or not the engine's pattern was revised; what goes stale is a criteria set that does not gate
-the new field. Below the floor **that matcher is skipped**, declining the packs that list it.
+The engine is the right level because it is the level that reads the graph. Its pattern walks
+graph *structure*, the op tables, operand names, and UID fields, and it publishes the symbol
+table every one of its packs' criteria then reads. A matcher constrains only what that pattern
+already bound, and is already validated against the engine of each pack that lists it
+([Section 5](#5-matching-the-ueds-pattern-and-the-umds-criteria)), so it inherits the engine's
+floor rather than stating one of its own.
 
-Concretely: a matcher is authored against schema `1.0`, and its engine accepts SDPA graphs.
-hipDNN later adds an optional SDPA field at `1.1`.
+Concretely: an engine accepts SDPA graphs and is authored against schema `1.0`. hipDNN later
+adds an optional SDPA field at `1.1`.
 
-- A graph that leaves the new field unset still requires only `1.0`, so the matcher runs as before.
-- A graph that sets it requires `1.1`. The matcher declares `1.0`, so it is skipped instead
-  of asked: it would otherwise match on the fields it knows and silently ignore a field that
-  changes what the graph means.
+- A graph that leaves the new field unset still requires only `1.0`, so the engine and its
+  packs run as before.
+- A graph that sets it requires `1.1`. The engine declares `1.0`, so it is skipped instead of
+  asked: its packs would otherwise match on the fields they know and silently ignore a field
+  that changes what the graph means.
 
-The matcher is not broken and needs no reauthoring; it has stopped claiming graphs it was never
-written for. Its author adopts `1.1` when the kernel can honor the new field, or stays on `1.0`
-when it cannot.
+Nothing is broken and nothing needs reauthoring; the engine has stopped claiming graphs it was
+never written for. Adopting `1.1` is a deliberate step whose cost is that **every** matcher on
+that engine must be reviewed at the same time, since binding is registry-driven — the new
+attribute is bound whether or not the pattern was touched, and what goes stale is a criteria
+set that never gates it. Declaring the floor once makes that a single, visible decision instead
+of a per-matcher one that can silently disagree with its engine.
 
 This mirrors an existing hipDNN mechanism instead of inventing one: a graph already
 carries a minimum-required engine-plugin API version, computed in the plugin SDK from the
@@ -606,8 +618,8 @@ IDs its kernels require.
 
 ```jsonc
 {
-  "version":     "1.0",   // matcher format version, gated at load (Section 4)
-  "sdk_version": "1.0",   // hipDNN graph schema version these criteria were authored against (Section 4)
+  "version":     "1.0",   // matcher format version, gated at load (Section 4); the graph-schema
+                          // floor is the engine's and is not restated here (Section 4)
   "id":     "968156a8-ee21-4827-bcd7-893a8a72dccc",    // stable; listed in KDP matchers[], shared across packs
   "name":   "Example attention forward (d128, bf16) criteria",
   "scope":  "kernel",   // criteria read $kernel.*, so they are re-evaluated per candidate kernel

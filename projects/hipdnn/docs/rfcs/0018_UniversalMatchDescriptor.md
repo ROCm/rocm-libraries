@@ -526,27 +526,33 @@ arbitrated here at all: that is ordinary engine selection, which hipDNN owns and
   within the same major always loads — a file stamped `1.0` loads on a `1.1` runtime — so an author
   stamps the lowest version their descriptor needs and it stays loadable on the oldest runtime that
   can serve it. This is RFC 0017 §4's rule for every format, applied here.
-- **`sdk_version` is a floor the graph sets, and both halves carry one.** It names the hipDNN graph
-  schema a descriptor was authored against. A graph reports the schema version its own contents
-  require, and a descriptor declaring less is declined before it runs rather than reading the fields
-  it knows while silently ignoring one that changes what the graph means. Both halves need it because
-  both are exposed to a graph-schema change, in different ways. The **UED's** covers graph
-  *structure* — the opcodes and operand names its pattern resolves — and below the floor the whole
-  engine declines, before binding, taking every pack naming it. The **UMD's** covers the *criteria*,
-  and it is the sharper of the two: auto-binding is registry-driven
-  ([RFC 0020 Appendix B](0020_UniversalEngineDescriptor.md#appendix-b-op-schema-registry-generation)), so a newly added attribute is bound
-  whether or not the pattern was touched, and what actually goes stale is a criteria set that never
-  gates it. Below the floor that matcher is skipped, declining its packs while other packs on the
-  same engine carry on. Both bounds hold at once — an `sdk_version` newer than the runtime's own
-  schema is still refused at compile
-  ([RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)). Both compare numerically
-  by `(major, minor)`; both default to `1.0` when omitted, which is what every descriptor authored
-  against this revision means.
+- **The graph-schema floor is the engine's alone; a UMD carries no `sdk_version`.** The hipDNN graph
+  schema version a descriptor was authored against is declared once, on the UED
+  ([RFC 0020 § 4.2](0020_UniversalEngineDescriptor.md#42-normative-schema)), and gates the
+  whole engine: a graph reports the schema version its own contents require, and an engine declaring
+  less declines it before binding, taking every pack that names it. A matcher inherits that floor
+  from the engine of each pack that lists it — the same pairing that already validates its
+  `$`-references ([§8](#8-the-matcher-compilation-indexing-and-caching)) — so it never carries a
+  floor of its own to disagree with. One gate, at the level that owns the symbol table the criteria
+  read.
+- **What the single floor costs, and why it is the right trade.** An earlier draft gave the UMD its
+  own floor, on the argument that binding is registry-driven
+  ([RFC 0020 Appendix B](0020_UniversalEngineDescriptor.md#appendix-b-op-schema-registry-generation)):
+  a newly added attribute is bound whether or not the pattern was touched, so what actually goes
+  stale is a criteria set that never gates it, and a per-matcher floor could skip exactly that
+  matcher while other packs on the same engine carried on. The finer grain is real and it is given
+  up here. Two floors are two places to state the same fact and therefore a place for them to
+  contradict each other — a matcher above its engine's floor is dead weight, one below it decides by
+  a rule the engine never stated — and the partial-skip semantics leave a graph's candidate set
+  depending on which matchers were quietly dropped. Raising an engine to a newer schema version is
+  instead a review point for **every** matcher on it: the engine's author confirms the criteria gate
+  whatever the revision added, because nothing narrower will decline them. That is a coarser and
+  louder unit of change, and the engine is already the unit a matcher is validated against.
 - **The graph's floor is an existing mechanism, not a new one.** hipDNN already computes the minimum
   engine-plugin API version a graph requires from the optional features it uses and stamps it into
   the serialized graph (`min_required_engine_api_version`); override shapes
   ([RFC 0008](0008_OverridableTensorShapesDesign.md)) raise it to `1.1` and runtime pass-by-value
-  tensors ([RFC 0016](0016_RuntimePassByValueTensors.md)) to `1.2`. The matcher reads that field
+  tensors ([RFC 0016](0016_RuntimePassByValueTensors.md)) to `1.2`. The engine reads that field
   rather than deriving a second floor of its own. A graph carrying no stamp reads as the `1.0`
   baseline.
 - **Additive evolution.** New layout aliases and new bound fields are additive
@@ -558,8 +564,9 @@ arbitrated here at all: that is ordinary engine selection, which hipDNN owns and
   References are typed by field (a KDP's `matchers` versus `engine`), so a matcher id and an engine id
   are never confused. A duplicate `id` seen on the drop-in path is logged and ignored rather than
   taking down the provider ([RFC 0017 §16](0017_UniversalKernelDescriptor.md#16-risks)).
-- **A UMD is versioned alone but validated in context.** Its `version` and `sdk_version` are its own,
-  but the check that its `$`-references resolve is against the engine of each pack that lists it
+- **A UMD is versioned alone but validated in context.** Its `version` is its own — the only version
+  it carries — but the check that its `$`-references resolve, and the graph-schema floor it runs
+  under, are both the engine's, taken from each pack that lists it
   ([§8](#8-the-matcher-compilation-indexing-and-caching)), so a UED pattern edit that drops or
   renames a bound variable invalidates every matcher written against it. That is a load-time error
   naming both descriptors and the pack that paired them, not a silent behavior change
@@ -807,6 +814,14 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
   ([§13](#13-testing-and-performance)), never a silent behavior change; a
   pattern is engine-wide and versioned like any descriptor, so a breaking edit is a coordinated
   change in the sense of [RFC 0017 §16](0017_UniversalKernelDescriptor.md#16-risks).
+- **The graph-schema floor is engine-grained, so a stale matcher is not declined individually.**
+  With `sdk_version` on the UED alone ([§10](#10-serialization-and-versioning)), raising an engine
+  to a newer schema admits graphs that use the new field to *every* pack on it, including a matcher
+  whose criteria never gate it — the case a per-matcher floor would have skipped. Mitigation: the
+  raise is a deliberate, reviewable edit to one descriptor, and the engine's author owns the
+  matchers on it; an engine left at its old floor declines those graphs wholesale, which is the safe
+  default. The residual risk is an author who raises the engine without auditing its matchers, and
+  no mechanism catches that — it is a review obligation, recorded here as one.
 - **Engine granularity is now forced by graph shape.** One pattern per UED
   ([§2](#2-the-symbol-table-criteria-read)) means a family serving two structurally different topologies must
   split into two engines, each with its own KMD and UHD, even where the kernels are otherwise
@@ -942,7 +957,6 @@ appendix fixes the descriptor object and the hipDNN environment its criteria are
 | `id` | string (UUID) | yes | — | A UUID; stable, globally unique identity ([§10](#10-serialization-and-versioning)) |
 | `name` | string | yes | — | Diagnostics only; not semantic |
 | `version` | string | no | `"1.0"` | Matcher format version, `<major>.<minor>`, gated at load as a **ceiling**: a differing `major`, or a `minor` newer than the runtime's, is refused; an older minor always loads ([§10](#10-serialization-and-versioning)) |
-| `sdk_version` | string | no | `"1.0"` | The hipDNN graph schema version these criteria were authored against, `<major>.<minor>`. Refused at load when newer than the runtime's own schema, and declined at match time against the **floor the graph sets** — a matcher below what the graph requires is skipped instead of asked, declining its packs ([§10](#10-serialization-and-versioning)) |
 | `allow_override_shape` | bool | no | `false` | The matcher's opt-in to accepting a graph that enables execute-time override shapes. When `false`, such a graph is declined before the criteria run. This is the matcher's own gate and is distinct from `$graph.is_override_shape_enabled`, which is the graph's state ([§2](#2-the-symbol-table-criteria-read), [RFC 0020 § 6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)). A prebuilt kernel that bakes its shape leaves this at the default rather than restating the condition as a criterion |
 | `criteria` | Expr | see below | — | A single expression whose static type is `Bool` (A.3) |
 | `scope` | `"graph"` \| `"kernel"` | yes | — | Which inputs the criteria read, and so what a failure prunes: `graph` is evaluated once per `(graph, device)` and disqualifies **every** kernel in the pack; `kernel` also reads `$kernel.*` and disqualifies **only the candidate** ([§8](#8-the-matcher-compilation-indexing-and-caching)). It is declared rather than inferred so the pruning level is a stated contract, not a consequence of which tokens an expression happens to name |
@@ -954,9 +968,11 @@ two matcher ids ([§6](#6-the-native-matcher-escape-hatch)). Either is refused. 
 keys are permitted, and an unknown key is refused. In particular a UMD carries no
 `schema` member — the `.umd.json` filename already states the type, and a file whose name and body
 disagree has no correct reading, so the body does not restate it ([§10](#10-serialization-and-versioning)).
-Nor does it carry `nodes`: the pattern is the engine's ([§2](#2-the-symbol-table-criteria-read)). Both version fields compare
-numerically by `(major, minor)`, so `1.10` is above `1.9`; a value that does not parse as exactly two
-decimal components is refused.
+Nor does it carry `nodes`: the pattern is the engine's ([§2](#2-the-symbol-table-criteria-read)). Nor
+`sdk_version`: the graph-schema floor is declared once, on the UED, and a matcher runs under the
+floor of the engine of each pack that lists it ([§10](#10-serialization-and-versioning)). `version`
+compares numerically by `(major, minor)`, so `1.10` is above `1.9`; a value that does not parse as
+exactly two decimal components is refused.
 
 A UMD names no engine. It is bound to one by the KDPs that list it
 ([RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)), and its `$`-references are
@@ -1037,10 +1053,9 @@ the UED ([§2](#2-the-symbol-table-criteria-read)).
 
 **The UMD alone:**
 
-1. `id` is a well-formed UUID, only the keys of A.1 at the top level, and each of `version` /
-   `sdk_version`, when present, is a well-formed `<major>.<minor>` string the runtime can honor:
-   same `major`, and a `minor` no newer than the runtime's
-   ([§10](#10-serialization-and-versioning)).
+1. `id` is a well-formed UUID, only the keys of A.1 at the top level, and `version`, when present,
+   is a well-formed `<major>.<minor>` string the runtime can honor: same `major`, and a `minor` no
+   newer than the runtime's ([§10](#10-serialization-and-versioning)).
 2. `scope` is `"graph"` or `"kernel"`, and exactly one of `criteria` and `match_symbol` is
    present (A.1).
 3. `criteria`, when present, passes the expression language's static validation — operator
