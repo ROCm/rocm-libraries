@@ -382,23 +382,38 @@ class OpOverride:
                 "later runs will re-decide from the heuristic",
                 self.op_name, len(results), name)
 
+    def _workspace(self, entry, device):
+        """The cached workspace tensor for this graph, grown on demand.
+
+        CACHED, NOT PER-CALL. A fresh ``torch.empty`` on every execute charges an
+        allocation to every single call -- caching-allocator hit or not -- while
+        the backend it is being compared against allocates nothing. On a hot
+        attention shape that overhead is a visible fraction of the kernel and it
+        lands entirely on hipDNN's side of any A/B. The buffer is owned by the
+        graph-cache entry, so it lives exactly as long as the plan that needs it.
+        """
+        want = entry["ws"]
+        if want <= 0:
+            return None, 0
+        buf = entry.get("ws_buf")
+        if buf is None or buf.numel() < want or buf.device != device:
+            buf = self.state.torch.empty(
+                want, dtype=self.state.torch.uint8, device=device
+            )
+            entry["ws_buf"] = buf
+        return buf, buf.data_ptr()
+
     def _execute(self, entry, variant_pack, device) -> None:
-        """Allocate the workspace (if any) and run the pinned plan. ``variant_pack``
-        maps uid -> device pointer (int); the workspace is an int pointer, 0 == none."""
+        """Run the pinned plan. ``variant_pack`` maps uid -> device pointer (int);
+        the workspace is an int pointer, 0 == none."""
         st = self.state
-        ws = entry["ws"]
-        workspace = (
-            st.torch.empty(ws, dtype=st.torch.uint8, device=device) if ws > 0 else None
-        )
-        ws_ptr = workspace.data_ptr() if workspace is not None else 0
+        _, ws_ptr = self._workspace(entry, device)
         if not entry.get("tuned", True):
             # First execution of this graph under tune mode: sweep on these very
             # pointers, then fall through and execute with the winner active.
+            # The sweep may raise the workspace requirement, so re-resolve after.
             self._maybe_tune(entry, variant_pack, ws_ptr)
-            ws = entry["ws"]
-            if ws > (workspace.numel() if workspace is not None else 0):
-                workspace = st.torch.empty(ws, dtype=st.torch.uint8, device=device)
-                ws_ptr = workspace.data_ptr()
+            _, ws_ptr = self._workspace(entry, device)
         err = entry["graph"].execute(st.handle, variant_pack, ws_ptr)
         if err.is_bad():
             raise NotApplicable(f"execute: {err.get_message()}")
