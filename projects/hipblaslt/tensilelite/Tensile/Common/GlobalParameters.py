@@ -831,6 +831,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
     "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
+    "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
