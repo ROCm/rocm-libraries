@@ -18,7 +18,7 @@ namespace hipdnn_test_sdk::utilities::pointwise
 // ComputeType: The type used for intermediate calculations
 // OutputType: The type returned from the operation
 
-template <typename ComputeType = float, typename OutputType = ComputeType>
+template <typename ComputeType, typename OutputType = ComputeType>
 struct Add
 {
     template <typename X0, typename X1>
@@ -29,7 +29,7 @@ struct Add
     }
 };
 
-template <typename ComputeType = float, typename OutputType = ComputeType>
+template <typename ComputeType, typename OutputType = ComputeType>
 struct Subtract
 {
     template <typename X0, typename X1>
@@ -40,7 +40,7 @@ struct Subtract
     }
 };
 
-template <typename ComputeType = float, typename OutputType = ComputeType>
+template <typename ComputeType, typename OutputType = ComputeType>
 struct Multiply
 {
     template <typename X0, typename X1>
@@ -51,7 +51,7 @@ struct Multiply
     }
 };
 
-template <typename ComputeType = float, typename OutputType = ComputeType>
+template <typename ComputeType, typename OutputType = ComputeType>
 struct Max
 {
     template <typename X0, typename X1>
@@ -62,7 +62,7 @@ struct Max
     }
 };
 
-template <typename ComputeType = float, typename OutputType = ComputeType>
+template <typename ComputeType, typename OutputType = ComputeType>
 struct Min
 {
     template <typename X0, typename X1>
@@ -73,7 +73,7 @@ struct Min
     }
 };
 
-template <typename ComputeType = float>
+template <typename ComputeType>
 struct CompareGreater
 {
     template <typename X0, typename X1>
@@ -86,7 +86,7 @@ struct CompareGreater
 // Backward activation operations: dx = dy * local_gradient
 // Takes upstream gradient dy and forward input x.
 
-template <typename ComputeType = float, typename OutputType = ComputeType>
+template <typename ComputeType, typename OutputType = ComputeType>
 struct ReluBackward
 {
     template <typename Dy, typename X>
@@ -112,7 +112,7 @@ struct ReluBackward
 // f'(x) = 1, if x > 0
 // f'(x) = lowerSlope, if x < 0
 // Again, the derivative at 0 is technically undefined, but we follow convention of treating f'(0) = lowerSlope.
-template <typename ComputeType = float, typename OutputType = ComputeType>
+template <typename ComputeType, typename OutputType = ComputeType>
 struct ParameterizedReluBackward
 {
     ComputeType lowerClip;
@@ -152,7 +152,7 @@ struct ParameterizedReluBackward
     }
 };
 
-template <typename ComputeType = float, typename OutputType = ComputeType>
+template <typename ComputeType, typename OutputType = ComputeType>
 struct SigmoidBackward
 {
     template <typename Dy, typename X>
@@ -168,7 +168,7 @@ struct SigmoidBackward
     }
 };
 
-template <typename ComputeType = float, typename OutputType = ComputeType>
+template <typename ComputeType, typename OutputType = ComputeType>
 struct TanhBackward
 {
     template <typename Dy, typename X>
