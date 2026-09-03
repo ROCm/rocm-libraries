@@ -22,10 +22,10 @@
  * ************************************************************************ */
 // Unit tests for StinkyMergeBarrierPass.
 //
-// The pass runs after StinkyDAGSchedulerPass and fuses barrier groups that sit
-// closer than DagFeatures::mergeBarrierThreshold cycles apart into a single
-// multi-token group. These tests build barrier groups directly (no scheduler)
-// in a self-loop body block and exercise a range of threshold values.
+// The pass runs after StinkyDAGSchedulerPass and fuses Layer 2 overlapping
+// barrier groups that sit closer than DagFeatures::mergeBarrierThreshold cycles
+// apart into a single multi-token group. These tests build barrier groups
+// directly in a self-loop body block and publish the scheduler analysis result.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -34,6 +34,7 @@
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/asm/Layer2BarrierOverlapAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
@@ -88,9 +89,24 @@ class MergeBarrierPassTest : public ::testing::Test {
         return inst;
     }
 
+    std::vector<std::pair<StinkyInstruction*, StinkyInstruction*>> legalBarrierGroups() {
+        std::vector<std::pair<StinkyInstruction*, StinkyInstruction*>> groups;
+        for (auto it = bb->begin(); it != bb->end(); ++it) {
+            auto* signal = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (signal == nullptr || !isBarrierSignal(*signal)) continue;
+            auto waitIt = std::next(it);
+            if (waitIt == bb->end()) continue;
+            auto* wait = dyn_cast<StinkyInstruction>(waitIt.getNodePtr());
+            if (wait != nullptr && isBarrierWait(*wait)) groups.emplace_back(signal, wait);
+        }
+        return groups;
+    }
+
     // Run BuildImplicitDependency (to attach LDS pseudo tokens to barriers) then
-    // MergeBarrier with the given cycle threshold (0 => pass default).
-    void runPasses(int mergeThreshold) {
+    // MergeBarrier with the given cycle threshold (0 => pass default). Most
+    // tests publish the forward Layer 2 relation for each consecutive group;
+    // dedicated gate tests can omit or reverse it.
+    void runPasses(int mergeThreshold, bool publishOverlap = true, bool reverseOverlap = false) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
@@ -100,6 +116,18 @@ class MergeBarrierPassTest : public ::testing::Test {
 
         auto implicitDep = createStinkyBuildImplicitDependencyPass();
         implicitDep->run(*func, ctx, am);
+
+        if (publishOverlap) {
+            Layer2BarrierOverlapAnalysis::Result overlaps;
+            auto groups = legalBarrierGroups();
+            for (size_t i = 0; i + 1 < groups.size(); ++i) {
+                if (reverseOverlap)
+                    overlaps.record(groups[i + 1].first, groups[i].first);
+                else
+                    overlaps.record(groups[i].first, groups[i + 1].first);
+            }
+            am.getResult<Layer2BarrierOverlapAnalysis>(*func) = std::move(overlaps);
+        }
 
         auto mergePass = createStinkyMergeBarrierPass();
         mergePass->run(*func, ctx, am);
@@ -166,6 +194,31 @@ TEST_F(MergeBarrierPassTest, AdjacentGroupsMergeWithDefaultThreshold) {
     // Surviving barriers carry the union of both token sets.
     EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0, 1}));
     EXPECT_EQ(tokensOf(firstBarrier("s_barrier_wait")), (std::vector<int>{0, 1}));
+}
+
+TEST_F(MergeBarrierPassTest, MissingLayer2OverlapPairPreventsMerge) {
+    createSignal(0);
+    createWait(0);
+    createSignal(1);
+    createWait(1);
+
+    runPasses(/*mergeThreshold=*/100000, /*publishOverlap=*/false);
+
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+}
+
+TEST_F(MergeBarrierPassTest, ReverseLayer2OverlapPairPreventsMerge) {
+    createSignal(0);
+    createWait(0);
+    createSignal(1);
+    createWait(1);
+
+    runPasses(/*mergeThreshold=*/100000, /*publishOverlap=*/true,
+              /*reverseOverlap=*/true);
+
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
 }
 
 // Distance strictly below the threshold merges; equal-or-above does not.
