@@ -44,6 +44,18 @@ if(Python3_Interpreter_FOUND)
         # pytest exits 5 when it collects nothing, which is what the suite's
         # importorskip guards produce when lightgbm/flatbuffers/numpy are absent.
         set_tests_properties(uhd_gen_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+
+        # results_import derives RFC 0019.13 §8.3's tflops and gbs from each operation's
+        # declared flops/elements. Registered beside uhd_gen's suite and for the same reason:
+        # a wrong formula or byte width does not raise, it yields a plausible rate, and every
+        # model trained on that corpus ranks by a number wrong by a constant nobody sees.
+        # Needs no ML dependencies -- it is arithmetic over a declaration and a row.
+        add_test(
+            NAME results_import_tests
+            COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                    ${CMAKE_CURRENT_SOURCE_DIR}/results_import/tests
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+        set_tests_properties(results_import_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
     else()
         message(WARNING
                 "uhd_gen tests NOT registered: pytest is not importable by "
