@@ -92,6 +92,30 @@ if [ ! -f "tests_to_run.json" ]; then
     exit 1
 fi
 
+# Step 3b: Force-include the ck_tile FMHA test if its example changed
+# The dependency parser only traces sources in the test build graph, so changes
+# to example/ck_tile/01_fmha/ (and subfolders) are not mapped to any test.
+# Explicitly build and run test_ck_tile_fmha when those C++/Python files change.
+echo ""
+echo "Step 3b: Checking ck_tile FMHA example for changes..."
+FMHA_EXAMPLE_PATTERN='projects/composablekernel/example/ck_tile/01_fmha/.*\.(cpp|cc|cxx|hpp|hxx|h|py)$'
+FMHA_CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null || echo "")
+
+if echo "${FMHA_CHANGED_FILES}" | grep -qE "${FMHA_EXAMPLE_PATTERN}"; then
+    echo "FMHA example changes detected - forcing test_ck_tile_fmha build and run"
+    # test_ck_tile_fmha is a ninja umbrella target (builds all fwd/bwd fmha tests)
+    # and, unanchored, matches every registered test_ck_tile_fmha_* ctest name.
+    tmp_json=$(mktemp)
+    jq --arg t "test_ck_tile_fmha" '
+        .executables = (.executables + [$t] | unique)
+        | .tests_to_run = (.tests_to_run + [$t] | unique)
+        | .regex_chunks = (.regex_chunks + [$t] | unique)
+        | .regex = (if (.regex | length) > 0 then .regex + "|" + $t else $t end)
+    ' tests_to_run.json > "${tmp_json}" && mv "${tmp_json}" tests_to_run.json
+else
+    echo "No ck_tile FMHA example changes detected"
+fi
+
 # Step 4: Check if any tests were selected
 num_tests=$(jq -r '.tests_to_run | length' tests_to_run.json 2>/dev/null || echo "0")
 echo "✓ Selected ${num_tests} tests"
