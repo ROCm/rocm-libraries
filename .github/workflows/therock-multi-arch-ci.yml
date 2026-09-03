@@ -147,7 +147,6 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      changed_projects: ${{ needs.configure.outputs.changed_projects }}
       # Copy all stages except math-libs and ml-libs from TheRock baseline
       # rocm-libraries only affects math-libs and ml-libs source sets
       # RPP owns cv-libs, so rebuild that stage when projects/rpp changes.
