@@ -214,19 +214,44 @@ TEST(TestShippedDescriptorSets, EveryHeuristicDeclaresSomethingToScoreWith)
 
         for(const auto* heuristic : all)
         {
-            EXPECT_FALSE(heuristic->payload.empty())
-                << "engine '" << set.engine.name << "' ships heuristic '" << heuristic->name
-                << "' with an empty payload";
-
-            if(heuristic->kind == HeuristicKind::NATIVE)
+            // What "something to score with" means is adapter-specific, because the
+            // descriptor IS the UHD: there is no single `payload` field that every kind
+            // fills in. Checking the wrong one per adapter would pass vacuously.
+            switch(heuristic->adapter)
             {
-                continue; // the symbol is resolved at registration, not on disk
+            case UhdAdapter::STATIC_ORDER:
+                // Ranks by declared fields alone -- no symbol, no artifact. The fields are
+                // optional (empty means priority then id), so there is nothing to require.
+                break;
+
+            case UhdAdapter::NATIVE:
+                EXPECT_FALSE(heuristic->nativeSymbol.empty())
+                    << "engine '" << set.engine.name << "' ships heuristic '" << heuristic->name
+                    << "' with an empty native symbol";
+                // The symbol is resolved at registration, not on disk.
+                break;
+
+            case UhdAdapter::TREE_DATA:
+            case UhdAdapter::TABLE:
+            case UhdAdapter::CUSTOM_LIBRARY:
+            {
+                ASSERT_FALSE(heuristic->modelArtifactPath.empty())
+                    << "engine '" << set.engine.name << "' ships heuristic '" << heuristic->name
+                    << "' with an empty model artifact path";
+
+                const auto artifact = heuristic->baseDir / heuristic->modelArtifactPath;
+                EXPECT_TRUE(std::filesystem::exists(artifact))
+                    << "engine '" << set.engine.name << "' ships heuristic '" << heuristic->name
+                    << "' whose artifact is missing: " << artifact;
+                break;
             }
 
-            const auto artifact = heuristic->baseDir / heuristic->payload;
-            EXPECT_TRUE(std::filesystem::exists(artifact))
-                << "engine '" << set.engine.name << "' ships heuristic '" << heuristic->name
-                << "' whose artifact is missing: " << artifact;
+            // -Wswitch-default. The enum is closed and every member is handled above.
+            default:
+                ADD_FAILURE() << "engine '" << set.engine.name << "' ships heuristic '"
+                              << heuristic->name << "' naming an adapter this test does not know";
+                break;
+            }
         }
     }
 }

@@ -7,8 +7,7 @@ Train and export heuristic models for hipDNN's Universal Heuristic Descriptor (U
 This tool takes benchmark timing data and produces:
 1. A trained LightGBM model
 2. A FlatBuffer model artifact (`model.bin`) for `TreeDataAdapter`
-3. A UHD FlatBuffer descriptor (`uhd.fb`) for UHD loader (RFC 0019 §9.2)
-4. A human-readable UHD JSON (`uhd.json`)
+3. The UHD itself (`heuristic.uhd.json`), the descriptor the runtime loads (RFC 0019 §4)
 
 ## Installation
 
@@ -98,19 +97,19 @@ The tool generates:
 
 ```
 output_dir/
-├── uhd.fb             # FlatBuffer UHD descriptor (RFC 0019 §9.2) - runtime format
-├── uhd.json           # UHD descriptor JSON - human-readable
-├── model.bin          # FlatBuffer GbdtModel for TreeDataAdapter
+├── heuristic.uhd.json  # The UHD (RFC 0019 §4) - what the runtime loads
+├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter
 └── train_manifest.json # Training metadata
 ```
 
-**NOTE:** The runtime loads `uhd.fb`, not `uhd.json`. The JSON is for inspection/debugging only.
+The descriptor is named `<stem>.uhd.json` because `DescriptorLoader` discovers a heuristic
+by that suffix; a bare `uhd.json` would be invisible to it.
 
-### uhd.json
+### heuristic.uhd.json
 
 ```json
 {
-  "schema": "hipdnn.uhd/v1",
+  "version": "1.0",
   "id": "...",
   "name": "GEMM UHD",
   "adapter": "tree_data",
@@ -118,7 +117,7 @@ output_dir/
   "features_hash": "sha256:...",
   "objective": "max",
   "score": {"units": "tflops", "calibrated": false, "transform": "log1p"},
-  "model": {"artifact": "model.bin"}
+  "tree_data": {"artifact": "model.bin"}
 }
 ```
 
@@ -141,10 +140,11 @@ pytest tests/ -v
 The output files are loaded by hipDNN's UHD system:
 
 ```cpp
-// Load UHD descriptor (RFC 0019 §9.2)
-auto uhd = UhdLoader::load("uhd.fb");
+// The descriptor IS the UHD: DescriptorLoader parses it, and the heuristic is built
+// from those fields directly (RFC 0019 §4).
+auto config = UhdKernelHeuristic::configFrom(heuristicDescriptor);
 
 // TreeDataAdapter loads the model artifact
-auto adapter = TreeDataAdapter::load("model.bin", uhd.features_hash);
+auto adapter = TreeDataAdapter::load(config.modelArtifactPath, config.featuresHash);
 double score = adapter->score(featureVector);
 ```

@@ -24,7 +24,6 @@
 #include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/UhdConfig.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/UhdLoader.hpp>
 
 /// @file UhdKernelHeuristic.hpp
 /// @brief Ranks an engine's kernels with a trained UHD (RFC 0019 §5).
@@ -122,12 +121,16 @@ inline std::unordered_set<std::string> kernelAxesOf(const std::vector<std::strin
     std::unordered_set<std::string> axes;
     for(const auto& entry : signature)
     {
-        // An entry is a JsonLogic expression; a bare reference is not valid JSON on its own,
-        // so it arrives quoted and parses to a string.
+        // Through FeatureExtractor's own parse, not a second one. RFC 0019 §7.2 allows a
+        // bare reference (`$kernel.block_size`) as well as a JsonLogic expression, and a
+        // bare reference is not valid JSON -- so parsing entries directly threw on every
+        // one of them, the catch below swallowed it, and the axis set came back empty.
+        // The §6.3 comparison then read "exposes [block_size], model ranks on <none>" and
+        // refused every bare-reference signature ever trained.
         try
         {
-            for(const auto& variable :
-                uhd::JsonLogicEvaluator::extractVariables(nlohmann::json::parse(entry)))
+            for(const auto& variable : uhd::JsonLogicEvaluator::extractVariables(
+                    uhd::FeatureExtractor::parseSignatureEntry(entry)))
             {
                 constexpr std::string_view PREFIX = "$kernel.";
                 if(variable.rfind(PREFIX, 0) == 0)
@@ -187,18 +190,17 @@ public:
     {
         try
         {
-            const auto path = descriptor.baseDir / descriptor.payload;
-            auto config = uhd::UhdLoader::load(path);
-            if(!config.has_value())
-            {
-                return nullptr;
-            }
+            // The descriptor IS the UHD -- no second file to open, so nothing here can
+            // fail to load. It used to be a stub naming a FlatBuffer that held these
+            // fields, which made the descriptor unreadable to save 134 bytes on a file
+            // read once per engine.
+            auto config = configFrom(descriptor);
 
             // RFC 0019 §6.3 check 2: the exposed knobs *are* the model's feature axes.
             // Returning nullptr degrades to declared order, which is what §5 step 7 asks for
             // on a broken feature contract -- the model's inputs are not the ones it was
             // trained on, so its scores would be wrong.
-            const auto axes = kernelAxesOf(config->featuresSignature);
+            const auto axes = kernelAxesOf(config.featuresSignature);
             const std::unordered_set<std::string> exposed(knobs.begin(), knobs.end());
             if(axes != exposed)
             {
@@ -218,32 +220,32 @@ public:
                 return nullptr;
             }
 
-            auto adapter = uhd::makeUhdAdapter(*config);
+            auto adapter = uhd::makeUhdAdapter(config);
             if(adapter == nullptr)
             {
                 HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " names adapter '"
-                                                << config->adapterType
+                                                << config.adapterType
                                                 << "', which built no scorer");
                 return nullptr;
             }
 
             auto extractor = std::make_shared<const uhd::FeatureExtractor>(
-                config->featuresSignature, config->derived, config->categoricalEncoding);
+                config.featuresSignature, config.derived, config.categoricalEncoding);
 
             // RFC 0019 §6.3: the signature the model was trained against must be the one
             // the extractor will produce. Both sides carry the hash; disagreeing means the
             // pair was assembled from two different training runs.
-            if(extractor->getSignatureHash() != config->featuresHash)
+            if(extractor->getSignatureHash() != config.featuresHash)
             {
                 HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " signature hashes disagree -- "
-                                                << "descriptor declares '" << config->featuresHash
+                                                << "descriptor declares '" << config.featuresHash
                                                 << "', signature computes '"
                                                 << extractor->getSignatureHash() << "'");
                 return nullptr;
             }
 
             auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
-                std::move(*config), std::move(adapter), std::move(extractor), describedBy));
+                std::move(config), std::move(adapter), std::move(extractor), describedBy));
             // Kept for RFC 0019 §8.3: the arch this was built from is whatever the loader
             // resolved (the `default` entry), and rank() re-resolves against the running
             // device the first time it sees one that these do not describe.
@@ -256,6 +258,54 @@ public:
             HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " failed to load: " << e.what());
             return nullptr;
         }
+    }
+
+    /// The descriptor's own fields, with the artifact path resolved against the file it
+    /// was declared in.
+    ///
+    /// A straight copy, because the descriptor IS the UHD -- there is no second document
+    /// to reconcile it against. It used to be a four-field stub naming a FlatBuffer that
+    /// held these fields, which made the descriptor unreadable to save 134 bytes on a
+    /// file read once per engine.
+    static uhd::UhdConfig configFrom(const HeuristicDescriptor& descriptor)
+    {
+        uhd::UhdConfig config;
+        config.uhdId = toString(descriptor.id);
+        config.name = descriptor.name;
+        config.featuresSignature = descriptor.featuresSignature;
+        config.featuresHash = descriptor.featuresHash;
+        config.categoricalEncoding = descriptor.categoricalEncoding;
+        config.objective = descriptor.objective;
+        config.scoreUnits = descriptor.score.units;
+        config.scoreCalibrated = descriptor.score.calibrated;
+        config.scoreTransform = descriptor.score.transform;
+        config.staticOrderFields = descriptor.staticOrderFields;
+        config.nativeSymbol = descriptor.nativeSymbol;
+        config.customLibrarySymbol = descriptor.customLibrarySymbol;
+        config.modelHash = descriptor.modelHash;
+
+        for(const auto& entry : descriptor.derived)
+        {
+            config.derived.emplace_back(entry.name, entry.expression);
+        }
+
+        switch(descriptor.adapter)
+        {
+        case UhdAdapter::STATIC_ORDER: config.adapterType = "static_order"; break;
+        case UhdAdapter::NATIVE: config.adapterType = "native"; break;
+        case UhdAdapter::TREE_DATA: config.adapterType = "tree_data"; break;
+        case UhdAdapter::TABLE: config.adapterType = "table"; break;
+        case UhdAdapter::CUSTOM_LIBRARY: config.adapterType = "custom_library"; break;
+        // -Wswitch-default. The enum is closed and every member is handled above.
+        default: config.adapterType = "static_order"; break;
+        }
+
+        if(!descriptor.modelArtifactPath.empty())
+        {
+            config.modelArtifactPath
+                = (descriptor.baseDir / descriptor.modelArtifactPath).string();
+        }
+        return config;
     }
 
     /// Scores one kernel, extracting the whole row. rank() does not use this -- it shares

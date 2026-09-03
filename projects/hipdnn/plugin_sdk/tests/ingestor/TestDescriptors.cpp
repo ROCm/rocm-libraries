@@ -129,13 +129,13 @@ TEST(TestIngestorDescriptors, KernelDescriptorOriginDirectoryDefaultsToEmpty)
     EXPECT_TRUE(kernel.originDirectory.empty());
 }
 
-// HeuristicDescriptor: HeuristicKind as data; dispatch is tested in TestKernelHeuristic.cpp.
+// HeuristicDescriptor: UhdAdapter as data; dispatch is tested in TestKernelHeuristic.cpp.
 
-TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToNativeKind)
+TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
 {
     const HeuristicDescriptor descriptor{};
 
-    EXPECT_EQ(descriptor.kind, HeuristicKind::NATIVE);
+    EXPECT_EQ(descriptor.adapter, UhdAdapter::STATIC_ORDER);
 }
 
 } // namespace

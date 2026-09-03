@@ -367,7 +367,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         find_package(rocm-kpack CONFIG REQUIRED)
     endif()
     add_subdirectory(descriptor-packaging)
-    # Produces the pointwise_model pack's .uhd.fb and its model artifact, which the
+    # Produces the pointwise_model pack's .uhd.json and its model artifact, which the
     # descriptor staging in src/ then copies alongside that pack's JSON. Ahead of src/ so
     # the target exists to depend on.
     add_subdirectory(tools/uhd_model_gen)
@@ -491,7 +491,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPDNN_TEST_DESCRIPTOR_FILES
         pointwise_model/pointwise_model.kmd.json
         pointwise_model/pointwise_model.ued.json
-        pointwise_model/pointwise_model.uhd.json
         pointwise_model/pointwise_model_add.kdp.json
     )
 
@@ -531,14 +530,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         list(APPEND _staged_descriptors "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}")
     endforeach()
 
-    # The pointwise_model pack's heuristic is a trained artifact rather than a symbol, so
-    # two of its files are binary and cannot be staged by copying from the source tree.
-    # They are generated instead -- see tools/uhd_model_gen for why they are not committed.
+    # The pointwise_model pack's heuristic is a trained artifact rather than a symbol. The
+    # model is binary and cannot be staged by copying from the source tree; the descriptor
+    # could be, but is generated with it so `features_hash` cannot drift -- see
+    # tools/uhd_model_gen. A committed descriptor would be free to disagree with the
+    # signature the model was built from.
     # Listed as outputs of one command because a single run writes both, and both are
     # inputs to the staging target below, so a test target that pulls the descriptors in
     # gets them too. Not installed, for the same reason the pack's JSON is not.
     set(_generated_model_artifacts
-        "${HIPDNN_DESCRIPTOR_BUILD_DIR}/pointwise_model/pointwise_model.uhd.fb"
+        "${HIPDNN_DESCRIPTOR_BUILD_DIR}/pointwise_model/pointwise_model.uhd.json"
         "${HIPDNN_DESCRIPTOR_BUILD_DIR}/pointwise_model/pointwise_model.bin"
     )
     add_custom_command(

@@ -1,15 +1,15 @@
 # pointwise_model — a model-backed UHD
 
-Every other pack in this tree declares `"kind": "native"`: its heuristic is a compiled
-function resolved by symbol. This one declares `"kind": "model"`, so its heuristic is a
-trained artifact loaded at plan build (RFC 0019 §7). It exists to keep that path exercised
+Every other pack in this tree declares `"adapter": "native"`: its heuristic is a compiled
+function resolved by symbol. This one declares `"adapter": "tree_data"`, so its heuristic
+is a trained artifact loaded at plan build (RFC 0019 §7). It exists to keep that path exercised
 end to end, on a device, rather than only in unit tests.
 
 ## What is deliberate here
 
 **It reuses the native pack's symbols.** The graph matcher, the ADD and dtype matchers and
-the dispatch handler are referenced by the same ids `pointwise/` uses. A MODEL heuristic
-resolves no score symbol, so this pack adds no C++ at all — the only difference from
+the dispatch handler are referenced by the same ids `pointwise/` uses. A model-backed
+heuristic resolves no score symbol, so this pack adds no C++ at all — the only difference from
 `pointwise/` is which heuristic its UED names.
 
 **Its model disagrees with the native scorer, on purpose.** `hipkernel.pointwise.score`
@@ -43,8 +43,10 @@ comes from `projects/hipdnn/tools/uhd_gen` and a benchmark corpus.
 
 ## The artifacts
 
-`pointwise_model.uhd.fb` and `pointwise_model.bin` are generated into the staged descriptor
-directory at build time, not committed: two opaque binaries in review are unreadable, and
-they would drift the moment the feature signature changed. The generator computes the
-signature hash with the same function the runtime validates it against, so the pair cannot
+`pointwise_model.uhd.json` and `pointwise_model.bin` are generated into the staged
+descriptor directory at build time, not committed. The model has to be: it is binary, and
+an opaque artifact in review is unreadable. The descriptor is text and could be committed,
+but is generated with it because the two are tied by `features_hash` — a committed copy
+would be free to drift the moment the feature signature changed. The generator computes
+that hash with the same function the runtime validates it against, so the pair cannot
 disagree.

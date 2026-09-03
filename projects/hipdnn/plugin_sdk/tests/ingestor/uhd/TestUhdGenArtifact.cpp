@@ -26,9 +26,12 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/AdapterFactory.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/UhdLoader.hpp>
+
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
@@ -119,6 +122,18 @@ protected:
                "installs.";
     }
 
+    /// The tool's descriptor, read back the way the runtime reads it: parsed by
+    /// DescriptorLoader, then turned into a UhdConfig by the heuristic itself. There is no
+    /// second file -- the descriptor IS the UHD -- so this is the whole load path.
+    hipdnn_plugin_sdk::ingestor::uhd::UhdConfig configFromTool() const
+    {
+        const auto path = _outputDir / "heuristic.uhd.json";
+        std::ifstream file(path);
+        const auto document = nlohmann::json::parse(file);
+        return hipdnn_plugin_sdk::ingestor::UhdKernelHeuristic::configFrom(
+            hipdnn_plugin_sdk::ingestor::detail::parseHeuristicDescriptor(document, path));
+    }
+
     std::unique_ptr<hipdnn_test_sdk::utilities::ScopedDirectory> _dir;
     std::filesystem::path _outputDir;
 };
@@ -127,23 +142,25 @@ protected:
 
 TEST_F(TestUhdGenArtifact, WritesTheArtifactsTheRuntimeLooksFor)
 {
-    // The names are a contract, not an implementation detail: the UHD's model_artifact_path
-    // is written relative to itself, so the loader resolves model.bin beside uhd.fb.
-    EXPECT_TRUE(std::filesystem::exists(_outputDir / "uhd.fb"));
+    // The names are a contract, not an implementation detail: the artifact path is written
+    // relative to the descriptor, so the loader resolves model.bin beside it. The `.uhd.json`
+    // suffix is what descriptor discovery looks for -- a bare `uhd.json` is invisible to it.
+    EXPECT_TRUE(std::filesystem::exists(_outputDir / "heuristic.uhd.json"));
     EXPECT_TRUE(std::filesystem::exists(_outputDir / "model.bin"));
 }
 
 TEST_F(TestUhdGenArtifact, TheRuntimeLoadsWhatTheToolWrote)
 {
-    const auto config = UhdLoader::load(_outputDir / "uhd.fb");
-    ASSERT_TRUE(config.has_value()) << "UhdLoader rejected a descriptor uhd_gen produced";
+    uhd::UhdConfig config;
+    ASSERT_NO_THROW(config = configFromTool())
+        << "the descriptor loader rejected a descriptor uhd_gen produced";
 
-    EXPECT_EQ(config->adapterType, "tree_data");
-    EXPECT_EQ(config->objective, "max");
+    EXPECT_EQ(config.adapterType, "tree_data");
+    EXPECT_EQ(config.objective, "max");
     // uhd_gen trains on log1p(target) and says so, which is what lets a consumer recover
     // the declared units.
-    EXPECT_EQ(config->scoreTransform, "log1p");
-    EXPECT_EQ(config->featuresSignature.size(), 2U);
+    EXPECT_EQ(config.scoreTransform, "log1p");
+    EXPECT_EQ(config.featuresSignature.size(), 2U);
 }
 
 TEST_F(TestUhdGenArtifact, TheSignatureHashAgreesAcrossLanguages)
@@ -151,23 +168,21 @@ TEST_F(TestUhdGenArtifact, TheSignatureHashAgreesAcrossLanguages)
     // The assertion this file exists for. Python canonicalises the signature and hashes it;
     // C++ does the same independently, and the runtime refuses the model on a mismatch. A
     // divergence in either spelling or canonicalisation shows up here and nowhere else.
-    const auto config = UhdLoader::load(_outputDir / "uhd.fb");
-    ASSERT_TRUE(config.has_value());
+    const auto config = configFromTool();
 
-    EXPECT_EQ(FeatureExtractor::computeHash(config->featuresSignature), config->featuresHash);
+    EXPECT_EQ(FeatureExtractor::computeHash(config.featuresSignature), config.featuresHash);
 }
 
 TEST_F(TestUhdGenArtifact, TheModelScoresAndOrdersByTheFeatureItWasTrainedOn)
 {
-    const auto config = UhdLoader::load(_outputDir / "uhd.fb");
-    ASSERT_TRUE(config.has_value());
+    const auto config = configFromTool();
 
     // makeUhdAdapter checks the descriptor's hash against the one baked into the model
     // artifact, so a non-null adapter is itself evidence the pair came from one run.
-    const auto adapter = makeUhdAdapter(*config);
+    const auto adapter = makeUhdAdapter(config);
     ASSERT_NE(adapter, nullptr) << "the model artifact did not load against its descriptor";
 
-    const FeatureExtractor extractor(config->featuresSignature, config->derived);
+    const FeatureExtractor extractor(config.featuresSignature, config.derived);
 
     const auto scoreFor = [&](int64_t tileM) {
         FeatureExtractionContext ctx;

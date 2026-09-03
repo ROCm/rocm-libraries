@@ -48,8 +48,8 @@ TEST(TestIngestorKernelHeuristic, NamesTheDescriptorThatCouldNotResolve)
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "misspelled selector";
-    descriptor.kind = HeuristicKind::NATIVE;
-    descriptor.payload = "hipdnn.kernel_ingestor.test.misspelled";
+    descriptor.adapter = UhdAdapter::NATIVE;
+    descriptor.nativeSymbol = "hipdnn.kernel_ingestor.test.misspelled";
 
     try
     {
@@ -314,8 +314,8 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "test heuristic";
-    descriptor.kind = HeuristicKind::NATIVE;
-    descriptor.payload = SCORE_SYMBOL;
+    descriptor.adapter = UhdAdapter::NATIVE;
+    descriptor.nativeSymbol = SCORE_SYMBOL;
 
     const auto heuristic = makeKernelHeuristic(descriptor);
 
@@ -335,8 +335,10 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicDegradesWhenAModelCannotBeB
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "model heuristic";
-    descriptor.kind = HeuristicKind::MODEL;
-    descriptor.payload = "some/model/artifact.bin";
+    descriptor.adapter = UhdAdapter::TREE_DATA;
+    descriptor.modelArtifactPath = "some/model/artifact.bin";
+    descriptor.featuresSignature = {R"("$kernel.tile_m")"};
+    descriptor.featuresHash = "sha256:whatever";
 
     std::shared_ptr<IKernelHeuristic> heuristic;
     ASSERT_NO_THROW(heuristic = makeKernelHeuristic(descriptor));

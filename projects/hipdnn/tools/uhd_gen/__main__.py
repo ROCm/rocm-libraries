@@ -29,7 +29,6 @@ import pandas as pd
 from .features import build_features_signature, compute_features_hash
 from .lgbm_to_flatbuffer import convert
 from .train_uhd import evaluate_regret, train_model
-from .uhd_to_flatbuffer import convert_uhd
 
 logging.basicConfig(
     level=logging.INFO,
@@ -273,45 +272,40 @@ def main(argv: list[str] | None = None) -> int:
     # Generate UHD identifier
     uhd_id = str(uuid.uuid4())
 
-    # Write JSON descriptor for human readability
-    uhd_json = {
-        "schema": "hipdnn.uhd/v1",
+    # The whole UHD, in the descriptor. RFC 0019 §4 always specified JSON; an earlier
+    # design put these fields in a FlatBuffer that a four-field stub pointed at, which
+    # made the UHD the only descriptor in the family a human could not read, diff or
+    # review -- to save 134 bytes on a file read once per engine.
+    #
+    # `model.bin` stays binary. It is read once per candidate score, and at a realistic
+    # 500 trees it is 3.7 MB; that one earns its format.
+    descriptor = {
+        "version": "1.0",
         "id": uhd_id,
         "name": args.name,
         "adapter": "tree_data",
         "features_signature": features_signature,
         "features_hash": features_hash,
         "objective": args.objective,
-        # transform is log1p because train_uhd.train_model always fits on
-        # log1p(target); the runtime inverts it to recover the declared units.
         "score": {
             "units": args.score_units or args.target,
             "calibrated": args.calibrated,
+            # log1p because train_uhd.train_model always fits on log1p(target); the
+            # runtime inverts it to recover the declared units.
             "transform": "log1p",
         },
-        "model": {"artifact": "model.bin"},
+        # The body key equals the adapter value (RFC 0019 §4). `artifact` is relative to
+        # this file, which is where the loader resolves it from, so the pair relocates
+        # together.
+        "tree_data": {"artifact": fb_path.name},
     }
-    uhd_json_path = output_dir / "uhd.json"
-    with open(uhd_json_path, "w") as f:
-        json.dump(uhd_json, f, indent=2)
-    logger.info("Generated UHD JSON descriptor: %s", uhd_json_path)
-
-    # Write FlatBuffer UHD (RFC 0019 §9.2 descriptor format)
-    uhd_fb_path = output_dir / "uhd.fb"
-    convert_uhd(
-        uhd_id=uhd_id,
-        name=args.name,
-        adapter="tree_data",
-        features_signature=features_signature,
-        features_hash=features_hash,
-        objective=args.objective,
-        score_units=args.score_units or args.target,
-        score_calibrated=args.calibrated,
-        score_transform="log1p",
-        output_path=uhd_fb_path,
-        model_artifact_path="model.bin",
-    )
-    logger.info("Generated UHD FlatBuffer: %s", uhd_fb_path)
+    # Named `<stem>.uhd.json`, not a bare `uhd.json`: DescriptorLoader discovers a
+    # heuristic by that suffix, so a bare name would be invisible to it.
+    descriptor_path = output_dir / "heuristic.uhd.json"
+    with open(descriptor_path, "w") as f:
+        json.dump(descriptor, f, indent=2)
+        f.write("\n")
+    logger.info("Generated UHD descriptor: %s", descriptor_path)
 
     manifest = {
         "features": args.features,
@@ -330,8 +324,7 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Wrote training manifest: %s", manifest_path)
 
     print(f"\nUHD Generation Complete")
-    print(f"  UHD FlatBuffer: {uhd_fb_path}")
-    print(f"  UHD JSON:       {uhd_json_path}")
+    print(f"  UHD descriptor: {descriptor_path}")
     print(f"  Model artifact: {fb_path} ({model.num_trees()} trees)")
     print(f"  Features hash:  {features_hash}")
 

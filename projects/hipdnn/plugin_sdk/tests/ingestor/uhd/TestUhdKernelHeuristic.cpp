@@ -22,19 +22,20 @@
 
 #include "../KernelIngestorTestFixtures.hpp"
 
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelHeuristicFactory.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/NativeScorerRegistry.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/UhdLoader.hpp>
 
-#include <hipdnn_flatbuffers_sdk/data_objects/uhd_generated.h>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
 
+#include <nlohmann/json.hpp>
+
 #include <cstdint>
+#include <exception>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -42,8 +43,6 @@ namespace hipdnn_plugin_sdk::ingestor
 {
 namespace
 {
-
-namespace fbs = hipdnn_flatbuffers_sdk::data_objects;
 
 // The signature both the descriptor and the tests agree on: slot 0 is a kernel knob, slot
 // 1 a problem token. Two slots from two namespaces is the minimum that can show the
@@ -143,67 +142,29 @@ hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec preferLargeTilesOnLon
     return spec;
 }
 
-/// Writes a `.uhd.fb` naming a model artifact, and returns its filename.
-///
-/// Local to this file rather than shared: the loader's own suites build their descriptors
-/// inline too, and a builder covering every field none of them set would be a third
-/// spelling of the schema to keep in step.
-std::string writeUhd(const std::filesystem::path& dir,
-                     const std::string& modelFileName,
-                     const std::string& objective,
-                     const std::string& featuresHash,
-                     bool calibrated,
-                     const std::string& scoreTransform)
-{
-    flatbuffers::FlatBufferBuilder builder;
-
-    auto id = builder.CreateString("test-uhd");
-    auto name = builder.CreateString("Test UHD");
-    auto hash = builder.CreateString(featuresHash);
-    auto obj = builder.CreateString(objective);
-    auto units = builder.CreateString("tflops");
-    auto transform = builder.CreateString(scoreTransform);
-    auto artifact = builder.CreateString(modelFileName);
-
-    std::vector<flatbuffers::Offset<flatbuffers::String>> signature;
-    signature.reserve(SIGNATURE.size());
-    for(const auto& entry : SIGNATURE)
-    {
-        signature.push_back(builder.CreateString(entry));
-    }
-    auto signatureVec = builder.CreateVector(signature);
-    auto score = fbs::CreateUhdScoreMetadata(builder, units, calibrated, transform);
-
-    auto uhd = fbs::CreateUHD(builder,
-                              id,
-                              name,
-                              fbs::UhdAdapter::TREE_DATA,
-                              0, // derived
-                              signatureVec,
-                              hash,
-                              obj,
-                              score,
-                              artifact);
-    builder.Finish(uhd, "HUHD");
-
-    const std::string fileName = "test.uhd.fb";
-    std::ofstream out(dir / fileName, std::ios::binary);
-    out.write(reinterpret_cast<const char*>(builder.GetBufferPointer()),
-              static_cast<std::streamsize>(builder.GetSize()));
-    out.close();
-    return fileName;
-}
-
 struct Fixture
 {
-    std::string uhdFileName;
+    /// The GBDT artifact `writeFixture` wrote, relative to the directory it wrote it in.
+    std::string modelFileName;
+    /// The hash SIGNATURE really computes to, which is what a descriptor must declare.
     std::string featuresHash;
+    /// The score fields the fixture was built for. They live on the descriptor now rather
+    /// than in a second file, so they have to travel back to the caller that will build it
+    /// -- otherwise every call site would repeat a value it has already passed here, and a
+    /// test varying the objective would hand the runtime a descriptor that does not.
+    std::string objective;
+    bool calibrated;
+    std::string scoreTransform;
 };
 
-/// Writes a matching `.uhd.fb` and GBDT artifact into @p dir.
+/// Writes a GBDT artifact into @p dir and reports what a descriptor over it must say.
+///
+/// There is no second file to write. The descriptor carries the header, so the only thing
+/// on disk is the model the header names.
 ///
 /// @param modelHash Written into the model artifact. Defaults to the signature's real
-///        hash; a caller passing something else is testing the contract check.
+///        hash; a caller passing something else is testing the contract check, which
+///        compares the model's own hash against the one the descriptor declares.
 Fixture writeFixture(const std::filesystem::path& dir,
                      const hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec& tree,
                      const std::string& objective = "max",
@@ -226,24 +187,88 @@ Fixture writeFixture(const std::filesystem::path& dir,
         .addTree(tree);
     model.buildToFile((dir / "model.bin").string());
 
-    return {writeUhd(dir,
-                     "model.bin",
-                     objective,
-                     signatureHash,
-                     calibrated.value_or(objective != "min"),
-                     scoreTransform),
-            signatureHash};
+    return {"model.bin",
+            signatureHash,
+            objective,
+            calibrated.value_or(objective != "min"),
+            scoreTransform};
 }
 
-HeuristicDescriptor modelDescriptor(const std::filesystem::path& dir, const std::string& payload)
+/// The descriptor the loader would produce for a tree_data UHD in @p dir.
+HeuristicDescriptor modelDescriptor(const std::filesystem::path& dir,
+                                    const std::string& artifact,
+                                    const std::string& objective = "max",
+                                    bool calibrated = true,
+                                    const std::string& scoreTransform = "identity",
+                                    const std::string& featuresHash = {})
 {
     HeuristicDescriptor descriptor;
     descriptor.id = testId(0xEE);
     descriptor.name = "test model heuristic";
-    descriptor.kind = HeuristicKind::MODEL;
-    descriptor.payload = payload;
+    descriptor.adapter = UhdAdapter::TREE_DATA;
+    descriptor.featuresSignature = SIGNATURE;
+    descriptor.featuresHash
+        = featuresHash.empty() ? uhd::FeatureExtractor::computeHash(SIGNATURE) : featuresHash;
+    descriptor.objective = objective;
+    descriptor.score.units = "tflops";
+    descriptor.score.calibrated = calibrated;
+    descriptor.score.transform = scoreTransform;
+    descriptor.modelArtifactPath = artifact;
     descriptor.baseDir = dir;
     return descriptor;
+}
+
+/// The descriptor over the artifact @p fixture wrote, carrying the score fields it was
+/// built for. Every test that varies one of them varies it through this, so the variation
+/// cannot be lost between writing the model and describing it.
+HeuristicDescriptor modelDescriptor(const std::filesystem::path& dir, const Fixture& fixture)
+{
+    return modelDescriptor(dir,
+                           fixture.modelFileName,
+                           fixture.objective,
+                           fixture.calibrated,
+                           fixture.scoreTransform);
+}
+
+/// A `.uhd.json` as an author would write it, naming @p artifact.
+///
+/// Only the tests that need a document the *parser* refuses build one of these. A
+/// descriptor assembled in memory has already skipped every check the parse performs, so a
+/// rule enforced there -- §15.1's calibrated/`min` pair is the one -- is only reachable
+/// through the JSON.
+nlohmann::json uhdDocument(const std::string& artifact,
+                           const std::string& objective,
+                           bool calibrated)
+{
+    nlohmann::json document;
+    document["version"] = "1.0";
+    document["id"] = "ee000000-0000-0000-0000-000000000000";
+    document["name"] = "test model heuristic";
+    document["adapter"] = "tree_data";
+    document["features_signature"] = SIGNATURE;
+    document["features_hash"] = uhd::FeatureExtractor::computeHash(SIGNATURE);
+    document["objective"] = objective;
+    document["score"]
+        = {{"units", "tflops"}, {"calibrated", calibrated}, {"transform", "identity"}};
+    document["tree_data"] = {{"artifact", artifact}};
+    return document;
+}
+
+/// Parses @p document exactly as descriptor discovery would.
+///
+/// @returns nullopt when the loader refuses it, which is the state the factory then sees:
+///          an engine whose UHD did not parse arrives with no descriptor at all.
+std::optional<HeuristicDescriptor> parseUhd(const nlohmann::json& document,
+                                            const std::filesystem::path& path)
+{
+    try
+    {
+        return detail::parseHeuristicDescriptor(document, path);
+    }
+    catch(const std::exception&)
+    {
+        return std::nullopt;
+    }
 }
 
 /// The suite's shared device, with the architecture the fixtures train against so the
@@ -274,7 +299,7 @@ TEST(TestIngestorUhdKernelHeuristic, RanksByTheModelRatherThanByPriority)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_happy");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -294,7 +319,7 @@ TEST(TestIngestorUhdKernelHeuristic, TheProblemChangesTheRanking)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_problem");
     const auto fixture = writeFixture(dir.path(), preferLargeTilesOnLongSequences());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -320,9 +345,9 @@ TEST(TestIngestorUhdKernelHeuristic, AMinimisingObjectiveReversesTheOrder)
     const auto minFixture = writeFixture(minDir.path(), preferLargeTiles(), "min");
 
     const auto maximising
-        = makeKernelHeuristic(modelDescriptor(maxDir.path(), maxFixture.uhdFileName), {}, KNOBS);
+        = makeKernelHeuristic(modelDescriptor(maxDir.path(), maxFixture), {}, KNOBS);
     const auto minimising
-        = makeKernelHeuristic(modelDescriptor(minDir.path(), minFixture.uhdFileName), {}, KNOBS);
+        = makeKernelHeuristic(modelDescriptor(minDir.path(), minFixture), {}, KNOBS);
     ASSERT_NE(maximising, nullptr);
     ASSERT_NE(minimising, nullptr);
 
@@ -350,7 +375,11 @@ TEST(TestIngestorUhdKernelHeuristic, AnAbsentArtifactDegradesToDeclaredOrder)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_absent");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), "not_written.uhd.fb"));
+    // KNOBS, so the degradation under test is the missing artifact and not the §6.3 knob
+    // check -- with no knobs declared the heuristic would refuse before it ever looked for
+    // the file, and this case would pass without exercising what it names.
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), "not_written.bin"), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -371,7 +400,7 @@ TEST(TestIngestorUhdKernelHeuristic, AFeaturesHashMismatchDegradesToDeclaredOrde
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", "sha256:not_the_real_hash");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -392,7 +421,7 @@ TEST(TestIngestorUhdKernelHeuristic, AKernelMissingAFeatureDegradesTheWholeRanki
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_partial");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     Catalog catalog;
@@ -420,7 +449,7 @@ TEST(TestIngestorUhdKernelHeuristic, AListValuedTokenIsSkippedRatherThanFatal)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_list");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     auto catalog = catalogAgainstPriority(2048);
@@ -435,7 +464,6 @@ TEST(TestIngestorUhdKernelHeuristic, AListValuedTokenIsSkippedRatherThanFatal)
     EXPECT_EQ(ranked.front().kernelId, testId(0x02)); // still the model's order
 }
 
-#endif // HIPDNN_ENABLE_K
 /// RFC 0019 §6.3 check 2: `set(UED.knobs) == set($kernel.* axes the model reads)`. Both
 /// directions of a mismatch fail silently, which is why the RFC asks for set equality rather
 /// than a subset test, and why both are pinned here.
@@ -448,9 +476,8 @@ TEST(TestIngestorUhdKernelHeuristic, AKnobTheModelDoesNotReadIsRefused)
     // distinguishes that from a knob the model happens to weigh lightly.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_extra_knob");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
-                                               {},
-                                               {"tile_m", "split_k"});
+    const auto heuristic = makeKernelHeuristic(
+        modelDescriptor(dir.path(), fixture), {}, {"tile_m", "split_k"});
     ASSERT_NE(heuristic, nullptr);
     const testing::TestGraph graph;
     const auto properties = gfx942();
@@ -461,14 +488,14 @@ TEST(TestIngestorUhdKernelHeuristic, AKnobTheModelDoesNotReadIsRefused)
     // have overturned had it been used.
     EXPECT_EQ(ranked.front().kernelId, testId(0x01));
 }
+
 TEST(TestIngestorUhdKernelHeuristic, AnAxisWithNoKnobIsRefused)
 {
     // The reverse direction: the model ranks on tile_m while the engine exposes nothing, so
     // its scores turn on something no caller can influence.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_no_knob");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
-    const auto heuristic
-        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, {});
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, {});
     ASSERT_NE(heuristic, nullptr);
     const testing::TestGraph graph;
     const auto properties = gfx942();
@@ -492,11 +519,11 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchSpecificModelOutranksTheDefaultOne)
     const auto specific = writeFixture(archDir.path(), preferLargeTiles());
 
     const std::map<std::string, HeuristicDescriptor> byArch{
-        {"default", modelDescriptor(defaultDir.path(), fallback.uhdFileName)},
-        {"gfx942", modelDescriptor(archDir.path(), specific.uhdFileName)}};
+        {"default", modelDescriptor(defaultDir.path(), fallback)},
+        {"gfx942", modelDescriptor(archDir.path(), specific)}};
 
     const auto heuristic = makeKernelHeuristic(
-        modelDescriptor(defaultDir.path(), fallback.uhdFileName), {}, KNOBS, byArch);
+        modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -519,11 +546,11 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnnamedArchFallsBackToDefault)
     const auto specific = writeFixture(archDir.path(), preferLargeTiles());
 
     const std::map<std::string, HeuristicDescriptor> byArch{
-        {"default", modelDescriptor(defaultDir.path(), fallback.uhdFileName)},
-        {"gfx942", modelDescriptor(archDir.path(), specific.uhdFileName)}};
+        {"default", modelDescriptor(defaultDir.path(), fallback)},
+        {"gfx942", modelDescriptor(archDir.path(), specific)}};
 
     const auto heuristic = makeKernelHeuristic(
-        modelDescriptor(defaultDir.path(), fallback.uhdFileName), {}, KNOBS, byArch);
+        modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -547,11 +574,11 @@ TEST(TestIngestorUhdKernelHeuristic, ArchResolutionIsStableAcrossCalls)
     const auto specific = writeFixture(archDir.path(), preferLargeTiles());
 
     const std::map<std::string, HeuristicDescriptor> byArch{
-        {"default", modelDescriptor(defaultDir.path(), fallback.uhdFileName)},
-        {"gfx942", modelDescriptor(archDir.path(), specific.uhdFileName)}};
+        {"default", modelDescriptor(defaultDir.path(), fallback)},
+        {"gfx942", modelDescriptor(archDir.path(), specific)}};
 
     const auto heuristic = makeKernelHeuristic(
-        modelDescriptor(defaultDir.path(), fallback.uhdFileName), {}, KNOBS, byArch);
+        modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -581,8 +608,7 @@ TEST(TestIngestorUhdKernelHeuristic, SelectionReturnsIdsWithScoresWinnerFirst)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_scored_form");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
-                                               {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -615,8 +641,8 @@ TEST(TestIngestorUhdKernelHeuristic, ADegradedRankingReportsTheZeroTheRfcPrescri
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
     // A knob set the model does not read breaks the §6.3 contract, so ranking degrades.
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
-                                               {}, {"tile_m", "split_k"});
+    const auto heuristic = makeKernelHeuristic(
+        modelDescriptor(dir.path(), fixture), {}, {"tile_m", "split_k"});
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -636,17 +662,27 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedScoreCannotAlsoBeMinimising)
     // would have engine selection compare one engine's throughput against another's latency
     // and rank the faster engine last, with nothing in the output to show it happened. So the
     // load fails rather than picking a direction.
+    //
+    // The descriptor IS the UHD, so the refusal happens where the JSON is parsed rather
+    // than where a second file was opened; a descriptor handed to the factory has already
+    // been through it. The document is therefore what this asserts on.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_calibrated_min");
-    const auto fixture = writeFixture(dir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/true);
+    const auto fixture
+        = writeFixture(dir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/true);
 
-    EXPECT_FALSE(uhd::UhdLoader::load(dir.path() / fixture.uhdFileName).has_value())
+    EXPECT_FALSE(parseUhd(uhdDocument(fixture.modelFileName, "min", /*calibrated=*/true),
+                          dir.path() / "test.uhd.json")
+                     .has_value())
         << "a calibrated, minimising UHD loaded";
 
     // The supported pairing -- rank on a cost target, decline cross-engine comparison -- still
     // loads, so the check rejects the contradiction rather than the objective.
     const hipdnn_test_sdk::utilities::ScopedDirectory okDir("uhd_uncalibrated_min");
-    const auto ok = writeFixture(okDir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/false);
-    EXPECT_TRUE(uhd::UhdLoader::load(okDir.path() / ok.uhdFileName).has_value());
+    const auto ok
+        = writeFixture(okDir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/false);
+    EXPECT_TRUE(parseUhd(uhdDocument(ok.modelFileName, "min", /*calibrated=*/false),
+                         okDir.path() / "test.uhd.json")
+                    .has_value());
 }
 
 TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngineEstimate)
@@ -660,8 +696,7 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngi
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true);
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
-                                               {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -685,8 +720,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedModelEstimatesZero)
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/false);
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
-                                               {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -725,8 +759,7 @@ TEST(TestIngestorUhdKernelHeuristic, AModelWhoseTransformGoesOutOfDomainDoesNotC
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_out_of_domain");
     const auto fixture = writeFixture(dir.path(), preferNegativeScores(), "max", {}, false, "exp");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
-                                               {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -763,8 +796,7 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelCannotReportANegativeThroug
     const auto fixture
         = writeFixture(dir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/true, "log1p");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
-                                               {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -793,8 +825,7 @@ TEST(TestIngestorUhdKernelHeuristic, AMinObjectiveScoresBelowZeroWithoutThatBein
     const auto fixture = writeFixture(
         dir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/false, "identity");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
-                                               {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -817,8 +848,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnmeasuredCandidateSortsLastUnderAMinObje
     const auto fixture = writeFixture(
         dir.path(), oneUsableOneOutOfRange(), "min", {}, /*calibrated=*/false, "identity");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
-                                               {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -850,8 +880,7 @@ TEST(TestIngestorUhdKernelHeuristic, ANegativeThroughputIsReportedAsAnErrorNotSw
     const auto fixture
         = writeFixture(dir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/true, "log1p");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
-                                               {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -885,8 +914,7 @@ TEST(TestIngestorUhdKernelHeuristic, APartiallyAffectedRankingSaysTheModelStillD
     const auto fixture = writeFixture(
         dir.path(), oneUsableOneOutOfRange(), "max", {}, /*calibrated=*/true, "identity");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
-                                               {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -918,8 +946,8 @@ TEST(TestIngestorUhdKernelHeuristic, PerArchModelsRankWithoutADefaultEntry)
     const auto onNine50 = writeFixture(gfx950Dir.path(), preferSmallTiles());
 
     const std::map<std::string, HeuristicDescriptor> byArch{
-        {"gfx942", modelDescriptor(gfx942Dir.path(), onNine42.uhdFileName)},
-        {"gfx950", modelDescriptor(gfx950Dir.path(), onNine50.uhdFileName)}};
+        {"gfx942", modelDescriptor(gfx942Dir.path(), onNine42)},
+        {"gfx950", modelDescriptor(gfx950Dir.path(), onNine50)}};
 
     // No descriptor: there is no `default` for the loader to have resolved.
     const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, byArch);
@@ -949,7 +977,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchNamedModelDoesNotRankAnArchitectureIt
     const auto onNine50 = writeFixture(dir.path(), preferLargeTiles());
 
     const std::map<std::string, HeuristicDescriptor> byArch{
-        {"gfx950", modelDescriptor(dir.path(), onNine50.uhdFileName)}};
+        {"gfx950", modelDescriptor(dir.path(), onNine50)}};
 
     const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, byArch);
     ASSERT_NE(heuristic, nullptr);
@@ -983,11 +1011,11 @@ TEST(TestIngestorUhdKernelHeuristic, ADefaultStillCoversAnArchitectureNotNamedEx
     const auto specific = writeFixture(archDir.path(), preferSmallTiles());
 
     const std::map<std::string, HeuristicDescriptor> byArch{
-        {"default", modelDescriptor(defaultDir.path(), fallback.uhdFileName)},
-        {"gfx950", modelDescriptor(archDir.path(), specific.uhdFileName)}};
+        {"default", modelDescriptor(defaultDir.path(), fallback)},
+        {"gfx950", modelDescriptor(archDir.path(), specific)}};
 
     const auto heuristic = makeKernelHeuristic(
-        modelDescriptor(defaultDir.path(), fallback.uhdFileName), "test-engine", KNOBS, byArch);
+        modelDescriptor(defaultDir.path(), fallback), "test-engine", KNOBS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1028,7 +1056,7 @@ std::shared_ptr<IKernelHeuristic> heuristicForCondition(  // NOLINT(misc-use-int
     if(condition == "healthy_model")
     {
         const auto fixture = writeFixture(dir, preferLargeTiles());
-        return makeKernelHeuristic(modelDescriptor(dir, fixture.uhdFileName), "e", KNOBS);
+        return makeKernelHeuristic(modelDescriptor(dir, fixture), "e", KNOBS);
     }
     if(condition == "features_hash_disagrees")
     {
@@ -1036,21 +1064,26 @@ std::shared_ptr<IKernelHeuristic> heuristicForCondition(  // NOLINT(misc-use-int
         // extractor will produce.
         const auto fixture
             = writeFixture(dir, preferLargeTiles(), "max", "sha256:not_the_real_hash");
-        return makeKernelHeuristic(modelDescriptor(dir, fixture.uhdFileName), "e", KNOBS);
+        return makeKernelHeuristic(modelDescriptor(dir, fixture), "e", KNOBS);
     }
     if(condition == "knobs_disagree_with_axes")
     {
         // §6.3 check 2: the UED advertises a knob the model has no axis for.
         const auto fixture = writeFixture(dir, preferLargeTiles());
-        return makeKernelHeuristic(
-            modelDescriptor(dir, fixture.uhdFileName), "e", {"tile_m", "split_k"});
+        return makeKernelHeuristic(modelDescriptor(dir, fixture), "e", {"tile_m", "split_k"});
     }
     if(condition == "calibrated_and_minimising")
     {
-        // §15.1: the one combination the loader refuses outright.
+        // §15.1: the one combination the loader refuses outright. It is refused at the
+        // parse now -- the descriptor IS the UHD -- so the engine reaches the factory with
+        // no descriptor, and this goes through the document rather than round it.
         const auto fixture
             = writeFixture(dir, preferLargeTiles(), "min", {}, /*calibrated=*/true);
-        return makeKernelHeuristic(modelDescriptor(dir, fixture.uhdFileName), "e", KNOBS);
+        return makeKernelHeuristic(
+            parseUhd(uhdDocument(fixture.modelFileName, "min", /*calibrated=*/true),
+                     dir / "test.uhd.json"),
+            "e",
+            KNOBS);
     }
     if(condition == "no_uhd_at_all")
     {
@@ -1062,7 +1095,7 @@ std::shared_ptr<IKernelHeuristic> heuristicForCondition(  // NOLINT(misc-use-int
         // §8.3 third step: models exist, but none for this architecture and no default.
         const auto fixture = writeFixture(dir, preferLargeTiles());
         const std::map<std::string, HeuristicDescriptor> byArch{
-            {"gfx950", modelDescriptor(dir, fixture.uhdFileName)}};
+            {"gfx950", modelDescriptor(dir, fixture)}};
         return makeKernelHeuristic(std::nullopt, "e", KNOBS, byArch);
     }
     return nullptr;
@@ -1115,3 +1148,5 @@ INSTANTIATE_TEST_SUITE_P(
     });
 
 } // namespace hipdnn_plugin_sdk::ingestor
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

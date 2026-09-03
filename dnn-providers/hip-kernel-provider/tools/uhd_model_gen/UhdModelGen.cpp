@@ -4,10 +4,11 @@
 /// @file UhdModelGen.cpp
 /// @brief Emits the trained-model artifacts the pointwise_model descriptor pack names.
 ///
-/// A MODEL heuristic (RFC 0019 §7) points at a `.uhd.fb` that in turn points at a model
-/// artifact, and neither is text. `HkpPackaging.cmake` carries `.json` and `.cpp` only, so
-/// something has to produce them; committing them instead would put two opaque binaries
-/// under review and let them drift silently the moment the feature signature changes.
+/// A tree_data heuristic (RFC 0019 §7) is a descriptor naming a model artifact. The
+/// descriptor is text and could be committed; the artifact cannot. Both are generated here
+/// anyway, because `features_hash` ties them together: computing it with the runtime's own
+/// function is what stops a committed descriptor drifting from the signature beside it the
+/// moment the feature set changes.
 ///
 /// The "training" here is a two-leaf tree written by hand. That is the point: the pack
 /// exists to prove a model-backed UHD is loaded and ranks the catalog, not to be a good
@@ -25,12 +26,12 @@
 #include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/uhd_generated.h>
 
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -45,9 +46,17 @@ namespace fbs = hipdnn_flatbuffers_sdk::data_objects;
 /// not of a well-chosen feature set.
 const std::vector<std::string> SIGNATURE = {"$kernel.block_size"};
 
-constexpr const char* UHD_ID = "5e8d21a7-9c34-4b16-8f70-2a63d8e14c90";
+/// MUST equal the `heuristic` id in pointwise_model.ued.json. The UED resolves its
+/// heuristic by id, and an id no descriptor defines is a dangling reference: the loader
+/// drops the whole engine, another engine serves the graph, and the model tests fail
+/// reporting the wrong engine rather than a missing UHD.
+///
+/// It used to differ, harmlessly, because the descriptor was a committed stub carrying
+/// this id and naming a FlatBuffer that carried its own. With the stub gone there is one
+/// descriptor and it must answer to the name the UED calls it by.
+constexpr const char* UHD_ID = "5a1c0000-0000-4000-8000-000000000002";
 constexpr const char* MODEL_FILE = "pointwise_model.bin";
-constexpr const char* UHD_FILE = "pointwise_model.uhd.fb";
+constexpr const char* UHD_FILE = "pointwise_model.uhd.json";
 
 /// Prefers the small block where the native scorer (`hipkernel.pointwise.score`, which
 /// returns `block_size`) prefers the large one. The disagreement is the whole point: it is
@@ -105,47 +114,49 @@ void writeModel(const std::filesystem::path& path, const std::string& featuresHa
               static_cast<std::streamsize>(builder.GetSize()));
 }
 
+/// Writes the descriptor itself, which under the current schema IS the UHD -- a text file
+/// with the fields inline, not a stub naming a binary that holds them.
+///
+/// Still generated rather than committed, for the reason the model is: `features_hash` is
+/// computed here with the runtime's own function, so the pair cannot drift. A committed
+/// copy would be free to disagree with the signature beside it, and the runtime would then
+/// refuse the model at load with nothing pointing at which of the two moved.
+///
+/// Hand-rolled rather than routed through a JSON library: this is nine fixed fields with no
+/// user input, the tool already links the flatbuffers and plugin SDKs and nothing else, and
+/// the output is read back by DescriptorLoader in the same build.
 void writeUhd(const std::filesystem::path& path, const std::string& featuresHash)
 {
-    flatbuffers::FlatBufferBuilder builder;
+    std::ostringstream json;
+    json << "{\n";
+    json << "  \"version\": \"1.0\",\n";
+    json << "  \"id\": \"" << UHD_ID << "\",\n";
+    json << "  \"name\": \"pointwise model selector\",\n";
+    json << "  \"adapter\": \"tree_data\",\n";
 
-    const auto id = builder.CreateString(UHD_ID);
-    const auto name = builder.CreateString("pointwise model selector");
-    const auto hash = builder.CreateString(featuresHash);
-    const auto objective = builder.CreateString("max");
-    const auto units = builder.CreateString("score");
-    // The leaf values are the score itself, so nothing has to be undone to read them.
-    const auto transform = builder.CreateString("identity");
-    // Relative: resolved against this file's own directory, wherever the pack is staged.
-    const auto artifact = builder.CreateString(MODEL_FILE);
-
-    std::vector<flatbuffers::Offset<flatbuffers::String>> signature;
-    signature.reserve(SIGNATURE.size());
-    for(const auto& entry : SIGNATURE)
+    json << "  \"features_signature\": [";
+    for(size_t i = 0; i < SIGNATURE.size(); ++i)
     {
-        signature.push_back(builder.CreateString(entry));
+        json << (i == 0 ? "" : ", ") << '"' << SIGNATURE[i] << '"';
     }
+    json << "],\n";
+
+    json << "  \"features_hash\": \"" << featuresHash << "\",\n";
+    json << "  \"objective\": \"max\",\n";
 
     // Not calibrated: 9.0 and 1.0 are ordering, not throughput, so this score means nothing
-    // against another engine's (RFC 0019 §12.3).
-    const auto score = fbs::CreateUhdScoreMetadata(builder, units, false, transform);
+    // against another engine's (RFC 0019 §12.3). The leaf values are the score itself, so
+    // nothing has to be undone to read them.
+    json << "  \"score\": { \"units\": \"score\", \"calibrated\": false, "
+            "\"transform\": \"identity\" },\n";
 
-    const auto uhd = fbs::CreateUHD(builder,
-                                    id,
-                                    name,
-                                    fbs::UhdAdapter::TREE_DATA,
-                                    0, // derived: the one feature is a bare field reference
-                                    builder.CreateVector(signature),
-                                    hash,
-                                    objective,
-                                    score,
-                                    artifact);
+    // Relative: resolved against this file's own directory, wherever the pack is staged.
+    json << "  \"tree_data\": { \"artifact\": \"" << MODEL_FILE << "\" }\n";
+    json << "}\n";
 
-    builder.Finish(uhd, fbs::UHDIdentifier());
-
+    const auto text = json.str();
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    out.write(reinterpret_cast<const char*>(builder.GetBufferPointer()),
-              static_cast<std::streamsize>(builder.GetSize()));
+    out.write(text.data(), static_cast<std::streamsize>(text.size()));
 }
 
 } // namespace

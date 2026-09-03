@@ -25,7 +25,7 @@ namespace hipdnn_plugin_sdk::ingestor
 {
 
 /// @param describedBy Engine named in the warning when @p descriptor is nullopt.
-/// @throws std::invalid_argument if @p descriptor names a kind with no adapter yet.
+/// @throws std::runtime_error if a NATIVE descriptor names an unregistered symbol.
 /// @param knobs The UED's declared knobs, checked against the model's `$kernel.*` axes
 ///              (RFC 0019 §6.3 check 2).
 inline std::shared_ptr<IKernelHeuristic>
@@ -57,17 +57,30 @@ inline std::shared_ptr<IKernelHeuristic>
         return std::make_shared<UnrankedKernelHeuristic>();
     }
 
-    switch(descriptor->kind)
+    const auto named = describeDescriptor("heuristic", descriptor->name, descriptor->id);
+
+    switch(descriptor->adapter)
     {
-    case HeuristicKind::NATIVE:
-        return std::make_shared<NativeKernelHeuristic>(
-            descriptor->payload, describeDescriptor("heuristic", descriptor->name, descriptor->id));
-    case HeuristicKind::MODEL:
-    {
-        // Where NATIVE throws, MODEL degrades. An unregistered symbol is a build fact and
-        // the engine could never score; an unloadable model is a deployment fact, and
-        // RFC 0019 §5 wants the engine still selecting, by declared order.
-        const auto named = describeDescriptor("heuristic", descriptor->name, descriptor->id);
+    case UhdAdapter::STATIC_ORDER:
+        // The declared order made explicit. Distinct from shipping no heuristic only in
+        // that the author said so, which is why this one does not warn.
+        return std::make_shared<UnrankedKernelHeuristic>();
+
+    case UhdAdapter::NATIVE:
+        return std::make_shared<NativeKernelHeuristic>(descriptor->nativeSymbol, named);
+
+    case UhdAdapter::TREE_DATA:
+    case UhdAdapter::TABLE:
+    case UhdAdapter::CUSTOM_LIBRARY:
+        // Where NATIVE throws, a model degrades. An unregistered symbol is a build fact
+        // and the engine could never score, so there is nothing to fall back to; an
+        // unloadable model is a deployment fact, and RFC 0019 §5 wants the engine still
+        // selecting, by declared order.
+        //
+        // `knobs` and `byArch` carry RFC 0019 §6.3 check 2 and §8.3 respectively: the
+        // first rejects a model whose axes are not the engine's exposed knobs, the second
+        // lets a UHD re-resolve against the running device when this descriptor does not
+        // describe it.
         if(auto heuristic = UhdKernelHeuristic::tryCreate(*descriptor, named, knobs, byArch))
         {
             return heuristic;
@@ -76,10 +89,12 @@ inline std::shared_ptr<IKernelHeuristic>
                                              << " could not be brought up; kernels rank by "
                                                 "priority, then descriptor id");
         return std::make_shared<UnrankedKernelHeuristic>();
-    }
+
+    // Unreachable: uhdAdapterFromString rejects anything not in the enum, and a
+    // descriptor built in memory gets the default. Present because -Wswitch-default
+    // requires an arm even for a closed enum.
     default:
-        throw std::invalid_argument("heuristic '" + toString(descriptor->id)
-                                    + "' names a kind with no adapter yet");
+        return std::make_shared<UnrankedKernelHeuristic>();
     }
 }
 

@@ -1,7 +1,0 @@
-{
-  "version": "1.0",
-  "id": "5a1c0000-0000-4000-8000-000000000002",
-  "name": "pointwise model selector",
-  "kind": "model",
-  "payload": "pointwise_model.uhd.fb"
-}

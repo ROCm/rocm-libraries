@@ -332,7 +332,12 @@ def _validate_ued(desc):
 # DescriptorLoader.hpp matchScopeFromString / heuristicKindFromString /
 # metadataTypeFromString.
 _MATCH_SCOPES = ("graph", "kernel")
-_HEURISTIC_KINDS = ("native", "model")
+_UHD_ADAPTERS = ("static_order", "native", "tree_data", "table", "custom_library")
+
+# The adapters whose body names a file rather than a symbol. `static_order` scores
+# from the descriptor's own fields and `native` names a symbol the provider
+# registered in-process; neither has anything on disk.
+_ARTIFACT_ADAPTERS = ("tree_data", "table", "custom_library")
 _METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
 
 
@@ -363,11 +368,32 @@ def _validate_udd(desc):
 
 
 def _validate_uhd(desc):
-    """UHD: kind is a closed enum, payload required. Mirrors
-    parseHeuristicDescriptor."""
+    """UHD: adapter is a closed enum, and the adapter-scoped body it selects has
+    to carry what that adapter cannot work without. Mirrors
+    parseHeuristicDescriptor.
+
+    The UHD is the whole descriptor now, not a stub naming a FlatBuffer, so the
+    fields checked here are the ones the runtime reads -- a body naming no
+    artifact drops the model at load and the engine ranks by declared order,
+    silently.
+    """
     where = f"UHD {desc.path.name}"
-    _require(desc.doc, ["name", "kind", "payload"], where)
-    _require_enum(desc.doc, "kind", _HEURISTIC_KINDS, where)
+    _require(desc.doc, ["name", "adapter"], where)
+    _require_enum(desc.doc, "adapter", _UHD_ADAPTERS, where)
+
+    adapter = desc.doc["adapter"]
+    if adapter == "native":
+        body = desc.doc.get("native")
+        if not isinstance(body, dict) or not body.get("symbol"):
+            raise HkpPackError(f"{where} adapter 'native' requires 'native.symbol'")
+        return
+
+    if adapter not in _ARTIFACT_ADAPTERS:
+        return
+
+    body = desc.doc.get(adapter)
+    if not isinstance(body, dict) or not body.get("artifact"):
+        raise HkpPackError(f"{where} adapter '{adapter}' requires '{adapter}.artifact'")
 
 
 def _validate_kmd(desc):
