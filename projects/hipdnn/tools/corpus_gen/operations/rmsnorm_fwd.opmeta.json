@@ -218,5 +218,19 @@
     "exploration": 0.2
   },
   "// archetypes": "Normalization runs once or twice per transformer block, on the same activation tensor the block's matmuls produce -- so its shapes are the model's hidden width against however many tokens are in flight, not arbitrary three-dimensional boxes.",
-  "// neighbourhood": "hidden_dim is absent from the neighbourhood: it is fixed by the model architecture and takes a handful of values, so an interpolated 5000 is a width nobody ships. batch and seq_len are what actually vary between requests."
+  "// neighbourhood": "hidden_dim is absent from the neighbourhood: it is fixed by the model architecture and takes a handful of values, so an interpolated 5000 is a width nobody ships. batch and seq_len are what actually vary between requests.",
+  "// elements": "in + out, plus the scale vector. No bias, unlike layernorm. Element count across every tensor the operation touches, inputs and outputs. Dtype-free on purpose: bytes is elements times the dtype width, and the width table belongs to the tool rather than repeated as a nested dtype lookup in seven declarations. gbs = bytes / measured time, which is the metric that ranks a memory-bound kernel where tflops cannot.",
+  "elements": {
+    "+": [
+      {
+        "*": [
+          2,
+          "$q.batch",
+          "$q.seq_len",
+          "$q.hidden_dim"
+        ]
+      },
+      "$q.hidden_dim"
+    ]
+  }
 }

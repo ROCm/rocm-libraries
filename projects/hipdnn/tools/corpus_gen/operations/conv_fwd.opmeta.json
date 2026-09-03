@@ -2102,5 +2102,99 @@
       "$q.R",
       "$q.S"
     ]
+  },
+  "// elements": "Input (N*C*H*W) + filter (K*(C/groups)*R*S) + output (N*K*P*Q). Element count across every tensor the operation touches, inputs and outputs. Dtype-free on purpose: bytes is elements times the dtype width, and the width table belongs to the tool rather than repeated as a nested dtype lookup in seven declarations. gbs = bytes / measured time, which is the metric that ranks a memory-bound kernel where tflops cannot.",
+  "elements": {
+    "+": [
+      {
+        "*": [
+          "$q.N",
+          "$q.C",
+          "$q.H",
+          "$q.W"
+        ]
+      },
+      {
+        "*": [
+          "$q.K",
+          {
+            "/": [
+              "$q.C",
+              "$q.groups"
+            ]
+          },
+          "$q.R",
+          "$q.S"
+        ]
+      },
+      {
+        "*": [
+          "$q.N",
+          "$q.K",
+          {
+            "ceil_div": [
+              {
+                "-": [
+                  {
+                    "+": [
+                      "$q.H",
+                      {
+                        "*": [
+                          2,
+                          "$q.pad_h"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.dilation_h",
+                      {
+                        "-": [
+                          "$q.R",
+                          1
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "$q.stride_h"
+            ]
+          },
+          {
+            "ceil_div": [
+              {
+                "-": [
+                  {
+                    "+": [
+                      "$q.W",
+                      {
+                        "*": [
+                          2,
+                          "$q.pad_w"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.dilation_w",
+                      {
+                        "-": [
+                          "$q.S",
+                          1
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "$q.stride_w"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }
