@@ -33,7 +33,12 @@ GEOMETRY = ("dtype", "head_size", "num_query_heads", "num_kv_heads",
             "seqlen_q", "seqlen_kv", "batch", "causal")
 
 # The KMD spells dtypes the rocKE way; a bundle spells them the data SDK's way.
-DTYPE_TO_BUNDLE = {"BF16": "bfloat16", "FP16": "float16"}
+# The graph JSON spellings, which are the FlatBuffer DataType enum's own names
+# (flatbuffers_sdk/utilities/json/Common.hpp), not the KMD's and not the encoder's.
+# The asymmetry is real: BFLOAT16 is written out, HALF is not "float16". Spelling it
+# `float16` did not fail conversion -- it produced a graph the backend then refused at
+# from_binary, so every fp16 case failed after the bundle looked fine on disk.
+DTYPE_TO_BUNDLE = {"BF16": "bfloat16", "FP16": "half"}
 DTYPE_TO_DIR = {"BF16": "bf16", "FP16": "fp16"}
 BYTES_PER_ELEMENT = {"BF16": 2, "FP16": 2}
 
@@ -74,6 +79,13 @@ def bundle_for(geom: dict) -> dict:
         # than as declined.
         "dropout_probability": None,
         "max_seq_len_kv": None,
+        # The attention window. Present-but-null for the same reason as the two above,
+        # and it is not cosmetic here: omitting them made `json::to<Graph>` reject the
+        # bundle, so every nomask case was logged as INVALID_GRAPH_SCHEMA and silently
+        # not registered -- no test, no failure, just 165 problems missing from a sweep
+        # that looked like it had run everything.
+        "left_bound": None,
+        "right_bound": None,
         "alibi_mask": False,
         "padding_mask": False,
         "causal_mask": False,
