@@ -400,10 +400,14 @@ endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The two descriptor trees are installed here and nowhere else. Every producer --
     # the packer, or a step added later -- delivers content into one of these two
-    # build-tree folders, and these two rules ship them wholesale. The installed tree
-    # is then the build tree by construction, so a test that passes against one is
-    # evidence about the other, and a set cannot be staged for testing yet silently
-    # missing from the package.
+    # build-tree folders, and these two rules ship them wholesale. Each installed
+    # descriptor tree is then a copy of its build-tree folder, so a test that passes
+    # against one is evidence about the other, and a set cannot be staged for testing
+    # yet silently missing from the package.
+    #
+    # This holds for these two trees only. Other content under the engine directory
+    # installs from the source tree, so it has no build-tree counterpart at the same
+    # relative path.
     #
     # Neither rule is OPTIONAL: each is emitted only when something was wired to fill its
     # tree, so a directory missing at install time means the build did not run to

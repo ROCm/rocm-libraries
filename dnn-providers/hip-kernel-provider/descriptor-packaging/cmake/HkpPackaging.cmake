@@ -75,10 +75,9 @@ endfunction()
 #
 #   Elsewhere in this repo a gfxNNX-style label is a selector matched against a
 #   concrete arch (shared/ctest/parse_test_categories.py,
-#   test/therock/test_runner.py, .github/scripts/amdgpu_family_matrix.py); here
-#   the value reaches hipcc's --offload-arch, where a family name is unusable
-#   rather than coarse. Hence drop-with-warning, not passthrough, and no
-#   family-to-arch expansion table.
+#   test/therock/test_runner.py); here the value reaches hipcc's --offload-arch,
+#   where a family name is unusable rather than coarse. Hence drop-with-warning,
+#   not passthrough, and no family-to-arch expansion table.
 # ---------------------------------------------------------------------------
 function(hkp_selected_arches out_var out_source_var)
     set(_targets "")
