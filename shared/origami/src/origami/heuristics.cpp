@@ -319,12 +319,6 @@ static void apply_tf32_heuristics(heuristic_params_t& params,
       params.weight_tile_total *= 0.4;
     }
   }
-
-  // NOTE: a large-K depth-upscaling bias (MT_K>=128 -> weight_tile_total *= 0.5)
-  // was removed here: with the current GEMM model it over-credits small deep-MT_K
-  // tiles (e.g. MT64x128x128) on huge-K xf32 shapes, flipping the pick off the
-  // HW-faster shallow tile (e.g. MT192x160x32) -- a full sweep showed removing it
-  // is a clear net win (26 shapes faster, 2 negligibly slower).
 }
 
 heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
