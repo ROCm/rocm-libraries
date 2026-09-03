@@ -41,6 +41,7 @@
 #include "stinkytofu/core/ModulePassManager.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/hardware/HwReg.hpp"
 #include "stinkytofu/ir/asm/RegHalfKeyer.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -51,6 +52,26 @@ using namespace stinkytofu;
 
 // Gate for the ESM2 VALU source-operand VA_VDST stamp (the src-operand WAR hazard).
 bool g_enableESM2TrackValuVsrc = false;
+
+// Counts of intervening operations that satisfy a pending wait come from the arch
+// (HWModel::WaitHide); 0 there leaves the corresponding wait always emitted.
+//
+// va_vdst: matrix ops issued after the producer satisfy it. Only matrix ops count
+// -- interleaved plain VALU advance other units and never lift the count. The
+// CSMACC form is consulted only while XDL and CSMACC are the sole units
+// outstanding.
+//
+// vm_vsrc: same-class reads issued after the read satisfy it. Classes are
+// independent -- reads of the other class never count. A flat_* belongs to both
+// classes at once, so either class reaching the count satisfies the whole read.
+//
+// Set once per function in setupArch, alongside g_enableESM2TrackValuVsrc.
+const HWModel::WaitHide* g_waitHide = nullptr;
+
+// Render one WaitHide entry for the debug banner; 0 reads as off.
+inline std::string waitHideStr(int v) {
+    return v > 0 ? std::to_string(v) : std::string("0(off)");
+}
 
 // TEMP HACK gate. When true, suppress the va_vdst wait for the VGPR-source (RAW)
 // hazard of GLOBAL-family memory ops and global_prefetch — the "valu writes VGPR,
@@ -308,6 +329,12 @@ struct VgprStamp {
     unsigned vmOrdTex = 0;
     // Both vm ordinals from one flat_*.
     bool pairedFlat = false;
+    // Ordinal step this producer took (2 for a scale pair). The hide threshold is a
+    // count of instructions, so it scales by this to stay in the same unit.
+    unsigned vaInc = 1;
+    // XDL pipe UB when this producer stamped. Lets a non-XDL producer measure how many
+    // WMMA have issued since, which is what hides it.
+    unsigned xdlOrdAtStamp = 0;
 };
 
 class WaitcntBrackets {
@@ -337,6 +364,12 @@ class WaitcntBrackets {
             unsigned inc = hasMatrixScalePair(inst) ? 2u : 1u;
             vaPipeUB[pipe] += inc;
             unsigned ord = vaPipeUB[pipe];
+            // Remember the XDL step so a CSMACC stamp can scale its threshold too.
+            if (pipe == PIPE_XDL) {
+                if (xdlIncSeen && inc != xdlInc) xdlFormMixed = true;
+                xdlInc = inc;
+                xdlIncSeen = true;
+            }
 
             PASS_DEBUG(std::cerr << "[InsertWaitAlu]   stamp event=" << eventName(ev) << " inc="
                                  << inc << " [pipe=" << vaPipeName(pipe) << " ord=" << ord
@@ -347,6 +380,8 @@ class WaitcntBrackets {
                 RegKey k = keyer.producerKey(idx, half);
                 VgprStamp& s = scores[k];
                 s.vaOrd[pipe] = ord;
+                s.vaInc = inc;
+                s.xdlOrdAtStamp = vaPipeUB[PIPE_XDL];
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp va v" << k.idx << "("
                                      << halfName(k.half) << ") [pipe=" << vaPipeName(pipe)
                                      << " ord=" << ord << "]\n");
@@ -424,12 +459,40 @@ class WaitcntBrackets {
             });
     }
 
-    // Wait needed for this reg's VM readers.
+    // Wait needed for this reg's VM readers. Returns kNoWait if no live producer
+    // constrains the wait (drained, or satisfied by the arch's intervening-read
+    // count).
     unsigned vmFollowers(const VgprStamp& s) const {
         bool liveLds = s.vmOrdLds && s.vmOrdLds > vmFifoLB[FIFO_LDS];
         bool liveTex = s.vmOrdTex && s.vmOrdTex > vmFifoLB[FIFO_TEX];
         unsigned fLds = liveLds ? vmFifoUB[FIFO_LDS] - s.vmOrdLds : 0u;
         unsigned fTex = liveTex ? vmFifoUB[FIFO_TEX] - s.vmOrdTex : 0u;
+
+        // Same-class reads issued after this one satisfy its wait. Per class; the
+        // other class's count is irrelevant.
+        if (g_waitHide != nullptr) {
+            const int req = g_waitHide->vmVsrc;
+            bool hidLds = liveLds && waitHideSatisfied(fLds, 1, req);
+            bool hidTex = liveTex && waitHideSatisfied(fTex, 1, req);
+            if (s.pairedFlat && liveLds && liveTex) {
+                // One flat_* belongs to both classes at once, so either class
+                // clearing it satisfies the whole read.
+                if (hidLds || hidTex) {
+                    PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip vm_vsrc (flat) [LDS=" << fLds
+                                         << " TEX=" << fTex << " >= " << req << "]\n");
+                    return kNoWait;
+                }
+            } else {
+                if (hidLds) liveLds = false;
+                if (hidTex) liveTex = false;
+                if (!liveLds && !liveTex) {
+                    PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip vm_vsrc [LDS=" << fLds
+                                         << " TEX=" << fTex << " >= " << req << "]\n");
+                    return kNoWait;
+                }
+            }
+        }
+
         // One flat_* retires from both FIFOs at once, so either proves it done.
         if (s.pairedFlat && liveLds && liveTex) return std::max(fLds, fTex);
         // Two distinct producers: must wait for both.
@@ -440,10 +503,46 @@ class WaitcntBrackets {
     }
 
     // Wait needed for this reg's VA producers.
+    // True when only XDL and CSMACC have work outstanding, so their completion
+    // order follows program order.
+    bool onlyXdlAndCsmaccInFlight() const {
+        return vaPipeUB[PIPE_DPMACC] == vaPipeLB[PIPE_DPMACC] &&
+               vaPipeUB[PIPE_TRANS] == vaPipeLB[PIPE_TRANS];
+    }
+
     unsigned vaFollowers(const VgprStamp& s) const {
         unsigned f = ~0u;
         for (int p = 0; p < NUM_VA_PIPE; ++p) {
-            if (s.vaOrd[p] && s.vaOrd[p] > vaPipeLB[p]) f = std::min(f, vaPipeUB[p] - s.vaOrd[p]);
+            if (s.vaOrd[p] && s.vaOrd[p] > vaPipeLB[p]) {
+                unsigned followers = vaPipeUB[p] - s.vaOrd[p];
+                if (g_waitHide != nullptr && !xdlFormMixed && p == PIPE_XDL) {
+                    // The count is in instructions while the ordinal steps by 2 on a
+                    // scale pair, so scale it into ordinal units.
+                    if (waitHideSatisfied(followers, s.vaInc, g_waitHide->xdlVaVdst)) {
+                        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip va_vdst [XDL followers="
+                                             << followers << " >= " << g_waitHide->xdlVaVdst << "*"
+                                             << s.vaInc << "]\n");
+                        continue;
+                    }
+                }
+                if (g_waitHide != nullptr && !xdlFormMixed && p == PIPE_CSMACC) {
+                    // A CSMACC producer is satisfied by matrix ops, not by its own
+                    // unit, so measure the XDL issues since it stamped.
+                    const unsigned since = vaPipeUB[PIPE_XDL] - s.xdlOrdAtStamp;
+                    if (!onlyXdlAndCsmaccInFlight()) {
+                        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-skip va_vdst (other "
+                                                "units outstanding) [CSMACC matrix-ops="
+                                             << since << "]\n");
+                    } else if (waitHideSatisfied(since, xdlInc, g_waitHide->csmaccVaVdst)) {
+                        PASS_DEBUG(std::cerr
+                                   << "[InsertWaitAlu]     skip va_vdst [CSMACC matrix-ops="
+                                   << since << " >= " << g_waitHide->csmaccVaVdst << "*" << xdlInc
+                                   << "]\n");
+                        continue;
+                    }
+                }
+                f = std::min(f, followers);
+            }
         }
         return f;
     }
@@ -470,6 +569,12 @@ class WaitcntBrackets {
                 return;
             }
             unsigned f = vmFollowers(s);
+            if (f == kNoWait) {  // no live FIFO constrains it (drained or hidden by depth)
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait vm_vsrc on v" << k.idx << "("
+                                     << halfName(k.half) << "," << role << ")" << vmStateStr(&s)
+                                     << " → hidden/drained (no wait)\n");
+                return;
+            }
             unsigned chosen = (f > 0) ? std::min(f, maxEmittableWait(c)) : 0u;
             addWait(wait, c, chosen);
             PASS_DEBUG(std::cerr << "[InsertWaitAlu]     wait hit vm_vsrc on v" << k.idx << "("
@@ -539,6 +644,11 @@ class WaitcntBrackets {
             vaPipeUB[P] = newUB;
         }
 
+        xdlFormMixed = xdlFormMixed || other.xdlFormMixed ||
+                       (xdlIncSeen && other.xdlIncSeen && xdlInc != other.xdlInc);
+        if (!xdlIncSeen && other.xdlIncSeen) xdlInc = other.xdlInc;
+        xdlIncSeen = xdlIncSeen || other.xdlIncSeen;
+
         {
             unsigned mineIF = vmUB - vmLB;
             unsigned otherIF = other.vmUB - other.vmLB;
@@ -572,6 +682,10 @@ class WaitcntBrackets {
                          fMyOldFloor[FIFO_LDS], fOtherOldFloor[FIFO_LDS], strictDom);
             mergeSlotOrd(s.vmOrdTex, o ? o->vmOrdTex : 0, fMyShift[FIFO_TEX], fOtherShift[FIFO_TEX],
                          fMyOldFloor[FIFO_TEX], fOtherOldFloor[FIFO_TEX], strictDom);
+            // Keep the later XDL stamp, which counts the fewer WMMA followers of the two
+            // paths. Floors are 0: this ordinal marks progress, it is not a live producer.
+            mergeSlotOrd(s.xdlOrdAtStamp, o ? o->xdlOrdAtStamp : 0, myShift[PIPE_XDL],
+                         otherShift[PIPE_XDL], 0, 0, strictDom);
             // Paired survives the join only if both paths agree.
             s.pairedFlat = s.pairedFlat && o && o->pairedFlat;
         }
@@ -641,6 +755,13 @@ class WaitcntBrackets {
     // VA_VDST per-pipe UB/LB.
     std::array<unsigned, NUM_VA_PIPE> vaPipeUB = {};
     std::array<unsigned, NUM_VA_PIPE> vaPipeLB = {};
+    // Ordinal step of the most recent XDL op, for scaling the CSMACC hide threshold.
+    unsigned xdlInc = 1;
+    bool xdlIncSeen = false;
+    // Set once two matrix ops with different steps issue. The hide counts are stated
+    // in instructions but measured in ordinal steps, so that conversion is only
+    // well-defined while every matrix op steps the same. Mixed: no skip.
+    bool xdlFormMixed = false;
     // VM_VSRC aggregate UB/LB.
     unsigned vmUB = 0;
     unsigned vmLB = 0;
@@ -1018,8 +1139,13 @@ class InsertWaitAluPassImpl : public Pass {
         const auto* archInfo = ArchHelper::getInstance().getArchInfo(archId);
         const bool hasD16 = archInfo && archInfo->hasD16Writes32BitVgpr();
         keyer = VGPRHalfKeyer(hasD16);
+        g_waitHide = &passCtx.getHWModel().waitHide;
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] run arch=gfx" << arch[0] << arch[1] << arch[2]
                              << " hasD16Writes32BitVgpr=" << hasD16 << "\n");
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu] waitHide"
+                             << " xdlVaVdst=" << waitHideStr(g_waitHide->xdlVaVdst)
+                             << " csmaccVaVdst=" << waitHideStr(g_waitHide->csmaccVaVdst)
+                             << " vmVsrc=" << waitHideStr(g_waitHide->vmVsrc) << "\n");
     }
 
    public:
