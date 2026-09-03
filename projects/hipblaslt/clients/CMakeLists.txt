@@ -38,17 +38,21 @@ endif()
 # auto-detection) the CHARACTER-argument routines it uses (e.g. zlange/clange/
 # dlange) pull in Flang runtime symbols (e.g. _FortranACharacterCompareScalar1)
 # that amdclang++ never links automatically, since Fortran isn't the link
-# driver for these C++/HIP targets. Probe for which on-disk name the runtime
-# uses (older split FortranRuntime+FortranDecimal vs. newer merged
-# flang_rt.runtime) using every root we can derive for the selected Flang
-# install (resolving symlinks, since invoke may hand us e.g.
-# /opt/rocm/bin/amdflang -> .../llvm/bin/flang-N), plus HIP_CLANG_ROOT.
-# Link the runtime by name rather than by the absolute path find_library
-# resolves: amdclang++ and flang share the same ROCm LLVM installation, so
-# amdclang++'s own default linker search already covers whichever root
-# actually has the file, even for a packaging layout our probe above didn't
-# find. This mirrors the approach used in hipsparselt's clients. Leave the
-# working gfortran path untouched.
+# driver for these C++/HIP targets. Search every root we can derive for the
+# selected Flang install (resolving symlinks, since invoke may hand us e.g.
+# /opt/rocm/bin/amdflang -> .../llvm/bin/flang-N), plus HIP_CLANG_ROOT, for
+# either the older split FortranRuntime+FortranDecimal or the newer merged
+# flang_rt.runtime. Prefer linking the absolute path find_library resolves:
+# amdclang++ isn't always installed under the same directory as flang (e.g.
+# .../bin/amdclang++ vs .../llvm/bin/flang), so its default linker search
+# doesn't reliably cover the runtime's directory, and a bare -l name can fail
+# to link even though the file exists (see git history for a CI regression
+# from trying that). Only fall back to linking by bare name when we can't
+# resolve any absolute path at all, on the chance amdclang++'s default search
+# happens to cover a packaging layout our probe above can't find (this is
+# what several of Math CI's precheckin images need). This mirrors the
+# approach used in hipsparselt's clients. Leave the working gfortran path
+# untouched.
 set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES)
 if(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
     get_filename_component(_hipblaslt_fortran_real "${CMAKE_Fortran_COMPILER}" REALPATH)
@@ -61,12 +65,24 @@ if(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
     find_library(HIPBLASLT_FORTRANRUNTIME_LIBRARY NAMES FortranRuntime
         PATHS ${_hipblaslt_fortran_search_dirs} NO_DEFAULT_PATH)
     if(HIPBLASLT_FORTRANRUNTIME_LIBRARY)
-        set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES -lFortranRuntime -lFortranDecimal)
+        find_library(HIPBLASLT_FORTRANDECIMAL_LIBRARY NAMES FortranDecimal
+            PATHS ${_hipblaslt_fortran_search_dirs} NO_DEFAULT_PATH)
+        if(HIPBLASLT_FORTRANDECIMAL_LIBRARY)
+            set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES
+                ${HIPBLASLT_FORTRANRUNTIME_LIBRARY} ${HIPBLASLT_FORTRANDECIMAL_LIBRARY})
+        else()
+            set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES -lFortranRuntime -lFortranDecimal)
+        endif()
     else()
         # Newer LLVM Flang releases merged FortranRuntime/FortranDecimal into
-        # a single flang_rt.runtime library; also the safe default when our
-        # probe above can't find either name (see comment above).
-        set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES -lflang_rt.runtime)
+        # a single flang_rt.runtime library.
+        find_library(HIPBLASLT_FLANGRT_LIBRARY NAMES flang_rt.runtime
+            PATHS ${_hipblaslt_fortran_search_dirs} NO_DEFAULT_PATH)
+        if(HIPBLASLT_FLANGRT_LIBRARY)
+            set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES ${HIPBLASLT_FLANGRT_LIBRARY})
+        else()
+            set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES -lflang_rt.runtime)
+        endif()
     endif()
     unset(_hipblaslt_fortran_real)
     unset(_hipblaslt_fortran_bin_dir)
