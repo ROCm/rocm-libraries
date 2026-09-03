@@ -176,116 +176,95 @@ The explicit dependency include path makes `cblas.h` visible to the client
 targets. Including `libblas.a` in `LAPACK_LIBRARIES` keeps static `libcblas.a`
 from leaving unresolved Fortran BLAS symbols at link time.
 
-## Build the Test Binary and Client
+## Build the Test Binary
 
-Build the GoogleTest binary:
+Build the GoogleTest binary. This also builds the `hipblaslt` library and the
+`hipblaslt-test-data` target that produces `clients/hipblaslt_gtest.data`:
 
 ```bash
 cmake --build "$BUILD_DIR" --target hipblaslt-test --parallel 16
 ```
 
-Build the TensileLite benchmark client. The client is needed to generate
-benchmark-derived PartialRMS `3_LibraryLogic` files:
-
-```bash
-cmake --build "$BUILD_DIR" --target tensilelite-client --parallel 16
-```
-
-Build the rocisa Python extension before running the Tensile logic generator:
+The rocisa Python extension is needed by the device-library step below, and the
+`tensilelite-device-libraries` target builds it as a dependency. To build it on
+its own:
 
 ```bash
 cmake --build "$BUILD_DIR" --target tensilelite/rocisa/all --parallel 16
 ```
 
-## Generate PartialRMS and RstdScale Library Logic
+The TensileLite benchmark client (`tensilelite-client`) is only required if you
+are re-tuning solutions and regenerating `3_LibraryLogic` from benchmark YAML.
+The workflow below uses the committed logic, so it is not needed.
 
-The full RMSNorm and decomposed producer tests need PartialRMS K1 logic that is
-not part of the normal generic gfx950 logic path. Generate it from the row-major
-PartialRMS benchmark YAML:
+## Select the Library Logic
 
-```bash
-rm -rf /tmp/hipblaslt_partialrms_out
-PYTHONPATH="$PWD/$BUILD_DIR/tensilelite/rocisa:$PWD/$BUILD_DIR/tensilelite:$PWD/tensilelite" \
-LD_LIBRARY_PATH="$PWD/$BUILD_DIR/tensilelite:$PWD/$BUILD_DIR/clients/common:$PWD/$BUILD_DIR/library:$ROCM_PATH/lib:$ROCM_PATH/lib/llvm/lib:${LD_LIBRARY_PATH:-}" \
-build/python-venv/bin/python tensilelite/Tensile/bin/Tensile \
-  tensilelite/epilogues/yaml/gemm_partial_rms_k1_rowmajor.yaml \
-  /tmp/hipblaslt_partialrms_out \
-  --cxx-compiler "$PWD/build/toolchain/amdclang++" \
-  --gpu-targets gfx950 \
-  --prebuilt-client "$PWD/$BUILD_DIR/tensilelite/client/tensilelite-client"
-```
-
-This should produce:
+The PartialRMS (K1) and RstdScale (K3) `3_LibraryLogic` YAML files are committed
+to the source tree, so no benchmark run is needed to produce them:
 
 ```text
-/tmp/hipblaslt_partialrms_out/3_LibraryLogic/
-  partialrms_k1_Cijk_Alik_Bljk_BBS_BH_PRMS_UserArgs.yaml
-  partialrms_k1_Cijk_Alik_Bljk_BBS_BH_PRMS_RA_UserArgs.yaml
+library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950/
+  Equality/partialrms_k1_*.yaml               # bf16 K1 producer (PRMS, PRMS_RA)
+  Equality/partialrms_mxfp8_quant_k1_*.yaml   # K1 producer with MX fp8 quant
+  Equality/mxfp8_quant_k1_*.yaml              # standalone MX fp8 quant
+  Equality/mxfp8_rstdscale_k3_*.yaml          # K3 consumer via ScaleAlphaVec
+  Origami/partialrms_*.yaml
+  partialrms_residualout_*.yaml
 ```
 
-The decomposed consumer E2E test also needs Kernel 3 RstdScale logic. K3 is
-implemented via TensileLite's ScaleAlphaVec feature: `gemm_rstdscale_k3.yaml`
-configures `UseScaleAlphaVec: 1` so the selected solution applies a per-row rstd
-scale to the GEMM output:
+Earlier revisions of this guide generated these from
+`tensilelite/epilogues/yaml/gemm_partial_rms_k1_rowmajor.yaml` and
+`gemm_rstdscale_k3.yaml`. Those files no longer exist and those steps are obsolete.
+
+Building every gfx950 logic file compiles roughly 71,000 assembly kernels and
+takes hours. For fused-epilogue work, restrict the build with
+`HIPBLASLT_LIBLOGIC_PATH` to the logic the tests actually need, which cuts it to
+about 8,500 kernels (~7 minutes on 128 cores). Copy that logic into a scratch
+directory, preserving the original relative path:
 
 ```bash
-rm -rf /tmp/hipblaslt_rstdscale_out
-PYTHONPATH="$PWD/$BUILD_DIR/tensilelite/rocisa:$PWD/$BUILD_DIR/tensilelite:$PWD/tensilelite" \
-LD_LIBRARY_PATH="$PWD/$BUILD_DIR/tensilelite:$PWD/$BUILD_DIR/clients/common:$PWD/$BUILD_DIR/library:$ROCM_PATH/lib:$ROCM_PATH/lib/llvm/lib:${LD_LIBRARY_PATH:-}" \
-build/python-venv/bin/python tensilelite/Tensile/bin/Tensile \
-  tensilelite/epilogues/yaml/gemm_rstdscale_k3.yaml \
-  /tmp/hipblaslt_rstdscale_out \
-  --cxx-compiler "$PWD/build/toolchain/amdclang++" \
-  --gpu-targets gfx950 \
-  --prebuilt-client "$PWD/$BUILD_DIR/tensilelite/client/tensilelite-client"
+SRC=library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950
+OUT=/tmp/hipblaslt_fused_epilogue_logic
+REL=src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950
+
+rm -rf $OUT
+mkdir -p $OUT/$REL/Equality $OUT/$REL/Origami
+cp $SRC/Equality/*.yaml          $OUT/$REL/Equality/
+cp $SRC/*.yaml                   $OUT/$REL/
+cp $SRC/Origami/partialrms*.yaml $OUT/$REL/Origami/
 ```
 
-This should produce:
+Two details matter here:
 
-```text
-/tmp/hipblaslt_rstdscale_out/3_LibraryLogic/
-  rstdscale_k3_Cijk_Alik_Bljk_BBS_BH_Rstd_UserArgs.yaml
-```
+- **Keep the relative path.** `TensileLogic --check-all` validates the logic
+  against `tensilelite/Tensile/TensileLogic/known_bugs.yaml`, whose skip entries
+  are keyed on paths relative to the logic root. A flattened directory makes those
+  entries stop matching, and the build fails on four pre-existing bad solutions
+  with `Validation failed: MatrixInstruction.py:329 MIInputPerThread ...`.
+- **Copy all of `Equality/`, not just `partialrms_*`.** The decomposed consumer
+  (K3) and the reference GEMMs need the standard ScaleAlphaVec solutions.
 
-> **Note:** Do not pass `--global-parameters LibraryFormat='"msgpack"'` to the
-> benchmark phase unless the prebuilt client was built with
-> `HIPBLASLT_ENABLE_YAML=OFF`. A YAML-enabled client cannot load the msgpack
-> `.dat.zlib` that the generator produces and will abort. The intermediate
-> benchmark library format does not affect the final `3_LibraryLogic` YAML output
-> or the device-library build.
-
-Merge the generated logic files into one directory for the device-library build:
-
-```bash
-rm -rf /tmp/hipblaslt_fused_epilogue_logic
-mkdir -p /tmp/hipblaslt_fused_epilogue_logic
-cp /tmp/hipblaslt_partialrms_out/3_LibraryLogic/*.yaml /tmp/hipblaslt_fused_epilogue_logic/
-cp /tmp/hipblaslt_rstdscale_out/3_LibraryLogic/*.yaml /tmp/hipblaslt_fused_epilogue_logic/
-```
-
-If the generated files contain `Device 74a1` in the device list, remove it. The
-gfx950 chip-ID validator rejects `74a1` because it is not a gfx950 device ID.
-One way to strip it from the merged logic directory is:
-
-```bash
-python3 - <<'PY'
-from pathlib import Path
-for p in Path('/tmp/hipblaslt_fused_epilogue_logic').glob('*.yaml'):
-    text = p.read_text()
-    text = text.replace('Device 74a1, ', '').replace('Device 74a1', '')
-    p.write_text(text)
-PY
-```
+As an alternative to copying, `TENSILELITE_LOGIC_FILTER` passes a glob straight
+through to `TensileCreateLibrary --logic-filter`, which is matched as
+`<logic-path>/**/<filter>.yaml`, for example `gfx950/Equality/*`.
 
 ## Build Device Libraries
 
-Build the PartialRMS K1 and RstdScale K3 libraries from the merged generated
-logic:
+Build the PartialRMS K1 and RstdScale K3 libraries from the selected logic. If
+`$BUILD_DIR` is already configured, pointing it at the scratch logic directory is
+the only change needed:
 
 ```bash
 rm -f "$BUILD_DIR/device-library/tensilelite-device-libraries.stamp"
 rm -f "$BUILD_DIR/device-library/tensilelite-device-libraries-TensileLogic.stamp"
 
+cmake -S . -B "$BUILD_DIR" -D HIPBLASLT_LIBLOGIC_PATH=/tmp/hipblaslt_fused_epilogue_logic
+cmake --build "$BUILD_DIR" --target tensilelite-device-libraries --parallel 16
+```
+
+For a build directory configured from scratch, pass the full option set instead:
+
+```bash
 cmake -S . -B "$BUILD_DIR" \
   -D HIPBLASLT_LIBLOGIC_PATH=/tmp/hipblaslt_fused_epilogue_logic \
   -D CMAKE_CXX_FLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 -I$PWD/build/deps/install/include" \
@@ -303,22 +282,26 @@ cmake -S . -B "$BUILD_DIR" \
 cmake --build "$BUILD_DIR" --target tensilelite-device-libraries --parallel 16
 ```
 
-Build and install the row-major Kernel 2 code objects:
+Build and install the row-major Kernel 2 code objects. There are three of them:
 
 ```bash
-cmake --build "$BUILD_DIR" --target row_div-library-gfx950 row_rstd-library-gfx950 --parallel 16
+cmake --build "$BUILD_DIR" \
+  --target row_div-library-gfx950 row_rstd-library-gfx950 row_div_quant-library-gfx950 \
+  --parallel 16
 ```
 
 `row_div_gfx950.co` is the full-flow reduce-and-apply Kernel 2.
 `row_rstd_gfx950.co` is the decomposed producer reduce-and-return Kernel 2 that
 writes the per-row rstd handoff consumed by Kernel 3.
+`row_div_quant_gfx950.co` is the full-flow Kernel 2 that reduces, applies rstd,
+and quantizes to FP8; `fullRmsNormResidualAddRequantMatchesReference` fails with
+`getKernel failed: row_div_quant` without it.
 
 Kernel 1 (PartialRMS) and Kernel 3 (RstdScale via ScaleAlphaVec) are not
-separate `row_*` code objects. They are TensileLite GEMM solutions generated from
-`gemm_partial_rms_k1_rowmajor.yaml` and `gemm_rstdscale_k3.yaml`, then packaged
-into the generated `TensileLibrary_*_gfx950.co` /
-`TensileLibrary_lazy_gfx950.dat.zlib` library artifacts by the
-`tensilelite-device-libraries` target above.
+separate `row_*` code objects. They are TensileLite GEMM solutions defined by the
+committed `partialrms_*` and `mxfp8_rstdscale_k3_*` logic, packaged into the
+generated `TensileLibrary_*_gfx950.co` / `TensileLibrary_lazy_gfx950.dat.zlib`
+artifacts by the `tensilelite-device-libraries` target above.
 
 The runtime should now have these artifacts:
 
@@ -329,6 +312,7 @@ ${BUILD_DIR}/Tensile/library/gfx950/
   TensileLiteLibrary_lazy_gfx950_Mapping.dat.zlib
   row_div_gfx950.co
   row_rstd_gfx950.co
+  row_div_quant_gfx950.co
   ...
 ```
 
@@ -345,9 +329,15 @@ LD_LIBRARY_PATH="$PWD/tensilelite:$PWD/clients/common:$PWD/library:$ROCM_PATH/li
 Expected result:
 
 ```text
-[==========] 51 tests from 4 test suites ran.
-[  PASSED  ] 51 tests.
+[==========] 67 tests from 4 test suites ran.
+[  PASSED  ] 67 tests.
 ```
+
+Every RMSNorm flow — full, residual-add, requant, and the decomposed
+producer/consumer — passes, as does the **standalone** MX fp8 quant path (a
+REQUANT-only chain with no RMSNorm stage). If the four `mxfp8Quant*` tests fail on
+the UE8M0 scale buffer while `D` still matches, see the scale-grid orientation
+entry under troubleshooting.
 
 ## Troubleshooting
 
@@ -371,6 +361,58 @@ Expected result:
   `row_div_gfx950.co` is present under `$BUILD_DIR/Tensile/library/gfx950`.
 - **`getKernel failed: row_rstd`**: build `row_rstd-library-gfx950` and make
   sure `row_rstd_gfx950.co` is present under `$BUILD_DIR/Tensile/library/gfx950`.
+- **`getKernel failed: row_div_quant`**: build `row_div_quant-library-gfx950`.
+  This target is easy to miss because the full RMSNorm flow only needs it once
+  the chain also requests static per-tensor FP8 requant.
+- **Every E2E test fails instantly with `algoCount == 0`**: the device libraries
+  in `$BUILD_DIR/Tensile/library/gfx950` are stale or were built from a logic set
+  that predates the fused-epilogue kernels. Check their timestamps and rebuild
+  `tensilelite-device-libraries`. A whole-suite runtime of well under a second is
+  the giveaway that nothing reached the GPU.
+- **`Validation failed: MatrixInstruction.py:329 MIInputPerThread ...` when using
+  `HIPBLASLT_LIBLOGIC_PATH`**: the scratch logic directory does not reproduce the
+  original relative paths, so the `known_bugs.yaml` skip entries no longer match.
+  Recreate it under
+  `src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950/...`.
+- **`Cannot open .../hipblaslt_gtest.data`**: reconfiguring the build directory
+  can drop the generated gtest data file. Rebuild the `hipblaslt-test` target
+  (which depends on `hipblaslt-test-data`) to regenerate it.
+- **`no standalone MX fp8 quant solution selected`**: this was a host-side defect
+  in `tensile_host.cpp`, now fixed. For a REQUANT-only chain,
+  `ConstructTensileProblem` and `updateTensileProblem` unconditionally set
+  `DQuantSize0 = requantMxBlockSize` and `DQuantSize1 = 1`. That pairing is only
+  correct for the PartialRMS flow, where the problem has already been transposed
+  so free0 is the hidden dimension. The standalone `mxfp8_quant_k1_*` solutions
+  are tuned with `DQuantSize0 = 1` and `DQuantSize1 = blockSize`, so the
+  `DQuantSize0Equal` / `DQuantSize1Equal` predicates rejected every candidate.
+  Both sites now pick the pair based on whether the PartialRMS transpose is active.
+  The `setMxScale` arguments are deliberately left in terms of `q0`/`q1`, since that
+  expression already matches Tensile's convention for either orientation.
+- **`MX UE8M0 scale buffer mismatch` (`FusedEpilogueE2E.mxfp8Quant*`)**: this was a
+  scale-grid orientation disagreement, now fixed on the test side. The numerics were
+  never wrong — the fp8 `D` output matched exactly, so the blocking and every
+  block's scale value were right.
+
+  Tensile places the scale grid's **rows on free1 and its columns on free0**,
+  regardless of which axis carries the block. Both halves of Tensile encode this:
+  `SubtileMXFP8QuantEmitter._tileByteOffset`
+  (`tensilelite/Tensile/Components/Subtile/SubtileDynamicQuant.py`) takes the
+  swizzle row from `WorkGroup1` and the column from `WorkGroup0`, and the client's
+  CPU model (`tensilelite/client/src/Reference.cpp`, "Scale grid: rows = free dim
+  (M_tokens, nTiles), cols = kblock dim (mTiles)") pads rows from the free1 tile
+  count and writes at `mxScaleSwizzleOffset(tj, ti, colBlocks)`. `tensilelite-client`
+  validates the MXScale bytes exactly and passes for the standalone `Q=[1,32]`
+  kernels at `(128,512,1,64)` — the same shape the gtest uses — so the emitter's
+  layout is the validated one. `quantizeMxfp8Standard` and the four `mxfp8Quant*`
+  bodies now follow it.
+
+  Be aware of the consequence: the two paths emit transposed grids for the same
+  logical operation. After the PartialRMS transpose tokens sit on free1, giving
+  `[M_tokens × N_hidden/blockSize]`; a REQUANT-only chain leaves tokens on free0,
+  giving `[N_hidden/blockSize × M_tokens]`. Both are self-consistent and validated,
+  but a caller that feeds these scales downstream must orient them per path. Making
+  the two agree would require re-tuning non-PartialRMS solutions for the transposed
+  orientation.
 - **Residual and non-residual tests interfere with each other**: ensure
   `ContractionProblemGemm` comparison and hashing include the PartialRMS
   discriminator fields (`usePartialRMS`, `partialRMSResidualAdd`,
