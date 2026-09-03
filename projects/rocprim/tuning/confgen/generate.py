@@ -65,11 +65,14 @@ def make_config(
     if config_data is None:
         config_data = type_data
 
+
     # Select the following type names
     # TODO: derive this from alg name maybe?
-    type_names = ["key_type", "value_type"]
+    type_names = ["key_type", "value_type", "data_type", "flag_type", "input_type"]
     # Only select relevant types
     type_info = {k: type_data[k] for k in type_names if k in type_data}
+
+
     # Annotate with extra info for jinja
     type_details = {k: annotate_type(type_info[k], k) for k in type_info}
     type_hash = frozenset(type_info.items())
@@ -162,6 +165,10 @@ def main():
                 log.warning(f"Skipping due to JSONDecodeError: {file_path}")
                 continue
 
+            for key in data:
+                print(key)
+                if key == 'key_type':
+                    print(data[key])
             # Record the target: gen, arch, gpu, rep
             target_info = derive_target(data, gfx_mapping)
             # Create hashable key
