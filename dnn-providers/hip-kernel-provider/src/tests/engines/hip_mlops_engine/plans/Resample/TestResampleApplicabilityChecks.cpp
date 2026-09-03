@@ -5,6 +5,7 @@
 
 #include "engines/hip_mlops_engine/plans/resample/ResampleApplicabilityChecks.hpp"
 
+#include <hipdnn_flatbuffers_sdk/data_objects/resample_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -12,6 +13,7 @@
 #include <optional>
 #include <vector>
 
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hip_kernel_provider::resample;
 
 namespace
@@ -347,11 +349,20 @@ TEST(TestResampleValidator, BwdValid)
     EXPECT_NO_THROW(validateResampleBwdGraph(builder));
 }
 
-TEST(TestResampleValidator, BwdValidWithoutIndex)
+TEST(TestResampleValidator, BwdAveragePoolValidWithoutIndex)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(false);
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
+        false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
 
     EXPECT_NO_THROW(validateResampleBwdGraph(builder));
+}
+
+TEST(TestResampleValidator, BwdMaxpoolInValidWithoutIndex)
+{
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(false, ResampleMode::MAXPOOL);
+
+    EXPECT_THROW(validateResampleBwdGraph(builder), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestResampleValidator, BwdUnsupportedDim)

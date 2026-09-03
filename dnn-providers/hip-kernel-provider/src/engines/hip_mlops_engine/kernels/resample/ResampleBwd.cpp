@@ -100,7 +100,7 @@ extern "C" __global__ void ResampleBwd(const DyType* __restrict__ dy,
     static_assert(std::is_same<ComputeType, float>::value,
                   "ResampleBwd currently supports float compute type only");
 
-    const uint64_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint64_t gid = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if(gid >= DX_ELEMENT_COUNT)
     {
         return;

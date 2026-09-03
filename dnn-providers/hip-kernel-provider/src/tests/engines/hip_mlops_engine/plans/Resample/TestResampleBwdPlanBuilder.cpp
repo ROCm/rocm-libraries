@@ -13,11 +13,13 @@
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
 
+#include <hipdnn_flatbuffers_sdk/data_objects/resample_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 
 using hipdnn_test_sdk::utilities::MockEngineConfig;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::resample;
 
@@ -68,7 +70,8 @@ TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsTrueForValidGraph)
 
 TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsTrueWithoutOptionalAttributes)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(false);
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
+        false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

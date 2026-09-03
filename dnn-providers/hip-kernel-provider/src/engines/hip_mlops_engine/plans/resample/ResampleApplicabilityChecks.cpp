@@ -169,11 +169,15 @@ void ResampleValidator::checkTensorConfigSupported(
 void ResampleValidator::checkBwdTensorConfigSupported(
     const data_objects::ResampleBwdAttributes& resampleBwdAttr)
 {
-    if(resampleBwdAttr.resample_mode() == data_objects::ResampleMode::NOT_SET)
+    const auto mode = resampleBwdAttr.resample_mode();
+    if(mode != data_objects::ResampleMode::MAXPOOL
+       && mode != data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING
+       && mode != data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "ResampleBwd mode must be set.");
+                                                       "ResampleBwd mode is unsupported.");
     }
+
     if(resampleBwdAttr.padding_mode() == data_objects::PaddingMode::PADDING_NOT_SET)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -186,6 +190,14 @@ void ResampleValidator::checkBwdTensorConfigSupported(
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "ResampleBwd index tensor is supported only for maxpool mode.");
+    }
+
+    if(resampleBwdAttr.resample_mode() == data_objects::ResampleMode::MAXPOOL
+       && !resampleBwdAttr.index_tensor_uid().has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ResampleBwd with maxpool mode requires an index tensor.");
     }
 
     std::vector<int64_t> tensorIds{resampleBwdAttr.dy_tensor_uid(),

@@ -161,13 +161,13 @@ inline void validateResampleBwdOutputShape(const std::vector<int64_t>& dyDims,
 
     for(size_t i = 0; i < spatialDims; ++i)
     {
-        const auto expected
-            = (dyDims[i + 2] * stride[i]) - prePadding[i] - postPadding[i] + window[i] - stride[i];
-        if(expected <= 0 || dxDims[i + 2] != expected)
+        const auto expectedDy
+            = (dxDims[i + 2] + prePadding[i] + postPadding[i] - window[i]) / stride[i] + 1;
+        if(expectedDy <= 0 || dyDims[i + 2] != expectedDy)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "ResampleBwd dx spatial dimensions must match the resample parameters.");
+                "ResampleBwd dy spatial dimensions must match the resample parameters.");
         }
     }
 }
