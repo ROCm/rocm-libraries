@@ -16,6 +16,7 @@ struct WriteSummary
 {
     size_t filesWritten = 0;
     size_t filesUnchanged = 0; // on-disk bytes already matched — no mtime bump
+    size_t filesSkipped = 0; // left untouched: nothing to claim, or refused
     std::vector<std::string> errors;
 };
 
