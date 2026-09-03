@@ -1592,6 +1592,7 @@ struct RocprimDeviceScanFutureTestsNameGenerator
                         + type_tag_or_array<typename Params::output_type>();
         if constexpr(Params::use_identity_iterator) n += "_Ident";
         if constexpr(Params::use_graphs) n += "_Graphs";
+        if constexpr(Params::deterministic) n += "_Det";
         return n;
     }
 };
