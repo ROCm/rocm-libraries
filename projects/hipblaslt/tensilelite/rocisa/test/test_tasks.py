@@ -14,9 +14,8 @@ class _Context:
         self.commands.append((command, env))
 
 
-def _editable_install(monkeypatch, tmp_path, rebuild_on_import):
+def _editable_install(monkeypatch, tmp_path, rebuild_on_import, shared=True):
     monkeypatch.setattr(tasks, "_detect_rocm", lambda: "/opt/rocm")
-    monkeypatch.setattr(tasks, "_build_and_install_stinkytofu", lambda *args, **kwargs: None)
     monkeypatch.setattr(tasks.shutil, "which", lambda name: None)
     monkeypatch.delenv("SKBUILD_EDITABLE_REBUILD", raising=False)
 
@@ -24,7 +23,7 @@ def _editable_install(monkeypatch, tmp_path, rebuild_on_import):
     tasks._pip_install_rocisa(
         context,
         rocisa_dir=tmp_path / "rocisa",
-        stinkytofu_prefix=tmp_path / "stinkytofu-install",
+        shared=shared,
         rebuild_on_import=rebuild_on_import,
     )
     return context.commands[-1]
@@ -38,3 +37,8 @@ def test_editable_rocisa_preserves_rebuild_on_import_by_default(monkeypatch, tmp
 def test_editable_rocisa_can_opt_out_of_rebuild_on_import(monkeypatch, tmp_path):
     _, env = _editable_install(monkeypatch, tmp_path, rebuild_on_import=False)
     assert env["SKBUILD_EDITABLE_REBUILD"] == "false"
+
+
+def test_editable_rocisa_sets_source_stinkytofu_linkage(monkeypatch, tmp_path):
+    _, env = _editable_install(monkeypatch, tmp_path, rebuild_on_import=False, shared=False)
+    assert "-DBUILD_SHARED_LIBS=OFF" in env["CMAKE_ARGS"]
