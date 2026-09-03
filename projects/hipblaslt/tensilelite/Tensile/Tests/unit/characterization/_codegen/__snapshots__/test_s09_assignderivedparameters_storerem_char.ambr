@@ -2,7 +2,7 @@
 # name: test_s09_assignderivedparameters_storerem_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_UserArgs_MT128x128x16W8G94FM9hWcB98Fvu9oORCssIXk-E6T4w-bL_ENR8AA=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_UserArgs_MT128x128x16clbFxb1CZGhYTmdBmiBm_5KIiZLLb7QSts20VEtbnr4=',
       'err': 0,
     }),
   ])

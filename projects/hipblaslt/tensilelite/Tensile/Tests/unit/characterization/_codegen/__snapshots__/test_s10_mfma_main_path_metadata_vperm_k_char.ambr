@@ -2,7 +2,7 @@
 # name: test_s10_mfma_main_path_metadata_vperm_k_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_HHS_BH_SPAML0_UserArgs_MT64x64x32-bAnZm-wjMjDZWCdU9PRSw3wg5IrzmFgTqiRA39jxoc=',
+      'basename': 'Cijk_Ailk_Bjlk_HHS_BH_SPAML0_UserArgs_MT64x64x32fEbS_jE5SjG4Sxy_puGul_jh7UzFc-8DeX3-6gE3h0A=',
       'err': 0,
     }),
   ])
