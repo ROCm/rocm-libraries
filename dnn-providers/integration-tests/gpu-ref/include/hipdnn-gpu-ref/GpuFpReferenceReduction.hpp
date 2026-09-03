@@ -124,22 +124,6 @@ private:
                                         "to indicate a reduced dimension");
         }
 
-        // Validate tensor layouts
-        // Should we check if the tensor layouts are amongst the supported layouts (e.g., NCHW, NHWC, etc.)?
-        if(!hipdnn_data_sdk::utilities::isLayoutAgnostic(inputDims)
-           && !hipdnn_data_sdk::utilities::isLayoutAgnostic(outputDims))
-        {
-            const auto inputStrideOrder
-                = hipdnn_data_sdk::utilities::extractStrideOrder(input.strides());
-            const auto outputStrideOrder
-                = hipdnn_data_sdk::utilities::extractStrideOrder(output.strides());
-            if(inputStrideOrder != outputStrideOrder)
-            {
-                throw std::invalid_argument(
-                    "Reduction requires input and output tensor layouts to be consistent");
-            }
-        }
-
         // Validate reduction mode
         using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
         switch(mode)
