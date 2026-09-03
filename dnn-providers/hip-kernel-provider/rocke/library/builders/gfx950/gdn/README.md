@@ -197,10 +197,16 @@ python3 tools/run_checks.py
 
 ## Understand the output
 
-`grid` is the number of workgroups:
+For the warp-tiled path:
 
 ```text
 grid = batch * num_v_heads * blocks_per_v_dim
+```
+
+For the simple reference path, there is no V split:
+
+```text
+grid = batch * num_v_heads
 ```
 
 At small batch, `blocks_per_v_dim` may be greater than one to create more
@@ -214,13 +220,13 @@ current output cannot prove that the next step will read correct state.
 
 ## Exit codes
 
-The driver and benchmark use meaningful process status:
+Exit codes differ slightly by command:
 
-| Code | Meaning |
-|---|---|
-| `0` | All requested correctness checks passed |
-| `1` | At least one checked shape exceeded tolerance or no valid timed tile remained |
-| `2` | No GPU was visible or the requested spec was invalid |
+| Command | `0` | `1` | `2` |
+|---|---|---|---|
+| `gdn_decode.py` | all requested checks passed, or checks were disabled | at least one checked batch exceeded tolerance | no GPU visible or the fixed spec was rejected |
+| `benchmark_gdn_decode.py` | every batch passed correctness and was timed | at least one batch exceeded tolerance | no GPU visible |
+| `tune.py` | every requested batch produced at least one correct, timed tile | some batch produced no correct, timeable tile | no GPU visible |
 
 Scripts and CI should check the exit code instead of relying on printed text.
 

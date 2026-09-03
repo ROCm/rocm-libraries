@@ -62,8 +62,7 @@ pointer. A correctness check must compare both results.
 
 ## One decode step
 
-The equations below are evaluated independently for each active sequence and
-value head.
+The following equations describe the default `use_qk_l2norm=True` path:
 
 ```text
 q_hat = l2norm(q) * head_k_dim**-0.5
@@ -71,7 +70,9 @@ k_hat = l2norm(k)
 ```
 
 The query and key are normalized. The extra scale on `q_hat` keeps the dot
-product magnitude controlled as the key-head dimension changes.
+product magnitude controlled as the key-head dimension changes. With
+`use_qk_l2norm=False`, the kernel instead uses
+`q_hat = q * head_k_dim**-0.5` and `k_hat = k`.
 
 ```text
 decay = exp(-exp(A_log) * softplus(a + dt_bias))
@@ -147,10 +148,12 @@ The main tile knobs are:
 | `warp_threads_k` | Lanes in a warp that cooperate across the key dimension |
 | `blocks_per_v_dim` | Workgroups that split one value head's rows |
 
-Each lane owns `STATE_VEC = 8` consecutive key-dimension elements. Therefore:
+Each lane owns one `STATE_VEC = 8`-element key-dimension chunk per K-tile
+iteration. Therefore:
 
 ```text
 warp_tile_k = warp_threads_k * 8
+K-tile iterations = head_k_dim / warp_tile_k
 ```
 
 A warp divides its 64 lanes in two directions:
@@ -198,8 +201,8 @@ This avoids the LDS crossbar and its wait. Wider offsets cross the quad and use
 `ds_swizzle`.
 
 At the end of the butterfly, every K lane holds the same total. Only the first
-K lane stores the output scalar, while every lane writes its own eight-element
-slice of the updated state.
+K lane stores the output scalar. Every lane writes its own eight-element state
+slice for each K-tile iteration.
 
 ## Why the tile changes with batch
 

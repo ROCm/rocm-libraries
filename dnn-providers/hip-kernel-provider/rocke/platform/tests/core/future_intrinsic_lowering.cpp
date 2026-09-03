@@ -211,6 +211,40 @@ void case_quad_perm_rejects_invalid_input()
     expect_quad_perm_rejected("quad_perm must reject non-i32 data", true, 1, 0, 3, 2);
 }
 
+void case_quad_perm_hip_rejects_missing_ctrl()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "qperm_missing_ctrl");
+    rocke_value_t* data = rocke_b_const_i32(&b, 1);
+    rocke_value_t* operands[] = {data};
+    const rocke_type_t* result_types[] = {rocke_i32()};
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_QUAD_PERM,
+               operands,
+               1,
+               result_types,
+               1,
+               nullptr,
+               nullptr,
+               0,
+               "qperm",
+               nullptr);
+    rocke_b_ret(&b);
+
+    rocke_strbuf_t out;
+    rocke_strbuf_init(&out, 256);
+    rocke_lower_hip_opts_t opts{};
+    opts.include_prologue = false;
+    opts.include_prologue_set = true;
+    opts.arch = "gfx950";
+    const rocke_status_t st
+        = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+    if(st != ROCKE_ERR_KEY)
+        fail("quad_perm HIP lowering must reject missing ctrl", __LINE__);
+    rocke_strbuf_free(&out);
+    rocke_ir_builder_free(&b);
+}
+
 /* ---- mov_dpp8 ---- */
 void case_mov_dpp8_i32()
 {
@@ -623,6 +657,7 @@ const TestCase k_cases[] = {
     {"ds_swizzle_raw_offset", case_ds_swizzle_raw_offset},
     {"quad_perm_hip", case_quad_perm_hip},
     {"quad_perm_rejects_invalid_input", case_quad_perm_rejects_invalid_input},
+    {"quad_perm_hip_rejects_missing_ctrl", case_quad_perm_hip_rejects_missing_ctrl},
     {"ds_swizzle_xor", case_ds_swizzle_xor},
     {"mov_dpp8_i32", case_mov_dpp8_i32},
     {"quad_perm", case_quad_perm},

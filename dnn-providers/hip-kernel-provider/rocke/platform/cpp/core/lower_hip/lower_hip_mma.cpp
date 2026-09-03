@@ -293,7 +293,8 @@ static rocke_status_t rocke_h_op_tile_quad_perm(
     const rocke_value_t* data = op->operands[0];
     const rocke_value_t* r = h_res(op);
     int64_t ctrl = 0;
-    rocke_attr_get_int(&op->attrs, "ctrl", &ctrl);
+    if(!rocke_attr_get_int(&op->attrs, "ctrl", &ctrl))
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.quad_perm: missing 'ctrl'");
     rocke_h_emitf(lw,
                   "int %s = __builtin_amdgcn_update_dpp(%s, %s, %lld, 15, 15, 1);",
                   rocke_h_name(lw, r),
