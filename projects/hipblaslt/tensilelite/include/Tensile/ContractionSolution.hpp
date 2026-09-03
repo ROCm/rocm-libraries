@@ -475,25 +475,23 @@ namespace TensileLite
         // reduction it sizes with requiredWorkspaceSizeGsu(problem, hardware,
         // grid / tiles) instead of partialTileSize(grid).
         //
-        // The two can therefore disagree about WHETHER a workspace is needed, not
-        // just about how many bytes. The case where they do is parallel reduction
-        // whose selected grid comes back equal to tiles: the k-split factor
-        // grid / tiles is then 1, and requiredWorkspaceSizeGsu() short-circuits to 0
-        // for a split of 1, while this field still reserves partialTileSize(tiles)
-        // because parallel reduction always needs a partials region. Concretely, a
-        // 256x4096x4096 SK3 launch with a 128x128x64 macro tile on a 256-CU device,
-        // handed a workspace between 4 MiB and 16 MiB, reports 4 MiB here and 0 from
-        // requiredWorkspaceSize().
+        // The two could in principle disagree about WHETHER a workspace is needed,
+        // not just about how many bytes: at a k-split factor grid / tiles of 1,
+        // requiredWorkspaceSizeGsu() short-circuits to 0 while partialTileSize(grid)
+        // does not, so a parallel reduction whose grid came back equal to tiles
+        // would reserve here and not there. That case is unreachable -- both call
+        // sites run streamKReconcileReduction() on the same (reduction, grid, tiles)
+        // triple immediately after getSKGridImpl(), and it demotes parallel to tree
+        // whenever the split factor is below 2, so neither sizing ever sees parallel
+        // at a split of 1. The formulas differ; the reserve-or-not answer does not.
         //
-        // That divergence is an over-reservation of a buffer the caller already
-        // supplied, never an under-allocation, so it is benign in the real
-        // allocate-then-launch flow: the allocator sizes from
+        // That agreement is load-bearing rather than incidental: it is what lets the
+        // allocate-then-launch flow close. The allocator sizes from
         // requiredWorkspaceSize(), that size is what problem.workspaceSize() reports
         // on the subsequent launch, and re-deriving this snapshot against it reaches
-        // a self-consistent fixed point (0 bytes -> workspace-DP fallback -> 0 bytes
-        // reserved). It only becomes visible when a caller hands in a workspace it
-        // sized some other way. Both implementations still encode the same intended
-        // rule -- change one, check the other.
+        // a self-consistent fixed point. Both implementations encode the same
+        // intended rule, by way of the same reconcile helper -- change one, check
+        // the other two.
         size_t requiredWorkspaceBytes = 0;
         // recomputed: partials(+work-queue) bytes wanted, before the fit check against
         // givenWorkspaceBytes. Non-zero even when the fallback fires, which is what
@@ -842,6 +840,12 @@ namespace TensileLite
 
         virtual void relaseDeviceUserArgs(void* dUA, void* dUAHost);
 
+        /**
+         * resolvedGlobalAccumulation is the mode the kernel will actually run in.
+         * AdaptiveGemmGSUA lets getAccumulation() pick it per launch, so it can
+         * differ from sizeMapping.globalAccumulation; the argument layout has to
+         * follow the resolved mode, not the compiled-in one.
+         */
         template <bool T_Debug, bool insertKernelArgs, typename KA>
         void singleCallArgs(Problem const&           problem,
                             ContractionInputs const& inputs,
@@ -850,7 +854,8 @@ namespace TensileLite
                             dim3 const&              problemNumGroupTiles,
                             dim3 const&              numWorkGroups,
                             KA&                      args,
-                            StreamKSettings const&   sk) const;
+                            StreamKSettings const&   sk,
+                            size_t                   resolvedGlobalAccumulation) const;
 
         // Common kernel related arguments (e.g. gemm_count, arg type, MT, GSU...)
         template <bool T_Debug, bool Legacy, typename KA>
@@ -909,6 +914,7 @@ namespace TensileLite
                                       KA&                      args,
                                       StreamKSettings const&   sk,
                                       uint32_t                 autoGsuVal,
+                                      size_t                   resolvedGlobalAccumulation,
                                       uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
 
         template <typename KA>
@@ -924,7 +930,8 @@ namespace TensileLite
         KernelInvocation generateOutputConversionCall(Problem const&           problem,
                                                       ContractionInputs const& inputs,
                                                       StreamKSettings const&   sk,
-                                                      uint32_t                 autoGsuVal) const;
+                                                      uint32_t                 autoGsuVal,
+                                                      size_t resolvedGlobalAccumulation) const;
 
         template <bool T_Debug, typename KA>
         KernelInvocation
