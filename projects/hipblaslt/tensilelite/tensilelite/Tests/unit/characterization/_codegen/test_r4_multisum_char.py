@@ -145,6 +145,13 @@ _TP_B = {
     "idx": 1,
 }
 
+_TP_A = {
+    "tensorChar": "A",
+    "isA": True,
+    "isB": False,
+    "idx": 0,
+}
+
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -269,4 +276,46 @@ class TestMultiSumGraIncrementsVgprPrintExit:
         output = captured.getvalue()
         assert "2" in output, (
             f"Expected NumIndicesSummation=2 in printExit message; got: {output!r}"
+        )
+
+
+class TestMultiSumGraIncrementsSGPRTensorA:
+    """SGPR other-summation arm on the A tensor (isA=True).
+
+    The isA=True branch additionally divides SizesSum by DepthU into the unroll
+    loop counter before the shared SMulI32/SSubI32/SLShiftLeftB32 tail.
+    """
+
+    def setup_method(self):
+        _init_rocisa_gfx942()
+
+    def test_tensor_a_emits_nonempty_module(self):
+        kwa = _build_minimal_kwa(_MULTISUM_KERNEL, globalReadIncsUseVgpr=False)
+        kwa.sgprs["LoopCounterL"] = 40
+        result = kwa.graIncrements(_MULTISUM_KERNEL, 0, _TP_A)
+        items = list(result.items())
+        assert len(items) >= 1, (
+            f"Expected non-empty Module from the isA=True arm, got {len(items)}"
+        )
+
+    def test_tensor_a_emits_divide(self):
+        """Power-of-two DepthU makes the quotient a right shift, emitted into a
+        nested Module -- hence flatitems() rather than items()."""
+        from rocisa.instruction import SLShiftRightB32
+
+        kwa = _build_minimal_kwa(_MULTISUM_KERNEL, globalReadIncsUseVgpr=False)
+        kwa.sgprs["LoopCounterL"] = 40
+        items = list(kwa.graIncrements(_MULTISUM_KERNEL, 0, _TP_A).flatitems())
+        assert any(isinstance(it, SLShiftRightB32) for it in items), (
+            f"Expected >=1 SLShiftRightB32 (SizesSum / DepthU); "
+            f"items: {[type(x).__name__ for x in items]}"
+        )
+
+    def test_gra_inc_references_a_tensor(self):
+        kwa = _build_minimal_kwa(_MULTISUM_KERNEL, globalReadIncsUseVgpr=False)
+        kwa.sgprs["LoopCounterL"] = 40
+        result = kwa.graIncrements(_MULTISUM_KERNEL, 0, _TP_A)
+        text = " ".join(str(it) for it in result.items())
+        assert "GlobalReadIncsA" in text, (
+            f"Expected 'GlobalReadIncsA' in emitted text; got:\n{text[:400]}"
         )
