@@ -261,6 +261,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINE_DEVICEPROP),
                  "HIPDNN_ATTR_ENGINE_DEVICEPROP");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINE_NAME_EXT),
+                 "HIPDNN_ATTR_ENGINE_NAME_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_KERNEL_CACHE_IS_ENGINECFG_KERNEL_CACHED),
                  "HIPDNN_ATTR_KERNEL_CACHE_IS_ENGINECFG_KERNEL_CACHED");

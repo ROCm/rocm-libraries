@@ -240,6 +240,13 @@ if(BUILD_ROCSPARSE_DEBUGGING)
     )
 endif()
 
+if(BUILD_WITH_ELL_TRSV)
+  list(APPEND ROCSPARSE_TEST_SOURCES
+    test_spsv_ell.cpp
+    test_sptrsv_ell.cpp)
+endif()
+
+
 if(ROCSPARSE_ENABLE_SPMAT_SCALE)
   list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
 endif()
@@ -409,6 +416,13 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spildlt0.cpp
 rocsparse_test_listeners.cpp
   )
+
+if(BUILD_WITH_ELL_TRSV)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+    ../testings/testing_spsv_ell.cpp
+    ../testings/testing_sptrsv_ell.cpp)
+endif()
+
 
 if(ROCSPARSE_ENABLE_SPMAT_SCALE)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)

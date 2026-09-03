@@ -396,13 +396,15 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
-    # gfx1250 LDS segment interleave: raises LDS read bandwidth by putting operand A's
-    # two halves in different 64KiB LDS segments so its two MFMA read ports stop conflicting.
+    # gfx1250 LDS segment interleave: puts an operand's two components in different 64KiB LDS segments
+    # so the two read ports (one per SIMD pair) read different segments, avoiding a segment conflict
+    # (both ports reading one segment at once).
     #
     # Applies only to gfx1250 wave-separated TDM kernels, and requires:
-    #   - TDMInst=3, MIWaveGroup [2,2], UnrollMajorLDS
+    #   - TDMInst=3, UnrollMajorLDS, MIWaveGroup [2,2], [4,1], [1,4]
     #   - dtype bf16 / fp16 / fp8 / fp4 (incl. MXFP8/MXFP4 and mixed narrow types such as F8xF4)
-    #   - VWA = WaveTileA (TDMSplit optional), or WaveTileA/2 (requires TDMSplit)
+    #   - VWA (for [2,2], [4,1]) = WaveTileA or WaveTileA/2; VWB (for [1,4]) = WaveTileB or WaveTileB/2;
+    #     the WaveTile/2 case needs TDMSplit
     # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
     #
     # Values:
@@ -630,7 +632,7 @@ validParameters = { # we need to make sure this matches develop
     #   (since C matrix is always coalesced in Free0 index direction and this assertion guarantees the index element multiple)
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
+    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32],
     # Kernel generator will assume that the FreeIndex[1] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[1] is usually letter "J"
@@ -638,7 +640,7 @@ validParameters = { # we need to make sure this matches develop
     # Optimizations enabled by AssertFree1ElementMultiple>1:
     #  - See above AssertFree0ElementMultiple "Load optimizations"
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
+    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32],
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -776,7 +778,7 @@ validParameters = { # we need to make sure this matches develop
     #  - Level2 grid dim 1x16 (if enabled, otherwise last 16 bit values are ignored)
     "SFCWGM" : -1,
     "MaxOccupancy": list(
-        range(1, 40 + 1)
+        range(1, 64 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy
     "MaxLDS": [-1, 65536, 163840, 327680],
     "WorkGroup": makeValidWorkGroups(),  # ( wg0 x wg1 x LocalSplitU ) dimensions of the workgroup which will operate on a tile and share lds
@@ -1083,7 +1085,8 @@ validParameters = { # we need to make sure this matches develop
     "KernelLanguage": ["Assembly"],
     # We set validParams["ISA"] in multiple places
     "ISA": validISA,  # arch for assembly kernels
-    # Name of the custom kernel located at `CUSTOM_KERNEL_PATH`.
+    # Name of a bundled custom kernel, or one located in an explicitly supplied
+    # custom-kernel directory.
     # a custom kernel is a user written assembly kernel with its associated configuration parameters included in a custom.config section
     # inside the yaml block between the --- and ... markers.  These parameters are only used for information purposes, not kernel generation.
     # Ex:
@@ -1096,7 +1099,7 @@ validParameters = { # we need to make sure this matches develop
     #
     # Custom kernels can be included in a BenchmarkProblemSizeGroup by having their name (without file extension) listed under the "CustomKernels"
     # category alongside InitialSolutionParameters, BenchmarkCommonParameters, etc...
-    "CustomKernel": -1,
+    "CustomKernelName": -1,
     # Will allow a kernel to be accepted even when checks determine it's not viable.
     # Intended for use with custom kernels which have confirmed to be correct
     "NoReject": [False, True],

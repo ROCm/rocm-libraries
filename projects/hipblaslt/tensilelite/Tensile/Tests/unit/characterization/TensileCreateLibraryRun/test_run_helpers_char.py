@@ -147,29 +147,13 @@ def test_remove_invalid_solutions_and_kernels(monkeypatch):
 # ---------------------------------------------------------------------------
 def test_pass_post_kernel_info_to_solution(monkeypatch):
     monkeypatch.setattr(M, "getKernelNameMin", lambda k, split: k["name"])
-    # customKernelDef mirrors KernelCodeGenResult's `= None` NamedTuple default:
-    # a real result always has it (None unless the kernel was custom), so a
-    # SimpleNamespace standing in for one must set it explicitly.
-    results = [SimpleNamespace(cuoccupancy=11, pgr=22, mathclk=33, customKernelDef=None)]
+    results = [SimpleNamespace(cuoccupancy=11, pgr=22, mathclk=33)]
     kernels = [{"name": "k0"}]
     sol = _Sol([{"name": "k0"}], state={})
     M.passPostKernelInfoToSolution(results, kernels, [sol], splitGSU=False)
     assert sol._state["CUOccupancy"] == 11
     assert sol._state["PrefetchGlobalRead"] == 22
     assert sol._state["MathClocksUnrolledLoop"] == 33
-    assert "CustomKernel" not in sol._state
-
-
-def test_pass_post_kernel_info_to_solution_carries_custom_kernel_def(monkeypatch):
-    # When a kernel is custom, its CustomKernel definition rides along into
-    # solution._state so downstream library serialization can see it.
-    monkeypatch.setattr(M, "getKernelNameMin", lambda k, split: k["name"])
-    ckDef = {"name": "k0", "args": []}
-    results = [SimpleNamespace(cuoccupancy=11, pgr=22, mathclk=33, customKernelDef=ckDef)]
-    kernels = [{"name": "k0"}]
-    sol = _Sol([{"name": "k0"}], state={})
-    M.passPostKernelInfoToSolution(results, kernels, [sol], splitGSU=False)
-    assert sol._state["CustomKernel"] is ckDef
 
 
 # ---------------------------------------------------------------------------

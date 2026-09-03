@@ -54,6 +54,8 @@ endif()
 # .h.in must be set (or unset) prior to the configure_file() calls.
 set(ROCSPARSE_WITH_SPMAT_SCALE ${ROCSPARSE_ENABLE_SPMAT_SCALE})
 set(ROCSPARSE_WITH_SDDMM_BATCHED ${ROCSPARSE_ENABLE_SDDMM_BATCHED})
+set(ROCSPARSE_WITH_ELL_TRSV ${BUILD_WITH_ELL_TRSV})
+set(ROCSPARSE_WITH_DIAGONAL_SOLVE ${BUILD_WITH_DIAGONAL_SOLVE})
 
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"

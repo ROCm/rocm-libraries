@@ -186,6 +186,15 @@ foreach(file ${DOCUMENTATION_EXAMPLES})
     add_rocsparse_example(${file})
 endforeach()
 
+# This documentation example intentionally demonstrates the deprecated
+# rocsparse_spmv API (see example_rocsparse_v2_spmv for the replacement),
+# so silence -Wdeprecated-declarations for it.
+set_source_files_properties(
+  documentation_examples/generic/example_rocsparse_spmv.cpp
+  PROPERTIES
+  COMPILE_FLAGS "-Wno-deprecated-declarations"
+)
+
 foreach(file ${DOCUMENTATION_EXAMPLES2})
     add_rocsparse_example(${file})
 endforeach()

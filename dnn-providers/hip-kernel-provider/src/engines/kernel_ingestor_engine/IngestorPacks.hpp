@@ -28,6 +28,9 @@ struct IngestorPack
     std::string_view label;
     /// May throw; caller rolls back this pack alone.
     void (*registerSymbols)(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+    /// Drops this pack's cached kpack modules, or null for a pack that loads no kpack
+    /// archive. Tests only -- see resetIngestorModuleCachesForTesting().
+    void (*resetModuleCache)();
 };
 
 /// Every pack this provider ships. **Adding an engine edits this table.**
@@ -39,9 +42,24 @@ const std::vector<IngestorPack>& ingestorPacks();
 
 /// @see packs/PointwiseNative.cpp
 void registerPointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetPointwiseModuleCache();
 
 /// @see packs/ConvNative.cpp
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+
+/// Drops every pack's cached kpack modules, so the next dispatch re-reads its archive
+/// from disk.
+///
+/// FOR TESTS ONLY. Nothing in the product calls this: module residency is a deliberate
+/// process-lifetime guarantee -- one hipModule_t per (archive, toc_key, arch) -- not a
+/// cache to be invalidated. It exists because a test that deliberately corrupts a
+/// staged archive cannot otherwise observe the failure it asserts on: a resident module
+/// serves the plan and the damaged bytes are read by nothing.
+///
+/// Clearing releases each cache's own reference only. A module still held by a live
+/// plan stays loaded until that plan drops it, so this cannot unload a module out from
+/// under a running dispatch.
+void resetIngestorModuleCachesForTesting();
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

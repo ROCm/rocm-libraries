@@ -19,6 +19,7 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
@@ -184,8 +185,12 @@ TEST(TestKernelIngestorEngine, GetEngineDetailsReportsTheBlockSizeKnob)
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(details.ptr,
                                                                                      details.size);
-    ASSERT_EQ(wrapper.knobCount(), 1U);
+    // block_size plus the benchmarking knob every descriptor-backed engine advertises
+    // out-of-band; looked up by name, since that knob is prepended.
+    ASSERT_EQ(wrapper.knobCount(), 2U);
     EXPECT_EQ(wrapper.getKnobByName("block_size").knobId(), "block_size");
+    EXPECT_EQ(wrapper.getKnobByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME).knobId(),
+              hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
 }
 
 TEST(TestKernelIngestorEngine, GetMaxWorkspaceSizeReportsTheLargerBlocksRequirement)

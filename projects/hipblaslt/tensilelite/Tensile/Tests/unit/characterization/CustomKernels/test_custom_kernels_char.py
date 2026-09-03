@@ -4,7 +4,7 @@
 ################################################################################
 
 """Characterization tests for ``Tensile.CustomKernels``: the custom-kernel
-.s-file embedded-YAML parsing and validation, driven over crafted .s files in
+.s-file config/assembly parsing and validation, driven over crafted .s files in
 a tmp directory."""
 
 import contextlib
@@ -13,10 +13,9 @@ import pytest
 
 from Tensile.CustomKernels import (
     isCustomKernelConfig,
-    getCustomKernelFilepath,
     getAllCustomKernelNames,
     getCustomKernelContents,
-    _readEmbeddedYaml,
+    getCustomKernelConfigAndAssembly,
     readCustomKernelConfig,
     getCustomKernelConfig,
 )
@@ -28,28 +27,6 @@ _VALID_S = """\
 custom.config:
   InternalSupportParams:
     KernArgsVersion: 2
-...
-s_nop 0
-s_endpgm
-"""
-
-# getCustomKernelConfig's no-explicit-CustomKernel path auto-infers one from
-# amdhsa.kernels[0].args (see _buildCustomKernelFromMetadata), so -- unlike the
-# other fixtures in this file -- it needs a real amdhsa.kernels entry, mirroring
-# the write_kernel() helper in Tests/unit/test_CustomKernelMetadata.py.
-_VALID_S_WITH_KERNEL_META = """\
----
-custom.config:
-  InternalSupportParams:
-    KernArgsVersion: 2
-amdhsa.kernels:
-  - .name: k
-    .max_flat_workgroup_size: 256
-    .args:
-      - .name: D
-        .size: 8
-        .offset: 0
-        .value_kind: global_buffer
 ...
 s_nop 0
 s_endpgm
@@ -82,10 +59,6 @@ def test_is_custom_kernel_config():
     assert not isCustomKernelConfig({"CustomKernelName": ""})
 
 
-def test_get_custom_kernel_filepath(snapshot):
-    assert getCustomKernelFilepath("mykern", directory="/some/dir").endswith("/some/dir/mykern.s")
-
-
 def test_get_all_custom_kernel_names(tmp_path, snapshot):
     _write(tmp_path, "alpha", _VALID_S)
     _write(tmp_path, "beta", _VALID_S)
@@ -103,13 +76,10 @@ def test_get_custom_kernel_contents_missing_raises(tmp_path):
         getCustomKernelContents("nope", directory=str(tmp_path))
 
 
-def test_read_embedded_yaml_parses_custom_config(tmp_path, snapshot):
-    # getCustomKernelConfigAndAssembly (raw '---'/'...' line-splitter, returning
-    # a (config_text, assembly_text) tuple) was replaced by _readEmbeddedYaml
-    # (parses the .amdgpu_metadata YAML block and returns the parsed dict) as
-    # part of Gemm-From-Anywhere; see adr/0002-custom-kernels-embedded-yaml-parsing.md.
+def test_get_config_and_assembly_split(tmp_path, snapshot):
     _write(tmp_path, "k", _VALID_S)
-    assert _readEmbeddedYaml("k", directory=str(tmp_path)) == snapshot
+    config, assembly = getCustomKernelConfigAndAssembly("k", directory=str(tmp_path))
+    assert {"config": config, "assembly": assembly} == snapshot
 
 
 def test_read_custom_kernel_config_ok(tmp_path, snapshot):
@@ -124,7 +94,7 @@ def test_read_custom_kernel_config_bad_yaml_raises(tmp_path):
 
 
 def test_get_custom_kernel_config_ok(tmp_path, snapshot):
-    _write(tmp_path, "k", _VALID_S_WITH_KERNEL_META)
+    _write(tmp_path, "k", _VALID_S)
     with _isolate_valid_parameters():
         cfg = getCustomKernelConfig("k", {"Extra": 9}, directory=str(tmp_path))
     assert {

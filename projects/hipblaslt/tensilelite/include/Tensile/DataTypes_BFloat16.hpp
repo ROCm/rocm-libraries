@@ -94,11 +94,6 @@ namespace TensileLite
             return static_cast<int8_t>(float(*this));
         }
 
-        explicit operator uint8_t() const
-        {
-            return static_cast<uint8_t>(float(*this));
-        }
-
         uint16_t data;
 
     private:

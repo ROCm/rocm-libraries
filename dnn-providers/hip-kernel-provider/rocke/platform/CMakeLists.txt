@@ -259,10 +259,10 @@ if(ROCKE_INSTALL_TESTS)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256.json"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
 
-    # The harness above builds LIBRARY kernels for its attention, attention_dense
-    # and attention_d256 families (the one platform -> library exception), so the
-    # `kernels` and `builders` packages must be importable by both runners.
-    # Without them every attention case degrades to an expected-failure and
+    # The harness above builds LIBRARY kernels for its attention, attention_dense,
+    # attention_d256 and kda_chunkwise families (the one platform -> library
+    # exception), so the `kernels` and `builders` packages must be importable by
+    # both runners. Without them those cases degrade to expected failures and
     # rocke_golden_static reports drift instead of passing.
     #
     # Destination matters: TheRock's artifact-hipkernelprovider.toml captures the
@@ -285,12 +285,14 @@ if(ROCKE_INSTALL_TESTS)
     else()
       message(WARNING
               "rocKE: library tree not found at ${_ROCKE_LIBRARY_DIR}; the installed "
-              "golden gate will fail on its attention cases")
+              "golden gate will fail on its library-kernel cases")
     endif()
 
     # Install the full pytest suite for installed/artifact test execution.
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
-    # the differential harness (needs compiler + source), and run_all.py (dev runner).
+    # the differential harness (needs compiler + source), the WaveScope sidecar
+    # tests (load tools from the adjacent dsl_docs source tree), and run_all.py
+    # (dev runner).
     # cmake-lint: disable=E1122
     block()
       install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
@@ -300,6 +302,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "*.c" EXCLUDE
               PATTERN "*.cpp" EXCLUDE
               PATTERN "differential" EXCLUDE
+              PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
 
     endblock()

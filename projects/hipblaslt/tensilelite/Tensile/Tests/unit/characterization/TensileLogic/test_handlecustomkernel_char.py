@@ -86,15 +86,6 @@ def test_has_custom_kernel_false_empty_name(tmp_path, snapshot):
     assert hasCustomKernel(f) == snapshot
 
 
-def test_has_custom_kernel_true_new_style_mapping(tmp_path, snapshot):
-    # The CustomKernel: mapping (name/args/macrotile/...) that replaced the
-    # flat CustomKernelName: string must be detected too -- both are live
-    # inputs to handleCustomKernel(). See adr/0003-hascustomkernel-dual-schema.md.
-    f = tmp_path / "withck_new.yaml"
-    f.write_text("- foo\n  CustomKernel:\n    name: MyKernel\n    args: []\n", encoding="utf-8")
-    assert hasCustomKernel(f) == snapshot
-
-
 # --- handleCustomKernel -----------------------------------------------------
 
 def test_handle_non_custom_returns_false(snapshot):
@@ -107,7 +98,7 @@ def test_handle_non_custom_returns_false(snapshot):
 def test_handle_custom_mi_length_4(monkeypatch, snapshot):
     # MI length 4 -> normal path, no hint, returns (sol, True).
     config = {"MatrixInstruction": [16, 16, 16, 1], "WorkGroup": [16, 16, 1]}
-    monkeypatch.setattr(hck_mod, "getCustomKernelConfig", lambda name, d, dir: dict(config))
+    monkeypatch.setattr(hck_mod, "getCustomKernelConfig", lambda name, d: dict(config))
     sol = {"CustomKernelName": "DummyKernel", "SolutionIndex": 0}
     out, is_custom = handleCustomKernel(sol, {})
     assert {"is_custom": is_custom, "sol": out} == snapshot
@@ -117,7 +108,7 @@ def test_handle_custom_mi_wrong_length_runs_hint(monkeypatch, isa_info_map, snap
     # MI length 9 (not 4 or 0) -> hint branch: matrixInstructionToMIParameters
     # + prepareCustomKernelConfig run (stdout incidental). Returns (sol, True).
     config = {"MatrixInstruction": [16, 16, 16, 1, 1, 2, 2, 2, 2]}
-    monkeypatch.setattr(hck_mod, "getCustomKernelConfig", lambda name, d, dir: dict(config))
+    monkeypatch.setattr(hck_mod, "getCustomKernelConfig", lambda name, d: dict(config))
     sol = {
         "CustomKernelName": "DummyKernel", "SolutionIndex": 0,
         "WavefrontSize": 64, "ProblemType": {"DataType": "h"},

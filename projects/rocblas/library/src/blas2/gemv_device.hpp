@@ -1659,6 +1659,136 @@ rocblas_gemvn_kernel(rocblas_int    m,
     }
 }
 
+// gemvn_sm is the skinny m optimization: the mirror of gemvt_sn.
+//
+// transA == none reduces over n into an m-long output, so gridDim.x -- which
+// tiles the output -- is set by m alone. A short m therefore leaves the card
+// idle no matter how long the reduction is: at m = 64 on gfx1100 the grid is a
+// single workgroup. gridDim.y splits the reduction so the launch is sized by
+// the work rather than by the output.
+//
+// Each (blockIdx.x, blockIdx.y) block runs the ordinary gemvn calc over its own
+// contiguous slice of columns, with alpha = 1 and beta = 0, writing an m-long
+// partial to workspace[blockIdx.y * m]. rocblas_gemvn_sm_reduce then sums the
+// gridDim.y partials and applies alpha and beta. The per-block math is the
+// unmodified kernel; only the column range and the destination differ.
+template <int DIM_X, int DIM_Y, typename T_Index, typename Ti, typename U, typename Tex>
+ROCBLAS_KERNEL(DIM_X* DIM_Y)
+rocblas_gemvn_sm_kernel(rocblas_int    m,
+                        rocblas_int    n,
+                        U              alpha_device_host,
+                        rocblas_stride stride_alpha,
+                        const Ti*      Aa,
+                        rocblas_stride shifta,
+                        T_Index        lda,
+                        rocblas_stride strideA,
+                        const Ti*      xa,
+                        rocblas_stride shiftx,
+                        T_Index        incx,
+                        rocblas_stride stridex,
+                        Tex* __restrict__ workspace,
+                        rocblas_int batch_count)
+{
+    rocblas_int num_threads = blockDim.x * blockDim.y * blockDim.z;
+    if(DIM_X * DIM_Y != num_threads)
+        return; // need to launch exactly the same number of threads as template parameters indicate
+
+    // Columns are split evenly; the last slice absorbs the remainder.
+    rocblas_int chunk = (n - 1) / rocblas_int(gridDim.y) + 1;
+    rocblas_int col0  = rocblas_int(blockIdx.y) * chunk;
+    if(col0 >= n)
+        return;
+    rocblas_int cols = min(chunk, n - col0);
+
+    uint32_t batch = blockIdx.z;
+
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    {
+        auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
+
+        // alpha is applied once, in the reduce; a zero alpha still has to reach
+        // the reduce so that it can write beta * y, so the partials are zeroed
+        // rather than skipped.
+        const auto* A = cond_load_ptr_batch(alpha, Aa, batch, shifta, strideA);
+        const auto* x = cond_load_ptr_batch(alpha, xa, batch, shiftx, stridex);
+
+        Tex* ws = workspace + size_t(gridDim.y) * m * batch + size_t(blockIdx.y) * m;
+
+        rocblas_gemvn_kernel_calc<DIM_X, DIM_Y, T_Index>(m,
+                                                         cols,
+                                                         alpha ? Tex(1) : Tex(0),
+                                                         A + col0 * T_Index(lda),
+                                                         lda,
+                                                         x + col0 * T_Index(incx),
+                                                         incx,
+                                                         Tex(0),
+                                                         ws,
+                                                         T_Index(1));
+    }
+}
+
+// Sums the gridDim.y partials left by rocblas_gemvn_sm_kernel and applies alpha
+// and beta. One thread per output element; consecutive threads read consecutive
+// workspace addresses, so each of the n_split passes is coalesced.
+template <typename Tex, typename To>
+ROCBLAS_KERNEL_ILF void rocblas_gemvn_sm_reduce_calc(rocblas_int m,
+                                                     rocblas_int n_split,
+                                                     rocblas_int ind,
+                                                     Tex         alpha,
+                                                     Tex         beta,
+                                                     To* __restrict__ y,
+                                                     int64_t incy,
+                                                     const Tex* __restrict__ workspace,
+                                                     uint32_t batch)
+{
+    Tex sum{0};
+
+    if(alpha)
+    {
+        const Tex* ws = workspace + size_t(n_split) * m * batch + ind;
+        for(rocblas_int j = 0; j < n_split; j++)
+            sum += ws[size_t(j) * m];
+    }
+
+    y[ind * incy] = beta ? (To)(alpha * sum + beta * y[ind * incy]) : (To)(alpha * sum);
+}
+
+template <int NB, typename Tex, typename U, typename To>
+ROCBLAS_KERNEL(NB)
+rocblas_gemvn_sm_reduce(rocblas_int    m,
+                        rocblas_int    n_split,
+                        U              alpha_device_host,
+                        rocblas_stride stride_alpha,
+                        U              beta_device_host,
+                        rocblas_stride stride_beta,
+                        To*            ya,
+                        rocblas_stride shifty,
+                        int64_t        incy,
+                        rocblas_stride stridey,
+                        Tex* __restrict__ workspace,
+                        rocblas_int batch_count)
+{
+    rocblas_int ind = blockIdx.x * NB + threadIdx.x;
+
+    if(ind >= m)
+        return;
+
+    uint32_t batch = blockIdx.z;
+
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    {
+        auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
+        auto beta  = load_scalar(beta_device_host, batch, stride_beta);
+
+        if(!alpha && beta == 1)
+            continue;
+
+        auto* y = load_ptr_batch(ya, batch, shifty, stridey);
+
+        rocblas_gemvn_sm_reduce_calc(m, n_split, ind, alpha, beta, y, incy, workspace, batch);
+    }
+}
+
 // lda always cast to size_t so single kernel
 //Optimized kernel for GEMV transpose case when m or n is less than gemvt_threshold
 template <bool CONJ, int NB_X, typename Ti, typename Tex, typename To>

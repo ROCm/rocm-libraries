@@ -31,11 +31,13 @@ import sys
 import time
 import itertools
 
+import rocisa
+
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict
 
-from Tensile import CUSTOM_KERNEL_PATH, SolutionLibrary, LibraryIO
+from Tensile import SolutionLibrary, LibraryIO
 from Tensile.KernelWriter import DebugConfig
 from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from Tensile.Toolchain.Component import Assembler
@@ -192,12 +194,21 @@ def _resetCacheDir(cacheDir):
     os.makedirs(cacheDir)
 
 
-def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
+def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap,
+                              rocIsaData=None):
     """Helper function to generate a single solution from a permutation.
-    
+
     This function handles standard permutations without group_ parameter expansion.
     For GA individuals that may have group_ parameters, use the GA backend's equivalent.
+
+    ParallelMap2 hands a worker globalParameters and nothing else, so the rocIsa
+    singleton here has never been init'd and every capability lookup would read a
+    default. Validators that ask the assembly backend what a solution emits need the
+    parent's capabilities to answer the same way the emitter will.
     """
+    if rocIsaData is not None:
+        rocisa.rocIsa.getInstance().setData(rocIsaData)
+
     solution = {
         "ProblemType": deepcopy(problemType.state),
         "ISA": next(iter(isaInfoMap.keys()))
@@ -264,7 +275,8 @@ def _generateForkedSolutions(problemType, constantParams, forkPermutations, asse
         itertools.repeat(constantParams),
         itertools.repeat(assembler),
         itertools.repeat(debugConfig),
-        itertools.repeat(isaInfoMap)
+        itertools.repeat(isaInfoMap),
+        itertools.repeat(rocisa.rocIsa.getInstance().getData())
     )
     raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions", return_as="list")
 
@@ -285,7 +297,7 @@ def _getCustomKernelSolutionObj(
         assembler: Assembler,
         debugConfig: DebugConfig,
         isaInfoMap: Dict[IsaVersion, IsaInfo],
-        directory=CUSTOM_KERNEL_PATH
+        directory=None
     ):
     """Creates the Solution object for a custom kernel"""
     sol = getCustomKernelConfig(kernelName, internalSupportParams, directory)
@@ -314,24 +326,6 @@ def _getCustomKernelSolutionObj(
     return sol
 
 
-def _hashableProblemTypeKV(k, v):
-    """Make (k, v) hashable for set-difference comparisons of ProblemType.
-
-    Lists become tuples; otherwise we fall back to repr(v) for unhashable
-    nested values (e.g. dict-valued problem-type fields). Note: repr is
-    insertion-order-sensitive for dicts, so equivalent dicts with different
-    insertion orders compare as different. Acceptable for the diagnostic
-    "differing parameters" message produced below.
-    """
-    if isinstance(v, list):
-        return (k, tuple(v))
-    try:
-        hash(v)
-        return (k, v)
-    except TypeError:
-        return (k, repr(v))
-
-
 def _generateCustomKernelSolutions(
         problemType,
         customKernels,
@@ -345,19 +339,17 @@ def _generateCustomKernelSolutions(
     solutions = []
     for kernelName in customKernels:
         print1("# Processing custom kernel {}".format(kernelName))
-        try:
-            solution = _getCustomKernelSolutionObj(kernelName, internalSupportParams, assembler, debugConfig, isaInfoMap)
-        except (RuntimeError, KeyError, TypeError) as e:
-            printWarning(f"Skipping custom kernel '{kernelName}': missing or invalid custom.config ({e})")
-            continue
+        solution = _getCustomKernelSolutionObj(kernelName, internalSupportParams, assembler, debugConfig, isaInfoMap)
         # The ActivationType setting in YAML is meaningless in customKernel case.
         # Therefore, we override the customKernel setting with the ActivationType value from ProblemType to avoid false alarms during subsequent problemType checks.
         solution["ProblemType"]["ActivationType"] = problemType["ActivationType"]
         if solution["ProblemType"] != problemType:
             # Raise error if this kernel was specifically requested and problem type doesn't match
             if failOnMismatch:
-                benchmarkSet = {_hashableProblemTypeKV(k, v) for k, v in problemType.items()}
-                customSet = {_hashableProblemTypeKV(k, v) for k, v in solution["ProblemType"].items()}
+                benchmarkSet = set([(k,tuple(v)) if type(v) is list else (k,v) \
+                        for k,v in problemType.items()])
+                customSet = set([(k,tuple(v)) if type(v) is list else (k,v) \
+                        for k,v in solution["ProblemType"].items()])
 
                 msg = "The problem type in the config file does not match " \
                         "that of the custom kernel, {}.".format(kernelName) \

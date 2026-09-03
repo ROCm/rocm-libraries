@@ -203,18 +203,6 @@ namespace TensileLite
 
         TENSILE_SERIALIZE_VECTOR(true, TensileLite::MLPClassification::ResBlock);
 
-        template <typename IO>
-        struct SequenceTraits<std::vector<TensileLite::CustomArgDefinition>, IO>
-            : public DefaultSequenceTraits<std::vector<TensileLite::CustomArgDefinition>, IO, false>
-        {
-        };
-
-        template <typename IO>
-        struct SequenceTraits<std::vector<TensileLite::CustomGridSize>, IO>
-            : public DefaultSequenceTraits<std::vector<TensileLite::CustomGridSize>, IO, false>
-        {
-        };
-
         template <typename Value, typename IO>
         struct SequenceTraits<std::vector<TensileLite::FreeSizeEntry<Value>>, IO>
             : public DefaultSequenceTraits<std::vector<TensileLite::FreeSizeEntry<Value>>, IO, false>

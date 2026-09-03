@@ -3,10 +3,11 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
+
+#include "ScratchDirectory.hpp"
 
 #include "harness/BundleMetadata.hpp"
 
@@ -15,6 +16,7 @@
 using hipdnn_integration_tests::BundleMetadata;
 using hipdnn_integration_tests::checkArchCompatibility;
 using hipdnn_integration_tests::checkVramRequirement;
+using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::loadBundleMetadata;
 using hipdnn_integration_tests::metaJsonPath;
 using hipdnn_test_sdk::utilities::isMetaJsonFile;
@@ -26,12 +28,17 @@ namespace
 
 /// Helper: create a temporary directory with a fake bundle JSON and optional
 /// .meta.json companion. Auto-cleans on destruction via ScopedDirectory.
+///
+/// The directory name must be unique per process AND per construction, or two test
+/// binaries running concurrently -- ctest -j N, or an install-tree and build-tree run
+/// at once -- collide and the second dies with "ScopedDirectory: Directory already
+/// exists" before reaching an assertion. scratch::makeDir() owns that; see
+/// ScratchDirectory.hpp.
 class TempBundle
 {
 public:
     explicit TempBundle(const std::string& metaJsonContent = "")
-        : _dir(std::filesystem::temp_directory_path()
-               / ("test_bundle_" + std::to_string(std::rand())))
+        : _dir(hipdnn_integration_tests::scratch::makeDir("test_bundle_"))
     {
         // Create a minimal bundle JSON (enough for path derivation)
         std::ofstream bundleFile(_dir.path() / "Bundle.json");
@@ -507,6 +514,56 @@ TEST(TestLoadBundleMetadata, ReturnsNulloptOnJsonArray)
 TEST(TestLoadBundleMetadata, RejectsFormatVersionZero)
 {
     const TempBundle bundle(R"({"format_version": 0})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    EXPECT_FALSE(meta.has_value());
+}
+
+// ---------------------------------------------------------------------------
+// loadBundleMetadata — enforcement_level
+// ---------------------------------------------------------------------------
+
+TEST(TestLoadBundleMetadata, EnforcementLevelDefaultsToFullWhenAbsent)
+{
+    const TempBundle bundle(R"({"format_version": 1})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::FULL);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelParsesApplicability)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "applicability"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::APPLICABILITY);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelParsesBuildable)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "buildable"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::BUILDABLE);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelParsesFull)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "full"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::FULL);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelInvalidTokenRejectsMetadata)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "buildible"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    EXPECT_FALSE(meta.has_value());
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelNonStringRejectsMetadata)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": 1})");
     auto meta = loadBundleMetadata(bundle.bundleJsonPath());
     EXPECT_FALSE(meta.has_value());
 }

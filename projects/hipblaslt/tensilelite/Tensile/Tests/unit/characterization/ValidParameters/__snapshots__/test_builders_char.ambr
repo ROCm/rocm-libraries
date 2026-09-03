@@ -1376,7 +1376,7 @@
     'ClusterLocalRead',
     'CompactLoopStore',
     'ConvertAfterDS',
-    'CustomKernel',
+    'CustomKernelName',
     'DebugPersistentKernelLoopForever',
     'DebugStreamK',
     'DepthU',
@@ -1601,7 +1601,7 @@
         2,
         4,
       ]),
-      'len': 9,
+      'len': 6,
       'type': 'list',
     }),
     'AssertFree1ElementMultiple': dict({
@@ -1610,7 +1610,7 @@
         2,
         4,
       ]),
-      'len': 9,
+      'len': 6,
       'type': 'list',
     }),
     'AssertSummationElementMultiple': dict({
@@ -1680,7 +1680,7 @@
       'len': 2,
       'type': 'list',
     }),
-    'CustomKernel': dict({
+    'CustomKernelName': dict({
       'type': 'int',
       'value': -1,
     }),
@@ -2157,7 +2157,7 @@
         2,
         3,
       ]),
-      'len': 40,
+      'len': 64,
       'type': 'list',
     }),
     'MbskPrefetchMethod': dict({

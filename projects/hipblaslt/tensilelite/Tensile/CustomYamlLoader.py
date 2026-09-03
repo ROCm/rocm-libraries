@@ -162,3 +162,10 @@ def archMatch(arch: str, archs: List[str]) -> bool:
     header arch (e.g. "gfx942") matches a predicated request ("gfx942:xnack+").
     """
     return (arch in archs) or any(a.startswith(arch) for a in archs)
+
+def load_logic_schedule_name(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML_LOADER):
+    try:
+        SCHEDULE_NAME_IDX = 1
+        return load_yaml_sequence_item(yaml_path, loader_type, SCHEDULE_NAME_IDX)
+    except RuntimeError:
+        return load_yaml_dict_item(yaml_path, loader_type, 'ScheduleName')

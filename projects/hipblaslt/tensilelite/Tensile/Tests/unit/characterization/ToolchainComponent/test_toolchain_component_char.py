@@ -92,6 +92,34 @@ def test_get_rocm_version_uses_hipconfig(monkeypatch):
     assert seen["exe"] == C.ToolchainDefaults.HIP_CONFIG
 
 
+@pytest.mark.parametrize(
+    "hipconfig_output, expected_version",
+    [
+        pytest.param(
+            b"7.1.25424-4179531dcd",
+            SemanticVersion(7, 1, 25424),
+            id="rocm_7_1_build_suffix",
+        ),
+        pytest.param(
+            b"7.2.26015-fc0010cf6a",
+            SemanticVersion(7, 2, 26015),
+            id="rocm_7_2_build_suffix",
+        ),
+    ],
+)
+def test_get_rocm_version_parses_hipconfig_build_suffix(
+    monkeypatch, hipconfig_output, expected_version
+):
+    monkeypatch.setattr(C, "validateToolchain", lambda x: x)
+
+    class _R:
+        stdout = hipconfig_output
+
+    monkeypatch.setattr(C, "run", lambda *a, **k: _R())
+
+    assert C.get_rocm_version() == expected_version
+
+
 # ---------------------------------------------------------------------------
 # Component base
 # ---------------------------------------------------------------------------
@@ -134,40 +162,6 @@ def test_assembler_call_true16_and_no_wavefront64(fixed_version, captured_invoke
     assert "-mcpu=gfx1100" in args
     assert "-mno-wavefrontsize64" in args
     assert "+real-true16" in args
-
-
-def test_assembler_call_missing_source_does_not_crash(fixed_version, captured_invoke):
-    # srcPath need not exist for arg-construction purposes here (stubbed
-    # _invoke never touches it). _retargetAssemblySource is opportunistic and
-    # must not raise when the source can't be read -- the real assembler
-    # invocation is what should surface a genuinely-missing source, not this
-    # pre-processing helper.
-    asm = C.Assembler(Path("/x/amdclang++"), co_version="5")
-    asm("gfx942", 64, "does-not-exist.s", "out.o")
-    assert captured_invoke[0][-3:] == ["does-not-exist.s", "-o", "out.o"]
-
-
-def test_retarget_assembly_source_rewrites_mismatched_target(tmp_path):
-    src = tmp_path / "k.s"
-    src.write_text(
-        '\t.amdgcn_target "amdgcn-amd-amdhsa--gfx900:sramecc+:xnack-"\n'
-        "\tamdhsa.target: amdgcn-amd-amdhsa--gfx900:sramecc+:xnack-\n"
-        "s_endpgm\n"
-    )
-    C.Assembler._retargetAssemblySource("gfx942", str(src))
-    updated = src.read_text()
-    assert '.amdgcn_target "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"' in updated
-    assert "amdhsa.target: amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-" in updated
-
-
-def test_retarget_assembly_source_leaves_matching_target_untouched(tmp_path):
-    src = tmp_path / "k.s"
-    original = '\t.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\ns_endpgm\n'
-    src.write_text(original)
-    mtime_before = src.stat().st_mtime_ns
-    C.Assembler._retargetAssemblySource("gfx942", str(src))
-    assert src.read_text() == original
-    assert src.stat().st_mtime_ns == mtime_before  # untouched -> no write happened
 
 
 # ---------------------------------------------------------------------------

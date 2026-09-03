@@ -223,7 +223,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_indextype value_)
 #define CASE(C) \
     case C:     \
         return #C
-    switch(value_)
+    switch(static_cast<int>(value_))
     {
         CASE(deprecated_rocsparse_indextype_u16);
         CASE(rocsparse_indextype_i32);
@@ -471,7 +471,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_operation value_)
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_indextype value_)
 {
-    switch(value_)
+    switch(static_cast<int>(value_))
     {
     case deprecated_rocsparse_indextype_u16:
     case rocsparse_indextype_i32:

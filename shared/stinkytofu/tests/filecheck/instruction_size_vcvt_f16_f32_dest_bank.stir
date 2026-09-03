@@ -1,0 +1,48 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --AccumulateInstructionSizeDebugPass 2>&1
+#
+# v_cvt_f16_f32 e32/e64 promotion uses the **destination** logical VGPR index
+# (phys % 256), not the source. llvm-mc on gfx1250 keeps _e32 when dest <= 127
+# even if src is v132+; other narrow converts (e.g. v_cvt_f32_f16) still use src.
+#
+# Regression for spmm_f8hs: 72x v_cvt_f16_f32 v[N-256], v132 after s_set_vgpr_msb 64
+# were over-counted at 8 B each (+288 B vs llvm-mc).
+
+#--- dest v0, src v132: _e32 (4 B) — spmm move-prop pattern
+# CHECK-LABEL: function "vcvt_f16_f32_dst0_src132"
+# CHECK: size=4 bytes{{.*}}v_cvt_f16_f32
+# CHECK: [AccumulateInstructionSizePass] total size = 4 bytes
+
+st.func @vcvt_f16_f32_dst0_src132() {
+^entry:
+  v0 = "st.v_cvt_f16_f32"(v132) { issueCycles = 1, latencyCycles = 4 }
+}
+
+#--- dest v256 (logical 0 in bank 1), src v132: still _e32 (4 B)
+# CHECK-LABEL: function "vcvt_f16_f32_dst256_src132"
+# CHECK: size=4 bytes{{.*}}v_cvt_f16_f32
+# CHECK: [AccumulateInstructionSizePass] total size = 4 bytes
+
+st.func @vcvt_f16_f32_dst256_src132() {
+^entry:
+  v256 = "st.v_cvt_f16_f32"(v132) { issueCycles = 1, latencyCycles = 4 }
+}
+
+#--- dest v128, src v127: dest logical 128 -> _e64 (8 B)
+# CHECK-LABEL: function "vcvt_f16_f32_dst128_src127"
+# CHECK: size=8 bytes{{.*}}v_cvt_f16_f32
+# CHECK: [AccumulateInstructionSizePass] total size = 8 bytes
+
+st.func @vcvt_f16_f32_dst128_src127() {
+^entry:
+  v128 = "st.v_cvt_f16_f32"(v127) { issueCycles = 1, latencyCycles = 4 }
+}
+
+#--- contrast: v_cvt_f32_f16 uses **source** for promotion (src v132 -> 8 B)
+# CHECK-LABEL: function "vcvt_f32_f16_src132"
+# CHECK: size=8 bytes{{.*}}v_cvt_f32_f16
+# CHECK: [AccumulateInstructionSizePass] total size = 8 bytes
+
+st.func @vcvt_f32_f16_src132() {
+^entry:
+  v0 = "st.v_cvt_f32_f16"(v132) { issueCycles = 1, latencyCycles = 4 }
+}

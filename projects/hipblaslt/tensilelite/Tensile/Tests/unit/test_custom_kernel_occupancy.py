@@ -44,15 +44,6 @@ _CUSTOM_KERNEL_DIR = Path(__file__).parents[2] / "CustomKernels"
 # helpers
 # ---------------------------------------------------------------------------
 
-def _custom_kernel_files(pattern):
-    return sorted(_CUSTOM_KERNEL_DIR.rglob(pattern))
-
-
-def _find_custom_kernel(stem):
-    matches = _custom_kernel_files(f"{stem}.s")
-    return matches[0] if matches else None
-
-
 def _make_asm(next_free_vgpr, next_free_sgpr, group_seg_size, accum_offset=None,
               kernel_name="test_kernel"):
     """Return a minimal .amdhsa_kernel block with the given directives."""
@@ -261,9 +252,9 @@ class TestComputeOccupancyRealCustomKernels:
                              ids=[c[0].split("Custom_")[1][:40] for c in _CASES])
     def test_real_kernel_occupancy(self, stem, isa, threads, expected):
         """Parser on a real .s file should return the expected occupancy."""
-        s_path = _find_custom_kernel(stem)
-        if s_path is None:
-            pytest.skip(f"File not found: {stem}.s")
+        s_path = _CUSTOM_KERNEL_DIR / f"{stem}.s"
+        if not s_path.exists():
+            pytest.skip(f"File not found: {s_path.name}")
 
         asm_source = s_path.read_text()
         kernel = {"ISA": list(isa), "NumThreads": threads, "KernelLanguage": "Assembly"}
@@ -280,7 +271,7 @@ class TestComputeOccupancyRealCustomKernels:
 
     def test_all_gfx950_kernels_have_positive_occupancy(self):
         """Every gfx950 custom .s file should yield CUOccupancy >= 1 (never None/-1)."""
-        files = _custom_kernel_files("*gfx950*.s")
+        files = sorted(_CUSTOM_KERNEL_DIR.glob("*gfx950*.s"))
         assert len(files) > 0, "No gfx950 custom kernels found in CustomKernels/"
         for f in files:
             asm = f.read_text()
@@ -291,7 +282,7 @@ class TestComputeOccupancyRealCustomKernels:
 
     def test_all_gfx942_kernels_have_positive_occupancy(self):
         """Every gfx942 custom .s file should yield CUOccupancy >= 1 (never None/-1)."""
-        files = _custom_kernel_files("*gfx942*.s")
+        files = sorted(_CUSTOM_KERNEL_DIR.glob("*gfx942*.s"))
         assert len(files) > 0, "No gfx942 custom kernels found in CustomKernels/"
         for f in files:
             asm = f.read_text()
@@ -490,6 +481,7 @@ class TestGetSourceFileStringCustomKernelPath:
         assert ti.getRegCaps().get("MaxVgpr") is not None, (
             "rocisa singleton not properly initialized; getRegCaps() returned empty dict"
         )
+        yield
 
     def _make_kernel(self):
         """Construct a kernel object matching the production custom-kernel dict."""
@@ -523,7 +515,7 @@ class TestGetSourceFileStringCustomKernelPath:
         # states WITHOUT regCaps/archCaps — the critical setRocIsa-path invariant
         kwa.states = SimpleNamespace()
         # return the .s content without touching the filesystem or assembler
-        kwa._getCustomKernelSource = lambda kernel, directory: asm_source
+        kwa._getCustomKernelSource = lambda kernel, directory=None: asm_source
         return kwa
 
     # ------------------------------------------------------------------
@@ -637,7 +629,7 @@ class TestGetSourceFileStringIncompleteSingletonCaps:
     def _make_kwa(self, asm_source):
         kwa = object.__new__(_KWA)
         kwa.states = SimpleNamespace()
-        kwa._getCustomKernelSource = lambda k, d: asm_source
+        kwa._getCustomKernelSource = lambda k, d=None: asm_source
         return kwa
 
     # ------------------------------------------------------------------

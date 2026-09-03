@@ -92,6 +92,43 @@ public:
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(func, broadcastShape);
         parallelFunc();
     }
+    template <typename Op, typename Input0Type, typename Input1Type, typename Input2Type>
+    void executeTernaryBroadcast(const hipdnn_data_sdk::utilities::TensorBase<Input0Type>& input0,
+                                 const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                                 const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2,
+                                 hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                 Op op)
+    {
+        const auto& input0Dims = input0.dims();
+        const auto& input1Dims = input1.dims();
+        const auto& input2Dims = input2.dims();
+        const auto& outputDims = output.dims();
+
+        if(!hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(input0Dims, outputDims))
+        {
+            throw std::runtime_error("Input0 dimensions are not broadcast compatible with output");
+        }
+        if(!hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(input1Dims, outputDims))
+        {
+            throw std::runtime_error("Input1 dimensions are not broadcast compatible with output");
+        }
+        if(!hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(input2Dims, outputDims))
+        {
+            throw std::runtime_error("Input2 dimensions are not broadcast compatible with output");
+        }
+
+        auto func = [&](const std::vector<int64_t>& indices) {
+            const auto input0Indices = getBroadcastableIndex(indices, input0Dims);
+            const auto input1Indices = getBroadcastableIndex(indices, input1Dims);
+            const auto input2Indices = getBroadcastableIndex(indices, input2Dims);
+            const auto result = op(input0.getHostValue(input0Indices),
+                                   input1.getHostValue(input1Indices),
+                                   input2.getHostValue(input2Indices));
+            output.setHostValue(hipdnn_test_sdk::detail::safeConvert<OutputType>(result), indices);
+        };
+
+        hipdnn_test_sdk::detail::makeParallelTensorFunctor(func, outputDims)();
+    }
 
     void markOutputModified(hipdnn_data_sdk::utilities::TensorBase<OutputType>& output)
     {

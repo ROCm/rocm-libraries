@@ -220,6 +220,66 @@ def test_conv_cshuffle_no_alias_lds_budget_is_per_case():
     assert "LDS budget" in why
 
 
+@pytest.mark.parametrize("cshuffle_no_alias", [False, True])
+def test_wavelet_cshuffle_both_branches_have_equal_barrier_count(cshuffle_no_alias):
+    """Both branches of the wavelet scf.if_else must emit the same number of
+    barriers, or the workgroup hangs at a barrier one role issues but the other
+    does not.
+
+    The math branch ends with CShuffleEpilogue (N_epi barriers inside it).
+    The load branch ends with a bare stub that emits N_epi raw s_barrier calls.
+    This test builds the conv IR and counts barriers in each region to confirm
+    both sides agree — a regression guard so future edits to either the epilogue
+    or the stub cannot silently diverge.
+    """
+    from rocke.instances.common.conv_implicit_gemm import (
+        ConvProblem,
+        ImplicitGemmConvSpec,
+        build_implicit_gemm_conv,
+    )
+
+    spec = ImplicitGemmConvSpec(
+        problem=ConvProblem(N=2, Hi=14, Wi=14, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+        name="wv_barrier_check",
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warp_m=1,
+        warp_n=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        wave_size=32,
+        pipeline="wavelet",
+        epilogue="cshuffle",
+        num_load_waves=1,
+        cshuffle_no_alias=cshuffle_no_alias,
+    )
+    kernel = build_implicit_gemm_conv(spec, arch="gfx1250")
+
+    ops = _flatten(kernel.body, [])
+
+    # Locate the scf.if_else that splits math vs load waves.
+    if_else_ops = [o for o in ops if o.name == "scf.if_else"]
+    assert if_else_ops, "expected an scf.if_else in the wavelet kernel"
+    ife = if_else_ops[0]
+
+    def _count_barriers_in_region(region):
+        buf = []
+        _flatten(region, buf)
+        return sum(1 for o in buf if o.name in _BARRIERS)
+
+    then_count = _count_barriers_in_region(ife.regions[0])
+    else_count = _count_barriers_in_region(ife.regions[1])
+
+    assert then_count == else_count, (
+        f"barrier count mismatch (cshuffle_no_alias={cshuffle_no_alias}): "
+        f"math branch has {then_count}, load branch has {else_count}. "
+        "A workgroup hang will occur at the barrier one role skips."
+    )
+    assert then_count > 0, "expected at least one barrier in each wavelet branch"
+
+
 if __name__ == "__main__":  # pragma: no cover
     import sys
 

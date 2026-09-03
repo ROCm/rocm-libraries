@@ -349,8 +349,8 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
         // half-lds
         body += set_lds_is_real();
 
-        body += CallbackLoadDeclaration{scalar_type.name, callback_type.name};
-        body += CallbackStoreDeclaration{scalar_type.name, callback_type.name};
+        body += CallbackLoadDeclaration{};
+        body += CallbackStoreDeclaration{};
 
         body += LineBreak{};
         body += CommentLines{"large twiddles"};
