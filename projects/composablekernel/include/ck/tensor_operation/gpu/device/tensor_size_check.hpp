@@ -13,10 +13,14 @@ template <typename DataType, typename Lengths>
 bool tensor_exceeds_2gb(const Lengths& lengths)
 {
     constexpr long_index_t TwoGB = (long_index_t{1} << 31);
-    long_index_t total           = sizeof(DataType);
+    long_index_t total           = 1;
     for(const auto& l : lengths)
         total *= l;
-    return total > TwoGB;
+    long_index_t total_bytes = total * sizeof(DataType);
+    // tensor number of elements is stored in int32_t so max value is TwoGB - 1,
+    // while tensor number of bytes is stored in uint32_t so max value is TwoGB.
+    // This double check is actually needed only for DataType with size 1
+    return total >= TwoGB || total_bytes > TwoGB;
 }
 
 } // namespace device
