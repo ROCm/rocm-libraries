@@ -16,6 +16,8 @@ rocIsa.init) nor a GPU. They cover:
 import os
 import shutil
 
+import pytest
+
 import rocisa
 from rocisa.container import vgpr
 from rocisa.enum import HighBitSel
@@ -44,6 +46,14 @@ def _use_isa(isa):
     inst.init(isa, _assembler_path(), False)  # idempotent per ISA
     inst.setKernel(isa, 64)
     return inst
+
+
+@pytest.fixture(autouse=True)
+def _restore_legacy_isa():
+    # rocIsa is a process-global singleton; restore the gfx942 default after each
+    # test so sibling tests that assume the default arch are unaffected.
+    yield
+    _use_isa(LEGACY_ISA)
 
 
 def test_half_select_render():
