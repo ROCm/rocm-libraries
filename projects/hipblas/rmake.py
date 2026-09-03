@@ -285,7 +285,7 @@ def config_cmd():
     # Skip when targeting CUDA: nvcc drives device compilation and g++ is not
     # the right host compiler for CUDA workflows.
     if os.name != "nt" and args.compiler is None:
-        if not args.use_amdclang_compiler and not use_cuda_backend:
+        if not args.use_amdclang_compiler and not args.use_cuda:
             cmake_options.append(f"-DCMAKE_CXX_COMPILER=g++")
 
     if args.static_lib:
@@ -342,7 +342,7 @@ def config_cmd():
 
     # CUDA backend: pass USE_CUDA=ON and locate nvcc so CMake's find_package(CUDAToolkit)
     # resolves without any hipcc involvement.
-    if use_cuda_backend:
+    if args.use_cuda:
         cmake_options.append("-DUSE_CUDA=ON")
         cuda_path = args.cuda_path  # defaults to /usr/local/cuda
         nvcc_candidate = os.path.join(cuda_path, 'bin', 'nvcc')
@@ -401,9 +401,7 @@ def main():
 
     rocm_path = get_rocm_path()
 
-    use_cuda_backend = args.use_cuda
-
-    if use_cuda_backend and args.static_lib:
+    if args.use_cuda and args.static_lib:
         fatal("Static library not supported for CUDA backend. Not continuing.")
 
     if args.install_invoked:
