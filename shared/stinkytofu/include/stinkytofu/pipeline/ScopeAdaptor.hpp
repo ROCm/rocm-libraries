@@ -353,6 +353,14 @@ class ScopeAdaptor : public Pass {
         }
     }
 
+    /// Run the inner pipeline, then detach any SSA it attached: the values belong
+    /// to this temporary Function's arena, which dies once splice-back has moved
+    /// the instructions into the kernel.
+    void runInner(Function& tempFunc) {
+        innerPM.run(tempFunc);
+        tempFunc.clearAttachedSSA();
+    }
+
     /// Extract a single group's instruction range to a temp Function,
     /// run the inner PM, and splice results back.
     void runSingleRegion(const std::string& groupName) {
@@ -369,7 +377,7 @@ class ScopeAdaptor : public Pass {
         moveIRToBlock(begin, end, bb);
 
         // Run the inner pipeline
-        innerPM.run(tempFunc);
+        runInner(tempFunc);
 
         // Splice back
         spliceBack(tempFunc, origBB, end, groupName);
@@ -409,7 +417,7 @@ class ScopeAdaptor : public Pass {
         moveIRToBlock(combinedBegin, combinedEnd, bb);
 
         // Run the inner pipeline
-        innerPM.run(tempFunc);
+        runInner(tempFunc);
 
         // Splice back — update all group ranges
         IRBase* firstInserted = nullptr;
@@ -452,7 +460,7 @@ class ScopeAdaptor : public Pass {
         moveIRToBlock(origBB->begin(), origBB->end(), bb);
 
         // Run the inner pipeline
-        innerPM.run(tempFunc);
+        runInner(tempFunc);
 
         // Splice back — insert before end of origBB
         auto insertPos = origBB->end();
