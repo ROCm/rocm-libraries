@@ -2,8 +2,8 @@
 
 - **Status:** proposed
 - **Raised while:** authoring the CRC interleaved GEMM (`kernels/tiling_gemm_crc_demo.py`), `ab_swap` knob —
-  the crossed path measured **1.69×** the direct path at 4096³ (99.6 vs 59.1 TFLOPS) by making the
-  M-contiguous C store wave-coalesced.
+  the crossed path measured faster than the direct path by making the M-contiguous C store wave-coalesced
+  (the direct path emits ~`lanes_N/lanes_M` = 4× more store transactions).
 - **Extends SOT:** `tiling_api_surface.md` §6/§9 (TileMma; `c_transpose` is listed **PLANNED / Part D**) +
   `tiling_interleaving_design.md` §7 "C-store coalescing — the lane-major axis".
 
@@ -60,8 +60,8 @@ store_fragment(b, c_ptr, make_window(mma.c_desc, (m0, n0)), acc, lane)   # c_des
 - **Only helps when the output major is the block-major axis** (e.g. col-major/M-contiguous C on the 16×16
   atom). For a row-major (N-contiguous) C the direct path already coalesces — `c_transpose=True` would be the
   pessimal choice. The picker/author must select it by output major (SOT §7).
-- **Perf is measured, not assumed:** the C store is an epilogue often hidden in the MFMA shadow; the 1.69×
-  here is at device-filling 4096³. Confirm per case (it can be a no-op at small/occupancy-bound sizes).
+- **Perf is measured, not assumed:** the C store is an epilogue often hidden in the MFMA shadow; the speedup
+  is realized at device-filling sizes. Confirm per case (it can be a no-op at small/occupancy-bound sizes).
 - **Arch/atom scope:** derived for the MmaDim-16 (16×16) atom; 32×32 accumulator crossing is out of scope
   (cross-lane, §7).
 
