@@ -1,11 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""SSOT guards for indexed MMA sources and destination metadata.
+"""SSOT guards for indexed MMA ``srcs`` and ``dst`` metadata.
 
-``IRBuilder.mma`` uses destination metadata to size a ``tile.mma`` result. These
-tests pin the destination lookup, indexed catalog query, and optional per-source
-scale parsing without assuming source 2 and destination are always identical.
+``IRBuilder.mma`` uses ``dst`` metadata to size a ``tile.mma`` result. These
+tests pin the ``dst`` lookup, indexed catalog query, and optional per-source
+scale parsing without assuming ``src2`` and ``dst`` are always identical.
 """
 
 from __future__ import annotations
@@ -17,9 +17,12 @@ from rocke.core.arch.target import (
     ArchTarget,
     MmaCatalog,
     MmaOp,
-    MmaOperand,
+    MmaDst,
     MmaScaleOperand,
-    MmaSource,
+    MmaSrc,
+    _FragInfo,
+    _FragOperand,
+    _MMA_FRAGMENT_INFO,
     _build_mma_op,
     _load_specs,
     _op_id_dst_dtype,
@@ -30,7 +33,7 @@ from rocke.core.ir import IRBuilder
 
 class TestOpIdDstDtype(unittest.TestCase):
     def test_matches_catalog_first_hit(self):
-        # Every op_id in the catalog resolves to its normalized accumulator dtype,
+        # Every op_id in the catalog resolves to its normalized dst dtype,
         # taking the first arch that lists it (dict preserves catalog order).
         expected: dict = {}
         for row in _load_specs().values():
@@ -39,7 +42,7 @@ class TestOpIdDstDtype(unittest.TestCase):
         self.assertEqual(_op_id_dst_dtype(), expected)
 
     def test_dst_dtype_invariant_across_arches(self):
-        # The whole premise of the bare-op_id lookup: an op_id's destination dtype
+        # The whole premise of the bare-op_id lookup: an op_id's dst dtype
         # is invariant across the arches that list it, so building the map must not
         # raise on the real catalog. (The raise path is exercised below.)
         try:
@@ -85,11 +88,11 @@ class TestIndexedMmaOperands(unittest.TestCase):
                         ),
                     )
 
-    def test_indexed_query_distinguishes_source2_and_destination(self):
+    def test_indexed_query_distinguishes_src2_and_dst(self):
         distinct = MmaOp(
             family="mma",
-            srcs=(MmaSource("xf32"), MmaSource("xf32"), MmaSource("fp32")),
-            dst=MmaOperand("i32", frag_len=7),
+            srcs=(MmaSrc("xf32"), MmaSrc("xf32"), MmaSrc("fp32")),
+            dst=MmaDst("i32", frag_len=7),
             m=16,
             n=16,
             k=8,
@@ -109,6 +112,53 @@ class TestIndexedMmaOperands(unittest.TestCase):
         value = builder.const_i32(0)
         result = builder.mma(distinct, value, value, value)
         self.assertEqual(result.type.count, distinct.dst.frag_len)
+        self.assertEqual(result.type.elem.name, "i32")
+
+    def test_fragment_metadata_distinguishes_src2_and_dst(self):
+        def src2_coord(builder, lane, slot):
+            return builder.const_i32(slot), lane
+
+        def dst_coord(builder, lane, slot):
+            return lane, builder.const_i32(slot)
+
+        op_id = "synthetic_distinct_fragment_metadata"
+        info = _FragInfo(
+            srcs=(
+                _FragOperand(1),
+                _FragOperand(1),
+                _FragOperand(3, src2_coord),
+            ),
+            dst=_FragOperand(7, dst_coord),
+            wave_size=32,
+        )
+        row = {
+            "family": "mma",
+            "srcs": [
+                {"dtype": "xf32"},
+                {"dtype": "xf32"},
+                {"dtype": "fp32"},
+            ],
+            "dst": {"dtype": "i32"},
+            "m": 16,
+            "n": 16,
+            "k": 8,
+            "op_id": op_id,
+        }
+
+        with mock.patch.dict(_MMA_FRAGMENT_INFO, {op_id: info}):
+            op = _build_mma_op(row)
+
+        self.assertEqual(op.srcs[2].frag_len, 3)
+        self.assertEqual(op.dst.frag_len, 7)
+        self.assertIs(op.src_layout(2).fn, src2_coord)
+        self.assertIs(op.dst_layout().fn, dst_coord)
+        self.assertEqual(op.c_frag_len, op.dst.frag_len)
+        self.assertIs(op.c_layout(), op.dst_layout())
+
+        builder = IRBuilder("distinct_fragment_metadata")
+        value = builder.const_i32(0)
+        result = builder.mma(op, value, value, value)
+        self.assertEqual(result.type.count, op.dst.frag_len)
         self.assertEqual(result.type.elem.name, "i32")
 
     def test_scale_is_optional_and_attached_to_its_source(self):

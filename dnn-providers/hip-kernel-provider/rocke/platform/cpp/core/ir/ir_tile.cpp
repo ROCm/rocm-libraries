@@ -25,9 +25,9 @@
 /*
  * rocke_b_mma emits a single tile.mma op keyed by op_id; the ISA backend lowers
  * that op_id to the matching MFMA/WMMA call. To size the result vector it needs
- * the destination fragment length and dtype for the atom. Both come from the
+ * the dst fragment length and dtype for the atom. Both come from the
  * arch SSOT (core/arch/target): frag lengths from rocke_arch_mma_dst_frag_len
- * (the _MMA_FRAGMENT_INFO projection) and the destination dtype from
+ * (the _MMA_FRAGMENT_INFO projection) and the dst dtype from
  * rocke_arch_mma_op_id_dst_dtype (the JSON catalog aggregation). This bucket keeps
  * NO private copy of that data, mirroring ir.py after it dropped _MMA_C_FRAG_LEN
  * / _MMA_C_INT_OP_IDS.
@@ -51,7 +51,7 @@ static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
 };
 
-/* Destination fragment length for op_id, from the arch SSOT
+/* dst fragment length for op_id, from the arch SSOT
  * (target._frag_info(op_id).dst.frag_len). Returns <= 0 for an unknown atom (the
  * zero-length _frag_info fallback), which rocke_b_mma reports as an error. */
 static int rocke_mma_dst_frag_len(const char* op_id)
@@ -565,8 +565,8 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     {
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "mma op_id is NULL");
     }
-    /* C has no MmaOp object; op_id is always a bare string, so the frag length
-     * and accumulator element are resolved from the arch SSOT (the Python
+    /* The C API has no MmaOp object; op_id is always a bare string, so the dst
+     * frag length and element type are resolved from the arch SSOT (the Python
      * bare-string code path). A <= 0 frag length means the op_id is unknown to
      * the SSOT (the zero-length _frag_info fallback). */
     dst_frag_len = rocke_mma_dst_frag_len(op_id);

@@ -104,7 +104,7 @@ def _check_u16(op: str, field: str, value: int) -> int:
 
 
 def _mma_dst_frag_len(op_id: str) -> int:
-    """Destination fragment length for ``op_id`` from the arch SSOT.
+    """``dst`` fragment length for ``op_id`` from the arch SSOT.
 
     Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
     ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
@@ -112,7 +112,7 @@ def _mma_dst_frag_len(op_id: str) -> int:
     """
     from rocke.core.arch import target as _arch
 
-    frag_len = _arch._frag_info(op_id).c_frag_len
+    frag_len = _arch._frag_info(op_id).dst.frag_len
     if frag_len <= 0:
         raise ValueError(
             f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of "
@@ -124,9 +124,9 @@ def _mma_dst_frag_len(op_id: str) -> int:
 def _mma_dst_is_int(op_id: str) -> bool:
     """True when ``op_id`` produces i32 (integer WMMA).
 
-    Sourced from the arch catalog's accumulator dtype
+    Sourced from the arch catalog's ``dst`` dtype
     (``core/arch/data/arch_specs.json`` via ``target._op_id_dst_dtype``), imported
-    lazily. Op_ids absent from the catalog default to the f32 accumulator.
+    lazily. Op_ids absent from the catalog default to an f32 ``dst``.
     """
     from rocke.core.arch import target as _arch
 
@@ -1804,7 +1804,7 @@ class IRBuilder:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
         ``op`` is either an :class:`~rocke.core.arch.MmaOp` (preferred — its
-        ``op_id`` and destination fragment metadata drive the lowering) or a raw ``op_id``
+        ``op_id`` and ``dst`` fragment metadata drive the lowering) or a raw ``op_id``
         string. This emits a single ``tile.mma`` op carrying the ``op_id`` as an
         attribute; the LLVM lowering dispatches that ``op_id`` through the ISA
         backend (:meth:`rocke.core.isa.ISABackend.emit_mma`), which emits the
@@ -1830,7 +1830,7 @@ class IRBuilder:
             else _mma_dst_frag_len(op_id)
         )
         # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
-        # i32; everything else in f32. Prefer the atom's own destination dtype when ``op``
+        # i32; everything else in f32. Prefer the atom's own dst dtype when ``op``
         # is an MmaOp, else resolve from the arch SSOT via op_id.
         dst_dtype = op.dst.dtype if hasattr(op, "dst") else None
         is_int_acc = (

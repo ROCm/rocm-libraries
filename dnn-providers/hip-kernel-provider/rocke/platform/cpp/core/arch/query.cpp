@@ -106,16 +106,6 @@ const rocke_layout_map_t* rocke_mma_op_b_layout(const rocke_mma_op_t* op, rocke_
 
 const rocke_layout_map_t* rocke_mma_op_c_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b)
 {
-    return rocke_mma_op_src_layout(op, 2, b);
-}
-
-const rocke_layout_map_t* rocke_mma_op_d_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b)
-{
-    return rocke_mma_op_dst_layout(op, b);
-}
-
-const rocke_layout_map_t* rocke_mma_op_acc_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b)
-{
     return rocke_mma_op_dst_layout(op, b);
 }
 
@@ -124,7 +114,7 @@ const rocke_layout_map_t*
 {
     if(index < 0 || index >= 3)
     {
-        rocke_ati_q_set_err(b, ROCKE_ERR_VALUE, "MMA source index %d is outside [0, 3)", index);
+        rocke_ati_q_set_err(b, ROCKE_ERR_VALUE, "MMA src index %d is outside [0, 3)", index);
     }
     char role[8];
     (void)snprintf(role, sizeof(role), "src%d", index);
@@ -390,7 +380,7 @@ const char* rocke_arch_mma_op_id_dst_dtype(const char* op_id)
     {
         return NULL;
     }
-    /* Mirrors target._op_id_dst_dtype()[op_id]: the destination dtype names a
+    /* Mirrors target._op_id_dst_dtype()[op_id]: the dst dtype names a
      * specific atom, so it is invariant across the arches that list op_id --
      * the first catalog hit wins. The catalog dst.dtype is already the normalised
      * (canonical) key, matching normalize_dtype(o["dst"]["dtype"]). Op_ids absent from

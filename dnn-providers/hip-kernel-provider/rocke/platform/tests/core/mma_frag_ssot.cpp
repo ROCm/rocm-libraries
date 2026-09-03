@@ -83,11 +83,17 @@ int main(void)
 
     {
         rocke_mma_op_t distinct = {};
+        const rocke_layout_map_t src2_layout = {ROCKE_MMA_ROLE_SRC2, 3, 32, NULL};
+        const rocke_layout_map_t dst_layout = {ROCKE_MMA_ROLE_DST, 7, 32, NULL};
         distinct.family = "mma";
         distinct.srcs[0].dtype = "xf32";
         distinct.srcs[1].dtype = "xf32";
         distinct.srcs[2].dtype = "fp32";
+        distinct.srcs[2].frag_len = 3;
+        distinct.srcs[2].layout = &src2_layout;
         distinct.dst.dtype = "i32";
+        distinct.dst.frag_len = 7;
+        distinct.dst.layout = &dst_layout;
         distinct.m = 16;
         distinct.n = 16;
         distinct.k = 8;
@@ -96,10 +102,16 @@ int main(void)
         const char* src_dtypes[3] = {"xf32", "xf32", "fp32"};
         CHECK(rocke_mma_catalog_op_for_shape_indexed(&catalog, "mma", src_dtypes, "i32", 16, 16, 8)
                   == &distinct,
-              "indexed query distinguishes source 2 and destination");
+              "indexed query distinguishes src2 and dst");
         CHECK(rocke_mma_catalog_op_for_shape(&catalog, "mma", "xf32", "xf32", "fp32", 16, 16, 8)
                   == NULL,
-              "legacy query defaults destination to source 2");
+              "legacy query defaults dst to src2");
+        CHECK(rocke_mma_op_src_layout(&distinct, 2, NULL) == &src2_layout,
+              "indexed src2 layout remains independent");
+        CHECK(rocke_mma_op_dst_layout(&distinct, NULL) == &dst_layout,
+              "dst layout remains independent");
+        CHECK(rocke_mma_op_c_layout(&distinct, NULL) == &dst_layout,
+              "historical C layout projects dst");
     }
 
     rocke_ir_builder_t b;

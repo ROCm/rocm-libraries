@@ -67,20 +67,15 @@ const char* rocke_normalize_dtype(const char* name, char* scratch, size_t scratc
 
 /* ============================== layout map ============================== */
 
-/* Machine-level MMA operand position. Mathematical A/B/C/D names are aliases
- * only; the stored contract is src0/src1/src2 -> dst. */
+/* Machine-level MMA operand position. The stored contract is
+ * src0/src1/src2 -> dst. */
 typedef enum rocke_mma_role
 {
-    ROCKE_MMA_ROLE_SRC0 = 0, /* A operand: coords (row, k) */
-    ROCKE_MMA_ROLE_SRC1, /* B operand: coords (k, col) */
-    ROCKE_MMA_ROLE_SRC2, /* accumulator input: coords (row, col) */
-    ROCKE_MMA_ROLE_DST /* result: coords (row, col) */
+    ROCKE_MMA_ROLE_SRC0 = 0, /* src0: coords (row, k) */
+    ROCKE_MMA_ROLE_SRC1, /* src1: coords (k, col) */
+    ROCKE_MMA_ROLE_SRC2, /* src2: coords (row, col) */
+    ROCKE_MMA_ROLE_DST /* dst: coords (row, col) */
 } rocke_mma_role_t;
-
-#define ROCKE_MMA_ROLE_A ROCKE_MMA_ROLE_SRC0
-#define ROCKE_MMA_ROLE_B ROCKE_MMA_ROLE_SRC1
-#define ROCKE_MMA_ROLE_C ROCKE_MMA_ROLE_SRC2
-#define ROCKE_MMA_ROLE_D ROCKE_MMA_ROLE_DST
 
 /* The lane/slot -> tile-coordinate emitter. Given the builder, a runtime i32
  * lane Value and a compile-time slot index, it emits the index arithmetic for
@@ -117,30 +112,30 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
 
 /* ============================== MMA atom =============================== */
 
-/* Metadata shared by one matrix source or destination. */
-typedef struct rocke_mma_operand
+/* Metadata shared by one matrix src or dst. */
+typedef struct rocke_mma_dst
 {
     const char* dtype;
     int frag_len;
     const rocke_layout_map_t* layout; /* may be NULL */
-} rocke_mma_operand_t;
+} rocke_mma_dst_t;
 
 /* A matrix source may have a distinct associated scale operand. NULL means
  * that the source is unscaled. Scales are not matrix fragments and therefore
  * are not flattened into the srcs[] array. */
-typedef struct rocke_mma_source
+typedef struct rocke_mma_src
 {
     const char* dtype;
     int frag_len;
     const rocke_layout_map_t* layout; /* may be NULL */
     const char* scale_dtype; /* may be NULL */
-} rocke_mma_source_t;
+} rocke_mma_src_t;
 
 typedef struct rocke_mma_op
 {
     const char* family;
-    rocke_mma_source_t srcs[3];
-    rocke_mma_operand_t dst;
+    rocke_mma_src_t srcs[3];
+    rocke_mma_dst_t dst;
     int m;
     int n;
     int k;
@@ -158,18 +153,17 @@ const rocke_layout_map_t*
     rocke_mma_op_src_layout(const rocke_mma_op_t* op, int index, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_dst_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 
-/* Mathematical-role compatibility accessors. Each returns the verified map, or NULL
- * when none is registered. Unlike Python (which raises NotImplementedError), the
- * C getters return NULL and -- when `b` is non-NULL -- set the builder's sticky
- * error (ROCKE_ERR_NOTIMPL) with the same message text, so callers can either
- * check NULL or rely on the sticky-fail builder. Pass b=NULL for a pure lookup.
- * These project A/B/C/D onto src0/src1/src2/dst; new instruction-level code
- * should use the indexed accessors above. */
+/* Historical mathematical-role compatibility accessors. A and B project src0
+ * and src1; C projects the result/dst, matching the original operator-level
+ * surface. src2 is available only through the indexed
+ * accessor above. Each returns the verified map, or NULL when none is
+ * registered. Unlike Python (which raises NotImplementedError), the C getters
+ * return NULL and -- when `b` is non-NULL -- set the builder's sticky error
+ * (ROCKE_ERR_NOTIMPL) with the same message text, so callers can either check
+ * NULL or rely on the sticky-fail builder. Pass b=NULL for a pure lookup. */
 const rocke_layout_map_t* rocke_mma_op_a_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_b_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_c_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
-const rocke_layout_map_t* rocke_mma_op_d_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
-const rocke_layout_map_t* rocke_mma_op_acc_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 
 /* ====================== memory caps / resource limits ================== */
 
@@ -201,8 +195,8 @@ typedef struct rocke_mma_catalog
 /* MmaCatalog.ops accessor (count + pointer). */
 const rocke_mma_op_t* rocke_mma_catalog_ops(const rocke_mma_catalog_t* cat, int* num_out);
 
-/* Indexed MmaCatalog.enumerate: filter atoms by family + the exact three source
- * dtypes and destination dtype. `src_dtypes` must contain three entries.
+/* Indexed MmaCatalog.enumerate: filter atoms by family + the exact three src
+ * dtypes and dst dtype. `src_dtypes` must contain three entries.
  * optional m/n. Writes up to `cap` matching op pointers into `out` and returns
  * the total number of matches (which may exceed `cap`). */
 int rocke_mma_catalog_enumerate_indexed(const rocke_mma_catalog_t* cat,
@@ -218,7 +212,7 @@ int rocke_mma_catalog_enumerate_indexed(const rocke_mma_catalog_t* cat,
  * optional m/n. Writes up to `cap` matching op pointers into `out` and returns
  * the total number of matches (which may exceed `cap` -- the caller can size a
  * buffer with cap=0 to count first). Pass m<0 / n<0 to mean "any" (Python None).
- * `family` may be NULL => "mma". The destination dtype defaults to C. */
+ * `family` may be NULL => "mma". The dst dtype defaults to C. */
 int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 const char* family,
                                 const char* a_dtype,
@@ -289,7 +283,7 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
  * any atom metadata. They mirror the target.py module-level helpers that
  * rocke.core.ir.IRBuilder.mma consults. */
 
-/* Destination fragment length for op_id -- the dst.frag_len projection of
+/* dst fragment length for op_id -- the dst.frag_len projection of
  * target.py::_MMA_FRAGMENT_INFO. Returns 0 for an unknown atom (the
  * zero-length _FragInfo fallback). */
 int rocke_arch_mma_dst_frag_len(const char* op_id);
