@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import statistics
+import time
 import sys
 
 import torch
@@ -53,11 +54,11 @@ DEFAULT_BATCHES = (1, 16, 64, 256)
 
 
 def eager_us(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
-    """Per-launch time with a synchronisation per iteration.
+    """Median host-observed launch latency in microseconds.
 
-    Inputs and the launch config are prepared once, outside the timed region:
-    re-allocating per iteration would time the caching allocator, which on a
-    launch-bound decode kernel is the same order as the launch itself.
+    Inputs and the launch config are prepared once, outside the timed region.
+    Each sample measures the CPU call plus the wait for that launch to finish,
+    which is the latency a synchronous Python decode loop observes.
     """
     launcher = launcher_for(spec)
     values, cfg = prepare(spec, make_inputs(spec, batch), batch)
@@ -66,13 +67,10 @@ def eager_us(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
     torch.cuda.synchronize()
     samples = []
     for _ in range(reps):
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
+        start = time.perf_counter_ns()
         launch(launcher, values, cfg)
-        end.record()
         torch.cuda.synchronize()
-        samples.append(start.elapsed_time(end) * 1e3)
+        samples.append((time.perf_counter_ns() - start) / 1e3)
     return statistics.median(samples)
 
 

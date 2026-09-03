@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import math
 import statistics
+import time
 import sys
 from typing import Dict, Tuple
 
@@ -195,7 +196,7 @@ def check(spec: GdnDecodeSpec, batch: int, seed: int = 0) -> Tuple[float, float]
 
 
 def bench(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
-    """Median per-launch wall time in microseconds, one sync per launch."""
+    """Median host-observed launch latency in microseconds."""
     launcher = launcher_for(spec)
     values, cfg = prepare(spec, make_inputs(spec, batch), batch)
     for _ in range(50):
@@ -203,13 +204,10 @@ def bench(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
     torch.cuda.synchronize()
     samples = []
     for _ in range(reps):
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
+        start = time.perf_counter_ns()
         launch(launcher, values, cfg)
-        end.record()
         torch.cuda.synchronize()
-        samples.append(start.elapsed_time(end) * 1e3)
+        samples.append((time.perf_counter_ns() - start) / 1e3)
     return statistics.median(samples)
 
 
