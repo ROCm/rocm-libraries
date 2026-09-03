@@ -46,6 +46,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/WaitCntInsertionTest.cpp
     unit/asm/DAGSchedulerPassTest.cpp
     unit/asm/CDNA5ReadyQueueTest.cpp
+    unit/asm/InFlightQueueTest.cpp
     unit/asm/ExecMaskGroupingTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/StinkyUnreachableBlockElimPassTest.cpp
@@ -67,6 +68,19 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/LegalizationUtilsTest.cpp
     unit/asm/VirtualRegisterTest.cpp
     unit/ssa/AttachedSSATest.cpp
+    unit/ssa/SSALiveIntervalsTest.cpp
+    unit/ra/PhysRegMatrixTest.cpp
+    unit/ra/AllocationConstraintsTest.cpp
+    unit/ra/AllocationScopeTest.cpp
+    unit/ra/AllocationVerifierTest.cpp
+    unit/ra/AllocatorConformanceTest.cpp
+    unit/ra/GreedyAllocatorTest.cpp
+    unit/ra/AllocationRulesTest.cpp
+    unit/ra/AllocationRulesRegistryTest.cpp
+    unit/ra/Gfx1250AllocationRulesTest.cpp
+    unit/ra/RegisterAllocationPassTest.cpp
+    unit/ra/RegisterBudgetTest.cpp
+    unit/ra/RegisterSymbolSyncTest.cpp
     unit/ssa/AsmPrinterSSAFormTest.cpp
     unit/ssa/LiftAsmRegistersToSSATest.cpp
     unit/asm/DefUseAnalysisCleanupTest.cpp
@@ -133,6 +147,7 @@ set(UNIT_COMMON_TEST_FILES
     unit/IntrusiveListTest.cpp
     unit/ir/IntrinsicExpansionPassTest.cpp
     unit/ir/RegisterWidthValidationTest.cpp
+    unit/ir/SymbolicRegNameTest.cpp
 )
 
 # Combine all unit tests

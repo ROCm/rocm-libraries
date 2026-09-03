@@ -159,6 +159,31 @@ def test_load_failure_falls_back_with_reason(warnings_sink):
     assert "adapter failed to load" in msgs[0]
 
 
+def test_auto_detected_unavailable_falls_back_silently(warnings_sink):
+    """Auto-detected gfx1250 but stinkytofu not built -> silent fallback."""
+    msgs, warn = warnings_sink
+    load = _Probe((True, ""))
+
+    assert _resolve_backend(
+        "stinkytofu", _Probe((False, "not built")), load,
+        warn=warn, auto_detected=True,
+    ) is False
+    assert load.calls == 0
+    assert msgs == []
+
+
+def test_auto_detected_load_failure_falls_back_silently(warnings_sink):
+    """Auto-detected gfx1250, stinkytofu available but adapter fails -> silent fallback."""
+    msgs, warn = warnings_sink
+    load = _Probe((False, "import failed: AttributeError('boom')"))
+
+    assert _resolve_backend(
+        "stinkytofu", _Probe((True, "")), load,
+        warn=warn, auto_detected=True,
+    ) is False
+    assert msgs == []
+
+
 def test_backend_value_is_normalized_strip_lower():
     """Contract mirror of the module-level ``_BACKEND`` normalization: the env
     value is compared case-insensitively and whitespace-trimmed."""

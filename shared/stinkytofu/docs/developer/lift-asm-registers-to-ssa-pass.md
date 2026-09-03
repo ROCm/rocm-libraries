@@ -2,10 +2,10 @@
 
 `LiftAsmRegistersToSSAPass` converts a function's physical register operands into SSA and attaches the result directly to the IR (`SSAArena`, instruction `AttachedSSA`, and block arguments).
 
-Allocation, destruction, and legacy replay all read that attached state; SSA never lives beside the program as a separate graph.
+Allocation and destruction both read that attached state; SSA never lives beside the program as a separate graph.
 
 It supports VGPR and SGPR operands and is available through `stinkytofu-opt`.
-It is not wired into the gfx1250 pipeline yet, because no allocator consumes its output.
+A backend that runs register allocation uses it too; section 12 of [register allocation](register-allocation.md) covers the ordering that has to hold.
 
 ## 1. Purpose
 
@@ -61,7 +61,7 @@ C++ pass name: LiftAsmRegistersToSSAPass
 Factory:        createLiftAsmRegistersToSSAPass()
 Display name:   Lift Asm Registers to SSA
 IR output:      Attached SSA on Function / BasicBlock / StinkyInstruction
-stinkytofu-opt: LiftAsmRegistersToSSAPass[=strictLiveIns,noVerify]
+stinkytofu-opt: LiftAsmRegistersToSSAPass[=classes=vs,strictLiveIns,noVerify]
 ```
 
 Legacy analysis caching is not used.
@@ -70,10 +70,11 @@ Consumers read attached SSA from IR state (`Function::hasAttachedSSA()`, `Functi
 Construction and the pass factory live on the pass header:
 
 ```cpp
-// include/stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp
+// include/stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp
 namespace stinkytofu {
 
 struct LiftAsmRegistersToSSAOptions {
+    RegClassSet classes = RegClassSet::all();
     bool verify = true;
     bool allowInferredLiveIns = true;
 };
@@ -105,6 +106,21 @@ createLiftAsmRegistersToSSAPass(
 
 The pass uses `liftAsmRegistersToAttachedSSA(...)`, which clears and rebuilds attached SSA on the function.
 Failure is a recoverable error rather than a pass-level abort: a caller receives either a fully attached and verified function, or the reason there is no SSA.
+
+### 3.1. Lift scope
+
+`classes` selects which register classes become SSA values.
+Everything outside it stays physical: those operands carry an immediate payload, contribute no value slot, and SSA destruction never rewrites them.
+That is how a caller allocates one class while leaving the others exactly as the producer wrote them — lifting SGPRs alone leaves every VGPR untouched, and with it the VGPR high-water mark and its kernel metadata.
+
+Capability and scope are different questions, and the pass keeps them apart.
+A class outside `kLiftableRegClasses` is an error, because lifting cannot model it soundly; narrowing the scope does not widen that set.
+A class inside the capability but outside the scope is skipped, exactly like a literal.
+Narrowing to nothing is rejected rather than treated as a no-op.
+
+The scope is recorded as `SSAArena::liftedClasses()`, and `liftedSSAUnits(reg, classes)` takes it as a required argument, because the slot layout depends on it and every walker must agree.
+The shape fingerprint cannot stand in: it hashes the physical program, which is identical whichever classes were lifted, so two scopes over one program share a shape while numbering their values differently.
+`AllocationResult` carries the scope for that reason, and destruction rejects a colouring computed under a different one.
 
 Diagnostics are located as `@function #instruction operand: message`, for example:
 
@@ -172,10 +188,12 @@ When the convention does arrive it needs argument, result, clobber, and preserve
 
 On success, attached SSA is present on the Function (`SSAArena`, block arguments, and instruction `AttachedSSA`).
 Physical `srcRegs` / `destRegs` are unchanged.
+"In scope" below means an allocatable class the lifter supports and `options.classes` selected.
 The attached form satisfies:
 
-- every supported allocatable source unit maps to exactly one SSA value;
-- every supported allocatable destination unit defines a new SSA value;
+- every in-scope source unit maps to exactly one SSA value;
+- every in-scope destination unit defines a new SSA value;
+- the arena records the scope it was built for, so the operand walk is reproducible;
 - every SSA value has exactly one definition: an instruction result, or the block argument it is;
 - merge points contain block arguments where required;
 - block-argument incoming operands model predecessor-edge uses;
@@ -377,7 +395,7 @@ They are sorted by register key, which is why `%1`/`%2` are `v10`/`v11` even tho
 
 Three further things this example shows:
 
-- `%9`, `%11`, and `%12` all keep `v5` as their `PhysicalBinding`. That is what makes legacy replay put the program back byte-identically, and what makes the merge need no copy: every version colours back to the same register.
+- `%9`, `%11`, and `%12` all keep `v5` as their `PhysicalBinding`. That is what lets the producer's colouring put the program back byte-identically, and what makes the merge need no copy: every version colours back to the same register.
 - `SCC0` stays physical in both forms. SCC is not an allocatable class, so the compare's destination binds no value, and neither do the branch's label and condition operands.
 - No `GFX::PHI` appears anywhere. The merge is on the block, so the instruction stream is exactly the physical one, which is why lifting can be undone.
 
@@ -418,11 +436,11 @@ Lowering that colouring therefore has to reproduce the input program exactly:
 LiftAsmRegistersToSSAPass -> legacy colouring -> SSA destruction
 ```
 
-Byte-identical assembly and metadata across that round trip is the lift pass's own correctness gate, and `ReplayLegacyColoringPass` exists to run it.
+Byte-identical assembly and metadata across that round trip is the lift pass's own correctness gate, run as `RegisterAllocationPass` with the `legacy` policy and `apply`.
 Identity alone is a weak test, since a lowering that did nothing would also pass, so a uniformly shifted colouring is tested alongside: every value moves by a constant, and the program must come back with every register renumbered and nothing else changed.
 
 Consumers on the other side of lift are documented in the [SSA representation](ssa-representation.md) contract: the mutation APIs an SSA rewrite uses are section 8, and the destruction contract is section 5.3.
-Allocation policy is not this pass's concern, since no allocator exists yet.
+Allocation policy is not this pass's concern; the framework that consumes what it produces is documented in [register allocation](register-allocation.md), and the default policy in [the greedy allocator](register-allocation-GreedyAllocator.md).
 
 ## 13. Analysis invalidation
 

@@ -45,15 +45,24 @@
 namespace stinkytofu {
 namespace test {
 
+/// Register classes \p instruction's attached SSA was built for, so the operand
+/// walk steps the same way lifting did.
+inline RegClassSet liftedClassesOf(const StinkyInstruction& instruction) {
+    const BasicBlock* block = instruction.getParentBlock();
+    const Function* function = block == nullptr ? nullptr : block->getParentFunc();
+    return function == nullptr ? RegClassSet::all() : function->ssaArena().liftedClasses();
+}
+
 /// Values bound to source operand \p operand, in DWORD order. Empty when the
 /// operand was not lifted or the instruction carries no attached SSA.
 inline std::vector<StinkySSAValue*> ssaSourceUnits(const StinkyInstruction& instruction,
                                                    size_t operand) {
     if (!instruction.hasAttachedSSA()) return {};
+    const RegClassSet classes = liftedClassesOf(instruction);
     size_t cursor = 0;
     const std::vector<StinkyRegister>& srcRegs = instruction.getSrcRegs();
     for (size_t i = 0; i < srcRegs.size(); ++i) {
-        const size_t units = liftedSSAUnits(srcRegs[i]);
+        const size_t units = liftedSSAUnits(srcRegs[i], classes);
         if (units == 0) {
             // A non-lifted operand still occupies one immediate slot.
             if (cursor < instruction.getNumSSAOperands()) ++cursor;
@@ -78,10 +87,11 @@ inline std::vector<StinkySSAValue*> ssaSourceUnits(const StinkyInstruction& inst
 inline std::vector<StinkySSAValue*> ssaDestUnits(const StinkyInstruction& instruction,
                                                  size_t operand) {
     if (!instruction.hasAttachedSSA()) return {};
+    const RegClassSet classes = liftedClassesOf(instruction);
     size_t cursor = 0;
     const std::vector<StinkyRegister>& destRegs = instruction.getDestRegs();
     for (size_t i = 0; i < destRegs.size(); ++i) {
-        const size_t units = liftedSSAUnits(destRegs[i]);
+        const size_t units = liftedSSAUnits(destRegs[i], classes);
         // A non-lifted destination defines nothing and occupies no slot.
         if (units == 0) {
             if (i == operand) return {};
