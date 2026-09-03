@@ -18,6 +18,11 @@ Kernel and drivers live under `library/` (`library -> platform` one-way):
 - `library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py` -- benchmark scenario
 - `library/dispatch/gdn/` -- request, candidates and `dispatch_gdn_decode`
 
+For the equation and GPU-mapping walkthrough, see
+[`library/builders/gfx950/gdn/ALGORITHM.md`](../../../library/builders/gfx950/gdn/ALGORITHM.md).
+For commands and output interpretation, see
+[`library/builders/gfx950/gdn/README.md`](../../../library/builders/gfx950/gdn/README.md).
+
 ## Contents
 
 - [The decode step](#the-decode-step)

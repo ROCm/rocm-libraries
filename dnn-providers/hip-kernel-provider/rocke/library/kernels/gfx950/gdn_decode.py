@@ -85,9 +85,9 @@ class GdnDecodeSpec:
     state_dtype: DType = "bf16"
     use_qk_l2norm: bool = True
     wave_size: int = 64
-    # Default tiling. Chosen empirically as the single configuration that is at
-    # least as fast as the reference implementation across the whole decode batch
-    # range, so no per-batch dispatcher is needed yet.
+    # Known-good fallback for direct callers. Production dispatch replaces
+    # these values with a batch-tuned tile; callers that construct the spec
+    # directly still get a valid general-purpose configuration.
     num_warps: int = 2
     warp_threads_k: int = 16
     blocks_per_v_dim: int = 8  # split a head's V-dim across this many CTAs (small-B fill)
