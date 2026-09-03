@@ -1853,12 +1853,16 @@ namespace
 
 // Standard MX-fp8 block quant of a col-major [m, n] f32 matrix: free0=m (q0=1),
 // free1=n (q1=blockSize). Returns swizzled UE8M0 scale bytes and fp8 e4m3 D bytes.
+// Tensile always lays the scale grid out with rows = free1 tiles and cols = free0
+// tiles, whichever axis carries the block; see mxScaleSwizzleOffset(tj, ti) and the
+// padding of nTiles/mTiles in the tensilelite client's Reference.cpp. Here that is
+// rows = n/blockSize and cols = m.
 static MxFp8Ref
     quantizeMxfp8Standard(const std::vector<float>& dF32, int64_t m, int64_t n, int32_t blockSize)
 {
     const int64_t nTiles     = (n + blockSize - 1) / blockSize;
-    const int64_t paddedRows = ((m + 31) / 32) * 32;
-    const int64_t paddedCols = ((nTiles + 7) / 8) * 8;
+    const int64_t paddedRows = ((nTiles + 31) / 32) * 32;
+    const int64_t paddedCols = ((m + 7) / 8) * 8;
 
     std::vector<uint8_t> scalePlain(static_cast<size_t>(paddedRows) * paddedCols, 0);
     std::vector<float>   dQuantF32(static_cast<size_t>(m) * n, 0.0f);
@@ -1875,7 +1879,7 @@ static MxFp8Ref
             }
             uint8_t     sb;
             const float mult                 = e8m0QuantMult(amax, sb);
-            scalePlain[ti * paddedCols + tj] = sb;
+            scalePlain[tj * paddedCols + ti] = sb;
             for(int64_t dj = 0; dj < blockSize; ++dj)
             {
                 const int64_t col = tj * blockSize + dj;
@@ -2064,8 +2068,9 @@ TEST(FusedEpilogueE2E, mxfp8QuantMatchesReference)
     const int32_t blockSize  = 32;
     const int64_t mTiles     = M; // q0=1
     const int64_t nTiles     = (N + blockSize - 1) / blockSize;
-    const int64_t paddedRows = ((mTiles + 31) / 32) * 32;
-    const int64_t paddedCols = ((nTiles + 7) / 8) * 8;
+    // Tensile scale grid: rows = free1 tiles (the blocked axis), cols = free0 tiles.
+    const int64_t paddedRows = ((nTiles + 31) / 32) * 32;
+    const int64_t paddedCols = ((mTiles + 7) / 8) * 8;
     const size_t  scaleBufSz = static_cast<size_t>(paddedRows) * paddedCols;
 
     std::vector<uint16_t>                 hA(static_cast<size_t>(K) * M);
@@ -2153,8 +2158,9 @@ TEST(FusedEpilogueE2E, mxfp8QuantF16MatchesReference)
     const int32_t blockSize  = 32;
     const int64_t mTiles     = M;
     const int64_t nTiles     = (N + blockSize - 1) / blockSize;
-    const int64_t paddedRows = ((mTiles + 31) / 32) * 32;
-    const int64_t paddedCols = ((nTiles + 7) / 8) * 8;
+    // Tensile scale grid: rows = free1 tiles (the blocked axis), cols = free0 tiles.
+    const int64_t paddedRows = ((nTiles + 31) / 32) * 32;
+    const int64_t paddedCols = ((mTiles + 7) / 8) * 8;
     const size_t  scaleBufSz = static_cast<size_t>(paddedRows) * paddedCols;
     const size_t  szA        = static_cast<size_t>(K) * M;
     const size_t  szB        = static_cast<size_t>(K) * N;
@@ -2248,8 +2254,9 @@ TEST(FusedEpilogueE2E, mxfp8QuantFp8MatchesReference)
     const int32_t blockSize  = 32;
     const int64_t mTiles     = M;
     const int64_t nTiles     = (N + blockSize - 1) / blockSize;
-    const int64_t paddedRows = ((mTiles + 31) / 32) * 32;
-    const int64_t paddedCols = ((nTiles + 7) / 8) * 8;
+    // Tensile scale grid: rows = free1 tiles (the blocked axis), cols = free0 tiles.
+    const int64_t paddedRows = ((nTiles + 31) / 32) * 32;
+    const int64_t paddedCols = ((mTiles + 7) / 8) * 8;
     const size_t  scaleBufSz = static_cast<size_t>(paddedRows) * paddedCols;
     const size_t  szA        = static_cast<size_t>(K) * M;
     const size_t  szB        = static_cast<size_t>(K) * N;
@@ -2343,8 +2350,9 @@ TEST(FusedEpilogueE2E, mxfp8QuantBf8MatchesReference)
     const int32_t blockSize  = 32;
     const int64_t mTiles     = M;
     const int64_t nTiles     = (N + blockSize - 1) / blockSize;
-    const int64_t paddedRows = ((mTiles + 31) / 32) * 32;
-    const int64_t paddedCols = ((nTiles + 7) / 8) * 8;
+    // Tensile scale grid: rows = free1 tiles (the blocked axis), cols = free0 tiles.
+    const int64_t paddedRows = ((nTiles + 31) / 32) * 32;
+    const int64_t paddedCols = ((mTiles + 7) / 8) * 8;
     const size_t  scaleBufSz = static_cast<size_t>(paddedRows) * paddedCols;
     const size_t  szA        = static_cast<size_t>(K) * M;
     const size_t  szB        = static_cast<size_t>(K) * N;
