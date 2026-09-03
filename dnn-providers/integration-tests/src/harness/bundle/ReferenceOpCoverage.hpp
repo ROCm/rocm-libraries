@@ -67,4 +67,36 @@ std::vector<std::string>
 /// sharedReferenceExecutors() -- the unit target deliberately does not link that.
 std::string formatUncoveredOps(const std::set<std::string>& uncoveredOps);
 
+/// One bundle a reference is known to decline, with the reason and its tracker.
+///
+/// `bundleId` is "<suiteName>.<testName>" -- the registered GTest name minus the
+/// "_CpuRef"/"_GpuRef" suffix, so an entry can be copied straight out of a failing
+/// run.
+struct KnownReferenceGap
+{
+    ReferenceExecutorType reference;
+    std::string_view bundleId;
+    std::string_view reason;
+};
+
+/// The bundles a reference is currently expected to decline, and why.
+///
+/// This is NOT a skip list. A listed bundle still registers and still runs; the
+/// harness simply inverts its expectation, requiring the reference to report the
+/// graph inapplicable. The moment someone implements the missing shape, the
+/// inverted assertion fails and forces the entry to be deleted, so the list cannot
+/// outlive the gap it documents. A skip list would do the opposite: go quiet
+/// exactly when the gap closes, and stay quiet if a bundle silently stopped being
+/// verified for some unrelated reason.
+///
+/// It exists because referenceSupportedOps() is keyed on node type while both
+/// references dispatch on op *shape*, so "Sdpa but not fp8, and not variable
+/// sequence length" is not expressible there. Every entry is therefore a temporary
+/// stand-in for either real support or a shape-aware coverage set.
+const std::vector<KnownReferenceGap>& knownReferenceGaps();
+
+/// The entry for this (reference, bundle) pair, or nullptr when none exists.
+const KnownReferenceGap* findKnownReferenceGap(ReferenceExecutorType type,
+                                               std::string_view bundleId);
+
 } // namespace hipdnn_integration_tests::bundle

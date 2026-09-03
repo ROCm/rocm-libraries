@@ -26,6 +26,7 @@
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/bundle/BundleReferenceValidationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/ReferenceOpCoverage.hpp"
 #include "mocks/MockReferenceExecutors.hpp"
 
 using namespace hipdnn_integration_tests;
@@ -93,6 +94,29 @@ protected:
     {
         harness.setBundle(fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true),
                           _tempDir / "Bundle");
+    }
+
+    // Same, but under a bundle id that knownReferenceGaps() recognises. Taken from
+    // the live table rather than hardcoded so these cases follow the list instead of
+    // pinning one bundle name that is expected to be deleted.
+    void setGoldenBundleWithId(BundleReferenceValidationHarness& harness, const std::string& id)
+    {
+        harness.setBundle(fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true),
+                          _tempDir / "Bundle",
+                          id);
+    }
+
+    // The first GPU entry in the table, or nullopt once every gap has been closed.
+    static std::optional<std::string> aKnownGpuGapId()
+    {
+        for(const auto& gap : knownReferenceGaps())
+        {
+            if(gap.reference == ReferenceExecutorType::GPU)
+            {
+                return std::string(gap.bundleId);
+            }
+        }
+        return std::nullopt;
     }
 };
 
@@ -237,6 +261,80 @@ TEST_F(TestBundleReferenceValidationHarness, InapplicableReferenceFailsRatherTha
     EXPECT_NE(testing_support::allMessages(results).find("is required to support this graph"),
               std::string::npos)
         << testing_support::allMessages(results);
+}
+
+// A bundle on the known-gap list still runs; it just expects the reference to
+// decline. That keeps the gap counted and named instead of skipped, and keeps the
+// suite green while the missing shapes are implemented elsewhere.
+TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatIsDeclinedPasses)
+{
+    const auto gapId = aKnownGpuGapId();
+    if(!gapId.has_value())
+    {
+        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
+    }
+
+    ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(false));
+    EXPECT_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundleWithId(harness, *gapId);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+}
+
+// The self-retiring half, and the reason this is an expected-failure list rather
+// than a skip list: the moment the reference can run a listed graph, the entry is
+// stale and the run goes red until someone deletes it. A skip list would instead
+// go quiet exactly when the gap closed, and the bundle would stay unverified.
+TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatGainsSupportFails)
+{
+    const auto gapId = aKnownGpuGapId();
+    if(!gapId.has_value())
+    {
+        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
+    }
+
+    ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(true));
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundleWithId(harness, *gapId);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("now reports this graph applicable"), std::string::npos) << messages;
+    EXPECT_NE(messages.find(*gapId), std::string::npos) << messages;
+}
+
+// An unlisted bundle keeps the original contract: declining is a failure, not an
+// expectation. Pins that the gap table narrows behaviour to its own entries.
+TEST_F(TestBundleReferenceValidationHarness, UnlistedBundleStillFailsWhenDeclined)
+{
+    ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(false));
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundleWithId(harness, "quick_NotOnTheList_Bundle.Bundle");
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("is required to support this graph"),
+              std::string::npos);
 }
 
 // Same contract by the other route: the reference accepts the graph up front and

@@ -234,6 +234,7 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
     size_t registered = 0;
     size_t noGolden = 0;
     size_t uncovered = 0;
+    size_t knownGaps = 0;
     std::set<std::string> uncoveredOps;
 
     for(const auto& bundle : bundles)
@@ -260,6 +261,12 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
             continue;
         }
 
+        const std::string bundleId = bundle.suiteName + "." + bundle.testName;
+        if(findKnownReferenceGap(referenceType, bundleId) != nullptr)
+        {
+            knownGaps++;
+        }
+
         ::testing::RegisterTest(
             (bundle.suiteName + "_" + label).c_str(),
             bundle.testName.c_str(),
@@ -267,7 +274,8 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
             nullptr,
             __FILE__,
             __LINE__,
-            [loaded = bundle.bundle, path = bundle.jsonPath, referenceType]() -> ::testing::Test* {
+            [loaded = bundle.bundle, path = bundle.jsonPath, bundleId, referenceType]()
+                -> ::testing::Test* {
                 // Only the GPU reference touches a device. Passing true for the CPU
                 // lane made SetUp() run SKIP_IF_NO_DEVICES() on work that reads and
                 // writes host memory, so CPU golden-data validation silently skipped
@@ -275,16 +283,25 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
                 const bool requiresDevice = referenceType == ReferenceExecutorType::GPU;
                 auto* test = new BundleReferenceValidationHarness(
                     referenceType, requiresDevice, sharedReferenceExecutors());
-                test->setBundle(loaded, path);
+                test->setBundle(loaded, path, bundleId);
                 return test;
             });
         registered++;
     }
 
+    // knownGaps is a subset of registered, not a third bucket: those tests still run,
+    // they just assert the reference declines. Printing it separately keeps "38
+    // registered" from reading as "38 validated against golden data".
     std::cerr << "Golden-data validation (" << label << "): " << registered
               << " bundle(s) registered, " << noGolden << " without golden data, " << uncovered
-              << " outside this reference's supported-op set" << formatUncoveredOps(uncoveredOps)
-              << "\n";
+              << " outside this reference's supported-op set" << formatUncoveredOps(uncoveredOps);
+    if(knownGaps > 0)
+    {
+        std::cerr << "\n       " << knownGaps << " of the " << registered
+                  << " registered are known reference gaps (see knownReferenceGaps()): they assert "
+                     "the reference declines the graph, and are NOT validated against golden data";
+    }
+    std::cerr << "\n";
 
     // A reference lane that registered nothing while golden data was sitting right
     // there verified nothing, and the whole-binary guard in main() cannot see it: a

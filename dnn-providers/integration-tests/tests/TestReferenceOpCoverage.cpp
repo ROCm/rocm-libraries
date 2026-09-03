@@ -9,6 +9,7 @@
 
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <flatbuffers/flatbuffers.h>
@@ -18,9 +19,11 @@
 #include "harness/bundle/ReferenceOpCoverage.hpp"
 
 using hipdnn_integration_tests::ReferenceExecutorType;
+using hipdnn_integration_tests::bundle::findKnownReferenceGap;
 using hipdnn_integration_tests::bundle::formatUncoveredOps;
 using hipdnn_integration_tests::bundle::graphNodeTypes;
 using hipdnn_integration_tests::bundle::K_UNREADABLE_GRAPH;
+using hipdnn_integration_tests::bundle::knownReferenceGaps;
 using hipdnn_integration_tests::bundle::NodeAttributes;
 using hipdnn_integration_tests::bundle::referenceCoversGraph;
 using hipdnn_integration_tests::bundle::referenceSupportedOps;
@@ -159,6 +162,41 @@ TEST(TestReferenceOpCoverage, ExcludedOpsAreNamedAndSeparated)
               " (BatchnormInferenceAttributes)");
     EXPECT_EQ(formatUncoveredOps({"ReductionAttributes", "ConvolutionBwdDataAttributes"}),
               " (ConvolutionBwdDataAttributes, ReductionAttributes)");
+}
+
+// The gap table is load-bearing: an entry inverts a bundle's expectation, so a
+// malformed one silently stops validating real data. These pin its shape.
+TEST(TestReferenceOpCoverage, KnownGapLookupIsScopedToOneReference)
+{
+    for(const auto& gap : knownReferenceGaps())
+    {
+        const auto other = gap.reference == ReferenceExecutorType::GPU ? ReferenceExecutorType::CPU
+                                                                       : ReferenceExecutorType::GPU;
+
+        EXPECT_EQ(findKnownReferenceGap(gap.reference, gap.bundleId), &gap);
+        EXPECT_EQ(findKnownReferenceGap(other, gap.bundleId), nullptr)
+            << "gap for " << gap.bundleId << " leaked across references";
+    }
+}
+
+TEST(TestReferenceOpCoverage, KnownGapLookupMissesAreNull)
+{
+    EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::GPU, "no_such_bundle.Case"), nullptr);
+    EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::CPU, ""), nullptr);
+}
+
+// A gap with no reason is just a silently disabled bundle, which is the thing the
+// list exists to avoid. A duplicated one means two entries disagree about why.
+TEST(TestReferenceOpCoverage, EveryKnownGapCarriesAReasonAndIsUnique)
+{
+    std::set<std::pair<int, std::string>> seen;
+    for(const auto& gap : knownReferenceGaps())
+    {
+        EXPECT_FALSE(gap.bundleId.empty());
+        EXPECT_FALSE(gap.reason.empty()) << gap.bundleId << " has no reason recorded";
+        EXPECT_TRUE(seen.emplace(static_cast<int>(gap.reference), std::string(gap.bundleId)).second)
+            << "duplicate gap entry for " << gap.bundleId;
+    }
 }
 
 // NOLINTEND(readability-identifier-naming)

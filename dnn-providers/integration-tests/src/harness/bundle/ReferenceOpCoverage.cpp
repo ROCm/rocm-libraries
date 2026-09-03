@@ -139,4 +139,47 @@ std::string formatUncoveredOps(const std::set<std::string>& uncoveredOps)
     return formatted;
 }
 
+const std::vector<KnownReferenceGap>& knownReferenceGaps()
+{
+    // Every entry here is a promise to delete it. See ALMIOPEN-2563 item 4: the
+    // GPU Sdpa reference dispatches through a dtype-keyed plan registry
+    // (GpuSdpaFwdSignatureKey.hpp) with no FP8 tuple, and its plan builder rejects
+    // variable sequence lengths outright (GpuSdpaFwdPlan.hpp). Both are being
+    // implemented; until they are, these bundles must fail applicability rather
+    // than vanish, and the run must not be red for a gap we have already written
+    // down.
+    //
+    // Note the CPU reference already handles fp8 (CPU SdpaFwdPlan registers
+    // FP8_E4M3 -> BFLOAT16), so none of the fp8 entries below apply to it. It
+    // shares only the variable-sequence-length gap.
+    static const std::vector<KnownReferenceGap> s_gaps = {
+        {ReferenceExecutorType::GPU,
+         "quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small.Small",
+         "variable sequence lengths (seq_len_q/kv) are not implemented"},
+        {ReferenceExecutorType::GPU,
+         "quick_SdpaFwd_bhsd_bf16_hd128_nomask_group_Small.Small",
+         "variable sequence lengths (seq_len_q/kv) are not implemented"},
+        {ReferenceExecutorType::GPU,
+         "quick_SdpaFwd_bhsd_fp8_hd128_causal_group_Small.Small",
+         "variable sequence lengths (seq_len_q/kv) are not implemented, and no FP8 plan exists"},
+        {ReferenceExecutorType::GPU,
+         "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
+         "no FP8 plan: the registry has no FP8_E4M3 tuple and descales are rejected"},
+        {ReferenceExecutorType::GPU,
+         "quick_SdpaFwd_bhsd_fp8_hd128_nomask_batch_Small.Small",
+         "no FP8 plan: the registry has no FP8_E4M3 tuple and descales are rejected"},
+    };
+    return s_gaps;
+}
+
+const KnownReferenceGap* findKnownReferenceGap(ReferenceExecutorType type,
+                                               std::string_view bundleId)
+{
+    const auto& gaps = knownReferenceGaps();
+    const auto it = std::find_if(gaps.begin(), gaps.end(), [&](const KnownReferenceGap& gap) {
+        return gap.reference == type && gap.bundleId == bundleId;
+    });
+    return it == gaps.end() ? nullptr : &*it;
+}
+
 } // namespace hipdnn_integration_tests::bundle
