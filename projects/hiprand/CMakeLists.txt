@@ -110,6 +110,7 @@ mark_as_advanced(HIPRAND_CONFIG_DIR)
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules
     ${HIP_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip # FindHIP.cmake
