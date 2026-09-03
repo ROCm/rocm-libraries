@@ -5427,7 +5427,7 @@ class KernelWriterAssembly(KernelWriter):
               quotient = loopCounterName
               dividend = "SizesSum+%u"%self.states.unrollIdx
               divisor = kernel["DepthU"]
-              module.add(scalarStaticDivideAndRemainder(quotient, None, dividend, \
+              module.add(scalarStaticDivideAndRemainder(quotient, 0, dividend, \
                          divisor, tmpSgprInfo, 0))
 
               gsuComponent = Component.GSU.find(self)
