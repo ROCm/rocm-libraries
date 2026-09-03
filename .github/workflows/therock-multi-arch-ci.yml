@@ -88,8 +88,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci-gate:
+    name: Check CI Label
+    runs-on: ubuntu-24.04
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - name: Check for multi-arch opt-in
+        id: gate
+        run: |
+          echo "enabled=${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:multi-arch')) }}" >> "${GITHUB_OUTPUT}"
+
   ci-env:
     name: Load CI Environment
+    needs: ci-gate
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-24.04
     outputs:
       baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
@@ -106,6 +119,8 @@ jobs:
 
   configure:
     name: Configure Changed Projects
+    needs: ci-gate
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
@@ -140,7 +155,8 @@ jobs:
             --config-path ".github/repos-config.json"
 
   setup:
-    needs: [ci-env, configure]
+    needs: [ci-gate, ci-env, configure]
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_variant: "release"
@@ -241,6 +257,7 @@ jobs:
     name: Multi-Arch CI Summary
     if: always()
     needs:
+      - ci-gate
       - ci-env
       - configure
       - setup
@@ -248,7 +265,14 @@ jobs:
       - windows_build_and_test
     runs-on: ubuntu-24.04
     steps:
+      - name: Report skipped workflow
+        if: ${{ needs.ci-gate.outputs.enabled != 'true' }}
+        run: |
+          echo "Multi-arch CI is skipped by default for pull_request and push events."
+          echo "Use workflow_dispatch or add the ci:multi-arch label to a pull request to enable it."
+
       - name: Checkout TheRock repository
+        if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
@@ -258,6 +282,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Evaluate workflow results
+        if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
