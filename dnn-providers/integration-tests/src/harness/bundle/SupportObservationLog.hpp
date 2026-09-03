@@ -27,14 +27,24 @@ struct ObservedSupportCell
     std::string engineName;
     std::string arch;
     std::string platform;
-    bool engineIsSupported = false; // resolved + in ranked list
+
+    // The engine was in the ranked list for this graph. False means the engine
+    // resolved and declined -- it does not mean "we could not tell". The writer
+    // reads false as "erase this claim", so recording an unknown as false
+    // deletes a true claim; see the log's precondition below.
+    bool engineIsSupported = false;
 };
 
 // Process-wide log of resolved support observations. Populated during
 // --write-support-claims runs and drained once after RUN_ALL_TESTS() to
-// produce .support.json sidecars. Only resolved queries (OK or
-// GRAPH_NOT_SUPPORTED) are recorded; unresolved queries are not
-// observations of "unsupported" and must never null an existing claim.
+// produce .support.json sidecars.
+//
+// Precondition on every recorded cell: the query that produced it resolved (OK
+// or GRAPH_NOT_SUPPORTED). An unresolved query is not an observation of
+// "unsupported" and must never null an existing claim. The type cannot express
+// this -- the guard is the early return in
+// IntegrationBundleVerificationHarness::observeSupportOnly(), which is the only
+// production caller of record().
 class SupportObservationLog
 {
 public:

@@ -116,6 +116,31 @@ SweepSupportClaims regroupSweepClaims(const FlatSweepMap& flat, int version)
     return result;
 }
 
+// "" is a legal JSON key, so a cell with an empty engine, arch, or platform
+// serializes without complaint and lands an entry in a checked-in sidecar that
+// no enforcement run can ever match or clear. An empty arch is the realistic
+// one: it is what a failed device probe leaves behind in the policy.
+std::string cellDefect(const ObservedSupportCell& cell)
+{
+    if(cell.claimLocator.sidecarPath.empty())
+    {
+        return "empty sidecar path";
+    }
+    if(cell.engineName.empty())
+    {
+        return "empty engine name";
+    }
+    if(cell.arch.empty())
+    {
+        return "empty arch";
+    }
+    if(cell.platform.empty())
+    {
+        return "empty platform";
+    }
+    return {};
+}
+
 bool writeIfChanged(const std::filesystem::path& filePath,
                     const std::string& newContent,
                     WriteSummary& summary)
@@ -157,27 +182,64 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
 {
     WriteSummary summary;
 
-    // One sidecar file's worth of work. isSweep is a property of the bundle,
-    // not of the engine queried, so every observation landing here agrees on it.
+    // One sidecar file's worth of work. isSweep is a property of the bundle, not
+    // of the engine queried, so every observation landing here should agree on
+    // it; `skip` records the cases where they did not, or where an observation
+    // was too malformed to place.
     struct SidecarTarget
     {
         bool isSweep = false;
+        bool skip = false;
         std::vector<ObservedSupportCell> observations;
     };
 
+    // Keyed on the normalized path so that two spellings of one file ("d/x.json"
+    // and "d/./x.json") cannot become two targets. Two targets for one file would
+    // slip past the isSweep check below and write the file twice, the second
+    // write overlaying a set of claims the first had already replaced.
     std::map<std::filesystem::path, SidecarTarget> targetsBySidecarPath;
     for(const auto& observation : observations)
     {
-        auto& target = targetsBySidecarPath[observation.claimLocator.sidecarPath];
-        target.isSweep = observation.claimLocator.isSweep();
+        auto& target
+            = targetsBySidecarPath[observation.claimLocator.sidecarPath.lexically_normal()];
+
+        if(target.observations.empty())
+        {
+            target.isSweep = observation.claimLocator.isSweep();
+        }
+        else if(target.isSweep != observation.claimLocator.isSweep())
+        {
+            // Single-graph and sweep sidecars have incompatible shapes, so one of
+            // the two readings of this file is wrong. Which one is not knowable
+            // here, and writing under either would destroy the other's structure.
+            summary.errors.push_back(
+                "refusing to write a sidecar observed as both single-graph and sweep: "
+                + observation.claimLocator.sidecarPath.string());
+            target.skip = true;
+        }
+
+        const std::string defect = cellDefect(observation);
+        if(!defect.empty())
+        {
+            summary.errors.push_back("refusing to write from a malformed observation (" + defect
+                                     + "): '" + observation.claimLocator.diagnosticPath + "'");
+            target.skip = true;
+        }
+
         target.observations.push_back(observation);
     }
 
-    // A sidecar with no observations is never a key here, so the RFC §9.2
-    // empty-write guard needs no explicit check: an absent observation set
-    // cannot reach the file, let alone null a claim in it.
+    // Every sidecar reached below is written from a complete, well-formed
+    // observation set. A sidecar nothing observed is never a key here, which is
+    // the RFC §9.2 empty-write guard: an absent observation set cannot reach the
+    // file, let alone null a claim in it.
     for(const auto& [sidecarPath, target] : targetsBySidecarPath)
     {
+        if(target.skip)
+        {
+            continue;
+        }
+
         const auto& fileObservations = target.observations;
 
         if(target.isSweep)
@@ -188,11 +250,12 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
             {
                 try
                 {
-                    auto loaded = loadSweepSupportClaims(sidecarPath.parent_path());
-                    if(loaded.has_value())
-                    {
-                        existing = std::move(*loaded);
-                    }
+                    // Read the file we are about to write, by the same rule the
+                    // enforcer reads it. Re-deriving the path from the directory
+                    // would let the read and the write name different files, and
+                    // a read that misses returns an empty claim set -- which
+                    // overlays into a write that erases everything in it.
+                    existing = loadSweepSupportClaimsFromPath(sidecarPath);
                 }
                 catch(const std::exception& e)
                 {

@@ -19,20 +19,27 @@
 // Both for a single-graph bundle and for a template sweep, because those use
 // different files, different schemas, and different lookup paths.
 //
-// The judge helpers below reproduce observeAllSupport()'s loop with the arch
-// and platform passed in rather than read from TestConfig. Those two reads
-// only answer "what machine am I on", which is not what is under test, and
-// depending on them would tie these tests to a GPU being present.
+// The judge helper below calls observeSupport() -- the enforcer's own read path
+// -- once per engine, with the arch and platform passed in rather than read from
+// TestConfig. Those two reads only answer "what machine am I on", which is not
+// what is under test, and depending on them would tie these tests to a GPU being
+// present. Everything else is production code: the sidecar is located by the same
+// factories the harness uses and parsed by the same loader, so a disagreement
+// about which cell a claim lives in cannot hide behind a test-local lookup.
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include <hipdnn_frontend/Error.hpp>
+
+#include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportClaims.hpp"
@@ -41,14 +48,18 @@
 #include "SupportClaimTestUtils.hpp"
 
 using hipdnn_frontend::ErrorCode;
-using hipdnn_integration_tests::bundle::evaluateSupport;
+using hipdnn_integration_tests::bundle::enginesAccept;
 using hipdnn_integration_tests::bundle::formatVerdictMessage;
 using hipdnn_integration_tests::bundle::LoadedEngine;
 using hipdnn_integration_tests::bundle::ObservedSupportCell;
-using hipdnn_integration_tests::bundle::parseSupportClaimsJson;
-using hipdnn_integration_tests::bundle::parseSweepSupportClaimsJson;
+using hipdnn_integration_tests::bundle::observeSupport;
+using hipdnn_integration_tests::bundle::RankedEngines;
+using hipdnn_integration_tests::bundle::SidecarState;
+using hipdnn_integration_tests::bundle::singleGraphClaimLocator;
+using hipdnn_integration_tests::bundle::SupportClaimLocator;
 using hipdnn_integration_tests::bundle::SupportResult;
 using hipdnn_integration_tests::bundle::SupportVerdict;
+using hipdnn_integration_tests::bundle::sweepCaseClaimLocator;
 using hipdnn_integration_tests::bundle::writeObservedSupportClaims;
 using hipdnn_integration_tests::bundle::test_utils::makeScopedTestDir;
 using hipdnn_integration_tests::bundle::test_utils::readFile;
@@ -71,51 +82,41 @@ const std::vector<LoadedEngine>& bothEngines()
     return s_engines;
 }
 
-std::vector<SupportResult> judgeSingleGraph(const std::filesystem::path& sidecarPath,
-                                            const std::vector<int64_t>& rankedIds,
-                                            const std::string& arch,
-                                            const std::string& platform)
+/// A query that resolved, ranking `rankedIds`, judged from `engine`'s seat.
+/// `accepted` is per-engine, so this cannot be hoisted out of the loop below.
+RankedEngines ranked(const std::vector<int64_t>& rankedIds, const LoadedEngine& engine)
 {
-    auto json = nlohmann::json::parse(readFile(sidecarPath));
-    const auto claims = parseSupportClaimsJson(json, sidecarPath.string());
-
-    std::vector<SupportResult> results;
-    for(const auto& engine : bothEngines())
-    {
-        results.push_back(evaluateSupport(ErrorCode::OK,
-                                          rankedIds,
-                                          engine.id,
-                                          claims.isClaimed(engine.name, arch, platform),
-                                          /*hasSidecar=*/true,
-                                          sidecarPath.string(),
-                                          engine.name,
-                                          arch,
-                                          platform));
-    }
-    return results;
+    RankedEngines engines;
+    engines.status = hipdnn_frontend::Error{ErrorCode::OK, ""};
+    engines.rankedIds = rankedIds;
+    engines.accepted = enginesAccept(ErrorCode::OK, rankedIds, engine);
+    return engines;
 }
 
-std::vector<SupportResult> judgeSweepCase(const std::filesystem::path& sidecarPath,
-                                          const std::string& caseId,
-                                          const std::vector<int64_t>& rankedIds,
-                                          const std::string& arch,
-                                          const std::string& platform)
+/// Read back what the writer just wrote, through the enforcer's own path.
+///
+/// The locator is built by the same factory the writer's observations carry, so
+/// this asks the file the writer actually touched -- there is no second opinion
+/// here about where a claim lives. Sweep and single-graph differ only in the
+/// locator; observeSupport() dispatches on locator.isSweep() itself.
+std::vector<SupportResult> judge(const SupportClaimLocator& locator,
+                                 const std::vector<int64_t>& rankedIds,
+                                 const std::string& arch,
+                                 const std::string& platform)
 {
-    auto json = nlohmann::json::parse(readFile(sidecarPath));
-    const auto claims = parseSweepSupportClaimsJson(json, sidecarPath.string());
-
     std::vector<SupportResult> results;
     for(const auto& engine : bothEngines())
     {
-        results.push_back(evaluateSupport(ErrorCode::OK,
-                                          rankedIds,
-                                          engine.id,
-                                          claims.isClaimed(caseId, engine.name, arch, platform),
-                                          /*hasSidecar=*/true,
-                                          sidecarPath.string(),
-                                          engine.name,
-                                          arch,
-                                          platform));
+        const auto observation
+            = observeSupport(ranked(rankedIds, engine), locator, engine, arch, platform);
+
+        // Every call site below writes the sidecar first. A NONE here would mean
+        // the judge is looking somewhere the writer never wrote, which is the
+        // exact divergence these tests exist to catch.
+        EXPECT_EQ(observation.sidecar, SidecarState::CHECKED)
+            << "sidecar not read at " << locator.sidecarPath;
+
+        results.insert(results.end(), observation.results.begin(), observation.results.end());
     }
     return results;
 }
@@ -134,7 +135,13 @@ void expectNoSurprises(const std::vector<SupportResult>& results)
     }
 }
 
-SupportVerdict verdictFor(const std::vector<SupportResult>& results, const std::string& engineName)
+/// The verdict recorded for `engineName`, or nullopt if none was.
+///
+/// Absence is an answer, not a lookup failure: chooseVerdict() records nothing
+/// for an engine that is neither claimed here nor in the ranked list, which is
+/// the case where there is simply nothing to enforce.
+std::optional<SupportVerdict> verdictFor(const std::vector<SupportResult>& results,
+                                         const std::string& engineName)
 {
     for(const auto& result : results)
     {
@@ -143,8 +150,7 @@ SupportVerdict verdictFor(const std::vector<SupportResult>& results, const std::
             return result.verdict;
         }
     }
-    ADD_FAILURE() << "no verdict recorded for engine " << engineName;
-    return SupportVerdict::NO_SIDECAR;
+    return std::nullopt;
 }
 
 } // namespace
@@ -167,11 +173,14 @@ TEST(TestSupportClaimRoundTrip, SingleGraphBootstrapAppendAndReRun)
     ASSERT_TRUE(std::filesystem::exists(sidecarPath));
 
     {
-        const auto verdicts = judgeSingleGraph(sidecarPath, {MIOPEN_ID}, "gfx942", "linux");
+        const auto verdicts
+            = judge(singleGraphClaimLocator(bundlePath), {MIOPEN_ID}, "gfx942", "linux");
         expectNoSurprises(verdicts);
-        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::SATISFIED);
-        // Never queried, never claimed: silence, not a failure.
-        EXPECT_EQ(verdictFor(verdicts, "HIP_KERNEL_ENGINE"), SupportVerdict::NOT_ENFORCED);
+        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_ACCEPTED);
+        // Never queried, never claimed: silence, not a failure. No claim to
+        // enforce means no record at all, which is why this asks for absence
+        // rather than for a verdict naming it.
+        EXPECT_FALSE(verdictFor(verdicts, "HIP_KERNEL_ENGINE").has_value());
     }
 
     // --- Run 2: a second machine (gfx90a) where both engines answer yes. ---
@@ -182,19 +191,20 @@ TEST(TestSupportClaimRoundTrip, SingleGraphBootstrapAppendAndReRun)
     EXPECT_EQ(writeObservedSupportClaims(secondRun).filesWritten, 1u);
 
     {
-        const auto verdicts
-            = judgeSingleGraph(sidecarPath, {MIOPEN_ID, HIP_KERNEL_ID}, "gfx90a", "linux");
+        const auto verdicts = judge(
+            singleGraphClaimLocator(bundlePath), {MIOPEN_ID, HIP_KERNEL_ID}, "gfx90a", "linux");
         expectNoSurprises(verdicts);
-        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::SATISFIED);
-        EXPECT_EQ(verdictFor(verdicts, "HIP_KERNEL_ENGINE"), SupportVerdict::SATISFIED);
+        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_ACCEPTED);
+        EXPECT_EQ(verdictFor(verdicts, "HIP_KERNEL_ENGINE"), SupportVerdict::CLAIM_ACCEPTED);
     }
 
     // Run 1's claim is still there — gfx942 was never observed this time, and an
     // unobserved cell must not be rewritten.
     {
-        const auto verdicts = judgeSingleGraph(sidecarPath, {MIOPEN_ID}, "gfx942", "linux");
+        const auto verdicts
+            = judge(singleGraphClaimLocator(bundlePath), {MIOPEN_ID}, "gfx942", "linux");
         expectNoSurprises(verdicts);
-        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::SATISFIED);
+        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_ACCEPTED);
     }
 
     // --- Run 3: same machine, same answers. Zero diff (RFC 0015 §9.5). ---
@@ -218,11 +228,13 @@ TEST(TestSupportClaimRoundTrip, SingleGraphWithdrawnSupportJudgesCleanAfterReWri
     writeObservedSupportClaims({
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
     });
+    ASSERT_TRUE(std::filesystem::exists(sidecarPath));
 
     // The engine stops accepting the graph. Judged against the stale file this
     // is CLAIM_BROKEN, which is exactly the failure re-authoring exists to fix.
     {
-        const auto verdicts = judgeSingleGraph(sidecarPath, /*rankedIds=*/{}, "gfx942", "linux");
+        const auto verdicts
+            = judge(singleGraphClaimLocator(bundlePath), /*rankedIds=*/{}, "gfx942", "linux");
         EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_BROKEN);
     }
 
@@ -231,9 +243,12 @@ TEST(TestSupportClaimRoundTrip, SingleGraphWithdrawnSupportJudgesCleanAfterReWri
     });
 
     {
-        const auto verdicts = judgeSingleGraph(sidecarPath, /*rankedIds=*/{}, "gfx942", "linux");
+        const auto verdicts
+            = judge(singleGraphClaimLocator(bundlePath), /*rankedIds=*/{}, "gfx942", "linux");
         expectNoSurprises(verdicts);
-        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::NOT_ENFORCED);
+        // The claim is gone and the engine declines: nothing left to enforce, so
+        // no verdict is recorded at all.
+        EXPECT_FALSE(verdictFor(verdicts, "MIOPEN_ENGINE").has_value());
     }
 }
 
@@ -259,11 +274,13 @@ TEST(TestSupportClaimRoundTrip, SweepBootstrapAppendAndReRun)
 
     for(const auto* caseId : {"case_a", "case_b"})
     {
-        const auto verdicts = judgeSweepCase(sidecarPath, caseId, {MIOPEN_ID}, "gfx942", "linux");
+        const auto verdicts
+            = judge(sweepCaseClaimLocator(sweepPath, caseId), {MIOPEN_ID}, "gfx942", "linux");
         expectNoSurprises(verdicts);
-        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::SATISFIED) << caseId;
-        EXPECT_EQ(verdictFor(verdicts, "HIP_KERNEL_ENGINE"), SupportVerdict::NOT_ENFORCED)
-            << caseId;
+        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_ACCEPTED) << caseId;
+        // Queried and declined, so nothing was claimed for it: silence, not a
+        // verdict naming it.
+        EXPECT_FALSE(verdictFor(verdicts, "HIP_KERNEL_ENGINE").has_value()) << caseId;
     }
 
     // --- Run 2: gfx90a, where both engines answer yes for both cases. ---
@@ -277,18 +294,22 @@ TEST(TestSupportClaimRoundTrip, SweepBootstrapAppendAndReRun)
 
     for(const auto* caseId : {"case_a", "case_b"})
     {
-        const auto verdicts
-            = judgeSweepCase(sidecarPath, caseId, {MIOPEN_ID, HIP_KERNEL_ID}, "gfx90a", "linux");
+        const auto verdicts = judge(sweepCaseClaimLocator(sweepPath, caseId),
+                                    {MIOPEN_ID, HIP_KERNEL_ID},
+                                    "gfx90a",
+                                    "linux");
         expectNoSurprises(verdicts);
-        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::SATISFIED) << caseId;
-        EXPECT_EQ(verdictFor(verdicts, "HIP_KERNEL_ENGINE"), SupportVerdict::SATISFIED) << caseId;
+        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_ACCEPTED) << caseId;
+        EXPECT_EQ(verdictFor(verdicts, "HIP_KERNEL_ENGINE"), SupportVerdict::CLAIM_ACCEPTED)
+            << caseId;
     }
 
     // Run 1's gfx942 claims survived the append.
     {
-        const auto verdicts = judgeSweepCase(sidecarPath, "case_a", {MIOPEN_ID}, "gfx942", "linux");
+        const auto verdicts
+            = judge(sweepCaseClaimLocator(sweepPath, "case_a"), {MIOPEN_ID}, "gfx942", "linux");
         expectNoSurprises(verdicts);
-        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::SATISFIED);
+        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_ACCEPTED);
     }
 
     // Both cases still share a support footprint per engine, so each engine
@@ -324,6 +345,7 @@ TEST(TestSupportClaimRoundTrip, SweepDivergingCaseKeepsItsOwnVerdict)
         sweepCaseObservation(sweepPath, "case_a", "MIOPEN_ENGINE", "gfx942", "linux", true),
         sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx942", "linux", true),
     });
+    ASSERT_TRUE(std::filesystem::exists(sidecarPath));
 
     // case_b regresses; case_a does not. The two must part ways in the file.
     writeObservedSupportClaims({
@@ -331,21 +353,22 @@ TEST(TestSupportClaimRoundTrip, SweepDivergingCaseKeepsItsOwnVerdict)
     });
 
     const auto caseAVerdicts
-        = judgeSweepCase(sidecarPath, "case_a", {MIOPEN_ID}, "gfx942", "linux");
+        = judge(sweepCaseClaimLocator(sweepPath, "case_a"), {MIOPEN_ID}, "gfx942", "linux");
     expectNoSurprises(caseAVerdicts);
-    EXPECT_EQ(verdictFor(caseAVerdicts, "MIOPEN_ENGINE"), SupportVerdict::SATISFIED);
+    EXPECT_EQ(verdictFor(caseAVerdicts, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_ACCEPTED);
 
     // case_b is unclaimed now, so a query that still says yes reports the file
     // is behind rather than passing silently.
     const auto caseBVerdicts
-        = judgeSweepCase(sidecarPath, "case_b", {MIOPEN_ID}, "gfx942", "linux");
+        = judge(sweepCaseClaimLocator(sweepPath, "case_b"), {MIOPEN_ID}, "gfx942", "linux");
     EXPECT_EQ(verdictFor(caseBVerdicts, "MIOPEN_ENGINE"), SupportVerdict::UNCLAIMED_SUPPORT);
 
-    // ...and a query that agrees with the withdrawal is simply silent.
+    // ...and a query that agrees with the withdrawal is simply silent: nothing
+    // claimed, nothing ranked, so no verdict is recorded at all.
     const auto caseBDeclined
-        = judgeSweepCase(sidecarPath, "case_b", /*rankedIds=*/{}, "gfx942", "linux");
+        = judge(sweepCaseClaimLocator(sweepPath, "case_b"), /*rankedIds=*/{}, "gfx942", "linux");
     expectNoSurprises(caseBDeclined);
-    EXPECT_EQ(verdictFor(caseBDeclined, "MIOPEN_ENGINE"), SupportVerdict::NOT_ENFORCED);
+    EXPECT_FALSE(verdictFor(caseBDeclined, "MIOPEN_ENGINE").has_value());
 }
 
 // NOLINTEND(readability-identifier-naming)
