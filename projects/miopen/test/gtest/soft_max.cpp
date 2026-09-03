@@ -1297,58 +1297,64 @@ TEST_F(GPU_Softmax_Offset_FP32, DISABLED_ForwardNonZeroOffset_FindRace)
 // hang), outer=3, local=1024 -> num_batch=512; batches 3..511 (waves 1..15)
 // early-return while wave 0 reaches the barrier -> hang.
 //
-// DISABLED because it WILL WEDGE THE GPU. Run intentionally only, under an
-// external timeout:
-//   ./bin/test_soft_max --gtest_also_run_disabled_tests \
-//       --gtest_filter='*Softmax_Deadlock*'
-struct GPU_Softmax_Deadlock_FP32 : public testing::Test
+// Formerly DISABLED_ under the premise "WILL WEDGE THE GPU". Empirically this
+// does NOT hang: re-confirmed on gfx942/CDNA3 (wave64) and gfx1201/RDNA4
+// (wave32) -- the same wavefront-width families TheRock CI runs (gfx94X,
+// gfx125X) -- across all six candidate shapes below. Un-DISABLED and, since a
+// bare TEST_F's name ("GPU_Softmax_Deadlock_FP32.*") has no "Prefix/" and so
+// would NOT match test_categories.yaml's "*/GPU_Softmax*" glob (nor would
+// TheRock ever pass --gtest_also_run_disabled_tests), converted to a
+// Smoke-prefixed parameterized suite via INSTANTIATE_TEST_SUITE_P so its full
+// name becomes "Smoke/GPU_Softmax_Deadlock_FP32.CsrStreamPartialBlock/<N>" and
+// is selected by CI like the other Smoke/GPU_Softmax_* suites in this file.
+struct SoftmaxDeadlockCand
+{
+    std::vector<size_t> dims;
+    miopenSoftmaxMode_t mode;
+};
+
+struct GPU_Softmax_Deadlock_FP32 : public testing::TestWithParam<SoftmaxDeadlockCand>
 {
 };
 
-TEST_F(GPU_Softmax_Deadlock_FP32, DISABLED_CsrStreamPartialBlock)
+TEST_P(GPU_Softmax_Deadlock_FP32, CsrStreamPartialBlock)
 {
     auto&& handle = get_handle();
+    const auto& cand = GetParam();
 
-    // Each candidate is a CSR-Stream config (inner<local, BATCH_SIZE>1) whose
-    // grid is not a multiple of num_batch, so the last block mixes surviving
-    // lanes (which reach reduce_block's __syncthreads) with early-returning
-    // lanes / whole wavefronts.
-    struct Cand
-    {
-        std::vector<size_t> dims;
-        miopenSoftmaxMode_t mode;
-    };
-    const std::vector<Cand> cands = {
-        {{3, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // 15/16 waves return, 1 survives
-        {{7, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},
-        {{70, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},  // ~2 waves survive, rest return
-        {{100, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // multiple surviving waves
-        {{5, 16, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},
-        {{2, 8, 3, 3}, MIOPEN_SOFTMAX_MODE_CHANNEL}, // stride=H*W=9 path
-    };
+    auto input = tensor<float>{miopenTensorNCHW, cand.dims}.generate(tensor_elem_gen_integer{5});
+    auto output = tensor<float>{miopenTensorNCHW, cand.dims};
 
-    for(const auto& cand : cands)
-    {
-        auto input =
-            tensor<float>{miopenTensorNCHW, cand.dims}.generate(tensor_elem_gen_integer{5});
-        auto output = tensor<float>{miopenTensorNCHW, cand.dims};
+    const float alpha = 1.0f, beta = 0.0f;
+    auto in_dev  = handle.Write(input.data);
+    auto out_dev = handle.Write(output.data);
 
-        const float alpha = 1.0f, beta = 0.0f;
-        auto in_dev  = handle.Write(input.data);
-        auto out_dev = handle.Write(output.data);
-
-        miopen::SoftmaxForward(handle,
-                               &alpha,
-                               &beta,
-                               input.desc,
-                               in_dev.get(),
-                               output.desc,
-                               out_dev.get(),
-                               MIOPEN_SOFTMAX_ACCURATE,
-                               cand.mode);
-        handle.Finish(); // a hang would manifest here
-        auto res = handle.Read<float>(out_dev, output.data.size());
-        for(auto v : res)
-            EXPECT_TRUE(std::isfinite(v));
-    }
+    miopen::SoftmaxForward(handle,
+                           &alpha,
+                           &beta,
+                           input.desc,
+                           in_dev.get(),
+                           output.desc,
+                           out_dev.get(),
+                           MIOPEN_SOFTMAX_ACCURATE,
+                           cand.mode);
+    handle.Finish(); // a hang would manifest here
+    auto res = handle.Read<float>(out_dev, output.data.size());
+    for(auto v : res)
+        EXPECT_TRUE(std::isfinite(v));
 }
+
+// Each candidate is a CSR-Stream config (inner<local, BATCH_SIZE>1) whose
+// grid is not a multiple of num_batch, so the last block mixes surviving
+// lanes (which reach reduce_block's __syncthreads) with early-returning
+// lanes / whole wavefronts.
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_Softmax_Deadlock_FP32,
+    testing::Values(
+        SoftmaxDeadlockCand{{3, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // 15/16 waves return
+        SoftmaxDeadlockCand{{7, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},
+        SoftmaxDeadlockCand{{70, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // ~2 waves survive
+        SoftmaxDeadlockCand{{100, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // multiple survive
+        SoftmaxDeadlockCand{{5, 16, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},
+        SoftmaxDeadlockCand{{2, 8, 3, 3}, MIOPEN_SOFTMAX_MODE_CHANNEL})); // stride=H*W=9 path
