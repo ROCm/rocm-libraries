@@ -725,3 +725,9 @@ There is no `configs/sdpa_backward.yaml`, and that omission is intentional — n
 - `configs/sdpa.yaml` exists and drives **packer/unpacker** codegen only.
 - `projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp` is hand-maintained: it exposes its data fields as **public `std::optional<T>` members** (e.g. `dropout_probability`) rather than getter methods. The `data_fields[].frontend_getter` entries in `sdpa.yaml` therefore use bare member-name syntax to match the existing class.
 - `--mode frontend` regeneration is **not supported** for SDPA — running it would emit an Attributes class with getter methods that does not match the hand-written class or the existing packer.
+
+**MoE grouped matmul** — generated except for `MoeGroupedMatmulOperationDescriptor::finalize()`.
+The checked-in `finalize()` delegates routing validation to
+`MoeGroupedMatmulValidation.hpp` so the backend and CPU reference share one
+contract. Regenerating the backend descriptor emits the template's original
+routing switch; preserve the checked-in `finalize()` during integration.

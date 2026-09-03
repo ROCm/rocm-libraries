@@ -719,6 +719,8 @@ TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd128CausalBatch)
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
 {
+    SKIP_IF_NO_DEVICES();
+
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
         GTEST_SKIP();
@@ -734,6 +736,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
 
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
@@ -752,6 +756,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsGfx950)
     // Cannot synthesise a different device string from the test harness, so
     // this test only meaningfully runs on a non-gfx942 device. On gfx942 it
     // is skipped (the positive case is covered by IsApplicableSdpaBwdVariations).
+    SKIP_IF_NO_DEVICES();
+
     auto deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
     if(deviceString == "gfx942")
     {
@@ -768,6 +774,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsGfx950)
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
 
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
@@ -801,6 +809,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
 
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {

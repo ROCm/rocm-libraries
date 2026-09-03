@@ -19,6 +19,7 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
@@ -52,14 +53,15 @@ GraphWrapper wrap(const flatbuffers::FlatBufferBuilder& builder)
 
 // SymbolScope stand-ins: content-indifferent, and a pack's real functions are internal
 // to their native file and unreachable from here.
-bool acceptAnyGraph(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
-                    hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/)
+std::optional<hipdnn_plugin_sdk::ingestor::BoundTokens>
+    acceptAnyGraph(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/)
 {
-    return true;
+    return hipdnn_plugin_sdk::ingestor::BoundTokens{};
 }
 
-double scoreNothing(const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/,
-                    const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/)
+double scoreNothing(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
+                    const hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/,
+                    const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/)
 {
     return 0.0;
 }
@@ -85,7 +87,7 @@ TEST(TestKernelIngestorEngine, RegisterNativeIngestorSymbolsIsIdempotentAcrossRe
 
 TEST(TestKernelIngestorEngine, AFailedPackUnregistersItsOwnSymbolsAndLeavesOthersAlone)
 {
-    using hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry;
+    using hipdnn_plugin_sdk::ingestor::GraphMatchRegistry;
     using hipdnn_plugin_sdk::ingestor::ScoreRegistry;
     using hipdnn_plugin_sdk::ingestor::SymbolScope;
 
@@ -108,18 +110,18 @@ TEST(TestKernelIngestorEngine, AFailedPackUnregistersItsOwnSymbolsAndLeavesOther
         EXPECT_THROW(failing.add(contendedSymbol, &scoreNothing), std::runtime_error);
     }
 
-    EXPECT_THROW(GraphMatcherRegistry::resolve(firstSymbol), std::runtime_error);
+    EXPECT_THROW(GraphMatchRegistry::resolve(firstSymbol), std::runtime_error);
     // ...while the neighbour's survives: one pack failing must not affect others.
-    EXPECT_NO_THROW(GraphMatcherRegistry::resolve(neighbourSymbol));
+    EXPECT_NO_THROW(GraphMatchRegistry::resolve(neighbourSymbol));
     EXPECT_NO_THROW(ScoreRegistry::resolve(contendedSymbol));
 
-    GraphMatcherRegistry::unregisterSymbol(neighbourSymbol);
+    GraphMatchRegistry::unregisterSymbol(neighbourSymbol);
     ScoreRegistry::unregisterSymbol(contendedSymbol);
 }
 
 TEST(TestKernelIngestorEngine, ACommittedScopeKeepsItsSymbols)
 {
-    using hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry;
+    using hipdnn_plugin_sdk::ingestor::GraphMatchRegistry;
     using hipdnn_plugin_sdk::ingestor::SymbolScope;
 
     const std::string symbol = "test.committed.graph_match";
@@ -129,9 +131,9 @@ TEST(TestKernelIngestorEngine, ACommittedScopeKeepsItsSymbols)
         scope.commit();
     }
 
-    EXPECT_NO_THROW(GraphMatcherRegistry::resolve(symbol));
+    EXPECT_NO_THROW(GraphMatchRegistry::resolve(symbol));
 
-    GraphMatcherRegistry::unregisterSymbol(symbol);
+    GraphMatchRegistry::unregisterSymbol(symbol);
 }
 
 // makePointwiseAddEngine(): a working GenericEngine, reached through Container
@@ -183,8 +185,12 @@ TEST(TestKernelIngestorEngine, GetEngineDetailsReportsTheBlockSizeKnob)
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(details.ptr,
                                                                                      details.size);
-    ASSERT_EQ(wrapper.knobCount(), 1U);
+    // block_size plus the benchmarking knob every descriptor-backed engine advertises
+    // out-of-band; looked up by name, since that knob is prepended.
+    ASSERT_EQ(wrapper.knobCount(), 2U);
     EXPECT_EQ(wrapper.getKnobByName("block_size").knobId(), "block_size");
+    EXPECT_EQ(wrapper.getKnobByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME).knobId(),
+              hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
 }
 
 TEST(TestKernelIngestorEngine, GetMaxWorkspaceSizeReportsTheLargerBlocksRequirement)

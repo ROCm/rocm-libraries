@@ -137,7 +137,7 @@
 
                                     {"VAdd3U32",
              "VAdd3U32",
-             2,
+             3,
              true,
              "Vector Arithmetic",
              true,

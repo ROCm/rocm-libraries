@@ -34,7 +34,7 @@ import pickle
 import zlib
 from pathlib import Path
 from timeit import default_timer as timer
-from typing import Collection, List, NamedTuple, Optional, Union
+from typing import Collection, Dict, List, NamedTuple, Optional, Union
 
 from Tensile import SOURCE_PATH, LibraryIO
 from Tensile.Common import (
@@ -60,7 +60,7 @@ from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParame
 from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
-from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
+from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch, load_logic_schedule_name
 from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriterBase import (
@@ -111,6 +111,29 @@ def libraryDir(outputPath: Union[str, Path], arch: str) -> Path:
 def _baseArchs(archs: Collection[str]) -> List[str]:
     """Unique base archs (xnack/sramecc stripped), sorted for determinism."""
     return sorted({a.split(":")[0] for a in archs})
+
+
+def computeOutputArchNames(requestedArchs: Collection[str]) -> Dict[str, str]:
+    """Map each requested arch's ISA-derived base name -> the subtree its library
+    ships under. A stepping (gfx1250v0) collapses to its base key (gfx1250) but
+    ships under its own subtree; ordinary archs map to themselves (identity), so
+    their output stays byte-identical. Raises if two requested names share an ISA;
+    archs with no ISA are skipped.
+    """
+    names: Dict[str, str] = {}
+    for a in requestedArchs:
+        isa = gfxToIsa(a)
+        if isa is None:
+            continue
+        key = isaToGfx(isa)
+        value = baseArchName(a)
+        if key in names and names[key] != value:
+            raise ValueError(
+                f"cannot name one output subtree for {key}: requested both "
+                f"{names[key]!r} and {value!r}, which share an ISA"
+            )
+        names[key] = value
+    return names
 
 
 def tensileLibraryFile(outputPath: Union[str, Path], arch: str, library_format: str = "msgpack") -> Path:
@@ -582,14 +605,18 @@ def writeSolutionsAndKernelsTCL(
     cmdlineArchs: List[str],
     disableAsmComments: bool=False,
     compress: bool=True,
-    removeTemporaries: bool=True
+    removeTemporaries: bool=True,
+    outputArchNames: Optional[Dict[str, str]]=None,
 ):
+    # base arch -> output subtree (see computeOutputArchNames); identity/empty
+    # for ordinary builds.
+    outArchNames = outputArchNames or {}
     outputPath = Path(outputPath)
     # Builders fan out into <destRoot>/<base-arch>/ at the moment of write.
     # Pre-create the per-base subdirs so concurrent emit doesn't race mkdir.
     destRoot = ensurePath(libraryRoot(outputPath))
     for base in _baseArchs(cmdlineArchs):
-        ensurePath(libraryDir(outputPath, base))
+        ensurePath(libraryDir(outputPath, outArchNames.get(base, base)))
     buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())
     assemblyTmpPath = ensurePath(
         buildTmpPath / "assembly"
@@ -663,6 +690,7 @@ def writeSolutionsAndKernelsTCL(
         destRoot,
         assemblyTmpPath,
         compress,
+        outputArchNames=outArchNames,
     )
 
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
@@ -676,6 +704,7 @@ def writeSolutionsAndKernelsTCL(
         outputPath,
         srcKernelFile,
         cmdlineArchs,
+        outputArchNames=outArchNames,
     )
 
     return len(uniqueAsmKernels), uniqueAsmKernels, results
@@ -1016,6 +1045,12 @@ def run():
     targetIsas = [gfxToIsa(a) for a in archs]
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
     applyArchCapOverrides(isaInfoMap, archs)
+
+    # Computed from the requested names (before they collapse to ISA-derived
+    # names below) so a stepping routes into library/<stepping>/; identity for
+    # ordinary archs.
+    outArchNames = computeOutputArchNames(archs)
+
     assignGlobalParameters(arguments, isaInfoMap)
 
     # gfx1250 v0/v1 share ISA (12,5,0); pass the concrete stepping name so StinkyTofu picks the right cost table.
@@ -1050,10 +1085,33 @@ def run():
     else:
         printExit(f"Unrecognized LogicFormat: {arguments['LogicFormat']}")
 
+    # A revision shares its arch's ISA and compiler target, so its logic
+    # declares the arch's name and ScheduleName is the only field separating the
+    # revisions. Filter both directions -- a revision build must not fall back to
+    # the arch's logic, and an arch build must not ship a revision's. Driven by
+    # the revision table (covers the next revision automatically) and scoped to
+    # revisioned archs so other archs' logic is untouched.
+    revisionedArchs = set(ARCH_COMPILER_TARGET.values())
+    requestedRevision = {
+        ARCH_COMPILER_TARGET[a]: a
+        for a in map(baseArchName, archs)
+        if a in ARCH_COMPILER_TARGET
+    }
+    revisionedLogic = {}
+    droppedByRevision = {}
+
     def validLogicFile(p: Path):
-        return p.suffix == logicExtFormat and (
-            "all" in archs or archMatch(load_logic_gfx_arch(p), archs)
-        )
+        if p.suffix != logicExtFormat:
+            return False
+        logicArch = load_logic_gfx_arch(p)
+        if logicArch in revisionedArchs:
+            scheduleName = load_logic_schedule_name(p)
+            fileRevision = scheduleName if scheduleName in ARCH_COMPILER_TARGET else None
+            if fileRevision != requestedRevision.get(logicArch):
+                droppedByRevision[logicArch] = droppedByRevision.get(logicArch, 0) + 1
+                return False
+            revisionedLogic[str(p)] = logicArch
+        return "all" in archs or archMatch(logicArch, archs)
 
     globPattern = os.path.join(
         arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}"
@@ -1079,6 +1137,37 @@ def run():
         print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching requested predicates")
 
     print1(f"# LibraryLogicFiles: {len(logicFiles)}")
+
+    # The file total above cannot show a revision build that discarded the
+    # arch's whole tree, so report per-arch counts -- only for archs this build
+    # makes, or the shared logic tree would add a line to every build.
+    selectedByArch = {}
+    for f in logicFiles:
+        arch = revisionedLogic.get(str(Path(f)))
+        if arch:
+            selectedByArch[arch] = selectedByArch.get(arch, 0) + 1
+    for logicArch in sorted(set(requestedRevision) | set(selectedByArch)):
+        revisionName = requestedRevision.get(logicArch)
+        # Name it as the build's flags do ("v0"/"v1"), so one grep finds
+        # this line and the invoke and CMake ones.
+        revision = revisionName.removeprefix(logicArch) if revisionName else "v1"
+        selected = selectedByArch.get(logicArch, 0)
+        dropped = droppedByRevision.get(logicArch, 0)
+        print1(
+            f"# {logicArch} ASIC revision: {revision}"
+            f" ({selected} selected, {dropped} dropped as another revision's)"
+        )
+        # A revision replaces the arch's tuning rather than adding to it, so an
+        # uncovered problem type has no solution and fails at runtime with no
+        # useful message. A v1 build dropping revision logic is correct,
+        # so warn only a revision build whose coverage is partial or empty.
+        if logicArch in requestedRevision and (not selected or dropped):
+            printWarning(
+                f"{revision} tuning replaces {logicArch}'s rather than adding to"
+                f" it ({selected} selected, {dropped} dropped); problem types with"
+                f" no {revision} logic have no solution and fail at runtime. Build"
+                f" {logicArch} without a revision for v1."
+            )
 
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)
@@ -1113,6 +1202,7 @@ def run():
         arguments["DisableAsmComments"],
         compress=arguments["UseCompression"],
         removeTemporaries=not arguments["KeepBuildTmp"],
+        outputArchNames=outArchNames,
     )
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
@@ -1126,7 +1216,7 @@ def run():
     # already created them above). Each per-arch write below routes to its own
     # libraryDir(outputPath, archName).
     for base in _baseArchs(archs):
-        ensurePath(libraryDir(outputPath, base))
+        ensurePath(libraryDir(outputPath, outArchNames.get(base, base)))
     splitGSU = False
 
     start_pki = timer()
@@ -1149,13 +1239,14 @@ def run():
     # suffix keeps each arch's Mapping complete while letting builds produce
     # non-colliding mapping artifacts that survive overlay-style installs.
     for archName in archs:
+        # Only the directory is revisioned; the filename keeps the ISA token.
         archMapping = {
             idx: name
             for idx, name in libraryMapping.items()
             if name.endswith("_" + archName)
         }
         if archMapping:
-            archDir = libraryDir(outputPath, archName)
+            archDir = libraryDir(outputPath, outArchNames.get(archName, archName))
             archMappingFile = os.path.join(
                 archDir, "TensileLiteLibrary_lazy_" + archName + "_Mapping"
             )
@@ -1164,7 +1255,9 @@ def run():
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
         if archName in archs:
-            archDir = libraryDir(outputPath, archName)
+            # Only the directory is revisioned; the master keeps the ISA token so
+            # the runtime finds the same name in either subtree.
+            archDir = libraryDir(outputPath, outArchNames.get(archName, archName))
             def writeMsl(name, lib, archDir=archDir):
                 filename = os.path.join(archDir, name)
                 lib.applyNaming(splitGSU)

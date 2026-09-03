@@ -138,6 +138,11 @@ typedef struct rocke_implicit_gemm_conv_spec
     bool async_dma; /* default false */
     bool unroll_k; /* default false */
 
+    /* wavelet pipeline: number of dedicated load waves appended to the math
+     * waves. launch_block_size = block_size + num_load_waves * wave_size.
+     * Only used (and required > 0) when pipeline == "wavelet". Default 2. */
+    int num_load_waves; /* default 2 */
+
     bool has_lds_k_pad; /* false => Python None */
     int lds_k_pad;
     /* Optional LdsLayout override (LdsLayout C port is a peer). NULL => Python
@@ -193,6 +198,10 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void);
 
 /* spec.block_size: warp_m * warp_n * wave_size. */
 int rocke_implicit_gemm_conv_spec_block_size(const rocke_implicit_gemm_conv_spec_t* s);
+
+/* spec.launch_block_size: block_size + num_load_waves * wave_size.
+ * Equals block_size for all non-wavelet pipelines (num_load_waves == 0). */
+int rocke_implicit_gemm_conv_spec_launch_block_size(const rocke_implicit_gemm_conv_spec_t* s);
 
 /* spec.k_atoms_per_tile_k: tile_k / warp_tile_k. */
 int rocke_implicit_gemm_conv_spec_k_atoms_per_tile_k(const rocke_implicit_gemm_conv_spec_t* s);

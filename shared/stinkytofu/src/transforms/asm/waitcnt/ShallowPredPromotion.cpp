@@ -73,8 +73,8 @@ void setCounter(WaitCountSpec& spec, CounterKind c, int w) {
         case CK_DS:
             spec.dsCount = w;
             break;
-        case CK_Buffer:
-            spec.bufferCount = w;
+        case CK_Load:
+            spec.loadCount = w;
             break;
         case CK_KM:
             spec.kmCount = w;
@@ -94,8 +94,8 @@ int getCounter(const WaitCountSpec& spec, CounterKind c) {
     switch (c) {
         case CK_DS:
             return spec.dsCount;
-        case CK_Buffer:
-            return spec.bufferCount;
+        case CK_Load:
+            return spec.loadCount;
         case CK_KM:
             return spec.kmCount;
         case CK_Tensor:
@@ -119,7 +119,7 @@ int perPredRequiredWait(const DataflowResult& dfr, BasicBlock* pred, CounterKind
         for (StinkyInstruction* d : deps) {
             int n = q.countFrom(d);
             if (n > 0) {
-                int w = n - 1;
+                int w = waitToDrain(c, n);
                 if (best < 0 || w < best) best = w;  // strictest dep on this path
             }
         }

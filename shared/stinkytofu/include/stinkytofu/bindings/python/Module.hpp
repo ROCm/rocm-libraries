@@ -83,6 +83,7 @@
     X(EnableESM2TrackValuVsrc, bool)              \
     X(VgprMsbMode, int)                           \
     X(RequiresXCntForVolatileVMEM, bool)          \
+    X(EnableXnackReplay, bool)                    \
     X(EnableSwInstructionPrefetchRelStatic, bool) \
     X(EnableSwInstructionPrefetchAbs, bool)       \
     X(SwInstructionPrefetchAbsBaseSgpr, int)      \
@@ -97,6 +98,7 @@
     X(DsReadDrainLatency, int)                    \
     X(DsReadThrottleLatency, int)                 \
     X(DsReadPerWmma, int)                         \
+    X(TensorLoadWmmaSpace, int)                   \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \

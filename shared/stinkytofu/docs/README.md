@@ -19,6 +19,7 @@
 - [Adding Peephole Patterns](developer/adding-peephole-patterns.md) -- Declarative pattern-based optimizations
 - [Adding Intrinsics](developer/adding-intrinsics.md) -- Define reusable high-level operations
 - [Pattern Grammar Reference](developer/pattern-grammar.md) -- Complete syntax for the pattern language
+- [Wait-Aware Schedule Repair Pass](developer/wait-aware-schedule-repair-pass.md) -- Reopen WMMA issue windows after final wait insertion, leaving wait immediates untouched
 
 ## [Known Issues](known-issues.md)
 

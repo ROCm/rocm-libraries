@@ -58,6 +58,15 @@ endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 
+set(RANDOMIZATION_LIBRARY "rocrand"  CACHE STRING "Name of the randomization library")
+
+# Derive USE_ROCRAND as a boolean based on the RANDOMIZATION_LIBRARY value
+if(RANDOMIZATION_LIBRARY STREQUAL "rocrand")
+    set(USE_ROCRAND TRUE)
+else()
+    set(USE_ROCRAND FALSE)
+endif()
+
 include(GNUInstallDirs)
 include(ClangTidy)
 include(ClangCheck)
@@ -106,6 +115,12 @@ endif()
 
 find_package(Threads REQUIRED)
 
+find_package(rocrand QUIET)
+if(USE_ROCRAND AND NOT TARGET roc::rocrand)
+    message(WARNING "rocRAND not found, falling back to CPU random number generation")
+    set(USE_ROCRAND OFF)
+endif()
+
 include(Dependencies)
 fetch_gtest_dependency()
 
@@ -117,6 +132,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # under integration-test-bundles/, re-run cmake to pick up the changes.
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration-test-bundles/"
      DESTINATION "${CMAKE_BINARY_DIR}/lib/integration-test-bundles")
+
 if(Python3_FOUND)
     add_test(
         NAME hipdnn_bundle_verifier_python_tests
@@ -139,6 +155,9 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    src/harness/bundle/SupportClaimReport.cpp
+    src/harness/bundle/SupportClaims.cpp
+    src/harness/bundle/SupportVerdict.cpp
     src/harness/input-init/FillInputs.cpp
 )
 

@@ -273,7 +273,7 @@ def test_halfplr_pap_rejects_on_other_streamk_modes(
         AssertSummationElementMultiple=256,
     )
     assert sol.get("Valid") is False
-    assert "PrefetchAcrossPersistent is currently supported only with StreamK=3" in out
+    assert "PrefetchAcrossPersistent is currently supported only with StreamK in [3, 4, 5]" in out
 
 
 def test_halfplr_pap_is_cleared_without_streamk(

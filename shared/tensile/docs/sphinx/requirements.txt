@@ -196,7 +196,7 @@ requests==2.33.0
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core==1.39.0
+rocm-docs-core==1.40.0
     # via -r requirements.in
 rpds-py==0.30.0
     # via
@@ -291,7 +291,7 @@ waitress==3.0.2
     # via webtest
 wcwidth==0.2.14
     # via prompt-toolkit
-webob==1.8.10
+webob==1.8.11
     # via webtest
 webtest==3.0.7
     # via autodoc

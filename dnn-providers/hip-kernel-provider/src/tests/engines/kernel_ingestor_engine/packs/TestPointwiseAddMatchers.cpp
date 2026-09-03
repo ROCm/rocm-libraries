@@ -31,8 +31,7 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 bool matches(const MatchContext& context)
 {
-    BoundTokens bound;
-    return matchesGraph(POINTWISE_ADD, context, bound);
+    return matchesGraph(POINTWISE_ADD, context).has_value();
 }
 
 // Graph-scoped matcher: acceptances
@@ -222,31 +221,21 @@ INSTANTIATE_TEST_SUITE_P(
 // Graph-scoped operation matchers: the one fact separating this engine's packs
 // ---------------------------------------------------------------------------
 
-/// The shared matcher deliberately admits any operation; these are what stop a
-/// multiplication reaching an add kernel. Both directions are asserted because a
-/// matcher that always returned true would satisfy only one of the two claims.
+/// The engine's graph match deliberately admits any operation, so these are what stop a
+/// multiplication reaching an add kernel. Asserted for both packs against both graphs,
+/// because "each accepts its own" and "each refuses the other's" are separate claims and
+/// a criterion that returned true unconditionally would satisfy only the first.
 TEST(TestPointwiseOperationMatchers, EachPackAdmitsOnlyItsOwnOperation)
 {
     const GraphFixture add(buildPointwiseGraph(data_objects::PointwiseMode::ADD));
     const GraphFixture mul(buildPointwiseGraph(data_objects::PointwiseMode::MUL));
 
-    BoundTokens bound;
+    const BoundTokens bound;
     EXPECT_TRUE(matchesOperation(POINTWISE_ADD, add.context(), bound));
     EXPECT_FALSE(matchesOperation(POINTWISE_ADD, mul.context(), bound));
 
     EXPECT_TRUE(matchesOperation(POINTWISE_MUL, mul.context(), bound));
     EXPECT_FALSE(matchesOperation(POINTWISE_MUL, add.context(), bound));
-}
-
-/// The shared matcher has already bound every token the dispatch reads; a second writer
-/// of the same token would be a silent last-one-wins.
-TEST(TestPointwiseOperationMatchers, BindNothingOfTheirOwn)
-{
-    const GraphFixture add(buildPointwiseGraph(data_objects::PointwiseMode::ADD));
-
-    BoundTokens bound;
-    ASSERT_TRUE(matchesOperation(POINTWISE_ADD, add.context(), bound));
-    EXPECT_TRUE(bound.empty());
 }
 
 /// The shared half of the split, stated as its own claim: the expensive checks do not
@@ -256,9 +245,8 @@ TEST(TestPointwiseGraphMatcher, AdmitsEveryOperationItsPacksBetweenThemServe)
     const GraphFixture add(buildPointwiseGraph(data_objects::PointwiseMode::ADD));
     const GraphFixture mul(buildPointwiseGraph(data_objects::PointwiseMode::MUL));
 
-    BoundTokens bound;
-    EXPECT_TRUE(matchesGraph(POINTWISE_ADD, add.context(), bound));
-    EXPECT_TRUE(matchesGraph(POINTWISE_ADD, mul.context(), bound));
+    EXPECT_TRUE(matchesGraph(POINTWISE_ADD, add.context()).has_value());
+    EXPECT_TRUE(matchesGraph(POINTWISE_ADD, mul.context()).has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -302,23 +290,23 @@ TEST(TestPointwiseAddScore, PrefersTheLargerBlockSize)
 {
     const GraphFixture fixture(buildPointwiseGraph());
 
-    EXPECT_GT(scoreKernel(POINTWISE_ADD, makeKernel(256, "FLOAT"), fixture.context()),
-              scoreKernel(POINTWISE_ADD, makeKernel(64, "FLOAT"), fixture.context()));
+    EXPECT_GT(scoreKernel(POINTWISE_ADD, fixture.context(), makeKernel(256, "FLOAT")),
+              scoreKernel(POINTWISE_ADD, fixture.context(), makeKernel(64, "FLOAT")));
 }
 
-TEST(TestPointwiseAddBinding, TheMatcherBindsTheOperandUidsItResolved)
+TEST(TestPointwiseAddBinding, TheGraphMatchBindsTheOperandUidsItResolved)
 {
     const GraphFixture fixture(buildPointwiseGraph());
 
-    BoundTokens bound;
-    ASSERT_TRUE(matchesGraph(POINTWISE_ADD, fixture.context(), bound));
+    const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
 
     // Asserted by token name: the contract a descriptor's dispatch formulas reference.
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_ADD.inputAToken),
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, POINTWISE_ADD.inputAToken),
               INPUT_A_UID);
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_ADD.inputBToken),
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, POINTWISE_ADD.inputBToken),
               INPUT_B_UID);
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_ADD.outputToken),
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, POINTWISE_ADD.outputToken),
               OUTPUT_UID);
 }
 
@@ -326,11 +314,9 @@ TEST(TestPointwiseAddBinding, ARejectedGraphBindsNothingToDispatchFrom)
 {
     const GraphFixture fixture(buildTwoNodePointwiseGraph());
 
-    BoundTokens bound;
-    ASSERT_FALSE(matchesGraph(POINTWISE_ADD, fixture.context(), bound));
-
-    // A refused graph must leave nothing bound, or a later pack could read stale operands.
-    EXPECT_TRUE(bound.empty());
+    // A refused graph yields no token map at all, so a later pack has nothing stale to
+    // read.
+    EXPECT_FALSE(matchesGraph(POINTWISE_ADD, fixture.context()).has_value());
 }
 
 } // namespace

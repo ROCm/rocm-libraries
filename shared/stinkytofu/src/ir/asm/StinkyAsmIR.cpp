@@ -88,7 +88,7 @@ void StinkyInstruction::resolveMatrixFmtOverrides() {
 //----------------------------------------------------------------------
 StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label, uint16_t alignment) {
     static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
     StinkyInstruction* labelInst = create(&labelMCID);
     labelInst->addModifier<LabelData>(LabelData{label, alignment});
@@ -97,7 +97,7 @@ StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label, uint16_t 
 
 StinkyInstruction* AsmIRBuilder::createPhi(RegType type, unsigned regIdx, IRBase* insertPt) {
     static const HwInstDesc phiMCID{
-        GFX::PHI, GFX::PHI, 0, 0, 0, "PHI", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::PHI, GFX::PHI, 0, 0, 0, 0, "PHI", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
     const size_t numPreds = bb->getPredecessors().size();
 

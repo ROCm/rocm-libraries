@@ -75,13 +75,14 @@ def _checkCache(cacheDir, cacheKey):
     return hsacoFiles
 
 
-def _populateCache(cacheDir, cacheKey, hsacoFiles):
+def _populateCache(cacheDir, cacheKey, hsacoFiles, storedArchNames=None):
     """Atomically populate a cache entry. Safe under concurrent writes.
 
-    hsacoFiles are full destination paths whose parent directory name is the
-    per-base arch subdir. The cache mirrors that structure as
-    <cacheDir>/<key>/<base-arch>/<name>.
+    storedArchNames maps each file's parent subtree back to the base arch the
+    entry is keyed on (the key is the compiler target, so a stepping and its base
+    share an entry). Empty/identity for ordinary builds.
     """
+    storedNames = storedArchNames or {}
     cacheDir = Path(cacheDir)
     finalDir = cacheDir / cacheKey
     if finalDir.exists():
@@ -91,7 +92,7 @@ def _populateCache(cacheDir, cacheKey, hsacoFiles):
     tmpDir.mkdir(parents=True, exist_ok=True)
     for f in hsacoFiles:
         src = Path(f)
-        archSubdir = tmpDir / src.parent.name
+        archSubdir = tmpDir / storedNames.get(src.parent.name, src.parent.name)
         archSubdir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, archSubdir / src.name)
 
@@ -137,16 +138,15 @@ class HelperKernelCache:
         self._cacheKey = None
         _evictStale(self.dir, self._MAX_AGE_DAYS)
 
-    def restore(self, kernelPath, includeDir, cmdlineArchs, compiler, destRoot):
-        """Try to restore cached .hsaco files into per-base subdirs under destRoot.
+    def restore(self, kernelPath, includeDir, cmdlineArchs, compiler, destRoot, outputArchNames=None):
+        """Restore cached .hsaco files (organized as <key>/<base-arch>/<*.hsaco>)
+        into <destRoot>/<subtree>/<name>. outputArchNames maps each base-arch
+        subdir to the subtree it ships under, so a stepping lands in its own tree;
+        identity/empty for ordinary builds.
 
-        Cache entries are organized as <key>/<base-arch>/<*.hsaco>; restore copies
-        each file to <destRoot>/<base-arch>/<name>, recreating subdirs as needed.
-
-        Returns (hit: bool, coPaths: List[str]).
-        On hit, coPaths contains the copied file paths. On miss, coPaths is empty.
-        No-op (returns False, []) if cache is disabled.
+        Returns (hit, coPaths): copied paths on hit, [] on miss or when disabled.
         """
+        outArchNames = outputArchNames or {}
         if not self.enabled:
             return False, []
 
@@ -158,7 +158,7 @@ class HelperKernelCache:
             try:
                 os.utime(Path(self.dir) / self._cacheKey)
                 for f in cachedFiles:
-                    archSubdir = Path(destRoot) / f.parent.name
+                    archSubdir = Path(destRoot) / outArchNames.get(f.parent.name, f.parent.name)
                     archSubdir.mkdir(parents=True, exist_ok=True)
                     dst = archSubdir / f.name
                     shutil.copy2(f, dst)
@@ -172,9 +172,17 @@ class HelperKernelCache:
         print1(f"# Helper kernel cache MISS ({self._cacheKey[:12]}...)")
         return False, []
 
-    def store(self, coPaths):
-        """Populate cache after a successful build. No-op if disabled or no key."""
+    def store(self, coPaths, outputArchNames=None):
+        """Populate cache after a successful build. No-op if disabled or no key.
+
+        outputArchNames is restore()'s base -> subtree map, inverted here to store
+        under the base arch (the inverse is well defined: two steppings sharing an
+        ISA is rejected by the capability guard).
+        """
         if not self.enabled or not self._cacheKey:
             return
+        storedArchNames = {out: base for base, out in (outputArchNames or {}).items()}
         self.dir.mkdir(parents=True, exist_ok=True)
-        _populateCache(self.dir, self._cacheKey, [Path(p) for p in coPaths])
+        _populateCache(
+            self.dir, self._cacheKey, [Path(p) for p in coPaths], storedArchNames
+        )

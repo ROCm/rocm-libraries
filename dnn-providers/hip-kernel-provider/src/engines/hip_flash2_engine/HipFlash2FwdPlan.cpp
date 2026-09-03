@@ -105,20 +105,22 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
     // -- 3. Grid dimensions -------------------------------?
 
     // -- 3. Grid dimensions ----------------------------------------------------
-    // V7 uses BQ=64 tile -- one CTA per (tile_q, head, batch)
-    constexpr unsigned int K_BQ = 64;
-    const unsigned int gridX = (static_cast<unsigned>(_params.seq_len_q) + K_BQ - 1u) / K_BQ;
+    // Tile size is a property of the SELECTED variant, not a constant.
+    const unsigned int qPerCta = _params.qPerCta;
+    const unsigned int gridX = (static_cast<unsigned>(_params.seq_len_q) + qPerCta - 1u) / qPerCta;
     // Finding 3 fix: kernel decodes blockIdx.y=batch, blockIdx.z=head_q
     const unsigned int gridY = static_cast<unsigned>(_params.batch);
     const unsigned int gridZ = static_cast<unsigned>(_params.num_heads_q);
 
-    // Block dim: kernel compiled __launch_bounds__(64,2) -- must match
-    constexpr unsigned int K_BLOCK_DIM = 64;
+    // Block dim must match the selected variant's __launch_bounds__. A
+    // mismatch is not benign: too few threads silently computes wrong results,
+    // too many fails with hipErrorLaunchFailure (719).
+    const unsigned int blockDim = _params.blockDim;
 
     // -- 4. Dispatch -----------------------------------------------------------
     // I5: propagate launch failure so callers see a hard error.
     const bool ok = launchFlash2Kernel(
-        _kernel.function(), args, gridX, gridY, gridZ, K_BLOCK_DIM, handle.getStream());
+        _kernel.function(), args, gridX, gridY, gridZ, blockDim, handle.getStream());
     if(!ok)
     {
         HIPDNN_PLUGIN_LOG_ERROR("HipFlash2FwdPlan::execute -- kernel launch failed");

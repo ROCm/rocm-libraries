@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 
 #include <string>
 #include <vector>
+
+inline constexpr const char* ARCH_SPIRV = "amdgcnspirv";
 
 // compile source to a code object, in the current process.
 std::vector<char> compile_inprocess(const std::string& kernel_src, const std::string& gpu_arch);

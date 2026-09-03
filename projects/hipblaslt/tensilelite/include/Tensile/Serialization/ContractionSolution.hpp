@@ -68,6 +68,8 @@ namespace TensileLite
                 iot::mapOptional(io, "linearModel", s.linearModel);
 
                 iot::mapRequired(io, "sizeMapping", s.sizeMapping);
+                if(!iot::outputting(io) && s.customKernel.name.empty())
+                    s.customKernel.name = s.sizeMapping.customKernelName;
                 iot::mapRequired(io, "internalArgsSupport", s.internalArgsSupport);
                 iot::mapRequired(io, "problemType", s.problemType);
             }

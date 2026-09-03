@@ -32,6 +32,23 @@ import os
 def isCustomKernelConfig(config):
     return "CustomKernelName" in config and config["CustomKernelName"]
 
+def supportsUserSgprKernargPreload(rocmVersion):
+    """Return whether a ROCm version passes TensileLite's preload gate.
+
+    AMD's ROCm 6.0 compiler branch added descriptor and codegen support in
+    September 2023 for feature-enabled targets. HIP recorded 6.0.32650 on
+    September 29, and hipBLASLt adopted it as its 6.x floor on October 6.
+    That floor is historical compatibility policy, not a complete capability
+    test: target ISA, assembler, and firmware also matter.
+
+    HIP's patch field is a build number, not globally monotonic. Official
+    ROCm 7 releases can report a patch below 32650, so later major releases
+    remain eligible. A locally built ROCm 6.x toolchain reporting a low build
+    (for example, 6.4.0) remains ambiguous and is treated as unsupported.
+    """
+    return rocmVersion.major > 6 or (
+        rocmVersion.major == 6 and rocmVersion.patch >= 32650
+    )
 def getCustomKernelFilepath(name, directory=CUSTOM_KERNEL_PATH):
     return os.path.join(directory, (name + ".s"))
 

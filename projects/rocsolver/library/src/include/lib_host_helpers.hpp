@@ -35,6 +35,8 @@
 #include <hip/hip_runtime.h>
 #include <rocblas/rocblas.h>
 
+#include "rocblas_utility.hpp"
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 /*
@@ -64,6 +66,13 @@ __device__ __host__ inline I1 ceil(const I1 n, const I2 nb)
 
 template <typename T>
 T const* cast2constType(T* array)
+{
+    return array;
+}
+
+// keep existing const
+template <typename T>
+T const* cast2constType(T const* array)
 {
     return array;
 }

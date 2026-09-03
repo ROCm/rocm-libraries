@@ -31,6 +31,8 @@ import threading
 import time
 import warnings
 
+import rocisa
+
 from pathlib import Path
 from typing import FrozenSet, List, Dict, NamedTuple, Tuple
 
@@ -67,6 +69,7 @@ def _runChecks(
     check: Check,
     known_bugs: FrozenSet[KnownBugKey],
     files: List[Path],
+    rocIsaData=None,
 ) -> Tuple[int, int, int, int, int]:
     """
     Run checks on the given logic files.
@@ -76,6 +79,8 @@ def _runChecks(
         isaInfoMap: Map of IsaVersion to IsaInfo.
         check: Object containing flags for checking.
         files: List of logic files to check.
+        rocIsaData: Capabilities snapshot from the parent's rocIsa singleton, or
+            None to leave this process's singleton as it is.
 
     Returns:
         Tuple of (keep, total, known_bug_skips, chip_id_failures, stale_known_bugs)
@@ -87,6 +92,13 @@ def _runChecks(
         whose solution now passes validation (a landed fix; the entry can be
         removed).
     """
+    # ParallelMap2 hands a worker globalParameters and nothing else, so the rocIsa
+    # singleton in this process has never been init'd and every capability lookup
+    # would read a default. Validators that ask the assembly backend what a solution
+    # emits need the parent's capabilities to answer the same way the emitter will.
+    if rocIsaData is not None:
+        rocisa.rocIsa.getInstance().setData(rocIsaData)
+
     keep, total, known_bug_skips, chip_id_failures = 0, 0, 0, 0
     stale_known_bugs = 0
     for file in files:
@@ -263,7 +275,10 @@ def main():
         files[i : i + batchSize] for i in range(0, len(files), batchSize)
     )
 
-    fn = functools.partial(_runChecks, logicPath, isaInfoMap, check, known_bugs)
+    fn = functools.partial(
+        _runChecks, logicPath, isaInfoMap, check, known_bugs,
+        rocIsaData=rocisa.rocIsa.getInstance().getData(),
+    )
     keep, total = 0, 0
     known_bug_skips = 0
     chip_id_failures = 0

@@ -259,9 +259,6 @@ globalParameters["DumpTensors"] = (
 # If PrintMax* is greater than the dimension, the middle elements will be replaced with "..."
 
 
-# device selection
-globalParameters["Platform"] = 0  # select opencl platform
-
 # shouldn't need to change
 globalParameters["ClientExecutionLockPath"] = (
     None  # Path for a file lock to ensure only one client is executed at once.  filelock module is required if this is enabled.
@@ -456,12 +453,12 @@ defaultBenchmarkCommonParameters = [
     {"LdsPadMXSA": [ -1 ] },
     {"LdsPadB": [-1]},
     {"LdsPadMXSB": [ -1 ] },
-    {"LdsPadMetadata": [0]},
+    {"LdsPadMetadata": [-1]},
     {"LdsBlockSizePerPadA": [-1]},
     {"LdsBlockSizePerPadMXSA": [ -1 ] },
     {"LdsBlockSizePerPadB": [-1]},
     {"LdsBlockSizePerPadMXSB": [ -1 ] },
-    {"LdsBlockSizePerPadMetadata": [0]},
+    {"LdsBlockSizePerPadMetadata": [-1]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
     {"MaxOccupancy": [40]},
@@ -605,6 +602,7 @@ defaultBenchmarkCommonParameters = [
     {"SwapGlobalReadOrder": [0]},
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
+    {"TDMPlusLdsBuf": [0]},
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
@@ -837,6 +835,14 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
 ]
 
 
+def validateRuntimeLanguage(runtimeLanguage):
+    if runtimeLanguage is not None and runtimeLanguage not in {"HIP", "HSA"}:
+        printExit(
+            f"Unsupported RuntimeLanguage {runtimeLanguage!r}. "
+            "Supported runtime languages are HIP and HSA."
+        )
+
+
 def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
     Assign Global Parameters
@@ -845,6 +851,8 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
 
     global globalParameters
+
+    validateRuntimeLanguage(config.get("RuntimeLanguage"))
 
     # Minimum Required Version
     if "MinimumRequiredVersion" in config:

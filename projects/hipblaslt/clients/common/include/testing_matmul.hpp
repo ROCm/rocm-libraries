@@ -2413,6 +2413,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                     &dyn,
                     sizeof(dyn)));
             }
+            int32_t uso = hipblaslt_bench_options::uniform_summation_order();
+            if(uso >= 0)
+            {
+                CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                    matmul[0][i],
+                    HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                    &uso,
+                    sizeof(uso)));
+            }
         }
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
@@ -3774,6 +3783,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                         HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                         &dyn,
                         sizeof(dyn)));
+                }
+                int32_t uso = hipblaslt_bench_options::uniform_summation_order();
+                if(uso >= 0)
+                {
+                    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                        matmul[b][i],
+                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                        &uso,
+                        sizeof(uso)));
                 }
             }
 

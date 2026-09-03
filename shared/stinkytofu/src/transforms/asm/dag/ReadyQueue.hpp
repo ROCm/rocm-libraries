@@ -27,6 +27,7 @@
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
 #include <queue>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/core/Function.hpp"
@@ -34,8 +35,8 @@
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 
-namespace {
-using namespace stinkytofu;
+namespace stinkytofu {
+namespace dag {
 
 // REMOVED: Local buildUseDefChain() has been replaced by stinkytofu::buildUseDefChain()
 // from BuildDefUseChain.hpp. All callers now use the shared implementation.
@@ -90,9 +91,20 @@ struct DAGNode {
     // gate short of real cycles to cover the gap with, falling back to a simulated
     // wait that has no matching instruction.
     int hazardDeadline = INT_MAX;
+    // --- Cluster-barrier SCC (ClusterBarrier kernels; see cluster-barrier.md) ---
+    bool handshakeBarrier = false;
+    unsigned sccChainId = 0;
+    unsigned sccChainReaders = 0;  // def node only
+    bool sccChainDef = false;
+    // kRule3CrossLoop false: INT_MIN. true: live-out SCC def lead floor.
+    int earliestClock = INT_MIN;
 
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
 };
+
+// A scheduler-only hard ordering constraint: first must issue before second.
+// It is kept separate from the register-dependency DAG.
+using HardSchedulingConstraint = std::pair<StinkyInstruction*, StinkyInstruction*>;
 
 // comparator: return true if a should come *after* b.
 struct CompareByDAGid {
@@ -100,18 +112,6 @@ struct CompareByDAGid {
         return a->id < b->id;  // smaller id has higher priority
     }
 };
-
-using DAGNodeList = std::vector<DAGNode>;
-
-static void addEdgeById(DAGNode* from, DAGNode* to,
-                        std::vector<std::unordered_set<unsigned>>& dagGraph) {
-    // Don't add duplicate edges, or self-loops.
-    if (from->id == to->id || dagGraph[from->id].count(to->id) > 0) return;
-
-    // Add edge from 'from' to 'to'
-    dagGraph[from->id].insert(to->id);
-    to->inDegree++;
-}
 
 // Cross-BB scheduling state: outstanding memory op latencies carried
 // from one BB to the next via CFG predecessor lookup.
@@ -149,6 +149,13 @@ class ReadyQueue {
         return passCtx_;
     }
 
+    // Mirrors ModuleOptions::ClusterBarrier (wired in Gfx1250Backend as
+    // PassFeatureConfig::dagFeatures::clusterBarrier). When false, the DAG
+    // scheduler follows the pre-cluster-barrier path.
+    bool clusterBarrierEnabled() const {
+        return passCtx_.getPassFeatureConfig().dagFeatures.clusterBarrier;
+    }
+
     virtual ~ReadyQueue() = default;
 
     // Pick one node from the ready queue based on some strategy.
@@ -172,10 +179,12 @@ class ReadyQueue {
     // Hook called before scheduling each region. \p blockBegin is the start of the basic block
     // (prefix [blockBegin, regionStart) is visible for cross-region / preloop state).
     virtual void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
-                              IRList::iterator blockBegin) {
+                              IRList::iterator blockBegin,
+                              std::vector<HardSchedulingConstraint>& hardConstraints) {
         (void)regionStart;
         (void)regionEnd;
         (void)blockBegin;
+        (void)hardConstraints;
     }
 
     // Hook called after a basic block has been fully scheduled. When the queue is
@@ -279,7 +288,7 @@ class ReadyQueueByDAGid : public ReadyQueue {
     }
 };
 
-DAGNode* ReadyQueueByDAGid::pickOne() {
+inline DAGNode* ReadyQueueByDAGid::pickOne() {
     assert(!queue.empty() && "Ready queue must not be empty");
     DAGNode* node = queue.top();
     queue.pop();
@@ -299,4 +308,5 @@ struct WMMAIssueConfig {
     int issueCycles = 1;  // single-WMMA issue cycles
     int issuedCount = 0;  // WMMA count in region (for barrier threshold math)
 };
-}  // namespace
+}  // namespace dag
+}  // namespace stinkytofu

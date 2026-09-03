@@ -612,9 +612,16 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.sched_barrier",
     "tile.sched_group_barrier",
 
+    /* tile.* exec-mask (wavelet pipeline, MFMA path) */
+    "tile.exec_and_saveexec",
+    "tile.exec_xor",
+    "tile.exec_or_saveexec",
+    "tile.exec_or",
+
     /* scf.* / cf.* */
     "scf.for",
     "scf.if",
+    "scf.if_else",
     "scf.yield",
     "cf.return"};
 
@@ -838,11 +845,18 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* sched_barrier        */ false,
     /* sched_group_barrier  */ false,
 
+    /* tile.* exec-mask (effectful: modify SGPR exec register) */
+    /* exec_and_saveexec  */ false,
+    /* exec_xor           */ false,
+    /* exec_or_saveexec   */ false,
+    /* exec_or            */ false,
+
     /* scf.* / cf.* (control flow, effectful) */
-    /* scf.for    */ false,
-    /* scf.if     */ false,
-    /* scf.yield  */ false,
-    /* cf.return  */ false};
+    /* scf.for      */ false,
+    /* scf.if       */ false,
+    /* scf.if_else  */ false,
+    /* scf.yield    */ false,
+    /* cf.return    */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

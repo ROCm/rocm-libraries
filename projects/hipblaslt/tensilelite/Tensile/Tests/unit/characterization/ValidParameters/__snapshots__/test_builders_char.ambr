@@ -1490,6 +1490,7 @@
     'TDMInst',
     'TDMIterateMode',
     'TDMLoadWaveSync',
+    'TDMPlusLdsBuf',
     'TDMSplit',
     'TailloopInNll',
     'TemporalHint',
@@ -2664,6 +2665,15 @@
         True,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'TDMPlusLdsBuf': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'TDMSplit': dict({

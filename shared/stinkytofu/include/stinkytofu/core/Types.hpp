@@ -81,6 +81,18 @@ struct PassFeatureConfig {
         int dsReadDrainLatency = 0;
         int dsReadThrottleLatency = 0;
         int dsReadPerWmma = INT_MAX;
+        int tensorLoadWmmaSpace = 0;
+        /// Max cycle-distance between two adjacent barrier groups for
+        /// StinkyMergeBarrierPass to merge them into a single multi-token
+        /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).
+        /// Internal tuning knob only — deliberately not surfaced as a module
+        /// option, so TensileLite cannot set it.
+        int mergeBarrierThreshold = 0;
+        /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
+        /// after the scheduler and plant SCC-clobbering handshakes around workgroup
+        /// barriers. Enables the scheduler's cluster-barrier SCC rule and the
+        /// CDNA5ReadyQueue paths that enforce it (see ReadyQueue::clusterBarrierEnabled).
+        bool clusterBarrier = false;
     };
 
     LoopConfig loopConfig;
@@ -100,7 +112,19 @@ struct AsmCapsConfig {
     VgprMsbMode vgprMsbMode = VgprMsbMode::None;
 
     /// rocisa archCaps `RequiresXCntForVolatileVMEM`. False on the standalone
-    /// path, which has no rocisa to ask; see Gfx1250HazardPass.
+    /// path, which has no rocisa to ask.
+    /// When set alone (without `enableXnackReplay`), Gfx1250HazardPass only
+    /// inserts atomic drains (Rule 4a). See Gfx1250HazardPass for the full
+    /// rule set (Rules 1–4).
     bool requiresXCntForVolatileVMEM = false;
+
+    /// Enable full XNACK replay protection in Gfx1250HazardPass:
+    ///   - Source-clobber checks: SMEM Rule 3, FLAT Rule 2
+    ///   - Boundary drains: ForeverSleep, ScalarPrefetch, VgprMsb
+    ///   - Atomic drains: Rule 4a (implies `requiresXCntForVolatileVMEM`)
+    /// When false, all of the above are skipped; only Rule 4a remains
+    /// active if `requiresXCntForVolatileVMEM` is set independently.
+    /// See Gfx1250HazardPass for the complete rule definitions.
+    bool enableXnackReplay = false;
 };
 }  // namespace stinkytofu

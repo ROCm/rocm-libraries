@@ -391,9 +391,16 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_SCHED_BARRIER,
     ROCKE_OP_TILE_SCHED_GROUP_BARRIER,
 
+    /* tile.* -- exec-mask (wavelet pipeline, MFMA path) */
+    ROCKE_OP_TILE_EXEC_AND_SAVEEXEC,
+    ROCKE_OP_TILE_EXEC_XOR,
+    ROCKE_OP_TILE_EXEC_OR_SAVEEXEC,
+    ROCKE_OP_TILE_EXEC_OR,
+
     /* scf.* / cf.* control flow */
     ROCKE_OP_SCF_FOR,
     ROCKE_OP_SCF_IF,
+    ROCKE_OP_SCF_IF_ELSE,
     ROCKE_OP_SCF_YIELD,
     ROCKE_OP_CF_RETURN,
 
@@ -515,6 +522,14 @@ typedef struct rocke_if
     rocke_op_t* op;
     rocke_region_t* then_region;
 } rocke_if_t;
+
+/* If/else handle: the C analog of _IfElseBuilder (scf.if_else). */
+typedef struct rocke_if_else
+{
+    rocke_op_t* op;
+    rocke_region_t* then_region;
+    rocke_region_t* else_region;
+} rocke_if_else_t;
 
 /* (name, init) pair for scf_for_iter. */
 typedef struct rocke_iter_arg
@@ -1322,7 +1337,21 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
                                  bool elide_trailing_barrier);
 void rocke_b_scf_yield(rocke_ir_builder_t* b, rocke_value_t* const* values, int num_values);
 rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond);
+/* scf.if_else: both then and else converge at the same join block.
+ * Use rocke_b_region_enter/leave to emit into then_region then else_region. */
+rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond);
 void rocke_b_ret(rocke_ir_builder_t* b);
+
+/* ---- tile.exec_* (wavelet exec-mask split, MFMA path) ----
+ * These emit AMDGPU exec-mask manipulation instructions:
+ *   exec_and_saveexec: s_and_saveexec_b64 dst, mask  -> dst = old exec (i64)
+ *   exec_xor:          s_xor_b64 dst, exec, saved    -> dst = compl (i64)
+ *   exec_or_saveexec:  s_or_saveexec_b64 dst, compl  -> dst = old exec (i64)
+ *   exec_or:           s_or_b64 exec, exec, saved    -> void (restore exec) */
+rocke_value_t* rocke_b_exec_and_saveexec(rocke_ir_builder_t* b, rocke_value_t* mask);
+rocke_value_t* rocke_b_exec_xor(rocke_ir_builder_t* b, rocke_value_t* saved);
+rocke_value_t* rocke_b_exec_or_saveexec(rocke_ir_builder_t* b, rocke_value_t* compl_v);
+void rocke_b_exec_or(rocke_ir_builder_t* b, rocke_value_t* saved);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -2,6 +2,7 @@
 
 Status:  Accepted
 Defect:  AIHPBLAS-4297
+Commit:  f5c0ffd (PR #10021) — https://github.com/ROCm/rocm-libraries/commit/f5c0ffda72bd554e4544a3b0a343cea58d98708e (pinned the crash + drafted this ADR) and https://github.com/ROCm/rocm-libraries/commit/cce9e4cefafe9c07bf8ddf702343815616e50a19 (linked the AIHPBLAS-4297 defect) — landed on develop via PR #10021's squash merge, 44b93a0
 
 ## Context
 Mutation-validating `SolutionStructs/Naming.py` confirmed a characterized crash in `getKernelNameMin`: with `splitGSU=True`, `GlobalSplitU > 1` or `-1` was first rewritten to the string `"M"` and then evaluated by `"M" > 0`, raising `TypeError`.

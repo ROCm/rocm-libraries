@@ -28,6 +28,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Matmul | FP16, BFP16, FP32 | NCHW, NCDHW | CPU Reference |  |
 | Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference |  |
 | Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference |  |
+| Pointwise Ternary | FP16, BFP16, FP32 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
 
 ## Implementation Details
 
@@ -58,9 +59,12 @@ The following table lists all operations currently supported in the CPU Referenc
 
 | Operation Type | Plan Builder | Signature Key | Supported Operations |
 |----------------|-------------|---------------|---------------------|
-| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG |
-| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, RELU_BWD, SIGMOID_BWD, TANH_BWD |
-| Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | None Supported Yet |
+| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD |
+| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, CMP_GT, RELU_BWD, SIGMOID_BWD, TANH_BWD |
+| Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | BINARY_SELECT (BOOLEAN mask) |
+
+`CMP_GT` outputs must have their tensor data type explicitly set to `BOOLEAN`; generic
+pointwise output inference otherwise uses the graph's intermediate data type.
 
 ## Legend
 

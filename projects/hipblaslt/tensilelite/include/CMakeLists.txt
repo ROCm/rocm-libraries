@@ -104,7 +104,6 @@ target_sources(tensilelite-host
         FILE_SET tensilelite_private_headers TYPE HEADERS
             BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}"
             FILES
-                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ArithmeticUnitTypes.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/EmbeddedData.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionMapLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionValidation.hpp"

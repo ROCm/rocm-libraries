@@ -99,8 +99,8 @@ hipDNN uses a deterministic hash-based system for managing engine IDs. This syst
 ### How It Works
 
 1. **Engine Names**: Define human-readable string names for your engines (e.g., "MIOPEN_PLUGIN", "MY_CUSTOM_ENGINE")
-2. **Hash Function**: The `hipdnn_plugin_sdk::engine_names::engineNameToId()` function converts names to IDs using a FNV-1a hash algorithm
-3. **Registration**: Engine names are registered in the Plugin SDK header for discoverability
+2. **Hash Function**: The `hipdnn_data_sdk::utilities::engineNameToId()` function converts names to IDs using a FNV-1a hash algorithm
+3. **Registration**: Engine names built into the hipDNN tree are registered in `data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp` for discoverability
 
 ### Using Engine IDs
 
@@ -126,7 +126,9 @@ public:
 
 ### Registering New Engine Names
 
-To add your engine name to the official registry:
+Registering an engine name is optional — a plugin can report its own names instead. See "Engine names" in [Develop plugins](./user-guides/how-to/develop-plugins.rst).
+
+Engines built into the hipDNN tree are registered as follows:
 
 1. **Choose a Unique Name**:
    - Use UPPER_CASE with underscores
@@ -137,18 +139,15 @@ To add your engine name to the official registry:
    HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE)
    ```
 
-3. **Test Locally First**: You can use unregistered names during development - they'll generate a warning but work correctly
-
 ### Benefits
 
 - **Deterministic**: Same name always produces same ID
-- **No Collisions**: Hash algorithm minimizes collision risk
+- **Collision-resistant**: Hash algorithm minimizes collision risk
 - **Human-Readable**: Debug logs can show meaningful engine names
 - **Forward Compatible**: New engines can be used without registry updates
 
 > [!TIP]
-> 💡 The engine ID system ensures globally unique identifiers across all plugins. You can query registered engines using `hipdnn_data_sdk::utilities::getAllEngineNames()` and check for name collisions using the provided test utilities.
-
+> 💡 You can query registered engines using `hipdnn_data_sdk::utilities::getAllEngineNames()` and check for name collisions using the provided test utilities.
 
 ## Creating a Kernel Engine Plugin
 
@@ -410,6 +409,16 @@ public:
 **Global Knobs** (use existing ones when applicable):
 - `global.benchmarking`: Enable benchmarking for kernel selection
 - `global.workspace_size_limit`: Limit workspace memory (when applicable)
+
+#### Implementing `global.benchmarking`
+
+The generic kernel ingestor engine (`hipdnn_plugin_sdk::ingestor`) implements the global benchmarking knob: setting `global.benchmarking=1` makes it build one candidate plan per knob-filtered catalog entry, time each on the device on first `execute()`, and reuse the fastest for the plan's remaining life. Per-field knobs plus `add_engine_sweep()` remain the way to sweep one metadata dimension and reach every kernel a declared field distinguishes; the two mechanisms are complementary. A provider adopting the ingestor needs no benchmarking code of its own: carry one `hipdnn_plugin_sdk::ingestor::IngestorSettings ingestorSettings` member on its `TSettings` type and a handle exposing `hipStream_t getStream() const`, and `GenericPlanBuilder` handles advertisement, knob reading, the `HIPDNN_FORCE_BENCHMARKING` override, and the composite plan.
+
+A handle used with the ingestor **must** expose `hipStream_t getStream() const`: benchmarking's default timer brackets each candidate with HIP events on that stream. Both `GenericPlanBuilder` and `BenchmarkPlan` `static_assert` the requirement, so a handle without it fails to compile with a message naming it rather than failing at plan-build time. The requirement sits on the ingestor templates, not on `validateHandleType()`, so a provider that never instantiates them is unaffected. `BenchmarkPlan` accepts an optional `Timer` in place of that default; it exists so tests can prove candidate selection without a device, and is not part of any stability promise.
+
+`Graph::autotune()` in `EXHAUSTIVE` mode primes every engine advertising the knob: it compiles a *separate* plan carrying `global.benchmarking=1`, executes it once, then discards that plan and compiles and times the plan it keeps from the original knob settings. Discarding is required, because a primed plan re-samples every candidate on each execute and timing it would measure the sampling sweep instead of the kernel. Priming therefore only pays off if its result survives in the provider: MIOpen's search populates a find-db that outlives the throwaway plan. The ingestor keeps its winner only in the plan that measured it, so an `EXHAUSTIVE` run pays `candidates x (warmup + iterations) + 1` extra device executions per spec and then selects by ranked order. `HIPDNN_FORCE_BENCHMARKING=0` suppresses that cost.
+
+A provider implementing `global.benchmarking` by hand rather than through the ingestor must apply `hipdnn_plugin_sdk::benchmarkingOverrideFromEnv()` as the ingestor and MIOpen do: consulted *outside* any config-validity branch and composed as `override.value_or(knobValue)` -- **never** an OR. An OR cannot express force-off, because a `false` override term never clears a `true` knob term, so `HIPDNN_FORCE_BENCHMARKING=0` could not override a knob-enabled run.
 
 #### Deprecating Knobs
 
@@ -759,6 +768,7 @@ nm -gD your_plugin.so | grep " T "
 # hipdnnEnginePluginCreate
 # hipdnnEnginePluginDestroy
 # hipdnnEnginePluginGetAllEngineIds
+# hipdnnEnginePluginGetEngineName
 # ... (other plugin API functions)
 ```
 

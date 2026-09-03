@@ -24,20 +24,24 @@ struct PointwiseSignatureKey
     hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType input1DataType
-        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET; // For binary ops
-
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET; // For binary and ternary ops
+    hipdnn_flatbuffers_sdk::data_objects::DataType input2DataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET; // For ternary ops
     PointwiseSignatureKey() = default;
     constexpr PointwiseSignatureKey(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode op,
                                     hipdnn_flatbuffers_sdk::data_objects::DataType input,
                                     hipdnn_flatbuffers_sdk::data_objects::DataType compute,
                                     hipdnn_flatbuffers_sdk::data_objects::DataType output,
                                     hipdnn_flatbuffers_sdk::data_objects::DataType input1
+                                    = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType input2
                                     = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
         : operation(op)
         , inputDataType(input)
         , computeDataType(compute)
         , outputDataType(output)
         , input1DataType(input1)
+        , input2DataType(input2)
     {
     }
 
@@ -74,23 +78,38 @@ struct PointwiseSignatureKey
         }
         outputDataType = outputTensorAttr->data_type();
 
-        // Get second input tensor if this is a binary operation
-        if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(operation))
+        // Get secondary input tensor for binary and ternary operations.
+        if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(operation)
+           || hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(operation))
         {
-            if(nodeAttributes->in_1_tensor_uid().has_value())
+            if(!nodeAttributes->in_1_tensor_uid().has_value())
             {
-                auto input1TensorAttr = tensorMap.at(nodeAttributes->in_1_tensor_uid().value());
-                if(input1TensorAttr == nullptr)
-                {
-                    throw std::runtime_error(
-                        "Second input tensor attributes could not be found in the map");
-                }
-                input1DataType = input1TensorAttr->data_type();
+                throw std::runtime_error("Pointwise operation missing second input tensor");
             }
-            else
+
+            auto input1TensorAttr = tensorMap.at(nodeAttributes->in_1_tensor_uid().value());
+            if(input1TensorAttr == nullptr)
             {
-                throw std::runtime_error("Binary operation missing second input tensor");
+                throw std::runtime_error(
+                    "Second input tensor attributes could not be found in the map");
             }
+            input1DataType = input1TensorAttr->data_type();
+        }
+
+        if(hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(operation))
+        {
+            if(!nodeAttributes->in_2_tensor_uid().has_value())
+            {
+                throw std::runtime_error("Ternary pointwise operation missing third input tensor");
+            }
+
+            auto input2TensorAttr = tensorMap.at(nodeAttributes->in_2_tensor_uid().value());
+            if(input2TensorAttr == nullptr)
+            {
+                throw std::runtime_error(
+                    "Third input tensor attributes could not be found in the map");
+            }
+            input2DataType = input2TensorAttr->data_type();
         }
     }
 
@@ -99,21 +118,28 @@ struct PointwiseSignatureKey
         return k.hashSelf();
     }
 
-    constexpr std::size_t hashSelf() const
+    std::size_t hashSelf() const noexcept
     {
-        return static_cast<std::size_t>(static_cast<int>(nodeType))
-               ^ (static_cast<std::size_t>(static_cast<int>(operation)) << 4)
-               ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 8)
-               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 12)
-               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 16)
-               ^ (static_cast<std::size_t>(static_cast<int>(input1DataType)) << 20);
+        std::size_t seed = 0;
+        const auto combine = [&seed](auto value) {
+            seed ^= std::hash<decltype(value)>{}(value) + 0x9e3779b9U + (seed << 6) + (seed >> 2);
+        };
+        combine(nodeType);
+        combine(operation);
+        combine(inputDataType);
+        combine(input1DataType);
+        combine(input2DataType);
+        combine(computeDataType);
+        combine(outputDataType);
+        return seed;
     }
 
     bool operator==(const PointwiseSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && operation == other.operation
                && inputDataType == other.inputDataType && computeDataType == other.computeDataType
-               && outputDataType == other.outputDataType && input1DataType == other.input1DataType;
+               && outputDataType == other.outputDataType && input1DataType == other.input1DataType
+               && input2DataType == other.input2DataType;
     }
 
     static std::unordered_map<PointwiseSignatureKey,
@@ -199,6 +225,32 @@ struct PointwiseSignatureKey
                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+
+        addComparisonPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addComparisonPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addComparisonPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+
+        addTernaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addTernaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addTernaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
 
         return map;
     }
@@ -288,6 +340,23 @@ private:
                              OutputDataTypeEnum>(map);
     }
 
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType Input1DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType Input2DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum>
+    static void addTernaryPlanBuilders(std::unordered_map<PointwiseSignatureKey,
+                                                          std::unique_ptr<IGraphNodePlanBuilder>,
+                                                          PointwiseSignatureKey>& map)
+    {
+        addTernaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::BINARY_SELECT,
+                              Input0DataTypeEnum,
+                              Input1DataTypeEnum,
+                              Input2DataTypeEnum,
+                              ComputeDataTypeEnum,
+                              OutputDataTypeEnum>(map);
+    }
+
     template <hipdnn_flatbuffers_sdk::data_objects::PointwiseMode ModeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType InputDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum,
@@ -299,6 +368,7 @@ private:
         map[PointwiseSignatureKey(
             ModeEnum, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum)]
             = std::make_unique<PointwisePlanBuilder<InputDataTypeEnum,
+                                                    InputDataTypeEnum,
                                                     InputDataTypeEnum,
                                                     ComputeDataTypeEnum,
                                                     OutputDataTypeEnum>>();
@@ -320,23 +390,71 @@ private:
                                   Input1DataTypeEnum)]
             = std::make_unique<PointwisePlanBuilder<Input0DataTypeEnum,
                                                     Input1DataTypeEnum,
+                                                    Input1DataTypeEnum,
                                                     ComputeDataTypeEnum,
                                                     OutputDataTypeEnum>>();
+    }
+
+    template <hipdnn_flatbuffers_sdk::data_objects::PointwiseMode ModeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType Input1DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType Input2DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum>
+    static void addTernaryPlanBuilder(std::unordered_map<PointwiseSignatureKey,
+                                                         std::unique_ptr<IGraphNodePlanBuilder>,
+                                                         PointwiseSignatureKey>& map)
+    {
+        map[PointwiseSignatureKey(ModeEnum,
+                                  Input0DataTypeEnum,
+                                  ComputeDataTypeEnum,
+                                  OutputDataTypeEnum,
+                                  Input1DataTypeEnum,
+                                  Input2DataTypeEnum)]
+            = std::make_unique<PointwisePlanBuilder<Input0DataTypeEnum,
+                                                    Input1DataTypeEnum,
+                                                    Input2DataTypeEnum,
+                                                    ComputeDataTypeEnum,
+                                                    OutputDataTypeEnum>>();
+    }
+
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType Input1DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
+    static void addComparisonPlanBuilder(std::unordered_map<PointwiseSignatureKey,
+                                                            std::unique_ptr<IGraphNodePlanBuilder>,
+                                                            PointwiseSignatureKey>& map)
+    {
+        map[PointwiseSignatureKey(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GT,
+                                  Input0DataTypeEnum,
+                                  ComputeDataTypeEnum,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                                  Input1DataTypeEnum)]
+            = std::make_unique<
+                PointwisePlanBuilder<Input0DataTypeEnum,
+                                     Input1DataTypeEnum,
+                                     Input1DataTypeEnum,
+                                     ComputeDataTypeEnum,
+                                     hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN>>();
     }
 };
 
 inline std::ostream& operator<<(std::ostream& os, const PointwiseSignatureKey& key)
 {
-    if(key.input1DataType != hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+    if(key.input2DataType != hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
     {
-        // Binary operation
+        os << "Pointwise(op=" << key.operation << ", in0=" << key.inputDataType
+           << ", in1=" << key.input1DataType << ", in2=" << key.input2DataType
+           << ", compute=" << key.computeDataType << ", out=" << key.outputDataType << ")";
+    }
+    else if(key.input1DataType != hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+    {
         os << "Pointwise(op=" << key.operation << ", in0=" << key.inputDataType
            << ", in1=" << key.input1DataType << ", compute=" << key.computeDataType
            << ", out=" << key.outputDataType << ")";
     }
     else
     {
-        // Unary operation
         os << "Pointwise(op=" << key.operation << ", in=" << key.inputDataType
            << ", compute=" << key.computeDataType << ", out=" << key.outputDataType << ")";
     }

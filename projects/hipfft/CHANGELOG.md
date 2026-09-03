@@ -19,6 +19,16 @@ Documentation for hipFFT is available at
   Multi-device, unbatched one-dimensional transforms remain unimplemented pending
   further analyses of the exact behavior(s) to be matched.
 
+### Resolved issues
+
+* Fixed a hang when creating a plan with a zero length or zero batch. These now return `HIPFFT_INVALID_SIZE`.
+
+## hipFFT 1.0.25 for ROCm 10.0
+
+### Changed
+
+* Minor internal changes.
+
 ## hipFFT 1.0.24 for ROCm 7.14
 
 ### Added

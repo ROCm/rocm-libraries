@@ -8,7 +8,7 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.6.0")
+set(VERSION_STRING "4.7.0")
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set the minimum required rocRAND version
@@ -68,7 +68,7 @@ option(ROCTHRUST_USE_LIBHIPCXX "Build rocThrust using libhipcxx backend, if avai
 option(ROCTHRUST_USE_LIBCUDACXX "Build rocThrust using libcudacxx backend, if available" ON)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
 cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
-option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
+option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (e.g., Google Test)" OFF)
 option(LINK_HIP_DEVICE_LIBS "Links against HIP device libraries. Required for device-side acceleration." ON)
 
 option(GRAFT_THRUST_ONTO_BINARIES "!!! TODO !!!" OFF)

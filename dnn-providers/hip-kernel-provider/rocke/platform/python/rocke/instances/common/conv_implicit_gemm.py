@@ -90,6 +90,9 @@ from ._conv_implicit_gemm_common import (  # noqa: F401 — re-exported for call
     _emit_mfma,
     _emit_smem_load,
     _ir_dtype,
+    build_wavelet_loaders,
+    compute_wavelet_epi_barriers,
+    emit_wavelet_kloop,
     make_a_descriptor,
 )
 
@@ -117,7 +120,17 @@ class ImplicitGemmConvSpec:
       - `pipeline="compv4"`   : double-buffer LDS (ping-pong A_smem/B_smem)
                                 + sched hints + s_setprio to push the K-loop
                                 into compute steady state
-
+      - `pipeline="wavelet"`  : load/math wave specialization (CK Tile PR
+                                #8009). **gfx1250/WMMA only** — rejected by
+                                ``is_valid_spec`` on MFMA/CDNA targets.
+                                Appends ``num_load_waves`` extra waves to
+                                the workgroup; those waves handle all
+                                DRAM→LDS transfers while the standard
+                                warp_m × warp_n waves run WMMA exclusively.
+                                Single-buffer LDS shared by both roles.
+                                Uses scf_if_else (LLVM br i1); separate
+                                VMEM/WMMA issue slots provide hardware
+                                concurrency without exec-masking.
     Epilogue options:
       - `epilogue="default"`  : per-lane scalar dtype_d stores via the D
                                 descriptor; correctness-first.
@@ -224,10 +237,26 @@ class ImplicitGemmConvSpec:
     # C gets its own LDS bytes (pool = ab + c) and the barrier is elided ->
     # lower small-tile latency, more LDS. Only affects epilogue == "cshuffle".
     cshuffle_no_alias: bool = False
+    # Number of extra load waves appended to the workgroup for pipeline="wavelet".
+    # Load waves handle all DRAM→LDS transfers; math waves (warp_m × warp_n) handle
+    # LDS reads + MFMA only. The launch block size becomes
+    # block_size + num_load_waves * wave_size. Ignored for all other pipelines.
+    num_load_waves: int = 4
 
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
+
+    @property
+    def launch_block_size(self) -> int:
+        """Total threads launched per workgroup.
+
+        For ``pipeline="wavelet"`` this is ``block_size + num_load_waves * wave_size``;
+        for all other pipelines it equals ``block_size``.
+        """
+        if self.pipeline == "wavelet":
+            return self.block_size + self.num_load_waves * self.wave_size
+        return self.block_size
 
     @property
     def k_atoms_per_tile_k(self) -> int:
@@ -372,6 +401,19 @@ def is_valid_spec_for_problem(
             f"N_gemm={problem.N_gemm} tile_n={spec.tile_n}"
         )
 
+    # Reject pipeline="basic" configs that would Python-unroll the K loop
+    # beyond this threshold — above it IR size explodes and comgr compilation
+    # time grows unacceptably.
+    _MAX_BASIC_K_ITERS = 128
+    if spec.pipeline == "basic":
+        _k_iters = (problem.K_gemm + spec.tile_k - 1) // spec.tile_k
+        if _k_iters > _MAX_BASIC_K_ITERS:
+            return False, (
+                f"pipeline='basic' K-loop would unroll to {_k_iters} iterations "
+                f"(K_gemm={problem.K_gemm} tile_k={spec.tile_k}), "
+                f"exceeding the {_MAX_BASIC_K_ITERS}-iteration limit"
+            )
+
     return True, "ok"
 
 
@@ -400,19 +442,20 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         return False, "tile_n not divisible by warp_n * warp_tile_n"
     if spec.tile_k % spec.warp_tile_k:
         return False, "tile_k not divisible by warp_tile_k"
-    if spec.block_size > target.max_threads_per_block:
+    _launch_block = spec.launch_block_size
+    if _launch_block > target.max_threads_per_block:
         return False, (
-            f"block_size {spec.block_size} > {target.max_threads_per_block} "
+            f"launch_block_size {_launch_block} > {target.max_threads_per_block} "
             f"(hardware cap) on {arch}"
         )
 
     # Check global store vector size and disable default epilogue for
-    # vec_size_c > 1 — whether set explicitly or auto-derived from K.
+    # vec_size_c > 1 — whether set explicitly or auto-derived from kpg.
     _eff_vec_c = (
         spec.vector_size_c
         if spec.vector_size_c is not None
         else ImplicitGemmConvSpec.default_vector_sizes(
-            spec.problem.C, spec.problem.K, spec.data.dtype_d
+            spec.problem.cpg, spec.problem.kpg, spec.data.dtype_d
         )[2]
     )
     _is_wmma_arch = target.wave_size == 32
@@ -464,7 +507,11 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     # bytes, so the LDS budget must be computed per case:
     #   OFF (default, aliased): C reuses the A/B bytes   -> pool = max(ab, c)
     #   ON  (exclusive):        C gets its own LDS bytes -> pool = ab + c
-    _total_lds = (_ab_lds + _c_lds) if spec.cshuffle_no_alias else max(_ab_lds, _c_lds)
+    # wavelet also forces additive: A/B stay live across the whole scf_if_else
+    # body (both branches reference them), so the liveness packer cannot alias
+    # C onto the A/B region even when cshuffle_no_alias=False.
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
+    _total_lds = (_ab_lds + _c_lds) if _no_alias else max(_ab_lds, _c_lds)
     if not target.fits_lds(_total_lds):
         return False, (
             f"LDS budget {_total_lds} bytes "
@@ -472,6 +519,40 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             f"> {target.lds_capacity_bytes} cap on {arch}"
         )
 
+    if spec.pipeline == "wavelet":
+        if spec.num_load_waves < 1:
+            return False, "pipeline='wavelet' requires num_load_waves >= 1"
+        if family != "wmma":
+            return False, (
+                f"pipeline='wavelet' is WMMA/gfx1250 only: on MFMA targets "
+                f"the single-buffer LDS is overwritten each K iteration and load/math "
+                f"waves execute sequentially rather than truly concurrently."
+            )
+        if spec.async_dma:
+            return False, (
+                "pipeline='wavelet' is incompatible with async_dma=True: "
+                "the wavelet loaders are only constructed in the non-async branch "
+                "and a_wavelet_loader/b_wavelet_loader would be None at fetch time."
+            )
+        # Guard against kernel IR so large that comgr takes minutes to compile.
+        # The WMMA K-loop is fully unrolled: each iteration emits
+        #   mfmas_per_warp_m × mfmas_per_warp_n WMMA calls,
+        # and the loop runs K_iters = ceil(K_gemm / tile_k) times.
+        # Empirically, cost > 4096 causes comgr_relocatable to take > 30 s
+        # (e.g. t512x512x32 w1x1 with cost=36864 never completes in practice).
+        # The cut-off is conservative enough that all practical tile shapes pass.
+        _mfmas_m = spec.tile_m // (spec.warp_m * spec.warp_tile_m)
+        _mfmas_n = spec.tile_n // (spec.warp_n * spec.warp_tile_n)
+        _k_iters = (spec.problem.K_gemm + spec.tile_k - 1) // spec.tile_k
+        _wmma_cost = _k_iters * _mfmas_m * _mfmas_n
+        _WMMA_COST_LIMIT = 4096
+        if _wmma_cost > _WMMA_COST_LIMIT:
+            return False, (
+                f"pipeline='wavelet' unrolled WMMA count {_wmma_cost} "
+                f"(K_iters={_k_iters} × mfmas={_mfmas_m}×{_mfmas_n}) "
+                f"exceeds compile-time limit {_WMMA_COST_LIMIT}; "
+                f"reduce tile_k, tile_m, or tile_n"
+            )
     # basic pipeline uses the split emit_global_read/emit_lds_write path which
     # is only available on the sync (non-async-DMA) CoalescedTileLoader path.
     # async_dma uses raw_ptr_buffer_load_lds which atomically loads directly
@@ -493,9 +574,9 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
                 False,
                 f"WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got {atom}) on {arch}",
             )
-        if spec.pipeline != "mem":
+        if spec.pipeline not in ("mem", "wavelet"):
             return False, (
-                f"WMMA conv supports only the 'mem' pipeline "
+                f"WMMA conv supports only 'mem', or 'wavelet' pipeline "
                 f"(got {spec.pipeline!r}) on {arch}"
             )
         if spec.epilogue not in ("default", "cshuffle"):
@@ -892,7 +973,7 @@ def build_implicit_gemm_conv(
 
     threads = spec.block_size
     _def_vec_a, _def_vec_b, _ = ImplicitGemmConvSpec.default_vector_sizes(
-        p.C, p.K, spec.data.dtype_a
+        p.cpg, p.kpg, spec.data.dtype_a
     )
     # Clamp the C/K-derived default by the tile-geometry safe maximum so that the
     # CoalescedTileLoader's (tile_rows * tile_cols / vec) % block_size == 0 invariant
@@ -1043,6 +1124,27 @@ def build_implicit_gemm_conv(
             load_vec=load_vec_b,
             elem_dtype=ir_dtype_b,
         )
+        # Wavelet pipeline: load waves use a separate loader sized to the
+        # number of load threads (num_load_waves * wave_size), not to
+        # spec.block_size (math threads only).  Using the math-wave
+        # block_size here causes vec_idx = e*math_threads + load_tid to
+        # exceed the tile dimensions, writing LDS at wrong addresses and
+        # producing NaN outputs.
+        if spec.pipeline == "wavelet":
+            a_wavelet_loader, b_wavelet_loader = build_wavelet_loaders(
+                num_load_waves=spec.num_load_waves,
+                wave_size=spec.wave_size,
+                block_m=block_m,
+                block_n=block_n,
+                block_k=block_k,
+                load_vec_a=load_vec_a,
+                load_vec_b=load_vec_b,
+                ir_dtype_a=ir_dtype_a,
+                ir_dtype_b=ir_dtype_b,
+            )
+        else:
+            a_wavelet_loader = None
+            b_wavelet_loader = None
 
     schedule = SchedulePolicy.for_pipeline(
         "async_dma" if spec.async_dma else spec.pipeline
@@ -1316,29 +1418,162 @@ def build_implicit_gemm_conv(
         return new_accs
 
     # ---- the K loop ----
+    # Three code paths:
+    #
+    # 1) Sync path (`async_dma=False`, `unroll_k=False`): emit a
+    #    single `scf.for_iter` body (load + barrier + MFMA + barrier).
+    #    No software pipelining; each iter waits for its own load.
     # The K-loop *structure* determines the branch — not the pipeline string.
     # "mem", "compv3", and "compv4" all share the same scf.for_iter shape;
     # their differences (scheduling hints, double-buffering) are handled inside
     # emit_mfma_phase and the LDS allocation, not by the K-loop itself.
     # A new branch is only introduced when the loop structure itself changes.
     #
-    # 1) unroll_k: Python-unroll + double-buffer ping-pong (no scf.for_iter).
+    # 2) unroll_k: Python-unroll + double-buffer ping-pong (no scf.for_iter).
     #    Stage tile t+1 into the alternate buffer while MFMA runs on tile t.
     #
-    # 2) pipeline="basic": Python-unroll + single buffer + split global_read /
+    # 3) pipeline="basic": Python-unroll + single buffer + split global_read /
     #    lds_write (no scf.for_iter). buffer_load_vN for tile t+1 is issued
     #    before sync+mfma, smem_store_vN is deferred until after the second
     #    sync. Overlaps VMEM latency with compute without double-buffering.
     #
-    # 3) not async_dma (mem/compv3/compv4): single scf.for_iter with
+    # 4) not async_dma (mem/compv3/compv4): single scf.for_iter with
     #    emit_load_phase -> sync -> emit_mfma_phase -> sync per tile.
     #
-    # 4) async_dma: Python-unroll the K loop and ping-pong between
-    #    A_smem/A_smem2 via SoftwarePipeline.run_ping_pong. The
-    #    s_waitcnt(vmcnt=0) drains only the previous iter's DMA;
-    #    the next iter's DMA is in flight against the other buffer.
-    #    K_gemm / block_k is the number of unrolled iters; for the
-    #    bake-off shape this is 9 (576 / 64), generating ~9x more IR.
+
+    if spec.pipeline == "wavelet":
+        # ----------------------------------------------------------------
+        # WAVELET pipeline — load/math wave specialization (CK Tile #8009).
+        #
+        # Reference: gemm_pipeline_ag_bg_cr_wavelet.hpp
+        #
+        # The workgroup is split into two roles identified by warp_id:
+        #   math waves  [0,          n_math_warps)  — LDS reads + MFMA + epilogue
+        #   load waves  [n_math_warps, total_warps)  — DRAM→register fetch + LDS write
+        #
+        # Both roles share a single LDS buffer (no ping-pong).
+        #
+        # Barrier protocol (must be bit-identical in both branches):
+        #
+        #   MATH branch:
+        #     barrier_0
+        #     for i in 0..K-2:
+        #       MFMA(LDS)
+        #       barrier_A          ← math done reading LDS
+        #       barrier_B          ← wait for load to write next tile
+        #     MFMA(LDS)            ← tail, no barriers
+        #     [epilogue — emits N_epi barriers]
+        #
+        #   LOAD branch:
+        #     fetch tile 0 → regs
+        #     store regs → LDS
+        #     barrier_0
+        #     for i in 0..K-2:
+        #       fetch tile i+1 → regs   ← overlaps math MFMA
+        #       barrier_A                ← wait for math to release LDS
+        #       store regs → LDS
+        #       barrier_B                ← signal LDS ready
+        #     [epilogue stub — N_epi bare barriers, no stores]
+        #
+        # Total barriers per branch: 1 + 2*(K-1) + N_epi
+        #
+        # N_epi = 3 for cshuffle (step-0 WAR#1 + step-1 WAR#2 + step-2 LDS RAW),
+        #         1 for cshuffle_no_alias (step-2 RAW only),
+        #         0 for default/wmma direct epilogues.
+        # epilogue_override is incompatible with wavelet (unknown N_epi).
+        # ----------------------------------------------------------------
+        if epilogue_override is not None:
+            raise ValueError(
+                "pipeline='wavelet' does not support epilogue_override "
+                "(barrier count of the override is unknown)"
+            )
+        if a_operand_override is not None:
+            raise ValueError(
+                "pipeline='wavelet' does not support a_operand_override on WMMA: "
+                "emit_wmma_phase uses fragment loads from LDS directly and does "
+                "not consult a_operand_override."
+            )
+
+        if op.family == "mma":
+            # The exec-mask MFMA wavelet path has an unfixable data race:
+            # the math section reads a single-buffer LDS that the load section
+            # overwrites every K iteration. True concurrent execution (different
+            # SIMD units) is required, but rocke emits flat sequential code with
+            # no cross-section barriers, so math reads garbage after iteration 0.
+            # is_valid_spec already blocks this via the WMMA-only guard, so this
+            # branch is unreachable in normal use. Raise here to make any direct
+            # call fail loudly instead of silently producing wrong results.
+            raise ValueError(
+                "pipeline='wavelet' is not supported for MFMA/CDNA targets: "
+                "the exec-mask split path has a data race (single LDS buffer "
+                "overwritten each K iteration with no cross-section barriers). "
+                "Use is_valid_spec() to reject this combination before building."
+            )
+
+        # WMMA path: scf_if_else (gfx1250).
+        #
+        # gfx1250 has separate VMEM and WMMA issue slots, so load and math
+        # waves truly overlap without exec-mask interleaving. The LLVM br i1
+        # divergent branch is fine here — the hardware concurrency comes
+        # from the distinct issue queues, not from hardware scheduling at
+        # s_barrier. Keep scf_if_else to avoid changing the validated path.
+        n_math_warps = spec.warp_m * spec.warp_n
+        launch_block = spec.launch_block_size
+        b.kernel.attrs["max_workgroup_size"] = launch_block
+
+        _epi_barriers = compute_wavelet_epi_barriers(
+            spec.epilogue, spec.cshuffle_no_alias
+        )
+
+        def _fwd_wavelet_epilogue(final_accs_math):
+            if spec.epilogue == "cshuffle":
+                _emit_cshuffle_epilogue(b, spec, final_accs_math, grid, d_rsrc, op=op)
+            else:
+                _emit_direct_epilogue_wmma(
+                    b,
+                    spec,
+                    op,
+                    final_accs_math,
+                    warp_m_idx,
+                    warp_n_idx,
+                    lane,
+                    block_m_off_v,
+                    block_n_off_v,
+                    d_rsrc,
+                    c0,
+                )
+
+        def _fwd_epilogue_with_acc_transform(accs_in):
+            _fwd_wavelet_epilogue(
+                _apply_accumulator_epilogue(b, spec.acc_epilogue, accs_in)
+            )
+
+        emit_wavelet_kloop(
+            b=b,
+            warp_id=warp_id,
+            tid=tid,
+            n_math_warps=n_math_warps,
+            math_block_size=spec.block_size,
+            K_iters=(p.K_gemm + block_k - 1) // block_k,
+            block_k=block_k,
+            k_lo=c0,
+            A_smem=A_smem,
+            B_smem=B_smem,
+            a_wavelet_loader=a_wavelet_loader,
+            b_wavelet_loader=b_wavelet_loader,
+            a_descriptor=a_descriptor,
+            b_descriptor=b_descriptor,
+            a_rsrc=a_rsrc,
+            b_rsrc=b_rsrc,
+            k_off_capture=k_off_capture,
+            accs=accs,
+            emit_mfma_phase=emit_mfma_phase,
+            emit_epilogue_fn=_fwd_epilogue_with_acc_transform,
+            epi_barriers=_epi_barriers,
+            k_lo_is_zero=True,
+        )
+        return b.kernel
+
     if spec.unroll_k:
         # Double-buffered Python-unrolled K-loop software pipeline.
         #
@@ -1691,13 +1926,23 @@ def _emit_cshuffle_epilogue(
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
     else:
         _, __, vec_c = ImplicitGemmConvSpec.default_vector_sizes(
-            p.C, p.K, spec.data.dtype_d
+            p.cpg, p.kpg, spec.data.dtype_d
         )
         _cshuffle_kwargs["max_store_vec"] = vec_c
+    _war_barriers = 2 if spec.pipeline == "wavelet" else 1
     if op is not None and op.family == "wmma":
-        _epi = CShuffleEpilogue.from_grid_op(op=op, grid=grid, **_cshuffle_kwargs)
+        _epi = CShuffleEpilogue.from_grid_op(
+            op=op, grid=grid, no_alias=spec.cshuffle_no_alias, **_cshuffle_kwargs
+        )
+        _epi = dc_replace(_epi, war_barriers=_war_barriers)
     else:
-        _epi = CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs)
+        _epi = CShuffleEpilogue.from_grid(
+            atom=spec.atom,
+            grid=grid,
+            no_alias=spec.cshuffle_no_alias,
+            **_cshuffle_kwargs,
+        )
+        _epi = dc_replace(_epi, war_barriers=_war_barriers)
     _epi.store(
         b,
         accs=accs,

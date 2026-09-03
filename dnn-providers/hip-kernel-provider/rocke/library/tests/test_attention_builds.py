@@ -1566,6 +1566,196 @@ class TestAttentionHelpers(unittest.TestCase):
                 )
             self.assertIs(ok.exception, sentinel)
 
+    def test_gfx950_dense_sinks_required_when_enabled(self):
+        """spec.use_sinks=True requires sinks parameter (not None)."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=64,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=1.0,
+                sinks=None,
+            )
+        self.assertEqual(
+            str(ctx.exception), "spec.use_sinks=True requires sinks that are not None"
+        )
+
+    def test_gfx950_dense_sinks_rejected_when_disabled(self):
+        """spec.use_sinks=False rejects sinks parameter if provided."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=64,
+            causal=True,
+            dtype="bf16",
+            use_sinks=False,
+        )
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+        sinks = [0.0] * spec.num_query_heads
+
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=1.0,
+                sinks=sinks,
+            )
+        self.assertEqual(
+            str(ctx.exception), "sinks provided but spec.use_sinks is False"
+        )
+
+    def test_gfx950_dense_sinks_passes_validation(self):
+        """spec.use_sinks=True with sinks provided passes validation and reaches compile."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import kernels.gfx950.attention_dense as ad
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=64,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape, dtype="bfloat16")
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+        # Mock sinks tensor with all required attributes
+        sinks = SimpleNamespace(
+            shape=(spec.num_query_heads,),
+            dtype="bfloat16",
+            is_contiguous=lambda: True,
+            is_cuda=True,
+        )
+        sentinel = RuntimeError("reached-compile")
+
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as ok:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    sinks=sinks,
+                )
+            self.assertIs(ok.exception, sentinel)
+
+    def test_gfx950_dense_sinks_rejected_with_paged(self):
+        """AttentionDenseSpec.__post_init__ rejects use_sinks with paged."""
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        base = dict(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+
+        # Valid: sinks without paged
+        spec = AttentionDenseSpec(**base)
+        self.assertTrue(spec.use_sinks)
+
+        # Reject: use_sinks + paged
+        with self.assertRaises(ValueError) as ctx:
+            AttentionDenseSpec(
+                paged=True, block_size=16, num_kv_blocks=512, sliding_window=128, **base
+            )
+        self.assertEqual(
+            str(ctx.exception), "use_sinks is not yet supported with paged KV"
+        )
+
+    def test_gfx950_dense_sinks_rejected_with_varlen(self):
+        """AttentionDenseSpec.__post_init__ rejects use_sinks with varlen."""
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        base = dict(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+
+        # Valid: sinks without varlen
+        spec = AttentionDenseSpec(**base)
+        self.assertTrue(spec.use_sinks)
+
+        # Reject: use_sinks + varlen
+        with self.assertRaises(ValueError) as ctx:
+            AttentionDenseSpec(varlen=True, **base)
+        self.assertEqual(
+            str(ctx.exception), "use_sinks is not yet supported with varlen"
+        )
+
     def test_attention_3d_workspace_size_matches_shapes(self):
         p = UnifiedAttentionProblem(
             total_q=3,
@@ -2274,10 +2464,11 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
     2. The emitted LLVM IR carries the correct ``amdgpu-waves-per-eu``
        attribute for each legal value — confirming the attribute reached
        codegen correctly both before and after the cache-key fix.
-    3. Two specs differing only in ``waves_per_eu`` produce distinct compiled
-       binaries (cache-isolation fix: key now includes ``waves_per_eu``).
+    3. Two specs differing only in ``waves_per_eu`` produce distinct emitted
+       IR, and each variant compiles cleanly (cache-isolation fix: key now
+       includes ``waves_per_eu``).
 
-    All three run without a GPU; test 3 needs comgr and is skipped when the
+    All run without a GPU; the compile test needs comgr and is skipped when the
     toolchain is unavailable (matching the pattern in
     ``test_gfx950_dense_prefill_compiles_and_fits_budget``).
     """
@@ -2333,9 +2524,9 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
         After the fix the key is ``(kernel_name(), batch, waves_per_eu)``, so
         each value maps to a distinct slot.
 
-        This test verifies the key structure directly (no comgr needed) and
-        checks that the distinct keys correspond to distinct binaries via the
-        IR attribute (which feeds AMDGPU register-file sizing).
+        This test verifies the key structure directly (no comgr needed);
+        ``test_waves_per_eu_cache_isolation_artifacts`` covers the emitted
+        artifact those distinct keys must map to.
         """
         from dataclasses import replace
         from kernels.gfx950.attention_dense import (
@@ -2368,35 +2559,50 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
             "kernel_name() or batch differed unexpectedly — test setup error",
         )
 
-    def test_waves_per_eu_cache_isolation_binaries(self):
-        """Specs differing only in waves_per_eu compile to distinct binaries.
+    def test_waves_per_eu_cache_isolation_artifacts(self):
+        """Specs differing only in waves_per_eu emit distinct IR and compile.
+
+        The artifact rocke owns is the IR, so that is what the cache slots must
+        differ in. Asserting on the HSACO instead would be asserting a backend
+        decision: ``amdgpu-waves-per-eu`` is an occupancy *hint*, and the
+        allocator is free to land two hint values on the same register budget.
+        It does exactly that here -- on the ROCm 7.2 comgr that torch bundles,
+        this kernel compiles wpe 1, 2 and 8 to byte-identical code and only 4
+        differs, while on an older /opt/rocm comgr 1 and 2 happen to differ.
+        A test that passed standalone and failed under the suite only because
+        importing torch swapped the comgr underneath it was measuring the
+        toolchain, not the fix.
 
         Requires comgr; skipped when the toolchain is unavailable.
         """
         import hashlib
         from dataclasses import replace
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
         from kernels.gfx950.attention_dense import (
             AttentionDenseSpec,
             build_attention_dense,
         )
 
         base = AttentionDenseSpec(**self._BASE_KWARGS)
-        hsaco_hashes = {}
+        ir_hashes = {}
         for wpe in (1, 2):
             with self.subTest(waves_per_eu=wpe):
-                spec = replace(base, waves_per_eu=wpe)
-                art = _compile_or_skip(
-                    build_attention_dense(spec, arch="gfx950"), arch="gfx950"
+                kernel = build_attention_dense(
+                    replace(base, waves_per_eu=wpe), arch="gfx950"
                 )
-                hsaco_hashes[wpe] = hashlib.sha256(art.hsaco).hexdigest()
+                ir_hashes[wpe] = hashlib.sha256(
+                    lower_kernel_to_llvm(kernel).encode()
+                ).hexdigest()
+                # Each variant must survive codegen, not just lowering.
+                _compile_or_skip(kernel, arch="gfx950")
 
-        if len(hsaco_hashes) == 2:
-            self.assertNotEqual(
-                hsaco_hashes[1],
-                hsaco_hashes[2],
-                "waves_per_eu=1 and waves_per_eu=2 produced identical binaries; "
-                "waves_per_eu is not reaching the register-file sizing pass",
-            )
+        self.assertNotEqual(
+            ir_hashes[1],
+            ir_hashes[2],
+            "waves_per_eu=1 and waves_per_eu=2 lowered to identical IR; "
+            "waves_per_eu is not reaching the emitted kernel, so the two "
+            "cache slots would hold the same artifact",
+        )
 
 
 # ---------------------------------------------------------------------

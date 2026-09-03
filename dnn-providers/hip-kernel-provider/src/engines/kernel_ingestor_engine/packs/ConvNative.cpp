@@ -189,18 +189,19 @@ std::optional<data_objects::DataType> graphDataType(const MatchContext& context)
  *        can launch? One pack, one operation, so this matcher (unlike Pointwise's)
  *        both admits the node type and validates it in one pass.
  */
-bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
+std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
 {
+
     const auto* attributesPtr = convFwdNode(context);
     if(attributesPtr == nullptr)
     {
-        return false;
+        return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
 
     if(attributes.conv_mode() != data_objects::ConvMode::CROSS_CORRELATION)
     {
-        return false;
+        return std::nullopt;
     }
 
     // Deliberately narrow: stride 1, dilation 1, no padding is the only shape the
@@ -210,7 +211,7 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
        || !allEqual(attributes.pre_padding(), SUPPORTED_SPATIAL_RANK, 0)
        || !allEqual(attributes.post_padding(), SUPPORTED_SPATIAL_RANK, 0))
     {
-        return false;
+        return std::nullopt;
     }
 
     const auto* x = findTensor(context, attributes.x_tensor_uid());
@@ -218,18 +219,18 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
     const auto* y = findTensor(context, attributes.y_tensor_uid());
     if(x == nullptr || w == nullptr || y == nullptr)
     {
-        return false;
+        return std::nullopt;
     }
 
     if(!isSupportedOperand(*x) || !isSupportedOperand(*w) || !isSupportedOperand(*y))
     {
-        return false;
+        return std::nullopt;
     }
 
     // Uniform dtype across operands; mixed precision is a different kernel.
     if(x->data_type() != w->data_type() || x->data_type() != y->data_type())
     {
-        return false;
+        return std::nullopt;
     }
 
     const auto* xDims = x->dims();
@@ -248,14 +249,14 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
     // past the end.
     if(wDims->Get(1) != xC)
     {
-        return false;
+        return std::nullopt;
     }
 
     // r <= h and s <= width, or p = h - r + 1 / q = width - s + 1 go non-positive,
     // which the kernel's flat-index unravel (ConvFwd.cpp) never expects.
     if(wR > xH || wS > xW)
     {
-        return false;
+        return std::nullopt;
     }
 
     // y must be exactly the shape the kernel computes: total = n*k*p*q comes from x
@@ -264,15 +265,16 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
     if(yDims->Get(0) != xDims->Get(0) || yDims->Get(1) != wK || yDims->Get(2) != xH - wR + 1
        || yDims->Get(3) != xW - wS + 1)
     {
-        return false;
+        return std::nullopt;
     }
 
     // Binds operand uids for the dispatch handler to read back rather than re-deriving
     // them from the graph.
+    BoundTokens bound;
     bound[std::string(X_TOKEN)] = attributes.x_tensor_uid();
     bound[std::string(W_TOKEN)] = attributes.w_tensor_uid();
     bound[std::string(Y_TOKEN)] = attributes.y_tensor_uid();
-    return true;
+    return bound;
 }
 
 /**
@@ -280,7 +282,9 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
  *        Evaluated once per candidate kernel; without it an f32 graph could reach an
  *        f16 binary and return wrong numbers rather than failing.
  */
-bool convFwdKernelMatches(const MatchContext& context, const KernelDefinition& kernel)
+bool convFwdKernelMatches(const MatchContext& context,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel)
 {
     const auto dataType = graphDataType(context);
     if(!dataType.has_value())
@@ -291,7 +295,9 @@ bool convFwdKernelMatches(const MatchContext& context, const KernelDefinition& k
     return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
 }
 
-double convFwdScore(const KernelDefinition& kernel, const MatchContext& /*context*/)
+double convFwdScore(const MatchContext& /*context*/,
+                    const BoundTokens& /*bound*/,
+                    const KernelDefinition& kernel)
 {
     // A stand-in for a trained model: prefers the larger block size.
     return static_cast<double>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
@@ -304,8 +310,8 @@ double convFwdScore(const KernelDefinition& kernel, const MatchContext& /*contex
  */
 ConvFwdBinding convFwdBinding(const BoundTokens& bound)
 {
-    // Every token was written by the graph matcher that admitted this graph; a missing
-    // one means the catalog was built by a matcher other than ours.
+    // Every token was written by the engine's graph match, which admitted this graph; a
+    // missing one means the catalog was built by an engine other than ours.
     const auto read = [&bound](std::string_view token) {
         const auto value = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token);
         if(!value.has_value())
@@ -468,7 +474,7 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        // Reads the operand uids the matcher bound rather than re-deriving them.
+        // Reads the operand uids the graph match bound rather than re-deriving them.
         const auto binding = convFwdBinding(bound);
 
         const auto& xTensor = requireTensor(context, binding.x);

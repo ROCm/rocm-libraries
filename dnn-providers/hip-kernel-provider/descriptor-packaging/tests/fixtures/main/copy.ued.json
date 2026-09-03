@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "ued-copy",
+  "name": "test_fixture:copy",
+  "heuristic": "uhd-shared",
+  "metadata": "kmd-copy"
+}
