@@ -131,7 +131,9 @@ void GpuFpReferenceReduction::launchReduction(
     }
 
     // Compute the reduction domain axes, strides and size based on the input and output dimensions
+    // NOLINTBEGIN(modernize-avoid-c-arrays)
     long long reductionDomainShape[5];
+    // NOLINTEND(modernize-avoid-c-arrays)
     long long reductionDomainSize = 1;
     long long reductionRank = 0;
     for(size_t i = 0; i < outputDims.size(); ++i)
