@@ -16426,6 +16426,8 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["CompactLoopStore"]:
       edgeModule.add(self.defineSgpr("CLSm0Base", 1))
       edgeModule.add(self.defineSgpr("CLSLoopCounter", 1))
+      if self.states.useGateResidual:
+        edgeModule.add(self.defineSgpr("CLSGateRowInc", 1))
 
     # for storeRemap edge case, non-beta still can enable vector stores
     gwvw = vectorWidth
@@ -16706,6 +16708,8 @@ class KernelWriterAssembly(KernelWriter):
 
     # Free dedicated CLS SGPRs after all batches / activation branches.
     if kernel["CompactLoopStore"]:
+      if self.states.useGateResidual:
+        edgeModule.add(self.undefineSgpr("CLSGateRowInc"))
       edgeModule.add(self.undefineSgpr("CLSLoopCounter"))
       edgeModule.add(self.undefineSgpr("CLSm0Base"))
 
@@ -17294,6 +17298,9 @@ class KernelWriterAssembly(KernelWriter):
     # CLS: seed the SRD chain on elt0/batch0. C uses tmpS01+1 so D's primer is kept.
     if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))) and not isWorkspace:
       _stmp = (tmpS01 + 1) if (tc == 'C' and kernel["CompactLoopStore"]) else tmpS01
+      # Gate has its own stride and must preserve C/D's delayed increments.
+      if tc == 'Gate' and kernel["CompactLoopStore"]:
+        _stmp = "CLSGateRowInc"
       module.add(addrCalc.incrementToNextRow(kernel, tc, ss, _stmp, forceinitrow0=1, bpeType=bpeType,
                                              overrideAfterPrimerRows=overrideAfterPrimerRows))
 
