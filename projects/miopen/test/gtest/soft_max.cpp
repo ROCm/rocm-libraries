@@ -1134,6 +1134,85 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(MIOPEN_SOFTMAX_ACCURATE),
                                           testing::Values(MIOPEN_SOFTMAX_MODE_INSTANCE)));
 
+// --- Mixed packing (packed x, non-packed/strided y) --------------------
+// Regression test for solver::softmax::Softmax::IsApplicable's forward gate,
+// which read `if(!x.IsPacked() && !y.IsPacked()) return false;` -- i.e. it only
+// rejected when BOTH operands were non-packed, so a MIXED case (one packed,
+// one not) was wrongly accepted. The corresponding backward gate a few lines
+// down already used `||` (reject if ANY operand is non-packed) -- the forward
+// gate should match. The Softmax (packed) solver's kernel derives all output
+// addressing from OUTER_SIZE/INNER_SIZE/STRIDE (no per-descriptor strides are
+// passed to the kernel at all, unlike SoftmaxNoncontiguous which passes real
+// N/C/H/W strides) -- so when accepted for a non-packed y, it writes assuming
+// packed/contiguous addressing while the real y buffer has padding, producing
+// wrong results at every row after the first.
+//
+// No forward softmax solver actually supports mixed packing, so the correct
+// behavior is to fail cleanly (miopenStatusNotImplemented) rather than silently
+// mis-address memory. miopen::SoftmaxForward runs
+// solver::SolverContainer<AttnSoftmax, Softmax, SoftmaxNoncontiguous>
+// ::ExecutePrimitive() in that FIXED order (see src/softmax.cpp) and takes the
+// first applicable solver. For packed-x / non-packed-y:
+//   * AttnSoftmax          -- rejects (requires both descriptors packed).
+//   * Softmax              -- pre-fix `&&` wrongly ACCEPTS -> runs with packed
+//                             addressing on the padded y -> silent wrong output
+//                             (no throw). Post-fix `||` correctly rejects.
+//   * SoftmaxNoncontiguous -- rejects: requires x and y to share identical
+//                             strides (src/solver/softmax/softmax_noncontiguous
+//                             .cpp), which mixed packing never does.
+// So post-fix NO solver applies and SoftmaxForward throws. The test is RED
+// pre-fix (Softmax runs, no throw) and GREEN post-fix (throws). The fix turns a
+// silent wrong result into a clean unsupported-config error; it does not make
+// mixed packing produce a correct result (no solver can, without extending
+// SoftmaxNoncontiguous to independent x/y strides).
+// Parameterized (with a single trivial value) so the test's full name is
+// "Smoke/GPU_Softmax_MixedPacking_FP32.ForwardPackedXStridedY/0" -- the
+// leading "Smoke/" prefix (from INSTANTIATE_TEST_SUITE_P) is required for
+// TheRock CI's "*/GPU_Softmax*" filter (see test_categories.yaml) to select
+// it; a bare TEST_F would not match that glob (no "Prefix/" component).
+struct GPU_Softmax_MixedPacking_FP32 : public testing::TestWithParam<int>
+{
+};
+
+TEST_P(GPU_Softmax_MixedPacking_FP32, ForwardPackedXStridedY)
+{
+    auto&& handle = get_handle();
+
+    const std::vector<size_t> dims = {2, 32, 1, 1};
+    // Packed would be {32, 1, 1, 1}; pad the N stride so y is non-packed.
+    const std::vector<size_t> strided_strides = {40, 1, 1, 1};
+
+    auto x_host = tensor<float>{miopenTensorNCHW, dims}.generate(tensor_elem_gen_integer{5});
+    auto y_host = tensor<float>{dims, strided_strides};
+
+    ASSERT_TRUE(x_host.desc.IsPacked()) << "test setup bug: x must be packed";
+    ASSERT_FALSE(y_host.desc.IsPacked()) << "test setup bug: y must be non-packed";
+
+    const size_t n_elems_y = dims[0] * strided_strides[0];
+
+    std::vector<float> ybuf(n_elems_y, -42.0f);
+
+    const float alpha = 1.0f, beta = 0.0f;
+    auto x_dev = handle.Write(x_host.data);
+    auto y_dev = handle.Write(ybuf);
+
+    // No forward solver supports mixed packing -> SoftmaxForward must throw
+    // (miopenStatusNotImplemented) rather than mis-address the padded y buffer.
+    // Pre-fix, the `&&` gate let the packed Softmax solver run instead, silently
+    // producing wrong output (no throw).
+    EXPECT_ANY_THROW(miopen::SoftmaxForward(handle,
+                                            &alpha,
+                                            &beta,
+                                            x_host.desc,
+                                            x_dev.get(),
+                                            y_host.desc,
+                                            y_dev.get(),
+                                            MIOPEN_SOFTMAX_ACCURATE,
+                                            MIOPEN_SOFTMAX_MODE_INSTANCE));
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Softmax_MixedPacking_FP32, testing::Values(0));
+
 // --- Extra coverage: non-zero x/y offsets --
 // Findings from the tests below (both DISABLED -- see caveats):
 //   * The Softmax solver DOES honor offsets correctly.
