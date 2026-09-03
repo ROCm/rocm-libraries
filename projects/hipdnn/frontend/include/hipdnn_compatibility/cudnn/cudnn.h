@@ -108,6 +108,12 @@ inline size_t cudnnGetVersion(void)
     return CUDNN_VERSION;
 }
 
+/// @brief Return the claimed CUDA-runtime version. Mirrors NVIDIA `cudnnGetCudartVersion`.
+inline size_t cudnnGetCudartVersion(void)
+{
+    return CUDNN_CUDART_VERSION;
+}
+
 } // extern "C"
 
 // ===========================================================================

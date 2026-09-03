@@ -36,7 +36,8 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
-                    streamKMulticast, streamK2DMulticast
+                    streamKMulticast, streamK2DMulticast, \
+                    swizzleGeometry
 from Tensile.Common.DataType import DataType
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.CustomKernels import supportsUserSgprKernargPreload
@@ -1167,6 +1168,10 @@ class Solution(collections.abc.Mapping):
         if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
+    if state["ClusterDim"] in ([16, 1], [1, 16]):
+      reject(state, printRejectionReason,
+              "Currently ClusterDim = 16x1 and 1x16 are not supported")
+
     # Multicast uses a mask fixed to the physical cluster position, but Stream-K remaps
     # each WG's tile per iteration, so the broadcast would target the wrong partner.
     # Keep the cluster WG-id decode (gated on ClusterDim) but leave multicast off for Stream-K
@@ -1238,6 +1243,12 @@ class Solution(collections.abc.Mapping):
     # NumLoads is NOT used on the fractional path
     # NumLoads is number of vector loads per-thread
     state["NumLoads%s"%tc] = totalVectors // state["NumThreads"]
+
+    # Replicated lanes re-read the same addresses, so a load moves dupFactor times fewer
+    # distinct elements than totalVectors assumes.
+    # .get() because unit tests drive this staticmethod with a partial state.
+    if tc in ("A", "B") and state.get("ProblemType", {}).get("SwizzleTensor%s"%tc, False):
+      state["NumLoads%s"%tc] *= swizzleGeometry(state, tc)["dupFactor"]
     #print "result: ", pvar(state, "GlobalReadVectorWidth%s"%tc), \
     #        pvar(state, "NumLoads%s"%tc)
 
@@ -1510,9 +1521,14 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "DirectToVgpr%c does not supports enableGLTr%c and GlobalReadVectorWidth != 8"%(tc, tc))
       return False
 
-    # TLU=False or enableGLTr case, need GlobalReadVectorWidth == LocalReadVectorWidth
+    # TLU=False or enableGLTr case, need GlobalReadVectorWidth == LocalReadVectorWidth.
+    # A swizzled tensor is exempt: it never goes through LDS, so LocalReadVectorWidth
+    # describes reads that do not happen. Its operand comes from LRVW/GRVW consecutive
+    # swizzle blocks instead.
     if ((not state["ProblemType"]["TLU%c"%tc]) or state["enableGLTr%c"%tc]) and \
-       state["GlobalReadVectorWidth%c"%tc] != state["LocalReadVectorWidth%s"%tc]:
+       state["GlobalReadVectorWidth%c"%tc] != state["LocalReadVectorWidth%s"%tc] and \
+       not (state["ProblemType"]["SwizzleTensor%c"%tc] and \
+            state["LocalReadVectorWidth%s"%tc] % state["GlobalReadVectorWidth%c"%tc] == 0):
       reject(state, printRejectionReason, "DirectToVgpr%c does not supports TLU=False GlobalReadVectorWidth%c(%u) != LocalReadVectorWidth(%u)"%(tc, tc, state["GlobalReadVectorWidth%c"%tc], state["LocalReadVectorWidth%s"%tc]))
       return False
 
@@ -1800,6 +1816,31 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Either GSU or StreamK must be enabled")
       return
 
+    if state["ProblemType"]["FusedGemmA2A"]:
+      if isa[:2] not in ((9, 4), (9, 5)):
+        reject(state, printRejectionReason,
+               "FusedGemmA2A requires a gfx94x/gfx95x ISA (the SdmaPacketEmitter "
+               "packet layout is gfx9 only)")
+        return
+      if not state["ProblemType"]["DestDataType"].isBFloat16():
+        reject(state, printRejectionReason, "FusedGemmA2A only supports a bf16 D")
+        return
+      if state["StreamK"] != 0:
+        reject(state, printRejectionReason, "FusedGemmA2A requires StreamK=0 (data-parallel carrier)")
+        return
+      mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
+      if mt0 not in (128, 256) or mt1 not in (128, 256):
+        reject(state, printRejectionReason, "FusedGemmA2A supports MacroTile0/1 in {128, 256}")
+        return
+      if state["GlobalSplitU"] != 1:
+        reject(state, printRejectionReason,
+               "FusedGemmA2A requires GlobalSplitU=1 (the DRAIN owner is elected "
+               "against NumWorkGroups0*NumWorkGroups1; any other GSU can multiply "
+               "the arriving work-group count -- GSU=-1 resolves at runtime -- so "
+               "the election may fire early)")
+        return
+      state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for the last-WG election
+
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")
       return
@@ -1814,6 +1855,11 @@ class Solution(collections.abc.Mapping):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
+      # Newly generated SK3 / SK5 kernels emit the per-tile extra-iters asm
+      # path. SK4 (dynamic) does not. Older/custom kernels keep the default
+      # False via YAML omission / defaultInternalSupportParams.
+      if state["StreamK"] in (3, 5):
+        state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = True
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
       state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
       if state["ClusterDim"] != [1, 1]:
@@ -3955,9 +4001,6 @@ class Solution(collections.abc.Mapping):
           optGRVW = int(16 // datatype.numBytes())
         return optGRVW
 
-      def calSwizzlePackK(state, tc):
-        return 16 // state[f"MIInputPerThread{tc}"] // int(state["ProblemType"][f"DataType{tc}"].numBytes())
-
       genGRVWA = False
       genGRVWB = False
       # Default GlobalReadVectorWidthA
@@ -3971,7 +4014,7 @@ class Solution(collections.abc.Mapping):
               reject(state, printRejectionReason, "GRVWA=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthA"] == -1:
             if state["ProblemType"]["SwizzleTensorA"]:
-              state["GlobalReadVectorWidthA"] = state["MIInputPerThreadA"] * calSwizzlePackK(state, "A")
+              state["GlobalReadVectorWidthA"] = swizzleGeometry(state, "A")["laneSize"]
             elif state["ProblemType"]["DataTypeA"].is6bitFloat():
               state["GlobalReadVectorWidthA"] = 32	  
             elif state["enableGLTrA"]:
@@ -4018,7 +4061,7 @@ class Solution(collections.abc.Mapping):
               reject(state, printRejectionReason, "GRVWB=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthB"] == -1:
             if state["ProblemType"]["SwizzleTensorB"]:
-              state["GlobalReadVectorWidthB"] = state["MIInputPerThreadB"] * calSwizzlePackK(state, "B")
+              state["GlobalReadVectorWidthB"] = swizzleGeometry(state, "B")["laneSize"]
             elif state["ProblemType"]["DataTypeB"].is6bitFloat():
               state["GlobalReadVectorWidthB"] = 32
             elif state["enableGLTrB"]:
@@ -4070,18 +4113,16 @@ class Solution(collections.abc.Mapping):
             state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], state["_DepthUMXSB"])
           state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], 16)
 
-      #for tensor swizzling, we calculate pack-k to achieve buffer_load_dwordx4
+      # One lane reads exactly one swizzle row per load, so GRVW is pinned to the lane size.
       for tc in ("A", "B",):
         if state["ProblemType"][f"SwizzleTensor{tc}"]:
           if not state["EnableMatrixInstruction"]:
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
-          # Print rejection reason instead of force set
-          # 16 means bytes of buffer_load_dwordx4
-          SwizzlePackK = calSwizzlePackK(state, tc)
-          if state[f"GlobalReadVectorWidth{tc}"] != state[f"MIInputPerThread{tc}"] * SwizzlePackK:
-            GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
-            MIInPerThread = state[f"MIInputPerThread{tc}"]
-            reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != MIInputPerThread{tc} ({MIInPerThread}) * {SwizzlePackK}")
+            continue
+          laneSize = swizzleGeometry(state, tc)["laneSize"]
+          GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
+          if GRVW_TC != laneSize:
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
 
       if state["ProblemType"]["SwizzleTensorA"]:
         if not state["DirectToVgprA"]:
@@ -4375,14 +4416,12 @@ class Solution(collections.abc.Mapping):
           # swizzle
           if state["LocalSplitU"] > 1:
             if state["ProblemType"]["SwizzleTensorA"]:
-              SwizzlePackK = calSwizzlePackK(state, "A")
-              if depthUA < state["MatrixInstK"] * SwizzlePackK * state["LocalSplitU"]:
+              if depthUA < swizzleGeometry(state, "A")["swizzleK"] * state["LocalSplitU"]:
                 validDepthU = False
                 extraComment = ": DepthU(%u) < Min-DU for swizzleA + LSU(%u)"%(depthUA, state["LocalSplitU"])
 
             if state["ProblemType"]["SwizzleTensorB"]:
-              SwizzlePackK = calSwizzlePackK(state, "B")
-              if depthUB < state["MatrixInstK"] * SwizzlePackK * state["LocalSplitU"]:
+              if depthUB < swizzleGeometry(state, "B")["swizzleK"] * state["LocalSplitU"]:
                 validDepthU = False
                 extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
 

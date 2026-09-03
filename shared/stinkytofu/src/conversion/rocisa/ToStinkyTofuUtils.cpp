@@ -62,6 +62,7 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 #ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
 #include "HelloWorldPass.hpp"  // declares stinkytofu::registerHelloWorldPassPlugin()
@@ -1481,10 +1482,28 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             if (signature_) {
                 int64_t totalBytes = module_->getTotalInstructionBytes();
                 if (totalBytes >= 0) signature_->setTotalInstructionBytes(totalBytes);
+                refreshSgprCount();
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
             return result;
+        }
+
+        /// A pass that rewrites operands invalidates the declared SGPR count, so
+        /// it is taken from the final code here rather than trusted from the
+        /// producer. Only that count moves: everything else in the descriptor
+        /// says what the hardware does before entry. Never raised, so a flow
+        /// whose registers did not move keeps the producer's number.
+        void refreshSgprCount() const {
+            stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+            uint32_t required = 0;
+            for (const auto* function : module_->getFunctions()) {
+                if (function == nullptr) continue;
+                required = std::max(required, stinkytofu::requiredSgprCount(
+                                                  *function, kd.numSgprPreload, kd.sgprWorkGroup));
+            }
+            if (required == 0 || static_cast<int>(required) >= kd.totalSgprs) return;
+            signature_->setGprs(kd.totalVgprs, kd.totalAgprs, static_cast<int>(required));
         }
 
         // Plugin data forwarding
@@ -1587,6 +1606,9 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     }
 
                 MODULE_OPTIONS_LIST(SET_MODULE_OPTION)
+#define SET_MODULE_OPTION_WITH_DEFAULT(name, type, value) SET_MODULE_OPTION(name, type)
+                MODULE_OPTIONS_WITH_DEFAULTS_LIST(SET_MODULE_OPTION_WITH_DEFAULT)
+#undef SET_MODULE_OPTION_WITH_DEFAULT
 #undef SET_MODULE_OPTION
 #undef DEBUG_SET_MODULE_OPTION
             }
