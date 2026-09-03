@@ -132,6 +132,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
+            --event-name "${{ github.event_name }}" \
+            --github-repo "${{ github.repository }}" \
+            --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
+            --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
+            --config-path ".github/repos-config.json"
           # Hardcoded for testing hipsolver
           echo 'changed_projects=projects/hipsolver' >> $GITHUB_OUTPUT
           echo 'run_all_tests=false' >> $GITHUB_OUTPUT
