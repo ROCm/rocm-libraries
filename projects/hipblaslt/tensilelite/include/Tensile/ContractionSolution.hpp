@@ -840,6 +840,12 @@ namespace TensileLite
 
         virtual void relaseDeviceUserArgs(void* dUA, void* dUAHost);
 
+        /**
+         * resolvedGlobalAccumulation is the mode the kernel will actually run in.
+         * AdaptiveGemmGSUA lets getAccumulation() pick it per launch, so it can
+         * differ from sizeMapping.globalAccumulation; the argument layout has to
+         * follow the resolved mode, not the compiled-in one.
+         */
         template <bool T_Debug, bool insertKernelArgs, typename KA>
         void singleCallArgs(Problem const&           problem,
                             ContractionInputs const& inputs,
@@ -848,7 +854,8 @@ namespace TensileLite
                             dim3 const&              problemNumGroupTiles,
                             dim3 const&              numWorkGroups,
                             KA&                      args,
-                            StreamKSettings const&   sk) const;
+                            StreamKSettings const&   sk,
+                            size_t                   resolvedGlobalAccumulation) const;
 
         // Common kernel related arguments (e.g. gemm_count, arg type, MT, GSU...)
         template <bool T_Debug, bool Legacy, typename KA>
@@ -907,6 +914,7 @@ namespace TensileLite
                                       KA&                      args,
                                       StreamKSettings const&   sk,
                                       uint32_t                 autoGsuVal,
+                                      size_t                   resolvedGlobalAccumulation,
                                       uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
 
         template <typename KA>
@@ -922,7 +930,8 @@ namespace TensileLite
         KernelInvocation generateOutputConversionCall(Problem const&           problem,
                                                       ContractionInputs const& inputs,
                                                       StreamKSettings const&   sk,
-                                                      uint32_t                 autoGsuVal) const;
+                                                      uint32_t                 autoGsuVal,
+                                                      size_t resolvedGlobalAccumulation) const;
 
         template <bool T_Debug, typename KA>
         KernelInvocation
