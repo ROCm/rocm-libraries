@@ -153,6 +153,25 @@ repos:
         pass_filenames: false
         always_run: true
 
+      # SUPPORT_MATRIX.md is generated, not committed (see
+      # dnn-providers/integration-tests/.gitignore for why), so there is no
+      # committed copy to check for staleness. Render and discard to catch
+      # interpreter-level errors (import failures, syntax errors, etc.).
+      - id: render-support-matrix
+        name: Support matrix renders without errors (RFC 0015)
+        entry: python dnn-providers/integration-tests/scripts/render_support_matrix.py --output /dev/null
+        language: python
+        pass_filenames: false
+        always_run: true
+
+      # SUPPORT_MATRIX_OVERVIEW.md *is* committed, so check it for staleness.
+      - id: check-support-matrix-overview
+        name: Support matrix overview is current (RFC 0015)
+        entry: python dnn-providers/integration-tests/scripts/render_support_matrix.py --overview-only --check
+        language: python
+        pass_filenames: false
+        always_run: true
+
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)
         entry: python projects/miopen/test/utils/gtest_formating_checks.py

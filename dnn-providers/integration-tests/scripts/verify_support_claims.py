@@ -32,6 +32,13 @@ import sys
 from pathlib import Path
 from typing import List
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from bundle_discovery import (  # noqa: E402
+    SWEEP_MANIFEST_NAME,
+    SWEEP_SUPPORT_NAME,
+)
+
 BUNDLE_ROOT = Path(__file__).resolve().parent.parent / "integration-test-bundles"
 VALID_PLATFORMS = {"linux", "windows"}
 VALID_ENFORCEMENT_LEVELS = {"applicability", "buildable", "full"}
@@ -187,7 +194,7 @@ def check_enforcement_level_single(support_path: Path, errors: List[str]) -> Non
 
 
 def check_enforcement_level_sweep(support_path: Path, errors: List[str]) -> None:
-    sweep_path = support_path.parent / "sweep.json"
+    sweep_path = support_path.parent / SWEEP_MANIFEST_NAME
     if not sweep_path.exists():
         return
     try:
@@ -218,7 +225,7 @@ def check_enforcement_level_sweep(support_path: Path, errors: List[str]) -> None
 def check_sweep_case_ids(
     support_path: Path, support_data: dict, errors: List[str]
 ) -> None:
-    sweep_path = support_path.parent / "sweep.json"
+    sweep_path = support_path.parent / SWEEP_MANIFEST_NAME
     if not sweep_path.exists():
         _error(
             support_path,
@@ -267,7 +274,7 @@ def check_orphaned_single_graph(support_path: Path, errors: List[str]) -> None:
 
 
 def check_orphaned_sweep(support_path: Path, errors: List[str]) -> None:
-    sweep_path = support_path.parent / "sweep.json"
+    sweep_path = support_path.parent / SWEEP_MANIFEST_NAME
     if not sweep_path.exists():
         _error(
             support_path,
@@ -278,7 +285,7 @@ def check_orphaned_sweep(support_path: Path, errors: List[str]) -> None:
 
 
 def is_sweep_sidecar(path: Path) -> bool:
-    return path.name == "support.json"
+    return path.name == SWEEP_SUPPORT_NAME
 
 
 def verify_all(bundle_root: Path) -> List[str]:
@@ -301,7 +308,9 @@ def verify_all(bundle_root: Path) -> List[str]:
         if _has_non_empty_claims(data):
             check_enforcement_level_single(support_path, errors)
 
-    for support_path in sorted(bundle_root.rglob("support.json")):
+    for support_path in sorted(bundle_root.rglob(SWEEP_SUPPORT_NAME)):
+        if not is_sweep_sidecar(support_path):
+            continue
         try:
             with open(support_path) as f:
                 data = json.load(f)

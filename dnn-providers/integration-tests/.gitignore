@@ -13,3 +13,12 @@
 # be added back under the old name, but guard against accidental recreation
 # (e.g. a stale script or muscle-memory path) getting committed again.
 integration_test_bundles/
+
+# The rendered engine support matrix (RFC 0015 §11). Generated, not committed:
+# it is ~420 KB today and grows with every bundle and every new gfx target,
+# which is both a large diff on every sidecar edit and close enough to the size
+# at which GitHub stops rendering a markdown file to be a problem. It is a pure
+# view of the committed .support.json sidecars, so anyone can rebuild it from a
+# plain checkout -- no GPU, no plugin, no DVC:
+#   python3 dnn-providers/integration-tests/scripts/render_support_matrix.py
+SUPPORT_MATRIX.md
