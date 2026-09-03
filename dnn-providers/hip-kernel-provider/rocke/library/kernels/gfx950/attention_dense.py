@@ -93,9 +93,7 @@ DENSE_TILE_GEOMETRIES = MappingProxyType(
         "default": MappingProxyType(
             {"block_m": 256, "block_n": 64, "lds_v_row_pad": 32}
         ),
-        "bm128": MappingProxyType(
-            {"block_m": 128, "block_n": 64, "lds_v_row_pad": 32}
-        ),
+        "bm128": MappingProxyType({"block_m": 128, "block_n": 64, "lds_v_row_pad": 32}),
     }
 )
 _DEFAULT_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
@@ -468,17 +466,13 @@ class AttentionDenseSpec:
             nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
             expected_np = nqb * self.num_kv_heads * self.batch * gqa // 2
             if not self.persistent or not self.causal:
-                raise ValueError(
-                    "gqa_pair_2phase requires persistent causal attention"
-                )
+                raise ValueError("gqa_pair_2phase requires persistent causal attention")
             if self.ragged or self.varlen or self.paged:
                 raise ValueError(
                     "gqa_pair_2phase is validated only for aligned dense attention"
                 )
             if nqb % 2 or gqa < 2:
-                raise ValueError(
-                    "gqa_pair_2phase requires even NQB and GQA ratio >= 2"
-                )
+                raise ValueError("gqa_pair_2phase requires even NQB and GQA ratio >= 2")
             if self.num_persistent != expected_np:
                 raise ValueError(
                     "gqa_pair_2phase requires num_persistent == W/2 "
@@ -2016,9 +2010,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                         slot = next(it, None)
                         if slot is not None:
                             nsub, i = slot
-                            p_vals[nsub][i] = _exp2(
-                                b.fsub(s_reg[nsub][i], m_new)
-                            )
+                            p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
             else:
                 out = []
                 for dt in range(D_TILES):
@@ -2037,9 +2029,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                             if slot is None:
                                 break
                             nsub, i = slot
-                            p_vals[nsub][i] = _exp2(
-                                b.fsub(s_reg[nsub][i], m_new)
-                            )
+                            p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
                             n_emit += 1
                         b.sched_group_barrier(DS_READ, 2, 0)
                         b.sched_group_barrier(MFMA, 1, 0)

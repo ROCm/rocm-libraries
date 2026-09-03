@@ -105,9 +105,7 @@ def make_spec_from_shape(shape: dict[str, Any]) -> AttentionDenseSpec:
     geometry = {
         "block_m": int(shape.get("block_m", defaults["block_m"])),
         "block_n": int(shape.get("block_n", defaults["block_n"])),
-        "lds_v_row_pad": int(
-            shape.get("lds_v_row_pad", defaults["lds_v_row_pad"])
-        ),
+        "lds_v_row_pad": int(shape.get("lds_v_row_pad", defaults["lds_v_row_pad"])),
     }
     return AttentionDenseSpec(
         batch=int(shape.get("batch", 1)),

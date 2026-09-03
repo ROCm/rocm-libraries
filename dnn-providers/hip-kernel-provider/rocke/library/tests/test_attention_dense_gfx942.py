@@ -201,9 +201,7 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
 # a duplicate compile and can never serve a wrong binary -- so these are recorded,
 # not asserted against. lazy_rescale is a gfx950-only lever (this builder never reads
 # spec.lazy_rescale) that the SHARED kernel_name() nevertheless tags with `lazyrs`.
-_NAME_ONLY_SPEC_FIELDS = frozenset(
-    {"lazy_rescale", "lds_v_row_pad", "wide_lds_dma"}
-)
+_NAME_ONLY_SPEC_FIELDS = frozenset({"lazy_rescale", "lds_v_row_pad", "wide_lds_dma"})
 
 # Second LEGAL values per field. Every candidate is filtered through
 # supports_attention_dense before use, so a candidate that is illegal for a given
