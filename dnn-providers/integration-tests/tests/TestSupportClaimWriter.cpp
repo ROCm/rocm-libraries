@@ -16,9 +16,9 @@
 #include "SupportClaimTestUtils.hpp"
 
 using hipdnn_integration_tests::bundle::dumpCanonical;
+using hipdnn_integration_tests::bundle::ObservedSupportCell;
 using hipdnn_integration_tests::bundle::parseSupportClaimsJson;
 using hipdnn_integration_tests::bundle::parseSweepSupportClaimsJson;
-using hipdnn_integration_tests::bundle::SupportObservation;
 using hipdnn_integration_tests::bundle::writeObservedSupportClaims;
 using hipdnn_integration_tests::bundle::test_utils::makeScopedTestDir;
 using hipdnn_integration_tests::bundle::test_utils::readFile;
@@ -37,7 +37,7 @@ TEST(TestSupportClaimWriter, SingleGraphWriteCreatesNewSidecar)
     const ScopedDirectory dir = makeScopedTestDir("test_writer");
     const auto bundlePath = dir.path() / "Small.json";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
     };
 
@@ -63,7 +63,7 @@ TEST(TestSupportClaimWriter, IdenticalObservationsWriteThenUnchanged)
     const ScopedDirectory dir = makeScopedTestDir("test_writer");
     const auto bundlePath = dir.path() / "Small.json";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
     };
 
@@ -95,7 +95,7 @@ TEST(TestSupportClaimWriter, UnobservedEngineBlockSurvivesUntouched)
     std::ofstream(sidecarPath) << dumpCanonical(existingJson);
 
     const auto bundlePath = dir.path() / "Small.json";
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
     };
 
@@ -121,7 +121,7 @@ TEST(TestSupportClaimWriter, EmptyObservationsLeaveExistingSidecarUntouched)
     existingJson["claims"]["MIOPEN_ENGINE"]["gfx942"] = nlohmann::json::array({"linux"});
     std::ofstream(sidecarPath) << dumpCanonical(existingJson);
 
-    const std::vector<SupportObservation> observations;
+    const std::vector<ObservedSupportCell> observations;
 
     const auto summary = writeObservedSupportClaims(observations);
     EXPECT_EQ(summary.filesWritten, 0u);
@@ -147,7 +147,7 @@ TEST(TestSupportClaimWriter, DeclineErasesPlatformAndCollapsesEmptyKeys)
     std::ofstream(sidecarPath) << dumpCanonical(existingJson);
 
     const auto bundlePath = dir.path() / "Small.json";
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", false),
     };
 
@@ -170,7 +170,7 @@ TEST(TestSupportClaimWriter, DeclineErasesOnlyTargetedPlatform)
     std::ofstream(sidecarPath) << dumpCanonical(existingJson);
 
     const auto bundlePath = dir.path() / "Small.json";
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", false),
     };
 
@@ -191,7 +191,7 @@ TEST(TestSupportClaimWriter, MultipleEngineObservationsInOneSidecar)
     const ScopedDirectory dir = makeScopedTestDir("test_writer");
     const auto bundlePath = dir.path() / "Small.json";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
         singleGraphObservation(bundlePath, "HIP_KERNEL_ENGINE", "gfx942", "linux", true),
         singleGraphObservation(bundlePath, "HIP_KERNEL_ENGINE", "gfx942", "windows", false),
@@ -216,7 +216,7 @@ TEST(TestSupportClaimWriter, SweepWriteCreatesNewSidecar)
     const ScopedDirectory dir = makeScopedTestDir("test_writer");
     const auto sweepPath = dir.path() / "sweep.json";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         sweepCaseObservation(sweepPath, "case_a", "MIOPEN_ENGINE", "gfx942", "linux", true),
         sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx942", "linux", true),
     };
@@ -242,7 +242,7 @@ TEST(TestSupportClaimWriter, SweepGroupsCasesWithIdenticalSupport)
     const ScopedDirectory dir = makeScopedTestDir("test_writer");
     const auto sweepPath = dir.path() / "sweep.json";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         sweepCaseObservation(sweepPath, "case_a", "MIOPEN_ENGINE", "gfx942", "linux", true),
         sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx942", "linux", true),
         sweepCaseObservation(sweepPath, "case_c", "MIOPEN_ENGINE", "gfx942", "linux", false),
@@ -279,7 +279,7 @@ TEST(TestSupportClaimWriter, SweepChangedSupportMovesCaseToCorrectGroup)
     std::ofstream(sidecarPath) << dumpCanonical(existingJson);
 
     const auto sweepPath = dir.path() / "sweep.json";
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         // case_b loses support on gfx942/linux
         sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx942", "linux", false),
     };
@@ -307,7 +307,7 @@ TEST(TestSupportClaimWriter, SweepIdenticalObservationsWriteThenUnchanged)
     const ScopedDirectory dir = makeScopedTestDir("test_writer");
     const auto sweepPath = dir.path() / "sweep.json";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         sweepCaseObservation(sweepPath, "case_a", "MIOPEN_ENGINE", "gfx942", "linux", true),
         sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx942", "linux", true),
     };
@@ -344,7 +344,7 @@ TEST(TestSupportClaimWriter, SweepUnobservedEngineBlockSurvivesUntouched)
     std::ofstream(sidecarPath) << dumpCanonical(existingJson);
 
     const auto sweepPath = dir.path() / "sweep.json";
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         sweepCaseObservation(sweepPath, "case_a", "MIOPEN_ENGINE", "gfx942", "linux", true),
     };
 
@@ -365,7 +365,7 @@ TEST(TestSupportClaimWriter, OutputIsCanonicalJson)
     const ScopedDirectory dir = makeScopedTestDir("test_writer");
     const auto bundlePath = dir.path() / "Small.json";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
     };
 
@@ -391,7 +391,7 @@ TEST(TestSupportClaimWriter, UnparseableSingleGraphSidecarReportsErrorAndSurvive
 
     std::ofstream(sidecarPath) << "not valid json {{{";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
     };
 
@@ -411,7 +411,7 @@ TEST(TestSupportClaimWriter, SchemaInvalidSingleGraphSidecarReportsErrorAndSurvi
     // Valid JSON but unsupported schema version — parseSupportClaimsJson throws
     std::ofstream(sidecarPath) << R"({"version": 999, "claims": {}})";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
     };
 
@@ -431,7 +431,7 @@ TEST(TestSupportClaimWriter, UnparseableSweepSidecarReportsErrorAndSurvives)
 
     std::ofstream(sidecarPath) << "corrupt sweep data!!!";
 
-    const std::vector<SupportObservation> observations = {
+    const std::vector<ObservedSupportCell> observations = {
         sweepCaseObservation(
             sweepDir / "sweep.json", "case_0", "MIOPEN_ENGINE", "gfx942", "linux", true),
     };

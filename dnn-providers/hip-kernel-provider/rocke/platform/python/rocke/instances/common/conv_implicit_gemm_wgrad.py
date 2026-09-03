@@ -324,10 +324,14 @@ class WgradConvSpec:
     )
     # Split-K: partition K_wg into this many equal slices along block_id_z.
     # -1 = auto (resolved by build_implicit_gemm_conv_wgrad via the CK formula).
+    #  0 = runtime atomic: kernel accepts ``ks`` as an i32 argument; the caller
+    #      supplies the slice width at launch.  Only one kernel is compiled; any
+    #      split-K degree is achievable at runtime by varying grid-Z and ``ks``.
+    #      Caller must zero-init dW before every launch.
     #  1 = disabled (default, normal store).
-    # >1 = each CTA atomic-adds its partial accumulator directly into dW
-    #      (dtype_d in fp32/bf16/fp16); caller must zero-init dW before launch.
-    # ABI is identical across all values; K_wg is padded as needed.
+    # >1 = fixed atomic: the exact degree is baked into the kernel name/IR.
+    #      Caller must zero-init dW before launch.
+    # ABI for 0 and >1: dW is not writeonly; K_wg is padded as needed.
     split_k: int = 1
 
     @property
@@ -368,16 +372,19 @@ class WgradConvSpec:
     def wg_K(self) -> int:
         return _wg_K(self.problem)
 
-    def wg_K_padded(self) -> int:
+    def wg_K_padded(self, split_k: Optional[int] = None) -> int:
         """K_wg rounded up to the nearest multiple of ``tile_k * split_k``.
 
-        Used by the builder as the loop upper bound so each split-K slice
-        spans exactly ``wg_K_padded // split_k`` K-elements, which is itself
-        a multiple of ``tile_k``.  Loads past the real ``wg_K`` are safe:
-        the buffer descriptor's OOB-clamp flag silently returns zero for
-        out-of-range byte offsets, so the MFMA contribution is zero.
+        When ``split_k=0`` (runtime) the caller must pass the concrete degree
+        to use for padding (e.g. the degree that will be used at launch time).
         """
-        stride = self.tile_k * self.split_k
+        sk = split_k if split_k is not None else self.split_k
+        if sk <= 0:
+            raise ValueError(
+                "wg_K_padded requires a concrete split_k degree (>= 1); "
+                f"got {sk!r}. Pass the launch-time degree explicitly."
+            )
+        stride = self.tile_k * sk
         k = _wg_K(self.problem)
         return ((k + stride - 1) // stride) * stride
 
@@ -395,6 +402,7 @@ class WgradConvSpec:
                 "async": self.async_dma,
                 f"spk{self.split_k}": self.split_k > 1,
                 "spkauto": self.split_k == -1,
+                "spkrt": self.split_k == 0,
             },
         )
 
@@ -415,24 +423,30 @@ class WgradConvSpec:
             )
         if self.block_size > 1024:
             raise ValueError(f"block_size {self.block_size} > 1024")
-        if self.split_k < -1 or self.split_k == 0:
+        if self.split_k < -1:
             raise ValueError(
-                f"split_k must be -1 (auto), 1 (disabled), or >1 (fixed); "
-                f"got {self.split_k}"
+                f"split_k must be -1 (auto), 0 (runtime atomic), 1 (disabled), "
+                f"or >1 (fixed); got {self.split_k}"
             )
-        if self.split_k > 1:
+        if self.split_k == 0 or self.split_k > 1:
             if self.data.dtype_d not in ("fp32", "bf16", "fp16"):
                 raise ValueError(
-                    f"split_k > 1 requires dtype_d in fp32/bf16/fp16 "
+                    f"split_k atomic requires dtype_d in fp32/bf16/fp16 "
                     f"(got {self.data.dtype_d!r})"
                 )
             if self.data.dtype_d in ("bf16", "fp16") and self.problem.cpg % 2 != 0:
                 raise ValueError(
-                    f"split_k > 1 with dtype_d={self.data.dtype_d!r} requires even cpg "
+                    f"split_k atomic with dtype_d={self.data.dtype_d!r} requires even cpg "
                     f"(packed <2 x dtype> atomic pairs must stay within one filter "
                     f"position; the packed dW inner dim is cpg=C/groups); "
                     f"got cpg={self.problem.cpg} (C={self.problem.C}, groups={self.problem.groups})"
                 )
+        if self.data.dtype_d in ("bf16", "fp16") and self.epilogue == "default":
+            raise ValueError(
+                f"split_k atomic with dtype_d={self.data.dtype_d!r} requires "
+                f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
+                f"scattered MFMA layout; cshuffle produces contiguous pairs)"
+            )
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -474,15 +488,16 @@ class WgradConvSpec:
           B (X):   NHWC → last dim C → vec_b
           D (dW):  KYXC → last dim C → vec_c
 
-        When ``split_k > 1`` the epilogue is ``default`` (direct scalar store),
-        which does not support vec_c > 1, so vec_c is forced to 1.
+        When ``split_k != 1`` (including ``split_k == 0`` for runtime selection)
+        the epilogue is ``default`` (direct scalar store), which does not support
+        vec_c > 1, so vec_c is forced to 1.
         """
         sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
 
         def _vec(n: int) -> int:
             return next(v for v in sizes if n % v == 0)
 
-        vec_c = 1 if split_k > 1 else _vec(C)
+        vec_c = 1 if split_k != 1 else _vec(C)
         return _vec(K), _vec(C), vec_c
 
 
@@ -532,22 +547,32 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         )
 
     sk = spec.split_k
-    if sk < -1 or sk == 0:
-        return False, f"split_k must be -1 (auto), 1, or >1 (got {sk})"
+    if sk < -1:
+        return False, f"split_k must be -1 (auto), 0 (runtime), 1, or >1 (got {sk})"
     # -1 = auto: resolved at build time; always valid at the spec-check stage.
-    if sk > 1 and family != "mma":
-        return False, f"split_k > 1 is CDNA-only (got family {family!r} on {arch})"
-    if sk > 1 and spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
+    # 0 = runtime atomic; validate constraints identically to >1 without a degree.
+    _is_atomic = sk == 0 or sk > 1
+    if _is_atomic and spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
         return False, (
-            f"split_k > 1 requires dtype_d in fp32/bf16/fp16 for atomic accumulation "
+            f"split_k atomic requires dtype_d in fp32/bf16/fp16 "
             f"(got {spec.data.dtype_d!r})"
         )
-    if sk > 1 and spec.data.dtype_d in ("bf16", "fp16") and spec.problem.cpg % 2 != 0:
+    if (
+        _is_atomic
+        and spec.data.dtype_d in ("bf16", "fp16")
+        and spec.problem.cpg % 2 != 0
+    ):
         return False, (
-            f"split_k > 1 with dtype_d={spec.data.dtype_d!r} requires even cpg "
+            f"split_k atomic with dtype_d={spec.data.dtype_d!r} requires even cpg "
             f"(packed <2 x dtype> atomic pairs must stay within one filter "
             f"position; the packed dW inner dim is cpg=C/groups); "
             f"got cpg={spec.problem.cpg}"
+        )
+    if spec.data.dtype_d in ("bf16", "fp16") and spec.epilogue == "default":
+        return False, (
+            f"split_k atomic with dtype_d={spec.data.dtype_d!r} requires "
+            f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
+            f"scattered MFMA layout; cshuffle produces contiguous pairs)"
         )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
@@ -617,7 +642,6 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             (spec.async_dma, "async_dma"),
             (spec.unroll_k, "unroll_k"),
             (spec.chiplet_swizzle, "chiplet_swizzle"),
-            (spec.split_k > 1, "split_k > 1"),
         ):
             if flag:
                 return False, f"WMMA wgrad does not support {label} on {arch}"
@@ -714,7 +738,9 @@ def build_implicit_gemm_conv_wgrad(
     ir_dtype_b = _ir_dtype(spec.data.dtype_b)
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
 
-    _is_split_k = spec.split_k > 1
+    _is_split_k = spec.split_k > 1 or spec.split_k == 0
+    _split_k_runtime = spec.split_k == 0  # ks passed as kernel arg at launch
+    _grouped = p_load.groups > 1
 
     b = IRBuilder(spec.kernel_name())
     if spec.waves_per_eu is not None:
@@ -743,6 +769,14 @@ def build_implicit_gemm_conv_wgrad(
     dY_bytes = b.param("dY_bytes", I32)
     X_bytes = b.param("X_bytes", I32)
     dW_bytes = b.param("dW_bytes", I32)
+    # Runtime split-K: ks = slice width per CTA, computed and passed by the launcher.
+    # Only present when split_k == 0; fixed-degree kernels bake ks as a constant.
+    # ks_count = number of slices; only needed when grouped+runtime so the kernel
+    # can decode (group, slice) from block_id_z = group*ks_count + slice.
+    _ks_param = b.param("ks", I32) if _split_k_runtime else None
+    _ks_count_param = (
+        b.param("ks_count", I32) if (_split_k_runtime and _grouped) else None
+    )
 
     op = _resolve_wgrad_op(spec, arch)
     atom = spec.atom if op.family == "mma" else None
@@ -783,33 +817,46 @@ def build_implicit_gemm_conv_wgrad(
     # matching forward).  When split_k>1 the group and the K-slice SHARE the z
     # axis: the grid launches z = groups*split_k and every CTA decodes
     # ``group = block_id_z // split_k`` and ``slice = block_id_z % split_k``.
+    # split_k==0 (runtime): same scheme but split_k degree is runtime; the kernel
+    # receives ``ks_count`` (the degree) as an extra arg alongside ``ks`` (slice
+    # width) so both div and mod can be emitted.  Grid: z = groups * ks_count.
     # ``group_v`` stays None on the ungrouped path so all groups==1 IR is
     # byte-identical to the pre-grouped kernel.
-    grouped = p_load.groups > 1
+    grouped = _grouped
     group_v = None
     if grouped:
         c_kpg = b.const_i32(p_load.kpg)  # kpg: dY output-channel slab stride
         if not _is_split_k:
             group_v = b.to_sgpr_u32(b.block_id_z())
 
-    # Split-K K-slice bounds.  K_wg is padded to the next multiple of
-    # tile_k * split_k so every slice is exactly ks = wg_K_padded // split_k
-    # elements wide and ks % tile_k == 0.  Loads past the real wg_K return 0
-    # (buffer descriptor OOB-clamp), so no masking is needed.
-    # When split_k == 1: k_lo = 0, k_hi = None (loop runs to c_wg_K, unpadded).
+    # Split-K K-slice bounds.  K_wg is padded so every slice is exactly ks
+    # elements wide and ks % tile_k == 0.  OOB loads return 0 via buffer clamp.
+    # split_k == 1: k_lo = 0, k_hi = None (loop runs to c_wg_K, unpadded).
+    # split_k == 0: ks/ks_count are runtime kernel args; k_lo/k_hi computed at runtime.
+    # split_k > 1: ks is a compile-time constant.
     if _is_split_k:
-        wg_K_padded = spec.wg_K_padded()
-        c_ks = b.const_i32(wg_K_padded // spec.split_k)
-        if grouped:
-            # z = group*split_k + slice: recover both from block_id_z so the
-            # group and the K-slice share the single z grid axis.
-            c_split_k = b.const_i32(spec.split_k)
-            z_id = b.block_id_z()
-            group_v = b.to_sgpr_u32(b.div(z_id, c_split_k))
-            slice_id = b.mod(z_id, c_split_k)
-            k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
+        if _split_k_runtime:
+            c_ks = _ks_param  # runtime i32 from kernel arg
+            if grouped:
+                # z = group * ks_count + slice; decode both at runtime.
+                z_id = b.block_id_z()
+                group_v = b.to_sgpr_u32(b.div(z_id, _ks_count_param))
+                slice_id = b.mod(z_id, _ks_count_param)
+                k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
+            else:
+                k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
         else:
-            k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
+            wg_K_padded = spec.wg_K_padded()
+            c_ks = b.const_i32(wg_K_padded // spec.split_k)
+            if grouped:
+                # z = group*split_k + slice: recover both from block_id_z.
+                c_split_k = b.const_i32(spec.split_k)
+                z_id = b.block_id_z()
+                group_v = b.to_sgpr_u32(b.div(z_id, c_split_k))
+                slice_id = b.mod(z_id, c_split_k)
+                k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
+            else:
+                k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
         k_hi = b.to_sgpr_u32(b.add(k_lo, c_ks))
     else:
         k_lo = c0
@@ -1226,10 +1273,35 @@ def build_implicit_gemm_conv_wgrad(
     # ---- epilogue ----
     final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
 
-    if _is_split_k:
-        # Atomic-add each warp's partial f32 accumulator into the workspace.
-        # cshuffle and wmma paths are not supported with split_k > 1
-        # (is_valid_wgrad_spec gates this to CDNA mfma only).
+    if _is_split_k and op.family == "wmma":
+        # WMMA split-K: atomic-add via the WMMA C-fragment layout (fp32/bf16/fp16).
+        _emit_wgrad_split_k_epilogue_wmma(
+            b,
+            spec,
+            op,
+            final_accs,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            block_m_off_v,
+            block_n_off_v,
+            dW,
+            group=group_v,
+        )
+    elif _is_split_k and spec.epilogue == "cshuffle":
+        # MFMA split-K + cshuffle: scatter to LDS then paired pk_atomic from smem.
+        # Avoids the zero-fill workaround of the direct split-K path for bf16/fp16.
+        _emit_wgrad_split_k_cshuffle_epilogue(
+            b,
+            spec,
+            atom,
+            final_accs,
+            grid,
+            dW,
+            group=group_v,
+        )
+    elif _is_split_k:
+        # MFMA split-K: supports fp32, bf16, fp16 via packed atomics.
         _emit_wgrad_split_k_epilogue(
             b,
             spec,
@@ -1430,6 +1502,179 @@ def _emit_wgrad_split_k_epilogue(
                     c_m_i = b.add(atom_m_base, rows[i])
                     c_n_i = b.add(atom_n_base, cols[i])
                     _emit_single_packed_atomic(c_m_i, c_n_i, b.vec_extract(acc, i))
+
+
+def _emit_wgrad_split_k_epilogue_wmma(
+    b: IRBuilder,
+    spec: WgradConvSpec,
+    op,
+    accs: Sequence[Value],
+    warp_m_idx: Value,
+    warp_n_idx: Value,
+    lane: Value,
+    block_m_off: Value,
+    block_n_off: Value,
+    dw_ptr: Value,
+    group: Optional[Value] = None,
+) -> None:
+    """Atomic-add partial WMMA accumulator directly into dW for split-K.
+
+    Mirrors :func:`_emit_wgrad_split_k_epilogue` but uses the WMMA C-fragment
+    layout (``op.c_layout()``) instead of the MFMA distribution decoder.
+
+    Dispatch by dtype_d:
+      fp32 — scalar ``global_atomic_add`` (atomicrmw fadd f32).
+      bf16 — packed ``global_atomic_add_pk_bf16`` (<2 x bfloat>); requires C%2==0.
+      fp16 — packed ``global_atomic_add_pk_f16`` (<2 x half>); requires C%2==0.
+
+    For bf16/fp16 each slot is issued as a single packed atomic with zero in the
+    unused lane (same approach as the MFMA split-K epilogue).  The parity of c_n
+    is checked at runtime to place the value in the correct half of the pair.
+    ``is_valid_wgrad_spec`` enforces C%2==0 so the 32-bit-aligned base address
+    assumption always holds within a filter position.
+
+    ``group`` (grouped wgrad only): the accumulator row ``c_m`` is per-group
+    ([0, kpg)); fold ``group*kpg`` into the atomic address so each group writes
+    to its own output-channel slab in dW.  Ungrouped (group is None) leaves
+    every address byte-identical to the pre-grouped path.
+
+    The caller must zero-initialise dW before launch.
+    """
+    p = spec.problem
+    dtype_d = spec.data.dtype_d
+    mfmas_m = spec.mfmas_per_warp_m
+    mfmas_n = spec.mfmas_per_warp_n
+
+    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
+    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
+    block_warp_m_off = b.add(block_m_off, warp_m_off)
+    block_warp_n_off = b.add(block_n_off, warp_n_off)
+
+    wg_M_v = b.const_i32(_wg_M(p))
+    wg_N_v = b.const_i32(_wg_N(p))
+
+    _c_kpg = b.const_i32(p.kpg) if group is not None else None
+
+    def _row_addr(c_m: Value) -> Value:
+        if group is None:
+            return c_m
+        return b.add(c_m, b.mul(group, _c_kpg))
+
+    c_map = op.c_layout()
+
+    def _to_dtype(v_f32: Value) -> Value:
+        if dtype_d == "fp32":
+            return v_f32
+        if dtype_d == "bf16":
+            return b.trunc_f32_to_bf16(v_f32)
+        return b.trunc_f32_to_f16(v_f32)
+
+    def _emit_single_packed_atomic(c_m: Value, c_n: Value, val_f32: Value) -> None:
+        zero = _to_dtype(b.const_f32(0.0))
+        val = _to_dtype(val_f32)
+        m_ok = b.cmp_lt(c_m, wg_M_v)
+        n_ok = b.cmp_lt(c_n, wg_N_v)
+        with b.scf_if(b.land(m_ok, n_ok)):
+            c_n_is_odd = b.mod(c_n, b.const_i32(2))
+            is_odd = b.cmp_ne(c_n_is_odd, b.const_i32(0))
+            c_n_even = b.sub(c_n, c_n_is_odd)
+            c_off_even = b.add(b.mul(_row_addr(c_m), wg_N_v), c_n_even)
+            v_even = b.select(is_odd, zero, val)
+            v_odd = b.select(is_odd, val, zero)
+            vec = b.vec_pack([v_even, v_odd], val.type)
+            if dtype_d == "bf16":
+                b.global_atomic_add_pk_bf16(dw_ptr, c_off_even, vec)
+            else:
+                b.global_atomic_add_pk_f16(dw_ptr, c_off_even, vec)
+
+    flat = 0
+    for mi in range(mfmas_m):
+        atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
+        for ni in range(mfmas_n):
+            acc = accs[flat]
+            flat += 1
+            atom_n_base = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
+            for i in range(op.c_frag_len):
+                row_off, col_off = c_map.coord(b, lane, i)
+                c_m = b.add(atom_m_base, row_off)
+                c_n = b.add(atom_n_base, col_off)
+                if dtype_d == "fp32":
+                    m_ok = b.cmp_lt(c_m, wg_M_v)
+                    n_ok = b.cmp_lt(c_n, wg_N_v)
+                    c_off = b.add(b.mul(_row_addr(c_m), wg_N_v), c_n)
+                    with b.scf_if(b.land(m_ok, n_ok)):
+                        b.global_atomic_add(dw_ptr, c_off, b.vec_extract(acc, i))
+                else:
+                    _emit_single_packed_atomic(c_m, c_n, b.vec_extract(acc, i))
+
+
+def _emit_wgrad_split_k_cshuffle_epilogue(
+    b: IRBuilder,
+    spec: WgradConvSpec,
+    atom: MfmaAtom,
+    accs: Sequence[Value],
+    grid,
+    dW: Value,
+    group: Optional[Value] = None,
+) -> None:
+    """Split-K epilogue via cshuffle + packed atomic-adds into dW.
+
+    After the GEMM loop each CTA holds a partial dW tile.  This epilogue:
+      1. Scatters the MFMA accumulator to an LDS staging buffer in row-major
+         order (identical to the non-atomic cshuffle epilogue).
+      2. Issues a barrier.
+      3. Reads back ``sv``-wide chunks per thread and issues atomic-adds:
+           fp32 — scalar ``global_atomic_add`` per element.
+           bf16 — ``global_atomic_add_pk_bf16`` (<2 x bfloat>) per pair.
+           fp16 — ``global_atomic_add_pk_f16`` (<2 x half>) per pair.
+
+    For bf16/fp16: adjacent elements in the sv-wide chunk share the same row
+    and consecutive N-positions after the shuffle, so they form a genuine
+    <2 x dtype> pair — no zero-fill required (contrast with the direct
+    split-K epilogue's ``_emit_single_packed_atomic``).
+
+    ``group`` (grouped wgrad only): fold ``group*kpg`` into the atomic address
+    so each group writes to its own output-channel slab in dW.
+    """
+    p = spec.problem
+    dtype_d = spec.data.dtype_d
+
+    _cshuffle_kwargs: dict = {"out_dtype": dtype_d}
+    if spec.vector_size_c is not None:
+        _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
+    else:
+        _vc_C = p.cpg if group is not None else p.C
+        _vc_K = p.kpg if group is not None else p.K
+        # Pass split_k=1 so default_vector_sizes does not force vec_c=1; the
+        # cshuffle atomic path reads from smem in sv-wide chunks and issues paired
+        # pk_atomics, so a wide store_vec is beneficial (not contraindicated).
+        _, __, vec_c = WgradConvSpec.default_vector_sizes(
+            _vc_C, _vc_K, dtype_d, split_k=1
+        )
+        _cshuffle_kwargs["max_store_vec"] = vec_c
+
+    wg_M_v = b.const_i32(_wg_M(p))
+    wg_N_v = b.const_i32(_wg_N(p))
+
+    # Grouped: shift block_m_off by group*kpg so the atomic addresses land in
+    # the group's absolute output-channel slab.  N axis is unaffected.
+    if group is not None:
+        c_kpg = b.const_i32(p.kpg)
+        eff_grid = dc_replace(
+            grid, block_m_off=b.add(grid.block_m_off, b.mul(group, c_kpg))
+        )
+    else:
+        eff_grid = grid
+
+    CShuffleEpilogue.from_grid(
+        atom=atom, grid=eff_grid, **_cshuffle_kwargs
+    ).atomic_store(
+        b,
+        accs=accs,
+        dw_ptr=dW,
+        wg_N=wg_N_v,
+        bounds=(wg_M_v, wg_N_v),
+    )
 
 
 def _emit_wgrad_direct_epilogue(

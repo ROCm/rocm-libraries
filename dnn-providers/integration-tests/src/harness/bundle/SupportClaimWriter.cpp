@@ -153,7 +153,7 @@ bool writeIfChanged(const std::filesystem::path& filePath,
 
 } // namespace
 
-WriteSummary writeObservedSupportClaims(const std::vector<SupportObservation>& observations)
+WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& observations)
 {
     WriteSummary summary;
 
@@ -162,7 +162,7 @@ WriteSummary writeObservedSupportClaims(const std::vector<SupportObservation>& o
     struct SidecarTarget
     {
         bool isSweep = false;
-        std::vector<SupportObservation> observations;
+        std::vector<ObservedSupportCell> observations;
     };
 
     std::map<std::filesystem::path, SidecarTarget> targetsBySidecarPath;

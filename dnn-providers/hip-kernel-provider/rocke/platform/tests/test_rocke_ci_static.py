@@ -108,6 +108,7 @@ class TestIrParityCoverage(unittest.TestCase):
 
         self.assertIn("moe", family_by_arch["gfx950"])
         self.assertIn("deep_fused_conv", family_by_arch["gfx950"])
+        self.assertIn("kda_chunkwise", family_by_arch["gfx942"])
 
     def test_ir_case_ids_are_unique(self):
         case_ids = [case["case_id"] for case in cases()]
