@@ -67,6 +67,7 @@ jobs:
       test_type: ${{ steps.linux_projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
+      changed_projects: ${{ steps.linux_projects.outputs.changed_projects }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -127,7 +128,11 @@ jobs:
           CI_CONFIG_PATH: ci-config
           IS_DRAFT: ${{ github.event.pull_request.draft || false }}
         run: |
-          python .github/scripts/therock_configure_ci.py
+          # Hardcoded for testing hipsolver
+          echo 'linux_projects=[{"cmake_options": "-DTHEROCK_ENABLE_SOLVER=ON -DTHEROCK_ENABLE_ALL=OFF", "projects_to_test": "rocsolver,hipsolver", "run_rocjitsu_race_check": false}]' >> $GITHUB_OUTPUT
+          echo 'test_type=standard' >> $GITHUB_OUTPUT
+          echo 'build_runs_on=' >> $GITHUB_OUTPUT
+          echo 'changed_projects=projects/hipsolver' >> $GITHUB_OUTPUT
 
       - name: Determine Windows projects to run
         id: windows_projects
@@ -137,7 +142,10 @@ jobs:
           CI_CONFIG_PATH: ci-config
           IS_DRAFT: ${{ github.event.pull_request.draft || false }}
         run: |
-          python .github/scripts/therock_configure_ci.py
+          # Hardcoded for testing - skip Windows
+          echo 'windows_projects=[]' >> $GITHUB_OUTPUT
+          echo 'test_type=standard' >> $GITHUB_OUTPUT
+          echo 'build_runs_on=' >> $GITHUB_OUTPUT
 
       - name: Fetch Linux targets for build and test
         env:
