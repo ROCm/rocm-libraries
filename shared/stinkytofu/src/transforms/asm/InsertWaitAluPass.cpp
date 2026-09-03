@@ -335,6 +335,13 @@ struct VgprStamp {
     // XDL pipe UB when this producer stamped. Lets a non-XDL producer measure how many
     // WMMA have issued since, which is what hides it.
     unsigned xdlOrdAtStamp = 0;
+    // Position in the shared VA order. Only consulted while the units in flight
+    // complete in issue order; otherwise the per-pipe ordinals are the truth.
+    unsigned vaOrdShared = 0;
+    // Other units' positions when this producer stamped. Only ops issued AFTER it can
+    // reorder against the ops counted for it; older ones are not followers at all.
+    unsigned dpOrdAtStamp = 0;
+    unsigned trOrdAtStamp = 0;
 };
 
 class WaitcntBrackets {
@@ -363,6 +370,7 @@ class WaitcntBrackets {
             VaPipe pipe = vaPipeOfEvent(ev);
             unsigned inc = hasMatrixScalePair(inst) ? 2u : 1u;
             vaPipeUB[pipe] += inc;
+            vaUB += inc;
             unsigned ord = vaPipeUB[pipe];
             // Remember the XDL step so a CSMACC stamp can scale its threshold too.
             if (pipe == PIPE_XDL) {
@@ -382,6 +390,9 @@ class WaitcntBrackets {
                 s.vaOrd[pipe] = ord;
                 s.vaInc = inc;
                 s.xdlOrdAtStamp = vaPipeUB[PIPE_XDL];
+                s.vaOrdShared = vaUB;
+                s.dpOrdAtStamp = vaPipeUB[PIPE_DPMACC];
+                s.trOrdAtStamp = vaPipeUB[PIPE_TRANS];
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp va v" << k.idx << "("
                                      << halfName(k.half) << ") [pipe=" << vaPipeName(pipe)
                                      << " ord=" << ord << "]\n");
@@ -503,11 +514,11 @@ class WaitcntBrackets {
     }
 
     // Wait needed for this reg's VA producers.
-    // True when only XDL and CSMACC have work outstanding, so their completion
-    // order follows program order.
-    bool onlyXdlAndCsmaccInFlight() const {
-        return vaPipeUB[PIPE_DPMACC] == vaPipeLB[PIPE_DPMACC] &&
-               vaPipeUB[PIPE_TRANS] == vaPipeLB[PIPE_TRANS];
+    // True when no DPMACC or TRANS op issued after \p s stamped, so every op counted
+    // for it is on XDL or CSMACC and completion follows issue order. Ops older than
+    // the producer are not followers, so they cannot disturb the count.
+    bool onlyXdlAndCsmaccSince(const VgprStamp& s) const {
+        return vaPipeUB[PIPE_DPMACC] <= s.dpOrdAtStamp && vaPipeUB[PIPE_TRANS] <= s.trOrdAtStamp;
     }
 
     unsigned vaFollowers(const VgprStamp& s) const {
@@ -529,10 +540,19 @@ class WaitcntBrackets {
                     // A CSMACC producer is satisfied by matrix ops, not by its own
                     // unit, so measure the XDL issues since it stamped.
                     const unsigned since = vaPipeUB[PIPE_XDL] - s.xdlOrdAtStamp;
-                    if (!onlyXdlAndCsmaccInFlight()) {
+                    if (!onlyXdlAndCsmaccSince(s)) {
                         PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-skip va_vdst (other "
                                                 "units outstanding) [CSMACC matrix-ops="
                                              << since << "]\n");
+                    } else if (s.vaOrdShared != 0 &&
+                               !waitHideSatisfied(since, xdlInc, g_waitHide->csmaccVaVdst)) {
+                        // Only these two units outstanding, so they complete in issue
+                        // order: everything issued after the producer counts, which is
+                        // a weaker wait than its own unit's followers alone.
+                        followers = vaUB - s.vaOrdShared;
+                        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     va_vdst from shared order ["
+                                             << followers << " vs per-pipe "
+                                             << (vaPipeUB[p] - s.vaOrd[p]) << "]\n");
                     } else if (waitHideSatisfied(since, xdlInc, g_waitHide->csmaccVaVdst)) {
                         PASS_DEBUG(std::cerr
                                    << "[InsertWaitAlu]     skip va_vdst [CSMACC matrix-ops="
@@ -602,7 +622,9 @@ class WaitcntBrackets {
     void applyWaitcnt(CounterType c, unsigned count) {
         if (count == kNoWait) return;
         if (c == CT_VA_VDST) {
-            // count bounds every pipe.
+            // count bounds the shared order and every pipe.
+            unsigned newVaLB = vaUB >= count ? vaUB - count : 0u;
+            if (newVaLB > vaLB) vaLB = newVaLB;
             for (int P = 0; P < NUM_VA_PIPE; ++P) {
                 unsigned oldLB = vaPipeLB[P];
                 unsigned newLB = vaPipeUB[P] >= count ? vaPipeUB[P] - count : 0u;
@@ -649,6 +671,19 @@ class WaitcntBrackets {
         if (!xdlIncSeen && other.xdlIncSeen) xdlInc = other.xdlInc;
         xdlIncSeen = xdlIncSeen || other.xdlIncSeen;
 
+        // Shared VA order: widen like a pipe, keeping the shift so the per-reg stamps
+        // below move into the same frame.
+        unsigned myShiftShared = 0, otherShiftShared = 0;
+        const unsigned myOldFloorShared = vaLB, otherOldFloorShared = other.vaLB;
+        {
+            unsigned mineIF = vaUB - vaLB;
+            unsigned otherIF = other.vaUB - other.vaLB;
+            unsigned newUB = vaLB + std::max(mineIF, otherIF);
+            myShiftShared = newUB - vaUB;
+            otherShiftShared = newUB - other.vaUB;
+            vaUB = newUB;
+        }
+
         {
             unsigned mineIF = vmUB - vmLB;
             unsigned otherIF = other.vmUB - other.vmLB;
@@ -686,6 +721,14 @@ class WaitcntBrackets {
             // paths. Floors are 0: this ordinal marks progress, it is not a live producer.
             mergeSlotOrd(s.xdlOrdAtStamp, o ? o->xdlOrdAtStamp : 0, myShift[PIPE_XDL],
                          otherShift[PIPE_XDL], 0, 0, strictDom);
+            mergeSlotOrd(s.vaOrdShared, o ? o->vaOrdShared : 0, myShiftShared, otherShiftShared,
+                         myOldFloorShared, otherOldFloorShared, strictDom);
+            // Keeping the later stamp makes the "nothing issued since" test harder to
+            // satisfy, so a join can only turn the widening off, never on.
+            mergeSlotOrd(s.dpOrdAtStamp, o ? o->dpOrdAtStamp : 0, myShift[PIPE_DPMACC],
+                         otherShift[PIPE_DPMACC], 0, 0, strictDom);
+            mergeSlotOrd(s.trOrdAtStamp, o ? o->trOrdAtStamp : 0, myShift[PIPE_TRANS],
+                         otherShift[PIPE_TRANS], 0, 0, strictDom);
             // Paired survives the join only if both paths agree.
             s.pairedFlat = s.pairedFlat && o && o->pairedFlat;
         }
@@ -752,7 +795,12 @@ class WaitcntBrackets {
         }
     }
 
-    // VA_VDST per-pipe UB/LB.
+    // VA_VDST shared UB/LB: every VA dst write in issue order. This is the unit the
+    // emitted s_wait_alu count is in. Mirrors vmUB/vmLB on the VM side.
+    unsigned vaUB = 0;
+    unsigned vaLB = 0;
+    // VA_VDST per-pipe UB/LB: the refinement that avoids draining every unit when
+    // they complete out of order.
     std::array<unsigned, NUM_VA_PIPE> vaPipeUB = {};
     std::array<unsigned, NUM_VA_PIPE> vaPipeLB = {};
     // Ordinal step of the most recent XDL op, for scaling the CSMACC hide threshold.
