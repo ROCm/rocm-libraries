@@ -2024,5 +2024,83 @@
   },
   "// archetypes": "Correlated tuples from real networks (RFC 0019.13 \u00a712.2). Realism is a joint fact: C=3 is a real convolution beside K=64, a 7x7 filter and a 224x224 image, and meaningless beside K=905. Each archetype fixes one coherent geometry -- filter size, dilation and padding together -- and varies stride inside it, because padding is chosen to suit the filter and dilation while stride is chosen independently of both. Between them these cover stride 1/2/4/16, padding 0 through 5, dilation 1 through 4, and group counts from 1 through depthwise.",
   "// neighbourhood": "How a draw may drift and stay a layer. R, S, stride, padding and dilation are all deliberately absent: they form one coupled geometry, and moving any of them alone breaks the pairing the archetypes exist to record -- a 7x7 that drifts to 3x3 while pad stays 3, or a 16x16 patch projection whose stride falls to 1, is valid and is in no network. Coverage of those axes comes from declaring more geometries, not from perturbing one. W repeats the 1 ratio because most images are square and a uniform draw over {1, 1.33, 2} would say otherwise.",
-  "// mixture": "Anchors alone memorise a handful of shapes; the wide net alone put 0.04% of ten thousand draws anywhere near a real layer. The exploration share is \u00a75.4's floor -- an engine still has to answer for problems nobody wrote down."
+  "// mixture": "Anchors alone memorise a handful of shapes; the wide net alone put 0.04% of ten thousand draws anywhere near a real layer. The exploration share is \u00a75.4's floor -- an engine still has to answer for problems nobody wrote down.",
+  "// flops": "2*N*K*P*Q*(C/groups)*R*S, with P and Q the output extents. ceil_div(x, s) is floor((x-1)/s)+1, so ceil_div(H + 2*pad - dil*(R-1), stride) is the standard floor((H + 2*pad - dil*(R-1) - 1)/stride) + 1 without needing a floor operator. C is divided by groups because each group convolves its own slice.",
+  "flops": {
+    "*": [
+      2,
+      "$q.N",
+      "$q.K",
+      {
+        "ceil_div": [
+          {
+            "-": [
+              {
+                "+": [
+                  "$q.H",
+                  {
+                    "*": [
+                      2,
+                      "$q.pad_h"
+                    ]
+                  }
+                ]
+              },
+              {
+                "*": [
+                  "$q.dilation_h",
+                  {
+                    "-": [
+                      "$q.R",
+                      1
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "$q.stride_h"
+        ]
+      },
+      {
+        "ceil_div": [
+          {
+            "-": [
+              {
+                "+": [
+                  "$q.W",
+                  {
+                    "*": [
+                      2,
+                      "$q.pad_w"
+                    ]
+                  }
+                ]
+              },
+              {
+                "*": [
+                  "$q.dilation_w",
+                  {
+                    "-": [
+                      "$q.S",
+                      1
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "$q.stride_w"
+        ]
+      },
+      {
+        "/": [
+          "$q.C",
+          "$q.groups"
+        ]
+      },
+      "$q.R",
+      "$q.S"
+    ]
+  }
 }

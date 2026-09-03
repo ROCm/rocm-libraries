@@ -302,5 +302,14 @@
     "exploration": 0.2
   },
   "// archetypes": "Transformer projection shapes, where nearly all production GEMM time goes. M carries tokens and moves with batch and sequence length; N and K are model widths and take a few architecture-fixed values, which is why they are perturbed by whole 128-element multiples rather than scaled.",
-  "// mixture": "Same shares as conv_fwd; see the note there."
+  "// mixture": "Same shares as conv_fwd; see the note there.",
+  "// flops": "2*M*N*K -- one multiply and one add per output element per K step. A property of the problem, not of the kernel: the same count however it is tiled. tflops = flops / measured time.",
+  "flops": {
+    "*": [
+      2,
+      "$q.M",
+      "$q.N",
+      "$q.K"
+    ]
+  }
 }
