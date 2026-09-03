@@ -7,7 +7,7 @@ function(hipblaslt_create_device_library)
     set(_opts "")
     set(_one
         TARGET LOGIC_PATH OUTPUT_DIR CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER
-        ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL LAZY_LOAD ASM_COMMENTS KEEP_BUILD_TMP ASM_DEBUG)
+        ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL GEMM_A2A_FUSION LAZY_LOAD ASM_COMMENTS KEEP_BUILD_TMP ASM_DEBUG)
     set(_multi ARCHES)
     cmake_parse_arguments(_cdl "${_opts}" "${_one}" "${_multi}" ${ARGN})
 
@@ -72,6 +72,9 @@ function(hipblaslt_create_device_library)
     endif()
     if(_cdl_EXPERIMENTAL)
         list(APPEND _opts_list "--experimental")
+    endif()
+    if(_cdl_GEMM_A2A_FUSION)
+        list(APPEND _opts_list "--enable-gemm-a2a-fusion")
     endif()
     if(NOT _cdl_LAZY_LOAD)
         list(APPEND _opts_list "--no-lazy-library-loading")
