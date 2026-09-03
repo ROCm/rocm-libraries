@@ -7,11 +7,12 @@
 
 // LayoutAliases.hpp - the `stride_order` layout-name pre-pass.
 //
-// A pure json -> json rewrite run before compilation, so the node tree and
-// evaluation only ever see integer arrays. This is the one place in the
+// A json -> json rewrite that runs before compilation, so the node tree and
+// evaluation only ever see integer arrays. This is the one part of the
 // language that knows anything about tensors.
 
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/Error.hpp>
+#include <hipdnn_plugin_sdk/ingestor/jsonexpr/Syntax.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -29,24 +30,24 @@
 namespace hipdnn_plugin_sdk::ingestor::jsonexpr::detail
 {
 // ---- layout aliases -------------------------------------------------------
-// A `stride_order` is an IntArray: for each logical dimension d, that
-// dimension's stride rank, 0 being the fastest-varying. The common layouts get
-// names, and a name expands to its array here, at compile time, so the array
-// stays the single canonical form and evaluation never sees an alias.
+// A `stride_order` is an array of integers: for each logical dimension, that
+// dimension's stride rank, where 0 is the fastest-varying. The common layouts
+// have names, and a name is expanded to its array here, at compile time, so
+// the array stays the single canonical form.
 
 /// The longest layout the table names. Rows are fixed-width so the table can
-/// be a constexpr value rather than pointers into separate objects.
+/// be a constexpr value instead of pointers to separate objects.
 inline constexpr std::size_t MAX_LAYOUT_RANK = 5;
 
 struct LayoutAlias
 {
     std::string_view name;
-    /// The stride order, `rank` entries wide; anything past that is padding
-    /// and is never read -- `order()` is the only accessor.
+    /// The stride order. Only the first `rank` entries are meaningful; the
+    /// rest is padding and is never read, since `order()` is the only accessor.
     std::array<std::int64_t, MAX_LAYOUT_RANK> dims;
     std::size_t rank;
 
-    /// The meaningful prefix of `dims`, i.e. the layout itself.
+    /// The first `rank` entries of `dims`, which is the layout itself.
     [[nodiscard]] std::vector<std::int64_t> order() const
     {
         return {dims.begin(), dims.begin() + static_cast<std::ptrdiff_t>(rank)};
@@ -72,8 +73,8 @@ inline const LayoutAlias* lookupLayoutAlias(const std::string& name)
     return nullptr;
 }
 
-/// The accepted names, for the diagnostic naming them. Built from the table so
-/// a new alias cannot be added without the error message following it.
+/// The accepted names, for use in the error message that lists them. Built
+/// from the table so a new alias always appears in the diagnostic.
 inline std::string knownLayoutAliases()
 {
     std::string s;
@@ -96,7 +97,7 @@ inline const std::string* variablePath(const nlohmann::json& j)
         return nullptr;
     }
     const auto& s = j.get_ref<const nlohmann::json::string_t&>();
-    // "$$x" is an escaped literal, and a bare "$" is rejected in compileNode.
+    // "$$x" is an escaped literal, and compileNode rejects a bare "$".
     if(s.size() < 2 || s[0] != VARIABLE_SIGIL || s[1] == VARIABLE_SIGIL)
     {
         return nullptr;
@@ -104,10 +105,10 @@ inline const std::string* variablePath(const nlohmann::json& j)
     return &s;
 }
 
-/// True for a string that can be read as a layout alias. A sigil-prefixed
-/// string is a variable reference ("$k.stride_order") or an escaped literal
-/// ("$$nhwc") -- both are strings, and neither names a layout, so comparing
-/// one tensor's layout against another's must not be read as a typo'd alias.
+/// True for a string that may be a layout alias. A sigil-prefixed string is
+/// either a variable reference ("$k.stride_order") or an escaped literal
+/// ("$$nhwc"), and neither names a layout. Without this check, comparing one
+/// tensor's layout against another's would be read as a misspelled alias.
 inline bool isLayoutAliasCandidate(const nlohmann::json& j)
 {
     if(!j.is_string())
@@ -118,9 +119,9 @@ inline bool isLayoutAliasCandidate(const nlohmann::json& j)
     return s.empty() || s[0] != VARIABLE_SIGIL;
 }
 
-/// True for a path whose last segment is `segment` -- ".stride_order" or
-/// ".rank". A path is more than its final segment, so the segment alone
-/// ("$.rank") does not name a tensor and does not match.
+/// True for a path whose last segment is `segment`, such as ".stride_order" or
+/// ".rank". A path needs more than the segment itself, so "$.rank" names no
+/// tensor and does not match.
 inline bool pathEndsWithSegment(const std::string& path, std::string_view segment)
 {
     return path.size() > segment.size() + 1
@@ -138,22 +139,22 @@ inline bool isStrideOrderRef(const nlohmann::json& j)
 /// ahead of that final segment, sigil dropped. "$q.stride_order" -> "q",
 /// "$inputs[1].rank" -> "inputs[1]", "$a.b.c.rank" -> "a.b.c".
 ///
-/// It has to be the whole prefix rather than the path's first segment: two
-/// elements of one array share a root but are separate tensors of their own
-/// ranks, so keying on "inputs" would let a rank pin on $inputs[0] veto a
-/// layout alias on $inputs[1], which it does not constrain.
+/// The whole prefix is used rather than the path's first segment, because two
+/// elements of one array share a root but are separate tensors with their own
+/// ranks. Keying on "inputs" would let a rank pin on $inputs[0] veto a layout
+/// alias on $inputs[1], which it does not constrain.
 ///
-/// Both callers reach here only after matching their suffix, so the last '.'
-/// is the separator before it and is always present.
+/// Both callers only get here after matching their suffix, so the last '.' is
+/// the separator before that suffix and is always present.
 inline std::string tensorKey(const std::string& sigilPath)
 {
     const std::string path = sigilPath.substr(1);
     return path.substr(0, path.rfind('.'));
 }
 
-/// True when `j` is a numeric rank literal that can be carried exactly as an
-/// int64_t pin. Floating-point inputs are accepted only when they are finite,
-/// integral, and exactly representable.
+/// True when `j` is a numeric rank literal that fits an int64_t pin exactly.
+/// A floating-point input is accepted only when it is finite, integral, and
+/// exactly representable.
 inline bool rankPinLiteral(const nlohmann::json& j, std::int64_t& value)
 {
     if(j.is_number_unsigned())
@@ -175,8 +176,8 @@ inline bool rankPinLiteral(const nlohmann::json& j, std::int64_t& value)
     if(j.is_number_float())
     {
         // Within +/-2^53 every integral double is exactly an int64_t, so the
-        // bound plus the integrality check together guarantee the conversion
-        // below is lossless.
+        // range check plus the integrality check make the conversion below
+        // lossless.
         const double raw = j.get<double>();
         constexpr double maxExactInteger = 9007199254740992.0; // 2^53
         if(!std::isfinite(raw) || raw < -maxExactInteger || raw > maxExactInteger)
@@ -193,10 +194,10 @@ inline bool rankPinLiteral(const nlohmann::json& j, std::int64_t& value)
     return false;
 }
 
-/// Collect `{"==": ["$x.rank", N]}` rank pins that hold unconditionally: the
-/// root, and anything reachable from it through `and` only. A pin inside an
-/// `or` / `if` / `!` arm is conditional and cannot contradict an alias, so it
-/// is deliberately not collected.
+/// Collect `{"==": ["$x.rank", N]}` rank pins that always hold: those at the
+/// root, and those reachable from it through `and` alone. A pin inside an
+/// `or`, `if`, or `!` arm is conditional and cannot contradict an alias, so it
+/// is deliberately skipped.
 inline void collectRankPins(const nlohmann::json& j,
                             std::map<std::string, std::int64_t>& pins,
                             std::size_t depth = 0)
@@ -238,8 +239,8 @@ inline void collectRankPins(const nlohmann::json& j,
         }
         if(pathEndsWithSegment(*s, ".rank"))
         {
-            // First pin wins; a second, contradictory one makes the criteria
-            // unsatisfiable on its own terms, which is not the alias's problem.
+            // First pin wins. A second, contradictory pin makes the criteria
+            // unsatisfiable on their own, which is not this pass's problem.
             pins.emplace(tensorKey(*s), rank);
         }
     }
@@ -250,9 +251,9 @@ inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
                                          const std::string& refPath,
                                          const std::map<std::string, std::int64_t>& rankPins)
 {
-    // A stride_order is an IntArray, so a string in this position can only be
-    // an alias; an unknown one is a typo that would otherwise compare unequal
-    // forever and decline silently at match time.
+    // A stride_order is an array of integers, so a string in this position can
+    // only be an alias. An unknown one is a typo, which would otherwise
+    // compare unequal forever and decline silently at match time.
     const auto& name = aliasNode.get_ref<const nlohmann::json::string_t&>();
     const LayoutAlias* alias = lookupLayoutAlias(name);
     if(alias == nullptr)
@@ -261,10 +262,10 @@ inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
                                          + refPath + "; expected an integer array or one of: "
                                          + knownLayoutAliases());
     }
-    // Every alias is fixed-rank, so an alias compared against a tensor the
-    // criteria pin to a different rank can never hold. Refuse it here rather
-    // than let it decline silently on every graph. The pin has to name this
-    // same tensor: $inputs[0] and $inputs[1] are two of them.
+    // Every alias has a fixed rank, so an alias compared against a tensor the
+    // criteria pin to a different rank can never hold. Reject it here instead
+    // of declining silently on every graph. The pin must name this same
+    // tensor: $inputs[0] and $inputs[1] are two different ones.
     const auto pin = rankPins.find(tensorKey(refPath));
     if(pin != rankPins.end() && pin->second != static_cast<std::int64_t>(alias->rank))
     {
@@ -275,24 +276,24 @@ inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
     return alias->order();
 }
 
-/// Rewrite every layout alias into its canonical array. An alias is recognized
-/// only where a `stride_order` reference gives it that meaning -- opposite one
-/// in an `==` / `!=`, or as an element of the array an `in` searches -- so
-/// "nhwc" stays an ordinary string literal everywhere else.
+/// Rewrite every layout alias into its array form. An alias is only recognized
+/// where a `stride_order` reference gives it that meaning: opposite one in an
+/// `==` or `!=`, or as an element of the array an `in` searches. Everywhere
+/// else "nhwc" stays an ordinary string literal.
 ///
-/// Depth is charged exactly as Compiler.hpp charges it, because the two share
-/// one MAX_EXPRESSION_DEPTH: an operator's argument array is not a level of
-/// its own, so `{"!": [X]}` puts X one deeper, not two. Charging the array as
-/// well would halve the effective limit for every rule -- and, since compile()
-/// runs this pass first, would reject at that halved depth while reporting the
-/// full documented limit.
+/// This pass counts depth exactly as Compiler.hpp does, because the two share
+/// one MAX_EXPRESSION_DEPTH. An operator's argument array is not a level of its
+/// own, so `{"!": [X]}` puts X one level deeper, not two. Counting the array as
+/// well would halve the effective limit, and because compile() runs this pass
+/// first, rules would be rejected at that halved depth while the error still
+/// named the documented limit.
 inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
                                           const std::map<std::string, std::int64_t>& rankPins,
                                           std::size_t depth = 0);
 
-/// Expand an operator's value the way compileObject descends into one: the
-/// elements of an argument array sit one level below the operator, and a bare
-/// non-array value sits one level below it too.
+/// Expand an operator's value the way compileObject descends into one. Both
+/// the elements of an argument array and a bare non-array value sit one level
+/// below the operator.
 inline nlohmann::json expandOperatorValue(const nlohmann::json& val,
                                           const std::map<std::string, std::int64_t>& rankPins,
                                           std::size_t depth)
@@ -316,7 +317,7 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
     checkExpressionDepth(depth);
     if(j.is_array())
     {
-        // A bare array literal IS a level of its own, matching compileNode.
+        // A bare array literal is a level of its own, matching compileNode.
         nlohmann::json out = nlohmann::json::array();
         for(const auto& e : j)
         {
@@ -350,7 +351,7 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
                 }
                 else
                 {
-                    // An operand of the argument array: one level below the operator.
+                    // An argument-array operand: one level below the operator.
                     args.push_back(expandLayoutAliases(side, rankPins, depth + 1));
                 }
             }
@@ -358,9 +359,9 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
             continue;
         }
 
-        // {"in": [$x.stride_order, [<alias-or-array>, ...]]} -- the documented
-        // way to accept a set of layouts. Only the haystack's own elements are
-        // aliases; a nested expression there is left alone.
+        // {"in": [$x.stride_order, [<alias-or-array>, ...]]} is the documented
+        // way to accept a set of layouts. Only the haystack's own elements can
+        // be aliases; a nested expression there is left alone.
         if(binary && key == "in" && isStrideOrderRef(val.at(0)) && val.at(1).is_array())
         {
             const std::string refPath = val.at(0).get<std::string>();
@@ -368,7 +369,7 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
             for(const auto& e : val.at(1))
             {
                 // The haystack is an operand (depth + 1) and is itself an
-                // array, so its elements are a further level down.
+                // array, so its elements are one level below that.
                 hay.push_back(isLayoutAliasCandidate(e)
                                   ? resolveLayoutAlias(e, refPath, rankPins)
                                   : expandLayoutAliases(e, rankPins, depth + 2));

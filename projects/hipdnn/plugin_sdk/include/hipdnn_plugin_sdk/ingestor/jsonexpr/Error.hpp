@@ -5,7 +5,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-// Error.hpp - the compile-time failure type for the JSON Expression Language.
+// Error.hpp - the compile-time failure type and depth bound for the JSON
+// Expression Language.
 //
 // Full reference: docs/JsonExpression.md.
 
@@ -22,24 +23,18 @@ public:
     using std::runtime_error::runtime_error;
 };
 
-/// The only variable-reference sigil supported by the expression language.
-inline constexpr char VARIABLE_SIGIL = '$';
-
-/// How deeply a rule may nest. Compilation walks the document recursively
-/// (rank pins, then alias expansion, then lowering) and evaluation walks the
-/// resulting tree the same way, so without a bound a deeply nested rule --
-/// and rules are read from descriptor files on disk, not only written by
-/// hand -- overflows the stack instead of reporting a bad rule. Compiling is
-/// what enforces it, which bounds evaluation too. Far above anything a real
+/// How deeply a rule may nest. Rules are read from descriptor files on disk,
+/// so the limit has to be enforced rather than assumed. Compilation recurses
+/// once per nesting level, and so does evaluation, so an unbounded rule would
+/// overflow the stack instead of reporting a bad rule. Compilation checks the
+/// depth, which bounds evaluation too. The limit is far above anything a real
 /// criterion or dispatch formula nests.
 ///
-/// All three compile passes must charge depth at the SAME rate for the number
-/// below to mean what it says. They share this one bound, and compile() runs
-/// them in the order above, so a pass that counts faster than the others
-/// silently becomes the real limit while still reporting this one -- and a
-/// pass that counts slower hands an over-deep document to the next pass.
-/// Compiler.hpp sets the rate: one level per operator, an argument array not
-/// being a level of its own.
+/// The three compile passes (rank pins, alias expansion, lowering) share this
+/// bound, so they must all count depth the same way. A pass that counts faster
+/// becomes the real limit while still reporting this number; a pass that counts
+/// slower hands an over-deep document to the next pass. Compiler.hpp defines
+/// the rate: one level per operator, and an argument array is not a level.
 inline constexpr std::size_t MAX_EXPRESSION_DEPTH = 256;
 
 inline void checkExpressionDepth(std::size_t depth)

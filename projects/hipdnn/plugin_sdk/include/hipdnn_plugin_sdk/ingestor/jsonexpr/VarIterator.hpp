@@ -20,10 +20,10 @@
 namespace hipdnn_plugin_sdk::ingestor::jsonexpr::detail
 {
 // ---- variable iteration ---------------------------------------------------
-// Lazily yields, in pre-order, a reference to every variable path referenced
-// by a compiled node tree. References point into the live VarNode::path, so no
-// strings are copied; duplicates are yielded as they occur (build a std::set
-// from the range if you need the unique, sorted set).
+// Lazily yields, in pre-order, a reference to every variable path in a
+// compiled node tree. The references point at the live VarNode::path, so no
+// strings are copied. Duplicates are yielded as they occur; build a std::set
+// from the range if you need the unique, sorted set.
 class VarIterator
 {
 public:
@@ -64,9 +64,9 @@ public:
         return tmp;
     }
 
-    /// Two iterators are equal when they sit on the same variable, so an
-    /// iterator equals itself and both end iterators (_cur == nullptr) compare
-    /// equal. Comparing only against end would break every algorithm that
+    /// Two iterators are equal when they sit on the same variable. An iterator
+    /// therefore equals itself, and two end iterators (_cur == nullptr) are
+    /// equal. Comparing only against end would break any algorithm that
     /// compares two positions.
     bool operator==(const VarIterator& o) const
     {
@@ -105,10 +105,10 @@ public:
         : _begin(root)
     {
     }
-    /// By value, not by reference: `Expression::variables()` returns a VarRange
-    /// by value, so `expr.variables().begin()` binds to a temporary that dies
-    /// at the end of the full-expression -- returning a reference into the
-    /// range's own members leaves that binding dangling.
+    /// Returned by value, not by reference. Expression::variables() returns a
+    /// VarRange by value, so in `expr.variables().begin()` the range is a
+    /// temporary that dies at the end of the statement; a reference into its
+    /// members would dangle.
     VarIterator begin() const
     {
         return _begin;

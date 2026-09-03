@@ -25,15 +25,14 @@
 namespace hipdnn_plugin_sdk::ingestor::jsonexpr::detail
 {
 // ---- operator table -------------------------------------------------------
-// The single place an operator is defined: its key, its accepted arity, and
-// its implementation. Adding an operator is one row plus one function in
-// `ops`, and a row that names no implementation fails the static_assert below
-// rather than evaluating to null (which the language reads as "unresolved",
-// so a half-wired operator would make a narrowing predicate silently decline).
+// A row that names no implementation fails the static_assert below. Without
+// that check the operator would evaluate to null, which the language reads as
+// "unresolved", so a half-wired operator would silently make predicates
+// decline.
 
-/// `maxArity` sentinel for an operator that accepts any number of arguments.
-/// A real ceiling here would be a new limit the language never had, so it is
-/// the largest representable count rather than a small sentinel.
+/// `maxArity` for an operator that accepts any number of arguments. This is
+/// the largest representable count rather than a small sentinel, so that it
+/// does not impose an argument limit the language never had.
 inline constexpr std::size_t VARIADIC = std::numeric_limits<std::size_t>::max();
 
 struct OpSpec
@@ -45,8 +44,8 @@ struct OpSpec
     ops::LazyFn lazy;
 };
 
-/// Convenience builders keeping the table rows readable: an operator is eager
-/// unless it must control its own argument evaluation.
+/// Builders that keep the table rows readable. An operator is eager unless it
+/// needs to control its own argument evaluation.
 constexpr OpSpec
     eagerOp(std::string_view key, std::size_t minArity, std::size_t maxArity, ops::EagerFn fn)
 {
@@ -93,8 +92,8 @@ constexpr bool opTableIsWellFormed()
 {
     for(const OpSpec& s : OP_TABLE)
     {
-        // Exactly one handler: neither would evaluate to null at run time,
-        // both would make the eager/lazy choice ambiguous.
+        // Exactly one handler. With neither the operator would evaluate to
+        // null at run time; with both the eager/lazy choice is ambiguous.
         if((s.eager == nullptr) == (s.lazy == nullptr))
         {
             return false;
@@ -121,10 +120,10 @@ struct OpNode final : Node
         {
             return spec->lazy(args, d);
         }
-        // Evaluate every argument once, so unresolved values are detected
-        // before the operator coerces them and so each argument is evaluated
-        // exactly once. Arrays propagate unresolved children: a predicate must
-        // not answer from a partially evaluated literal array.
+        // Evaluate every argument exactly once, then check the results before
+        // the operator can coerce them. An array counts as unresolved if any
+        // element is, so a predicate never answers from a partly resolved
+        // array literal.
         std::vector<Value> v;
         v.reserve(args.size());
         for(const auto& c : args)

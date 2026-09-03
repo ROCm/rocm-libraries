@@ -7,10 +7,10 @@
 
 // DataSource.hpp - the type-erased data source a compiled tree evaluates against.
 //
-// The node tree targets IDataSource rather than a concrete DataT, so the tree
-// carries no template parameter and instantiates no per-DataT virtuals.
-// Expression<DataT> wraps the caller's object in a DataSourceAdapter at
-// evaluation time.
+// The compiled node tree evaluates against IDataSource instead of a concrete
+// DataT, so the tree carries no template parameter and no per-DataT virtuals
+// are instantiated. Expression<DataT> wraps the caller's object in a
+// DataSourceAdapter at evaluation time.
 
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/Value.hpp>
 
@@ -34,10 +34,6 @@ struct HasGetData<
 };
 
 // ---- type-erased data source ---------------------------------------------
-// The compiled node tree evaluates against this abstract source rather than a
-// concrete DataT, so the tree itself carries no template parameter (and thus
-// no per-DataT virtual member instantiation). Expression<DataT> wraps the
-// caller's data object in a DataSourceAdapter at evaluation time.
 struct IDataSource
 {
     virtual ~IDataSource() = default;

@@ -23,7 +23,8 @@ in the implementation, which is split by layer under
 
 | Header | Contents |
 | --- | --- |
-| `Error.hpp` | `JsonExpressionCompileError`, `VARIABLE_SIGIL`, depth limit |
+| `Error.hpp` | `JsonExpressionCompileError`, depth limit |
+| `Syntax.hpp` | the variable sigil |
 | `Value.hpp` | the runtime value type |
 | `DataSource.hpp` | the type-erased data-source contract |
 | `Node.hpp` | compiled tree nodes |
@@ -59,7 +60,7 @@ jexpr::Value getData(const std::string& path) const;
 The compiled expression passes the variable path (e.g. `"a.b.c"`) straight to
 this accessor; your type owns path resolution. Conventions:
 
-- the path is always non-empty: whole-document references are rejected at
+- the path is always non-empty: a bare sigil names no path and is rejected at
   compile time, so a data source never receives `""`.
 - returning `Value()` (null) means "not found"; `value_or_default` is how a rule
   supplies a fallback for such a path.
@@ -92,13 +93,13 @@ src.setData("$q.dims[0]", 2);   // -> {"q":{"dims":[2, 16]}}
 ```
 
 A `[N]` subscript grows an array (filling gaps with null); any other key creates
-or descends into an object; the empty path replaces the whole document.
-`setData` throws `std::invalid_argument` on a malformed path, a non-numeric
-index applied to an array, or an index at or above `MAX_ARRAY_INDEX` — a `[N]`
-subscript grows the array to `N`, so an unbounded index would turn a typo into
-an allocation of arbitrary size. A path may not start with `.` (after the
-optional sigil), and `getData` reads any malformed path as null rather than
-guessing at it. It validates the whole path before writing anything, so a
+or descends into an object. `setData` throws `std::invalid_argument` on a
+malformed path, a non-numeric index applied to an array, or an index at or
+above `MAX_ARRAY_INDEX` — a `[N]` subscript grows the array to `N`, so an
+unbounded index would turn a typo into an allocation of arbitrary size. A path
+may not be empty and may not start with `.` (after the optional sigil), and
+`getData` reads any malformed path as null rather than guessing at it. It
+validates the whole path before writing anything, so a
 throwing call leaves the document unchanged rather than part-way written.
 Objects and null in the document read back as `Value` null, matching `Value`'s
 scalar/array-only model — as does an unsigned integer too large for `int64_t`,
@@ -132,7 +133,7 @@ literals, so a variable can appear anywhere a literal can:
 | `"$a.b.c"`   | nested path                                |
 | `"$arr[0]"`  | array index (subscript)                    |
 | `"$arr.1"`   | dot-form array index                       |
-| `"$"`        | whole document — rejected at compile time  |
+| `"$"`        | names no path — rejected at compile time   |
 | `"$$text"`   | escaped string literal `"$text"`           |
 
 ## Layout aliases

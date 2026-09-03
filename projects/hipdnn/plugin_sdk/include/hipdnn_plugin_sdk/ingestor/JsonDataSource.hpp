@@ -30,20 +30,20 @@
 //                             existing array; use arr[1] to force array creation)
 //   - an optional leading variable sigil (VARIABLE_SIGIL) is stripped, so both
 //     "q.dims[0]" and "$q.dims[0]" address the same location
-//   - the empty path (or a bare variable sigil) addresses the whole document
+//   - the empty path (or a bare variable sigil) names nothing and is malformed
 //
 // getData follows the language convention: an unresolved path reads as null
 // (Value()). setData is a mutation and reports a malformed path or an
 // incompatible index by throwing std::invalid_argument.
 //
-// This is a *sample* accessor: objects and null in the document convert to
-// jexpr::Value null (Value has no object alternative), matching Value's
-// scalar/array-only model.
+// This is a sample accessor. Objects and null in the document both convert to
+// a null jexpr::Value, since Value models scalars and arrays only and has no
+// object alternative.
 //
 // Full reference: docs/JsonExpression.md.
 
 #include <hipdnn_plugin_sdk/ingestor/JsonExpression.hpp>
-#include <hipdnn_plugin_sdk/ingestor/jsonexpr/Error.hpp>
+#include <hipdnn_plugin_sdk/ingestor/jsonexpr/Syntax.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -78,9 +78,8 @@ public:
     }
 
     /// Data-source contract: resolve a variable path to a Value.
-    /// An empty path returns the whole document; an unresolved path (missing
-    /// key, out-of-range or non-numeric index, subscript on a non-array)
-    /// returns null so a `var` default, if any, takes over.
+    /// An unresolved path returns null: a missing key, an out-of-range or
+    /// non-numeric index, or a subscript applied to a non-array.
     Value getData(const std::string& path) const
     {
         std::vector<Segment> segs;
@@ -122,29 +121,23 @@ public:
     }
 
     /// Write a Value into the document at a path, creating intermediate
-    /// containers as needed: a `[N]` subscript (or a dot-form index against an
-    /// existing array) grows an array, filling gaps with null; any other key
-    /// creates or descends into an object. An empty path replaces the whole
-    /// document. Throws std::invalid_argument on a malformed path, a
-    /// non-numeric index applied to an array, or an index at or above
-    /// MAX_ARRAY_INDEX.
+    /// containers as needed. A `[N]` subscript, or a dot-form index against an
+    /// existing array, grows an array and fills any gap with null; any other
+    /// key creates or descends into an object. Throws std::invalid_argument on
+    /// a malformed path, a non-numeric index applied to an array, or an index
+    /// at or above MAX_ARRAY_INDEX.
     ///
-    /// All-or-nothing: the path is fully validated before anything is written,
-    /// so a throwing call leaves the document exactly as it was. Validating
-    /// inline instead would let a rejected write destroy data it had already
-    /// passed over -- `setData("q.dims[999999999]")` on `{"q":5}` would replace
-    /// the 5 with `{"dims":null}` on its way to the throw.
+    /// The path is fully validated before anything is written, so a throwing
+    /// call leaves the document unchanged. Validating as it went would let a
+    /// rejected write destroy data it had already passed over: on `{"q":5}`,
+    /// `setData("q.dims[999999999]")` would replace the 5 with `{"dims":null}`
+    /// before reaching the throw.
     void setData(const std::string& path, const Value& value)
     {
         std::vector<Segment> segs;
         if(!tokenize(path, segs))
         {
             throw std::invalid_argument("JsonDataSource::setData: malformed path '" + path + "'");
-        }
-        if(segs.empty())
-        {
-            _doc = toJson(value); // whole-document assignment
-            return;
         }
         validatePath(segs, path);
 
@@ -196,13 +189,13 @@ private:
         std::string text;
     };
 
-    /// Reject every index setData's write walk could reject, without touching
-    /// the document. Mirrors that walk's branching exactly: a subscript always
-    /// indexes, and a dotted segment indexes only where the document already
-    /// holds an array -- so it has to descend the existing structure to know
+    /// Reject every index setData's write walk would reject, without touching
+    /// the document. It mirrors that walk's branching: a subscript always
+    /// indexes, while a dotted segment indexes only where the document already
+    /// holds an array, so this has to descend the existing structure to know
     /// which segments are index positions. Descent stops at the first segment
     /// that is not already present, because from there on the write creates
-    /// objects and only explicit subscripts can be index positions.
+    /// objects, and only an explicit subscript can be an index position.
     void validatePath(const std::vector<Segment>& segs, const std::string& path) const
     {
         const nlohmann::json* cur = &_doc;
@@ -241,12 +234,13 @@ private:
         }
     }
 
-    /// Split a path into segments. Strips one optional leading variable sigil.
-    /// Returns false on a malformed path: an unterminated subscript, a leading
-    /// dot after the optional sigil, an empty segment (`a..b`, or a trailing
-    /// `.`), or text wedged between a `]` and the next separator
-    /// (`q.dims[0]bogus`). Accepting those would let setData create a key
-    /// nobody wrote, under a contract that says it throws instead.
+    /// Split a path into segments, stripping one optional leading variable
+    /// sigil. Returns false for a malformed path: an empty path (or a bare
+    /// sigil, which names no location), an unterminated subscript, a
+    /// leading dot after the optional sigil, an empty segment (`a..b` or a
+    /// trailing `.`), or text between a `]` and the next separator
+    /// (`q.dims[0]bogus`). Accepting any of those would have setData create a
+    /// key the caller never wrote, when its contract says it throws instead.
     static bool tokenize(const std::string& raw, std::vector<Segment>& out)
     {
         std::size_t pos = 0;
@@ -254,7 +248,11 @@ private:
         {
             ++pos; // strip the variable sigil
         }
-        if(pos < raw.size() && raw[pos] == '.')
+        if(pos == raw.size())
+        {
+            return false; // no location named
+        }
+        if(raw[pos] == '.')
         {
             return false; // leading empty segment
         }
@@ -299,11 +297,11 @@ private:
     }
 
     /// The largest index a path may name. A `[N]` subscript in setData grows
-    /// the array to N, so an unbounded index turns a one-character typo in a
-    /// descriptor path into an allocation of arbitrary size. No document this
-    /// addresses is anywhere near this long, and getData resolves an index at
-    /// or above the bound to null exactly as it already did for any index past
-    /// the end.
+    /// the array to N, so an unbounded index would turn a one-character typo in
+    /// a descriptor path into an allocation of arbitrary size. No document this
+    /// addresses comes close to this length. getData resolves an index at or
+    /// above the bound to null, just as it already did for any index past the
+    /// end.
     static constexpr std::size_t MAX_ARRAY_INDEX = (1U << 20U);
 
     /// Parse a decimal index below MAX_ARRAY_INDEX. Rejects empty text, any
@@ -314,10 +312,10 @@ private:
         {
             return false;
         }
-        // Digits only, checked by hand rather than with strtol: strtol accepts
+        // Digits only, checked by hand rather than with strtol. strtol accepts
         // leading whitespace and a leading '+', so `[ 3]` and `[+3]` would both
         // resolve as index 3, and it saturates at LONG_MAX on overflow instead
-        // of failing. Requiring digits only removes all three.
+        // of failing.
         for(const char c : s)
         {
             if(c < '0' || c > '9')
@@ -325,8 +323,8 @@ private:
                 return false;
             }
         }
-        // Bounds-check on the digit count first, so an absurdly long string
-        // never reaches a conversion that would saturate.
+        // Check the digit count first, so an absurdly long string never reaches
+        // a conversion that would overflow.
         constexpr std::size_t MAX_INDEX_DIGITS = 7; // MAX_ARRAY_INDEX is 7 digits
         if(s.size() > MAX_INDEX_DIGITS)
         {

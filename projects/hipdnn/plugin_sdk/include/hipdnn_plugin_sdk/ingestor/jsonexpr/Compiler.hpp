@@ -13,6 +13,7 @@
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/Error.hpp>
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/Node.hpp>
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/OperatorTable.hpp>
+#include <hipdnn_plugin_sdk/ingestor/jsonexpr/Syntax.hpp>
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/Value.hpp>
 
 #include <nlohmann/json.hpp>
@@ -123,7 +124,7 @@ inline NodePtr compileNode(const nlohmann::json& j, std::size_t depth)
         }
         if(s.size() == 1)
         {
-            throw JsonExpressionCompileError("whole-document variable reference is not supported");
+            throw JsonExpressionCompileError("a bare variable is unsupported");
         }
         auto n = std::make_unique<VarNode>();
         n->path = s.substr(1);

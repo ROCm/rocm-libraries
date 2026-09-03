@@ -24,7 +24,7 @@ static_assert(!std::is_constructible_v<jexpr::JsonDataSource, json, char>,
               "JsonDataSource uses the shared variable sigil and has no custom sigil API");
 
 // ---------------------------------------------------------------------------
-// JsonDataSource: the sample nlohmann::json-backed data source (getData/setData).
+// JsonDataSource: the sample nlohmann::json-backed data source.
 // ---------------------------------------------------------------------------
 TEST(TestJsonDataSource, GetResolvesPathsAndSubscripts)
 {
@@ -36,8 +36,8 @@ TEST(TestJsonDataSource, GetResolvesPathsAndSubscripts)
     EXPECT_EQ(src.getData("q.dims.0"), V(8)); // dot-form index against an array
     EXPECT_EQ(src.getData("rows[1].name"), V("a1"));
     EXPECT_EQ(src.getData("grid[0][1]"), V(2));
-    EXPECT_EQ(src.getData(""), V()); // whole document is an object -> null
-    // unresolved paths read as null
+    EXPECT_EQ(src.getData(""), V()); // an empty path names nothing
+    // Unresolved paths read as null.
     EXPECT_EQ(src.getData("q.nope"), V());
     EXPECT_EQ(src.getData("q.dims[9]"), V());
     EXPECT_EQ(src.getData("q.dims[x]"), V());
@@ -78,7 +78,7 @@ TEST(TestJsonDataSource, SetScalarCreatesNestedObjects)
 TEST(TestJsonDataSource, SetSubscriptCreatesAndExtendsArray)
 {
     jexpr::JsonDataSource src;
-    // [N] forces array creation; gaps fill with null.
+    // [N] forces array creation, and gaps are filled with null.
     src.setData("q.dims[2]", V(7));
     EXPECT_EQ(src.document(), (json{{"q", {{"dims", {nullptr, nullptr, 7}}}}}));
     EXPECT_EQ(src.getData("q.dims[2]"), V(7));
@@ -93,12 +93,14 @@ TEST(TestJsonDataSource, SetOverwritesExistingArrayIndex)
     EXPECT_EQ(src.getData("q.dims[0]"), V(2));
 }
 
-TEST(TestJsonDataSource, SetWholeDocument)
+TEST(TestJsonDataSource, SetRejectsAnEmptyPathWithoutMutation)
 {
+    // An empty path, or a bare sigil, names no location in the document.
     jexpr::JsonDataSource src{json{{"x", 1}}};
-    src.setData("", V(V::Array{V(1), V(2)}));
-    EXPECT_EQ(src.document(), (json::array({1, 2})));
-    EXPECT_EQ(src.getData("[1]"), V(2));
+    EXPECT_THROW(src.setData("", V(V::Array{V(1), V(2)})), std::invalid_argument);
+    EXPECT_THROW(src.setData("$", V(2)), std::invalid_argument);
+    EXPECT_EQ(src.document(), json({{"x", 1}}));
+    EXPECT_EQ(src.getData("$"), V());
 }
 
 TEST(TestJsonDataSource, SetRoundTripsValueKinds)
@@ -143,12 +145,12 @@ TEST(TestJsonDataSource, SetRejectsMalformedPaths)
     EXPECT_THROW(src.setData("q.dims[0", V(1)), std::invalid_argument); // missing ']'
     EXPECT_THROW(src.setData("q.dims[x]", V(1)), std::invalid_argument); // non-numeric index
     EXPECT_THROW(src.setData("q.dims.nope", V(1)), std::invalid_argument); // string key on array
-    // Text between a ']' and the next separator is not a key: accepting it
-    // would have setData silently create one the caller never wrote.
+    // Text between a ']' and the next separator is not a key. Accepting it
+    // would have setData create a key the caller never wrote.
     EXPECT_THROW(src.setData("q.dims[0]bogus", V(1)), std::invalid_argument);
     EXPECT_THROW(src.setData("q..dims", V(1)), std::invalid_argument); // empty segment
     EXPECT_THROW(src.setData("q.", V(1)), std::invalid_argument); // trailing separator
-    // strtol would accept both of these as 3; an index is digits only.
+    // strtol would accept both of these as 3; an index must be digits only.
     EXPECT_THROW(src.setData("q.dims[ 1]", V(1)), std::invalid_argument);
     EXPECT_THROW(src.setData("q.dims[+1]", V(1)), std::invalid_argument);
     // Every rejection above left the document exactly as it was.

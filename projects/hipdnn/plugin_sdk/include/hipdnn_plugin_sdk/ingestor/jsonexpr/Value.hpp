@@ -7,11 +7,11 @@
 
 // Value.hpp - the language's runtime value.
 //
-// A small standalone variant (null, bool, int64, double, string, array) that
-// deliberately does NOT depend on nlohmann/json: nlohmann expresses the rule
-// being compiled, never the values an evaluation produces. Null means
-// "unresolved", not a value -- see Operators.hpp for what that costs each
-// operator.
+// A small standalone variant (null, bool, int64, double, string, array). It
+// does not depend on nlohmann/json, because nlohmann represents the rule being
+// compiled, not the values an evaluation produces. Null means "unresolved"
+// rather than being a value of its own; Operators.hpp describes what that
+// means for each operator.
 //
 // Full reference: docs/JsonExpression.md.
 
@@ -119,8 +119,9 @@ public:
         return std::holds_alternative<Array>(_v);
     }
 
-    /// Null is the language's unresolved marker. Arrays propagate that marker:
-    /// an eager operator must not answer from a partially evaluated array.
+    /// True when this value is null, or is an array holding a null anywhere
+    /// inside it. Null is the language's unresolved marker, so an eager
+    /// operator uses this to avoid answering from a partly resolved array.
     bool containsUnresolved() const
     {
         if(isNull())
@@ -199,17 +200,17 @@ public:
                           _v);
     }
 
-    /// Structural equality (== / !=). Integers and doubles compare equal only
-    /// when the double names that integer exactly; non-numeric differing kinds
-    /// do not.
+    /// Structural equality (== / !=). An integer equals a double only when the
+    /// double is exactly that integer. Values of different, non-numeric kinds
+    /// are never equal.
     bool operator==(const Value& o) const
     {
         if(isInt() && o.isInt())
         {
-            // Exactly, not through double: above 2^53 a double cannot tell two
-            // adjacent int64 apart, and this language gates dispatch on sizes,
-            // strides and byte offsets, where that is a wrong decision rather
-            // than a rounding error.
+            // Compared as int64, not through double. Above 2^53 a double cannot
+            // distinguish adjacent int64 values, and this language gates
+            // dispatch on sizes, strides and byte offsets, so that would be a
+            // wrong decision rather than a rounding error.
             return asInt() == o.asInt();
         }
         if(isInt() && o.isDouble())
@@ -233,8 +234,8 @@ public:
         return !(*this == o);
     }
 
-    /// Ordering result of `compare`. UNORDERED is the non-finite numeric case,
-    /// and makes ordering predicates decline.
+    /// Result of `compare`. UNORDERED means at least one operand was not
+    /// finite, which makes the ordering operators decline.
     enum class Ordering
     {
         LESS,
@@ -243,10 +244,9 @@ public:
         UNORDERED
     };
 
-    /// Three-way compare for ordering. Two strings compare lexically; int64 and
-    /// double values compare without rounding the integer operand through
-    /// double. Anything else is compared as a number, and a non-finite operand
-    /// yields UNORDERED.
+    /// Three-way comparison. Two strings compare lexically. An int64 and a
+    /// double compare without rounding the integer through double. Anything
+    /// else compares as a number, and a non-finite operand gives UNORDERED.
     static Ordering compare(const Value& a, const Value& b)
     {
         if(a.isString() && b.isString())
@@ -261,9 +261,9 @@ public:
         }
         if(a.isInt() && b.isInt())
         {
-            // Exactly, for the same reason operator== does: routing two int64
-            // through double reports adjacent values above 2^53 as EQUAL, which
-            // makes <= and >= both hold on a pair that is neither.
+            // Compared as int64 for the same reason operator== is: routing two
+            // int64 through double reports adjacent values above 2^53 as EQUAL,
+            // which makes <= and >= both hold on a pair that is neither.
             const std::int64_t x = a.asInt();
             const std::int64_t y = b.asInt();
             if(x < y)
@@ -334,8 +334,8 @@ private:
         return doubleRepresentsInt64(d) && i == static_cast<std::int64_t>(d);
     }
 
-    /// The build enforces -Wswitch-default, so the unreachable `default:` is
-    /// required rather than dead: every Ordering is already handled above it.
+    /// The build enables -Wswitch-default, so the `default:` is required even
+    /// though every Ordering is already handled above it.
     static Ordering reverse(Ordering c)
     {
         switch(c)
@@ -414,8 +414,8 @@ private:
         return d;
     }
 
-    // The alternatives are reached by type through std::visit, so their order
-    // here carries no meaning.
+    // std::visit selects an alternative by type, so the order here does not
+    // matter.
     std::variant<std::nullptr_t, bool, std::int64_t, double, std::string, Array> _v;
 };
 } // namespace hipdnn_plugin_sdk::ingestor::jsonexpr

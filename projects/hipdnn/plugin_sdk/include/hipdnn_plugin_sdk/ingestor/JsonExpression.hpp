@@ -10,7 +10,7 @@
 // All names below live in namespace hipdnn_plugin_sdk::ingestor::jsonexpr;
 // these examples assume `namespace jexpr = hipdnn_plugin_sdk::ingestor::jsonexpr;`.
 //
-// An expression (an nlohmann::json value) is *compiled once* into a reusable
+// An expression (an nlohmann::json value) is compiled once into a reusable
 // jexpr::Expression<Data>, then evaluated many times against different data
 // sources:
 //
@@ -22,20 +22,22 @@
 //     jexpr::Value r1 = expr(dataA);              // evaluate, no re-parse
 //     jexpr::Value r2 = expr(dataB);              // reuse for other data
 //
-// Two conventions drive most of the design, and both are documented where they
-// are implemented rather than restated here:
+// Two conventions drive most of the design. Each is documented where it is
+// implemented:
 //
-//   - A string prefixed with '$' is a variable reference and the only way to
-//     read data; there is no `var` operator. See Compiler.hpp.
-//   - Null is "unresolved", not a value: an unresolved path means a field is
-//     absent, so operators propagate null rather than coercing it to
-//     false/0/not-equal and silently passing a narrowing predicate. `and`/`or`
-//     are correspondingly three-valued. See Operators.hpp.
+//   - A string prefixed with '$' is a variable reference, and it is the only
+//     way to read data; there is no `var` operator. See Compiler.hpp.
+//   - Null means "unresolved" rather than being a value of its own. An
+//     unresolved path means the field is absent, so operators return null
+//     instead of coercing it to false/0/not-equal, which would let a narrowing
+//     predicate pass. `and` and `or` are three-valued to match. See
+//     Operators.hpp.
 //
-// This header is the entry point; the implementation is split by layer under
-// jsonexpr/, each header documenting its own piece:
+// This header is the entry point. The implementation is split by layer under
+// jsonexpr/, and each header documents its own piece:
 //
-//     jsonexpr/Error.hpp           JsonExpressionCompileError
+//     jsonexpr/Error.hpp           JsonExpressionCompileError, the depth bound
+//     jsonexpr/Syntax.hpp          the variable sigil
 //     jsonexpr/Value.hpp           the runtime value type
 //     jsonexpr/DataSource.hpp      the type-erased data-source contract
 //     jsonexpr/Node.hpp            compiled tree nodes
@@ -52,6 +54,7 @@
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/Error.hpp>
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/LayoutAliases.hpp>
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/Node.hpp>
+#include <hipdnn_plugin_sdk/ingestor/jsonexpr/Syntax.hpp>
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/Value.hpp>
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/VarIterator.hpp>
 
@@ -115,9 +118,9 @@ private:
 /// Compile a rule into a reusable Expression bound to data source
 /// type DataT. Throws JsonExpressionCompileError on malformed rules.
 ///
-/// Layout aliases ("nhwc" and friends) opposite a `stride_order` reference are
-/// expanded to their canonical integer arrays first, so the compiled tree and
-/// evaluation see only arrays.
+/// Layout aliases ("nhwc" and friends) written against a `stride_order`
+/// reference are expanded into their integer arrays first, so the compiled
+/// tree and evaluation only ever see arrays.
 template <class DataT>
 Expression<DataT> compile(const nlohmann::json& rule)
 {
@@ -127,10 +130,10 @@ Expression<DataT> compile(const nlohmann::json& rule)
     return Expression<DataT>(detail::compileNode(expanded));
 }
 
-/// True when any variable referenced by `expr` has `root` as its first path
-/// token (the segment before the first '.'/'[' separator). The paths yielded by
-/// Expression::variables() are already sigil-stripped, so `root` is given
-/// without the sigil (e.g. "kernel"). Short-circuits on the first match.
+/// True when any variable referenced by `expr` starts with the path token
+/// `root`, i.e. the text before the first '.' or '['. Paths from
+/// Expression::variables() have the sigil stripped, so pass `root` without it
+/// (e.g. "kernel"). Stops at the first match.
 template <class DataT>
 bool referencesVariableRoot(const Expression<DataT>& expr, std::string_view root)
 {
