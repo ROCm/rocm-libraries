@@ -1187,7 +1187,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             }
 
-            s_wait_tensorcnt_barrier<0>();
+            s_wait_tensorcnt_barrier<1>();
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
