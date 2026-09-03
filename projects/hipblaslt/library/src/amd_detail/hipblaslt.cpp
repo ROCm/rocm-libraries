@@ -1057,22 +1057,18 @@ try
                     return HIPBLAS_STATUS_NOT_SUPPORTED;
                 }
             }
-            if(scaleApply
-               && (fused->rmsnorm_stats == nullptr || !fused->rmsnorm_stats->populated
-                   || fused->rmsnorm_stats->per_row_scale == nullptr))
+            // Decomposed flow: validate the caller-owned FP32 [rows*batch] handoff buffer on both
+            // sides. The producer's row_rstd reduction writes exactly one float per row, and the
+            // consumer reads it through a ScaleAlphaVec SRD bounded to the same row count, so both
+            // calls must supply a buffer covering their own D row count. The two stages are
+            // mutually exclusive within a chain.
+            if(partialStats || scaleApply)
             {
-                rocblaslt::Debug::Instance().markerStop();
-                return HIPBLAS_STATUS_INVALID_VALUE;
-            }
-            // Decomposed producer: validate the caller-owned FP32 [rows*batch] handoff buffer.
-            // The producer's row_rstd reduction writes exactly one float per row, and the consumer
-            // reads it through a ScaleAlphaVec SRD bounded to the same row count.
-            if(partialStats)
-            {
-                auto*         dlay  = (rocblaslt_matrix_layout)matD;
-                const uint64_t rows = dlay ? dlay->m : 0;
-                const int32_t batch = dlay ? dlay->batch_count : 1;
+                auto*          dlay  = (rocblaslt_matrix_layout)matD;
+                const uint64_t rows  = dlay ? dlay->m : 0;
+                const int32_t  batch = dlay ? dlay->batch_count : 1;
                 if(dlay == nullptr || rows == 0 || batch <= 0 || fused->rmsnorm_stats == nullptr
+                   || !fused->rmsnorm_stats->populated
                    || fused->rmsnorm_stats->per_row_scale == nullptr)
                 {
                     rocblaslt::Debug::Instance().markerStop();

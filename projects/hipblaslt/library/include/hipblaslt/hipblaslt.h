@@ -931,8 +931,9 @@ hipblasStatus_t
  *  \details
  *  The decomposed producer writes one FP32 value per output row and batch. Therefore, the
  *  required buffer size is ``M * batchCount * sizeof(float)``, where ``M`` and ``batchCount``
- *  come from the producer D matrix layout. The buffer must remain valid and unmodified from the
- *  producer call until all work submitted by the consumer call has completed. The descriptor
+ *  come from the producer D matrix layout. The consumer reads the same layout, so its D matrix
+ *  must have a matching row and batch count. The buffer must remain valid and unmodified from
+ *  the producer call until all work submitted by the consumer call has completed. The descriptor
  *  does not take ownership of the buffer.
  *
  *  @param[in]
@@ -944,8 +945,8 @@ hipblasStatus_t
  *
  *  \retval HIPBLAS_STATUS_SUCCESS If the buffer was set.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p desc or \p buffer is NULL, or if
- *  \p sizeInBytes is zero. A later producer matmul also returns this status when the supplied
- *  buffer is smaller than its required size.
+ *  \p sizeInBytes is zero. A later producer or consumer matmul also returns this status when no
+ *  buffer is set, or when the supplied buffer is smaller than that call's required size.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(

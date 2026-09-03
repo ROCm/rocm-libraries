@@ -1674,6 +1674,121 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
     static_cast<void>(hipFree(dWs));
 }
 
+// ---- Validation: the decomposed flow requires a caller-owned handoff buffer ----
+//
+// The library does not allocate the per-row rstd storage, so both decomposed stages reject a
+// handoff descriptor with no buffer, or one too small for that call's D row count. This covers
+// the matmul-level enforcement; the argument checks on
+// hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer itself are in
+// FusedEpilogueLifecycle.rmsnormStatsBufferValidation. gfx950-only, because reaching the
+// enforcement requires a real PartialRMS (K1) / RstdScale (K3) solution to be selected.
+TEST(FusedEpilogueE2E, decomposedHandoffBufferIsValidated)
+{
+    if(!deviceIsGfx950())
+        GTEST_SKIP() << "decomposed RMSNorm flow is wired for gfx950 only";
+
+    const int64_t M = 1024, Nhidden = 1024, K0 = 64, Nout = 64;
+    const float   eps = 1e-5f;
+
+    std::vector<uint16_t> hX(static_cast<size_t>(K0) * M);
+    std::vector<uint16_t> hW0(static_cast<size_t>(K0) * Nhidden);
+    std::vector<uint16_t> hW1(static_cast<size_t>(Nhidden) * Nout);
+    std::vector<uint16_t> hGamma(static_cast<size_t>(Nhidden), f32_to_bf16(1.0f));
+
+    std::mt19937                          rng(99);
+    std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
+    fillRandomBf16(hX, rng, dist);
+    fillRandomBf16(hW0, rng, dist);
+    fillRandomBf16(hW1, rng, dist);
+
+    void *dX = nullptr, *dW0 = nullptr, *dGamma = nullptr, *dH2 = nullptr, *dW1 = nullptr,
+         *dD2 = nullptr, *dRstd = nullptr, *dWs = nullptr;
+    const size_t wsSize = size_t(256) * 1024 * 1024;
+    ASSERT_EQ(hipMalloc(&dX, hX.size() * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dW0, hW0.size() * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dGamma, hGamma.size() * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dH2, size_t(M) * Nhidden * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dW1, hW1.size() * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dD2, size_t(M) * Nout * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dRstd, size_t(M) * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dX, hX.data(), hX.size() * 2, hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dW0, hW0.data(), hW0.size() * 2, hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dGamma, hGamma.data(), hGamma.size() * 2, hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dW1, hW1.data(), hW1.size() * 2, hipMemcpyHostToDevice), hipSuccess);
+
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    // Handoff descriptor deliberately left without a buffer for the first case.
+    hipblasLtFusedEpilogueRMSNormDescriptor_t stats = nullptr;
+    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats), HIPBLAS_STATUS_SUCCESS);
+
+    hipblasLtFusedEpilogueDescriptor_t prod = nullptr;
+    ASSERT_NO_FATAL_FAILURE(createPartialStatsDescriptor(stats, dGamma, eps, &prod));
+
+    const size_t requiredBytes = size_t(M) * sizeof(float);
+    int          algoCount     = 0;
+
+    // No buffer: the producer rejects instead of allocating one internally.
+    EXPECT_EQ(runBf16TnFusedMatmul(
+                  handle, M, Nhidden, K0, dX, K0, dW0, dH2, dH2, prod, dWs, wsSize, algoCount),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    ASSERT_GT(algoCount, 0) << "no PartialRMS (K1) producer solution selected";
+
+    // One row short of M * batchCount * sizeof(float).
+    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
+                  stats, dRstd, requiredBytes - sizeof(float)),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(runBf16TnFusedMatmul(
+                  handle, M, Nhidden, K0, dX, K0, dW0, dH2, dH2, prod, dWs, wsSize, algoCount),
+              HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Correctly sized: the same producer call now runs, confirming the rejections above are
+    // caused by the buffer and not by the problem setup.
+    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(stats, dRstd, requiredBytes),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(runBf16TnFusedMatmul(
+                  handle, M, Nhidden, K0, dX, K0, dW0, dH2, dH2, prod, dWs, wsSize, algoCount),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    // The consumer validates the buffer against its own D row count as well.
+    hipblasLtFusedEpilogueDescriptor_t cons = nullptr;
+    ASSERT_NO_FATAL_FAILURE(createScaleApplyDescriptor(stats, &cons));
+
+    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
+                  stats, dRstd, requiredBytes - sizeof(float)),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(
+        runBf16TnFusedMatmul(
+            handle, M, Nout, Nhidden, dH2, Nhidden, dW1, dD2, dD2, cons, dWs, wsSize, algoCount),
+        HIPBLAS_STATUS_INVALID_VALUE);
+    ASSERT_GT(algoCount, 0) << "no RstdScale (K3) consumer solution selected";
+
+    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(stats, dRstd, requiredBytes),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(
+        runBf16TnFusedMatmul(
+            handle, M, Nout, Nhidden, dH2, Nhidden, dW1, dD2, dD2, cons, dWs, wsSize, algoCount),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    hipblasLtFusedEpilogueDestroy(prod);
+    hipblasLtFusedEpilogueDestroy(cons);
+    hipblasLtFusedEpilogueRMSNormDescriptorDestroy(stats);
+    hipblasLtDestroy(handle);
+    static_cast<void>(hipFree(dX));
+    static_cast<void>(hipFree(dW0));
+    static_cast<void>(hipFree(dGamma));
+    static_cast<void>(hipFree(dH2));
+    static_cast<void>(hipFree(dW1));
+    static_cast<void>(hipFree(dD2));
+    static_cast<void>(hipFree(dRstd));
+    static_cast<void>(hipFree(dWs));
+}
+
 // ---- CPU reference helpers for MX fp8 quant ----
 
 // Compute e8m0 scale byte and quantization multiplier for a single block amax.
