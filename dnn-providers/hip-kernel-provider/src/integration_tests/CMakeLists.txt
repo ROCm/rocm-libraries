@@ -213,3 +213,50 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
             *_SdpaFwd_bshd_*.*
     )
 endif()
+
+# Register the gfx950 dense-attention ingestor engine's own gpu-reference target.
+#
+# Same rationale as the gfx942 block above -- bundles run against whichever engine
+# WINS the graph, so without a pin this engine can sit unexercised while the suite
+# reports green -- and the same gating, for the same reason: the descriptors exist
+# only when the ingestor is on AND the rocKE producer ran, so without that
+# conjunction every pinned case FAILS rather than skips.
+#
+# The two ingestor targets do NOT compete despite sharing the bundle filter. Each
+# pack declares a single, different `arch` and packs arch-prune BEFORE the matcher
+# runs, so at most one of them can match on a given device: on a gfx942 device the
+# gfx950 pack is pruned and every case here reports not-applicable, and vice versa.
+# That is also why this target is registered unconditionally rather than behind an
+# arch check -- the pruning is the arch check, and doing it twice in two places is
+# how the two answers drift apart.
+#
+# READ THE FRACTION, NOT THE COLOUR. This engine's shipped set is dispatcher-derived
+# from rocKE's own prefill traces, and it matches only a handful of the SdpaFwd
+# bundles that ship today -- most are BHSD, which this kernel bakes against and
+# correctly declines. A green run of this target therefore proves very little on its
+# own: it must be read as "N of M dispatched THIS engine, K skipped for a named
+# reason, 0 unexplained". A pass where N is small is a coverage finding, not a
+# success, and the fix is more bundles rather than a wider filter.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+   AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx950_attention_dense_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        # Exactly as the UED spells it; --test-engine matches the engine's engineName,
+        # which for a descriptor-registered engine comes from the UED's own `name`.
+        ENGINE_NAME hipkernel:Gfx950AttentionDense
+        INSTALL_SUBDIR hip_kernel_provider
+        # Computes the reference live. The GPU reference accepts these graphs -- dense,
+        # stride-based, no paging/varlen/ragged-tensor/stats/dropout/fp8. Note it also
+        # implements sliding-window bounds, but this engine declines windowed graphs,
+        # so no windowed case reaches it.
+        REFERENCE_EXECUTOR gpu
+        # The bshd bundles only, quick AND standard: the suite name is the bundle's own
+        # path, not the Smoke/<Fixture>.Correctness/* shape a C++
+        # INSTANTIATE_TEST_SUITE_P produces. Every other SdpaFwd case is BHSD and this
+        # engine correctly declines it, so those are EXPECTED TO SKIP under this pin.
+        GTEST_FILTER
+            *_SdpaFwd_bshd_*.*
+    )
+endif()

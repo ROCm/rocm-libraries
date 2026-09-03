@@ -24,6 +24,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942AttentionDenseNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionDenseNative.cpp
 )
 
 # Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the

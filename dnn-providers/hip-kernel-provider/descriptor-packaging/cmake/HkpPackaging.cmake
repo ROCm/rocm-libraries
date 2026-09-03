@@ -981,13 +981,14 @@ silently stop running.")
     # which arches got packed is a build-time fact HIPDNN_DESCRIPTOR_BUILD_DIR only
     # resolves once hkp_stage_all()'s custom command has actually run.
     # Rows are `<arch>;<pack-dir>;<engine-name>;<Native.cpp>`, one per attention_dense
-    # pack the branch actually ships. The tooling base leaves this empty; this branch
-    # sets the gfx942 pack it integrates, so the table never names a Native.cpp absent
-    # from the checkout. Separators are escaped (`\;`) so each row stays ONE list
-    # element -- unescaped, the rows flatten into loose fields and `list(GET _ns_spec 1)`
-    # reads past the end of a 1-element list.
+    # pack the branch actually ships. The tooling base leaves this empty; each
+    # integration branch adds the pack it integrates, so the table never names a
+    # Native.cpp absent from the checkout. Separators are escaped (`\;`) so each row
+    # stays ONE list element -- unescaped, the rows flatten into loose fields and
+    # `list(GET _ns_spec 1)` reads past the end of a 1-element list.
     set(HKP_NATIVE_SOURCE_PACKS
-        "gfx942\;gfx942_attention_dense\;hipkernel:Gfx942AttentionDense\;Gfx942AttentionDenseNative.cpp")
+        "gfx942\;gfx942_attention_dense\;hipkernel:Gfx942AttentionDense\;Gfx942AttentionDenseNative.cpp"
+        "gfx950\;gfx950_attention_dense\;hipkernel:Gfx950AttentionDense\;Gfx950AttentionDenseNative.cpp")
 
     if(TARGET hipdnn_validate_descriptors AND HKP_NATIVE_SOURCE_PACKS)
         set(_ns_native_source_root "${HKP_PKG_DIR}/../src/engines/kernel_ingestor_engine/packs")

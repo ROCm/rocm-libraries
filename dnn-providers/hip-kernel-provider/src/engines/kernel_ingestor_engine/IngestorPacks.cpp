@@ -29,6 +29,15 @@ const std::vector<IngestorPack>& ingestorPacks()
          &registerGfx942AttentionDenseSymbols,
          true,
          &resetGfx942AttentionDenseModuleCache},
+        // Packaged/kpack, same shape as the gfx942 entry above and for the same
+        // reason: its module cache must be reachable by the reset sweep. The two
+        // packs never compete -- each declares a single, different `arch`, and packs
+        // arch-prune before the matcher runs -- so both are registered
+        // unconditionally and at most one can ever match on a given device.
+        {"hipkernel:Gfx950AttentionDense",
+         &registerGfx950AttentionDenseSymbols,
+         true,
+         &resetGfx950AttentionDenseModuleCache},
     };
     return s_packs;
 }
