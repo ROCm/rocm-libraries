@@ -13,7 +13,9 @@ SPDX-License-Identifier: MIT
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
+#ifdef HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR
 #include "TestDescriptorRoot.hpp"
+#endif
 
 int main(int argc, char** argv)
 {
