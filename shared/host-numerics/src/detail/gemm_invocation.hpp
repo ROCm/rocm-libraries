@@ -65,7 +65,7 @@ struct GemmInvocation : GemmSpecification {
 };
 
 struct GemmExecutionInfo {
-    GemmBackend backendUsed = GemmBackend::Pointwise;
+    GemmBackend backendUsed = GemmBackend::Blocked;
     std::optional<std::string> fallbackReason;
     size_t outputElementsWritten = 0;
     size_t outputElementsCovered = 0;

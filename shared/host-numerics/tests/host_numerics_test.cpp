@@ -95,7 +95,7 @@ void testRuntimeReferenceGemm() {
     require(static_cast<bool>(queryGemmSupport(problem, backend)),
             "Runtime reference GEMM request support mismatch.");
     const GemmTestRunInfo runInfo = referenceGemm(problem, backend);
-    require(runInfo.backendUsed == GemmBackend::Pointwise && runInfo.outputElementsWritten == 4 &&
+    require(runInfo.backendUsed == GemmBackend::Blocked && runInfo.outputElementsWritten == 4 &&
                 runInfo.outputElementsCovered == 4,
             "Runtime reference GEMM run information mismatch.");
 
@@ -123,7 +123,7 @@ void testRuntimeReferenceGemm() {
         .layout = owningLayout,
         .selection = OutputSelection::explicitIndices({0, 1}),
     };
-    const GemmTestResult owned = referenceGemm(owningProblem, owningOutput, GemmBackend::Pointwise);
+    const GemmTestResult owned = referenceGemm(owningProblem, owningOutput, GemmBackend::Blocked);
     require(owned.output.layout() == owningLayout && owned.runInfo.outputElementsWritten == 2 &&
                 owned.output.loadAs<float>({0, 0}) == expected[0] &&
                 owned.output.loadAs<float>({0, 1}) == expected[2] &&
@@ -236,11 +236,11 @@ void testGemmScaleCValidationMatchesExecution() {
                              realOutput, ScalarType::Float32);
     realProblem.scaleC = std::complex<double>(1.0, 1.0);
 
-    require(!queryGemmSupport(realProblem, GemmBackend::Pointwise),
+    require(!queryGemmSupport(realProblem, GemmBackend::Blocked),
             "GEMM support query accepted a complex C scale for a real accumulator.");
     bool rejectedComplexScaleC = false;
     try {
-        referenceGemm(realProblem, GemmBackend::Pointwise);
+        referenceGemm(realProblem, GemmBackend::Blocked);
     } catch (const std::invalid_argument&) {
         rejectedComplexScaleC = true;
     }
@@ -257,11 +257,11 @@ void testGemmScaleCValidationMatchesExecution() {
         ScalarType::Int32);
     integerProblem.scaleC = 0.5;
 
-    require(!queryGemmSupport(integerProblem, GemmBackend::Pointwise),
+    require(!queryGemmSupport(integerProblem, GemmBackend::Blocked),
             "GEMM support query accepted a fractional C scale for an integer accumulator.");
     bool rejectedFractionalScaleC = false;
     try {
-        referenceGemm(integerProblem, GemmBackend::Pointwise);
+        referenceGemm(integerProblem, GemmBackend::Blocked);
     } catch (const std::invalid_argument&) {
         rejectedFractionalScaleC = true;
     }
@@ -315,7 +315,7 @@ void testRuntimeMixedAndBlockScaledGemm() {
             "Runtime block-scaled GEMM result mismatch.");
 }
 
-void testPointwiseRoutes() {
+void testBlockedUnalignedScaleSegments() {
     using namespace roc::host_numerics;
 
     const std::array<float, 7> a{1, 1, 1, 1, 1, 1, 1};
@@ -349,22 +349,13 @@ void testPointwiseRoutes() {
     GemmTestCase automaticProblem = makeProblem(automaticOutput);
     const GemmTestRunInfo automatic = referenceGemm(automaticProblem);
 
-    Tensor pointwiseOutput =
-        Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
-    GemmTestCase pointwiseProblem = makeProblem(pointwiseOutput);
-    const GemmTestRunInfo pointwise = referenceGemm(pointwiseProblem, GemmBackend::Pointwise);
-
     const Tensor expected =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, 184});
-    require(
-        compare(automaticOutput, expected).passed() && compare(pointwiseOutput, expected).passed(),
-        "Automatic and explicit Pointwise routes diverged.");
-    require(automatic.backendUsed == GemmBackend::Pointwise &&
-                pointwise.backendUsed == GemmBackend::Pointwise &&
-                automatic.outputElementsWritten == 1 && pointwise.outputElementsWritten == 1 &&
-                automatic.outputElementsCovered == 1 && pointwise.outputElementsCovered == 1 &&
-                automatic.fallbackReason && !pointwise.fallbackReason,
-            "Pointwise route information changed.");
+    require(compare(automaticOutput, expected).passed(),
+            "Blocked GEMM with unequal scale segments produced the wrong output.");
+    require(automatic.backendUsed == GemmBackend::Blocked && automatic.outputElementsWritten == 1 &&
+                automatic.outputElementsCovered == 2 && !automatic.fallbackReason,
+            "Blocked route information changed.");
 }
 
 void testExactIntegerGemm() {
@@ -383,7 +374,7 @@ void testExactIntegerGemm() {
                                   std::span<const int32_t>(c)),
         d, ScalarType::Int32);
     problem.beta = 2.0;
-    referenceGemm(problem);
+    referenceGemm(problem, GemmBackend::Blocked);
 
     const auto wrapMultiply = [](int32_t left, int32_t right) {
         return std::bit_cast<int32_t>(static_cast<uint32_t>(left) * static_cast<uint32_t>(right));
@@ -426,7 +417,7 @@ void testRuntimeComplexAndExplicitAxisGemm() {
                                     std::span<const std::complex<float>>(complexC)),
                                 complexD, ScalarType::ComplexFloat32);
     complexProblem.conjugateA = true;
-    referenceGemm(complexProblem);
+    referenceGemm(complexProblem, GemmBackend::Blocked);
     require(complexD.loadAs<std::complex<float>>({0, 0}) == std::complex<float>(11.0f, -2.0f),
             "Runtime complex GEMM result mismatch.");
 
@@ -472,7 +463,7 @@ void testOutputSelection() {
         d, ScalarType::Float32);
     problem.outputSelection = OutputSelection::explicitIndices({0, 3});
     const GemmTestRunInfo runInfo = referenceGemm(problem);
-    require(runInfo.outputElementsWritten == 2 && runInfo.outputElementsCovered == 2,
+    require(runInfo.outputElementsWritten == 2 && runInfo.outputElementsCovered == 4,
             "Selected-output GEMM reported the wrong element count.");
     require(d.loadAs<float>({0, 0}) == 19 && d.loadAs<float>({0, 1}) == -99 &&
                 d.loadAs<float>({1, 0}) == -99 && d.loadAs<float>({1, 1}) == 50,
@@ -545,15 +536,10 @@ void testStreamingGemmValidation() {
     options.comparison.selection =
         OutputSelection::explicitIndices({1}, IndexOrder::FirstDimensionFastest);
 
-    ComparisonReport pointwise =
+    ComparisonReport selected =
         validateGemm(tensorA, tensorB, tensorC, observed, gemmOptions, options);
-    require(pointwise.passed() && pointwise.compared == 1,
+    require(selected.passed() && selected.compared == 1,
             "Streaming GEMM validation did not isolate the selected output.");
-
-    options.backend = GemmBackend::Blocked;
-    ComparisonReport blocked =
-        validateGemm(tensorA, tensorB, tensorC, observed, gemmOptions, options);
-    require(blocked.passed(), "Streaming blocked GEMM validation reported the wrong work.");
 
     observed.storeFrom({1, 0}, 44.0f);
     ComparisonReport mismatch =
@@ -563,6 +549,38 @@ void testStreamingGemmValidation() {
                 mismatch.reportedMismatches[0].coordinates == std::vector<size_t>({1, 0}) &&
                 mismatch.reportedMismatches[0].observedOffset == 2,
             "Streaming GEMM validation did not preserve the original logical location.");
+
+    constexpr size_t extent = 64;
+    std::vector<float> sparseA(extent);
+    std::vector<float> sparseB(extent);
+    std::vector<float> sparseExpected(extent * extent);
+    for (size_t row = 0; row < extent; ++row) sparseA[row] = static_cast<float>(row + 1);
+    for (size_t column = 0; column < extent; ++column)
+        sparseB[column] = static_cast<float>(column + 2);
+    for (size_t row = 0; row < extent; ++row)
+        for (size_t column = 0; column < extent; ++column)
+            sparseExpected[row * extent + column] = sparseA[row] * sparseB[column];
+
+    const Tensor sparseTensorA = Tensor::copyNativeValues<float>(Shape{extent, 1}, sparseA);
+    const Tensor sparseTensorB = Tensor::copyNativeValues<float>(Shape{1, extent}, sparseB);
+    const Tensor sparseTensorC(ScalarType::Float32, Shape{extent, extent});
+    Tensor sparseObserved = Tensor::copyNativeValues<float>(Shape{extent, extent}, sparseExpected);
+    options.comparison.selection = OutputSelection::explicitIndices(
+        {40 + extent, 35 + 35 * extent, 2 + 40 * extent, 1 + 63 * extent},
+        IndexOrder::FirstDimensionFastest);
+    require(validateGemm(sparseTensorA, sparseTensorB, sparseTensorC, sparseObserved, gemmOptions,
+                         options)
+                .passed(),
+            "Sparse streaming GEMM reordered compact expected values.");
+
+    sparseObserved.storeFrom({40, 1}, sparseObserved.loadAs<float>({40, 1}) + 1.0f);
+    mismatch = validateGemm(sparseTensorA, sparseTensorB, sparseTensorC, sparseObserved,
+                            gemmOptions, options);
+    require(!mismatch.passed() && mismatch.mismatches == 1 &&
+                mismatch.reportedMismatches[0].index == 40 + extent &&
+                mismatch.reportedMismatches[0].coordinates == std::vector<size_t>({40, 1}) &&
+                mismatch.reportedMismatches[0].observedOffset == 40 * extent + 1,
+            "Sparse streaming GEMM did not preserve compact-selection ordering.");
 }
 
 void testReferenceEpilogue() {
@@ -2209,7 +2227,7 @@ int main() {
     testZeroGemmScalarsSuppressNonFiniteOperands();
     testGemmScaleCValidationMatchesExecution();
     testRuntimeMixedAndBlockScaledGemm();
-    testPointwiseRoutes();
+    testBlockedUnalignedScaleSegments();
     testExactIntegerGemm();
     testRuntimeComplexAndExplicitAxisGemm();
     testOutputSelection();

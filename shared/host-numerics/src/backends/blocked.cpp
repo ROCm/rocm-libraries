@@ -3,10 +3,12 @@
 
 #include <algorithm>
 #include <array>
+#include <complex>
 #include <cstddef>
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include "detail/blocked_gemm.hpp"
@@ -43,7 +45,6 @@ struct SelectedOutputBlockPlan {
 SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selection,
                                                  const Shape& outputShape) {
     const size_t logicalElements = outputShape.elementCount();
-    const size_t outputColumns = outputShape[1];
     const std::vector<size_t> selectedIndices = selection.indices(logicalElements);
     std::vector<SelectedOutputLocation> locations;
     locations.reserve(selectedIndices.size());
@@ -99,34 +100,56 @@ SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selectio
 }
 
 void validateBlocked(const GemmInvocation& problem) {
-    const GemmSupportInfo pointwise = queryGemmSupport(problem, GemmBackend::Pointwise);
-    if (!pointwise) throw std::invalid_argument(pointwise.reason);
-    if (problem.accumulatorType != ScalarType::Float32 &&
-        problem.accumulatorType != ScalarType::Float64)
-        throw std::invalid_argument("Blocked backend supports F32 and F64 accumulation.");
-    const auto validateBlockScale = [&](const std::optional<Tensor>& scale, size_t blockSize) {
-        if (!scale) return;
-        const size_t k = problem.a.shape()[1];
-        if (blockSize % reductionBlockElements != 0)
-            throw std::invalid_argument(
-                "Blocked backend requires block sizes divisible by its K block.");
-        if (k % blockSize != 0)
-            throw std::invalid_argument(
-                "Blocked backend requires K divisible by every block-scale size.");
-    };
-    validateBlockScale(problem.blockScaleA, problem.blockSizeA);
-    validateBlockScale(problem.blockScaleB, problem.blockSizeB);
+    validateRuntimeGemm(problem);
 }
 
-template <typename Accumulator>
+template <typename Accumulator, bool QuantizeAccumulator>
+detail::RuntimeGemmFinalizer<Accumulator> makeFinalizer(const GemmInvocation& problem) {
+    if constexpr (QuantizeAccumulator)
+        return detail::RuntimeGemmFinalizer<Accumulator>(
+            problem, detail::gemmAccumulatorQuantizer<Accumulator>(problem));
+    else
+        return detail::RuntimeGemmFinalizer<Accumulator>(problem);
+}
+
+template <typename Accumulator, bool QuantizeAccumulator = false>
 GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutput = nullptr) {
     using namespace detail;
+    constexpr bool needsExplicitArithmetic =
+        QuantizeAccumulator || (std::is_integral_v<Accumulator> && std::is_signed_v<Accumulator>);
+
+    const size_t m = problem.a.shape()[0];
+    const size_t k = problem.a.shape()[1];
+    const size_t n = problem.b.shape()[1];
+    const size_t outputElementsWritten =
+        problem.outputSelection.selectedCount(problem.d.shape().elementCount());
+    size_t outputElementsCovered = 0;
+    std::optional<SelectedOutputBlockPlan> selectedPlan;
+    if (!problem.outputSelection.selectsAll()) {
+        selectedPlan = planSelectedOutputBlocks(problem.outputSelection, problem.d.shape());
+        for (const PlannedOutputBlock& block : selectedPlan->blocks)
+            outputElementsCovered += std::min(outputBlockRows, m - block.rowBase) *
+                                     std::min(outputBlockColumns, n - block.columnBase);
+    }
 
     const RuntimeMatrixReader<Accumulator> a(problem.a);
     const RuntimeMatrixReader<Accumulator> b(problem.b);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.computeTypeA);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.computeTypeB);
-    const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
+    const RuntimeGemmFinalizer<Accumulator> finalizer =
+        makeFinalizer<Accumulator, QuantizeAccumulator>(problem);
+    const auto multiply = [&](Accumulator left, Accumulator right) {
+        if constexpr (needsExplicitArithmetic)
+            return finalizer.multiply(left, right);
+        else
+            return left * right;
+    };
+    const auto add = [&](Accumulator left, Accumulator right) {
+        if constexpr (needsExplicitArithmetic)
+            return finalizer.add(left, right);
+        else
+            return left + right;
+    };
     const RuntimeMatrixOutputWriter<Accumulator> output(problem.d, problem.outputConversion);
     std::optional<RuntimeMatrixOutputWriter<Accumulator>> selectedOutputWriter;
     if (selectedOutput != nullptr)
@@ -146,9 +169,7 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
     if (problem.blockScaleA) blockScaleA.emplace(*problem.blockScaleA);
     if (problem.blockScaleB) blockScaleB.emplace(*problem.blockScaleB);
 
-    const size_t m = problem.a.shape()[0];
-    const size_t k = problem.a.shape()[1];
-    const size_t n = problem.b.shape()[1];
+    const bool hasBlockScale = blockScaleA.has_value() || blockScaleB.has_value();
 
     const auto executeBlock = [&](size_t rowBase, size_t columnBase, bool storeAllOutputs,
                                   std::span<const SelectedOutputLocation> selectedOutputs) {
@@ -158,18 +179,21 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
         const size_t maximumReductions = std::min(reductionBlockElements, k);
         std::vector<Accumulator> aBlock(rows * maximumReductions);
         std::vector<Accumulator> bBlock(maximumReductions * columns);
-        const bool hasBlockScale = blockScaleA.has_value() || blockScaleB.has_value();
         std::vector<Accumulator> partial(hasBlockScale ? rows * columns : 0);
 
-        for (size_t reductionBase = 0; !finalizer.skipsProduct() && reductionBase < k;
-             reductionBase += reductionBlockElements) {
-            const size_t reductions = std::min(reductionBlockElements, k - reductionBase);
+        const auto accumulateTile = [&](std::vector<Accumulator>& destination, size_t reductionBase,
+                                        size_t reductions) {
             for (size_t row = 0; row < rows; ++row) {
                 for (size_t reduction = 0; reduction < reductions; ++reduction) {
                     Accumulator value = conjugateIfNeeded(
                         a(rowBase + row, reductionBase + reduction), problem.conjugateA);
-                    for (const auto& scale : preScalesA)
-                        value *= scale(rowBase + row, reductionBase + reduction);
+                    for (const auto& scale : preScalesA) {
+                        if constexpr (needsExplicitArithmetic)
+                            value =
+                                multiply(value, scale(rowBase + row, reductionBase + reduction));
+                        else
+                            value *= scale(rowBase + row, reductionBase + reduction);
+                    }
                     aBlock[row * reductions + reduction] = operandMath(quantizeA(value));
                 }
             }
@@ -177,49 +201,88 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
                 for (size_t column = 0; column < columns; ++column) {
                     Accumulator value = conjugateIfNeeded(
                         b(reductionBase + reduction, columnBase + column), problem.conjugateB);
-                    for (const auto& scale : preScalesB)
-                        value *= scale(reductionBase + reduction, columnBase + column);
+                    for (const auto& scale : preScalesB) {
+                        if constexpr (needsExplicitArithmetic)
+                            value = multiply(value,
+                                             scale(reductionBase + reduction, columnBase + column));
+                        else
+                            value *= scale(reductionBase + reduction, columnBase + column);
+                    }
                     bBlock[reduction * columns + column] = operandMath(quantizeB(value));
                 }
             }
 
-            const bool startsScaleSegment =
-                hasBlockScale &&
-                (reductionBase == 0 || (blockScaleA && reductionBase % problem.blockSizeA == 0) ||
-                 (blockScaleB && reductionBase % problem.blockSizeB == 0));
-            if (startsScaleSegment) std::fill(partial.begin(), partial.end(), Accumulator(0));
-            std::vector<Accumulator>& destination = hasBlockScale ? partial : accumulator;
             for (size_t row = 0; row < rows; ++row) {
                 for (size_t reduction = 0; reduction < reductions; ++reduction) {
                     const Accumulator aValue = aBlock[row * reductions + reduction];
-                    for (size_t column = 0; column < columns; ++column)
-                        destination[row * columns + column] +=
-                            aValue * bBlock[reduction * columns + column];
+                    for (size_t column = 0; column < columns; ++column) {
+                        if constexpr (needsExplicitArithmetic)
+                            destination[row * columns + column] =
+                                add(destination[row * columns + column],
+                                    multiply(aValue, bBlock[reduction * columns + column]));
+                        else
+                            destination[row * columns + column] +=
+                                aValue * bBlock[reduction * columns + column];
+                    }
                 }
             }
-            const size_t reductionEnd = reductionBase + reductions;
-            const bool endsScaleSegment =
-                hasBlockScale &&
-                (reductionEnd == k || (blockScaleA && reductionEnd % problem.blockSizeA == 0) ||
-                 (blockScaleB && reductionEnd % problem.blockSizeB == 0));
-            if (endsScaleSegment) {
+        };
+
+        if (!finalizer.skipsProduct() && !hasBlockScale) {
+            for (size_t reductionBase = 0; reductionBase < k;
+                 reductionBase += reductionBlockElements) {
+                const size_t reductions = std::min(reductionBlockElements, k - reductionBase);
+                accumulateTile(accumulator, reductionBase, reductions);
+            }
+        } else if (!finalizer.skipsProduct()) {
+            for (size_t reductionBase = 0; reductionBase < k;) {
+                size_t reductions = std::min(reductionBlockElements, k - reductionBase);
+                if (blockScaleA)
+                    reductions = std::min(reductions,
+                                          problem.blockSizeA - reductionBase % problem.blockSizeA);
+                if (blockScaleB)
+                    reductions = std::min(reductions,
+                                          problem.blockSizeB - reductionBase % problem.blockSizeB);
+                const bool startsScaleSegment =
+                    reductionBase == 0 ||
+                    (blockScaleA && reductionBase % problem.blockSizeA == 0) ||
+                    (blockScaleB && reductionBase % problem.blockSizeB == 0);
+                if (startsScaleSegment) std::fill(partial.begin(), partial.end(), Accumulator(0));
+                accumulateTile(partial, reductionBase, reductions);
+
+                const size_t reductionEnd = reductionBase + reductions;
+                const bool endsScaleSegment =
+                    reductionEnd == k || (blockScaleA && reductionEnd % problem.blockSizeA == 0) ||
+                    (blockScaleB && reductionEnd % problem.blockSizeB == 0);
+                if (!endsScaleSegment) {
+                    reductionBase = reductionEnd;
+                    continue;
+                }
                 std::array<Accumulator, outputBlockColumns> bScales;
                 for (size_t column = 0; column < columns; ++column)
                     bScales[column] = blockScaleB
                                           ? (*blockScaleB)(columnBase + column,
-                                                           reductionBase / problem.blockSizeB)
+                                                           (reductionEnd - 1) / problem.blockSizeB)
                                           : Accumulator(1);
                 for (size_t row = 0; row < rows; ++row) {
                     const Accumulator aScale =
                         blockScaleA
-                            ? (*blockScaleA)(rowBase + row, reductionBase / problem.blockSizeA)
+                            ? (*blockScaleA)(rowBase + row, (reductionEnd - 1) / problem.blockSizeA)
                             : Accumulator(1);
                     for (size_t column = 0; column < columns; ++column) {
-                        const Accumulator scale = aScale * bScales[column];
-                        accumulator[row * columns + column] +=
-                            partial[row * columns + column] * scale;
+                        if constexpr (needsExplicitArithmetic) {
+                            const Accumulator scale = multiply(aScale, bScales[column]);
+                            accumulator[row * columns + column] =
+                                add(accumulator[row * columns + column],
+                                    multiply(partial[row * columns + column], scale));
+                        } else {
+                            const Accumulator scale = aScale * bScales[column];
+                            accumulator[row * columns + column] +=
+                                partial[row * columns + column] * scale;
+                        }
                     }
                 }
+                reductionBase = reductionEnd;
             }
         }
 
@@ -246,9 +309,6 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
         return rows * columns;
     };
 
-    size_t outputElementsCovered = 0;
-    const size_t outputElementsWritten =
-        problem.outputSelection.selectedCount(problem.d.shape().elementCount());
     const bool parallelOutput = detail::canParallelizeGemmOutput(problem);
     const size_t reductionWork = finalizer.skipsProduct() ? 0 : k;
     if (problem.outputSelection.selectsAll()) {
@@ -264,16 +324,12 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
                 (void)executeBlock(rowBase, columnBase, true, {});
             });
     } else {
-        const SelectedOutputBlockPlan plan =
-            planSelectedOutputBlocks(problem.outputSelection, problem.d.shape());
-        const std::span<const SelectedOutputLocation> selectedOutputs(plan.locations);
-        for (const PlannedOutputBlock& block : plan.blocks)
-            outputElementsCovered += std::min(outputBlockRows, m - block.rowBase) *
-                                     std::min(outputBlockColumns, n - block.columnBase);
+        const std::span<const SelectedOutputLocation> selectedOutputs(selectedPlan->locations);
         detail::forEachParallelIndex(
-            plan.blocks.size(), detail::saturatedProduct(outputElementsCovered, reductionWork),
-            parallelOutput, 1'000'000, [&](size_t index) {
-                const PlannedOutputBlock& block = plan.blocks[index];
+            selectedPlan->blocks.size(),
+            detail::saturatedProduct(outputElementsCovered, reductionWork), parallelOutput,
+            1'000'000, [&](size_t index) {
+                const PlannedOutputBlock& block = selectedPlan->blocks[index];
                 (void)executeBlock(
                     block.rowBase, block.columnBase, false,
                     selectedOutputs.subspan(block.firstSelectedOutput, block.selectedOutputCount));
@@ -292,58 +348,31 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
 GemmSupportInfo detail::queryBlockedGemmSupport(const GemmInvocation& problem) {
     try {
         validateBlocked(problem);
-        return {
-            .supported = true,
-            .reason = {},
-            .preferredForAutomaticExecution = isBlockedGemmPreferredForAutomaticExecution(problem),
-        };
+        return {.supported = true, .reason = {}};
     } catch (const std::exception& error) {
         return {.supported = false, .reason = error.what()};
     }
-}
-
-bool detail::isBlockedGemmPreferredForAutomaticExecution(const GemmInvocation& problem) {
-    const size_t selectedOutputCount =
-        problem.outputSelection.selectedCount(problem.d.shape().elementCount());
-    if (selectedOutputCount == 0) return false;
-
-    const size_t reductionElements = problem.a.shape()[1];
-    const size_t pointwiseWork = detail::saturatedProduct(selectedOutputCount, reductionElements);
-    constexpr size_t minimumBlockedMultiplyAdds = 8'192;
-    if (pointwiseWork < minimumBlockedMultiplyAdds) return false;
-    if (problem.outputSelection.selectsAll()) return true;
-
-    const SelectedOutputBlockPlan plan =
-        planSelectedOutputBlocks(problem.outputSelection, problem.d.shape());
-    size_t coveredOutputCount = 0;
-    for (const PlannedOutputBlock& block : plan.blocks)
-        coveredOutputCount += std::min(outputBlockRows, problem.d.shape()[0] - block.rowBase) *
-                              std::min(outputBlockColumns, problem.d.shape()[1] - block.columnBase);
-
-    const size_t blockedWork = detail::saturatedProduct(coveredOutputCount, reductionElements);
-    const size_t pointwiseThreads =
-        static_cast<size_t>(detail::operationThreadCount(pointwiseWork, 500'000));
-    const size_t blockedThreads =
-        std::min(plan.blocks.size(),
-                 static_cast<size_t>(detail::operationThreadCount(blockedWork, 1'000'000)));
-
-    constexpr long double blockedWorkAdvantage = 20.0L;
-    const long double pointwiseCost =
-        static_cast<long double>(pointwiseWork) / static_cast<long double>(pointwiseThreads);
-    const long double blockedCost = static_cast<long double>(blockedWork) /
-                                    static_cast<long double>(std::max<size_t>(1, blockedThreads)) /
-                                    blockedWorkAdvantage;
-    return blockedCost < pointwiseCost;
 }
 
 GemmExecutionInfo detail::runBlockedGemm(const GemmInvocation& problem) {
     const GemmSupportInfo support = queryBlockedGemmSupport(problem);
     if (!support) throw std::invalid_argument(support.reason);
     switch (problem.accumulatorType) {
+        case ScalarType::Float16:
+        case ScalarType::BFloat16:
+            if (problem.accumulationRounding == AccumulationRounding::FullPrecision)
+                return runBlocked<float, false>(problem);
+            return runBlocked<float, true>(problem);
         case ScalarType::Float32:
-            return runBlocked<float>(problem);
+            return runBlocked<float, false>(problem);
         case ScalarType::Float64:
-            return runBlocked<double>(problem);
+            return runBlocked<double, false>(problem);
+        case ScalarType::Int32:
+            return runBlocked<int32_t, false>(problem);
+        case ScalarType::ComplexFloat32:
+            return runBlocked<std::complex<float>, false>(problem);
+        case ScalarType::ComplexFloat64:
+            return runBlocked<std::complex<double>, false>(problem);
         default:
             throw std::invalid_argument("Blocked backend accumulator type is unsupported.");
     }
@@ -361,12 +390,23 @@ GemmExecutionInfo detail::runBlockedGemmToSelectedOutput(const GemmInvocation& p
         throw std::invalid_argument("Streaming blocked GEMM output shape or type mismatch.");
 
     switch (problem.accumulatorType) {
+        case ScalarType::Float16:
+        case ScalarType::BFloat16:
+            if (problem.accumulationRounding == AccumulationRounding::FullPrecision)
+                return runBlocked<float, false>(problem, &selectedOutput);
+            return runBlocked<float, true>(problem, &selectedOutput);
         case ScalarType::Float32:
-            return runBlocked<float>(problem, &selectedOutput);
+            return runBlocked<float, false>(problem, &selectedOutput);
         case ScalarType::Float64:
-            return runBlocked<double>(problem, &selectedOutput);
+            return runBlocked<double, false>(problem, &selectedOutput);
+        case ScalarType::Int32:
+            return runBlocked<int32_t, false>(problem, &selectedOutput);
+        case ScalarType::ComplexFloat32:
+            return runBlocked<std::complex<float>, false>(problem, &selectedOutput);
+        case ScalarType::ComplexFloat64:
+            return runBlocked<std::complex<double>, false>(problem, &selectedOutput);
         default:
-            throw std::invalid_argument("Blocked backend supports F32 and F64 accumulation.");
+            throw std::invalid_argument("Blocked backend accumulator type is unsupported.");
     }
 }
 }  // namespace roc::host_numerics
