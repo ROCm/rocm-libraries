@@ -7,19 +7,19 @@
 #
 # gfx1250 kernels are authored in Python (there is no cpp/instances/gfx1250/),
 # so no instance-builder family in this gate exercises the gfx1250 *lowerer*.
-# That left the six places Gfx1250Backend diverges from its Gfx12RdnaBackend
+# That left the target-specific places Gfx1250Backend diverges from its Gfx12RdnaBackend
 # parent covered only by the ROCKE_BACKEND=both pytest lane, and invisible to
 # check_byte_identity.py -- the tree's stated definition-of-done. This family
 # closes that: one config per divergence, built from the smallest kernel that
 # reaches it, byte-compared against gfx1250_lowering_emit.c.
 #
-# The gfx950 twins are deliberately included. Four of the six divergences are a
+# The gfx950 twins are deliberately included. Several divergences are a
 # *choice between two encodings*, so a lowering that ignored the backend and
 # always picked the gfx1250 form would still pass a gfx1250-only family. Pairing
 # each with its gfx950 counterpart pins both sides of the choice.
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
-from rocke.core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import BF16, F16, F32, I32, I64, IRBuilder, KernelDef, PtrType
 
 from _emit_common import run_emit
 
@@ -68,6 +68,46 @@ def _wmma_k64(a_kind, b_kind):
     def build(b: IRBuilder) -> None:
         tid, c_ptr, a, bb, c = _frag_operands(b, I32, 8)
         d = b.mma(f"wmma_gfx1250_f32_16x16x64_{a_kind}_{b_kind}", a, bb, c)
+        b.global_store(c_ptr, tid, d)
+        b.ret()
+
+    return build
+
+
+def _wmma_scaled(scale16):
+    """K=128 FP8 SCALE/SCALE16 WMMA with i32/i64 packed E8M0 scales."""
+
+    def build(b: IRBuilder) -> None:
+        a_ptr = b.param(
+            "A", PtrType(I32, "global"), noalias=True, readonly=True, align=16
+        )
+        b_ptr = b.param(
+            "B", PtrType(I32, "global"), noalias=True, readonly=True, align=16
+        )
+        c_ptr = b.param("C", PtrType(F32, "global"), noalias=True, align=16)
+        scale_ty = I64 if scale16 else I32
+        scale_ptr = b.param(
+            "scale",
+            PtrType(scale_ty, "global"),
+            noalias=True,
+            readonly=True,
+            align=16,
+        )
+        tid = b.thread_id_x()
+        a_lo = b.global_load_vN(a_ptr, tid, dtype=I32, n=8)
+        eight = b.const_i32(8)
+        hi_idx = b.add(tid, eight)
+        a_hi = b.global_load_vN(a_ptr, hi_idx, dtype=I32, n=8)
+        a = b.vec_concat(a_lo, a_hi)
+        b_lo = b.global_load_vN(b_ptr, tid, dtype=I32, n=8)
+        b_hi = b.global_load_vN(b_ptr, hi_idx, dtype=I32, n=8)
+        bb = b.vec_concat(b_lo, b_hi)
+        c = b.global_load_vN(c_ptr, tid, dtype=F32, n=8)
+        scale = b.global_load(scale_ptr, tid, dtype=scale_ty)
+        if scale16:
+            d = b.wmma_scale16_f32_16x16x128_fp8_fp8(a, bb, c, scale, scale)
+        else:
+            d = b.wmma_scale_f32_16x16x128_fp8_fp8(a, bb, c, scale, scale)
         b.global_store(c_ptr, tid, d)
         b.ret()
 
@@ -140,6 +180,8 @@ CONFIGS = [
     (_wmma_k64("fp8", "bf8"), "gfx1250"),
     (_wmma_k64("bf8", "fp8"), "gfx1250"),
     (_wmma_k64("bf8", "bf8"), "gfx1250"),
+    (_wmma_scaled(False), "gfx1250"),
+    (_wmma_scaled(True), "gfx1250"),
     (_tr16_b128(F16), "gfx1250"),
     (_tr16_b128(F16), "gfx950"),
     (_tr16_b128(BF16), "gfx1250"),

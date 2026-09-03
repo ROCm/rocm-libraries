@@ -29,7 +29,6 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-
 # ----------------------------- Types --------------------------------------
 
 
@@ -86,6 +85,8 @@ _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_16x16x96_fp6": "acc6",
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
+    "wmma_scale_f32_16x16x128_fp8_fp8": "mxacc",
+    "wmma_scale16_f32_16x16x128_fp8_fp8": "mxacc",
 }
 
 
@@ -1933,6 +1934,38 @@ class IRBuilder:
     def wmma_gfx1250_f32_16x16x64_bf8_bf8(self, a: Value, b: Value, c: Value) -> Value:
         """gfx1250 (gfx1250) BF8 K=64 WMMA. Thin wrapper over :meth:`mma`."""
         return self.mma("wmma_gfx1250_f32_16x16x64_bf8_bf8", a, b, c)
+
+    def wmma_scale_f32_16x16x128_fp8_fp8(
+        self,
+        a: Value,
+        b: Value,
+        c: Value,
+        a_scale: Value,
+        b_scale: Value,
+    ) -> Value:
+        """gfx1250 native SCALE FP8 WMMA with packed E8M0 scale operands.
+
+        A and B are ``<16 x i32>`` fragments (64 FP8 bytes per lane), C is
+        ``<8 x f32>``, and each scale operand is one i32 packing four E8M0
+        bytes for the instruction's four K=32 scale blocks.
+        """
+        return self.mma("wmma_scale_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
+
+    def wmma_scale16_f32_16x16x128_fp8_fp8(
+        self,
+        a: Value,
+        b: Value,
+        c: Value,
+        a_scale: Value,
+        b_scale: Value,
+    ) -> Value:
+        """gfx1250 native SCALE16 FP8 WMMA with eight packed E8M0 scales.
+
+        The matrix and accumulator fragments match
+        :meth:`wmma_scale_f32_16x16x128_fp8_fp8`; each scale operand is i64
+        because SCALE16 carries eight K=16 E8M0 scale bytes.
+        """
+        return self.mma("wmma_scale16_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
 
     def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_16x16x16_f16", a, b, c)

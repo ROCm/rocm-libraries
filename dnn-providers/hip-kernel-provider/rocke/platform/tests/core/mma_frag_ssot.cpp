@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 
 static int g_failures = 0;
@@ -59,6 +60,19 @@ static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag
     }
 }
 
+static void check_catalog_fragments(const rocke_mma_catalog_t* catalog, const char* op_id)
+{
+    const rocke_mma_op_t* op = rocke_mma_catalog_by_op_id(catalog, op_id);
+    CHECK(op != NULL, op_id);
+    if(!op)
+    {
+        return;
+    }
+    CHECK(op->a_frag_len == 16, op_id);
+    CHECK(op->b_frag_len == 16, op_id);
+    CHECK(op->c_frag_len == 8, op_id);
+}
+
 int main(void)
 {
     rocke_ir_builder_t b;
@@ -77,6 +91,17 @@ int main(void)
     /* Integer WMMA: 8-wide i32 accumulator. */
     check_atom(&b, "wmma_i32_16x16x16_iu8", 8, true);
     check_atom(&b, "wmma_i32_16x16x16_iu4", 8, true);
+
+    /* Keep the C catalog in parity with Python _MMA_FRAGMENT_INFO. The scaled
+     * matrix operands are <16 x i32>, so fragment length is 16 elements, not
+     * the equivalent 64-byte storage width. */
+    const rocke_arch_target_t* gfx1250 = rocke_arch_target_from_gfx("gfx1250");
+    CHECK(gfx1250 != NULL, "gfx1250 target");
+    if(gfx1250)
+    {
+        check_catalog_fragments(&gfx1250->mma, "wmma_scale_f32_16x16x128_fp8_fp8");
+        check_catalog_fragments(&gfx1250->mma, "wmma_scale16_f32_16x16x128_fp8_fp8");
+    }
 
     /* Unknown op_id must be rejected. The engine's error path either returns
      * NULL with a sticky builder error or raises (ckc::ValueError) depending on

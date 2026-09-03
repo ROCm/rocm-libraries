@@ -117,6 +117,43 @@ static void build_wmma_k64_bf8_bf8(rocke_ir_builder_t* b)
     wmma_k64(b, "wmma_gfx1250_f32_16x16x64_bf8_bf8");
 }
 
+/* K=128 FP8 SCALE/SCALE16 WMMA. Matrix fragments are <16 x i32>; packed
+ * E8M0 scale operands are i32 for SCALE and i64 for SCALE16. */
+static void wmma_scaled(rocke_ir_builder_t* b, bool scale16)
+{
+    const rocke_type_t* scale_ty = scale16 ? rocke_i64() : rocke_i32();
+    rocke_value_t* a_ptr = frag_param(b, "A", rocke_i32(), true);
+    rocke_value_t* b_ptr = frag_param(b, "B", rocke_i32(), true);
+    rocke_value_t* c_ptr = frag_param(b, "C", rocke_f32(), false);
+    rocke_value_t* scale_ptr = frag_param(b, "scale", scale_ty, true);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* a_lo = rocke_b_global_load_vN(b, a_ptr, tid, rocke_i32(), 8, /*align=*/0);
+    rocke_value_t* eight = rocke_b_const_i32(b, 8);
+    rocke_value_t* hi_idx = rocke_b_add(b, tid, eight);
+    rocke_value_t* a_hi = rocke_b_global_load_vN(b, a_ptr, hi_idx, rocke_i32(), 8, /*align=*/0);
+    rocke_value_t* a = rocke_b_vec_concat(b, a_lo, a_hi);
+    rocke_value_t* b_lo = rocke_b_global_load_vN(b, b_ptr, tid, rocke_i32(), 8, /*align=*/0);
+    rocke_value_t* b_hi = rocke_b_global_load_vN(b, b_ptr, hi_idx, rocke_i32(), 8, /*align=*/0);
+    rocke_value_t* bb = rocke_b_vec_concat(b, b_lo, b_hi);
+    rocke_value_t* c = rocke_b_global_load_vN(b, c_ptr, tid, rocke_f32(), 8, /*align=*/0);
+    rocke_value_t* scale = rocke_b_global_load(b, scale_ptr, tid, scale_ty, /*align=*/1);
+    rocke_value_t* d = scale16
+                           ? rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(b, a, bb, c, scale, scale)
+                           : rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(b, a, bb, c, scale, scale);
+    rocke_b_global_store(b, c_ptr, tid, d, /*align=*/1);
+    rocke_b_ret(b);
+}
+
+static void build_wmma_scale(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, false);
+}
+
+static void build_wmma_scale16(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, true);
+}
+
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
  * <8 x i16> that the handler reinterprets; gfx1250 has per-element-type
  * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret. */
@@ -220,6 +257,8 @@ static const config_t CONFIGS[] = {
     {build_wmma_k64_fp8_bf8, "gfx1250"},
     {build_wmma_k64_bf8_fp8, "gfx1250"},
     {build_wmma_k64_bf8_bf8, "gfx1250"},
+    {build_wmma_scale, "gfx1250"},
+    {build_wmma_scale16, "gfx1250"},
     {build_tr16_f16, "gfx1250"},
     {build_tr16_f16, "gfx950"},
     {build_tr16_bf16, "gfx1250"},

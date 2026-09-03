@@ -749,6 +749,27 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_acc_16x16,
     ),
+    # Native gfx1250 MX FP8 WMMA. A/B each carry 64 bytes as <16 x i32>;
+    # SCALE packs four K=32 E8M0 bytes in i32 and SCALE16 packs eight K=16
+    # bytes in i64. Both share the gfx12 column-distributed accumulator.
+    "wmma_scale_f32_16x16x128_fp8_fp8": _FragInfo(
+        16,
+        16,
+        8,
+        32,
+        None,
+        None,
+        _wmma_gfx12_acc_16x16,
+    ),
+    "wmma_scale16_f32_16x16x128_fp8_fp8": _FragInfo(
+        16,
+        16,
+        8,
+        32,
+        None,
+        None,
+        _wmma_gfx12_acc_16x16,
+    ),
     "wmma_gfx1250_f32_16x16x32_bf16": _FragInfo(
         16,
         16,
