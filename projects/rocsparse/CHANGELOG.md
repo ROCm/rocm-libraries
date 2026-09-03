@@ -11,6 +11,7 @@ Documentation for rocSPARSE is available at
 * Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split` and `rocsparse_spmm_alg_csr_merge_path`.
 * Added `rocsparse_sddmm` batched support to CSR, CSC, COO, COO AoS, and ELL formats.
 * Added ELL format support to `rocsparse_spsv` and `rocsparse_sptrsv`.
+* Added the `rocsparse_solve_mode` enum (`triangular`, `diagonal`) and the `rocsparse_diagonal_modifier` enum (`none`, `absolute`) to enable diagonal-only solves in `rocsparse_sptrsv` and `rocsparse_sptrsm`, together with the `rocsparse_sptrsv_input_solve_mode` / `rocsparse_sptrsm_input_solve_mode` and `rocsparse_sptrsv_input_diagonal_modifier` / `rocsparse_sptrsm_input_diagonal_modifier` set-input values. The modifier selects the function applied to each diagonal value (`d` or `|d|`). CSR and CSC formats are supported.
 
 ### Optimized
 * Optimized architecture-aware launch configurations for RDNA (wave32) and CDNA (wave64) GPUs, improving performance and performance portability for several sparse level 2 and level 3 routines without algorithmic or numerical changes. Affected routines include `rocsparse_spmv` for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); `rocsparse_Xbsrmv`; `rocsparse_Xbsrxmv`; `rocsparse_Xgemvi`; `rocsparse_Xgemmi`; and `rocsparse_spmm` with the blocked-ELL format.
