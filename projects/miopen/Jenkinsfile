@@ -296,11 +296,11 @@ pipeline {
             name: "BUILD_THEROCK_DOCKER",
             defaultValue: false,
             description: "")
-        // TEMPORARY (ALMIOPEN therock-artifact-docker feasibility spike): lets a PR build
-        // exercise the Build TheRock Docker + Package/Static Checks + Full Tests stages
-        // without pushing to the production rocm/miopen:therock / rocm/miopen-dev:latest
-        // tags. Remove this param (and its `when` guards below) once the artifact-based
-        // Dockerfile path is validated and either adopted or reverted.
+        // Operational safety toggle: lets a build exercise the Build TheRock Docker +
+        // Package/Static Checks + Full Tests stages without pushing to the production
+        // rocm/miopen:therock / rocm/miopen-dev:latest tags. Defaults to true so the
+        // nightly cron promotes as usual; set false for a test-only build (e.g. from a
+        // PR) that validates the image but leaves production tags untouched.
         booleanParam(
             name: "THEROCK_DOCKER_PROMOTE",
             defaultValue: true,
