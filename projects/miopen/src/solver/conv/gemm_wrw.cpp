@@ -224,11 +224,14 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
     const auto& dwDesc = problem.GetWeights();
     const auto& conv   = problem.GetConv();
 
-    // Casted and f8 are excluded because the channel-last GEMM transposes dy instead of x,
-    // inverting the operand roles the cast types assume.
-    const auto nhwc_pointwise = problem.IsLayoutNHWC() && conv.group_count == 1 &&
+    // This solver accepts NHWC only for single-group problems with no cast or f8 types.
+    //
+    // The NHWC branch of GetSolution calls hipBLASLt, whose wrapper dispatches on
+    // gemm_desc.dataType alone and never reads a_cast_type or b_cast_type, and which throws
+    // for f8 on every architecture except gfx942. Grouped NHWC has no branch there at all.
+    const auto nhwc_supported = problem.IsLayoutNHWC() && conv.group_count == 1 &&
                                 !problem.IsTensorsCasted() && !problem.IsFp8() && !problem.IsBfp8();
-    if(!problem.IsLayoutDefault() && !nhwc_pointwise)
+    if(!problem.IsLayoutDefault() && !nhwc_supported)
         return false;
 
     const auto wei_spatial =
@@ -560,7 +563,7 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
     if(!GemmWrwBase::IsApplicable(context, problem))
         return false;
 
-    // Everything below goes through Im2Col, which addresses x channel-first.
+    // Everything below goes through Im2Col, which addresses x as NCHW.
     if(!problem.IsLayoutDefault())
         return false;
 
