@@ -1011,8 +1011,12 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
 
 
 def _includeGemmA2AFusionProblemType(problemType, enabled: bool) -> bool:
-    """Return whether this build admits one library logic's GEMM+A2A solutions."""
-    return enabled or not problemType["FusedGemmA2A"]
+    """Return whether this build admits one library logic's GEMM+A2A solutions.
+
+    A logic file carrying no problem type, or one predating the FusedGemmA2A key,
+    is not a fused one and so is admitted whatever the build asked for.
+    """
+    return enabled or not (problemType or {}).get("FusedGemmA2A", False)
 
 
 ################################################################################
