@@ -46,9 +46,7 @@ endmacro()
 
 # Fetches and configures rocRAND for a given source directory.
 macro(configure_rocrand _source_dir)
-  # rocRAND should be built as a shared library s.t. it can be loaded by
-  # consuming libraries or executables.
-  override_variable(BUILD_SHARED_LIBS ON)
+  # rocRAND should share 'BUILD_SHARED_LIBS' similarly to the consuming library.
   FetchContent_Declare(
     rocrand
     SOURCE_DIR    ${_source_dir}
@@ -60,7 +58,6 @@ macro(configure_rocrand _source_dir)
   if(NOT TARGET roc::rocrand)
     add_library(roc::rocrand ALIAS rocrand)
   endif()
-  restore_variable(BUILD_SHARED_LIBS)
 endmacro()
 
 # TODO: once we hit CMake >= 3.24 change macro to function. This is because
