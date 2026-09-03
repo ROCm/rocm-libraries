@@ -1737,14 +1737,22 @@ namespace TensileLite
 
         // SynchronizerSizeCheck
         //
-        // MBSK owns one GSU region, indexed by problem. Bounding usage by the
-        // region size is what makes a solution unable to run past the end of it.
+        // MBSK owns the GSU region: a grouped GEMM is bounded by the one slot at
+        // its problem index and by the slot count, a non-grouped one by the whole
+        // buffer (see GsuSynchronizerElements). Bounding usage is what keeps a
+        // solution from running past the end of its region.
         if(gsuVal > 1 && sizeMapping.globalAccumulation == 3) // MBSK
         {
             uint32_t synchronizerUsage
                 = sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B;
 
-            gsuVal = synchronizerUsage > GsuSynchronizerElements ? 1 : gsuVal;
+            bool fits = problem.groupedGemm()
+                            ? (synchronizerUsage <= GsuSynchronizerElements
+                               && problem.groupedGemmCount() <= SynchronizerGroupedSlots)
+                            : (synchronizerUsage
+                               <= GsuSynchronizerElements * SynchronizerGroupedSlots);
+
+            gsuVal = fits ? gsuVal : 1;
         }
 
         // Avoid selecting a gsu value that would make launch grid over the limit
