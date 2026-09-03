@@ -80,11 +80,6 @@ target_link_libraries(hipdnn_integration_tests_unit_tests
 target_compile_options(hipdnn_integration_tests_unit_tests
     PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
 
-# Same bundle source path the main binary is built with, so BundleRegistration.hpp
-# compiles identically in both (set in the parent CMakeLists).
-target_compile_definitions(hipdnn_integration_tests_unit_tests PRIVATE
-    HIPDNN_INTEGRATION_TEST_BUNDLES_SOURCE_DIR="${HIPDNN_INTEGRATION_TEST_BUNDLES_SOURCE_DIR}")
-
 clang_tidy_check(hipdnn_integration_tests_unit_tests)
 
 add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_DIR})
