@@ -11,6 +11,8 @@
 
 using namespace gpu_ref;
 
+constexpr ReductionMode mode = static_cast<ReductionMode>(MODE);
+
 template <typename T>
 struct NumericLimits;
 
@@ -44,15 +46,15 @@ struct NumericLimits<__bf16>
 
 __device__ inline COMPUTE_TYPE initAccumulator()
 {
-    if constexpr(MODE == ReductionMode::MUL || MODE == ReductionMode::MUL_NO_ZEROS)
+    if constexpr(mode == ReductionMode::MUL || mode == ReductionMode::MUL_NO_ZEROS)
     {
         return static_cast<COMPUTE_TYPE>(1);
     }
-    else if constexpr(MODE == ReductionMode::MIN_OP)
+    else if constexpr(mode == ReductionMode::MIN_OP)
     {
         return NumericLimits<COMPUTE_TYPE>::maxVal;
     }
-    else if constexpr(MODE == ReductionMode::MAX_OP)
+    else if constexpr(mode == ReductionMode::MAX_OP)
     {
         return NumericLimits<COMPUTE_TYPE>::minVal;
     }
@@ -64,37 +66,37 @@ __device__ inline COMPUTE_TYPE initAccumulator()
 
 __device__ inline void accumulate(COMPUTE_TYPE* acc, COMPUTE_TYPE val)
 {
-    if constexpr(MODE == ReductionMode::ADD || MODE == ReductionMode::AVG)
+    if constexpr(mode == ReductionMode::ADD || mode == ReductionMode::AVG)
     {
         *acc = *acc + val;
     }
-    else if constexpr(MODE == ReductionMode::MUL)
+    else if constexpr(mode == ReductionMode::MUL)
     {
         *acc = *acc * val;
     }
-    else if constexpr(MODE == ReductionMode::MIN_OP)
+    else if constexpr(mode == ReductionMode::MIN_OP)
     {
         *acc = (*acc < val) ? *acc : val;
     }
-    else if constexpr(MODE == ReductionMode::MAX_OP)
+    else if constexpr(mode == ReductionMode::MAX_OP)
     {
         *acc = (*acc > val) ? *acc : val;
     }
-    else if constexpr(MODE == ReductionMode::AMAX)
+    else if constexpr(mode == ReductionMode::AMAX)
     {
         COMPUTE_TYPE absVal = (val < static_cast<COMPUTE_TYPE>(0)) ? -val : val;
         *acc = (*acc > absVal) ? *acc : absVal;
     }
-    else if constexpr(MODE == ReductionMode::NORM1)
+    else if constexpr(mode == ReductionMode::NORM1)
     {
         COMPUTE_TYPE absVal = (val < static_cast<COMPUTE_TYPE>(0)) ? -val : val;
         *acc = *acc + absVal;
     }
-    else if constexpr(MODE == ReductionMode::NORM2)
+    else if constexpr(mode == ReductionMode::NORM2)
     {
         *acc = *acc + (val * val);
     }
-    else if constexpr(MODE == ReductionMode::MUL_NO_ZEROS)
+    else if constexpr(mode == ReductionMode::MUL_NO_ZEROS)
     {
         if(val != static_cast<COMPUTE_TYPE>(0))
         {
@@ -105,20 +107,20 @@ __device__ inline void accumulate(COMPUTE_TYPE* acc, COMPUTE_TYPE val)
 
 __device__ inline void combine(COMPUTE_TYPE* acc, COMPUTE_TYPE val)
 {
-    if constexpr(MODE == ReductionMode::ADD || MODE == ReductionMode::AVG
-                 || MODE == ReductionMode::NORM1 || MODE == ReductionMode::NORM2)
+    if constexpr(mode == ReductionMode::ADD || mode == ReductionMode::AVG
+                 || mode == ReductionMode::NORM1 || mode == ReductionMode::NORM2)
     {
         *acc = *acc + val;
     }
-    else if constexpr(MODE == ReductionMode::MUL || MODE == ReductionMode::MUL_NO_ZEROS)
+    else if constexpr(mode == ReductionMode::MUL || mode == ReductionMode::MUL_NO_ZEROS)
     {
         *acc = *acc * val;
     }
-    else if constexpr(MODE == ReductionMode::MIN_OP)
+    else if constexpr(mode == ReductionMode::MIN_OP)
     {
         *acc = (*acc < val) ? *acc : val;
     }
-    else if constexpr(MODE == ReductionMode::MAX_OP || MODE == ReductionMode::AMAX)
+    else if constexpr(mode == ReductionMode::MAX_OP || mode == ReductionMode::AMAX)
     {
         *acc = (*acc > val) ? *acc : val;
     }
@@ -126,11 +128,11 @@ __device__ inline void combine(COMPUTE_TYPE* acc, COMPUTE_TYPE val)
 
 __device__ inline COMPUTE_TYPE finalize(COMPUTE_TYPE acc, long long count)
 {
-    if constexpr(MODE == ReductionMode::AVG)
+    if constexpr(mode == ReductionMode::AVG)
     {
         return acc / static_cast<COMPUTE_TYPE>(count);
     }
-    else if constexpr(MODE == ReductionMode::NORM2)
+    else if constexpr(mode == ReductionMode::NORM2)
     {
         return static_cast<COMPUTE_TYPE>(sqrt(static_cast<double>(acc)));
     }
@@ -164,8 +166,8 @@ extern "C" __global__ void ReductionRef(ReductionArgs args)
         long long remaining = gid;
         for(long long d = 0; d < numDims; ++d)
         {
-            long long idx = remaining / args.outputShapeStrides[d];
-            remaining %= args.outputShapeStrides[d];
+            long long idx = remaining / args.outputLogicalStrides[d];
+            remaining %= args.outputLogicalStrides[d];
             outputIndices[d] = idx;
             inputIndices[d] = idx; // Set default input index to output index
         }

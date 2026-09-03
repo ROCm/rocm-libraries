@@ -20,6 +20,7 @@ set(GPU_REF_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefConvArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefLayernormArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefSdpaArgs.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefReductionArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefRMSNormArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefBatchnormArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefPointwiseArgs.h
