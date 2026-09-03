@@ -120,7 +120,7 @@
 #undef ROCPRIM_TARGET_UNKNOWN
 
 // See https://llvm.org/docs/AMDGPUUsage.html#instructions
-if defined(__gfx1250__)
+#if defined(__gfx1250__)
     #define ROCPRIM_TARGET_CDNA5 1
 #elif defined(__gfx942__) || defined(__gfx9_4_generic__)
     #define ROCPRIM_TARGET_CDNA3 1
@@ -161,8 +161,8 @@ if defined(__gfx1250__)
     #if !defined(ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS)
         #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
     #endif
-    #define ROCPRIM_IS_CDNA5() (__builtin_amdgcn_processor_is("gfx1250"))
-    #define ROCPRIM_IS_CDNA4() (__builtin_amdgcn_processor_is("gfx950"))
+    #define ROCPRIM_IS_CDNA5() __builtin_amdgcn_processor_is("gfx1250")
+    #define ROCPRIM_IS_CDNA4() __builtin_amdgcn_processor_is("gfx950")
     #define ROCPRIM_IS_CDNA3()                                                              \
         (__builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950") \
          || __builtin_amdgcn_processor_is("gfx9-4-generic"))
