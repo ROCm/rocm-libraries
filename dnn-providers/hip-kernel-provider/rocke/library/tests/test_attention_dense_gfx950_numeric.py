@@ -314,9 +314,7 @@ class TestDenseGqaPairVariants:
         v = torch.randn(B, S, Hkv, D, device="cuda", dtype=torch.float16)
         out = torch.empty_like(q)
         sinks = (
-            torch.zeros(Hq, device="cuda", dtype=torch.float16)
-            if use_sinks
-            else None
+            torch.zeros(Hq, device="cuda", dtype=torch.float16) if use_sinks else None
         )
         scale = 1.0 / math.sqrt(D)
 
@@ -361,13 +359,9 @@ class TestDenseGqaPairVariants:
                 causal=True,
             )
         else:
-            ref = _standard_reference(
-                q, k, v, scale, sliding_window=sliding_window
-            )
+            ref = _standard_reference(q, k, v, scale, sliding_window=sliding_window)
         max_abs = (ref - out.float()).abs().max().item()
-        assert max_abs < _tolerance("fp16"), (
-            f"gqa_pair {_name}: max_abs={max_abs:.3e}"
-        )
+        assert max_abs < _tolerance("fp16"), f"gqa_pair {_name}: max_abs={max_abs:.3e}"
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
@@ -397,15 +391,11 @@ class TestDenseGqaPairVariants:
             persist_decode="qb_major",
             wide_lds_dma=True,
         )
-        run_attention_dense_torch(
-            spec=spec, q=q, k=k, v=v, out=out, scale=scale
-        )
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
         torch.cuda.synchronize()
         ref = _standard_reference(q, k, v, scale)
         max_abs = (ref - out.float()).abs().max().item()
-        assert max_abs < _tolerance("fp16"), (
-            f"wide DMA MHA: max_abs={max_abs:.3e}"
-        )
+        assert max_abs < _tolerance("fp16"), f"wide DMA MHA: max_abs={max_abs:.3e}"
 
 
 class TestDenseSinksNumeric:
