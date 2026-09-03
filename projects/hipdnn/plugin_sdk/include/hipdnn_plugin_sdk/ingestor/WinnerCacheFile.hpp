@@ -105,9 +105,8 @@ inline std::string_view winnerCacheVersion()
 /// Where @p engineName's shard for @p gcnArchName lives:
 /// `cacheRoot()/ingestor-winners/<version>/<sanitized-engine>/<base-arch>/winners.jsonl`.
 ///
-/// The arch component is the stripped base target id VERBATIM, which ALMIOPEN-2451's
-/// design record requires: a user has to be able to find and delete one arch's cache by
-/// eye, so `gfx942` must read as `gfx942`. It is validated rather than sanitized --
+/// The arch component is the stripped base target id VERBATIM: a user has to be able to
+/// find and delete one arch's cache by eye, so `gfx942` must read as `gfx942`. It is
 /// sanitizeForPath() would append its unconditional hash suffix and cost exactly that
 /// readability, and the arch has nothing to disambiguate, being drawn from a small set of
 /// known-good identifiers. An arch that is not a plain component is a driver anomaly:

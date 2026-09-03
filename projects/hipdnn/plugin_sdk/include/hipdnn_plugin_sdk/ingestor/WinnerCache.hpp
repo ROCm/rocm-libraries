@@ -68,8 +68,8 @@ struct WinnerKeyHash
     }
 };
 
-/// Why a benchmarked ranking is being written back, which is what separates the two rules in
-/// ALMIOPEN-2451: a fresh miss adopts an existing entry for the key, and a re-benchmark triggered
+/// Why a benchmarked ranking is being written back, which is what separates the two rules
+/// below: a fresh miss adopts an existing entry for the key, and a re-benchmark triggered
 /// by a record that did not cover the current candidates appends a superseding line.
 enum class WinnerWriteCause
 {

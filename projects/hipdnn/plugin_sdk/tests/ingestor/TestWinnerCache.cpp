@@ -722,11 +722,10 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroug
     EXPECT_EQ(served->front().kernelId, testId(0x11));
 }
 
-/// gcnArchName is raw, driver-supplied and suffixed. ALMIOPEN-2451's design record
-/// requires the arch directory to be the stripped base target id and to stay readable, so
-/// a user can find and delete one arch's cache by eye: `gfx942`, not `gfx942-<hash>` and
-/// not an opaque digest. Run on Linux CI, where a Windows-only break in the ':' handling
-/// would otherwise never surface.
+/// gcnArchName is raw, driver-supplied and suffixed. The arch directory is required to be
+/// the stripped base target id and to stay readable, so a user can find and delete one
+/// arch's cache by eye: `gfx942`, not `gfx942-<hash>` and not an opaque digest. Run on
+/// Linux CI, where a Windows-only break in the ':' handling would otherwise never surface.
 ///
 /// Falsifying mutation: wrap the arch in sanitizeForPath(). The exact-equality check below
 /// fails on the appended hash suffix.
@@ -874,7 +873,7 @@ TEST(TestIngestorWinnerCacheStateManager, AMalformedLineCostsOnlyItself)
 }
 
 /// A record line missing the per-line format-version field is a foreign or pre-upgrade
-/// line: skip it like any other malformed line, per ALMIOPEN-2451's per-line stamp
+/// line: skip it like any other malformed line, per the per-line format-version stamp
 /// design, rather than parsing it as version 1 by default.
 TEST(TestIngestorWinnerCacheStateManager, ALineMissingTheFormatFieldIsSkipped)
 {

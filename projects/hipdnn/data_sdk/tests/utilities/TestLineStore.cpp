@@ -907,6 +907,7 @@ std::optional<int> awaitChild(ChildProcess& child,
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     bool timedOut = false;
 #if defined(_WIN32)
+    bool childExitObserved = false;
     for(;;)
     {
         const auto remaining = deadline - std::chrono::steady_clock::now();
@@ -922,9 +923,20 @@ std::optional<int> awaitChild(ChildProcess& child,
         }
         if(available == 0)
         {
+            if(childExitObserved)
+            {
+                break; // Confirmed drained: the prior iteration already saw the child
+                    // exit, and this second, unconditional peek still finds nothing.
+            }
             if(::WaitForSingleObject(child.process, 0) == WAIT_OBJECT_0)
             {
-                break;
+                // The child can flush its last line and exit in the gap between the
+                // PeekNamedPipe call above and this WaitForSingleObject call, so
+                // WAIT_OBJECT_0 here does not mean the pipe is drained -- only that the
+                // process is gone. Loop back once more instead of breaking immediately,
+                // so the next PeekNamedPipe can see bytes written just before exit.
+                childExitObserved = true;
+                continue;
             }
             ::Sleep(5);
             continue;

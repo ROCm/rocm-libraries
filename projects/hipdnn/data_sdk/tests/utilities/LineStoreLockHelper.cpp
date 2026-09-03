@@ -106,6 +106,7 @@ int main(int argc, char** argv)
         unlockLineStore(*shard);
 
         std::printf("elapsedMs=%lld\n", static_cast<long long>(elapsedMs));
+        std::fflush(stdout);
         return 0;
     }
 
