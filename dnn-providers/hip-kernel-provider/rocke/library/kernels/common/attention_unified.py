@@ -2951,7 +2951,11 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             # is unmeasured -> clamp to the pre-bump baseline so the routing bump can
             # never over-split prefill (identical to the shipped num_cus=120 split).
             return min(segments, pre_bump)
-    if arch == "gfx950" and problem.sliding_window == 0:
+    if (
+        arch == "gfx950"
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+    ):
         # CONSERVATIVE gfx950 clamp: bound EVERY already-3D shape to the pre-bump
         # (num_cus=120 -> target 480) baseline split, capturing the 2D->3D reroute
         # win with zero over-split regression.
@@ -2960,7 +2964,15 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
         # exactly the shipped split, byte-identical. A caller that ALREADY passed
         # an explicit num_cus > 120 is the one exception: that path was previously
         # unclamped and is now capped, so it gets a coarser split than before.
-        # Pin the old behaviour with target_ctas, which supersedes num_cus here.
+        #
+        # ESCAPE HATCH: an explicit ``target_ctas > 0`` skips this clamp entirely
+        # (the guard above), restoring the pre-clamp split. It has to be the guard
+        # and not a bigger target: ``target_ctas`` raises the RAW split through
+        # ``_effective_target_ctas``, but ``_pre_bump_segments`` is derived from the
+        # fixed ``_PRE_BUMP_CUS`` and ignores it, so ``min(segments, pre_bump)``
+        # would cap any target straight back to the 120-baseline ceiling. That is
+        # also why the knob's contract ("replaces num_cus*4 for routing AND
+        # segmentation") only holds here if the clamp steps aside.
         #
         # UNLIKE the gfx942 branch above, this one has no measured carve-outs:
         # every shape is clamped, none falls through. Carve-outs for shapes where

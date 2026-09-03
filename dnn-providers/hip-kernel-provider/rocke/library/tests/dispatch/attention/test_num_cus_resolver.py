@@ -297,6 +297,48 @@ def test_gfx950_segments_conservatively_clamped():
         p.restore()
 
 
+def test_target_ctas_bypasses_the_gfx950_clamp():
+    """An explicit ``target_ctas > 0`` is a deliberate caller override and skips
+    the conservative gfx950 clamp, restoring the pre-clamp split.
+
+    A BIGGER target alone cannot do this: ``target_ctas`` raises the raw split via
+    ``_effective_target_ctas``, but ``_pre_bump_segments`` is derived from the fixed
+    ``_PRE_BUMP_CUS`` and ignores it, so ``min(segments, pre_bump)`` would cap any
+    target straight back to the 120-baseline ceiling. The bypass therefore has to
+    live in the branch GUARD -- which is what this test pins.
+    """
+    p = _Patch()
+    try:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.attr(au, "_resolve_attention_arch", lambda: "gfx950")
+        shape = dict(nq=8, nk=8, D=128, kv=8192, batch=1)  # num_2d=8 -> pre_bump 64
+        ceiling = au._pre_bump_segments(_prob(120, clamp_arch="gfx950", **shape))
+
+        # Default callers: clamped to the pre-bump ceiling regardless of the bump.
+        assert au._num_segments(_prob(120, clamp_arch="gfx950", **shape)) == ceiling
+        assert au._num_segments(_prob(256, clamp_arch="gfx950", **shape)) == ceiling
+
+        # Explicit target_ctas: clamp steps aside, caller gets the raw split.
+        pinned = _prob(120, tctas=1024, clamp_arch="gfx950", **shape)
+        raw = pinned.select_3d()[0].NUM_SEGMENTS_PER_SEQ
+        assert (
+            raw > ceiling
+        ), f"shape no longer exercises the bypass: {raw} <= {ceiling}"
+        assert au._num_segments(pinned) == raw, (
+            "explicit target_ctas must bypass the gfx950 clamp: "
+            f"got {au._num_segments(pinned)}, want the unclamped {raw}"
+        )
+
+        # The bypass is scoped to gfx950's blanket clamp; gfx942 keeps its measured
+        # carve-outs, which are NOT a target_ctas override surface.
+        p.attr(au, "_resolve_attention_arch", lambda: "gfx942")
+        g942 = _prob(120, tctas=1024, clamp_arch="gfx942", **shape)
+        assert au._num_segments(g942) <= au._pre_bump_segments(g942)
+    finally:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.restore()
+
+
 def test_partition_floor_is_gfx950_only():
     """A partitioned device (CPX / NPS4) reports the PARTITION CU count (~32).
 
