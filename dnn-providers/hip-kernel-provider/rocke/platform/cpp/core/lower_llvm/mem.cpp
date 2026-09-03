@@ -251,23 +251,33 @@ static void op_memref_global_atomic_add_f32(rocke_lower_t* L, const rocke_op_t* 
 
 static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op_t* op)
 {
+    /* Mirror of Python _op_memref_global_atomic_add_pk_bf16: there is NO
+     * llvm.amdgcn.global.atomic.fadd.v2bf16 intrinsic in the shipping ROCm
+     * LLVM, so lower to a generic atomicrmw fadd <2 x bfloat> with the AMDGPU
+     * memory-model metadata (backend selects global_atomic_pk_add_bf16). GEP
+     * uses the idx operand's own width (i64 after the wide C-scatter fix). */
     const rocke_value_t* ptr = op->operands[0];
     const rocke_value_t* idx = op->operands[1];
     const rocke_value_t* val = op->operands[2];
-    const char* gep;
-    rocke_ll_need(L, "global.atomic.fadd.v2bf16");
-    gep = rocke_ll_fresh(L, "gep");
+    const char* idx_ty = rocke_ll_llvm_type(L, idx->type);
+    const char* gep = rocke_ll_fresh(L, "gep");
+    const char* ordering = ll_attr_str(op, "ordering", "monotonic");
     rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds bfloat, ptr addrspace(1) %s, i32 %s",
+                   "  %s = getelementptr inbounds bfloat, ptr addrspace(1) %s, %s %s",
                    gep,
                    rocke_ll_operand(L, ptr),
+                   idx_ty,
                    rocke_ll_operand(L, idx));
+    L->needs_fp_atomic_md = true;
     rocke_ll_emitf(L,
-                   "  %s = call <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
-                   "ptr addrspace(1) %s, <2 x bfloat> %s)",
+                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x bfloat> %s %s"
+                   ", !amdgpu.no.fine.grained.memory !1"
+                   ", !amdgpu.no.remote.memory !1"
+                   ", !amdgpu.ignore.denormal.mode !1",
                    ll_res(op),
                    gep,
-                   rocke_ll_operand(L, val));
+                   rocke_ll_operand(L, val),
+                   ordering);
 }
 
 static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_t* op)
