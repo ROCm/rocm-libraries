@@ -26,7 +26,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # TN - MXF8F4SS Block32, E8, decoupled PrefetchGlobalReadA/B
+  # TN - MXF8F4SS Block32, E8, decoupled PGR + TDMFuse sweep
   #######################################
   -
     - # ProblemType, TN
@@ -49,22 +49,23 @@ BenchmarkProblems:
       DataTypeMXSA: E8
       DataTypeMXSB: E8
 
-    - # BenchmarkProblemSizeGroup - decoupled PGR pairs, NumWaves=4
+    - # BenchmarkProblemSizeGroup - decoupled PGR, TDMFuse, NumWaves=4
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1,  2, 16,  2, 2]
-        - DepthU: [256]
+          - [16, 16, 128, 1,  1,  2,  4,  2, 2]   # 64x128, waves [2,2]
+          - [16, 16, 128, 1,  1,  4,  4,  1, 4]   # 64x256, waves [1,4]
+          - [16, 16, 128, 1,  1,  1, 32,  4, 1]   # 64x512, waves [4,1]
+        - DepthU: [256, 512, 1024]
         - TDMInst: [3]
-        # Upstream still rejects TDMSplit (PR #10911); xfailed unit tests keep
-        # the per-row guards. Restore [False, True] when it is selectable again.
         - TDMSplit: [False]
-        - TDMFuse: [0, 5]
-        - PrefetchGlobalRead: [2]
-        - PrefetchGlobalReadA: [1, 2]
-        - PrefetchGlobalReadB: [1, 2]
+        - TDMFuse: [0, 1, 2]
+        - InitCIterWmma: [0, 1]
+        - PrefetchGlobalRead: [-1, 0, 1, 2]
+        - PrefetchGlobalReadA: [-1, 0, 1, 2]
+        - PrefetchGlobalReadB: [-1, 0, 1, 2]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -73,7 +74,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - LDSTrInst: [False]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [1]
@@ -96,9 +97,6 @@ BenchmarkProblems:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
-        # A single-buffered tensor's fill is relocated inside the unrolled loop,
-        # so its write-after-read is only reachable from K = 2*DepthU: one trip
-        # cannot reach it and the tail loop does not fill.
         - ProblemSizes:
           - Exact: [512, 512, 1, 384]   #below 2*DepthU
           - Exact: [512, 512, 1, 512]   #2*DepthU

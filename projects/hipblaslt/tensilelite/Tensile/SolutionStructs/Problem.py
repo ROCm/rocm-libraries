@@ -587,10 +587,6 @@ _validGEMMTypes = [
     ("F6", "F8", "S", "S"),
     ("F8", "F4", "S", "S"),
     ("F4", "F8", "S", "S"),
-    # FP8 output for the F8xF4 pair, which is what the reference path computes
-    # (Cijk_..._F8F4F8S).
-    ("F8", "F4", "F8", "S"),
-    ("F4", "F8", "F8", "S"),
     ("F6", "F4", "S", "S"),
     ("F4", "F6", "S", "S"),
     ("F6", "F4", "B", "S"),

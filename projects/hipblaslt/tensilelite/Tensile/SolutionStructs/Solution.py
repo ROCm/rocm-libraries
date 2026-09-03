@@ -39,12 +39,12 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     clusterEnabled, streamKMulticast, streamK2DMulticast, \
                     swizzleGeometry
 from Tensile.Common.DataType import DataType
-from Tensile.Common.DecouplePgr import pgrLevelsForTensors, ldsBlocksForPgrLevel, \
-                                       decoupledOneBlockBoth, tdmBothTensors, \
-                                       tdmDealiasAB, tdmWaveComponents, decouplePgrBlocks, \
+from Tensile.Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, \
+                                       decoupledOneBlockBoth, decouplePGRBlocks, \
                                        equalPairDegeneratesToScalar, \
                                        divergentPairUnsupportedReason, \
-                                       tdmFuseAMx, tdmFusePaired
+                                       resolvePrefetchGlobalReadSpecialValues
+from Tensile.Components.TDMFuse import tdmBothTensors, tdmFuseAMx, tdmFusePaired
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.CustomKernels import supportsUserSgprKernargPreload
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -1779,45 +1779,27 @@ class Solution(collections.abc.Mapping):
     state["CUOccupancy"]            = -1
     state["MathClocksUnrolledLoop"] = 0
 
-    # Per-tensor PrefetchGlobalRead: freeze the pair, then derive the scalar from
-    # it. Both belong here, ahead of assignProblemIndependentDerivedParameters and
-    # the twenty-odd later rules that branch on PrefetchGlobalRead, so that all of
-    # derivation sees one value; a scalar rewritten further down would leave the
-    # rules that already read it disagreeing with the loop that gets emitted.
+    # Pin PrefetchGlobalReadA/B early and derive PrefetchGlobalRead from the pair
+    # before later rules read the scalar loop depth.
     #
-    # Deriving rather than rejecting a mismatch is safe because the pin is a
-    # determined function of the pair: for any (A, B) exactly one scalar is valid,
-    # so a hand-computed value can only match it or provoke a reject, never select
-    # a different but equally valid kernel.
+    # Equal (k,k) degenerates to scalar PrefetchGlobalRead=k; divergent pairs keep
+    # both keys. A scalar mismatch is overwritten, not rejected.
     #
-    # Freezing the pair first is not optional. pgrLevelsForTensors falls back to
-    # the scalar for a tensor whose key is absent, so when only one key is given
-    # the scalar is also the other tensor's level. Rewriting it in place would move
-    # the pair with it, and PrefetchGlobalReadA=1 with PrefetchGlobalRead=2 would
-    # quietly become (1,1) -- a different kernel, and the one that computes wrong
-    # answers -- rather than the (1,2) that was asked for.
+    # One-sided pairs are rejected earlier; both keys are present or both absent.
+    dcpSpecialReject = resolvePrefetchGlobalReadSpecialValues(state)
+    if dcpSpecialReject:
+      reject(state, printRejectionReason, dcpSpecialReject)
+      return
     dcpSetPerTensor, dcpPgrA, dcpPgrB = pgrLevelsForTensors(state)
-    # Equal (k,k) with k!=1 is legacy PrefetchGlobalRead=k; drop the per-tensor
-    # keys so later derivation sees a scalar. (1,1) stays decoupled: TDM PGR=1
-    # is two LDS blocks unless 1LDSBuffer=1, which this path must not imply.
-    # equalPairDegeneratesToScalar also holds back an explicit 1LDSBuffer=1.
+    # Equal (k,k) is legacy PrefetchGlobalRead=k. Drop the keys so later
+    # derivation sees a scalar. The per-tensor path is for divergent pairs.
     if equalPairDegeneratesToScalar(state):
       printWarning(
-        "PrefetchGlobalReadA/B: PrefetchGlobalReadA and PrefetchGlobalReadB are both "
-        "%u, which is legacy PrefetchGlobalRead=%u exactly -- the same block count on "
-        "both tensors, the same LDS layout and the same loop. Both keys have been "
-        "dropped and this is built as an ordinary PrefetchGlobalRead=%u solution%s.%s "
-        "The per-tensor path is for divergent pairs; an equal pair has nothing for it "
-        "to do. Tracking: AIHPBLAS-4159."
-        % (dcpPgrA, dcpPgrA, dcpPgrA,
+        "PrefetchGlobalReadA/B: equal pair (%u, %u) is legacy PrefetchGlobalRead=%u; "
+        "dropping both keys%s."
+        % (dcpPgrA, dcpPgrB, dcpPgrA,
            "" if state["PrefetchGlobalRead"] == dcpPgrA else
-           " (the PrefetchGlobalRead=%u it carried is not used)" % state["PrefetchGlobalRead"],
-           # At level 0 the tokens are PGRA0_PGRB0 either way, so there is no
-           # name being given up and the clause would contrast a name with
-           # itself.
-           "" if dcpPgrA == 0 else
-           " It will therefore name PGRA0_PGRB0 like any other legacy kernel rather "
-           "than PGRA%u_PGRB%u." % (dcpPgrA, dcpPgrA)))
+           " (ignoring PrefetchGlobalRead=%u)" % state["PrefetchGlobalRead"]))
       for dcpKey in ("PrefetchGlobalReadA", "PrefetchGlobalReadB"):
         if dcpKey in state:
           del state[dcpKey]
@@ -1830,14 +1812,13 @@ class Solution(collections.abc.Mapping):
                       min(ldsBlocksForPgrLevel(dcpPgrA), ldsBlocksForPgrLevel(dcpPgrB)))
       if state["PrefetchGlobalRead"] != dcpPinned:
         printWarning(
-          "PrefetchGlobalReadA/B: PrefetchGlobalRead has been set to %u by the decoupled "
-          "rule; the %u this solution carried was not used. PrefetchGlobalReadA=%u and "
-          "PrefetchGlobalReadB=%u determine the scalar, so %u is the only value it can "
-          "take and it does not have to be supplied. The kernel name is built from "
-          "PrefetchGlobalRead, so it will name %u and not %u. Tracking: AIHPBLAS-4159."
-          % (dcpPinned, state["PrefetchGlobalRead"], dcpPgrA, dcpPgrB, dcpPinned,
-             dcpPinned, state["PrefetchGlobalRead"]))
+          "PrefetchGlobalReadA/B: ignoring PrefetchGlobalRead=%u; pair (%u, %u) pins scalar %u."
+          % (state["PrefetchGlobalRead"], dcpPgrA, dcpPgrB, dcpPinned))
       state["PrefetchGlobalRead"] = dcpPinned
+
+    if not dcpSetPerTensor and state.get("PrefetchGlobalRead") == 1:
+      printWarning(
+        "PrefetchGlobalRead=1 may overwrite LDS data still being read from K >= 2*DepthU.")
 
     Solution.assignProblemIndependentDerivedParameters(state, printRejectionReason, isaInfoMap)
 
@@ -2941,23 +2922,17 @@ class Solution(collections.abc.Mapping):
         return
       if not ((state["enableTDMA"] or state["enableTDMB"]) and state["NumWaves"] > 1):
         state["TDMLoadWaveSync"] = False
-    # TDMFuse -- which tensors share one TDM descriptor set. See the declaration
-    # in Common/ValidParameters.py for what each value means.
+    # TDMFuse pins which tensors share a TDM descriptor set; see ValidParameters.py.
     #
-    # 0, including the absent key, derives nothing: defineTdmSgprs keeps whatever
-    # grouping it already picks. A nonzero value PINS a grouping, and a pinned
-    # grouping that quietly degrades into a different one is worse than no
-    # parameter at all, because the kernel name then asserts something untrue
-    # about the kernel -- hence a reject wherever the grouping would not be
-    # produced.
+    # 0 derives nothing. Nonzero values must match what the writer emits or the
+    # kernel name would lie about the grouping.
+    #
+    # Reject anywhere the pinned grouping cannot be produced.
     tdmFuse: int = state.get("TDMFuse", 0)
     if tdmFuse:
       if not (state["enableTDMA"] and state["enableTDMB"]):
-        # Reachable on non-MX shapes only. On an MX problem TDMInst=0 has already
-        # been rejected by validateMXScaleFormatCombination above, which is the
-        # right precedence -- an MX shape whose scales have no legal transport is
-        # a more fundamental objection than how its descriptors would be grouped
-        # -- so this text is unreachable from that direction rather than dead.
+        # MX problems already failed validateMXScaleFormatCombination, so only
+        # non-MX shapes reach here.
         reject(state, printRejectionReason,
                "TDMFuse=%d describes how TDM transfers share descriptors, so it needs the TDM on "
                "both tensors (TDMInst=3); got TDMInst=%d" % (tdmFuse, state["TDMInst"]))
@@ -2982,12 +2957,10 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  "TDMFuse=2 names MXSA and MXSB as the two single-wave members of its shared "
                  "group, so it requires MX scales on both tensors; without them the group is "
-                 "just {A} and this is TDMFuse=6 with the scales moved")
+                 "just {A}")
           return
-        # Unreachable while upstream's temporary blanket TDMSplit reject stands
-        # (97e1223a3f9, PR #10911) at function scope above this block. Kept: it
-        # carries this row's own reason, which the blanket reject does not
-        # record, and it revives the moment TDMSplit is re-enabled.
+        # Unreachable while TDMSplit has a blanket reject above.
+        # Kept so this fuse mode has its own reason when TDMSplit is re-enabled.
         if state.get("TDMSplit"):
           reject(state, printRejectionReason,
                  "TDMFuse=2 is not available with TDMSplit, whose multi-wave increment recomputes "
@@ -3000,15 +2973,11 @@ class Solution(collections.abc.Mapping):
                  "a descriptor (tdmMetadataGroup0) that no value of this parameter names")
           return
         # Compares block counts only: LdsOffsetBlkA/B are assigned later.
-        decoupled, blkA, blkB = decouplePgrBlocks(state)
+        decoupled, blkA, blkB = decouplePGRBlocks(state)
         if decoupled and blkA != blkB:
           reject(state, printRejectionReason,
-                 "TDMFuse=2 requires an equal decoupled pair: MXSB rides A's descriptor set but "
-                 "follows B's LDS block count, so a divergent pair carries two cadences on the "
-                 "one shared set and its single swap arm cannot express both. The three-way arm "
-                 "is unimplemented rather than impossible -- the manual fuseMXA reference kernel has "
-                 "none to copy, because its cadences are equal. Got PrefetchGlobalReadA=%d and "
-                 "PrefetchGlobalReadB=%d, resolving to %d and %d LDS blocks"
+                 "TDMFuse=2 requires an equal decoupled pair (got PGRA=%d, PGRB=%d -> %d and %d LDS blocks); "
+                 "MXSB shares A's descriptor set and cannot follow a divergent cadence"
                  % (state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"], blkA, blkB))
           return
         # These guards must stay exactly tdmFuseAMx's preconditions; if they drift,
@@ -3019,78 +2988,47 @@ class Solution(collections.abc.Mapping):
                  "solution, so the writer would emit a different grouping than the name claims")
           return
 
-      if tdmFuse == 4:
-        # defineTdmSgprs reaches {MXSA,MXSB} + {A,B} under exactly NumWaves > 1
-        # and not UseSubtileImpl. Outside that, each tensor already owns its
-        # descriptor and this grouping does not exist to be pinned.
-        if state["NumWaves"] <= 1:
-          reject(state, printRejectionReason,
-                 "TDMFuse=4 requires wave-separated TDM (NumWaves > 1); at NumWaves=%d every "
-                 "tensor keeps its own descriptor and nothing is fused" % state["NumWaves"])
-          return
-        if state.get("UseSubtileImpl"):
-          reject(state, printRejectionReason,
-                 "TDMFuse=4 is not available with UseSubtileImpl=1, which gives each tensor its "
-                 "own descriptor to avoid reinitialising a shared one before every load")
-          return
-        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
-          reject(state, printRejectionReason,
-                 "TDMFuse=4 names the MX scale group {MXSA,MXSB}, so it requires MX scales on "
-                 "both tensors; without them the only group is {A,B}")
-          return
-        if state["enableTDMMetadata"]:
-          reject(state, printRejectionReason,
-                 "TDMFuse=4 does not describe the sparse metadata tensor, which the TDM moves on "
-                 "a third descriptor (tdmMetadataGroup0) that no value of this parameter names")
-          return
 
-      if tdmFuse == 5:
+      if tdmFuse == 1:
         # {MXSA,A} + {MXSB,B} on a crossed parity dispatch.
         if state["NumWaves"] <= 1:
           reject(state, printRejectionReason,
-                 "TDMFuse=5 splits each of its two descriptor sets by wave parity, which needs "
+                 "TDMFuse=1 splits each of its two descriptor sets by wave parity, which needs "
                  "wave-separated TDM (NumWaves > 1); at NumWaves=%d every tensor keeps its own "
                  "descriptor and nothing is fused" % state["NumWaves"])
           return
         if state.get("UseSubtileImpl"):
           reject(state, printRejectionReason,
-                 "TDMFuse=5 is not available with UseSubtileImpl=1, which gives each tensor its "
+                 "TDMFuse=1 is not available with UseSubtileImpl=1, which gives each tensor its "
                  "own descriptor and so has no shared set to dispatch")
           return
         if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
           reject(state, printRejectionReason,
-                 "TDMFuse=5 names MXSA and MXSB as the odd-wave member of one set each, so it "
-                 "requires MX scales on both tensors; without them both sets hold a single "
-                 "tensor and this is TDMFuse=6 without its third set")
+                 "TDMFuse=1 requires MX scales on both tensors; without them each set "
+                 "holds one tensor and nothing is fused")
           return
-        # Unreachable while upstream's temporary blanket TDMSplit reject stands
-        # (97e1223a3f9, PR #10911) at function scope above this block. Kept: it
-        # carries this row's own reason, which the blanket reject does not
-        # record, and it revives the moment TDMSplit is re-enabled.
+        # Unreachable while TDMSplit has a blanket reject above.
+        # Kept so this fuse mode has its own reason when TDMSplit is re-enabled.
         if state.get("TDMSplit"):
           reject(state, printRejectionReason,
-                 "TDMFuse=5 is not available with TDMSplit, whose multi-wave increment recomputes "
+                 "TDMFuse=1 is not available with TDMSplit, whose multi-wave increment recomputes "
                  "one parity-selected split stride for one shared descriptor; this grouping has "
                  "two shared descriptors and no arithmetic that names the second")
           return
         if state["enableTDMMetadata"]:
           reject(state, printRejectionReason,
-                 "TDMFuse=5 does not describe the sparse metadata tensor, which the TDM moves on "
+                 "TDMFuse=1 does not describe the sparse metadata tensor, which the TDM moves on "
                  "a descriptor (tdmMetadataGroup0) that no value of this parameter names")
           return
         # Compares block counts only: LdsOffsetBlkA/B are assigned later.
-        decoupled, blkA, blkB = decouplePgrBlocks(state)
+        decoupled, blkA, blkB = decouplePGRBlocks(state)
         if state["HalfPLR"] and decoupled and blkA != blkB:
-          # KernelWriter._dcpScheduleSingleBufferedFillLate moves the
-          # single-buffered set's advance with its fill, and HalfPLR's
-          # end-of-loop increment mask sits in the same module -- moving it late
-          # leaves the other set advancing by an increment that was never zeroed.
+          # _dcpScheduleSingleBufferedFillLate relocates one set's fill with its advance.
+          # HalfPLR's end-of-loop mask lives in that same module, so the other set
+          # would advance one step too many on the final iteration.
           reject(state, printRejectionReason,
-                 "TDMFuse=5 requires HalfPLR=0 at a divergent decoupled pair: the per-set fill "
-                 "relocation moves one set's advance into a later sub-iteration, and HalfPLR's "
-                 "increment mask rides in that same module, so the set that stays at the top "
-                 "would advance on the final iteration. Got HalfPLR=%d with PrefetchGlobalReadA=%d "
-                 "and PrefetchGlobalReadB=%d, resolving to %d and %d LDS blocks"
+                 "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair "
+                 "(HalfPLR=%d, PGRA=%d, PGRB=%d -> %d and %d LDS blocks)"
                  % (state["HalfPLR"], state["PrefetchGlobalReadA"],
                     state["PrefetchGlobalReadB"], blkA, blkB))
           return
@@ -3098,43 +3036,10 @@ class Solution(collections.abc.Mapping):
         # drift, decline rather than accept a name the writer will not honour.
         if not tdmFusePaired(state):
           reject(state, printRejectionReason,
-                 "TDMFuse=5 passed its solution-level guards but tdmFusePaired declined the "
+                 "TDMFuse=1 passed its solution-level guards but tdmFusePaired declined the "
                  "solution, so the writer would emit a different grouping than the name claims")
           return
 
-      if tdmFuse == 6:
-        if state["NumWaves"] <= 1 or state.get("UseSubtileImpl"):
-          reject(state, printRejectionReason,
-                 "TDMFuse=6 de-aliases A from B on the wave-separated path; at NumWaves=%d or "
-                 "under UseSubtileImpl each tensor already owns its descriptor"
-                 % state["NumWaves"])
-          return
-        # Unreachable while upstream's temporary blanket TDMSplit reject stands
-        # (97e1223a3f9, PR #10911) at function scope above this block. Kept: it
-        # carries this row's own reason, which the blanket reject does not
-        # record, and it revives the moment TDMSplit is re-enabled.
-        if state.get("TDMSplit"):
-          reject(state, printRejectionReason,
-                 "TDMFuse=6 is not available with TDMSplit, whose multi-wave increment recomputes "
-                 "one parity-selected split stride for one shared descriptor")
-          return
-        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
-          reject(state, printRejectionReason,
-                 "TDMFuse=6 names the MX scale group {MXSA,MXSB}, so it requires MX scales on "
-                 "both tensors")
-          return
-        if state["enableTDMMetadata"]:
-          reject(state, printRejectionReason,
-                 "TDMFuse=6 does not describe the sparse metadata tensor")
-          return
-        # SIA4 is OptLevel 3: barriers are rebuilt from tensor_load/ds_read
-        # tokens. Placement must stay outside wave-parity around a de-aliased
-        # fill (count is not a detector). Guards must match tdmDealiasAB.
-        if not tdmDealiasAB(state):
-          reject(state, printRejectionReason,
-                 "TDMFuse=6 passed its solution-level guards but tdmDealiasAB declined the "
-                 "solution, so the writer would emit a different grouping than the name claims")
-          return
 
     # DepthU == -1?
     if state["DepthU"] == -1:
@@ -3532,6 +3437,7 @@ class Solution(collections.abc.Mapping):
             reject(state, printRejectionReason,
                    f"fp6 MacDataType{tc}: LdsPad{tc} and LdsBlockSizePerPad{tc} must be 0")
             return
+
       iterModeMask = state["TDMIterateMode"]
       if state["TDMInst"] and state["EnableMatrixInstruction"] and not state["ProblemType"]["Sparse"]:
         # Stage 1: decide iterate-mode per tensor.
@@ -5497,52 +5403,37 @@ class Solution(collections.abc.Mapping):
     decouplePGR, pgrA, pgrB = pgrLevelsForTensors(state)
     numLdsBlkA = ldsBlocksForPgrLevel(pgrA)
     numLdsBlkB = ldsBlocksForPgrLevel(pgrB)
-    # Only divergent counts need the owner-grouped LDS layout. Equal counts are
-    # left to the legacy layout below, which is what makes them byte-identical
-    # to an existing legacy configuration rather than merely equivalent to it.
+    # Divergent block counts use owner-grouped LDS layout.
+    # Equal counts keep the legacy layout for byte-identical kernels.
     dcpDivergent = decouplePGR and numLdsBlkA != numLdsBlkB
     if clusterEnabled(state["ClusterDim"]) and dcpDivergent:
       reject(state, printRejectionReason,
-             "PrefetchGlobalReadA/B: ClusterDim != [1, 1] is incompatible with divergent "
-             "per-tensor LDS block counts (A=%u, B=%u), because the cluster barrier drains "
-             "tensorcnt to zero while thick wait1 preserves outstanding tensor loads. "
-             "Tracking: AIHPBLAS-4159."
+             "PrefetchGlobalReadA/B: ClusterDim != [1, 1] is incompatible with "
+             "divergent LDS block counts (A=%u, B=%u)"
              % (numLdsBlkA, numLdsBlkB))
       return
     if decouplePGR:
-      # Resolve both keys even if only one was given, so a decoupled solution
-      # round-trips through library logic and names both tokens. Legacy solutions
-      # never reach here and so never gain the keys.
+      # Set both keys so decoupled solutions round-trip through library logic.
+      # Legacy solutions never reach this block.
       state["PrefetchGlobalReadA"] = pgrA
       state["PrefetchGlobalReadB"] = pgrB
       if not tdmBothTensors(state):
         # Decoupled PGR is TDM-only. Equal pairs already degenerated to scalar
         # before this reject, so (0,0)/(2,2) never reach it.
         reject(state, printRejectionReason,
-               "PrefetchGlobalReadA/B: PrefetchGlobalReadA=%u and PrefetchGlobalReadB=%u "
-               "require both tensors to move data with the TDM (TDMInst == 3); this "
-               "solution has TDMInst=%u. The per-tensor value is a block count, and a "
-               "block count is a prefetch depth only where there is no VGPR staging "
-               "buffer. The buffer_load path allocates one, so it holds two LDS blocks "
-               "at this depth and 1LDSBuffer stays independent of PrefetchGlobalRead "
-               "there, which no single block count expresses. Tracking: AIHPBLAS-4159."
-               % (pgrA, pgrB, state["TDMInst"]))
+               "PrefetchGlobalReadA/B: decoupled prefetch requires TDMInst=3; "
+               "got TDMInst=%u for PrefetchGlobalReadA=%u and PrefetchGlobalReadB=%u"
+               % (state["TDMInst"], pgrA, pgrB))
         return
-      # The unrolled loop skeleton is still emitted from the scalar, and the pair
-      # pins it: never deeper than the deepest level asked for, and never deeper
-      # than the number of LDS blocks the shallowest tensor holds, because the
-      # prologue issues one fill round per level with nothing consuming between
-      # them. assignDerivedParameters set the scalar to exactly this before any
-      # rule read it, so reaching here with a different value is not a user error
-      # -- it means a later rule moved the scalar out from under the pin, which
-      # DirectToVgprA + DirectToVgprB is the one rule that does.
+      # The unrolled-loop depth comes from PrefetchGlobalRead, pinned by the pair:
+      # min(max(A,B), min(blocksA, blocksB)). assignDerivedParameters set this early.
+      #
+      # A mismatch here means a later rule changed the scalar after the pin.
       pgrSkeleton = min(max(pgrA, pgrB), min(numLdsBlkA, numLdsBlkB))
       if state["PrefetchGlobalRead"] != pgrSkeleton:
         reject(state, printRejectionReason,
-               "PrefetchGlobalReadA/B: PrefetchGlobalRead=%u no longer matches the %u "
-               "pinned by PrefetchGlobalReadA=%u (%u LDS block(s)) and "
-               "PrefetchGlobalReadB=%u (%u LDS block(s)); a later rule moved the scalar "
-               "after it was derived. Tracking: AIHPBLAS-4159."
+               "PrefetchGlobalReadA/B: PrefetchGlobalRead=%u does not match %u pinned "
+               "by PGRA=%u (%u blocks) and PGRB=%u (%u blocks)"
                % (state["PrefetchGlobalRead"], pgrSkeleton, pgrA, numLdsBlkA,
                   pgrB, numLdsBlkB))
         return
@@ -5551,7 +5442,7 @@ class Solution(collections.abc.Mapping):
           "PrefetchGlobalReadA=%u and PrefetchGlobalReadB=%u both resolve to %u LDS block(s) "
           "and share one loop envelope, so this solution is identical to "
           "PrefetchGlobalRead=%u on both tensors. Per-tensor prefetch cadence is not "
-          "implemented yet (AIHPBLAS-4159)."
+          "implemented yet."
           % (pgrA, pgrB, numLdsBlkA, max(pgrA, pgrB)))
       if state["ProblemType"]["Sparse"]:
         reject(state, printRejectionReason, "PrefetchGlobalReadA/B: Sparse is not supported yet "
@@ -5571,44 +5462,31 @@ class Solution(collections.abc.Mapping):
       if state["1LDSBuffer"] == 1 and max(numLdsBlkA, numLdsBlkB) > 1:
         reject(state, printRejectionReason, "PrefetchGlobalReadA/B: 1LDSBuffer=1 gives every "
                "tensor one shared LDS block, but PrefetchGlobalReadA=%u and PrefetchGlobalReadB=%u "
-               "ask for %u and %u. The per-tensor value is the block count, so drop 1LDSBuffer "
-               "rather than pinning it -- a one-block pair does not need it. Tracking: AIHPBLAS-4159."
+               "ask for %u and %u. Drop 1LDSBuffer or raise a per-tensor level."
                % (pgrA, pgrB, numLdsBlkA, numLdsBlkB))
         return
       if numLdsBlkA != numLdsBlkB:
-        # A single-buffered tensor is legal only because
-        # KernelWriter._dcpScheduleSingleBufferedFillLate can move its fill to a
-        # sub-iteration between the last local read and the pre-read sync.
-        # divergentPairUnsupportedReason holds the conditions under which that
-        # slot exists and can be reached; outside them the kernel would compute
-        # wrong results from K = 2*DepthU, or would not build at all. That K is a
-        # trip-count consequence rather than an observed sample -- see
-        # divergentPairUnsupportedReason -- so it does not carry the intermittency
-        # of the SIA4 barrier defect above. It is not unsourced either: the same
-        # two-trip argument is what the one-block-both FFM sweep below lands on
-        # independently, clean at K=992 and wrong at K=1024 with DepthU 512. A
-        # prediction and a measurement agreeing is the reason this K survives
-        # while the SIA4 one was withdrawn; do not fold the two together.
+        # Divergent single-buffering is legal only when
+        # _dcpScheduleSingleBufferedFillLate can move the thin tensor's fill into a
+        # spare sub-iteration. divergentPairUnsupportedReason lists when that slot
+        # exists.
+        #
+        # Fill overwrite from K >= 2*DepthU is predicted by trip count, not a
+        # runtime sample.
         dcpUnsupported = divergentPairUnsupportedReason(state)
         if dcpUnsupported:
           reject(state, printRejectionReason,
-                 "PrefetchGlobalReadA/B: divergent per-tensor LDS block counts (A=%u, B=%u) "
-                 "need a slot in the unrolled loop to move the single-buffered tensor's fill "
-                 "into, and this solution has none: %s. Tracking: AIHPBLAS-4159."
+                 "PrefetchGlobalReadA/B: divergent LDS blocks (A=%u, B=%u) need a "
+                 "single-buffered fill slot: %s"
                  % (numLdsBlkA, numLdsBlkB, dcpUnsupported))
           return
-      # (1,1)/(0,1)/(1,0) are one LDS block each: fill overwrites the previous
-      # trip from K=2*DepthU (no double-buffered partner, tail does not fill).
-      # Workgroup K under GSU/StreamK is the threshold, not problem K.
-      # Legacy PrefetchGlobalRead=1 + 1LDSBuffer=1 is the same kernel and is
-      # not reached by this guard (AIHPBLAS-4159).
+      # (0,1)/(1,0): one LDS block each, no double-buffer partner.
+      # Equal (1,1) already degenerated to scalar PrefetchGlobalRead=1 above.
       if decoupledOneBlockBoth(state):
         reject(state, printRejectionReason,
-               "PrefetchGlobalReadA/B: PrefetchGlobalReadA=%u and PrefetchGlobalReadB=%u put "
-               "both tensors on a single LDS block, which builds and fits but computes wrong "
-               "results from K = 2*DepthU, because each iteration's fill overwrites the block "
-               "the previous one is still reading and there is no double-buffered partner to "
-               "hide it behind. Give at least one tensor 2. Tracking: AIHPBLAS-4159."
+               "PrefetchGlobalReadA/B: PGRA=%u and PGRB=%u leave both tensors on one "
+               "LDS block; fills overwrite data still in use from K >= 2*DepthU. "
+               "Give at least one tensor level 2."
                % (pgrA, pgrB))
         return
 
@@ -5647,10 +5525,8 @@ class Solution(collections.abc.Mapping):
         state["TDMPlusLdsBuf"] = 0
 
     if decouplePGR and state["1LDSBuffer"] == -1:
-      # The per-tensor value is the block count and it decides the layout, so take
-      # the auto rule for 1LDSBuffer out of play before it can resolve to 1 further
-      # down and overwrite that decision. An explicit 1LDSBuffer is left alone: it
-      # is either redundant (a one-block pair) or already rejected above.
+      # Block count comes from PGRA/PGRB, so resolve auto 1LDSBuffer before a
+      # later rule can force 1LDSBuffer=1 and override the layout.
       state["1LDSBuffer"] = 0
 
     # Here, 1LDSBuffer == -1 is not resolved yet.
@@ -5670,18 +5546,12 @@ class Solution(collections.abc.Mapping):
       # (same as DtlPlusLdsBuf but without the DirectToLds requirement)
       numLdsBlk = state["PrefetchGlobalRead"] + 1
     elif decouplePGR and not dcpDivergent and state["PrefetchGlobalRead"]:
-      # The per-tensor value IS the block count, so allocate exactly that many
-      # rather than inferring a count from 1LDSBuffer, which exists to drop the
-      # surplus block the buffer_load path gets from also holding a VGPR staging
-      # buffer -- a surplus TDM never has. numLdsBlkA == numLdsBlkB here.
-      # elif so TDMPlusLdsBuf's extra buffer is not overwritten.
+      # TDM has no VGPR staging buffer, so use the per-tensor block count directly
+      # instead of inferring from 1LDSBuffer (equal-count path; elif preserves TDMPlusLdsBuf).
       numLdsBlk = numLdsBlkA
     if dcpDivergent:
-      # As on the PGR>=3 path above, the owner-grouped layout replaces the single
-      # shared buffer, so pin 1LDSBuffer before an unresolved -1 can auto-resolve
-      # to 1 further down and overwrite the decoupled offsets. numLdsBlk needs no
-      # override: setLdsOffsetsDecoupled lays a divergent solution out from the
-      # two per-tensor counts directly.
+      # Pin 1LDSBuffer=0 before auto-resolution: owner-grouped layout replaces
+      # the single shared buffer. setLdsOffsetsDecoupled sizes from the two counts.
       state["1LDSBuffer"] = 0
 
     def setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB):
@@ -5697,17 +5567,13 @@ class Solution(collections.abc.Mapping):
       return ldsNumBytesAB
 
     def setLdsOffsetsDecoupled(halfBankShiftA, halfBankShiftB, ldsNumBytesB):
-      # Segments are grouped by owner, each group with its own block count and
-      # its own stride:
-      #   group A, NumLdsBlkA copies of [ A | MXSA ]   stride blkA
-      #   group B, NumLdsBlkB copies of [ MXSB | B ]   stride blkB
-      # Metadata sits between MXSB and B in the ordering but contributes no
-      # bytes: Sparse is rejected on this path.
-      # Group B starts after every copy of group A. The single-block segment order
-      # is already A, MXSA, MXSB, Metadata, B, so grouping by owner needs no
-      # reordering and NumLdsBlkA == 1 reproduces the legacy base offsets.
+      # Owner-grouped layout:
+      #   nBlkA x [A|MXSA] with stride blkA, then nBlkB x [MXSB|B] with stride blkB.
+      # Metadata has no bytes here (Sparse is rejected).
       #
-      # No power-of-two round-up: legacy pads the interleaved block for xor swap.
+      # Segment order is already A, MXSA, MXSB, Metadata, B; NumLdsBlkA==1 matches legacy.
+      #
+      # No power-of-two round-up: legacy padded for xor swap; this layout is packed.
       nBlkA = numLdsBlkA
       nBlkB = numLdsBlkB
       spanA = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"] + state["LdsNumElementsAlignedMXSA"]
@@ -5731,13 +5597,8 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetB"] = baseB + offBinB
       state["LdsOffsetBlkA"] = blkA
       state["LdsOffsetBlkB"] = blkB
-      # Absolute base of each segment's second copy, emitted only for a group that
-      # has one. A one-copy group has no such address and the arithmetic does not
-      # produce a harmless number: on the hero, group A holds one copy and
-      # LdsOffsetMXSA + blkA lands 33280 bytes inside group B's first copy. The
-      # same value is a correct second-copy base in the mirror, so nothing in the
-      # key records whether it means anything. Omit it, so a consumer that reaches
-      # for it fails at build time rather than addressing someone else's tile.
+      # Second-copy bases are emitted only when a group has two blocks.
+      # A one-block group has no valid second base; omit the key so misuse fails at build time.
       for _key, _base, _stride, _copies in (
           ("LdsOffsetMXSA_Blk",     state["LdsOffsetMXSA"],     blkA, nBlkA),
           ("LdsOffsetMXSB_Blk",     state["LdsOffsetMXSB"],     blkB, nBlkB),
@@ -5747,11 +5608,8 @@ class Solution(collections.abc.Mapping):
           state[_key] = _base + _stride
         else:
           state.pop(_key, None)
-      # LdsOffsetA_Blk is misnamed: consumers read it as *the* whole-block swap
-      # stride (LdsOneBlockSize, xor/AND swap masks), not as A's offset. One scalar
-      # cannot describe two strides, so this reports the stride of whichever group
-      # double-buffers and gets the other group's wrong -- new addressing must go
-      # through LdsOffsetBlkA/B.
+      # LdsOffsetA_Blk is legacy's whole-block swap stride. With two group strides,
+      # consumers must use LdsOffsetBlkA/B instead.
       state["LdsOffsetA_Blk"] = blkB if nBlkB > 1 else (blkA if nBlkA > 1 else 0)
       # Tail uses the unaligned B size, matching the legacy total's convention.
       lastB = baseB + (nBlkB - 1) * blkB + offBinB + ldsNumBytesB
@@ -5800,10 +5658,8 @@ class Solution(collections.abc.Mapping):
     state["LDSSegInterleaveOffsets"] = _segRes["offsets"]    # consumed by emit sites when applied
     _segAligned = _segRes["applicable"] and _segRes["aligned"]
     _segReason = _segRes["reason"]                           # why not applied (may change if budget disables aligned)
-    # dcpDivergent stays a local and never becomes a state key: a state key would
-    # be written for legacy solutions too, changing every solution's key set and
-    # reaching the serialized library. KernelWriterAssembly._dcpDivergent
-    # re-derives it from the two parameters.
+    # Keep dcpDivergent local: serializing it would change every solution's key set.
+    # KernelWriterAssembly._dcpDivergent re-derives it from PGRA/PGRB.
     if dcpDivergent:
       # Segment interleave is a separate LDS layout transform and is not combined
       # with the owner-grouped one yet.
@@ -5812,10 +5668,8 @@ class Solution(collections.abc.Mapping):
       _segReason = "not supported with PrefetchGlobalReadA/B"
       ldsNumBytesAB = setLdsOffsetsDecoupled(halfBankShiftA, halfBankShiftB, ldsNumBytesB)
       offsetBlk = state["LdsOffsetA_Blk"]
-      # StoreSwapAddr is forced, not derived: this layout is packed, so no single
-      # power-of-two stride exists for an inlined xor constant to swap by. Rounding
-      # one up would inflate LDS and enable nothing -- the hero's blkB of 141312
-      # would round to 262144 and blow past MaxLDS.
+      # Packed layout has no power-of-two swap stride; force StoreSwapAddr instead
+      # of rounding up (would blow past MaxLDS without enabling xor swap).
       state["StoreSwapAddr"] = True
     elif state["PrefetchGlobalRead"]:
       offsetBlk = state["LdsOffsetB"] + ldsNumBytesAlignedB
@@ -5960,11 +5814,6 @@ class Solution(collections.abc.Mapping):
       # Should be able to support as long as NO scheduleLocalWrite
       if (not state["_ScheduleIterAlg"] == 2) and (not state["_ScheduleIterAlg"] == 3) and (state["ScheduleLocalWrite"]):
         reject(state, printRejectionReason, "1LDSBuffer only support SIA2 or SIA3, or SIA1 without SLW")
-      ldsNumBytesAB = setLdsOffsetsOneBlock()
-    elif decoupledOneBlockBoth(state):
-      # Same layout, reached from the per-tensor block counts. The SIA restriction
-      # above belongs to 1LDSBuffer's scheduling rather than to the layout, so
-      # (1,1) is not subject to it and builds at every SIA.
       ldsNumBytesAB = setLdsOffsetsOneBlock()
 
     # lds size is the greater of the two

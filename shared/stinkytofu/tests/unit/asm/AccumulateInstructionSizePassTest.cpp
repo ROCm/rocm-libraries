@@ -16,6 +16,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
+#include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/InstructionSizeCosting.hpp"
 
 using namespace stinkytofu;
@@ -560,4 +561,124 @@ TEST_F(InstructionSizeCostingTest, SMovB32_Hex40800000_StillPlus4_NotValuF32Rule
     inst->addSrcReg(litStr("0x40800000"));
 
     EXPECT_EQ(getLiteralExtraBytes(*inst), 4);
+}
+
+// ---------------------------------------------------------------------------
+// Pseudo instructions: no encoding, therefore no bytes
+// ---------------------------------------------------------------------------
+
+TEST_F(InstructionSizeCostingTest, Fence_EmitsNoAssembly_CostsZeroBytes) {
+    auto b = makeBuilder();
+    StinkyInstruction* fence = b.createFence();
+    ASSERT_NE(fence, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*fence), 0);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*fence), 0);
+    EXPECT_EQ(getLiteralExtraBytes(*fence), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*fence), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, FunctionAsmPlacementMarker_CostsZeroBytes) {
+    auto b = makeBuilder();
+    StinkyInstruction* marker = b.createFunctionAsmPlacementMarker("label_Activation_None_VW8");
+    ASSERT_NE(marker, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*marker), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*marker), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, Label_CostsZeroBytes) {
+    auto b = makeBuilder();
+    StinkyInstruction* lbl = b.createLabel("label_LoopBeginL", 16);
+    ASSERT_NE(lbl, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*lbl), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*lbl), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, RealOpcodeWithoutTablegenEncoding_KeepsFourByteDefault) {
+    // The pseudo carve-out must not swallow the defensive default: a *real* opcode whose
+    // tablegen entry carries no `.encoding` still occupies at least one 32-bit word.
+    auto b = makeBuilder();
+    static const HwInstDesc noEncoding{GFX::s_nop,           GFX::s_nop, 0, 0, 0, 0,
+                                       "s_nop_no_encoding_", makeFlagSet({})};
+    StinkyInstruction* inst = b.create(&noEncoding);
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+// ---------------------------------------------------------------------------
+// accumulateInstructionSize: pseudo instructions must not move the byte cursor
+// ---------------------------------------------------------------------------
+
+TEST_F(InstructionSizeCostingTest, Accumulate_FenceCostsNothing) {
+    auto b = makeBuilder();
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+    b.createFence();
+    b.createFence();
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+
+    std::unordered_map<std::string, int64_t> labelOff;
+    int64_t totalBytes = -1;
+    accumulateInstructionSize(*bb, labelOff, nullptr, nullptr, &totalBytes);
+    EXPECT_EQ(totalBytes, 8);  // two s_nop; the fences are free
+}
+
+TEST_F(InstructionSizeCostingTest, Accumulate_FencesDoNotPadAnAlreadyAlignedLabel) {
+    // Regression for the CheckASMCodeSize gate. TDMFuse=1 emits two WAR SSchedulingFences
+    // just ahead of the 16-byte-aligned unroll-loop label. Charging them 4 B each moved the
+    // cursor to 8 mod 16, so the label got 8 B of padding the assembler never emits and
+    // STINKY_TOTAL_INST_BYTES over-counted the ELF .text section.
+    auto b = makeBuilder();
+    for (int i = 0; i < 4; ++i) b.create(getMCIDByUOp(GFX::s_nop, arch));  // 16 B: 16-aligned
+    b.createFence();
+    b.createFence();
+    b.createLabel("label_LoopBeginL", 16);
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+
+    std::unordered_map<std::string, int64_t> labelOff;
+    int64_t totalBytes = -1;
+    accumulateInstructionSize(*bb, labelOff, nullptr, nullptr, &totalBytes);
+
+    EXPECT_EQ(labelOff["label_LoopBeginL"], 16);  // already aligned -> zero padding
+    EXPECT_EQ(totalBytes, 20);                    // five s_nop, no padding
+}
+
+TEST_F(InstructionSizeCostingTest, Accumulate_MisalignedLabelStillPadsWithFencesPresent) {
+    // Complement of the regression above: the fix stops pseudo ops from moving the cursor,
+    // it must not disable label alignment. 12 B of code means `.align 16` really owes 4 B.
+    auto b = makeBuilder();
+    for (int i = 0; i < 3; ++i) b.create(getMCIDByUOp(GFX::s_nop, arch));  // 12 B
+    b.createFence();
+    b.createLabel("label_TailLoopBeginL", 16);
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+
+    std::unordered_map<std::string, int64_t> labelOff;
+    int64_t totalBytes = -1;
+    accumulateInstructionSize(*bb, labelOff, nullptr, nullptr, &totalBytes);
+
+    EXPECT_EQ(labelOff["label_TailLoopBeginL"], 16);  // 12 -> pad 4
+    EXPECT_EQ(totalBytes, 20);                        // 12 + 4 padding + 4
+}
+
+TEST_F(InstructionSizeCostingTest, Accumulate_LabelOffsetsUnaffectedByFenceCount) {
+    // Same code, one extra fence: every label offset and the total must be identical.
+    auto run = [this](int fences) {
+        Function f("fence_invariance");
+        BasicBlock* block = f.createBasicBlock("entry");
+        AsmIRBuilder b(*block, arch);
+        b.create(getMCIDByUOp(GFX::s_nop, arch));
+        for (int i = 0; i < fences; ++i) b.createFence();
+        b.createLabel("label_A", 1);
+        b.create(getMCIDByUOp(GFX::s_nop, arch));
+        b.createLabel("label_B", 16);
+        b.create(getMCIDByUOp(GFX::s_nop, arch));
+        std::unordered_map<std::string, int64_t> off;
+        int64_t total = -1;
+        accumulateInstructionSize(*block, off, nullptr, nullptr, &total);
+        return std::make_pair(off, total);
+    };
+    auto none = run(0);
+    auto many = run(7);
+    EXPECT_EQ(none.second, many.second);
+    EXPECT_EQ(none.first["label_A"], many.first["label_A"]);
+    EXPECT_EQ(none.first["label_B"], many.first["label_B"]);
 }

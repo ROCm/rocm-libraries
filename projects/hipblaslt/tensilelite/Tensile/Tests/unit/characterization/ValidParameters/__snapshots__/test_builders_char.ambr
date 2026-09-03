@@ -2424,29 +2424,29 @@
     }),
     'PrefetchGlobalRead': dict({
       'head': list([
+        -1,
         0,
         1,
-        2,
       ]),
-      'len': 17,
+      'len': 18,
       'type': 'list',
     }),
     'PrefetchGlobalReadA': dict({
       'head': list([
+        -1,
         0,
         1,
-        2,
       ]),
-      'len': 17,
+      'len': 18,
       'type': 'list',
     }),
     'PrefetchGlobalReadB': dict({
       'head': list([
+        -1,
         0,
         1,
-        2,
       ]),
-      'len': 17,
+      'len': 18,
       'type': 'list',
     }),
     'PrefetchLocalRead': dict({
@@ -2665,10 +2665,10 @@
     'TDMFuse': dict({
       'head': list([
         0,
+        1,
         2,
-        4,
       ]),
-      'len': 5,
+      'len': 3,
       'type': 'list',
     }),
     'TDMInst': dict({

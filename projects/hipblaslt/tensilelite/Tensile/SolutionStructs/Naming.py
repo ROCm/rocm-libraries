@@ -104,49 +104,18 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   return key + cof + dn
 
 
-# THE SWITCH: does a key the solution does not carry get NAMED?
+# Should a parameter absent from the solution state still appear in the kernel name?
 #
-# One place, two reachable behaviours, because this has already been flipped
-# twice -- conditional, unconditional, conditional again -- and the convention
-# owner has not formally answered. The current setting is this codebase's
-# reading of the design principle, not a ruling, so a flip back is live. Flip
-# _NAME_ABSENT_KEYS and regenerate the snapshots; nothing else here has to be
-# worked out again.
+# False (current): absent keys are omitted. This keeps legacy kernel names and
+# characterization snapshots unchanged when a parameter is off.
 #
-# MEASURED COST OF EACH DIRECTION, so nobody re-derives it:
+# True: name every key in getRequiredParametersMin, using _ABSENT_KEY_LEVEL for
+# omitted keys. That renames 51 snapshot files with no assembly change.
 #
-#   False -- hidden when off (current)
-#       227 pre-existing golden kernels byte-identical in NAME and in assembly.
-#       Zero characterization snapshots differ from the merge-base for naming.
-#       (ValidParameters' test_builders_char does differ, but only because it
-#       is the roster of which parameters exist at all; it reads the same
-#       whichever way this switch is set.)
+# PGRA/PGRB at level 0 must not name the scalar PrefetchGlobalRead: legacy PGR=1
+# and decoupled (1,1) would both read PGRA1_PGRB1 despite different LDS layouts.
 #
-#   True -- named on every kernel
-#       227 kernels rename. Zero assembly movement, measured name-neutrally.
-#       51 .ambr files, 77 snapshot entries, 239 changed lines -- of which 222
-#       are hash-shortened filename tails past shortenFileBase's 48-character
-#       pivot (MAX_FILENAME_LENGTH * 3 // 4) and only 17 are readable full
-#       names.
-#
-# WHY FALSE IS THE CURRENT CHOICE. The characterization snapshots exist to
-# catch an UNINTENDED kernel-name change. A parameter that renames every kernel
-# while it is switched off moves 51 of them for a change with no semantic
-# effect, and a 239-line diff that is 93% unreadable hash tails gets
-# regenerated reflexively rather than reviewed -- which is exactly the habit a
-# real rename would slip through. Hidden-when-off is what keeps those files
-# load-bearing. The argument the other way is real but smaller: named
-# unconditionally, PGRA/PGRB report what the kernel IS rather than which
-# spelling its solution happened to be written in.
-#
-# WHAT AN ABSENT KEY NAMES WHEN THE SWITCH IS TRUE. The level below, not the
-# scalar the key resolves to during derivation. Naming the scalar was measured
-# to collide: legacy PrefetchGlobalRead=1 at 1LDSBuffer=0 holds two LDS blocks
-# at 219392 bytes and decoupled (1,1) holds one at 88320, no other named
-# parameter separates them, and naming the scalar gives both PGRA1_PGRB1 -- two
-# different kernels under one name. 0 doubles as "not asked for" in the name
-# only, where it costs a reader nothing, since a legacy kernel already names
-# its prefetch depth in PGR.
+# Flipping _NAME_ABSENT_KEYS requires regenerating characterization snapshots.
 _NAME_ABSENT_KEYS = False
 _ABSENT_KEY_LEVEL = {"PrefetchGlobalReadA": 0, "PrefetchGlobalReadB": 0}
 
@@ -266,15 +235,15 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if state.get("LDSSegmentInterleave") == 1:
     requiredParametersTemp.add("LDSSegmentInterleave")
 
-  # TDMFuse names the grouping only when one was asked for: 0, equivalently an
-  # absent key, leaves the existing derivation alone, so naming it there would
-  # rename every pre-existing kernel while asserting nothing.
+  # Name TDMFuse only when nonzero: 0 leaves defineTdmSgprs's default grouping.
+  # TDMF0 would rename legacy kernels without asserting a real difference.
   if state.get("TDMFuse", 0):
     requiredParametersTemp.add("TDMFuse")
+  else:
+    requiredParametersTemp.discard("TDMFuse")
 
-  # Optional parameters otherwise opt IN above; _NAME_ABSENT_KEYS is the switch
-  # for the keys that have a defined "not specified" level instead. See its
-  # comment for the measured cost of each setting.
+  # LDSSegmentInterleave and TDMFuse opt in above.
+  # PGRA/PGRB use _ABSENT_KEY_LEVEL when _NAME_ABSENT_KEYS is True.
   for key in sorted(requiredParametersTemp):
     if key == "CustomKernelName":
       continue

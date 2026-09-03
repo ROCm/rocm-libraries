@@ -316,3 +316,36 @@ def test_halfplr_rejects_use_subtile_impl(
     sol, out = _derive(gfx1250_iim, assembler, capsys, UseSubtileImpl=True)
     assert sol.get("Valid") is False
     assert "HalfPLR is not supported with UseSubtileImpl" in out
+
+
+# ---------------------------------------------------------------------------
+# Guard 4: HalfPLR + TDMFuse=1 at a divergent PrefetchGlobalReadA/B pair.
+# The increment mask rides in the module the single-buffered fill relocation
+# moves, so the set that stays at the top would advance on the final iteration.
+# ---------------------------------------------------------------------------
+def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        TDMFuse=1,
+        PrefetchGlobalReadA=1,
+        PrefetchGlobalReadB=2,
+        mi=[16, 16, 128, 1, 1, 2, 16, 2, 2],
+        WorkGroup=[32, 4, 1],
+        MXScaleFormat="InMemorySwizzle",
+        LDSTrInst=True,
+        ProblemType={
+            "MacDataTypeA": "F8",
+            "MacDataTypeB": "F4",
+            "DestDataType": "s",
+            "MXBlockA": 32,
+            "MXBlockB": 32,
+            "DataTypeMXSA": "E8",
+            "DataTypeMXSB": "E8",
+        },
+    )
+    assert sol.get("Valid") is False
+    assert "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair" in out
