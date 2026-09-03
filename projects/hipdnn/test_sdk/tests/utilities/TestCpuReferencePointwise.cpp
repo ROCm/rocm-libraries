@@ -144,8 +144,7 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(std::max(-TEST_VALUE_1, TEST_VALUE_4)), 0, 0, 0, 3);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::MAX_OP, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -178,8 +177,7 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(std::min(-TEST_VALUE_1, TEST_VALUE_4)), 0, 0, 0, 3);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::MIN_OP, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -681,8 +679,7 @@ protected:
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::MAX_OP, 40.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -721,8 +718,7 @@ protected:
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::MIN_OP, 40.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
