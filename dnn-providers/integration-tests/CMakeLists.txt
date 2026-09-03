@@ -148,6 +148,8 @@ if(Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_verify_support_claims.py
     )
+    # Not routed through _apply_provider_ctest_category_labels because the
+    # support-claim verifier is not listed in test_categories_external.yaml.
     set_tests_properties(hipdnn_support_claim_verifier_python_tests PROPERTIES LABELS "unit_test;quick")
 endif()
 
