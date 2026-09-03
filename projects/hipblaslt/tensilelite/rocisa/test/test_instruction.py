@@ -452,7 +452,7 @@ def test_instruction_vmax_f16_true16():
     from rocisa.enum import HighBitSel
     from rocisa.instruction import VMaxF16, t16
 
-    # Initialize a NoSDWA gfx11 ISA so EMaxF16 selects the true16 path. Resolve
+    # Initialize a NoSDWA gfx11 ISA so t16() selects the true16 path. Resolve
     # the assembler via ROCM_PATH first (matching test_mubuf.py::_isa_context) so
     # this works when ROCm's bin dir is not on PATH (common in CI / Windows).
     isa = (11, 0, 0)
@@ -467,38 +467,35 @@ def test_instruction_vmax_f16_true16():
     ri.setKernel(isa, 32)
     assert ri.getArchCaps()["NoSDWA"], "expected NoSDWA cap for gfx11"
 
-    # How this test works: rocisa instruction objects render their assembly text
-    # through __str__, so we construct the instruction under test, stringify it,
-    # and assert on the emitted form. vgpr(name, ...) builds a VGPR operand
-    # container (symbolic names like "Output"/"Value+0" mirror what the AMax
-    # generator passes; isAbs=True wraps it in abs()). t16() is the NoSDWA-gated
-    # half-select helper that tags .l on true16 targets. This mirrors exactly what
-    # AMaxGenerator.max_per_data / merge_sum emit. Nothing is assembled or run on
-    # a device.
-    low = HighBitSel.LOW
+    try:
+        low = HighBitSel.LOW
 
-    # abs() source (the activation-clamp shape from AMaxGenerator.max_per_data).
-    inst = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
-                   t16(vgpr("Value+0", isAbs=True), low))
-    s = str(inst)
-    assert re.search(
-        r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+abs\(v\[vgprValue\+0\]\.l\)",
-        s,
-    ), f"activation clamp not in true16 form: {s!r}"
-    # The suffix must be inside the abs() paren, never outside it.
-    assert "abs(v[vgprValue+0].l)" in s
-    assert "abs(v[vgprValue+0]).l" not in s
-    # And it must not be the bare fake16 form.
-    assert "abs(v[vgprValue+0])," not in s and not s.rstrip().endswith("abs(v[vgprValue+0])")
+        # abs() source (the activation-clamp shape from AMaxGenerator.max_per_data).
+        inst = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
+                       t16(vgpr("Value+0", isAbs=True), low))
+        s = str(inst)
+        assert re.search(
+            r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+abs\(v\[vgprValue\+0\]\.l\)",
+            s,
+        ), f"activation clamp not in true16 form: {s!r}"
+        # The suffix must be inside the abs() paren, never outside it.
+        assert "abs(v[vgprValue+0].l)" in s
+        assert "abs(v[vgprValue+0]).l" not in s
+        # And it must not be the bare fake16 form.
+        assert "abs(v[vgprValue+0])," not in s and not s.rstrip().endswith("abs(v[vgprValue+0])")
 
-    # Plain register sources (the merge_sum shape): every operand gets .l.
-    inst2 = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
-                    t16(vgpr("OutputB"), low))
-    s2 = str(inst2)
-    assert re.search(
-        r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+v\[vgprOutputB\]\.l",
-        s2,
-    ), f"merge clamp not in true16 form: {s2!r}"
+        # Plain register sources (the merge_sum shape): every operand gets .l.
+        inst2 = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
+                        t16(vgpr("OutputB"), low))
+        s2 = str(inst2)
+        assert re.search(
+            r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+v\[vgprOutputB\]\.l",
+            s2,
+        ), f"merge clamp not in true16 form: {s2!r}"
+    finally:
+        legacy = (9, 4, 2)
+        ri.init(legacy, assembler, False)
+        ri.setKernel(legacy, 64)
 
 
 if __name__ == "__main__":
