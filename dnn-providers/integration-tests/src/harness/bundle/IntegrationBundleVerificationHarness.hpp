@@ -119,24 +119,25 @@ public:
         // nothing caches it on the harness.
         GraphSession session = openGraph();
 
-        // Phase 1: read the claim facts before anything can cut the test short. This
-        // has to sit above runComparison(): every mode has an early return that would
-        // otherwise leave the graph's claims undecided while the run exited 0.
+        if(TestConfig::get().writeSupportClaims())
+        {
+            observeSupportOnly(session);
+            GTEST_SKIP() << "support-claim authoring run (--write-support-claims)";
+            return;
+        }
+
+        // Enforcement + verification only below this point.
+        //
+        // Read the claim facts before anything can cut the test short: every mode
+        // has an early return that would otherwise leave the graph's claims
+        // undecided while the run exited 0.
         const auto observation = checkSupportClaims(session);
         recordClaimCoverage(observation);
 
-        // Phase 2: author claims, enforce an existing claim, or run the bundle.
         VerificationOutcome outcome;
         try
         {
-            if(TestConfig::get().writeSupportClaims())
-            {
-                observeSupportOnly(session);
-                outcome = VerificationOutcome::skipped(
-                    VerificationDepth::NOT_REACHED,
-                    "support-claim authoring run (--write-support-claims)");
-            }
-            else if(const auto blocked = claimBlocked(observation))
+            if(const auto blocked = claimBlocked(observation))
             {
                 outcome = *blocked;
             }
@@ -144,10 +145,9 @@ public:
             {
                 outcome = runComparison(session);
 
-                // Kept as a live check because "the test did nothing and went green"
-                // is the failure this harness exists to catch. Only asked on this
-                // path: a blocked claim never reached the depth, and is already a
-                // failure.
+                // "the test did nothing and went green" is the failure this harness
+                // exists to catch. Only asked on this path: a blocked claim never
+                // reached the depth, and is already a failure.
                 const VerificationDepth required = bundleRequiredDepth();
                 EXPECT_FALSE(outcome.status == OutcomeStatus::PASSED && outcome.depth < required)
                     << "test passed without reaching " << toString(required) << " for "
@@ -158,14 +158,12 @@ public:
         {
             // This graph was already counted as queried, so a verdict that never
             // lands leaves the summary short a row and reconciles against nothing.
-            // HARNESS at NOT_REACHED because a throw in here is our bug and proves
-            // nothing about the engine: it must not demote the claim, and it must
-            // not confirm it either.
+            // HARNESS at NOT_REACHED because a throw is our bug and proves nothing
+            // about the engine.
             outcome = VerificationOutcome::failed(
                 VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, e.what());
         }
 
-        // Phase 3: one verdict, then one pass/fail/skip, both from the same outcome.
         commitClaims(observation.results, outcome);
         reportOutcome(outcome);
     }
