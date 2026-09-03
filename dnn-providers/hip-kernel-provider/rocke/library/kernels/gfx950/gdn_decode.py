@@ -90,7 +90,9 @@ class GdnDecodeSpec:
     # directly still get a valid general-purpose configuration.
     num_warps: int = 2
     warp_threads_k: int = 16
-    blocks_per_v_dim: int = 8  # split a head's V-dim across this many CTAs (small-B fill)
+    blocks_per_v_dim: int = (
+        8  # split a head's V-dim across this many CTAs (small-B fill)
+    )
     simple: bool = False  # True => v1 one-thread-per-row reference path
     name: str = "rocke_gdn_decode"
 
@@ -158,7 +160,10 @@ def is_valid_spec(spec: GdnDecodeSpec, arch: str = "gfx950") -> Tuple[bool, str]
             return False, "head_v_dim must be a multiple of blocks_per_v_dim"
         tile_v = spec.head_v_dim // spec.blocks_per_v_dim
         if tile_v % wgroup_v:
-            return False, f"head_v_dim/blocks_per_v_dim must be a multiple of {wgroup_v}"
+            return (
+                False,
+                f"head_v_dim/blocks_per_v_dim must be a multiple of {wgroup_v}",
+            )
     return True, ""
 
 
@@ -190,9 +195,13 @@ def _build_simple(spec: GdnDecodeSpec) -> KernelDef:
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = BS
 
-    Q = b.param("query", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Q = b.param(
+        "query", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
     K = b.param("key", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    Vv = b.param("value", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Vv = b.param(
+        "value", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
     Ag = b.param("a", PtrType(io_ty, "global"), noalias=True, readonly=True)
     Bg = b.param("b", PtrType(io_ty, "global"), noalias=True, readonly=True)
     DTB = b.param("dt_bias", PtrType(io_ty, "global"), noalias=True, readonly=True)
@@ -200,7 +209,9 @@ def _build_simple(spec: GdnDecodeSpec) -> KernelDef:
     RIDX = b.param("read_indices", PtrType(I32, "global"), noalias=True, readonly=True)
     WIDX = b.param("write_indices", PtrType(I32, "global"), noalias=True, readonly=True)
     STATE = b.param("state", PtrType(st_ty, "global"), noalias=True, align=16)
-    OUT = b.param("out", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
+    OUT = b.param(
+        "out", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16
+    )
     _ = b.param("batch_size", I32)  # noqa: F841
 
     tid = b.thread_id_x()  # value-dim row this thread owns (0..DV-1)
@@ -341,9 +352,13 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = BS
 
-    Q = b.param("query", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Q = b.param(
+        "query", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
     K = b.param("key", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    Vv = b.param("value", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Vv = b.param(
+        "value", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
     Ag = b.param("a", PtrType(io_ty, "global"), noalias=True, readonly=True)
     Bg = b.param("b", PtrType(io_ty, "global"), noalias=True, readonly=True)
     DTB = b.param("dt_bias", PtrType(io_ty, "global"), noalias=True, readonly=True)
@@ -351,7 +366,9 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
     RIDX = b.param("read_indices", PtrType(I32, "global"), noalias=True, readonly=True)
     WIDX = b.param("write_indices", PtrType(I32, "global"), noalias=True, readonly=True)
     STATE = b.param("state", PtrType(st_ty, "global"), noalias=True, align=16)
-    OUT = b.param("out", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
+    OUT = b.param(
+        "out", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16
+    )
     _ = b.param("batch_size", I32)  # noqa: F841
 
     tid = b.thread_id_x()
@@ -375,6 +392,7 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
         b.cmp_ge(read_pool, b.const_i32(0)), b.cmp_ge(write_pool, b.const_i32(0))
     )
     with b.scf_if(active):
+
         def exp_f32(x):
             return b.exp2_fast(b.fmul(x, b.const_f32(LOG2E)))
 
@@ -416,28 +434,51 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
         if spec.use_qk_l2norm:
             pq = wsum(
                 tree_reduce(
-                    b, b.fadd,
-                    [b.fmul(qn[ki][i], qn[ki][i]) for ki in range(WTK_ITERS) for i in range(VPT)],
+                    b,
+                    b.fadd,
+                    [
+                        b.fmul(qn[ki][i], qn[ki][i])
+                        for ki in range(WTK_ITERS)
+                        for i in range(VPT)
+                    ],
                 )
             )
             pk = wsum(
                 tree_reduce(
-                    b, b.fadd,
-                    [b.fmul(kn[ki][i], kn[ki][i]) for ki in range(WTK_ITERS) for i in range(VPT)],
+                    b,
+                    b.fadd,
+                    [
+                        b.fmul(kn[ki][i], kn[ki][i])
+                        for ki in range(WTK_ITERS)
+                        for i in range(VPT)
+                    ],
                 )
             )
             inv_q = b.rsqrt(b.fadd(pq, b.const_f32(NORM_EPS)))
             inv_k = b.rsqrt(b.fadd(pk, b.const_f32(NORM_EPS)))
             sq = b.fmul(inv_q, b.const_f32(scale))
-            qn = [[b.fmul(qn[ki][i], sq) for i in range(VPT)] for ki in range(WTK_ITERS)]
-            kn = [[b.fmul(kn[ki][i], inv_k) for i in range(VPT)] for ki in range(WTK_ITERS)]
+            qn = [
+                [b.fmul(qn[ki][i], sq) for i in range(VPT)] for ki in range(WTK_ITERS)
+            ]
+            kn = [
+                [b.fmul(kn[ki][i], inv_k) for i in range(VPT)]
+                for ki in range(WTK_ITERS)
+            ]
         else:
-            qn = [[b.fmul(qn[ki][i], b.const_f32(scale)) for i in range(VPT)] for ki in range(WTK_ITERS)]
+            qn = [
+                [b.fmul(qn[ki][i], b.const_f32(scale)) for i in range(VPT)]
+                for ki in range(WTK_ITERS)
+            ]
 
         dot_kq = wsum(
             tree_reduce(
-                b, b.fadd,
-                [b.fmul(kn[ki][i], qn[ki][i]) for ki in range(WTK_ITERS) for i in range(VPT)],
+                b,
+                b.fadd,
+                [
+                    b.fmul(kn[ki][i], qn[ki][i])
+                    for ki in range(WTK_ITERS)
+                    for i in range(VPT)
+                ],
             )
         )
 
@@ -446,7 +487,10 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
         for vi in range(WTV_ITERS):
             v_row = b.add(tile_v_start, b.add(gv_start, b.const_i32(vi * WGROUP_V)))
             rs_row = b.add(
-                b.add(b.mul(read_pool, b.const_i32(S_POOL)), b.mul(hv_i, b.const_i32(S_HV))),
+                b.add(
+                    b.mul(read_pool, b.const_i32(S_POOL)),
+                    b.mul(hv_i, b.const_i32(S_HV)),
+                ),
                 b.mul(v_row, b.const_i32(S_VR)),
             )
             for ki in range(WTK_ITERS):
@@ -458,18 +502,29 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
             v_row = b.add(tile_v_start, b.add(gv_start, b.const_i32(vi * WGROUP_V)))
             phk = wsum(
                 tree_reduce(
-                    b, b.fadd,
-                    [b.fmul(sv[(vi, ki)][i], kn[ki][i]) for ki in range(WTK_ITERS) for i in range(VPT)],
+                    b,
+                    b.fadd,
+                    [
+                        b.fmul(sv[(vi, ki)][i], kn[ki][i])
+                        for ki in range(WTK_ITERS)
+                        for i in range(VPT)
+                    ],
                 )
             )
             phq = wsum(
                 tree_reduce(
-                    b, b.fadd,
-                    [b.fmul(sv[(vi, ki)][i], qn[ki][i]) for ki in range(WTK_ITERS) for i in range(VPT)],
+                    b,
+                    b.fadd,
+                    [
+                        b.fmul(sv[(vi, ki)][i], qn[ki][i])
+                        for ki in range(WTK_ITERS)
+                        for i in range(VPT)
+                    ],
                 )
             )
             v_idx = b.add(
-                b.add(b.mul(b_i, b.const_i32(V_HN)), b.mul(hv_i, b.const_i32(V_HK))), v_row
+                b.add(b.mul(b_i, b.const_i32(V_HN)), b.mul(hv_i, b.const_i32(V_HK))),
+                v_row,
             )
             rv = load_scalar_as_f32(b, Vv, v_idx, dtype=spec.dtype)
             # v_new is in-group uniform (rv, broadcast phk, beta) - no bcast.
@@ -478,7 +533,10 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
             with b.scf_if(b.cmp_eq(k_lane, b.const_i32(0))):
                 store_scalar_from_f32(b, OUT, v_idx, out_val, dtype=spec.dtype)
             ws_row = b.add(
-                b.add(b.mul(write_pool, b.const_i32(S_POOL)), b.mul(hv_i, b.const_i32(S_HV))),
+                b.add(
+                    b.mul(write_pool, b.const_i32(S_POOL)),
+                    b.mul(hv_i, b.const_i32(S_HV)),
+                ),
                 b.mul(v_row, b.const_i32(S_VR)),
             )
             for ki in range(WTK_ITERS):

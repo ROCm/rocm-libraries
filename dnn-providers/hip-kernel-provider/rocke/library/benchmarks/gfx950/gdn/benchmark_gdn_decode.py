@@ -125,8 +125,10 @@ def main() -> int:
         print("no HIP device visible", file=sys.stderr)
         return 2
 
-    print(f"{'batch':>6} {'tile':>10} {'spec_id':>9} {'grid':>8} "
-          f"{'eager_us':>10} {'device_us':>10}  correctness")
+    print(
+        f"{'batch':>6} {'tile':>10} {'spec_id':>9} {'grid':>8} "
+        f"{'eager_us':>10} {'device_us':>10}  correctness"
+    )
 
     failures = 0
     for batch in (int(x) for x in args.batches.split(",")):
@@ -142,14 +144,18 @@ def main() -> int:
         err = max(out_err, state_err)
         if err > TOL:
             failures += 1
-            print(f"{batch:>6} {tile:>10} {result.candidate.spec_id:>9} {grid:>8} "
-                  f"{'-':>10} {'-':>10}  FAIL max_err={err:.3e}")
+            print(
+                f"{batch:>6} {tile:>10} {result.candidate.spec_id:>9} {grid:>8} "
+                f"{'-':>10} {'-':>10}  FAIL max_err={err:.3e}"
+            )
             continue
         eager = eager_us(spec, batch)
         device = None if args.no_device else device_us(spec, batch)
         dev_s = f"{device:10.2f}" if device is not None else f"{'n/a':>10}"
-        print(f"{batch:>6} {tile:>10} {result.candidate.spec_id:>9} {grid:>8} "
-              f"{eager:10.2f} {dev_s}  max_err={err:.3e}")
+        print(
+            f"{batch:>6} {tile:>10} {result.candidate.spec_id:>9} {grid:>8} "
+            f"{eager:10.2f} {dev_s}  max_err={err:.3e}"
+        )
 
     return 1 if failures else 0
 

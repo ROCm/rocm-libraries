@@ -20,8 +20,8 @@
 #include <string>
 
 #include "rocke/ir.h"
-#include "rocke/lower_llvm.h"
 #include "rocke/lower_hip.h"
+#include "rocke/lower_llvm.h"
 #include "rocke/strbuf.h"
 
 namespace
@@ -182,16 +182,14 @@ void case_quad_perm_hip()
     EXPECT_IR(hip, "__builtin_amdgcn_update_dpp(c1, c1, 177, 15, 15, 1)");
 }
 
-void expect_quad_perm_rejected(
-    const char* name, bool use_f32, int p0, int p1, int p2, int p3)
+void expect_quad_perm_rejected(const char* name, bool use_f32, int p0, int p1, int p2, int p3)
 {
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, name);
     bool rejected = false;
     try
     {
-        rocke_value_t* data
-            = use_f32 ? rocke_b_const_f32(&b, 1.0) : rocke_b_const_i32(&b, 1);
+        rocke_value_t* data = use_f32 ? rocke_b_const_f32(&b, 1.0) : rocke_b_const_i32(&b, 1);
         rocke_value_t* r = rocke_b_quad_perm(&b, data, p0, p1, p2, p3);
         rejected = (r == nullptr || rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE);
     }

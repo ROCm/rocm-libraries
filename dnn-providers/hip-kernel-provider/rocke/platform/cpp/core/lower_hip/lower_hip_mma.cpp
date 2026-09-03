@@ -287,8 +287,7 @@ static rocke_status_t rocke_h_op_tile_ds_swizzle_xor(rocke_h_lowerer_t* lw, cons
     return lw->status;
 }
 
-static rocke_status_t rocke_h_op_tile_quad_perm(
-    rocke_h_lowerer_t* lw, const rocke_op_t* op)
+static rocke_status_t rocke_h_op_tile_quad_perm(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const rocke_value_t* data = op->operands[0];
     const rocke_value_t* r = h_res(op);

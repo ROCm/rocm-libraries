@@ -1111,8 +1111,8 @@ rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
                                   bool fi,
                                   bool bound_ctrl);
 /* quad_perm: each pN selects source lane 0..3 for destination lane N. */
-rocke_value_t* rocke_b_quad_perm(
-    rocke_ir_builder_t* b, rocke_value_t* data, int p0, int p1, int p2, int p3);
+rocke_value_t*
+    rocke_b_quad_perm(rocke_ir_builder_t* b, rocke_value_t* data, int p0, int p1, int p2, int p3);
 rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
 rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
                                  rocke_value_t* a,

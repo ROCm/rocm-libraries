@@ -154,8 +154,12 @@ def prepare(spec: GdnDecodeSpec, inp, batch: int):
     """
     torch_dtype = {"bf16": torch.bfloat16, "f16": torch.float16}[spec.dtype]
     out = torch.zeros(
-        batch, 1, spec.num_v_heads, spec.head_v_dim,
-        device=inp["query"].device, dtype=torch_dtype,
+        batch,
+        1,
+        spec.num_v_heads,
+        spec.head_v_dim,
+        device=inp["query"].device,
+        dtype=torch_dtype,
     )
     values = dict(inp)
     values["state"] = inp["state"].clone()  # the kernel updates the state in place
@@ -215,7 +219,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--batches", default="1,16,64", help="comma-separated batch sizes")
     ap.add_argument(
-        "--variant", choices=("tiled", "simple"), default="tiled",
+        "--variant",
+        choices=("tiled", "simple"),
+        default="tiled",
         help="tiled = default warp-tiled path; simple = one-thread-per-row reference",
     )
     ap.add_argument("--bench", action="store_true", help="also report per-launch time")

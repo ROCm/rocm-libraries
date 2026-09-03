@@ -58,9 +58,14 @@ class TestTunedSelection(unittest.TestCase):
 
     def test_band_edges_are_where_the_table_says(self):
         # Guards against an off-by-one that would silently mis-tune a whole band.
-        for batch, expected in ((4, (4, 16, 8)), (5, (2, 8, 2)),
-                                (32, (2, 8, 2)), (33, (1, 8, 1)),
-                                (128, (1, 8, 1)), (129, (8, 16, 1))):
+        for batch, expected in (
+            (4, (4, 16, 8)),
+            (5, (2, 8, 2)),
+            (32, (2, 8, 2)),
+            (33, (1, 8, 1)),
+            (128, (1, 8, 1)),
+            (129, (8, 16, 1)),
+        ):
             with self.subTest(batch=batch):
                 self.assertEqual(_TILE(dispatch_gdn_decode(_req(batch)).spec), expected)
 
@@ -74,7 +79,9 @@ class TestTunedSelection(unittest.TestCase):
     def test_selected_spec_is_always_buildable(self):
         for batch in (1, 4, 5, 16, 33, 64, 129, 256, 8192):
             with self.subTest(batch=batch):
-                ok, why = is_valid_spec(dispatch_gdn_decode(_req(batch)).spec, arch=ARCH)
+                ok, why = is_valid_spec(
+                    dispatch_gdn_decode(_req(batch)).spec, arch=ARCH
+                )
                 self.assertTrue(ok, why)
 
 
@@ -140,8 +147,11 @@ class TestKernelIdentity(unittest.TestCase):
         seen = {}
         for batch in (1, 16, 64, 256):
             kid = dispatch_gdn_decode(_req(batch)).kernel_id
-            self.assertNotIn(kid.compile_key, seen,
-                             f"batch {batch} collides with batch {seen.get(kid.compile_key)}")
+            self.assertNotIn(
+                kid.compile_key,
+                seen,
+                f"batch {batch} collides with batch {seen.get(kid.compile_key)}",
+            )
             seen[kid.compile_key] = batch
 
     def test_spec_hash_covers_the_tile(self):
@@ -149,8 +159,9 @@ class TestKernelIdentity(unittest.TestCase):
 
         a = dispatch_gdn_decode(_req(1)).spec
         b = dispatch_gdn_decode(_req(256)).spec
-        self.assertNotEqual(stable_json_hash(asdict(a), n=16),
-                            stable_json_hash(asdict(b), n=16))
+        self.assertNotEqual(
+            stable_json_hash(asdict(a), n=16), stable_json_hash(asdict(b), n=16)
+        )
 
 
 class TestSweepSpace(unittest.TestCase):

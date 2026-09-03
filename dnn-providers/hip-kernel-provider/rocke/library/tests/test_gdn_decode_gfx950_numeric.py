@@ -51,8 +51,13 @@ def harness():
     from builders.gfx950.gdn.gdn_decode import make_inputs, prepare, ref_fp32
 
     return {
-        "TOL": TOL, "check": check, "launch": launch, "launcher_for": launcher_for,
-        "make_inputs": make_inputs, "prepare": prepare, "ref_fp32": ref_fp32,
+        "TOL": TOL,
+        "check": check,
+        "launch": launch,
+        "launcher_for": launcher_for,
+        "make_inputs": make_inputs,
+        "prepare": prepare,
+        "ref_fp32": ref_fp32,
     }
 
 
@@ -117,9 +122,9 @@ def test_padding_lanes_are_skipped_and_leave_state_untouched(harness):
     torch.cuda.synchronize()
 
     inactive = torch.arange(1, batch, 2, device=values["state"].device)
-    assert torch.equal(values["state"][inactive], before[inactive]), (
-        "state of an inactive (negative-index) sequence was modified"
-    )
+    assert torch.equal(
+        values["state"][inactive], before[inactive]
+    ), "state of an inactive (negative-index) sequence was modified"
 
 
 @requires_gfx950

@@ -47,9 +47,7 @@ class TestSpecAdmission(unittest.TestCase):
         self.assertTrue(ok, why)
 
     def test_value_heads_must_be_a_multiple_of_key_heads(self):
-        ok, why = is_valid_spec(
-            dc.replace(GdnDecodeSpec(), num_v_heads=33), arch=ARCH
-        )
+        ok, why = is_valid_spec(dc.replace(GdnDecodeSpec(), num_v_heads=33), arch=ARCH)
         self.assertFalse(ok)
         self.assertIn("divisible", why)
 
@@ -122,7 +120,8 @@ class TestKernelNameIdentity(unittest.TestCase):
         for label, spec in variants.items():
             name = spec.kernel_name()
             self.assertNotIn(
-                name, names,
+                name,
+                names,
                 f"{label!r} collides with {names.get(name)!r} on {name!r}; "
                 "two different kernels would share one cache entry",
             )
@@ -153,8 +152,20 @@ class TestLaunchShape(unittest.TestCase):
         names = [a["name"] for a in sig]
         self.assertEqual(
             names,
-            ["query", "key", "value", "a", "b", "dt_bias", "A_log",
-             "read_indices", "write_indices", "state", "out", "batch_size"],
+            [
+                "query",
+                "key",
+                "value",
+                "a",
+                "b",
+                "dt_bias",
+                "A_log",
+                "read_indices",
+                "write_indices",
+                "state",
+                "out",
+                "batch_size",
+            ],
         )
         self.assertEqual(names[-1], "batch_size")
         self.assertEqual(sig[-1]["type"], "i32")
@@ -190,10 +201,16 @@ class TestEmission(unittest.TestCase):
     def test_distinct_tiles_emit_distinct_code(self):
         # If two tiles produced identical IR the tuning table would be choosing
         # between kernels that are actually the same.
-        a = _lower(dc.replace(GdnDecodeSpec(), num_warps=1, warp_threads_k=8,
-                              blocks_per_v_dim=1))
-        b = _lower(dc.replace(GdnDecodeSpec(), num_warps=8, warp_threads_k=16,
-                              blocks_per_v_dim=1))
+        a = _lower(
+            dc.replace(
+                GdnDecodeSpec(), num_warps=1, warp_threads_k=8, blocks_per_v_dim=1
+            )
+        )
+        b = _lower(
+            dc.replace(
+                GdnDecodeSpec(), num_warps=8, warp_threads_k=16, blocks_per_v_dim=1
+            )
+        )
         self.assertNotEqual(a, b)
 
     def test_emission_is_deterministic(self):

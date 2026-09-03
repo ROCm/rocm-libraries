@@ -3210,9 +3210,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
     # ---- quad_perm ----
     def test_quad_perm_encodes_lane_selection(self):
         # [1,0,3,2] -> 1 | (0 << 2) | (3 << 4) | (2 << 6) == 177.
-        ll = self._lower(
-            "qperm", lambda b: b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
-        )
+        ll = self._lower("qperm", lambda b: b.quad_perm(b.const_i32(1), [1, 0, 3, 2]))
         self.assertIn("declare i32 @llvm.amdgcn.update.dpp.i32(", ll)
         self.assertIn(
             "call i32 @llvm.amdgcn.update.dpp.i32("

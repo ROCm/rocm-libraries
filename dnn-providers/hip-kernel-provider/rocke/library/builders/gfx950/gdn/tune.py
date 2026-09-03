@@ -156,15 +156,19 @@ def main() -> int:
             return 1
         print(f"\n=== batch {batch}: top {args.top} of {len(rows)} ===")
         for micros, tile, err in rows[: args.top]:
-            print(f"  {micros:9.3f}us  num_warps={tile[0]} warp_threads_k={tile[1]} "
-                  f"blocks_per_v_dim={tile[2]}  err={err:.2e}")
+            print(
+                f"  {micros:9.3f}us  num_warps={tile[0]} warp_threads_k={tile[1]} "
+                f"blocks_per_v_dim={tile[2]}  err={err:.2e}"
+            )
         winners[batch] = rows[0]
 
     print("\n=== fastest per batch ===")
     for batch, (micros, tile, _) in winners.items():
         print(f"  batch {batch:<6d} {tile}  {micros:.3f}us")
-    print("\nUpdate _TUNED_TILES in dispatch/gdn/gfx950.py if these disagree "
-          "with the table, and re-run the wiring test.")
+    print(
+        "\nUpdate _TUNED_TILES in dispatch/gdn/gfx950.py if these disagree "
+        "with the table, and re-run the wiring test."
+    )
     return 0
 
 
