@@ -1,6 +1,5 @@
 {% extends "common/base.h.jinja2" %}
 
-
 {% block target_tparams %}
 template<class Target, class key_type, class value_type>
 {% endblock %}
@@ -8,13 +7,9 @@ template<class Target, class key_type, class value_type>
 {% block config_guard scoped %}{{ mk_kv_type_check(type) }}{% endblock %}
 
 {% block config_constructor -%}
-merge_sort_block_merge_config_params{
-    { 256, 1, (1 << 17) + 70000 },
-    { 128, 1 },
-    { {{ config.block_size_x }}, {{ config.ipt }} }
-}
+kernel_config_params{ {{ config.block_size_x }}, {{ config.ipt }} }
 {%- endblock %}
 
 {% block config_base_type -%}
-merge_sort_block_merge_config_params_base<key_type, value_type>
+radix_sort_block_sort_config_params_base<key_type, value_type>
 {%- endblock %}
