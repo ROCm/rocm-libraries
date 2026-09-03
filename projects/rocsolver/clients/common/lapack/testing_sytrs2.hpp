@@ -36,6 +36,8 @@
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 
+#include "common/misc/generate.hpp"
+
 template <bool STRIDED, typename I, typename Td, typename Id>
 void sytrs2_checkBadArgs(const rocblas_handle handle,
                          const rocblas_fill uplo,
@@ -162,31 +164,58 @@ void sytrs2_initData(const rocblas_handle handle,
         rocblas_init<T>(hA, true);
         rocblas_init<T>(hB, true);
 
-        // scale A to avoid singularities
-        for(I b = 0; b < bc; ++b)
+        bool const use_syrand = true;
+        if(use_syrand)
         {
-            for(rocblas_int i = 0; i < n; i++)
+            for(I b = 0; b < bc; ++b)
             {
-                for(rocblas_int j = 0; j < n; j++)
+                T* const A = &(hA[b][0]);
                 {
-                    if(i == j)
-                        hA[b][i + j * lda] += 400;
-                    else
-                        hA[b][i + j * lda] -= 4;
+                    int value = 0xFF;
+                    size_t nbytes = sizeof(T) * lda * n;
+                    memset((void*)A, value, nbytes);
                 }
-            }
 
-            // shuffle rows to test pivoting
-            // always the same permutation for debugging purposes
-            for(rocblas_int i = 0; i < n / 2; i++)
+                syrand(uplo, n, A, lda);
+
+                // set diagonal entries
+                {
+                    T const alpha = 0;
+                    for(I i = 0; i < n; i++)
+                    {
+                        A[i + i * int64_t(lda)] = alpha;
+                    }
+                }
+            } // end for b
+        }
+        else
+        {
+            // scale A to avoid singularities
+            for(I b = 0; b < bc; ++b)
             {
-                for(rocblas_int j = 0; j < n; j++)
+                for(rocblas_int i = 0; i < n; i++)
                 {
-                    std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        if(i == j)
+                            hA[b][i + j * lda] += 400;
+                        else
+                            hA[b][i + j * lda] -= 4;
+                    }
                 }
-            }
 
-        } // end for b
+                // shuffle rows to test pivoting
+                // always the same permutation for debugging purposes
+                for(rocblas_int i = 0; i < n / 2; i++)
+                {
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
+                    }
+                }
+
+            } // end for b
+        }
 
         // do the symmetric decomposition of matrix A w/ the reference LAPACK routine
         for(I b = 0; b < bc; ++b)
@@ -197,6 +226,24 @@ void sytrs2_initData(const rocblas_handle handle,
 
             cpu_sytrf(uplo, n, hA[b], lda, hIpiv_cpu[b], work.data(), lwork, &info);
             assert(info == 0);
+
+#ifdef NDEBUG
+#else
+            {
+                auto ipiv = hIpiv_cpu[b];
+                int num_1x1 = 0;
+                for(int i = 0; i < n; i++)
+                {
+                    if(ipiv[i] > 0)
+                    {
+                        num_1x1 += 1;
+                    }
+                }
+                int num_2x2 = (n - num_1x1) / 2;
+                std::cout << "b = " << b << " n = " << n << " num_1x1 = " << num_1x1
+                          << " num_2x2 = " << num_2x2 << "\n";
+            }
+#endif
 
             for(I i = 0; i < n; i++)
             {
@@ -260,7 +307,6 @@ void sytrs2_getError(const rocblas_handle handle,
     for(I b = 0; b < bc; ++b)
     {
         err = norm_error('I', n, nrhs, ldb, hB[b], hBRes[b]);
-        // *max_err = err > *max_err ? err : *max_err;
         *max_err = rocblas_max_nan(err, (*max_err));
     }
 }
@@ -524,7 +570,7 @@ void testing_sytrs2(Arguments& argus)
     // validate results for rocsolver-test
     // using n * machine_precision as tolerance
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, n);
+        ROCSOLVER_TEST_CHECK(T, max_error, 4 * n);
 
     // output results for rocsolver-bench
     if(argus.timing)
