@@ -29,14 +29,13 @@
 
 #include "common/misc/client_util.hpp"
 #include "common/misc/clientcommon.hpp"
+#include "common/misc/generate.hpp"
 #include "common/misc/lapack_host_reference.hpp"
 #include "common/misc/norm.hpp"
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
-
-#include "common/misc/generate.hpp"
 
 template <bool STRIDED, typename I, typename Td, typename Id>
 void sytrs2_checkBadArgs(const rocblas_handle handle,

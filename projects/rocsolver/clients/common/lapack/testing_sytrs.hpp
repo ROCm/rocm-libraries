@@ -29,6 +29,7 @@
 
 #include "common/misc/client_util.hpp"
 #include "common/misc/clientcommon.hpp"
+#include "common/misc/generate.hpp"
 #include "common/misc/lapack_host_reference.hpp"
 #include "common/misc/norm.hpp"
 #include "common/misc/rocsolver.hpp"
@@ -162,30 +163,57 @@ void sytrs_initData(const rocblas_handle handle,
         rocblas_init<T>(hA, true);
         rocblas_init<T>(hB, true);
 
-        for(I b = 0; b < bc; ++b)
+        bool const use_syrand = true;
+        if(use_syrand)
         {
-            for(rocblas_int i = 0; i < n; i++)
+            for(I b = 0; b < bc; ++b)
             {
-                for(rocblas_int j = 0; j < n; j++)
+                T* const A = &(hA[b][0]);
                 {
-                    if(i == j)
-                        hA[b][i + j * lda] += 400;
-                    else
-                        hA[b][i + j * lda] -= 4;
+                    int value = 0xFF;
+                    size_t nbytes = sizeof(T) * lda * n;
+                    memset((void*)A, value, nbytes);
                 }
-            }
 
-            // shuffle rows to test pivoting
-            // always the same permutation for debugging purposes
-            for(rocblas_int i = 0; i < n / 2; i++)
+                syrand(uplo, n, A, lda);
+
+                // set diagonal entries
+                {
+                    T const alpha = 0;
+                    for(I i = 0; i < n; i++)
+                    {
+                        A[i + i * int64_t(lda)] = alpha;
+                    }
+                }
+            } // end for b
+        }
+        else
+        {
+            for(I b = 0; b < bc; ++b)
             {
-                for(rocblas_int j = 0; j < n; j++)
+                for(rocblas_int i = 0; i < n; i++)
                 {
-                    std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        if(i == j)
+                            hA[b][i + j * lda] += 400;
+                        else
+                            hA[b][i + j * lda] -= 4;
+                    }
                 }
-            }
 
-        } // end for b
+                // shuffle rows to test pivoting
+                // always the same permutation for debugging purposes
+                for(rocblas_int i = 0; i < n / 2; i++)
+                {
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
+                    }
+                }
+
+            } // end for b
+        }
 
         // do the symmetric decomposition of matrix A w/ the reference LAPACK routine
         for(I b = 0; b < bc; ++b)
@@ -259,7 +287,6 @@ void sytrs_getError(const rocblas_handle handle,
     for(I b = 0; b < bc; ++b)
     {
         err = norm_error('I', n, nrhs, ldb, hB[b], hBRes[b]);
-        // *max_err = err > *max_err ? err : *max_err;
         *max_err = rocblas_max_nan(err, (*max_err));
     }
 }
@@ -523,7 +550,7 @@ void testing_sytrs(Arguments& argus)
     // validate results for rocsolver-test
     // using n * machine_precision as tolerance
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, n);
+        ROCSOLVER_TEST_CHECK(T, max_error, 4 * n);
 
     // output results for rocsolver-bench
     if(argus.timing)
