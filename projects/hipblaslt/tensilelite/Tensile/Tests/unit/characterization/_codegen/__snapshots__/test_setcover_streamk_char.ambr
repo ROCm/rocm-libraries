@@ -2,35 +2,27 @@
 # name: test_setcover_streamk_emits_golden[sk_bgemm_tdm_split]
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT16x16x128_MI16xyM1-DDeGdRimyqTGU6Ju947Hpu9Rt_0mUNrXBcvhnxk=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT16x16x128_MI16xuSAG9_I2cC2UfcQCPFI9656aQGCjuIzqG6zShin_MWA=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT16x16x64_MI16x1A8qYRIcQeau_s63CR4KqeuSm9jcHcDgTO_lUsN412r8=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT16x16x64_MI16x1b5DZYGyL8i-e9jMrYhu1-jId3ZdPLQm7PETzLmlwEdo=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT16x16x64_MI16x1wIlEHMdSpdsn6wUcRhVymzXCLB5yA0cYPz0h5LCaOZQ=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT256x128x128_MI1tIfEk6d2RuA2_QuzlyyjrXcyvLFWz2q2taIT2jfCCB8=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT256x128x128_MI1e_Va0Oh0GI2jAou29NaF4US6gsw_S7Ctl3773XCYDYw=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT256x128x64_MI16jI8sPzlTV9OH3_WJkMRHwUiYzOpRd-BKJr3vJ-35bpk=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT256x128x64_MI16Cwxe2a7wefWyv8tNX2q0cziQXLly-c70GrRB1DDZNcc=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT32x32x128_MI16xeySCTTuvIuM8MGBSpIG4pzd1hPj6i-69f4gN01kXp4M=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT32x32x128_MI16xOXyTOdKNUNkVw_VtgenK_RZeQ7oO-F831CPtf6Y146w=',
-      'err': 0,
-    }),
-    dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT32x32x64_MI16x1ORuUifAiN4G2ZiRH2qizit4mjPIUecKijQCINKlLsQA=',
-      'err': 0,
-    }),
-    dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT32x32x64_MI16x1ad-nqr6sGxzk6XJe_rm4I-Rt_3N19RLcZqHX67EKBqM=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT32x32x64_MI16x1iWmgKNdJ2WaP61U5phjk_4NYW9ugmKdlwV83xfau-po=',
       'err': 0,
     }),
   ])
@@ -38,35 +30,35 @@
 # name: test_setcover_streamk_emits_golden[sk_dynamic]
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32bZ-ndtxGv5yRfMO01Co7Se1vAmIAcbutaUdHbgI6D3s=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x328htLniwjbSahc-UTIpWFlLkSboZ3AQaoWf63uJYDNi4=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT192x192x16_MI32x32rfZobalM5eZ1ufrhACf4Kt2hYcGoTiBRCQ4rI_YGTTI=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT192x192x16_MI32x32Pa_V4fACx0REEDKG7n4P3eWFCI0KDxZxfDhMQbucZSg=',
       'err': -2,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x128x16_MI16x16Alsuj06_IuIxpRV7N1nLwjZUVJrsHQ13Qz6GdQzcpG0=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x128x16_MI16x16nkLnqwvwV-y0v5GmsUzkCXiEPwJYH90QETalN3ZcvHQ=',
       'err': -2,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x256x16_MI16x16IHVi5026eGupoCQtHx2w1kqjRf-CkU--bxdLvTh10OA=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x256x16_MI16x16CzImI3ON8sQNEMQoGuyX1t_cKpTKl9BTX-IxFLTGf3Q=',
       'err': -2,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x256x16_MI32x32bP06WdcwFzTeJsc0fHf_JYMBpGoNi_Y3aSCaYpmGI6Y=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x256x16_MI32x32UWJxvgbaCVwEqgFNr-1anePCZbwYy4mw_twZoKPZz1I=',
       'err': -2,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x32x16_MI16x16x7FLoVLVbTLRgYG6lXlLFbBE-q7OmjAsMn-75VcSyBDk=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x32x16_MI16x16xDolmEuDT9pjqCJMxjTeTqmLtMyQAmBM7m21ByFa4je8=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x64x16_MI16x16xAQ8dBdFcr2rKEl9cnkwxZb2J-Xv-IBFGjXkw4vZYzQI=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x64x16_MI16x16xa8RkmB_3iM6Y94_yI8ecWQLqWpitSHdTUJiAn3RphyA=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI32x32x1tgjybWZIgCL4bXcx6Gh6tR7OpJoJvj4lOQo0mkNofoQ=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI32x32x1-hqcRKV0kOqSog727SVOJBDfByQ-P5Hm6XG-DqofDu0=',
       'err': 0,
     }),
   ])
@@ -74,19 +66,19 @@
 # name: test_setcover_streamk_emits_golden[sk_dynamic_work_stealing]
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32No_I2fn0raze9CWaTxvGzeBA06txGn-gBC3QTCA8lQQ=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x328htLniwjbSahc-UTIpWFlLkSboZ3AQaoWf63uJYDNi4=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32bZ-ndtxGv5yRfMO01Co7Se1vAmIAcbutaUdHbgI6D3s=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32RYjOuy47c6Scxoe1RSx0Fey2E05JaQobK09i_xRYG2s=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x1ClAj6Pg75Qvfiiu4iJKl945UIrlct7aQMuU57PU6fYY=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x14VA2fgv3XW73f31HiiH_Lq3F--QRbEDvu2UN46pqfSw=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x1QJfEeaWJvaNGmALAPinz5QMJ7zJSgGSGQV4VmN48-rQ=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x1jPtamR6nL0qvBtfYbRzWGmt59va0kaFYVxcYZOT5l6w=',
       'err': 0,
     }),
   ])
@@ -94,35 +86,35 @@
 # name: test_setcover_streamk_emits_golden[sk_halfplr_f8gemm_tdm]
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT128x128x256_MHQduh6cDP9WQ1r-xMZ1RPQmqgy8cIbx7tUEMp508cng=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT128x128x256_MmKVnxK-u_g1pHSWKL6hapXrBK_eOSoBv9tNgkQ3xv0M=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT128x128x256_MPo-RhorVIbcgz6nDvgnwTqlCiCmTWdUcfrqk_VBA4Bk=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT128x128x256_MmbBA9xbA3nHxUS5daqQsfNLP6bW8a8sHea6TkA1XWhQ=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT256x256x256_MTyu1--_GaX5QjTun0oqFNLEwrJi86MZ7J9AMo02RO5g=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT256x256x256_MVsOB43UxoMxNc81Bqr1X_7WhleutDFhgEVuG9qDBru0=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT256x256x256_Me7xr1oJu2bhDV4YLD4HrsjK9g2bzSfTJi5xsIlFy2f0=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT256x256x256_Madrfm5QHyXerrFWNWoRhHE216O3TKqbOppTfZSb67JU=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI1IsKsmBOGymZ-Ud-Q9_cU5lr5wBvT6mUuh0wDvxbwlY0=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI1-X5wVW0OUtXuNyrsiB1E9f5a44eUtK9it5WbJUGFeJ0=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI1N5olT18bEi6P2ywbjn5mM6iLwQlMO4731s7IBK4awMo=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI1ZT9Fg6UoI1pJxErjw8vna2ECFjH0eghNNlH0quF5M18=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI1YLvNOJtsoNFUgGAuS08likJ9kemYw6H3JqUxNnwygOE=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI1xiFEBSAdKGrKk0tVQq_Z7n0pT6nMnQZYxc9rLGLQiSQ=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI1vep1xlYd_stEv0uEeZlFDyF3XcKvuD9hh94MtOkbChg=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI1y28vd165BPjY3R9dmImh5j4Cw8QvxzL5Rzljm0asQwM=',
       'err': 0,
     }),
   ])
@@ -130,19 +122,19 @@
 # name: test_setcover_streamk_emits_golden[sk_hybrid_work_stealing]
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32WztN9cymGZJz-k3i4CRVQ8524JrRcP7W4lh2lOX9H7E=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32eiPyBJECgdc9hwX_0QH0bTuftc0qyZVlZ77vS-A7V0A=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32yGZOm_MsDpcqvVKqsOPCcjxKZbDnRRP3mS07RYF9GOg=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32fLwwTwIbM4lLJ96sPIAp7SLeRZVTA8-bT3fXkvZge7o=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x1CYdRjuqpCLY5s80jUdx5f2lTA0GNoDHJQ2QenPSMJw8=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x1A8hS_WZnPTq2CagXyrpr2AxQjRYIkBIl934kKvfZU-4=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x1O3mHI6qQcHL26_JoI4G2_zcNhpkEk08n9vJOip9YX5U=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x1Zb2yTQEDcgHniEBiflWQrCXmZ2FYEqxsC4atI9sMUMI=',
       'err': 0,
     }),
   ])
@@ -150,11 +142,11 @@
 # name: test_setcover_streamk_emits_golden[sk_mx32f4_quick]
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_Bias_HA_ViXN_QUu3sDYqbxcngaS3RcTNNzp76JggU7VmpiGwY=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_Bias_HADnuBCJ8jtRwSM05tGnwgX3QEmd-mkvOtpqNiE1Dem9U=',
       'err': -2,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_Bias_HAjktUHd_5-zHlRFfwFBEMb0i_DThHkAidaHKkZquaIbI=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_Bias_HAg3VEfL3YEZUFIRj-DjVTj_iB6_fymXCxLjngT7a8ZEk=',
       'err': 0,
     }),
   ])
@@ -162,19 +154,19 @@
 # name: test_setcover_streamk_emits_golden[sk_mxf4gemm_pap]
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg1RIiVEAGLq69Nq589jEnatllIMI1pz9fnMDxuZ55gE4=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgATVUEfpGlbky548S9SuI9URZn1FskS_YBKsFfbkpaHU=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg42HkJnvI58Eu3ndTTi4KKnUzgr_04evpq8BWb4T70TU=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgKbRBLRugaeSYkfBrDDpvo8OU2a5zPw88-4_oAB96W-0=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgfrpUNMa4gseeq1vdX3t-c7PMxcHVNWt7F142IIH2vms=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgoAD0ovPwtsqpwse0VnG6VpSbgjz_VOscvltOSSNjeh0=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgjcjyvbEtNzGeq7BZHQ2LrSHZI1U1kP5w9W5DTzA3vfo=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgomHgPSbnA2333Vj9MjOCXAKpA6AepRNybxp3Q2K7NjA=',
       'err': 0,
     }),
   ])
@@ -182,35 +174,35 @@
 # name: test_setcover_streamk_emits_golden[sk_mxf4gemm_pap_prefetchgl2]
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg0cclKyvzF5Hi7Vh8W3K9lwEapIizfS7_PiLlp-USBpE=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg4BaF4fxPGIqLy7pLojdCIw_zbMGyn3nuwN7-9WKzKYE=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg9GS7JJOK2jkn_HbqWFRf6BEj4JdfePcMpLcs8KLGU_U=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg4IZzJ5AK2pWwK2gHpuFeS8-wNWDijW4IphRlM2RNc-Y=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgT3BUSfDUaLq5XmQqyJ9YK-scuSniPKXNV7yjKaY2l6I=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgA7GKQVrxAsnPEAYhKGfi2RQysiWnDZdCPLCBHgLa14k=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgZ7VQZyWa5quS0XHwDKZkbXoUXNpdvKqPQD4wyR4APtE=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgabnVlT5p0Nqh2_nDwvNFOwSfIfwGwwH4atwkFpg-Jmc=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgZyqWymZka5m9QzJV9zCvmX_iexybSstQmQkA5z8VRZE=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgeeK6k57MsWnxXwJ3r_BSy0cZyCFD09h84E6h-G839AY=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArga7bKLSt432ROEA2vYYULr5IF_0i7_E9nhrm1qaIbyEg=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArglr4H1dEVdF7pPuzONOHg5cOvWCYRT9SDKycBO4Pf7-w=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArggK6wa6vM7QYZC_HX331-1WxfhrVmKw6xgr4Y0ygB-co=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgmymd7IZhM80xZZflJ6DmD9mQqcep4L66PcWibPpC78k=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArguRbR85nGicDr4QFzpb7umnz2ek_YGt1gpyQjv4hQADQ=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgq1Q-S1RPLzFIlcxMN2LTRYC3WGAXW2NVVQI-E-Gh0tk=',
       'err': 0,
     }),
   ])
@@ -218,19 +210,19 @@
 # name: test_setcover_streamk_emits_golden[sk_mxf8_force_dp_only_halfplr_tdm_pap]
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH_UserArR7r-NUNcfqGGWrHvyUsR0D6B6t6BN0IpJU3WpigZzUw=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH_UserAr2PU1TTKpmCcpZMzNQDUkNWvjAJG0o-x8WlPDgneTUFw=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH_UserAr_SAHxJVbCyv4BWs_2Er8F4X7sI_DSMWdG2YrFkjsIeo=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH_UserArHkG5c3YqzNSRsLpKgmsxD91BfpOUk0DrrjyT04PvRLY=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH_UserArfmwU0AfJ4OwPi222xUffRVqDZpsYyI7DoepMO7ArX9w=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH_UserArfIjps55gA1rwXI7_mDPetsE4-JpfxHxvv7nBl5dFKIQ=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH_UserArvGXfu-9Uh_AtEeoms88y_ujUuh9dgaTqfPrj5mtdadw=',
+      'basename': 'Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH_UserArl-ApfejTacW9R_LLLvi3ndE_-5QCXoha4RCwgqODHHs=',
       'err': 0,
     }),
   ])
@@ -238,19 +230,11 @@
 # name: test_setcover_streamk_emits_golden[sk_mxf8gemm_tdm_split]
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B16_MXBE8B16_BH_UserArg6fvmsY0XYQuvsf-Us2_OgGA4NKUm-OGUdjQWr9BNFwc=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B16_MXBE8B16_BH_UserArgJ38aDc6jHBXCfNd-RprnMgIQ1tTz5PmI4QepRcMAkwA=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B16_MXBE8B16_BH_UserArgCbdPdAZqZKpmweI8ajrrNUMrv2tPbUMyd7niEiy9cWM=',
-      'err': 0,
-    }),
-    dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B16_MXBE8B16_BH_UserArgPL2I1u92ASpKMC6lLKHTQ6E-Vir83wI0CtKRlaprD28=',
-      'err': 0,
-    }),
-    dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B16_MXBE8B16_BH_UserArgrwydEEOsfjEhQZkfjaeKn3a_MAVcx4Dp4X2eYqQ20BE=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B16_MXBE8B16_BH_UserArgz21viteoPWEzhScJtQxvMq5yYJtsVL8_dE1MlCHGIYc=',
       'err': 0,
     }),
   ])
@@ -258,35 +242,35 @@
 # name: test_setcover_streamk_emits_golden[sk_sgemm_pap]
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x1656FhXoORH7MQI6RBLmNMgI-LfUvVWaADXH-3NGlP-Sw=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x163pFwONawYV_jb8GOPnT6Hr_FjbZvP4lRAuaFw1sDdr4=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16LjdylUZ90szUZzbliTvwQjL4ODUyFeU318ePD5rLA58=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16L7h1WT8CKY0EngxWK4raEItD7ukUY64O5UziAS-fwdQ=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16YJNqBWhKNnbgYXBVQTsNNjSkxvVsXAkm8q2Q27oGN8A=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16Qz736sJqlKynMIUU8qMdNZNoNBgxHv9bliQnNkYdEYA=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16e4W-4QItDgeeW4znNSn7xAY6aR6qH-e7BycDI6Ax8EU=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16YPgrBGJe8u2XWRQzbkIFdtU9ukRZgHPE_l5AqfjAG3Q=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16g_X5FyY2Vwy1Jp2HFMRtnhrX5e1hq-E5bYw-_Xem90U=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16en_AiikxMNMrhCATUGxP40MZyZKqD-xBGyDq-RrFqbA=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16heNUFaptA7mJrJovfRTb8lxf6Xe6BOfuWHilrAnuqmE=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16mNd3X8ef8EdqP6WUZPXPH43c9wCn9Xgt44ixSYvfLDY=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16jccJ3BJih7hQS2-xAy_WRK3cp4VzwQJ237bJlsath0Q=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16pu5AAStc3bosmzg0OEfy4RjUrsTHOxMS3Hne-nMCm2E=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16p9JdlIqlRvp8h04UKxhclQiQbfE5480AvysO_5sXQVw=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16yXvuRJ--XcodRi5P5X7af90ht3fIG8mc_xUccSpOXYU=',
       'err': 0,
     }),
   ])
