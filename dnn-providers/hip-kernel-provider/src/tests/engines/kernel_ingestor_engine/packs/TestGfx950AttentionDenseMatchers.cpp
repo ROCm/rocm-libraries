@@ -798,12 +798,17 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherDtype)
     EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
 }
 
-TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherBatch)
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateWhoseBatchBoundIsTooSmall)
 {
-    // Every shape field is compiled in: the K/V buffer resources are sized at build
-    // time, so a larger batch reads zero-fill past the bound rather than faulting.
+    // This case used to assert the opposite direction -- `kernel.batch = BATCH + 1`
+    // must be REFUSED -- on the grounds that "every shape field is compiled in". That
+    // was true of every other shape field and never true of batch on the default arm,
+    // where it reaches the IR only as a buffer_rsrc extent. A variant built for a
+    // LARGER batch is now a legitimate match (see the bound cases at the end of this
+    // file); a variant built for a SMALLER one is not, because the graph then reads
+    // past a resource bound that zero-fills rather than faulting.
     KernelSpec kernel;
-    kernel.batch = BATCH + 1;
+    kernel.batch = BATCH - 1;
     EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
 }
 
@@ -1005,6 +1010,61 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesAWideDmaCandidateThatIsNotPersi
     kernel.wideLdsDma = 1;
     kernel.persistent = 0;
     EXPECT_FALSE(matchesKernel(graph, kernel));
+}
+
+// ---------------------------------------------------------------------------
+// batch: a CAPACITY BOUND on the default arm, strict equality on the persistent one.
+// ---------------------------------------------------------------------------
+
+TEST(TestGfx950AttentionDenseKernelMatch, ADefaultVariantServesASmallerBatchThanItWasBuiltFor)
+{
+    // The widening this bound exists for. `batch` reaches the default arm's IR only as
+    // the K/V (and ragged Q) buffer_rsrc extents; the batch index is block_id_z and the
+    // addressing is computed at runtime. A binary compiled for 8 has resource bounds
+    // strictly larger than a 4-sequence graph needs, and prepare() launches 4 CTAs in
+    // Z rather than 8.
+    GraphSpec graph;
+    graph.batch = 4;
+    KernelSpec kernel;
+    kernel.batch = 8;
+    kernel.persistent = 0;
+    EXPECT_TRUE(matchesKernel(graph, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, ADefaultVariantRefusesALargerBatchThanItWasBuiltFor)
+{
+    // The other side, and the one that is a fault rather than a missed opportunity: a
+    // graph with more sequences than the compiled resource bound covers reads past the
+    // K/V extent. Bounds-checked, so it zero-fills silently -- which is why the bound
+    // is `<=` and not "ignore batch".
+    GraphSpec graph;
+    graph.batch = 16;
+    KernelSpec kernel;
+    kernel.batch = 8;
+    kernel.persistent = 0;
+    EXPECT_FALSE(matchesKernel(graph, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, APersistentVariantStillRequiresExactBatch)
+{
+    // The persistent arm recovers (qb, hq, bt) from a flat work-item index by mod/div
+    // against a COMPILE-TIME B. A smaller batch does not decode to a subset -- it
+    // decodes to different work items entirely, so every CTA computes the wrong tile.
+    // Wrong output, no fault. This is the case that makes the bound arm-specific
+    // rather than global.
+    GraphSpec graph;
+    graph.batch = 4;
+    KernelSpec kernel;
+    kernel.batch = 8;
+    kernel.persistent = 1;
+    EXPECT_FALSE(matchesKernel(graph, kernel));
+
+    // ...and the control: exact batch on the persistent arm still matches, so the
+    // guard above is refusing the mismatch rather than the arm.
+    KernelSpec exact;
+    exact.batch = 4;
+    exact.persistent = 1;
+    EXPECT_TRUE(matchesKernel(graph, exact));
 }
 
 // ---------------------------------------------------------------------------

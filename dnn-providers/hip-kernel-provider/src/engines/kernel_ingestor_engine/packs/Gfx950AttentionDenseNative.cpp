@@ -763,7 +763,43 @@ bool kernelMatches(const MatchContext& context,
        || intField(NUM_QUERY_HEADS_FIELD) != problem.numQueryHeads
        || intField(NUM_KV_HEADS_FIELD) != problem.numKvHeads
        || intField(SEQLEN_Q_FIELD) != problem.seqLenQ
-       || intField(SEQLEN_KV_FIELD) != problem.seqLenKv || intField(BATCH_FIELD) != problem.batch)
+       || intField(SEQLEN_KV_FIELD) != problem.seqLenKv)
+    {
+        return false;
+    }
+
+    // BATCH IS A CAPACITY BOUND ON THE DEFAULT ARM, AND A BAKED CONSTANT ON THE
+    // PERSISTENT ONE. The two arms genuinely differ, and collapsing them either way is
+    // a defect:
+    //
+    //   * DEFAULT arm. `batch` reaches the emitted IR in exactly two places, both
+    //     `buffer_rsrc` extents -- the K/V cache bound
+    //     (kernels/gfx950/attention_dense.py:830) and, on the ragged path, the Q bound
+    //     (:781). The batch INDEX is `b.block_id_z()` (:718) and the addressing is
+    //     `bt * Sq * stride` (:741), both runtime. Verified rather than read: building
+    //     the same spec at batch=1 and batch=8 and diffing every numeric literal in
+    //     the emitted IR moves exactly two of them, and they are those extents -- at
+    //     aligned, ragged, non-causal, hdim=64 and GQA configurations alike. So a
+    //     binary compiled for batch N serves any batch <= N correctly: the resource
+    //     bound is larger than needed, and the grid launches fewer CTAs in Z.
+    //
+    //   * PERSISTENT arm. The grid is 1-D, so each CTA recovers (qb, hq, bt) from a
+    //     flat work-item index by `mod`/`div` against a COMPILE-TIME `B`
+    //     (:1524, :1542, :1569, :1585, and the epilogue at :2241). A graph with a
+    //     different batch decodes to the wrong (qb, hq, bt) entirely -- wrong output,
+    //     no fault. That is strict equality, permanently.
+    //
+    // THE BOUND HAS A PARTNER OBLIGATION IN prepare(), and without it this widening
+    // would be a silent wrong answer: the default arm's grid Z must come from the
+    // GRAPH's batch, not the descriptor's. Launching a batch=8 variant's Z extent for
+    // a batch=4 graph runs four CTAs over memory the tensors do not cover.
+    //
+    // Requiring equality on both arms was not WRONG, just needlessly narrow: it forced
+    // one variant per (shape x batch) pair, which on the 5,005-graph corpus is 1,453
+    // variants for the reachable population where 771 suffice.
+    const bool kernelIsPersistent = intField(PERSISTENT_FIELD) != 0;
+    const int64_t kernelBatch = intField(BATCH_FIELD);
+    if(kernelIsPersistent ? (kernelBatch != problem.batch) : (problem.batch > kernelBatch))
     {
         return false;
     }
@@ -1066,15 +1102,14 @@ public:
         // branch. The arithmetic and its guards live in gfx950AttentionDenseGeometry()
         // so a test can reach them without a device: this correspondence is unchecked
         // by the build, the packer and the validator, and it fails silently rather
-        // than loudly. Every term comes from the KMD, so a variant launches the
-        // geometry it was actually compiled for.
+        // than loudly.
         //
-        // block_m is now one of those terms. It reaches BOTH the ceil'd grid and the
-        // CTA size (`num_waves * 64`, `num_waves = block_m // 32`), so a bm128 binary
-        // launched with the old hardcoded 256 gets half the CTAs and twice the
-        // threads. Read through tryGetMetadata with the dispatcher's own default,
-        // matching kernelMatches, so a descriptor predating the field behaves as it
-        // did before rather than throwing.
+        // block_m reaches BOTH the ceil'd grid and the CTA size (`num_waves * 64`,
+        // `num_waves = block_m // 32`), so a bm128 binary launched with the old
+        // hardcoded 256 gets half the CTAs and twice the threads. Read through
+        // tryGetMetadata with the dispatcher's own default, matching kernelMatches, so
+        // a descriptor predating the field behaves as it did before rather than
+        // throwing.
         int64_t blockM = GFX950_ATTENTION_DENSE_BLOCK_M_DEFAULT;
         if(const auto declared = kernel.tryGetMetadata(std::string(BLOCK_M_FIELD));
            declared.has_value())
@@ -1084,10 +1119,46 @@ public:
                 blockM = *held;
             }
         }
+
+        // BATCH COMES FROM THE GRAPH ON THE DEFAULT ARM, and this is the partner half
+        // of kernelMatches' `problem.batch <= kernel.batch` bound. Every OTHER term
+        // below is a KMD field, because every other term is baked; batch is not.
+        //
+        // Taking grid Z from the descriptor instead would launch a batch=8 variant's
+        // full Z extent for a batch=4 graph: four CTAs indexing `bt * Sq * stride`
+        // past the end of tensors that only have four sequences. The K/V loads are
+        // bounds-checked against a resource sized for EIGHT, so they return zero-fill
+        // rather than faulting, and the phantom CTAs then write their results through
+        // an UNGUARDED global store in the epilogue (:1336). Corruption downstream of
+        // the output tensor, no error anywhere. Reading it from the graph is what
+        // makes the widening safe rather than merely wider.
+        //
+        // The persistent arm is unaffected: its grid is `(num_persistent, 1, 1)` with
+        // no Z term at all, and kernelMatches holds it to strict batch equality
+        // precisely because `B` is baked into its work-item decode.
+        const auto* qForGrid = findTensor(context, binding.q);
+        if(qForGrid == nullptr || !isWellFormedOperand(*qForGrid))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_dense: the query tensor is missing or malformed at "
+                "prepare(), so the launch batch cannot be determined");
+        }
+        const int64_t graphBatch = qForGrid->dims()->Get(BATCH_AXIS);
+        const int64_t kernelBatch = kernel.getIntMetadata(std::string(BATCH_FIELD));
+        if(graphBatch <= 0 || graphBatch > kernelBatch)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_dense: the graph's batch exceeds the batch this "
+                "kernel's buffer bounds were compiled for; kernelMatches should have "
+                "declined it");
+        }
+
         const auto geometry = gfx950AttentionDenseGeometry(
             kernel.getIntMetadata(std::string(SEQLEN_Q_FIELD)),
             kernel.getIntMetadata(std::string(NUM_QUERY_HEADS_FIELD)),
-            kernel.getIntMetadata(std::string(BATCH_FIELD)),
+            graphBatch,
             kernel.getIntMetadata(std::string(PERSISTENT_FIELD)),
             kernel.getIntMetadata(std::string(NUM_PERSISTENT_FIELD)),
             blockM,
