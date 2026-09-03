@@ -214,20 +214,55 @@ python3 migration-scripts/find_case.py --id f446b9 --detail
 
 ### Verification modes
 
-Bundle output can be verified against golden data or a live reference executor.
-The mode is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE`):
+Bundle output is verified against golden data or a live reference executor. The mode
+is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE`):
 
 | Mode | Behavior |
 |------|----------|
 | `auto` (default) | golden → GPU ref → CPU ref → skip, in that order |
-| `golden` | compare against DVC-fetched golden tensors only |
+| `golden` | compare against DVC-fetched golden tensors only; **FAIL if a bundle has none** |
 | `gpu` | compute the reference on the GPU ref executor |
 | `cpu` | compute the reference on the CPU ref executor |
 
-Golden data is optional: `--verification-mode gpu` (or `cpu`) runs the bundle
-graphs without any DVC pull. Bundle registration is on by default; pass
-`--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests
+`auto` is the mode with a fallback chain. An explicit mode is a demand for a
+specific oracle, so `golden` on a bundle with no golden data is a failure, not a
+skip — `dvc pull` the op, or use `auto`.
+
+Golden data is optional in the other modes: `--verification-mode gpu` (or `cpu`)
+runs the bundle graphs without any DVC pull. Bundle registration is on by default;
+pass `--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests
 that were compiled into the binary.
+
+### Validating golden data itself
+
+The `hipdnn_golden_data_tests` binary runs a **separate suite** that recomputes each
+bundle's outputs with a reference executor and compares them against the checked-in
+golden `.bin` data. No engine is loaded and no support claims are involved — it
+validates our data, not a provider. Suites are named `…_CpuRef` / `…_GpuRef`.
+
+It validates against both references by default; `--reference cpu|gpu|both` narrows
+that. The CPU reference is host-only and needs no GPU; the GPU one skips without a
+device.
+
+It has no skip path: a test is registered only when the bundle has golden data and
+every node type in its graph is in that reference's required-op set, so a reference
+that cannot run the graph is a failure. Bundles outside the set are absent from the
+suite, and the counts — plus the ops responsible — are printed at registration.
+
+Golden `.bin` blobs are DVC-managed, so a tree that has not run `dvc pull` in
+`integration-test-bundles/` registers nothing and says so.
+
+This replaces the former `--verification-mode=golden-check`, and the
+`--validate-golden-data` flag that briefly stood in for it: golden-data validation
+is its own binary, not a mode of the engine harness.
+
+### Support claims
+
+A bundle may carry a `.support.json` sidecar promising that a named engine supports
+that graph on a given arch and platform. `--enforce-support-claims` (which requires
+`--test-engine`) turns a broken promise into a test failure instead of a silent
+skip. Claims are checked for the single engine under test. Off by default. See
+[`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md).
 
 ## Test Tiers
 
@@ -610,3 +645,6 @@ for the full workflow and tooling reference.
   field mapping.
 - [RFC 0011 — Golden Reference Validation](../../projects/hipdnn/docs/rfcs/0011_GoldenReferenceValidation.md)
   — the bundle/sweep naming spec (§4.1) and design rationale.
+- [`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md) —
+  `.support.json` sidecars, the verdict set comparison, the `TestBody()`
+  enforcement lifecycle, and how to read the claim summary.

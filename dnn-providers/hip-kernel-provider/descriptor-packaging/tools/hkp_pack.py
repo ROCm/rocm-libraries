@@ -37,6 +37,44 @@ def _parse_args(argv):
         prog="hkp_pack",
         description="Compile authored hip and rocKE UKDs, prune per arch, and "
         "pack a per-arch kpack release tree for the hip-kernel-provider.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "environment:\n"
+            "  HKP_PACK_JOBS  Worker processes used to compile distinct "
+            "variants within one\n"
+            "                 arch. Defaults to min(32, cpus available to this "
+            "process),\n"
+            "                 which respects a cgroup or affinity limit rather "
+            "than the\n"
+            "                 host core count. The cap is per-worker startup, "
+            "not memory:\n"
+            "                 a worker costs about 250 ms to load rocke+comgr, "
+            "so too many\n"
+            "                 workers make a pack slower. The best count grows "
+            "with the\n"
+            "                 variant count, and 32 is a compromise -- measured "
+            "on gfx942,\n"
+            "                 a 1672-variant pack is fastest near 48 workers "
+            "while a\n"
+            "                 200-variant pack is 2.5x faster on 12 than on 32, "
+            "so set this\n"
+            "                 explicitly when packing a small arch. Arches are "
+            "always\n"
+            "                 packed one at a time.\n"
+            "                 Set HKP_PACK_JOBS=1 to force serial execution -- "
+            "a compile\n"
+            "                 failure then raises from the walk itself, with a "
+            "single clean\n"
+            "                 traceback and nothing else in flight. Anything "
+            "that is not an\n"
+            "                 integer of 1 or more -- including 0 -- is an "
+            "error, not a\n"
+            "                 fallback to the default. On any worker count "
+            "the first\n"
+            "                 variant that fails to compile stops the pack and "
+            "the queued\n"
+            "                 variants are cancelled."
+        ),
     )
     p.add_argument(
         "--source-root",

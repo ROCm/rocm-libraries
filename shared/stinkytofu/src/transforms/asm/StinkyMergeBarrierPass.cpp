@@ -29,6 +29,7 @@
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/LoopAnalysis.hpp"
+#include "stinkytofu/analysis/asm/Layer2BarrierOverlapAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -40,9 +41,10 @@
 // StinkyMergeBarrierPass
 // ======================
 // Runs immediately after StinkyDAGSchedulerPass. Within loop bodies it looks
-// for two (or more) barrier groups that the scheduler placed only a few cycles
-// apart and fuses them into a single group carrying the union of their memory
-// tokens, dropping the redundant second signal/wait pair.
+// for two (or more) barrier groups that Layer 2 identified as a directional
+// overlapping pair and the scheduler placed only a few cycles apart. It fuses
+// them into a single group carrying the union of their memory tokens, dropping
+// the redundant second signal/wait pair.
 //
 // A legal "barrier group" is exactly one adjacent s_barrier_signal /
 // s_barrier_wait pair that shares the same non-empty LDS token set, e.g.:
@@ -50,8 +52,8 @@
 //   s_barrier_wait   -1   // token 0
 // Anything else (lone signal/wait, signal/.../wait with filler between, mismatched
 // tokens) is ignored. Two consecutive legal groups G1 (tokens T1) and G2 (tokens
-// T2) may merge only when T1 ≠ T2 and the modeled cycle-distance between them is
-// below the configured threshold.
+// T2) may merge only when Layer2BarrierOverlapAnalysis contains G1 -> G2,
+// T1 ≠ T2, and the modeled cycle-distance is below the configured threshold.
 //
 // The merge never moves instructions: it only unions G2's tokens into G1's
 // barriers and drops G2's redundant signal/wait pair. That is correct precisely
@@ -75,6 +77,44 @@ struct BarrierGroup {
     IRList::iterator firstIt;  // signal
     IRList::iterator lastIt;   // wait
 };
+
+using Layer2OverlapResult = Layer2BarrierOverlapAnalysis::Result;
+
+bool containsBarrier(const BarrierGroup& group, const StinkyInstruction* barrier) {
+    return std::find(group.barriers.begin(), group.barriers.end(), barrier) != group.barriers.end();
+}
+
+// Layer 2 records a directional after->before relation. The merge candidate
+// must preserve that direction in final program order.
+bool isLayer2OverlapPair(const BarrierGroup& earlier, const BarrierGroup& later,
+                         const Layer2OverlapResult& overlaps) {
+    for (StinkyInstruction* barrierAfter : earlier.barriers)
+        for (StinkyInstruction* barrierBefore : later.barriers)
+            if (overlaps.contains(barrierAfter, barrierBefore)) return true;
+    return false;
+}
+
+// A successful merge makes \p surviving and \p removed one logical barrier group.
+// Redirect the removed group's scheduler-approved incoming/outgoing relations to
+// that logical survivor. This intentionally derives only the transitive chain
+// eligibility needed after an approved merge; it does not authorize an unrelated
+// pair that was absent from the scheduler's validated relation graph.
+void transferLayer2OverlapPairs(Layer2OverlapResult& overlaps, const BarrierGroup& surviving,
+                                const BarrierGroup& removed) {
+    std::vector<Layer2BarrierOverlapAnalysis::BarrierPair> additions;
+    for (const auto& [barrierAfter, barrierBefore] : overlaps.pairs()) {
+        const bool afterRemoved = containsBarrier(removed, barrierAfter);
+        const bool beforeRemoved = containsBarrier(removed, barrierBefore);
+        if (afterRemoved && !beforeRemoved)
+            for (StinkyInstruction* survivor : surviving.barriers)
+                additions.emplace_back(survivor, barrierBefore);
+        if (beforeRemoved && !afterRemoved)
+            for (StinkyInstruction* survivor : surviving.barriers)
+                additions.emplace_back(barrierAfter, survivor);
+    }
+    for (const auto& [barrierAfter, barrierBefore] : additions)
+        overlaps.record(barrierAfter, barrierBefore);
+}
 
 // LDS memory-token ids attached to a barrier (from the pseudo LDS registers
 // planted by StinkyBuildImplicitDependencyPass; barriers carry them on both
@@ -188,7 +228,10 @@ void setMergedBarrierComment(StinkyInstruction* barrier,
 
 // Attempt to merge the two consecutive groups g1 (earlier) and g2 (later) inside
 // \p bb. Returns true on success (IR mutated). \p threshold is in cycles.
-bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2, int threshold) {
+bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2, int threshold,
+                  Layer2OverlapResult& overlaps) {
+    if (!isLayer2OverlapPair(g1, g2, overlaps)) return false;
+
     // Only distinct token sets are merge candidates. Same-token consecutive
     // legal groups are successive syncs of one token and must both remain.
     if (g1.tokens == g2.tokens) return false;
@@ -217,6 +260,7 @@ bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2
         addTokensToBarrier(barrier, g2.tokens);
         setMergedBarrierComment(barrier, mergedTokens);
     }
+    transferLayer2OverlapPairs(overlaps, g1, g2);
     for (StinkyInstruction* barrier : g2.barriers) bb.removeIR(barrier);
 
     return true;
@@ -224,13 +268,13 @@ bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2
 
 // Repeatedly merge mergeable adjacent barrier-group pairs in \p bb until a fixed
 // point. Chained close groups collapse into one multi-token group.
-void mergeBarriersInBlock(BasicBlock& bb, int threshold) {
+void mergeBarriersInBlock(BasicBlock& bb, int threshold, Layer2OverlapResult& overlaps) {
     bool changed = true;
     while (changed) {
         changed = false;
         std::vector<BarrierGroup> groups = collectBarrierGroups(bb);
         for (size_t i = 0; i + 1 < groups.size(); ++i) {
-            if (tryMergePair(bb, groups[i], groups[i + 1], threshold)) {
+            if (tryMergePair(bb, groups[i], groups[i + 1], threshold, overlaps)) {
                 changed = true;
                 break;  // group layout changed; rebuild before continuing
             }
@@ -262,6 +306,9 @@ class StinkyMergeBarrierPass : public StinkyInstPass {
             return preserveCFGAnalyses();
         }
 
+        // Copy because chained merges redirect relations away from removed barriers.
+        Layer2OverlapResult layer2Overlaps = AM.getResult<Layer2BarrierOverlapAnalysis>(func);
+
         // Only touch loop-body basic blocks — the request targets the loop
         // interior, where the scheduler emits the repeated barrier groups.
         const auto& loops = AM.getResult<LoopAnalysis>(func);
@@ -274,7 +321,7 @@ class StinkyMergeBarrierPass : public StinkyInstPass {
         for (BasicBlock& bb : func) {
             if (!loopBodyBBs.count(&bb)) continue;
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
-            mergeBarriersInBlock(bb, threshold);
+            mergeBarriersInBlock(bb, threshold, layer2Overlaps);
         }
         return preserveCFGAnalyses();
     }
