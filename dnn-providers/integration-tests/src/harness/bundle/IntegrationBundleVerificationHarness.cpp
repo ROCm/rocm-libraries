@@ -252,18 +252,6 @@ void IntegrationBundleVerificationHarness::observeSupportOnly(const GraphSession
 
 VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSession& session)
 {
-    // Authoring mode records what the engines actually take and stops: it has no
-    // verdict to give about the graph, so nothing below it may run. SKIPPED at
-    // NOT_REACHED is the honest outcome and keeps TestBody()'s "passed without
-    // reaching the required depth" guard quiet, which a PASSED here would trip.
-    if(TestConfig::get().writeSupportClaims())
-    {
-        observeSupportOnly(session);
-        return VerificationOutcome::skipped(VerificationDepth::NOT_REACHED,
-                                            "support-claim authoring run "
-                                            "(--write-support-claims)");
-    }
-
     // A graph that would not load is the engine's problem, at every level, and it is
     // the reason nothing below can run. Checked once, here, so the rungs and the
     // modes can all assume a usable session.

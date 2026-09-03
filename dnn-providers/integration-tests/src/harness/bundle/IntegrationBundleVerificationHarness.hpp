@@ -125,16 +125,19 @@ public:
         const auto observation = checkSupportClaims(session);
         recordClaimCoverage(observation);
 
-        // Phase 2: either a claim already failed, or this bundle gets run.
+        // Phase 2: author claims, enforce an existing claim, or run the bundle.
         VerificationOutcome outcome;
         try
         {
-            if(const auto blocked = claimBlocked(observation))
+            if(TestConfig::get().writeSupportClaims())
             {
-                // A broken claim means the engine will not take the graph, so there is
-                // nothing to compare. Running anyway would execute nothing, leave the
-                // NaN sentinel outputs untouched, and pile a tensor diff on the real
-                // message.
+                observeSupportOnly(session);
+                outcome = VerificationOutcome::skipped(
+                    VerificationDepth::NOT_REACHED,
+                    "support-claim authoring run (--write-support-claims)");
+            }
+            else if(const auto blocked = claimBlocked(observation))
+            {
                 outcome = *blocked;
             }
             else
