@@ -40,6 +40,7 @@
 // Indexes are assigned in block-list order, which is emission order, so a
 // block's indexes are contiguous and adjacent blocks are numerically adjacent.
 
+#include <cstddef>
 #include <cstdint>
 #include <unordered_map>
 
