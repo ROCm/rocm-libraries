@@ -1,0 +1,282 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
+#
+# enableSkipHiddenXdlVaVdst: an XDL(WMMA) producer whose va_vdst hazard already has
+# >= kXdlVaVdstHideWmmas (12) WMMA issued between it and the consumer needs no
+# s_wait_alu -- the intervening WMMA fully hide the WMMA result latency. Only WMMA
+# (the XDL pipe) count toward the 12; interleaved plain VALU do not. Non-XDL
+# producers are unaffected.
+
+#===----------------------------------------------------------------------===#
+# Exactly 12 WMMA between the producer WMMA (writes v[0:7]) and a ds_load reading
+# v0: hazard hidden, NO va_vdst wait before the load.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @xdl_hidden_12_wmma_no_wait
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+
+st.func @xdl_hidden_12_wmma_no_wait() {
+^entry:
+  v[0:7]    = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15]   = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v110 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Only 11 WMMA between: below the threshold, so the wait IS emitted (va_vdst=11).
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @xdl_not_hidden_11_wmma_wait
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 11
+# CHECK: ds_load_b32
+
+st.func @xdl_not_hidden_11_wmma_wait() {
+^entry:
+  v[0:7]   = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v110 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# 10 WMMA + 3 plain VALU (CSMACC) between: only WMMA count, so followers=10 < 12,
+# the wait IS still emitted (va_vdst=10). Proves interleaved VALU do not lift it.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @xdl_valu_between_dont_count
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 10
+# CHECK: ds_load_b32
+
+st.func @xdl_valu_between_dont_count() {
+^entry:
+  v[0:7]   = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v150 = "st.v_add_f32"(v151, v152) { issueCycles = 1, latencyCycles = 5 }
+  v153 = "st.v_add_f32"(v154, v155) { issueCycles = 1, latencyCycles = 5 }
+  v156 = "st.v_add_f32"(v157, v158) { issueCycles = 1, latencyCycles = 5 }
+  v110 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Consumer type doesn't matter: 12 WMMA then a buffer_load reading v0 -> no wait.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @xdl_hidden_12_buffer_consumer
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: buffer_load_b32
+
+st.func @xdl_hidden_12_buffer_consumer() {
+^entry:
+  v[0:7]    = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15]   = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95]  = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v110 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#===----------------------------------------------------------------------===#
+# Non-XDL producer is unaffected: a CSMACC (v_add_f32) producer with 12 later
+# CSMACC still gets its normal va_vdst wait -- the skip is XDL-only.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @csmacc_producer_not_skipped
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst
+# CHECK: ds_load_b32
+
+st.func @csmacc_producer_not_skipped() {
+^entry:
+  v0  = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3  = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v6  = "st.v_add_f32"(v7, v8) { issueCycles = 1, latencyCycles = 5 }
+  v9  = "st.v_add_f32"(v10, v11) { issueCycles = 1, latencyCycles = 5 }
+  v12 = "st.v_add_f32"(v13, v14) { issueCycles = 1, latencyCycles = 5 }
+  v15 = "st.v_add_f32"(v16, v17) { issueCycles = 1, latencyCycles = 5 }
+  v18 = "st.v_add_f32"(v19, v20) { issueCycles = 1, latencyCycles = 5 }
+  v21 = "st.v_add_f32"(v22, v23) { issueCycles = 1, latencyCycles = 5 }
+  v24 = "st.v_add_f32"(v25, v26) { issueCycles = 1, latencyCycles = 5 }
+  v27 = "st.v_add_f32"(v28, v29) { issueCycles = 1, latencyCycles = 5 }
+  v30 = "st.v_add_f32"(v31, v32) { issueCycles = 1, latencyCycles = 5 }
+  v33 = "st.v_add_f32"(v34, v35) { issueCycles = 1, latencyCycles = 5 }
+  v36 = "st.v_add_f32"(v37, v38) { issueCycles = 1, latencyCycles = 5 }
+  v110 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Scale-pair producer. MC_VOP3PX2/PX3 step the XDL ordinal by 2, so the threshold
+# is a count of instructions and scales with it. 6 scale WMMA after the producer
+# are 12 ordinal but only 6 instructions -- below the 12 the rule asks for, so the
+# wait IS emitted (va_vdst = 12, the raw ordinal distance).
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @xdl_scale_pair_6_wmma_waits
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 12
+# CHECK: ds_load_b32
+
+st.func @xdl_scale_pair_6_wmma_waits() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[0:7], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[8:15], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[16:23], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[24:31], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[32:39], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[40:47], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[48:55], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v340 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Same producer, 12 scale WMMA after it: 24 ordinal, 12 instructions -- the rule is
+# met, so NO wait. Without the vaInc scaling this would already have fired at 6.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @xdl_scale_pair_12_wmma_no_wait
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+
+st.func @xdl_scale_pair_12_wmma_no_wait() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[0:7], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[8:15], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[16:23], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[24:31], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[32:39], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[40:47], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[48:55], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[56:63], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[64:71], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[72:79], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[80:87], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[88:95], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[300:315], v[316:331], v[96:103], v220, v221) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v340 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# CSMACC (plain VALU) producer, hidden by WMMA rather than by its own pipe. It needs
+# kCsmaccVaVdstHideWmmas (13) intervening WMMA -- one more than an XDL producer.
+# 12 WMMA is one short, so the wait IS emitted.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @csmacc_hidden_12_wmma_waits
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst
+# CHECK: ds_load_b32
+
+st.func @csmacc_hidden_12_wmma_waits() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v190 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Same producer, 13 intervening WMMA: the rule is met, so NO wait. Note the WMMA
+# never touch v0 -- only their count matters, not a data dependence.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @csmacc_hidden_13_wmma_no_wait
+# CHECK: v_add_f32
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: ds_load_b32
+
+st.func @csmacc_hidden_13_wmma_no_wait() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:111] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[104:111]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v190 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# The CSMACC rule infers completion order across pipes, which only holds while XDL
+# and CSMACC are the only pipes in flight. A live TRANS op (v_rcp_f32, never waited
+# on) breaks that, so the wait IS emitted despite 13 intervening WMMA.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @csmacc_not_hidden_when_trans_inflight
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst
+# CHECK: ds_load_b32
+
+st.func @csmacc_not_hidden_when_trans_inflight() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v191 = "st.v_rcp_f32"(v192) { issueCycles = 1, latencyCycles = 10 }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:111] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[104:111]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v190 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}

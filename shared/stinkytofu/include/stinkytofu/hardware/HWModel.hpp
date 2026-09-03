@@ -87,13 +87,38 @@ struct HWModel {
         bool hasSplitStoreCntAsyncCnt;
     };
 
+    /// Counts of intervening operations that satisfy a pending wait, so the wait
+    /// need not be emitted. 0 means a count alone never satisfies that wait on
+    /// this arch and it is always emitted.
+    struct WaitHide {
+        /// Matrix ops after an XDL producer that satisfy its va_vdst wait.
+        int xdlVaVdst;
+        /// Matrix ops after a CSMACC producer that satisfy its va_vdst wait.
+        /// Consulted only while XDL and CSMACC are the sole units outstanding.
+        int csmaccVaVdst;
+        /// Same-class reads after a read that satisfy its vm_vsrc wait.
+        int vmVsrc;
+    };
+
     Lds lds;
     Barrier barrier;
     Coexec coexec;
     Hazards hazards;
     DelayAlu delayAlu;
     Counters counters;
+    WaitHide waitHide;
 };
+
+/// True when \p count intervening operations satisfy a wait whose arch entry is
+/// \p required, with \p count expressed in units of \p step. A non-positive entry
+/// means the arch does not use a count there, so nothing is ever satisfied.
+///
+/// Defined inline next to WaitHide: the only correct way to read one of its
+/// entries, including the zero-is-off convention.
+inline bool waitHideSatisfied(unsigned count, unsigned step, int required) {
+    if (required <= 0) return false;
+    return count >= static_cast<unsigned>(required) * step;
+}
 
 /// Collapse a {major, minor, stepping} arch triple to a switchable key.
 ///

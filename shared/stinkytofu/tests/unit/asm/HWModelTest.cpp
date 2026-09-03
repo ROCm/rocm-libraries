@@ -119,3 +119,36 @@ TEST(HWModel, ConfiguredPassContextCachesMatchingModel) {
     ctx.setGemmTileConfig(cfg);
     EXPECT_EQ(&ctx.getHWModel(), &hwModelForArch(kGfx1250));
 }
+
+// Pins the wait-hide counts. Behaviour built on them is covered by
+// tests/filecheck/InsertWaitAluPass_xdl_hide_test.stir and _vmvsrc_hide_test.stir.
+TEST(HWModel, Gfx1250WaitHideCounts) {
+    const HWModel& hw = hwModelForArch(kGfx1250);
+    EXPECT_EQ(hw.waitHide.xdlVaVdst, 12);
+    EXPECT_EQ(hw.waitHide.csmaccVaVdst, 13);
+    EXPECT_EQ(hw.waitHide.vmVsrc, 11);
+
+    const HWModel& v0 = hwModelForArch(kGfx1250v0);
+    EXPECT_EQ(v0.waitHide.xdlVaVdst, hw.waitHide.xdlVaVdst);
+    EXPECT_EQ(v0.waitHide.csmaccVaVdst, hw.waitHide.csmaccVaVdst);
+    EXPECT_EQ(v0.waitHide.vmVsrc, hw.waitHide.vmVsrc);
+}
+
+// The zero-is-off convention. No arch currently ships a 0, so this is the only
+// coverage of the inert path an arch opting out would take.
+TEST(HWModel, WaitHideSatisfiedZeroIsOff) {
+    EXPECT_FALSE(waitHideSatisfied(/*count=*/1000, /*step=*/1, /*required=*/0));
+    EXPECT_FALSE(waitHideSatisfied(1000, 2, 0));
+    EXPECT_FALSE(waitHideSatisfied(1000, 1, -1));
+}
+
+// Boundary: satisfied at exactly the count, not one below. \p step scales the
+// requirement, so a 2-unit step needs twice the raw count.
+TEST(HWModel, WaitHideSatisfiedBoundaryAndStep) {
+    EXPECT_FALSE(waitHideSatisfied(11, 1, 12));
+    EXPECT_TRUE(waitHideSatisfied(12, 1, 12));
+    EXPECT_TRUE(waitHideSatisfied(13, 1, 12));
+
+    EXPECT_FALSE(waitHideSatisfied(23, 2, 12));
+    EXPECT_TRUE(waitHideSatisfied(24, 2, 12));
+}

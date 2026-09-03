@@ -1,0 +1,168 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass --print-output
+#
+# enableSkipHiddenVmVsrc: an in-flight VMEM read whose vm_vsrc WAR hazard already
+# has >= kVmVsrcHideDepth (11) same-FIFO reads issued between it and the
+# overwriting consumer needs no s_wait_alu -- the bounded VMEM read FIFO
+# guarantees the older read has completed. The count is PER-FIFO: a TEX read is
+# hidden only by TEX-FIFO depth, an LDS read only by LDS-FIFO depth; reads in the
+# other FIFO never count. A flat_* sits in both FIFOs, so either reaching the
+# depth proves it done.
+#
+# vm_vsrc is a 3-bit field (max emittable wait = 6), so a below-threshold wait
+# saturates: 7..10 followers all emit vm_vsrc = 6. The value of this optimization
+# is turning that saturated stall into NO wait once followers reach 11.
+
+#===----------------------------------------------------------------------===#
+# TEX producer (buffer_load reads v0) with exactly 11 later TEX reads: hazard
+# hidden, NO vm_vsrc wait before the VALU that overwrites v0.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vmtex_hidden_11_no_wait
+# CHECK: buffer_load_b32
+# CHECK-NOT: vm_vsrc
+# CHECK: v_mov_b32
+
+st.func @vmtex_hidden_11_no_wait() {
+^entry:
+  v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+  v101 = "st.buffer_load_b32"(v1) { issueCycles = 1, latencyCycles = 100 }
+  v102 = "st.buffer_load_b32"(v2) { issueCycles = 1, latencyCycles = 100 }
+  v103 = "st.buffer_load_b32"(v3) { issueCycles = 1, latencyCycles = 100 }
+  v104 = "st.buffer_load_b32"(v4) { issueCycles = 1, latencyCycles = 100 }
+  v105 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+  v106 = "st.buffer_load_b32"(v6) { issueCycles = 1, latencyCycles = 100 }
+  v107 = "st.buffer_load_b32"(v7) { issueCycles = 1, latencyCycles = 100 }
+  v108 = "st.buffer_load_b32"(v8) { issueCycles = 1, latencyCycles = 100 }
+  v109 = "st.buffer_load_b32"(v9) { issueCycles = 1, latencyCycles = 100 }
+  v110 = "st.buffer_load_b32"(v10) { issueCycles = 1, latencyCycles = 100 }
+  v111 = "st.buffer_load_b32"(v11) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#===----------------------------------------------------------------------===#
+# Only 10 later TEX reads: below threshold, wait IS emitted (saturates to 6).
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vmtex_not_hidden_10_wait
+# CHECK: buffer_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 6
+# CHECK: v_mov_b32
+
+st.func @vmtex_not_hidden_10_wait() {
+^entry:
+  v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+  v101 = "st.buffer_load_b32"(v1) { issueCycles = 1, latencyCycles = 100 }
+  v102 = "st.buffer_load_b32"(v2) { issueCycles = 1, latencyCycles = 100 }
+  v103 = "st.buffer_load_b32"(v3) { issueCycles = 1, latencyCycles = 100 }
+  v104 = "st.buffer_load_b32"(v4) { issueCycles = 1, latencyCycles = 100 }
+  v105 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+  v106 = "st.buffer_load_b32"(v6) { issueCycles = 1, latencyCycles = 100 }
+  v107 = "st.buffer_load_b32"(v7) { issueCycles = 1, latencyCycles = 100 }
+  v108 = "st.buffer_load_b32"(v8) { issueCycles = 1, latencyCycles = 100 }
+  v109 = "st.buffer_load_b32"(v9) { issueCycles = 1, latencyCycles = 100 }
+  v110 = "st.buffer_load_b32"(v10) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#===----------------------------------------------------------------------===#
+# LDS producer (ds_load reads v0) with exactly 11 later LDS reads: hidden, skip.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @lds_hidden_11_no_wait
+# CHECK: ds_load_b32
+# CHECK-NOT: vm_vsrc
+# CHECK: v_mov_b32
+
+st.func @lds_hidden_11_no_wait() {
+^entry:
+  v100 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v101 = "st.ds_load_b32"(v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v102 = "st.ds_load_b32"(v2) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v103 = "st.ds_load_b32"(v3) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v104 = "st.ds_load_b32"(v4) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v105 = "st.ds_load_b32"(v5) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v106 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v107 = "st.ds_load_b32"(v7) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v108 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v109 = "st.ds_load_b32"(v9) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v110 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v111 = "st.ds_load_b32"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#===----------------------------------------------------------------------===#
+# Only 10 later LDS reads: below threshold, wait IS emitted (saturates to 6).
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @lds_not_hidden_10_wait
+# CHECK: ds_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 6
+# CHECK: v_mov_b32
+
+st.func @lds_not_hidden_10_wait() {
+^entry:
+  v100 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v101 = "st.ds_load_b32"(v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v102 = "st.ds_load_b32"(v2) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v103 = "st.ds_load_b32"(v3) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v104 = "st.ds_load_b32"(v4) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v105 = "st.ds_load_b32"(v5) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v106 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v107 = "st.ds_load_b32"(v7) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v108 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v109 = "st.ds_load_b32"(v9) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v110 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#===----------------------------------------------------------------------===#
+# Cross-FIFO does NOT count: a TEX producer with 11 later LDS reads (a different
+# FIFO) is NOT hidden -- its TEX follower count is still 0, so the wait IS
+# emitted (vm_vsrc = 0, a full TEX drain). Proves LDS depth can't lift a TEX read.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @tex_lds_between_dont_count
+# CHECK: buffer_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 0
+# CHECK: v_mov_b32
+
+st.func @tex_lds_between_dont_count() {
+^entry:
+  v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+  v101 = "st.ds_load_b32"(v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v102 = "st.ds_load_b32"(v2) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v103 = "st.ds_load_b32"(v3) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v104 = "st.ds_load_b32"(v4) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v105 = "st.ds_load_b32"(v5) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v106 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v107 = "st.ds_load_b32"(v7) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v108 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v109 = "st.ds_load_b32"(v9) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v110 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v111 = "st.ds_load_b32"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#===----------------------------------------------------------------------===#
+# flat_* sits in both FIFOs: 11 later TEX reads hide it via the TEX FIFO alone
+# (LDS FIFO has 0 followers), so NO vm_vsrc wait -- either FIFO proves it done.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @flat_hidden_by_tex_either_fifo
+# CHECK: flat_load_b32
+# CHECK-NOT: vm_vsrc
+# CHECK: v_mov_b32
+
+st.func @flat_hidden_by_tex_either_fifo() {
+^entry:
+  v100 = "st.flat_load_b32"(v[0:1], s[16:17]) { issueCycles = 1, latencyCycles = 20 }
+  v101 = "st.buffer_load_b32"(v2) { issueCycles = 1, latencyCycles = 100 }
+  v102 = "st.buffer_load_b32"(v3) { issueCycles = 1, latencyCycles = 100 }
+  v103 = "st.buffer_load_b32"(v4) { issueCycles = 1, latencyCycles = 100 }
+  v104 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+  v105 = "st.buffer_load_b32"(v6) { issueCycles = 1, latencyCycles = 100 }
+  v106 = "st.buffer_load_b32"(v7) { issueCycles = 1, latencyCycles = 100 }
+  v107 = "st.buffer_load_b32"(v8) { issueCycles = 1, latencyCycles = 100 }
+  v108 = "st.buffer_load_b32"(v9) { issueCycles = 1, latencyCycles = 100 }
+  v109 = "st.buffer_load_b32"(v12) { issueCycles = 1, latencyCycles = 100 }
+  v110 = "st.buffer_load_b32"(v13) { issueCycles = 1, latencyCycles = 100 }
+  v111 = "st.buffer_load_b32"(v14) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
