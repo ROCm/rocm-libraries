@@ -279,10 +279,17 @@ def test_gfx950_segments_conservatively_clamped():
         p.restore()
 
 
-def test_gfx950_partition_floors_to_120():
-    """A partitioned gfx950 (CPX / NPS4) reports the PARTITION CU count (~32).
-    The resolver floors to the legacy 120 baseline so the routing target never
-    drops below 480 and flips already-3D shapes back to 2D."""
+def test_partition_floor_is_gfx950_only():
+    """A partitioned device (CPX / NPS4) reports the PARTITION CU count (~32).
+
+    gfx950 floors that to the legacy 120 baseline so the routing target never
+    drops below 480 and flips already-3D shapes back to 2D -- the gfx950 segment
+    clamp's byte-identical guarantee is defined against that baseline.
+
+    gfx942 is NOT floored: it shipped unfloored on develop, and flooring would
+    silently change its 2D/3D routing and segment counts on partitioned parts.
+    This PR targets gfx950 only, so gfx942 must resolve exactly as develop does.
+    """
     p = _Patch()
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx950")
@@ -291,7 +298,45 @@ def test_gfx950_partition_floors_to_120():
         # A full-device count is above the floor and passes through unchanged.
         p.attr(AC, "_device_num_cus", lambda: 256)
         assert _resolve_num_cus(_req(num_cus=0, arch="gfx950")) == 256
+
+        # gfx942 on a partitioned gfx942 box: raw live count, no floor.
+        p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
+        for partition_cus in (32, 38, 64):
+            p.attr(AC, "_device_num_cus", lambda n=partition_cus: n)
+            assert _resolve_num_cus(_req(num_cus=0, arch="gfx942")) == partition_cus
+        # ...and a full gfx942 part is unaffected either way.
+        p.attr(AC, "_device_num_cus", lambda: 304)
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx942")) == 304
     finally:
+        p.restore()
+
+
+def test_gfx942_partition_routing_matches_develop():
+    """The floor scoping is observable downstream, not just in the resolver.
+
+    On a partitioned gfx942 the resolved count feeds select_path/_num_segments.
+    Pin the develop behaviour for the shapes a 120 floor would have moved: at 38
+    CUs they must stay on the path/split that 38 CUs produces, NOT the 120 one.
+    """
+    p = _Patch()
+    try:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.attr(au, "_resolve_attention_arch", lambda: "gfx942")
+        p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
+        p.attr(AC, "_device_num_cus", lambda: 38)  # CPX partition
+        for shape in (
+            dict(nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=8192, batch=1),
+            dict(nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=8192, batch=16),
+            dict(nhead_q=32, nhead_k=4, hdim_q=64, hdim_v=64, seqlen_k=32768, batch=4),
+            dict(nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=4096, batch=32),
+        ):
+            resolved = A._problem(_req(num_cus=0, arch="gfx942", **shape))
+            unfloored = A._problem(_req(num_cus=38, arch="gfx942", **shape))
+            assert resolved.num_cus == 38, shape
+            assert resolved.select_path() == unfloored.select_path(), shape
+            assert au._num_segments(resolved) == au._num_segments(unfloored), shape
+    finally:
+        au._RESOLVED_ATTENTION_ARCH = None
         p.restore()
 
 

@@ -191,6 +191,10 @@ def _device_num_cus() -> "int | None":
 # branch in kernels/common/attention_unified.py::_num_segments -- adding an arch
 # here does NOT give it a segment clamp; add a matching branch there too (both
 # read the resolved value through the shared _effective_target_ctas seam).
+# Membership also does NOT apply the partitioned-device floor in
+# _resolve_num_cus: that floor is gfx950-scoped, because only gfx950's clamp is
+# defined against the 120-CU baseline. An arch added here gets the raw live
+# count; decide per arch whether it also needs the floor.
 _AUTO_RESOLVE_ARCHS = frozenset({"gfx942", "gfx950"})
 
 
@@ -207,6 +211,8 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
       3. otherwise the legacy ``120`` (matches develop): every non-auto-resolve
          arch, and an auto-resolve arch built off-box / with no visible matching
          device.
+    The on-box count is floored at ``120`` for **gfx950 only** (see below); every
+    other arch passes the live count through exactly as develop does.
     An explicit ``target_ctas`` on the spec supersedes all of the above. Because
     the resolved value feeds the 3D ``num_segments`` (a compiled-kernel constant),
     the on-box value is device-dependent within an arch (varies across parts); for
@@ -224,14 +230,21 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
             if get_device_arch() == arch:
                 cus = _device_num_cus()
                 if cus and cus > 0:
-                    # Floor at the legacy 120 baseline. On a partitioned device
-                    # (CPX / NPS4) the query returns the PARTITION's CU count
-                    # (~32), which would drop the routing target below the 480
-                    # pre-bump baseline -- flipping already-3D shapes back to 2D
-                    # (the opposite of this resolver's intent) and breaking the
-                    # _num_segments clamp's byte-identical no-op guarantee. Never
-                    # resolve below the baseline.
-                    return max(cus, 120)
+                    # gfx950 ONLY: floor at the legacy 120 baseline. On a
+                    # partitioned device (CPX / NPS4) the query returns the
+                    # PARTITION's CU count (~32), which would drop the routing
+                    # target below the 480 pre-bump baseline -- flipping
+                    # already-3D shapes back to 2D (the opposite of this
+                    # resolver's intent) and breaking the byte-identical no-op
+                    # guarantee the gfx950 _num_segments clamp is built on (that
+                    # clamp is defined against _PRE_BUMP_CUS = 120).
+                    #
+                    # gfx942 is deliberately NOT floored: it shipped unfloored,
+                    # its clamp uses measured per-shape carve-outs rather than a
+                    # blanket pre-bump bound, and flooring would change 2D/3D
+                    # routing and segment counts on partitioned gfx942 parts --
+                    # an unmeasured change this resolver does not need.
+                    return max(cus, 120) if arch == "gfx950" else cus
         except Exception:
             pass
     return 120
