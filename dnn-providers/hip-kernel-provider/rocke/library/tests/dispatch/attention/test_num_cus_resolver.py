@@ -194,16 +194,32 @@ def test_target_ctas_threaded_through_problem():
 
 
 def test_problem_lowercases_arch_for_the_clamp():
-    """_problem normalizes req.arch to lowercase. The segment clamp compares
-    against lowercase arch literals ("gfx942"/"gfx950"), so a mixed-case request
-    arch must not silently skip the clamp on the dispatch path."""
+    """``_problem`` lowercases ``req.arch`` before it reaches the clamp, which
+    compares against lowercase literals ("gfx942" / "gfx950") -- an exact string
+    match, so a mixed-case arch would silently skip the clamp rather than error.
+
+    Scope: this pins ``_problem``'s normalization ONLY. It is defence in depth,
+    not a reachable input -- the dispatch path rejects mixed case earlier, in
+    ``_request_errors``, because ``ArchTarget.from_gfx`` is case-sensitive
+    (``from_gfx("GFX950")`` raises ``KeyError``). Entry here is deliberately
+    below that gate. See ``test_request_layer_rejects_mixed_case_arch``.
+    """
     for raw in ("GFX950", "Gfx950", "gfx950"):
         assert A._problem(_req(num_cus=200, arch=raw)).arch == "gfx950", raw
-    # Driven through _problem + _num_segments, request casing must not change the
-    # segment count: both normalize to gfx950 and take the same clamp.
+    # Driven through _problem + _num_segments, casing must not change the segment
+    # count: both normalize to gfx950 and take the same clamp.
     p_mixed = A._problem(_req(num_cus=256, arch="GFX950"))
     p_lower = A._problem(_req(num_cus=256, arch="gfx950"))
     assert au._num_segments(p_mixed) == au._num_segments(p_lower)
+
+
+def test_request_layer_rejects_mixed_case_arch():
+    """Pins the reason the test above is defence in depth: the request layer is
+    case-sensitive, so a mixed-case arch never reaches ``_problem`` at all."""
+    for raw in ("GFX950", "Gfx950", "GFX942"):
+        errors = AC._request_errors(_req(num_cus=0, arch=raw))
+        assert any("unknown gfx target" in e for e in errors), (raw, errors)
+    assert AC._request_errors(_req(num_cus=0, arch="gfx950")) == []
 
 
 def test_segments_bounded_after_bump():
