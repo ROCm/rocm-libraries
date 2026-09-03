@@ -21,9 +21,8 @@ constexpr HWModel kGfx1250Model = {
     .lds =
         {
             .readQueueDepth = 16,
-            // 0 => derive barrier-timing drain latency dynamically from
-            // matching ds_read count and the latest ds_read's own latency.
-            .readDrainLatency = 0,
+            // Cycles for a saturated read queue to drain.
+            .readDrainLatency = 72,
             .readThrottleLatency = 72,
         },
     .barrier =
@@ -82,6 +81,19 @@ int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int t
     // Past the depth the queue is full, so the overflow issues at half rate.
     return targetDSLoadLatency + (queueDepth - 1) * numWaves +
            (matchingDsLoadCount - queueDepth) * numWaves / 2;
+}
+
+int computeBarrierDrainLatency(int queueDepth, int fullQueueDrainLatency, int matchingDsLoadCount,
+                               int targetDSLoadLatency) {
+    // A zero queue depth means the arch has no modeled LDS return queue, and a lone
+    // load has nothing queued behind it. Either way only the load's own latency applies.
+    if (queueDepth <= 0 || matchingDsLoadCount <= 1) return targetDSLoadLatency;
+    // The queue cannot hold more than its depth, so beyond that the barrier waits on a
+    // full queue no matter how many more loads match.
+    if (matchingDsLoadCount >= queueDepth) return fullQueueDrainLatency;
+
+    const int fullQueueRamp = fullQueueDrainLatency - targetDSLoadLatency;
+    return targetDSLoadLatency + (matchingDsLoadCount - 1) * fullQueueRamp / (queueDepth - 1);
 }
 
 const HWModel& hwModelForArch(const std::array<int, 3>& arch) {

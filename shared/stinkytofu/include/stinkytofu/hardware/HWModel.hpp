@@ -122,6 +122,18 @@ constexpr int kArchKeyGfx1250v0 = archKey({12, 5, 1});
 int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
                                int numWaves);
 
+/// Cycles a barrier must wait for the ds_reads it depends on to return.
+///
+/// Ramps from a single load's own latency up to \p fullQueueDrainLatency as the
+/// matching count approaches \p queueDepth, and holds there beyond it: only a
+/// queue's worth of loads can still be outstanding when the barrier is reached, so
+/// the total matching count must not drive the wait past a full-queue drain.
+///
+/// Takes the depth and drain latency as arguments rather than reading them off an
+/// HWModel because both are overridable per run (PassFeatureConfig::dagFeatures).
+int computeBarrierDrainLatency(int queueDepth, int fullQueueDrainLatency, int matchingDsLoadCount,
+                               int targetDSLoadLatency);
+
 /// Look up the hardware model for \p arch (the {major, minor, stepping} triple
 /// from GemmTileConfig). gfx1250 is the fallback for any unlisted arch.
 STINKYTOFU_EXPORT const HWModel& hwModelForArch(const std::array<int, 3>& arch);

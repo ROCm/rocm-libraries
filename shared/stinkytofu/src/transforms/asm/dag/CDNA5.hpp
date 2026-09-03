@@ -384,10 +384,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadQueueDepth;
         return cfg > 0 ? cfg : hw_.lds.readQueueDepth;
     }
-    // Barrier-timing only (computeBarrierAfterThresholds): the cycles a barrier must wait for
-    // its dependent ds_reads to return. 0 means "derive dynamically from the matching
-    // ds_read count and target ds_read latency." Queue occupancy / pacing uses
-    // dsReadThrottleLatency, not this.
+    // Barrier-timing only (computeBarrierAfterThresholds): the cycles a saturated ds_read
+    // queue takes to drain, i.e. the longest a barrier can have to wait for its dependent
+    // ds_reads. Queue occupancy / pacing uses dsReadThrottleLatency, not this.
     int dsReadDrainLatency() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadDrainLatency;
         return cfg > 0 ? cfg : hw_.lds.readDrainLatency;
@@ -1253,8 +1252,10 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 //  Step 4 — threshold N = max(lastOverlap, wmmaWindowsNeeded) + latencyWmmaBudget;
 //            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
 //            wmmaWindowsNeeded is derived from matching ds_read count and DS per-WMMA cap.
-//            latency = dsReadDrainLatency when it is configured (> 0), else
-//            computeDynamicDrainLatency(hw, matchingDsLoadCount, targetDSLoadLatency, numWaves).
+//            latency = computeBarrierDrainLatency(), which ramps the latest matching ds_read's
+//            own latency up to dsReadDrainLatency as the count reaches the queue depth. The
+//            count must not push it further: overflow past the depth is ds_read *issue*
+//            pacing, and computeWmmaWindowsNeeded() already charges that to wmmaWindowsNeeded.
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -1315,17 +1316,8 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         }
 
         // Step 4: threshold N = lastOverlap + (latency / wmmaIssueConfig.latency) + 1.
-        // A positive dsReadDrainLatency pins the latency. A non-positive value
-        // (default 0) means "use dynamic drain latency," derived from the matching
-        // ds_load count and the latest matching ds_read latency by the HWModel helper,
-        // keyed by this pass context's NumWaves.
-        const int configuredDrainLatency = dsReadDrainLatency();
-        const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
-        const int latencyForAfterThreshold =
-            configuredDrainLatency > 0
-                ? configuredDrainLatency
-                : computeDynamicDrainLatency(hw_, matchingDsLoadCount, (int)targetDSLoadLatency,
-                                             numWaves);
+        const int latencyForAfterThreshold = computeBarrierDrainLatency(
+            dsReadQueueDepth(), dsReadDrainLatency(), matchingDsLoadCount, (int)targetDSLoadLatency);
         const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
