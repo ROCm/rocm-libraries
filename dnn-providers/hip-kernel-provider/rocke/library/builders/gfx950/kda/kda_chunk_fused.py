@@ -287,9 +287,7 @@ def main():
                     else dataclasses.replace(spec, has_initial_state=True)
                 )
                 state_label = " with h0" if with_h0 else ""
-                print(
-                    f"parity B={B} H={H} T={T} gate in [{gate_low}, 0]{state_label}:"
-                )
+                print(f"parity B={B} H={H} T={T} gate in [{gate_low}, 0]{state_label}:")
                 worst = max(
                     worst,
                     check(
