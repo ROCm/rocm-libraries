@@ -321,27 +321,15 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
             existing.version = 1;
             if(std::filesystem::exists(sidecarPath))
             {
-                std::ifstream existingFile(sidecarPath);
-                if(existingFile)
+                try
                 {
-                    auto json
-                        = nlohmann::json::parse(existingFile, nullptr, /*allow_exceptions=*/false);
-                    if(json.is_discarded())
-                    {
-                        summary.errors.push_back("refusing to overwrite unparseable sidecar: "
-                                                 + sidecarPath.string());
-                        continue;
-                    }
-                    try
-                    {
-                        existing = parseSupportClaimsJson(json, sidecarPath.string());
-                    }
-                    catch(const std::exception& e)
-                    {
-                        summary.errors.push_back("refusing to overwrite unparseable sidecar: "
-                                                 + sidecarPath.string() + ": " + e.what());
-                        continue;
-                    }
+                    existing = loadSupportClaimsFromPath(sidecarPath);
+                }
+                catch(const std::exception& e)
+                {
+                    summary.errors.push_back("refusing to overwrite unparseable sidecar: "
+                                             + sidecarPath.string() + ": " + e.what());
+                    continue;
                 }
             }
 

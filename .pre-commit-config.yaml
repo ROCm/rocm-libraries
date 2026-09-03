@@ -48,9 +48,8 @@ exclude: |
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
     projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
-    # Reference data (auto-generated) — support-claim sidecars are exempt so the
-    # verify-support-claims hook can see them.
-    dnn-providers/integration-tests/integration-test-bundles/.*(?<!\.support\.json)(?<!support\.json)$|
+    # Reference data (auto-generated)
+    dnn-providers/integration-tests/integration-test-bundles/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
     projects/rocrand/library/.*precomputed\.(cpp|h)|
@@ -148,11 +147,7 @@ repos:
         entry: python dnn-providers/integration-tests/scripts/verify_support_claims.py
         language: python
         pass_filenames: false
-        files: >-
-          (?x)
-          ^dnn-providers/integration-tests/integration-test-bundles/.*\.support\.json$|
-          ^dnn-providers/integration-tests/integration-test-bundles/.*/support\.json$|
-          ^dnn-providers/integration-tests/scripts/verify_support_claims\.py$
+        always_run: true
 
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)
