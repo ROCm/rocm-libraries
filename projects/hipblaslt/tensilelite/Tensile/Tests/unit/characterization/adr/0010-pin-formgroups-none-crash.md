@@ -1,6 +1,6 @@
 # ADR 0010: Pin the `formGroups("None")` crash on the skipMI / MI-disabled path
 
-Status:  Accepted
+Status:  Superseded by adr/0013
 Defect:  [AIHPBLAS-4409](https://amd-hub.atlassian.net/browse/AIHPBLAS-4409)
 Commit:  ce8c60e (PR #7989) — https://github.com/ROCm/rocm-libraries/commit/ce8c60e66640b60f7fde9122907b593ed6620c7d — landed on develop via PR #7989's squash merge, 74e4693
 

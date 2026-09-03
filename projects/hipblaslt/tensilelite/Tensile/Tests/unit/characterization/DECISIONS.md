@@ -283,3 +283,10 @@ field tuple position.
 **ADR:** [`adr/0002-knownbugs-key-on-solution-name.md`](adr/0002-knownbugs-key-on-solution-name.md)
 
 **Decision:** `TensileLogic.KnownBugs` now keys documented `--check-all` skips on `(path, solution_name)` instead of positional `(path, solution_index)`, which shifts on re-tuning; `solution_index` support is dropped. Intended behavior change, not a pinned bug. Motivating context: ROCM-7144.
+
+## D23 — TensileLibLogicToYaml: the skipMI / MI-disabled crash is fixed, D14's pin flipped
+
+**ADR:** [`adr/0013-fix-formgroups-none-crash.md`](adr/0013-fix-formgroups-none-crash.md), superseding [`adr/0010-pin-formgroups-none-crash.md`](adr/0010-pin-formgroups-none-crash.md)
+
+**Decision:** D14 pinned the `AttributeError` that `formGroups` raised when `formForkParams` passed the string sentinel `"None"` on the skipMI / MI-disabled path (AIHPBLAS-4409). PR #11538 fixes it: that branch now builds a real `{"WorkGroup": ...}` group. `test_form_fork_params_skip_mi_raises` is replaced by `test_form_fork_params_skip_mi_emits_workgroup`, which asserts the working behavior, plus a companion test pinning the `KeyError` a solution with no `WorkGroup` still raises. ADR 0010 anticipated exactly this flip.
+

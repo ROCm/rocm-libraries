@@ -106,13 +106,22 @@ def test_form_9bit_mi_inst_empty_raises():
 # ---------------------------------------------------------------------------
 # formForkParams
 # ---------------------------------------------------------------------------
-def test_form_fork_params_skip_mi_raises():
-    # LATENT BUG (pinned): when MI is skipped the code sets temp="None" (a str)
-    # then calls formGroups(temp), which does temp.items() -> AttributeError.
-    # So the skipMI / MI-disabled path is currently broken. See DECISIONS D14.
-    sol = {"EnableMatrixInstruction": False}
-    with pytest.raises(AttributeError):
-        M.formForkParams(sol, skipMI=True)
+def test_form_fork_params_skip_mi_emits_workgroup():
+    # D14 / AIHPBLAS-4409 (was pinned, now FIXED): this path used to pass the
+    # string "None" to formGroups, whose .items() raised AttributeError. It now
+    # emits a WorkGroup group, so the skipMI / MI-disabled path works.
+    sol = {"EnableMatrixInstruction": False, "WorkGroup": [16, 16, 1]}
+    data = M.formForkParams(sol, skipMI=True)
+    grp = data["ForkParameters"][-1]["Groups"][0][0]
+    assert list(grp["WorkGroup"]) == [16, 16, 1]
+    assert "MatrixInstruction" not in grp
+
+
+def test_form_fork_params_skip_mi_without_workgroup_raises():
+    # formGroups is the only emitter for WorkGroup, so a solution that omits it
+    # cannot produce a group at all.
+    with pytest.raises(KeyError):
+        M.formForkParams({"EnableMatrixInstruction": False}, skipMI=True)
 
 
 def test_form_fork_params_with_mi():
@@ -172,11 +181,48 @@ def test_form_problem_size_origami_none(capsys, monkeypatch):
 # ---------------------------------------------------------------------------
 # formLibraryLogic
 # ---------------------------------------------------------------------------
+def _solution_source(**overrides):
+    fields = dict(
+        versionString={"MinimumRequiredVersion": "1.2.3"},
+        scheduleName="sched",
+        architectureName="gfx942",
+        deviceNames=["Device 75a0"],
+        problemType={},
+        solution={},
+    )
+    fields.update(overrides)
+    return M.SolutionSource(**fields)
+
+
 def test_form_library_logic():
-    data = M.formLibraryLogic("sched", ["Device 75a0"], "gfx942")
+    data = M.formLibraryLogic(_solution_source())
     assert str(data["ScheduleName"]) == "sched"
     assert str(data["ArchitectureName"]) == "gfx942"
     assert [str(x) for x in data["DeviceNames"]] == ["Device 75a0"]
+
+
+def test_form_library_logic_prefers_run_config(monkeypatch):
+    # Values recorded by the run config win over the ones derived from the input.
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
+    runSettings = M.RunSettings(
+        libraryLogic={
+            "ScheduleName": "recorded",
+            "ArchitectureName": "gfx950",
+            "DeviceNames": ["Device 0050"],
+        }
+    )
+    data = M.formLibraryLogic(_solution_source(), runSettings)
+    assert str(data["ScheduleName"]) == "recorded"
+    assert str(data["ArchitectureName"]) == "gfx950"
+    assert [str(x) for x in data["DeviceNames"]] == ["Device 0050"]
+
+
+def test_form_library_logic_unwraps_dict_architecture():
+    # rawLibraryLogic may hand back {'Architecture': 'gfx950', 'CUCount': 128}.
+    data = M.formLibraryLogic(
+        _solution_source(architectureName={"Architecture": "gfx950", "CUCount": 128})
+    )
+    assert str(data["ArchitectureName"]) == "gfx950"
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +315,11 @@ def test_main_single_index(monkeypatch):
     monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
     monkeypatch.setattr(M.sys, "argv", ["prog", "-i", "in.yaml", "-d", "0", "-o", "out.yaml"])
     calls = []
-    monkeypatch.setattr(M, "TensileLibLogicToYaml", lambda inp, idx, out, skip: calls.append((idx, out)))
+    monkeypatch.setattr(
+        M,
+        "TensileLibLogicToYaml",
+        lambda inp, idx, out, skip, runCfg, useRunCfg: calls.append((idx, out)),
+    )
     M.main()
     assert len(calls) == 1
     assert calls[0][0] == 0
@@ -279,7 +329,11 @@ def test_main_multi_index_suffixes(monkeypatch):
     monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
     monkeypatch.setattr(M.sys, "argv", ["prog", "-i", "in.yaml", "-d", "1,2", "-o", "/tmp/out.yaml"])
     calls = []
-    monkeypatch.setattr(M, "TensileLibLogicToYaml", lambda inp, idx, out, skip: calls.append((idx, out)))
+    monkeypatch.setattr(
+        M,
+        "TensileLibLogicToYaml",
+        lambda inp, idx, out, skip, runCfg, useRunCfg: calls.append((idx, out)),
+    )
     M.main()
     assert [c[0] for c in calls] == [1, 2]
     # multi-id appends _<id> before .yaml
