@@ -101,7 +101,7 @@ echo "Step 3b: Checking ck_tile FMHA example for changes..."
 FMHA_EXAMPLE_PATTERN='projects/composablekernel/example/ck_tile/01_fmha/.*\.(cpp|cc|cxx|hpp|hxx|h|py)$'
 FMHA_CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null || echo "")
 
-if echo "${ARCH_NAME}" | grep -qE "gfx11|gfx9" \
+if echo "${ARCH_NAME}" | grep -qE "gfx12|gfx9" \
     && echo "${FMHA_CHANGED_FILES}" | grep -qE "${FMHA_EXAMPLE_PATTERN}"; then
     echo "FMHA example changes detected - forcing test_ck_tile_fmha build and run"
     # test_ck_tile_fmha is a ninja umbrella target (builds all fwd/bwd fmha tests)
