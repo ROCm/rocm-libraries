@@ -142,7 +142,7 @@ def test_explicit_caller_wins_any_arch():
         p.restore()
 
 
-def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0, arch=None):
+def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0, clamp_arch=None):
     return UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
@@ -157,7 +157,7 @@ def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0, arch=None):
         use_sinks=False,
         num_cus=num_cus,
         target_ctas=tctas,
-        arch=arch,
+        clamp_arch=clamp_arch,
     )
 
 
@@ -194,9 +194,10 @@ def test_target_ctas_threaded_through_problem():
 
 
 def test_problem_lowercases_arch_for_the_clamp():
-    """``_problem`` lowercases ``req.arch`` before it reaches the clamp, which
-    compares against lowercase literals ("gfx942" / "gfx950") -- an exact string
-    match, so a mixed-case arch would silently skip the clamp rather than error.
+    """``_problem`` lowercases ``req.arch`` into ``clamp_arch`` before it reaches
+    the clamp, which compares against lowercase literals ("gfx942" / "gfx950") --
+    an exact string match, so a mixed-case arch would silently skip the clamp
+    rather than error.
 
     Scope: this pins ``_problem``'s normalization ONLY. It is defence in depth,
     not a reachable input -- the dispatch path rejects mixed case earlier, in
@@ -205,7 +206,7 @@ def test_problem_lowercases_arch_for_the_clamp():
     below that gate. See ``test_request_layer_rejects_mixed_case_arch``.
     """
     for raw in ("GFX950", "Gfx950", "gfx950"):
-        assert A._problem(_req(num_cus=200, arch=raw)).arch == "gfx950", raw
+        assert A._problem(_req(num_cus=200, arch=raw)).clamp_arch == "gfx950", raw
     # Driven through _problem + _num_segments, casing must not change the segment
     # count: both normalize to gfx950 and take the same clamp.
     p_mixed = A._problem(_req(num_cus=256, arch="GFX950"))
@@ -358,8 +359,9 @@ def test_gfx942_partition_routing_matches_develop():
 
 def test_segment_clamp_keys_on_request_arch():
     """The split-KV clamp keys on the arch the problem TARGETS, not the running
-    box. When ``problem.arch`` is set the running-box resolver is never consulted,
-    so an off-box build targeting one arch can't pick up another arch's clamp."""
+    box. When ``problem.clamp_arch`` is set the running-box resolver is never
+    consulted, so an off-box build targeting one arch can't pick up another
+    arch's clamp."""
     p = _Patch()
     calls = {"n": 0}
 
@@ -371,10 +373,10 @@ def test_segment_clamp_keys_on_request_arch():
     try:
         au._RESOLVED_ATTENTION_ARCH = None
         p.attr(au, "_resolve_attention_arch", _spy)
-        # problem.arch set -> resolver is never consulted.
-        au._num_segments(_prob(256, arch="gfx942", **shape))
-        assert calls["n"] == 0, "running-box arch consulted despite problem.arch set"
-        # problem.arch unset -> falls back to the running-box resolver.
+        # clamp_arch set -> resolver is never consulted.
+        au._num_segments(_prob(256, clamp_arch="gfx942", **shape))
+        assert calls["n"] == 0, "running-box arch consulted despite clamp_arch set"
+        # clamp_arch unset -> falls back to the running-box resolver.
         au._num_segments(_prob(256, **shape))
         assert calls["n"] >= 1, "running-box resolver not used as fallback"
     finally:
@@ -396,7 +398,7 @@ def test_every_auto_resolve_arch_clamps_the_split():
     uncapped (D256, or long-kv D128) would fail for a legitimate reason."""
     shape = dict(nq=8, nk=8, D=128, kv=2048, batch=1)
     for arch in sorted(AC._AUTO_RESOLVE_ARCHS):
-        prob = _prob(256, arch=arch, **shape)
+        prob = _prob(256, clamp_arch=arch, **shape)
         raw = prob.select_3d()[0].NUM_SEGMENTS_PER_SEQ
         ceiling = au._pre_bump_segments(prob)
         assert raw > ceiling, (

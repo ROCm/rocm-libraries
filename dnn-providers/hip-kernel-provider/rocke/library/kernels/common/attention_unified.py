@@ -125,12 +125,18 @@ class UnifiedAttentionProblem:
     # cache; 0 means "unknown" (assume small / fast i32 path). The
     # dispatcher fills this from the K tensor when available.
     num_kv_blocks: int = 0
-    # Target arch this problem is BUILT for (threaded from the dispatch request).
-    # When set, the split-KV segment clamp keys on it instead of the running-box
-    # arch (``_resolve_attention_arch``), so an off-box tuner/benchmark passing an
-    # explicit ``num_cus`` while targeting one arch never picks up another arch's
-    # clamp. ``None`` => fall back to the running-box arch (unchanged behaviour).
-    arch: Optional[str] = None
+    # Arch the split-KV SEGMENT CLAMP keys on, threaded from the dispatch request.
+    #
+    # This is NOT the spec's authoritative arch. The 3D spec CLASS and every other
+    # tuning field (tile_size_override, waves_per_eu, the hoist / wide-KV gates)
+    # still come from the running box via ``_resolve_attention_arch`` -- see
+    # ``builders/common/attention_spec_builder.py::_tiled_3d_spec_from_problem``.
+    # ``num_segments`` is the one field keyed here, so that an off-box
+    # tuner/benchmark passing an explicit ``num_cus`` while targeting one arch
+    # never picks up another arch's clamp. When the two sources disagree the
+    # clamp stops describing the kernel that actually gets built; unifying them
+    # is tracked separately. ``None`` => fall back to the running-box arch.
+    clamp_arch: Optional[str] = None
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -2911,7 +2917,9 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
     # Key the clamp on the arch this problem targets when the dispatcher threaded
     # it through; fall back to the running-box arch otherwise. This keeps an
     # off-box build targeting one arch from picking up another arch's clamp.
-    arch = problem.arch or _resolve_attention_arch()
+    # NOTE ``clamp_arch`` governs THIS field only -- the spec class and the other
+    # tuning fields still resolve from the running box.
+    arch = problem.clamp_arch or _resolve_attention_arch()
     # Routing uses the device CU count (num_cus*4) so under-filled grids flip
     # 2D->3D; but the split-KV segment count must stay bounded, else the reduce
     # round-trip over-splits 3D shapes. The PRE-BUMP baseline (segments the same

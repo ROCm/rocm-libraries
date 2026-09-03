@@ -268,7 +268,7 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         fp8_fnuz=bool(req.fp8_fnuz),
         num_cus=_resolve_num_cus(req),
         target_ctas=int(req.target_ctas),
-        arch=req.arch.lower(),
+        clamp_arch=req.arch.lower(),
     )
 
 
