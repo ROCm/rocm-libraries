@@ -1014,7 +1014,7 @@ namespace TensileLite::Client::HostNumerics
     {
         using namespace roc::host_numerics;
 
-        GemmBackend combined   = GemmBackend::Pointwise;
+        GemmBackend combined   = GemmBackend::Blocked;
         bool        hasBackend = false;
         for(size_t batch = 0; batch < batchCount(); ++batch)
         {

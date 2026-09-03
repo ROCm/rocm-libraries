@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <optional>
 #include <roc/host_numerics/comparison.hpp>
 #include <roc/host_numerics/gemm.hpp>
 #include <span>
@@ -81,7 +82,7 @@ size_t parseSize(const char* text, const char* name) {
 Options parseOptions(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--help") {
         std::cout << "Usage: host-numerics-gemm-benchmark "
-                     "<automatic|pointwise|blocked> <M> <N> <K> <selected-or-0-for-all> "
+                     "<automatic|blocked> <M> <N> <K> <selected-or-0-for-all> "
                      "<warmups> <iterations> [profile]\n";
         std::exit(0);
     }
@@ -91,12 +92,10 @@ Options parseOptions(int argc, char** argv) {
     const std::string_view backend(argv[1]);
     if (backend == "automatic")
         options.backend = GemmBackend::Automatic;
-    else if (backend == "pointwise")
-        options.backend = GemmBackend::Pointwise;
     else if (backend == "blocked")
         options.backend = GemmBackend::Blocked;
     else
-        throw std::invalid_argument("Backend must be automatic, pointwise, or blocked.");
+        throw std::invalid_argument("Backend must be automatic or blocked.");
 
     options.rows = parseSize(argv[2], "M");
     options.columns = parseSize(argv[3], "N");
@@ -132,6 +131,90 @@ Tensor makeBlockScales(size_t freeElements, size_t reductionBlocks, size_t strea
     return scales;
 }
 
+template <typename Accumulator>
+void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
+    using namespace roc::host_numerics;
+
+    if (problem.computeTypeA || problem.computeTypeB || !problem.preQuantizationScalesA.empty() ||
+        !problem.preQuantizationScalesB.empty() || problem.mathMode != MathMode::Default ||
+        problem.conjugateA || problem.conjugateB ||
+        problem.outputConversion != OutputConversion::Default)
+        throw std::invalid_argument("Benchmark scalar oracle does not support this profile.");
+    if (problem.activation != Activation::None && problem.activation != Activation::Relu)
+        throw std::invalid_argument("Benchmark scalar oracle does not support this activation.");
+
+    const size_t rows = problem.a.shape()[0];
+    const size_t reductions = problem.a.shape()[1];
+    const size_t columns = problem.b.shape()[1];
+    const Shape outputShape{rows, columns};
+    const auto scaleValue = [&](const std::optional<Tensor>& scale, size_t row, size_t column) {
+        return scale ? scale->broadcastTo(outputShape).loadAs<Accumulator>({row, column})
+                     : Accumulator(1);
+    };
+
+    for (const size_t logicalIndex :
+         problem.outputSelection.indices(problem.d.shape().elementCount())) {
+        const auto coordinates =
+            problem.d.shape().coordinates(logicalIndex, problem.outputSelection.indexOrder());
+        const size_t row = coordinates[0];
+        const size_t column = coordinates[1];
+        Accumulator accumulation = Accumulator(0);
+
+        for (size_t blockBase = 0; blockBase < reductions;) {
+            const size_t remainingA = problem.blockScaleA
+                                          ? problem.blockSizeA - blockBase % problem.blockSizeA
+                                          : reductions - blockBase;
+            const size_t remainingB = problem.blockScaleB
+                                          ? problem.blockSizeB - blockBase % problem.blockSizeB
+                                          : reductions - blockBase;
+            const size_t blockEnd =
+                blockBase + std::min({reductions - blockBase, remainingA, remainingB});
+            Accumulator partial = Accumulator(0);
+            for (size_t reduction = blockBase; reduction < blockEnd; ++reduction)
+                partial += problem.a.loadAs<Accumulator>({row, reduction}) *
+                           problem.b.loadAs<Accumulator>({reduction, column});
+            if (problem.blockScaleA)
+                partial *=
+                    problem.blockScaleA->loadAs<Accumulator>({row, blockBase / problem.blockSizeA});
+            if (problem.blockScaleB)
+                partial *= problem.blockScaleB->loadAs<Accumulator>(
+                    {column, blockBase / problem.blockSizeB});
+            accumulation += partial;
+            blockBase = blockEnd;
+        }
+
+        Accumulator effectiveAlpha = problem.alpha.as<Accumulator>();
+        effectiveAlpha *= scaleValue(problem.scaleA, row, column);
+        effectiveAlpha *= scaleValue(problem.scaleB, row, column);
+        effectiveAlpha *= scaleValue(problem.scaleAlpha, row, column);
+        Accumulator result = effectiveAlpha * accumulation;
+        if (problem.beta.as<Accumulator>() != Accumulator(0))
+            result += problem.beta.as<Accumulator>() * problem.scaleC.as<Accumulator>() *
+                      problem.c.loadAs<Accumulator>({row, column});
+        if (problem.bias)
+            result += problem.bias->broadcastTo(outputShape).loadAs<Accumulator>({row, column});
+        if (problem.activation == Activation::Relu) result = std::max(Accumulator(0), result);
+        result *= problem.outputScale.as<Accumulator>();
+        destination.storeFrom({row, column}, result);
+    }
+}
+
+void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
+    using roc::host_numerics::ScalarType;
+
+    switch (problem.accumulatorType) {
+        case ScalarType::Float32:
+            runScalarOracle<float>(problem, destination);
+            return;
+        case ScalarType::Float64:
+            runScalarOracle<double>(problem, destination);
+            return;
+        default:
+            throw std::invalid_argument(
+                "Benchmark scalar oracle requires F32 or F64 accumulation.");
+    }
+}
+
 double median(std::vector<double> values) {
     std::sort(values.begin(), values.end());
     const size_t middle = values.size() / 2;
@@ -143,8 +226,6 @@ const char* backendName(GemmBackend backend) {
     switch (backend) {
         case GemmBackend::Automatic:
             return "automatic";
-        case GemmBackend::Pointwise:
-            return "pointwise";
         case GemmBackend::Blocked:
             return "blocked";
         default:
@@ -235,7 +316,7 @@ int main(int argc, char** argv) {
         GemmOptions expectedOptions = requestOptions;
         expectedOptions.outputSelection = validationSelection;
         GemmTestCase expectedRequest(a, b, c, expected, expectedOptions);
-        referenceGemm(expectedRequest, GemmBackend::Pointwise);
+        runScalarOracle(expectedRequest, expected);
 
         const std::vector<size_t> validationIndices = validationSelection.indices(outputElements);
         const double tolerance = defaultSymmetricRelativeTolerance(profile.outputType);
@@ -248,7 +329,7 @@ int main(int argc, char** argv) {
             const double difference = std::abs(observed - reference);
             if (observed != reference &&
                 !(difference < tolerance * (std::abs(observed) + std::abs(reference) + 1.0)))
-                throw std::runtime_error("Benchmark backend differs from pointwise reference.");
+                throw std::runtime_error("Benchmark result differs from the scalar oracle.");
             checksum += observed;
         }
 

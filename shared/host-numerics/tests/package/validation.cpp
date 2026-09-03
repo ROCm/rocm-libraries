@@ -28,7 +28,7 @@ int main() {
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b));
     const Tensor inputC = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(c));
-    if (referenceGemmInto(operandA, operandB, inputC, d) != GemmBackend::Pointwise) return 1;
+    if (referenceGemmInto(operandA, operandB, inputC, d) != GemmBackend::Blocked) return 1;
     if (d.loadAs<float>({0, 0}) != 6) return 1;
     if (referenceGemmInto(operandA, operandB, inputC, d, GemmOptions{}, GemmBackend::Blocked) !=
             GemmBackend::Blocked ||

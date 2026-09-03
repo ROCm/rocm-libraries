@@ -122,7 +122,7 @@ def modular_values(rows, columns, row_factor, column_factor, modulus, center, di
     ).astype(np.float32) / np.float32(divisor)
 
 
-class PointwiseOracleTests(unittest.TestCase):
+class GemmOracleTests(unittest.TestCase):
     def test_zero_matrix_extents_are_no_ops(self):
         for rows, columns, reductions in ((0, 4, 3), (2, 0, 3), (2, 4, 0)):
             with self.subTest(rows=rows, columns=columns, reductions=reductions):
@@ -132,19 +132,18 @@ class PointwiseOracleTests(unittest.TestCase):
                     rows, columns
                 )
                 expected = np.float32(1.5) * initial
-                for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
-                    observed = hv.reference_gemm(
-                        hv.from_numpy(left),
-                        hv.from_numpy(right),
-                        hv.from_numpy(initial),
-                        hv.ScalarType.Float32,
-                        hv.ScalarType.Float32,
-                        alpha=np.nan if reductions == 0 else 1.0,
-                        beta=1.5,
-                        backend=backend,
-                    )
-                    self.assertEqual(observed.shape, [rows, columns])
-                    np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+                observed = hv.reference_gemm(
+                    hv.from_numpy(left),
+                    hv.from_numpy(right),
+                    hv.from_numpy(initial),
+                    hv.ScalarType.Float32,
+                    hv.ScalarType.Float32,
+                    alpha=np.nan if reductions == 0 else 1.0,
+                    beta=1.5,
+                    backend=hv.GemmBackend.Blocked,
+                )
+                self.assertEqual(observed.shape, [rows, columns])
+                np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_selected_affine_reduced_precision_accumulation_rounds_each_step(self):
         left = np.asarray(
@@ -185,7 +184,7 @@ class PointwiseOracleTests(unittest.TestCase):
                     accumulator_type,
                     output_selection=hv.OutputSelection.explicit_indices(selected),
                     output_layout=output_layout,
-                    backend=hv.GemmBackend.Pointwise,
+                    backend=hv.GemmBackend.Blocked,
                 )
 
                 self.assertEqual(observed.strides, [7, 2])
@@ -222,7 +221,7 @@ class PointwiseOracleTests(unittest.TestCase):
             beta=2.0,
             output_selection=selection,
             output_layout=output_layout,
-            backend=hv.GemmBackend.Pointwise,
+            backend=hv.GemmBackend.Blocked,
         )
         np.testing.assert_array_equal(
             hv.to_numpy(alpha_zero), selected_values(2.0 * finite_initial, selected)
@@ -243,7 +242,7 @@ class PointwiseOracleTests(unittest.TestCase):
             beta=0.0,
             output_selection=selection,
             output_layout=output_layout,
-            backend=hv.GemmBackend.Pointwise,
+            backend=hv.GemmBackend.Blocked,
         )
         np.testing.assert_array_equal(
             hv.to_numpy(beta_zero),
@@ -269,7 +268,7 @@ class PointwiseOracleTests(unittest.TestCase):
             hv.ScalarType.Float32,
             alpha=0.75,
             beta=-0.25,
-            backend=hv.GemmBackend.Pointwise,
+            backend=hv.GemmBackend.Blocked,
         )
         expected = np.float32(0.75) * (left @ right) + np.float32(-0.25) * initial
         np.testing.assert_allclose(
@@ -306,7 +305,7 @@ class PointwiseOracleTests(unittest.TestCase):
             beta=beta,
             output_scale=output_scale,
             output_selection=hv.OutputSelection.explicit_indices(selected),
-            backend=hv.GemmBackend.Pointwise,
+            backend=hv.GemmBackend.Blocked,
         )
 
         complete_expected = exact_int32_gemm(
@@ -321,7 +320,7 @@ class PointwiseOracleTests(unittest.TestCase):
         np.testing.assert_array_equal(
             np.frombuffer(output.storage, dtype=np.int32), expected_storage
         )
-        self.assertEqual(backend, hv.GemmBackend.Pointwise)
+        self.assertEqual(backend, hv.GemmBackend.Blocked)
 
     def test_unequal_mx_blocks_and_k_tail_use_per_k_scale_oracle(self):
         left = np.asarray(
@@ -382,7 +381,7 @@ class PointwiseOracleTests(unittest.TestCase):
             block_size_a=block_a,
             block_size_b=block_b,
             output_selection=hv.OutputSelection.explicit_indices(selected),
-            backend=hv.GemmBackend.Pointwise,
+            backend=hv.GemmBackend.Blocked,
         )
 
         expected_complete = per_k_block_scaled_gemm(
@@ -391,7 +390,7 @@ class PointwiseOracleTests(unittest.TestCase):
         expected = np.zeros_like(expected_complete)
         expected.reshape(-1)[selected] = expected_complete.reshape(-1)[selected]
         np.testing.assert_array_equal(hv.to_numpy(output), expected)
-        self.assertEqual(backend, hv.GemmBackend.Pointwise)
+        self.assertEqual(backend, hv.GemmBackend.Blocked)
 
     def test_one_sided_block_scales_are_independent(self):
         left = np.ones((2, 4), dtype=np.float32)
@@ -489,7 +488,7 @@ class PointwiseOracleTests(unittest.TestCase):
             beta=complex(beta),
             conjugate_a=True,
             output_selection=hv.OutputSelection.explicit_indices(selected),
-            backend=hv.GemmBackend.Pointwise,
+            backend=hv.GemmBackend.Blocked,
         )
 
         expected_complete = np.complex64(alpha) * (np.conjugate(left) @ right)
@@ -506,7 +505,7 @@ class PointwiseOracleTests(unittest.TestCase):
             np.frombuffer(output.storage, dtype=np.complex64),
             expected_storage,
         )
-        self.assertEqual(backend, hv.GemmBackend.Pointwise)
+        self.assertEqual(backend, hv.GemmBackend.Blocked)
 
 
 class GemmFinalizationOracleTests(unittest.TestCase):
@@ -593,7 +592,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
         )
         np.testing.assert_array_equal(hv.to_numpy(observed), saturating_int8(targets))
 
-    def test_selected_float_results_match_full_results_across_backends(self):
+    def test_selected_float_results_match_full_result_and_numpy(self):
         rows = 35
         reduction = 65
         columns = 37
@@ -618,48 +617,37 @@ class GemmFinalizationOracleTests(unittest.TestCase):
         ) + float(beta) * initial.astype(np.float64)
         relative_tolerance = 1.0e-4
         absolute_tolerance = 1.0e-5
-        full_outputs = []
-        for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
-            with self.subTest(backend=backend):
-                full = hv.to_numpy(
-                    hv.reference_gemm(
-                        *tensors,
-                        hv.ScalarType.Float32,
-                        hv.ScalarType.Float32,
-                        alpha=float(alpha),
-                        beta=float(beta),
-                        backend=backend,
-                    )
-                )
-                partial = hv.to_numpy(
-                    hv.reference_gemm(
-                        *tensors,
-                        hv.ScalarType.Float32,
-                        hv.ScalarType.Float32,
-                        alpha=float(alpha),
-                        beta=float(beta),
-                        output_selection=hv.OutputSelection.explicit_indices(selected),
-                        backend=backend,
-                    )
-                )
-                np.testing.assert_allclose(
-                    full, expected, rtol=relative_tolerance, atol=absolute_tolerance
-                )
-                np.testing.assert_allclose(
-                    partial.reshape(-1)[selected],
-                    full.reshape(-1)[selected],
-                    rtol=relative_tolerance,
-                    atol=absolute_tolerance,
-                )
-                np.testing.assert_array_equal(partial.reshape(-1)[unselected], 0.0)
-                full_outputs.append(full)
-
+        full = hv.to_numpy(
+            hv.reference_gemm(
+                *tensors,
+                hv.ScalarType.Float32,
+                hv.ScalarType.Float32,
+                alpha=float(alpha),
+                beta=float(beta),
+                backend=hv.GemmBackend.Blocked,
+            )
+        )
+        partial = hv.to_numpy(
+            hv.reference_gemm(
+                *tensors,
+                hv.ScalarType.Float32,
+                hv.ScalarType.Float32,
+                alpha=float(alpha),
+                beta=float(beta),
+                output_selection=hv.OutputSelection.explicit_indices(selected),
+                backend=hv.GemmBackend.Blocked,
+            )
+        )
         np.testing.assert_allclose(
-            full_outputs[0],
-            full_outputs[1],
+            full, expected, rtol=relative_tolerance, atol=absolute_tolerance
+        )
+        np.testing.assert_allclose(
+            partial.reshape(-1)[selected],
+            full.reshape(-1)[selected],
             rtol=relative_tolerance,
             atol=absolute_tolerance,
         )
+        np.testing.assert_array_equal(partial.reshape(-1)[unselected], 0.0)
 
 
 if __name__ == "__main__":

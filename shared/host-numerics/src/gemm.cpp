@@ -58,8 +58,6 @@ detail::GemmSupportInfo detail::queryGemmSupport(const GemmInvocation& request,
 
     switch (backend) {
         case GemmBackend::Automatic:
-        case GemmBackend::Pointwise:
-            return {.supported = true, .reason = {}};
         case GemmBackend::Blocked:
             return detail::queryBlockedGemmSupport(request);
         case GemmBackend::Blas:
@@ -77,30 +75,11 @@ detail::GemmSupportInfo detail::queryGemmSupport(const GemmInvocation& request,
 }
 
 detail::GemmExecutionInfo detail::executeGemm(const GemmInvocation& request, GemmBackend backend) {
-    std::optional<std::string> fallbackReason;
-    if (backend == GemmBackend::Automatic) {
-        const GemmSupportInfo blockedSupport = detail::queryBlockedGemmSupport(request);
-        if (blockedSupport && blockedSupport.preferredForAutomaticExecution) {
-            GemmExecutionInfo runInfo = detail::runBlockedGemm(request);
-            runInfo.fallbackReason = std::move(fallbackReason);
-            return runInfo;
-        }
-        if (!blockedSupport && !fallbackReason) fallbackReason = blockedSupport.reason;
-        backend = GemmBackend::Pointwise;
-    }
+    if (backend == GemmBackend::Automatic) backend = GemmBackend::Blocked;
 
     const GemmSupportInfo requestedSupport = queryGemmSupport(request, backend);
     if (!requestedSupport) throw std::invalid_argument(requestedSupport.reason);
-    if (backend == GemmBackend::Blocked) {
-        return detail::runBlockedGemm(request);
-    }
-
-    const GemmSupportInfo pointwiseSupport = queryGemmSupport(request, GemmBackend::Pointwise);
-    if (!pointwiseSupport) throw std::invalid_argument(pointwiseSupport.reason);
-
-    GemmExecutionInfo runInfo = detail::runPointwiseGemm(request);
-    runInfo.fallbackReason = std::move(fallbackReason);
-    return runInfo;
+    return detail::runBlockedGemm(request);
 }
 
 GemmBackend referenceGemmInto(Tensor a, Tensor b, Tensor c, Tensor d, const GemmOptions& options,

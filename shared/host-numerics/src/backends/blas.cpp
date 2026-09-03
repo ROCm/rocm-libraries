@@ -103,8 +103,7 @@ T* typedMutableData(const Tensor& view, const char* name) {
 }
 
 void validateCommon(const GemmInvocation& problem) {
-    const GemmSupportInfo pointwise = detail::queryGemmSupport(problem, GemmBackend::Pointwise);
-    if (!pointwise) throw std::invalid_argument(pointwise.reason);
+    detail::validateRuntimeGemm(problem);
 
     if (problem.a.type() != problem.accumulatorType ||
         problem.b.type() != problem.accumulatorType ||
@@ -219,8 +218,7 @@ size_t saturatedSum(size_t left, size_t right) {
 }
 
 void validateTransforming(const GemmInvocation& problem) {
-    const GemmSupportInfo pointwise = detail::queryGemmSupport(problem, GemmBackend::Pointwise);
-    if (!pointwise) throw std::invalid_argument(pointwise.reason);
+    detail::validateRuntimeGemm(problem);
 
     switch (problem.accumulatorType) {
         case ScalarType::Float32:

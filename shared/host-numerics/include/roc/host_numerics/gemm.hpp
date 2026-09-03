@@ -10,13 +10,12 @@
 #include <vector>
 
 namespace roc::host_numerics {
-// Selects the host implementation strategy. Pointwise computes exactly the
-// selected D coordinates. Blocked reuses operand blocks and may accumulate
-// unselected coordinates in every touched output block, but writes only the
-// selected D coordinates. Blas delegates to a supplied BLAS implementation.
+// Selects the host implementation strategy. Blocked reuses operand blocks and
+// may accumulate unselected coordinates in every touched output block, but
+// writes only the selected D coordinates. Blas delegates to a supplied BLAS
+// implementation.
 enum class GemmBackend {
-    Automatic,  // Selects among available BLAS, built-in Blocked, and Pointwise execution.
-    Pointwise,  // Computes and writes exactly the selected D coordinates.
+    Automatic,  // Selects between available BLAS and built-in Blocked execution.
     Blocked,    // Accumulates complete touched output blocks; writes selected D coordinates.
     Blas,       // Uses the optional BLAS component's transforming implementation.
     Mixed,      // Reporting-only value for an aggregate that used multiple concrete backends.
