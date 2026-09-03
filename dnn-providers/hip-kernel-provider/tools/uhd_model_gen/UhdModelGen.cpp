@@ -46,7 +46,15 @@ namespace fbs = hipdnn_flatbuffers_sdk::data_objects;
 /// not of a well-chosen feature set.
 const std::vector<std::string> SIGNATURE = {"$kernel.block_size"};
 
-constexpr const char* UHD_ID = "5e8d21a7-9c34-4b16-8f70-2a63d8e14c90";
+/// MUST equal the `heuristic` id in pointwise_model.ued.json. The UED resolves its
+/// heuristic by id, and an id no descriptor defines is a dangling reference: the loader
+/// drops the whole engine, another engine serves the graph, and the model tests fail
+/// reporting the wrong engine rather than a missing UHD.
+///
+/// It used to differ, harmlessly, because the descriptor was a committed stub carrying
+/// this id and naming a FlatBuffer that carried its own. With the stub gone there is one
+/// descriptor and it must answer to the name the UED calls it by.
+constexpr const char* UHD_ID = "5a1c0000-0000-4000-8000-000000000002";
 constexpr const char* MODEL_FILE = "pointwise_model.bin";
 constexpr const char* UHD_FILE = "pointwise_model.uhd.json";
 
