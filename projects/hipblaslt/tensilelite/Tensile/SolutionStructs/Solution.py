@@ -1081,6 +1081,15 @@ class Solution(collections.abc.Mapping):
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
 
+    if isgfx1250 and not state["ProblemType"].get("Batched", True):
+        reject(state, printRejectionReason, "Non-batched (Batched=False) not supported on gfx1250")
+
+    if isgfx1250 and state["ScheduleGlobalRead"] != 1:
+        reject(state, printRejectionReason, "ScheduleGlobalRead not supported on gfx1250 (requires ScheduleGlobalRead=1)")
+
+    if isgfx1250 and state["ScheduleLocalWrite"] != 1:
+        reject(state, printRejectionReason, "ScheduleLocalWrite not supported on gfx1250 (requires ScheduleLocalWrite=1)")
+
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
