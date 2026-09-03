@@ -246,7 +246,6 @@ if(BUILD_WITH_ELL_TRSV)
     test_sptrsv_ell.cpp)
 endif()
 
-
 if(ROCSPARSE_ENABLE_SPMAT_SCALE)
   list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
 endif()
@@ -422,7 +421,6 @@ if(BUILD_WITH_ELL_TRSV)
     ../testings/testing_spsv_ell.cpp
     ../testings/testing_sptrsv_ell.cpp)
 endif()
-
 
 if(ROCSPARSE_ENABLE_SPMAT_SCALE)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
