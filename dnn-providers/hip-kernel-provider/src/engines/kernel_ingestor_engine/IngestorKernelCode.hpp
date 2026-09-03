@@ -38,6 +38,12 @@ compilation::KpackModuleCache& pointwiseKpackModuleCache();
 /// internal so the definition beside its handler has external linkage.
 compilation::KpackModuleCache& gfx942AttentionDenseKpackModuleCache();
 
+/// The kpack module cache the gfx950 dense-attention pack loads through,
+/// process-lifetime. Same rationale and placement as the gfx942 accessor above; the
+/// two packs hold SEPARATE caches because each keys on its own (archive, toc_key,
+/// arch) and only one of them can ever be live on a given device.
+compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
+
 /// The program plus the kernel resolved out of it, in the shape every pack's
 /// PreparedDispatch already holds. Returned together because the kernel is a
 /// non-owning view into the program and the two must be stored side by side.

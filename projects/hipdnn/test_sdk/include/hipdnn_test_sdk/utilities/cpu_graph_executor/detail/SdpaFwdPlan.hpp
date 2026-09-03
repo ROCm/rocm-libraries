@@ -35,7 +35,8 @@ struct SdpaFwdParams
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleQAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleKAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* sinkAttributes = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
@@ -59,6 +60,9 @@ struct SdpaFwdParams
         , descaleVTensor(descaleVAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*descaleVAttributes))
                              : std::nullopt)
+        , sinkTensor(sinkAttributes != nullptr
+                         ? std::make_optional(unpackTensorAttributes(*sinkAttributes))
+                         : std::nullopt)
     {
     }
 
@@ -75,6 +79,9 @@ struct SdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleKTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
+    /// Per-query-head attention-sink logits. Float, because a sink is a logit in the
+    /// compute domain rather than a value in the operands' storage type.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sinkTensor;
 };
 
 template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
@@ -141,6 +148,13 @@ public:
                 *_params.descaleVTensor, variantPack.at(_params.descaleVTensor->uid));
         }
 
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowSinkTensor;
+        if(_params.sinkTensor.has_value())
+        {
+            shallowSinkTensor = createShallowTensor<float>(*_params.sinkTensor,
+                                                           variantPack.at(_params.sinkTensor->uid));
+        }
+
         // Runtime attention scale: resolve the folded scale operand (runtime tensor
         // or baked attn_scale_value) to a scalar; nullopt => reference default 1/sqrt(D).
         std::optional<float> effectiveScale;
@@ -163,7 +177,8 @@ public:
             shallowLseTensor.get(),
             shallowDescaleQ.get(),
             shallowDescaleK.get(),
-            shallowDescaleV.get());
+            shallowDescaleV.get(),
+            shallowSinkTensor.get());
     }
 
 private:
@@ -235,11 +250,32 @@ public:
             return false;
         }
 
-        // Unsupported: block sparse attention
-        if(nodeAttributes->block_mask_tensor_uid().has_value()
-           || nodeAttributes->sink_token_tensor_uid().has_value())
+        // Unsupported: block sparse attention. A block mask is a per-block structural
+        // pattern the dense reference has no representation for.
+        if(nodeAttributes->block_mask_tensor_uid().has_value())
         {
             return false;
+        }
+
+        // SUPPORTED: attention sinks. A sink is a per-query-head learned logit that
+        // participates in the softmax denominator and has no value vector, which the
+        // dense reference CAN express -- it is one extra term in the normaliser, not a
+        // new addressing mode, so nothing about the q/k/v pointer-plus-strides shape
+        // this executor is built around has to change.
+        //
+        // It was previously declined alongside block-sparse, which put sink graphs in
+        // the same bucket as features the reference genuinely cannot represent. That
+        // made every sink shape unverifiable by any executor available to the suite,
+        // which in turn forced an integration serving them to ship without a
+        // correctness story. The tensor must exist and be float: a sink is a logit in
+        // the compute domain, and reading it at the operands' storage type would
+        // quantise it before it reaches the exponential.
+        if(nodeAttributes->sink_token_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->sink_token_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->sink_token_tensor_uid().value(),
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
         }
 
         // FP8 quantization: descales are required for fp8 inputs (mirrors AITER's
@@ -334,6 +370,9 @@ public:
         const auto* descaleVPtr = nodeAttributes->descale_v_tensor_uid().has_value()
                                       ? tensorMap.at(nodeAttributes->descale_v_tensor_uid().value())
                                       : nullptr;
+        const auto* sinkPtr = nodeAttributes->sink_token_tensor_uid().has_value()
+                                  ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
+                                  : nullptr;
 
         auto [leftBound, rightBound, isTopLeft]
             = extractDiagonalBandParams(*nodeAttributes, "SdpaFwdPlan");
@@ -351,7 +390,8 @@ public:
                           lsePtr,
                           descaleQPtr,
                           descaleKPtr,
-                          descaleVPtr));
+                          descaleVPtr,
+                          sinkPtr));
     }
 };
 
