@@ -126,7 +126,10 @@ endfunction()
 check_fetch_method(ROCPRIM_FETCH_METHOD)
 
 # Add hipCUB's CMake modules
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH 
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+)
 
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT BUILD_CODE_COVERAGE)
