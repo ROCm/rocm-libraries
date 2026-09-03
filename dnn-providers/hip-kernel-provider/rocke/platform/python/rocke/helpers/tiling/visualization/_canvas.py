@@ -42,7 +42,8 @@ EMPTY = (0.93, 0.93, 0.93)         # unoccupied bank/grid cell
 
 
 def accent_tint(ai, tstep, ntsteps):
-    """Accent ``ai`` at visit-order ``tstep``: t0 = full accent, later steps blend toward white."""
+    """Accent ``ai`` at visit-order ``tstep``: t0 = full accent, later steps blend toward white (MONOTONIC:
+    darkest = first, per §9.6 shade = transaction time order)."""
     base = ACCENTS[ai % NACC]
     p = 1.0 if ntsteps <= 1 else 1.0 - 0.72 * (tstep / (ntsteps - 1))   # 1.0(full) .. 0.28(pale)
     return tuple(base[k] * p + (1 - p) for k in range(3))
@@ -73,6 +74,19 @@ def box(ax, x, y, w, h, *, color="black", lw=1.8, zorder=4):
     """Outline a region (an unfilled rectangle) -- group borders, anchors, red conflict boxes, highlights."""
     from matplotlib.patches import Rectangle
     ax.add_patch(Rectangle((x, y), w, h, fill=False, edgecolor=color, lw=lw, zorder=zorder))
+
+
+def fit_fs(s, cell_wh, fs_max, *, floor=4.5, pad=0.90):
+    """The LARGEST font (pt, capped at ``fs_max``) at which label ``s`` fits inside a ``cell_wh`` (inches)
+    cell -- so a per-cell DETAILED label in a dense grid scales DOWN to fit instead of overflowing into an
+    unreadable overlap. ~0.60*fs per char wide, ~1.0*fs per line tall; ``pad`` leaves a hair of margin. A
+    2-line label (``\\n``) uses the widest line for width + line count for height. Never below ``floor``."""
+    cw, ch = cell_wh
+    lines = s.split("\n")
+    longest = max((len(t) for t in lines), default=1)
+    w_fs = (cw * 72.0 * pad) / max(1.0, 0.60 * longest)
+    h_fs = (ch * 72.0 * pad) / max(1, len(lines))
+    return max(floor, min(fs_max, w_fs, h_fs))
 
 
 def label(ax, x, y, s, *, fs, weight="normal", style="normal", color="0.0", ha="center", va="center",
@@ -211,7 +225,8 @@ def axis_marks(ax, ticks, *, horizontal, side, origin, along, cross, name, fs, m
 # ---------------------------------------------------------------- structural composites
 def render_cells_and_groups(ax, cells, *, pos_of, lane_of, shade_of, nsteps, color_mode, groups,
                             detailed, label_of, summary_of, highlight_cells, highlight_color,
-                            origin=(0.0, 0.0), fs=7.0, cell_wh=(1.0, 1.0)):
+                            origin=(0.0, 0.0), fs=7.0, cell_wh=(1.0, 1.0), palette=None,
+                            detail_label_of=None):
     """The shared cell-grid + group-overlay used by every cell-field view. Fills every cell (hue =
     ``lane_of``, tint = ``shade_of`` under ``color_mode``), labels the ``detailed`` cells, borders each
     group's contiguous runs, adds each group's overlay by ``detail``, and outlines ``highlight_cells``.
@@ -221,8 +236,8 @@ def render_cells_and_groups(ax, cells, *, pos_of, lane_of, shade_of, nsteps, col
       ``grouped``  -- a bordered ANCHOR cell stamped with its real coord + one derived summary label
                       (the WAVE view: one atom shown in full, the rest extrapolated from it).
       ``block``    -- a SOLID block: no inner grid lines, no anchor, just ONE centred name label
-                      (the MACRO/WG view: a whole wave's tile at a glance).
-      ``plain``    -- border only, NO labels/anchor (the WG LDS bank grid -- the wave is read from HUE).
+                      (the MACRO/macro view: a whole wave's tile at a glance).
+      ``plain``    -- border only, NO labels/anchor (the macro LDS bank grid -- the wave is read from HUE).
 
     ``cells`` = iterable of cell keys; ``pos_of(cell)->(gx,gy)``; ``label_of(cell)->str``;
     ``summary_of(members)->str``; ``groups`` have ``.members``, ``.detail``, ``.name``."""
@@ -231,11 +246,19 @@ def render_cells_and_groups(ax, cells, *, pos_of, lane_of, shade_of, nsteps, col
         if any(g.detail == "block" for g in groups) else set()
     for cell in cells:
         gx, gy = pos_of(cell)
-        col = shade(lane_of(cell), shade_of.get(cell, 0), nsteps, color_mode=color_mode)
+        # ``palette`` (a lane/wave -> RGB map) OVERRIDES the accent+tint model -- used by macro scope to give
+        # each wave its OWN distinct colour instead of the 8-hue cycle.
+        col = (palette(lane_of(cell)) if palette is not None
+               else shade(lane_of(cell), shade_of.get(cell, 0), nsteps, color_mode=color_mode))
         # block cells fuse into a seamless solid (no inner grid); every other cell keeps the hairline grid
         fill(ax, ox + gx, oy + gy, col, edge=("none" if cell in block_members else "white"), lw=0.2)
+        # Every cell-field label is FIT to the space it occupies (``fit_fs``) -- one consistent rule for all
+        # detailed views (the MMA tee keeps its own sizing). A DETAILED per-cell label fits ONE cell, so it
+        # scales down in a dense grid instead of overflowing into an unreadable overlap.
         if cell in detailed:
-            label(ax, ox + gx + 0.5, oy + gy + 0.5, label_of(cell), fs=fs)
+            lbl = (detail_label_of or label_of)(cell)          # detail labels may be 2-line (d0 / d1) to fit
+            label(ax, ox + gx + 0.5, oy + gy + 0.5, lbl, fs=fit_fs(lbl, cell_wh, fs))
+    cw, ch = cell_wh
     for g in groups:
         pts = {pos_of(c) for c in g.members}
         for comp in grid_components(pts):
@@ -246,18 +269,27 @@ def render_cells_and_groups(ax, cells, *, pos_of, lane_of, shade_of, nsteps, col
             continue
         xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
         x0, x1, y0, y1 = min(xs), max(xs) + 1, min(ys), max(ys) + 1
+        bw, bh = (x1 - x0) * cw, (y1 - y0) * ch             # the box's PHYSICAL span (inches)
         if g.detail == "block":                            # solid block: ONE centred name, no anchor/grid
-            cw, ch = cell_wh                                # rotate the label to run ALONG a tall-thin band
-            rot = 90 if (y1 - y0) * ch > 1.2 * (x1 - x0) * cw else 0
-            label(ax, ox + (x0 + x1) / 2, oy + (y0 + y1) / 2, g.name or summary_of(g.members),
-                  fs=fs + 2, style="italic", weight="bold", zorder=5, rotation=rot)
+            rot = 90 if bh > 1.2 * bw else 0               # rotate the label to run ALONG a tall-thin band
+            txt = g.name or summary_of(g.members)
+            avail = (bh, bw) if rot else (bw, ch * 1.6)    # rotated -> text runs along the height; one line tall
+            label(ax, ox + (x0 + x1) / 2, oy + (y0 + y1) / 2, txt, fs=fit_fs(txt, avail, fs + 2),
+                  style="italic", weight="bold", zorder=5, rotation=rot)
         elif g.detail == "grouped":
-            anchor = min(g.members)                        # data anchor = lowest key, order-independent
-            agx, agy = pos_of(anchor)
-            box(ax, ox + agx, oy + agy, 1, 1, lw=2.4, zorder=6)
-            label(ax, ox + agx + 0.5, oy + agy + 0.5, label_of(anchor), fs=fs, weight="bold", zorder=7)
-            label(ax, ox + (x0 + x1) / 2, oy + (y0 + y1) / 2, summary_of(g.members),
-                  fs=fs + 2, style="italic", weight="bold", zorder=5)
+            summ = summary_of(g.members)
+            # A 1D box (a single row OR single column) is fully described by its range summary -- the anchor
+            # cell would just repeat one endpoint, so skip it. Only a >=2D box keeps the anchor as its key coord.
+            is_1d = (y1 - y0 == 1) or (x1 - x0 == 1)
+            if not (is_1d and summ):
+                anchor = min(g.members)                    # data anchor = lowest key, order-independent
+                agx, agy = pos_of(anchor)
+                box(ax, ox + agx, oy + agy, 1, 1, lw=2.4, zorder=6)
+                albl = label_of(anchor)
+                label(ax, ox + agx + 0.5, oy + agy + 0.5, albl, fs=fit_fs(albl, cell_wh, fs),
+                      weight="bold", zorder=7)
+            label(ax, ox + (x0 + x1) / 2, oy + (y0 + y1) / 2, summ, fs=fit_fs(summ, (bw, ch * 1.6), fs + 2),
+                  style="italic", weight="bold", zorder=5)
     for cell in highlight_cells:
         gx, gy = pos_of(cell)
         box(ax, ox + gx, oy + gy, 1, 1, color=highlight_color, lw=3.4, zorder=12)
