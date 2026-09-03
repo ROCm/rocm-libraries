@@ -282,8 +282,8 @@ def get_device_num_cus(device: int = 0) -> Optional[int]:
     dispatch/benchmark layers can size split-KV device subscription without a torch
     dependency. Best-effort and side-effect-free (``hipDeviceGetAttribute`` lazily
     inits the runtime internally). NOTE: this reports CUs on CU-mode devices (CDNA);
-    a WGP-mode (RDNA) device reports half the CU count — irrelevant to the current
-    gfx942-only caller.
+    a WGP-mode (RDNA) device reports half the CU count — inert for the current
+    CDNA-only callers (gfx942 / gfx950), but a non-CDNA caller must account for it.
     """
     v = ctypes.c_int(0)
     try:

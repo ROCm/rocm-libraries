@@ -2954,8 +2954,11 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
         # unclamped and is now capped, so it gets a coarser split than before.
         # Pin the old behaviour with target_ctas, which supersedes num_cus here.
         #
-        # Cases proven on gfx950 silicon to benefit from a finer split are uncapped
-        # later, each gated by its own measurement (not assumed from gfx942).
+        # UNLIKE the gfx942 branch above, this one has no measured carve-outs:
+        # every shape is clamped, none falls through. Carve-outs for shapes where
+        # a finer split is measured to win on gfx950 can be added here later, each
+        # gated by its own measurement -- never assumed from gfx942, whose CU
+        # count, LDS, and reduce cost all differ.
         pre_bump = _pre_bump_segments(problem)
         return min(segments, pre_bump)
     return segments
