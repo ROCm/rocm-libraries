@@ -98,12 +98,35 @@ struct HWModel {
         bool hasSplitStoreCntAsyncCnt;
     };
 
+    /// Intervening-operation counts that satisfy a pending wait, so it need not be
+    /// emitted. A non-zero entry is how many ops are needed; 0 is a sentinel for off,
+    /// so that wait is always sent.
+    struct WaitHide {
+        /// Matrix ops that satisfy a pending va_vdst, for one form. Keyed by the
+        /// instruction's own resolved cost latency and destination width.
+        struct Form {
+            int costLatency;
+            int dstVgprs;
+            /// Matrix ops after an XDL producer that satisfy its va_vdst wait.
+            int xdlVaVdst;
+            /// Matrix ops after a CSMACC producer that satisfy its va_vdst wait.
+            int csmaccVaVdst;
+        };
+        /// One row per form the arch issues. A form with no row never satisfies a
+        /// va_vdst wait, so its producers are always waited on.
+        std::span<const Form> forms;
+        /// Same-class reads after a read that satisfy its vm_vsrc wait; a class at 0 always waits.
+        int vmVsrcLds;
+        int vmVsrcTex;
+    };
+
     Lds lds;
     Barrier barrier;
     Coexec coexec;
     Hazards hazards;
     DelayAlu delayAlu;
     Counters counters;
+    WaitHide waitHide;
 };
 
 /// Collapse a {major, minor, stepping} arch triple to a switchable key.
