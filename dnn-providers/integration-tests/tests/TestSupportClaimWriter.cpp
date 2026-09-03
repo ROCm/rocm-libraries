@@ -13,6 +13,7 @@
 #include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 
+#include "ScratchDirectory.hpp"
 #include "SupportClaimTestUtils.hpp"
 
 using hipdnn_integration_tests::bundle::dumpCanonical;
@@ -20,10 +21,10 @@ using hipdnn_integration_tests::bundle::ObservedSupportCell;
 using hipdnn_integration_tests::bundle::parseSupportClaimsJson;
 using hipdnn_integration_tests::bundle::parseSweepSupportClaimsJson;
 using hipdnn_integration_tests::bundle::writeObservedSupportClaims;
-using hipdnn_integration_tests::bundle::test_utils::makeScopedTestDir;
 using hipdnn_integration_tests::bundle::test_utils::readFile;
 using hipdnn_integration_tests::bundle::test_utils::singleGraphObservation;
 using hipdnn_integration_tests::bundle::test_utils::sweepCaseObservation;
+using hipdnn_integration_tests::scratch::makeDir;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -34,7 +35,7 @@ using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 TEST(TestSupportClaimWriter, SingleGraphWriteCreatesNewSidecar)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto bundlePath = dir.path() / "Small.json";
 
     const std::vector<ObservedSupportCell> observations = {
@@ -60,7 +61,7 @@ TEST(TestSupportClaimWriter, SingleGraphWriteCreatesNewSidecar)
 
 TEST(TestSupportClaimWriter, IdenticalObservationsWriteThenUnchanged)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto bundlePath = dir.path() / "Small.json";
 
     const std::vector<ObservedSupportCell> observations = {
@@ -81,12 +82,12 @@ TEST(TestSupportClaimWriter, IdenticalObservationsWriteThenUnchanged)
 }
 
 // ---------------------------------------------------------------------------
-// Surgical write: unobserved engine block is byte-identical
+// Surgical write: unobserved engine block is semantically preserved
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportClaimWriter, UnobservedEngineBlockSurvivesUntouched)
+TEST(TestSupportClaimWriter, UnobservedEngineBlockIsPreserved)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto sidecarPath = dir.path() / "Small.support.json";
 
     nlohmann::json existingJson;
@@ -113,7 +114,7 @@ TEST(TestSupportClaimWriter, UnobservedEngineBlockSurvivesUntouched)
 
 TEST(TestSupportClaimWriter, EmptyObservationsLeaveExistingSidecarUntouched)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto sidecarPath = dir.path() / "Small.support.json";
 
     nlohmann::json existingJson;
@@ -138,7 +139,7 @@ TEST(TestSupportClaimWriter, EmptyObservationsLeaveExistingSidecarUntouched)
 
 TEST(TestSupportClaimWriter, DeclineErasesPlatformAndCollapsesEmptyKeys)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto sidecarPath = dir.path() / "Small.support.json";
 
     nlohmann::json existingJson;
@@ -161,7 +162,7 @@ TEST(TestSupportClaimWriter, DeclineErasesPlatformAndCollapsesEmptyKeys)
 
 TEST(TestSupportClaimWriter, DeclineErasesOnlyTargetedPlatform)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto sidecarPath = dir.path() / "Small.support.json";
 
     nlohmann::json existingJson;
@@ -188,7 +189,7 @@ TEST(TestSupportClaimWriter, DeclineErasesOnlyTargetedPlatform)
 
 TEST(TestSupportClaimWriter, MultipleEngineObservationsInOneSidecar)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto bundlePath = dir.path() / "Small.json";
 
     const std::vector<ObservedSupportCell> observations = {
@@ -213,7 +214,7 @@ TEST(TestSupportClaimWriter, MultipleEngineObservationsInOneSidecar)
 
 TEST(TestSupportClaimWriter, SweepWriteCreatesNewSidecar)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto sweepPath = dir.path() / "sweep.json";
 
     const std::vector<ObservedSupportCell> observations = {
@@ -239,7 +240,7 @@ TEST(TestSupportClaimWriter, SweepWriteCreatesNewSidecar)
 
 TEST(TestSupportClaimWriter, SweepGroupsCasesWithIdenticalSupport)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto sweepPath = dir.path() / "sweep.json";
 
     const std::vector<ObservedSupportCell> observations = {
@@ -266,7 +267,7 @@ TEST(TestSupportClaimWriter, SweepGroupsCasesWithIdenticalSupport)
 
 TEST(TestSupportClaimWriter, SweepChangedSupportMovesCaseToCorrectGroup)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto sidecarPath = dir.path() / "support.json";
 
     // Pre-existing: case_a and case_b in one group, both supported
@@ -304,7 +305,7 @@ TEST(TestSupportClaimWriter, SweepChangedSupportMovesCaseToCorrectGroup)
 
 TEST(TestSupportClaimWriter, SweepIdenticalObservationsWriteThenUnchanged)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto sweepPath = dir.path() / "sweep.json";
 
     const std::vector<ObservedSupportCell> observations = {
@@ -326,12 +327,12 @@ TEST(TestSupportClaimWriter, SweepIdenticalObservationsWriteThenUnchanged)
 }
 
 // ---------------------------------------------------------------------------
-// Sweep: unobserved engine passes through byte-identical
+// Sweep: unobserved engine is semantically preserved
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportClaimWriter, SweepUnobservedEngineBlockSurvivesUntouched)
+TEST(TestSupportClaimWriter, SweepUnobservedEngineBlockIsPreserved)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto sidecarPath = dir.path() / "support.json";
 
     nlohmann::json group;
@@ -362,7 +363,7 @@ TEST(TestSupportClaimWriter, SweepUnobservedEngineBlockSurvivesUntouched)
 
 TEST(TestSupportClaimWriter, OutputIsCanonicalJson)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto bundlePath = dir.path() / "Small.json";
 
     const std::vector<ObservedSupportCell> observations = {
@@ -385,7 +386,7 @@ TEST(TestSupportClaimWriter, OutputIsCanonicalJson)
 
 TEST(TestSupportClaimWriter, UnparseableSingleGraphSidecarReportsErrorAndSurvives)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto bundlePath = dir.path() / "Corrupt.json";
     const auto sidecarPath = dir.path() / "Corrupt.support.json";
 
@@ -404,7 +405,7 @@ TEST(TestSupportClaimWriter, UnparseableSingleGraphSidecarReportsErrorAndSurvive
 
 TEST(TestSupportClaimWriter, SchemaInvalidSingleGraphSidecarReportsErrorAndSurvives)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto bundlePath = dir.path() / "BadSchema.json";
     const auto sidecarPath = dir.path() / "BadSchema.support.json";
 
@@ -424,7 +425,7 @@ TEST(TestSupportClaimWriter, SchemaInvalidSingleGraphSidecarReportsErrorAndSurvi
 
 TEST(TestSupportClaimWriter, UnparseableSweepSidecarReportsErrorAndSurvives)
 {
-    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const ScopedDirectory dir = makeDir("test_writer_");
     const auto sweepDir = dir.path() / "sweep";
     std::filesystem::create_directories(sweepDir);
     const auto sidecarPath = sweepDir / "support.json";
@@ -441,6 +442,85 @@ TEST(TestSupportClaimWriter, UnparseableSweepSidecarReportsErrorAndSurvives)
     EXPECT_EQ(summary.errors.size(), 1u);
     EXPECT_NE(summary.errors[0].find("unparseable"), std::string::npos);
     EXPECT_EQ(readFile(sidecarPath), "corrupt sweep data!!!");
+}
+
+// ---------------------------------------------------------------------------
+// Malformed observations: cellDefect() refuses and skips the sidecar
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimWriter, EmptyArchObservationIsRefusedAndLeavesFileUntouched)
+{
+    const ScopedDirectory dir = makeDir("test_writer_");
+    const auto bundlePath = dir.path() / "Small.json";
+    const auto sidecarPath = dir.path() / "Small.support.json";
+
+    const std::vector<ObservedSupportCell> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "", "linux", true),
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    const auto summary = writeObservedSupportClaims(observations);
+
+    EXPECT_FALSE(std::filesystem::exists(sidecarPath));
+    ASSERT_EQ(summary.errors.size(), 1u);
+    EXPECT_NE(summary.errors[0].find("empty arch"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Mixed sweep / single-graph observations for one path are refused
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimWriter, MismatchedSweepFlagIsRefusedAndLeavesFileUntouched)
+{
+    const ScopedDirectory dir = makeDir("test_writer_");
+    const auto sidecarPath = dir.path() / "support.json";
+
+    ObservedSupportCell singleObs;
+    singleObs.claimLocator.sidecarPath = sidecarPath;
+    singleObs.claimLocator.diagnosticPath = sidecarPath.string();
+    singleObs.engineName = "MIOPEN_ENGINE";
+    singleObs.arch = "gfx942";
+    singleObs.platform = "linux";
+    singleObs.engineIsSupported = true;
+
+    ObservedSupportCell sweepObs;
+    sweepObs.claimLocator.sidecarPath = sidecarPath;
+    sweepObs.claimLocator.caseId = "case_a";
+    sweepObs.claimLocator.diagnosticPath = sidecarPath.string() + "#case_a";
+    sweepObs.engineName = "MIOPEN_ENGINE";
+    sweepObs.arch = "gfx942";
+    sweepObs.platform = "linux";
+    sweepObs.engineIsSupported = true;
+
+    const std::vector<ObservedSupportCell> observations = {singleObs, sweepObs};
+
+    const auto summary = writeObservedSupportClaims(observations);
+
+    EXPECT_FALSE(std::filesystem::exists(sidecarPath));
+    ASSERT_EQ(summary.errors.size(), 1u);
+    EXPECT_NE(summary.errors[0].find("both single-graph and sweep"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// All engines decline: no sidecar should be created
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimWriter, AllEnginesDeclinedCreatesNoSidecar)
+{
+    const ScopedDirectory dir = makeDir("test_writer_");
+    const auto bundlePath = dir.path() / "Small.json";
+    const auto sidecarPath = dir.path() / "Small.support.json";
+
+    const std::vector<ObservedSupportCell> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", false),
+        singleGraphObservation(bundlePath, "HIP_KERNEL_ENGINE", "gfx942", "linux", false),
+    };
+
+    const auto summary = writeObservedSupportClaims(observations);
+
+    EXPECT_FALSE(std::filesystem::exists(sidecarPath));
+    EXPECT_EQ(summary.filesWritten, 0u);
+    EXPECT_TRUE(summary.errors.empty());
 }
 
 // NOLINTEND(readability-identifier-naming)

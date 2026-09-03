@@ -308,6 +308,10 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
             }
 
             const auto regrouped = regroupSweepClaims(flat, existing.version);
+            if(regrouped.claims.empty() && !std::filesystem::exists(sidecarPath))
+            {
+                continue;
+            }
             const auto jsonContent = dumpCanonical(toJson(regrouped));
             writeIfChanged(sidecarPath, jsonContent, summary);
         }
@@ -347,6 +351,10 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
                     existing, obs.engineName, obs.arch, obs.platform, obs.engineIsSupported);
             }
 
+            if(existing.claims.empty() && !std::filesystem::exists(sidecarPath))
+            {
+                continue;
+            }
             const auto jsonContent = dumpCanonical(toJson(existing));
             writeIfChanged(sidecarPath, jsonContent, summary);
         }

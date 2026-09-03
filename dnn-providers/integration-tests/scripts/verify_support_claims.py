@@ -27,7 +27,7 @@ Exit codes
 from __future__ import annotations
 
 import json
-import subprocess
+
 import sys
 from pathlib import Path
 from typing import List
@@ -320,33 +320,7 @@ def verify_all(bundle_root: Path) -> List[str]:
     return errors
 
 
-def has_staged_changes(bundle_root: Path) -> bool:
-    """Check if any files under bundle_root are staged in git."""
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--", str(bundle_root)],
-            capture_output=True,
-            text=True,
-        )
-        return bool(result.stdout.strip())
-    except FileNotFoundError:
-        print(
-            "verify_support_claims: git not found, running full validation",
-            file=sys.stderr,
-        )
-        return True
-    except Exception as e:
-        print(
-            f"verify_support_claims: git check failed ({e}), running full validation",
-            file=sys.stderr,
-        )
-        return True
-
-
 def main() -> int:
-    if not has_staged_changes(BUNDLE_ROOT):
-        return 0
-
     errors = verify_all(BUNDLE_ROOT)
     if errors:
         print(

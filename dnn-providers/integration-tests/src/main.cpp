@@ -446,19 +446,30 @@ int main(int argc, char** argv) noexcept
 
         if(hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
         {
-            const auto writeSummary = hipdnn_integration_tests::bundle::writeObservedSupportClaims(
-                hipdnn_integration_tests::bundle::SupportObservationLog::get().all());
-            std::cerr << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
-                      << "  written: " << writeSummary.filesWritten
-                      << "  unchanged: " << writeSummary.filesUnchanged
-                      << "  errors: " << writeSummary.errors.size() << "\n";
-            for(const auto& error : writeSummary.errors)
+            if(hipdnn_integration_tests::bundle::SupportObservationLog::get().empty())
             {
-                std::cerr << "  ERROR: " << error << "\n";
-            }
-            if(!writeSummary.errors.empty())
-            {
+                std::cerr << "\n--write-support-claims: no graphs were observed; "
+                             "nothing was written.\n"
+                             "Check --gtest_filter and --test-article.\n";
                 exitCode = 1;
+            }
+            else
+            {
+                const auto writeSummary
+                    = hipdnn_integration_tests::bundle::writeObservedSupportClaims(
+                        hipdnn_integration_tests::bundle::SupportObservationLog::get().all());
+                std::cerr << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
+                          << "  written: " << writeSummary.filesWritten
+                          << "  unchanged: " << writeSummary.filesUnchanged
+                          << "  errors: " << writeSummary.errors.size() << "\n";
+                for(const auto& error : writeSummary.errors)
+                {
+                    std::cerr << "  ERROR: " << error << "\n";
+                }
+                if(!writeSummary.errors.empty())
+                {
+                    exitCode = 1;
+                }
             }
         }
 

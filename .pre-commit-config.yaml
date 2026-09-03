@@ -48,8 +48,9 @@ exclude: |
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
     projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
-    # Reference data (auto-generated)
-    dnn-providers/integration-tests/integration-test-bundles/.*|
+    # Reference data (auto-generated) — support-claim sidecars are exempt so the
+    # verify-support-claims hook can see them.
+    dnn-providers/integration-tests/integration-test-bundles/.*(?<!\.support\.json)(?<!support\.json)$|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
     projects/rocrand/library/.*precomputed\.(cpp|h)|
@@ -146,12 +147,12 @@ repos:
         name: Verify support-claim sidecars (RFC 0015)
         entry: python dnn-providers/integration-tests/scripts/verify_support_claims.py
         language: python
-        # always_run: true + pass_filenames: false — runs on every commit.
-        # The script walks integration-test-bundles/ itself; the top-level
-        # exclude hides that directory so pre-commit's file filtering
-        # does not work here.
         pass_filenames: false
-        always_run: true
+        files: >-
+          (?x)
+          ^dnn-providers/integration-tests/integration-test-bundles/.*\.support\.json$|
+          ^dnn-providers/integration-tests/integration-test-bundles/.*/support\.json$|
+          ^dnn-providers/integration-tests/scripts/verify_support_claims\.py$
 
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)
