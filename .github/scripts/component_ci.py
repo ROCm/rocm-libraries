@@ -33,6 +33,11 @@ COMPONENTS = {
     ],
     "miopen": [
         "projects/miopen/**",
+        # The hipDNN MIOpen provider hand-maintains copies of MIOpen's private
+        # entry-point declarations, which MIOpen CI cross-checks against the
+        # originals. A PR touching only the provider is exactly the drift that
+        # gate exists to catch, so it has to trigger this component too.
+        "dnn-providers/miopen-provider/**",
         ".github/workflows/component-ci-miopen.yml",
     ],
     "tensilelite_coverage": [

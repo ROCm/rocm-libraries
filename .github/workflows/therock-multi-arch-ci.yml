@@ -18,6 +18,10 @@ name: TheRock Multi-Arch CI
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
   pull_request:
     types:
       - opened
@@ -84,21 +88,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ci-gate:
-    name: Check CI Label
-    runs-on: ubuntu-24.04
-    outputs:
-      enabled: ${{ steps.gate.outputs.enabled }}
-    steps:
-      - name: Check for multi-arch opt-in
-        id: gate
-        run: |
-          echo "enabled=${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:multi-arch') }}" >> "${GITHUB_OUTPUT}"
-
   ci-env:
     name: Load CI Environment
-    needs: ci-gate
-    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-24.04
     outputs:
       baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
@@ -115,8 +106,6 @@ jobs:
 
   configure:
     name: Configure Changed Projects
-    needs: ci-gate
-    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
@@ -146,13 +135,12 @@ jobs:
           python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
             --github-repo "${{ github.repository }}" \
-            --base-sha "${{ github.event.pull_request.base.sha }}" \
-            --head-sha "${{ github.event.pull_request.head.sha }}" \
+            --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
+            --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
 
   setup:
-    needs: [ci-gate, ci-env, configure]
-    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
+    needs: [ci-env, configure]
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_variant: "release"
@@ -163,9 +151,10 @@ jobs:
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       # Copy all stages except math-libs and ml-libs from TheRock baseline
       # rocm-libraries only affects math-libs and ml-libs source sets
+      # RPP owns cv-libs, so rebuild that stage when projects/rpp changes.
       # Note: compiler-runtime excluded due to hardcoded CMake paths (fftw3, etc.)
       # When baseline-run-id is empty, clear prebuilt_stages to force full rebuild
-      prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.ci-env.outputs.baseline-run-id != '' && 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg') || '' }}
+      prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.ci-env.outputs.baseline-run-id != '' && (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
       # Pull baseline run ID from ci-env (updated by assistant-librarian[bot] on submodule bumps)
       baseline_run_id: ${{ inputs.baseline_run_id || needs.ci-env.outputs.baseline-run-id }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
@@ -239,7 +228,6 @@ jobs:
     name: Multi-Arch CI Summary
     if: always()
     needs:
-      - ci-gate
       - ci-env
       - configure
       - setup
@@ -248,7 +236,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
-        if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
@@ -258,15 +245,8 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Evaluate workflow results
-        if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python build_tools/github_actions/workflow_summary.py \
             --needs-json '${{ toJSON(needs) }}'
-
-      - name: Report skipped workflow
-        if: ${{ needs.ci-gate.outputs.enabled != 'true' }}
-        run: |
-          echo "TheRock Multi-Arch CI is skipped by default for pull requests."
-          echo "Add the ci:multi-arch label to enable it."

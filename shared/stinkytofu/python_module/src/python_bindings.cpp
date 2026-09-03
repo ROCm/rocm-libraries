@@ -47,6 +47,7 @@
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
 namespace nb = nanobind;
@@ -57,6 +58,7 @@ void init_logical_count(nb::module_& m);
 
 NB_MODULE(_stinkytofu, m) {
     BackendRegistry::registerAllBackends();
+    AllocationRulesRegistry::registerAll();
     m.doc() = "StinkyTofu: High-Level IR for AMDGPU Assembly Generation (internal C++ module)";
 
     // ========================================================================

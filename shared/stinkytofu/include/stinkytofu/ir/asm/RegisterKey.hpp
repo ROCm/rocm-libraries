@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -72,6 +73,15 @@ struct RegKeyHash {
         return h;
     }
 };
+
+/// Human-readable key, e.g. "v20", "s4", "acc10", or "v20.lo" for a True16 half.
+inline std::string regKeyToString(const RegKey& key) {
+    std::string text = key.type == RegType::AGPR ? "acc" : regTypeToString(key.type);
+    text += std::to_string(key.idx);
+    if (key.half == RegHalf::LOW) text += ".lo";
+    if (key.half == RegHalf::HIGH) text += ".hi";
+    return text;
+}
 
 template <typename V>
 using RegKeyMap = std::unordered_map<RegKey, V, RegKeyHash>;
