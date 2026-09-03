@@ -1559,6 +1559,9 @@ struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
 template <typename Traits_, typename Arch = void>
 float fmha_fwd_(const ck_tile::stream_config&, fmha_fwd_args);
 
+template <typename Traits_, typename Arch = void>
+ck_tile::index_t fmha_fwd_kvscale_align_();
+
 template <ck_tile::index_t HDim_,
           typename DataType_,
           bool kIsGroupMode_,
@@ -1748,6 +1751,12 @@ struct fmha_fwd_traits
     // TODO: padding check is inside this api
 };
 float fmha_fwd(fmha_fwd_traits, fmha_fwd_args, const ck_tile::stream_config&);
+
+inline constexpr ck_tile::index_t fmha_fwd_largest_n_tile_size = 128;
+
+ck_tile::index_t fmha_fwd_block_scale_size_kv(const std::string& data_type,
+                                              ck_tile::index_t hdim_q,
+                                              ck_tile::index_t hdim_v);
 
 struct fmha_fwd_pagedkv_traits
 {
