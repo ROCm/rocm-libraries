@@ -52,6 +52,25 @@ std::optional<std::set<NodeAttributes>> graphNodeTypes(const void* graphBuffer, 
 /// required-op set.
 bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, size_t size);
 
+/// False when running this graph on `type` would cost far more than it is worth.
+///
+/// Separate from referenceCoversGraph() on purpose: coverage answers "is this
+/// reference required to handle this op", and this answers "is this particular
+/// shape worth spending the time on". Folding the second into the first would make
+/// a runtime-cost decision look like a missing capability.
+///
+/// Only the CPU reference is gated, and only for Sdpa: it is scalar, so it is
+/// restricted to the `quick` tier and to shapes under a working-set cap. Excluded
+/// bundles stay covered by the GPU lane, so this trades CPU cross-checking of the
+/// larger shapes for a golden-data run that finishes.
+///
+/// `bundleId` is "<suiteName>.<testName>"; its leading path tier is what the tier
+/// cap reads.
+bool referenceShapeIsAffordable(ReferenceExecutorType type,
+                                std::string_view bundleId,
+                                const void* graphBuffer,
+                                size_t size);
+
 /// Human-readable node types the given reference does not cover, for diagnostics.
 ///
 /// An unreadable graph yields a single sentinel entry rather than nothing, so a

@@ -235,6 +235,7 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
     size_t noGolden = 0;
     size_t uncovered = 0;
     size_t knownGaps = 0;
+    size_t tooCostly = 0;
     std::set<std::string> uncoveredOps;
 
     for(const auto& bundle : bundles)
@@ -262,6 +263,18 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
         }
 
         const std::string bundleId = bundle.suiteName + "." + bundle.testName;
+
+        // Deliberate cost exclusion, counted and printed rather than silent. Unlike
+        // an op-set miss this bundle IS validated -- by the other reference lane.
+        if(!referenceShapeIsAffordable(referenceType,
+                                       bundleId,
+                                       bundle.bundle->graphBuffer.data(),
+                                       bundle.bundle->graphBuffer.size()))
+        {
+            tooCostly++;
+            continue;
+        }
+
         if(findKnownReferenceGap(referenceType, bundleId) != nullptr)
         {
             knownGaps++;
@@ -295,6 +308,12 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
     std::cerr << "Golden-data validation (" << label << "): " << registered
               << " bundle(s) registered, " << noGolden << " without golden data, " << uncovered
               << " outside this reference's supported-op set" << formatUncoveredOps(uncoveredOps);
+    if(tooCostly > 0)
+    {
+        std::cerr << "\n       " << tooCostly
+                  << " excluded as too costly for this reference (see "
+                     "referenceShapeIsAffordable); the other reference lane covers them";
+    }
     if(knownGaps > 0)
     {
         std::cerr << "\n       " << knownGaps << " of the " << registered
@@ -306,11 +325,11 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
     // A reference lane that registered nothing while golden data was sitting right
     // there verified nothing, and the whole-binary guard in main() cannot see it: a
     // sibling reference that registered some bundles keeps the total non-zero. The
-    // one legitimate way to register zero with golden data present is for every
-    // golden-bearing bundle to fall outside this reference's declared op set — that
-    // gap is declared in ReferenceOpCoverage.cpp and already printed above. Anything
-    // else is a bundle that should have been here and isn't.
-    if(registered == 0 && uncovered == 0 && noGolden != bundles.size())
+    // legitimate ways to register zero with golden data present are declared and
+    // already printed above: every golden-bearing bundle fell outside this
+    // reference's op set, or every one was excluded on cost. Anything else is a
+    // bundle that should have been here and isn't.
+    if(registered == 0 && uncovered == 0 && tooCostly == 0 && noGolden != bundles.size())
     {
         registerFailedBundleLoad(std::string("GoldenDataValidation_") + label,
                                  "RegisteredAtLeastOneBundle",
