@@ -423,16 +423,17 @@ RUN python3 -m pip install --break-system-packages pre-commit 'msgpack>=1.0.0' '
 # pytest is importable, and warns and skips registration otherwise. Without these the
 # warning fires and the tests silently do not exist -- including in CI, so the
 # cross-language features_hash contract they pin against the C++ FeatureExtractor goes
-# unchecked. The suite additionally guards each case with importorskip, so a partial set
-# degrades to skips rather than errors -- which is why a short list here is not visible
-# as a failure either.
+# unchecked. The suite guards each case with importorskip, so a partial set degrades to
+# skips rather than errors.
 #
-# The runtime list is uhd_gen/requirements.txt, not a subset of it: __main__.py imports
-# pandas unconditionally and train_uhd.py imports sklearn.model_selection, so omitting
-# either turns test_converter.py's importorskip into a permanent skip and leaves the
-# same contract unchecked that this layer exists to check.
+# Installed from the tool's own metadata rather than a copied list, which would be free to
+# drift from pyproject.toml -- as a hand-written one already did, omitting pandas and
+# scikit-learn. `[dev]` adds pytest, which is what the CTest registration probes for.
+COPY projects/hipdnn/tools/uhd_gen/pyproject.toml /tmp/uhd_gen/pyproject.toml
+COPY projects/hipdnn/tools/uhd_gen/requirements.txt /tmp/uhd_gen/requirements.txt
 RUN python3 -m pip install --break-system-packages --no-cache-dir \
-        pytest lightgbm numpy flatbuffers pandas scikit-learn
+        -r /tmp/uhd_gen/requirements.txt pytest \
+    && rm -rf /tmp/uhd_gen
 
 # Create mount point for /opt/rocm (will be empty unless mounted or built upon)
 RUN mkdir -p /opt/rocm

@@ -109,19 +109,20 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
     //     (priority, id, or any KMD field) and never leaves the engine.
     //
     // RFC 0019 §2 draws the same line: kernel selection is UHD's scope, engine
-    // selection is RFC 0007's. Both can run for one graph — UHD ranks kernels, then
-    // StaticOrdering ranks whatever engines remain. Read §6 step 6's "degrades to
-    // static_order (priority + id)" as the kernel comparator in SelectionEngine, not
-    // as a hand-off to this policy.
+    // selection is RFC 0007's. Both can run for one graph -- the engine's UHD ranks its own
+    // kernels (RFC 0019 §5: "the engine owns the UHD that ranks it"), then StaticOrdering
+    // ranks whatever engines remain. Read §6 step 6's "degrades to static_order (priority +
+    // id)" as the kernel comparator inside the engine, not as a hand-off to this policy.
+    // SelectionHeuristic::UHD used to sit between these two. It ranked kernels where the
+    // heuristic-plugin ABI can only return engine ids, so it always reported applied=0 and
+    // never changed this chain's outcome; the ranking it computed is now done by the engine.
     std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"),
-        hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::UHD"),
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"),
     };
     HIPDNN_BACKEND_LOG_WARN(
         "No heuristic policy order configured, falling back to built-in defaults "
-        "[SelectionHeuristic::Config, SelectionHeuristic::UHD, "
-        "SelectionHeuristic::StaticOrdering]. "
+        "[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]. "
         "Set HIPDNN_HEUR_POLICY_ORDER or the descriptor attribute to silence "
         "this warning.");
     return policyIds;

@@ -19,7 +19,12 @@ add_library(hipdnn_plugin_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_plugin_sdk)
 
-target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_flatbuffers_sdk hipdnn_data_sdk)
+# CMAKE_DL_LIBS because CustomLibraryAdapter.hpp calls dlopen/dlsym/dlclose (RFC 0019 §7.2's
+# escape hatch). A header-only target has to propagate what its headers use: this links today
+# only because glibc 2.34+ folds libdl into libc and the current consumers happen to link it
+# themselves, neither of which is a guarantee.
+target_link_libraries(hipdnn_plugin_sdk
+    INTERFACE hipdnn_flatbuffers_sdk hipdnn_data_sdk ${CMAKE_DL_LIBS})
 
 # The ingestor headers are wholly inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`, and they
 # are installed whenever it is set. Carrying the definition on the exported target is what

@@ -252,9 +252,9 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets)
         {
             harvested.dispatch.insert(dispatch.dispatchSymbol);
         }
-        if(set.heuristic.has_value() && set.heuristic->kind == HeuristicKind::NATIVE)
+        if(set.heuristic.has_value() && set.heuristic->adapter == UhdAdapter::NATIVE)
         {
-            harvested.score.insert(set.heuristic->payload);
+            harvested.score.insert(set.heuristic->nativeSymbol);
         }
     }
     return harvested;

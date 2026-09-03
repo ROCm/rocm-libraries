@@ -56,7 +56,7 @@ from .evaluate import add_evaluate_arguments, run_evaluate
 from .features import build_features_signature, compute_features_hash
 from .lgbm_to_flatbuffer import convert
 from .promote import add_promote_arguments, run_promote
-from .train_uhd import find_constant_feature_columns, train_model
+from .train_uhd import evaluate_regret, find_constant_feature_columns, train_model
 
 logging.basicConfig(
     level=logging.INFO,
@@ -210,6 +210,18 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         dest="group_by",
         help="Columns for GroupKFold (prevents problem leakage)",
+    )
+    parser.add_argument(
+        "--report-regret",
+        nargs="+",
+        default=None,
+        dest="report_regret",
+        metavar="COL",
+        help=(
+            "Columns identifying one problem (e.g. the q.* columns). Reports "
+            "out-of-fold top-1 regret of the ranking the model induces, which is what "
+            "RFC 0019.13 §11 asks for and what CV RMSE cannot answer."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -437,6 +449,36 @@ def _run_train(args: argparse.Namespace) -> int:
     except ValueError as error:
         logger.error("%s", error)
         return 1
+
+    if args.report_regret:
+        # Reported after training and measured independently of it: this scores the
+        # ranking the model induces on problems it did not see, which is the question
+        # the heuristic exists to answer. RMSE says how close the numbers are.
+        metrics = evaluate_regret(
+            df,
+            args.features,
+            args.target,
+            args.report_regret,
+            num_boost_round=args.num_boost_round,
+        )
+        logger.info(
+            "Out-of-fold top-1 accuracy %.1f%% over %d problems "
+            "(%d single-variant excluded, %d unusable)",
+            metrics["top1_accuracy"] * 100.0,
+            metrics["problems_scored"],
+            metrics["problems_single_variant"],
+            metrics["problems_unusable"],
+        )
+        logger.info(
+            "Regret mean %.4f, median %.4f, p90 %.4f, p99 %.4f, max %.4f",
+            metrics["mean_regret"],
+            metrics["median_regret"],
+            metrics["p90_regret"],
+            metrics["p99_regret"],
+            metrics["max_regret"],
+        )
+        with (output_dir / "regret.json").open("w") as handle:
+            json.dump(metrics, handle, indent=2)
 
     lgbm_path = output_dir / "model.lgbm"
     model.save_model(str(lgbm_path))

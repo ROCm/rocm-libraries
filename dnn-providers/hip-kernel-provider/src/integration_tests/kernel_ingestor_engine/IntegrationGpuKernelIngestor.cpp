@@ -50,6 +50,8 @@ namespace
 
 constexpr const char* ENGINE_NAME = "hipkernel:Pointwise";
 constexpr const char* CONV_ENGINE_NAME = "hipkernel:ConvFwd";
+/// Same kernels and matchers as ENGINE_NAME's packs; the heuristic is the only difference.
+constexpr const char* MODEL_ENGINE_NAME = "hipkernel:PointwiseModel";
 constexpr const char* BLOCK_SIZE_KNOB = "block_size";
 
 /// Maximum workspace across the pack's surviving kernels for a FLOAT graph.
@@ -279,6 +281,37 @@ protected:
     static int64_t convEngineId()
     {
         return hipdnn_data_sdk::utilities::engineNameToId(CONV_ENGINE_NAME);
+    }
+
+    static int64_t modelEngineId()
+    {
+        return hipdnn_data_sdk::utilities::engineNameToId(MODEL_ENGINE_NAME);
+    }
+
+    /// The block_size @p engine ranks first for a pointwise-add graph, read from the knob
+    /// default. That default follows the top-ranked kernel, which makes it the one place a
+    /// caller can observe a heuristic's choice without executing anything --
+    /// get_workspace_size reports a max across the catalog, not the selection.
+    int64_t rankedFirstBlockSize(int64_t engine)
+    {
+        auto graph = buildPointwiseAddGraph();
+        EXPECT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
+
+        std::vector<Knob> knobs;
+        EXPECT_EQ(graph->get_knobs_for_engine(engine, knobs).code, ErrorCode::OK);
+
+        const auto blockSizeKnob = std::find_if(knobs.begin(), knobs.end(), [](const Knob& knob) {
+            return knob.knobId() == BLOCK_SIZE_KNOB;
+        });
+        EXPECT_NE(blockSizeKnob, knobs.end());
+        if(blockSizeKnob == knobs.end())
+        {
+            return -1;
+        }
+
+        const auto* defaultValue = std::get_if<int64_t>(&blockSizeKnob->defaultValue());
+        EXPECT_NE(defaultValue, nullptr);
+        return defaultValue == nullptr ? -1 : *defaultValue;
     }
 
     /// Pins @p pinnedEngineId before plan creation and compiles with default knobs.
@@ -677,6 +710,98 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesAConvGraphToTheConvEngineAndNotTheP
 
     EXPECT_TRUE(offers(pointwiseEngines, engineId()));
     EXPECT_FALSE(offers(pointwiseEngines, convEngineId()));
+}
+
+// A model-backed UHD
+//
+// Every other pack here declares a native heuristic: a compiled scorer resolved by symbol.
+// hipkernel:PointwiseModel declares "kind": "model", so its heuristic is a trained artifact
+// loaded at plan build (RFC 0019 §7). These cases are the only place that path runs on a
+// device.
+//
+// The two engines are arranged to disagree. The native scorer returns block_size, so it
+// ranks the 256 kernel first; the model prefers the small one. Both model-pack kernels sit
+// at priority 0 and the 256 kernel carries the lower descriptor id, so the declared-order
+// fallback lands on 256 as well. A model that failed to load therefore reads as 256 rather
+// than hiding behind a coincidence -- which matters, because that failure is silent by
+// design: RFC 0019 §5 degrades to declared order instead of erroring.
+//
+// The knob default is the observable. get_knobs_for_engine reports the top-ranked kernel's
+// block_size; get_workspace_size cannot serve, being a max across the catalog rather than a
+// property of the selection.
+
+/// The shipped engines are the ones with no way to prove themselves by outcome.
+///
+/// Every UHD failure path degrades to declared order, which is a legal ranking, so a test can
+/// only tell a working UHD from a discarded one if the two produce different kernels. For the
+/// model engine they do -- that is what the next test relies on. For the shipped native engines
+/// they do not: every kernel carries priority=0, so declared order falls to the id tiebreak and
+/// lands on block_size=256, which is exactly what the native scorer picks.
+///
+/// So the assertion has to be on provenance, which RFC 0019 §12 puts in the selection trace.
+/// This matters more since a throwing scorer began degrading instead of propagating (§5 step 7):
+/// that failure used to be an exception and is now silent, and for this engine it is silent
+/// *and* returns the same kernel.
+TEST_F(IntegrationGpuKernelIngestor, TheShippedEngineRanksByItsOwnScorerNotByFallback)
+{
+    const ScopedPluginLogCapture capture(this);
+    auto& recorder = capture.recorder();
+
+    (void)rankedFirstBlockSize(engineId());
+
+    EXPECT_TRUE(recorder.hasLogContaining("decided_by=native"))
+        << "the shipped engine's UHD did not decide this ranking";
+    EXPECT_FALSE(recorder.hasLogContaining("decided_by=declared_order"))
+        << "the shipped engine degraded to declared order without failing any test";
+}
+
+TEST_F(IntegrationGpuKernelIngestor, ModelEngineRanksItsCatalogAheadOfDeclaredOrder)
+{
+    // 64 is reachable only by ranking: it is neither the declared-order answer nor the
+    // native scorer's, both of which are 256.
+    EXPECT_EQ(rankedFirstBlockSize(modelEngineId()), 64);
+}
+
+TEST_F(IntegrationGpuKernelIngestor, TheModelAndTheNativeScorerPickDifferentKernels)
+{
+    // Same graph, same kernels, same everything but the heuristic. If these ever agree,
+    // either the model stopped ranking or the two packs drifted into one catalog.
+    EXPECT_NE(rankedFirstBlockSize(modelEngineId()), rankedFirstBlockSize(engineId()));
+}
+
+TEST_F(IntegrationGpuKernelIngestor, ExecutesAModelSelectedKernelOnDevice)
+{
+    // Ranking is worth nothing if the kernel it picks cannot run. Checked against the CPU
+    // reference, so a wrong launch configuration fails here rather than quietly producing
+    // plausible numbers.
+    auto graph = buildPointwiseAddGraph();
+    buildAndCompile(*graph, modelEngineId());
+
+    int64_t workspaceSize = 0;
+    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+
+    executeAndVerify(*graph, workspace.get(), 0U);
+}
+
+TEST_F(IntegrationGpuKernelIngestor, BothPointwiseEnginesOfferTheSameGraph)
+{
+    // The model pack reuses the native pack's matchers, so both engines accept a
+    // pointwise-add graph and neither shadows the other. A caller chooses between them by
+    // pinning an id, which is what the cases above rely on.
+    auto graph = buildPointwiseAddGraph();
+    ASSERT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
+
+    std::vector<int64_t> rankedEngineIds;
+    ASSERT_EQ(graph->get_ranked_engine_ids(rankedEngineIds).code, ErrorCode::OK);
+
+    const auto offers = [&rankedEngineIds](int64_t id) {
+        return std::find(rankedEngineIds.begin(), rankedEngineIds.end(), id)
+               != rankedEngineIds.end();
+    };
+
+    EXPECT_TRUE(offers(engineId()));
+    EXPECT_TRUE(offers(modelEngineId()));
 }
 
 INSTANTIATE_TEST_SUITE_P(,

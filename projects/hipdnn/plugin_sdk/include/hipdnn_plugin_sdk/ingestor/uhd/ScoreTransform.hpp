@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <string>
 
 namespace hipdnn_plugin_sdk::ingestor::uhd
@@ -85,7 +86,11 @@ inline double applyInverse(double rawScore, const std::string& transform)
     }
     if(transform == "sqrt")
     {
-        return rawScore * rawScore;
+        // Squaring is the inverse only on the domain sqrt actually produces. A negative
+        // prediction is out of that domain, and squaring it silently maps it to a *positive*
+        // score -- so a model predicting -0.5 outranks one predicting +0.25. NaN says
+        // out-of-domain, which is what the log branches above already say for the same reason.
+        return rawScore < 0.0 ? std::numeric_limits<double>::quiet_NaN() : rawScore * rawScore;
     }
     // "" or "identity": the model was trained on the raw target.
     return rawScore;
