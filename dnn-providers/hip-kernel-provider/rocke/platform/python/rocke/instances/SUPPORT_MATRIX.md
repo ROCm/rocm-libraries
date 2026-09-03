@@ -88,7 +88,6 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 | `unified_attention_2d` | ✅ | ✅ | ✅ | scalar (no matrix core) |
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
-| `kda_chunkwise` | ❌ | ✅ | ❌ | gfx950-only; dispatcher-wired via `dispatch.kda` |
 
 ---
 
@@ -99,9 +98,9 @@ as described in the notes.
 
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
-| `kda_chunk_fused` | ✅ | ❌ | ❌ | bf16 only; fused prefill, one workgroup per (batch, head, V partition) |
-| `kda_chunk_prep` | ✅ | ❌ | ❌ | bf16 only; split path phase 1, one workgroup per chunk |
-| `kda_chunk_scan` | ✅ | ❌ | ❌ | bf16 only; split path phase 2, consumes what prep wrote |
+| `kda_chunk_fused` | ✅ | ✅ | ❌ | bf16 only; fused prefill; gfx942 partitions V, gfx950 owns a full head |
+| `kda_chunk_prep` | ✅ | ✅ | ❌ | bf16 only; split path phase 1, one workgroup per chunk |
+| `kda_chunk_scan` | ✅ | ✅ | ❌ | bf16 only; split path phase 2, consumes what prep wrote |
 
 ---
 
@@ -151,15 +150,14 @@ as described in the notes.
   supported. fp8/bf8 output needs the CDNA-only `v_cvt_pk_{fp8,bf8}_f32`
   conversion, so fp8/bf8 specs are rejected by the validator on non-CDNA
   families.
-- **KDA (`kda_chunk_*`)** is gfx942-only by construction, not by omission: all
-  three validators reject any other `arch` (`test_kda_chunkwise_gfx942_spec.py`,
-  and the dispatch arch gate in `library/tests/dispatch/kda/`). CDNA3 lacks the
-  K-packed bf16 atoms and transposing LDS reads a CDNA4 path would use, so the
-  swizzled store/load pairing here assumes `a_per_lane == 4`. The ❌ cells are
-  therefore a refusal, not an untested gap. The gfx942 ✅ is GPU-numeric-verified
-  against a torch reference (`test_kda_chunkwise_gfx942_numeric.py`, needs a
-  local gfx942 device); the emitted IR is additionally pinned by
-  `test_kda_gfx942_golden.py`, which needs no device.
+- **KDA (`kda_chunk_*`)** has separate gfx942 and gfx950 emitters, each with an
+  architecture gate and schedule matched to that ISA. gfx942 partitions a
+  logical value head into 64-channel workgroups to fit its LDS budget; gfx950
+  uses CDNA4 K-packed bf16 atoms and supports both full-head and value-split
+  scans. Both ✅ columns are GPU-numeric-verified by their architecture-specific
+  tests, and their emitted IR is pinned by `test_kda_gfx942_golden.py` and
+  `test_kda_gfx950_golden.py`. gfx1151 remains an explicit refusal, not an
+  untested gap.
 - All other ✅ cells remain compile-verified only (HSACO produced for the
   target; not yet GPU-numeric-verified).
 - gfx942/gfx950 cells use a portable f16 16x16x16 config; an instance marked ❌

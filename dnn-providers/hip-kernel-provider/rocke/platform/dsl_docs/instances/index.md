@@ -79,7 +79,6 @@ Direct grouped 4c (same shape, cpg=kpg=4):
 | `fmha_fwd_fp8.py` | `FmhaFwdFp8Spec` (CK Tile 01 fp8; per-tensor scales) | `instances/attention.md` |
 | `sage_attention.py` | `SageAttentionSpec`, `SageQuantMode` (CK Tile 49; 4 variants) | `instances/attention.md` |
 | `sparse_attention.py` | `JengaSparseSpec`, `VsaSparseSpec` (CK Tile 50; jenga + VSA) | `instances/attention.md` |
-| `library/kernels/gfx950/kda_chunkwise.py` | `KdaTileSpec`, `KdaChunkPrepSpec`, `KdaChunkScanSpec`, `KdaChunkFusedSpec` | `instances/kda.md` |
 
 Runtime entry point: `run_unified_attention_torch(...)`.
 
@@ -97,9 +96,10 @@ code with the family above.
 | File | Spec | Doc |
 |-----------------------------------|-------------------------------------------------------------------|------------------------------|
 | `gfx942/kda_chunkwise.py` | `KdaChunkFusedSpec`, `KdaChunkPrepSpec`, `KdaChunkScanSpec`, `KdaTileSpec` | `instances/kda.md` |
+| `gfx950/kda_chunkwise.py` | `KdaChunkFusedSpec`, `KdaChunkPrepSpec`, `KdaChunkScanSpec`, `KdaTileSpec` | `instances/kda.md` |
 
 Three kernels: a fused prefill, and a two-phase split path (per-chunk tile
-builder, then state scan). gfx942 / bf16 only; prefill only, no varlen.
+builder, then state scan). gfx942 and gfx950 are bf16-only; prefill only, no varlen.
 Dispatch is `library/dispatch/kda/` (`dispatch_kda`), which defaults to the
 fused kernel and keeps the split halves opt-in.
 
