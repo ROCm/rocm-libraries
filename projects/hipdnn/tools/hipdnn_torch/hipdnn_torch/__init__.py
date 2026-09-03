@@ -53,6 +53,8 @@ __all__ = [
     "install",
     "uninstall",
     "reset",
+    "tuning",
+    "tuning_report",
     "report",
     "census",
     "enable_logging",
@@ -108,6 +110,42 @@ def report(ops=None) -> str:
         if ov.census() or ov.installed:
             chunks.append(ov.format_report())
     return "\n\n".join(chunks) if chunks else "hipdnn_torch: nothing installed"
+
+
+def tuning(ops=None) -> list:
+    """Every exhaustive sweep that actually ran, as a list of records.
+
+    A record carries the op, the winning engine, how many candidates were
+    benchmarked, the best ``robust_time_ms``, the top of the measured ranking,
+    and -- the field that matters -- ``outcome``: the
+    ``AutotuneCacheWriteOutcome`` name saying whether the ranking was persisted.
+    Anything other than ``WRITTEN``/``UNCHANGED`` means later runs will re-decide
+    from the heuristic rather than inherit this measurement.
+    """
+    out = []
+    for name in _selected(ops):
+        out.extend(_OVERRIDES[name]._tune_log)
+    return out
+
+
+def tuning_report(ops=None) -> str:
+    """Human-readable summary of :func:`tuning`; empty string when nothing swept."""
+    records = tuning(ops)
+    if not records:
+        return ""
+    lines = ["exhaustive sweeps (torch.backends.cudnn.benchmark / HIPDNN_TORCH_TUNE):"]
+    for rec in records:
+        best = rec["best_ms"]
+        lines.append(
+            f"  {rec['op']:32s} winner={rec['winner']:24s} "
+            f"benchmarked={rec['benchmarked']}/{rec['candidates']}  "
+            f"best={best:.4f} ms  cache={rec['outcome']}"
+            if best is not None else
+            f"  {rec['op']:32s} no candidate succeeded  cache={rec['outcome']}"
+        )
+        for engine, ms in rec["ranking"][:4]:
+            lines.append(f"      {engine:38s} {ms:8.4f} ms")
+    return "\n".join(lines)
 
 
 def overrides() -> dict:
