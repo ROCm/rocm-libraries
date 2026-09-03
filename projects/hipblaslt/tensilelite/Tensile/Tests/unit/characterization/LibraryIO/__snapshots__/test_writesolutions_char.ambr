@@ -26,10 +26,19 @@
   '''
   - MinimumRequiredVersion: <VERSION>
   - ProblemSizes:
-  - BiasTypeArgs: [[0, 4]]
+  - BiasTypeArgs: [0, 4]
   - ActivationArgs:
     - [Enum: relu]
     - [Enum: gelu]
+  
+  '''
+# ---
+# name: test_header_with_bias_and_gate
+  '''
+  - MinimumRequiredVersion: <VERSION>
+  - ProblemSizes:
+  - BiasTypeArgs: [0, 4]
+  - GateTypeArgs: [3]
   
   '''
 # ---

@@ -284,6 +284,16 @@ field tuple position.
 
 **Decision:** `TensileLogic.KnownBugs` now keys documented `--check-all` skips on `(path, solution_name)` instead of positional `(path, solution_index)`, which shifts on re-tuning; `solution_index` support is dropped. Intended behavior change, not a pinned bug. Motivating context: ROCM-7144.
 
+## D21 — TensileLibLogicToYaml/LibraryIO: BiasTypeArgs written one level too deep (fixed, goldens flipped)
+
+**ADR:** [`adr/0012-flatten-biastypeargs-solutions-header.md`](adr/0012-flatten-biastypeargs-solutions-header.md)
+
+**Decision:** `LibraryIO._writeSolutionsHeader` wrapped `BiasTypeArgs` (and its `GateTypeArgs` copy) in a second pair of brackets, so solutions headers carried `[[7]]` where the benchmark config schema takes `[7]`. Fixed at the writer, normalized on read in `TensileLibLogicToYaml` for the files already on disk, and the one `test_writesolutions_char` golden (`test_header_with_bias_and_activation`) re-recorded. Intended behavior change, not a pinned bug.
+
+## D22 — TensileLibLogicToYaml: benchmark solution offset scanned, not assumed
+
+**Decision:** `BENCHMARK_SOLUTION_OFFSET = 4` assumed `MinimumRequiredVersion`, `ProblemSizes`, `BiasTypeArgs` and `ActivationArgs` were all present, but `_writeSolutionsHeader` writes each optional entry only when it is set — and `GateTypeArgs` adds a fifth. A file without bias/activation put the first solution at index 2, and one with a gate put a header entry at index 4. Replaced with `splitBenchmarkHeader`, which scans the known optional keys in order exactly as `LibraryIO.parseSolutionsData` does. Found while fixing D21; no golden changes.
+
 ## D23 — TensileLibLogicToYaml: the skipMI / MI-disabled crash is fixed, D14's pin flipped
 
 **ADR:** [`adr/0013-fix-formgroups-none-crash.md`](adr/0013-fix-formgroups-none-crash.md), superseding [`adr/0010-pin-formgroups-none-crash.md`](adr/0010-pin-formgroups-none-crash.md)

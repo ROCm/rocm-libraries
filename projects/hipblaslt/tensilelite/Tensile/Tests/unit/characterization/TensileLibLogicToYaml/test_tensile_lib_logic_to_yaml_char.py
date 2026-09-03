@@ -226,6 +226,126 @@ def test_form_library_logic_unwraps_dict_architecture():
 
 
 # ---------------------------------------------------------------------------
+# BiasTypeArgs shape normalization / benchmark header scan
+# ---------------------------------------------------------------------------
+def test_normalize_bias_type_args_flattens_nested():
+    # LibraryIO._writeSolutionsHeader wrote "[{}]".format([7]) -> [[7]] for
+    # years, so existing benchmark data files carry the nested shape while the
+    # benchmark config schema takes a flat list. See DECISIONS D21.
+    assert M.normalizeBiasTypeArgs([[7]]) == [7]
+    assert M.normalizeBiasTypeArgs([[0, 4]]) == [0, 4]
+
+
+def test_normalize_bias_type_args_passes_flat_through():
+    assert M.normalizeBiasTypeArgs([7]) == [7]
+    assert M.normalizeBiasTypeArgs(["s"]) == ["s"]
+
+
+def test_normalize_bias_type_args_empty_is_absent():
+    # [[]] is what the old writer emitted for an empty bias list; both it and []
+    # must read as "not set" so the BiasDataTypeList fallback engages.
+    assert M.normalizeBiasTypeArgs([[]]) is None
+    assert M.normalizeBiasTypeArgs([]) is None
+    assert M.normalizeBiasTypeArgs(None) is None
+
+
+def test_form_problem_size_flattens_nested_bias():
+    data = M.formProblemSize(
+        exactLogic=None,
+        solutionIndex=0,
+        problemTypeStat={"BiasDataTypeList": [0]},
+        problemSizes=[{"Exact": [128, 64, 1, 256]}],
+        biasTypeArgs=[[7]],
+    )
+    assert list(data["BenchmarkFinalParameters"][1]["BiasTypeArgs"]) == [7]
+
+
+def test_form_problem_size_empty_bias_falls_back_to_problem_type():
+    data = M.formProblemSize(
+        exactLogic=None,
+        solutionIndex=0,
+        problemTypeStat={"BiasDataTypeList": [0]},
+        problemSizes=[{"Exact": [128, 64, 1, 256]}],
+        biasTypeArgs=[[]],
+    )
+    assert list(data["BenchmarkFinalParameters"][1]["BiasTypeArgs"]) == [0]
+
+
+def test_split_benchmark_header_all_optional_fields():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"BiasTypeArgs": [[7]]},
+        {"ActivationArgs": [[{"Enum": "relu"}]]},
+        {"GateTypeArgs": [[4]]},
+        {"ProblemType": {}},
+    ]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 5
+    assert header["BiasTypeArgs"] == [[7]]
+    assert "GateTypeArgs" in header
+
+
+def test_split_benchmark_header_optional_fields_absent():
+    # Each optional entry is written only when set, so a file without bias or
+    # activation puts the first solution at index 2, not at a fixed offset.
+    data = [{"MinimumRequiredVersion": "1.2.3"}, {"ProblemSizes": []}, {"ProblemType": {}}]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 2
+    assert header == {}
+
+
+def test_split_benchmark_header_skips_absent_middle_key():
+    # Each optional entry is independent, so activation can be present with no
+    # bias. The scan must keep going rather than stop at the first miss.
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"ActivationArgs": [[{"Enum": "relu"}]]},
+        {"ProblemType": {}},
+    ]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 3
+    assert "ActivationArgs" in header
+    assert "BiasTypeArgs" not in header
+
+
+def test_split_benchmark_header_bias_and_gate_without_activation():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"BiasTypeArgs": [[7]]},
+        {"GateTypeArgs": [[3]]},
+        {"ProblemType": {}},
+    ]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 4
+    assert header["BiasTypeArgs"] == [[7]]
+    assert header["GateTypeArgs"] == [[3]]
+    assert "ActivationArgs" not in header
+
+
+def test_benchmark_reader_matches_without_optional_header():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"ProblemType": {"DataType": "S"}, "ISA": [9, 4, 2], "SolutionIndex": 0},
+    ]
+    assert M.BenchmarkDataReader.matches(data) is True
+
+
+def test_benchmark_reader_reads_nested_bias_as_flat():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": [{"Exact": [128, 64, 1, 256]}]},
+        {"BiasTypeArgs": [[7]]},
+        {"ProblemType": {"DataType": "S"}, "ISA": [9, 4, 2], "SolutionIndex": 0},
+    ]
+    source = M.BenchmarkDataReader.read(data, 0)
+    assert source.biasTypeArgs == [7]
+
+
+# ---------------------------------------------------------------------------
 # writeToTensileYamlFile
 # ---------------------------------------------------------------------------
 def test_write_yaml_file_ok(tmp_path, monkeypatch):

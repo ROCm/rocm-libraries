@@ -51,9 +51,14 @@ from typing import Any, Dict, List, Optional, Tuple
 #: Emitted only when no run config supplies a real device name.
 FALLBACK_DEVICE_NAME = "Device 0000"
 
-#: Index of the first solution state in a benchmark data file; entries 0..3 are
-#: MinimumRequiredVersion, ProblemSizes, BiasTypeArgs and ActivationArgs.
-BENCHMARK_SOLUTION_OFFSET = 4
+#: Entries every benchmark data file starts with: MinimumRequiredVersion and
+#: ProblemSizes.
+BENCHMARK_REQUIRED_HEADER_LEN = 2
+
+#: Header entries that may follow, in this order. _writeSolutionsHeader emits
+#: each one only when it is set, so the first solution state does not sit at a
+#: fixed index.
+BENCHMARK_OPTIONAL_HEADER_KEYS = ("BiasTypeArgs", "ActivationArgs", "GateTypeArgs")
 
 #: Written by ClientWriter into every benchmark step directory. This is the
 #: authoritative record of the settings a run actually used, and unlike the
@@ -379,6 +384,47 @@ def formForkParams(currentIndexSolution: dict, skipMI: bool) -> dict:
     return data
 
 
+def splitBenchmarkHeader(data: list) -> Tuple[dict, int]:
+    """Splits a benchmark data file into its header fields and its solutions.
+
+    Mirrors LibraryIO.parseSolutionsData: the optional header entries are each
+    written only when set, so the first solution state is found by scanning for
+    the known keys rather than by assuming a fixed offset.
+
+    Returns the header fields found and the index of the first solution state.
+    """
+    header = {}
+    index = BENCHMARK_REQUIRED_HEADER_LEN
+    for key in BENCHMARK_OPTIONAL_HEADER_KEYS:
+        if index < len(data) and isinstance(data[index], dict) and key in data[index]:
+            header[key] = data[index][key]
+            index += 1
+    return header, index
+
+
+def normalizeBiasTypeArgs(biasTypeArgs: Optional[list]) -> Optional[list]:
+    """Flattens the nested BiasTypeArgs shape written into benchmark data files.
+
+    LibraryIO._writeSolutionsHeader wrapped the value in a second pair of
+    brackets, so files written before that fix carry [[7]] where the benchmark
+    config schema takes a flat [7]. Left nested, BiasTypeArgs in Solution.py
+    hands the inner list to DataType and raises. Every already-generated file
+    keeps the old shape, so accept both here rather than only fixing the writer.
+
+    Returns None for an absent or empty value so the caller falls back to the
+    problem type's BiasDataTypeList.
+    """
+    if biasTypeArgs is None:
+        return None
+    flattened = []
+    for entry in biasTypeArgs:
+        if isinstance(entry, (list, tuple)):
+            flattened.extend(entry)
+        else:
+            flattened.append(entry)
+    return flattened or None
+
+
 def formProblemSize(
     exactLogic: Optional[list[Tuple[list, list]]],
     solutionIndex: int,
@@ -412,7 +458,8 @@ def formProblemSize(
     data["BenchmarkFinalParameters"].append(temp)
 
     temp = {}
-    if biasTypeArgs is None:
+    biasTypeArgs = normalizeBiasTypeArgs(biasTypeArgs)
+    if not biasTypeArgs:
         biasTypeArgs = problemTypeStat["BiasDataTypeList"]
     temp["BiasTypeArgs"] = FlowList(biasTypeArgs)
     gateTypeArgs = problemTypeStat.get("GateResidualDataTypeList", [])
@@ -469,8 +516,9 @@ class SourceReader(ABC):
 class BenchmarkDataReader(SourceReader):
     """Reads 1_BenchmarkProblems/<problem>/Data/*_Final.yaml.
 
-    The format is a list of [MinimumRequiredVersion, ProblemSizes, BiasTypeArgs,
-    ActivationArgs, *solutionStates]. Benchmark data predates the library logic
+    The format is a list of [MinimumRequiredVersion, ProblemSizes, then any of
+    BiasTypeArgs, ActivationArgs and GateTypeArgs that were set, followed by
+    *solutionStates]. Benchmark data predates the library logic
     step, so it records no schedule, device or architecture name; the
     architecture is recovered from the selected solution's ISA.
     """
@@ -481,20 +529,26 @@ class BenchmarkDataReader(SourceReader):
     def matches(data) -> bool:
         # A list-format library logic holds the schedule name (a string) at
         # index 1, and the dict format is not a list at all.
-        return (
+        if not (
             isinstance(data, list)
-            and len(data) > BENCHMARK_SOLUTION_OFFSET
+            and len(data) > BENCHMARK_REQUIRED_HEADER_LEN
             and isinstance(data[0], dict)
             and "MinimumRequiredVersion" in data[0]
             and isinstance(data[1], dict)
             and "ProblemSizes" in data[1]
-            and isinstance(data[BENCHMARK_SOLUTION_OFFSET], dict)
-            and "ProblemType" in data[BENCHMARK_SOLUTION_OFFSET]
+        ):
+            return False
+        _, solutionOffset = splitBenchmarkHeader(data)
+        return (
+            len(data) > solutionOffset
+            and isinstance(data[solutionOffset], dict)
+            and "ProblemType" in data[solutionOffset]
         )
 
     @staticmethod
     def read(data, solutionIndex: int) -> SolutionSource:
-        solutionStates = data[BENCHMARK_SOLUTION_OFFSET:]
+        header, solutionOffset = splitBenchmarkHeader(data)
+        solutionStates = data[solutionOffset:]
         solution = BenchmarkDataReader._selectSolution(solutionStates, solutionIndex)
 
         # Each benchmark solution embeds its own problem type; a library logic
@@ -532,7 +586,7 @@ class BenchmarkDataReader(SourceReader):
             solution=solution,
             exactLogic=exactLogic,
             problemSizes=problemSizes,
-            biasTypeArgs=data[2].get("BiasTypeArgs"),
+            biasTypeArgs=normalizeBiasTypeArgs(header.get("BiasTypeArgs")),
             origin="benchmark data, solution {} ({})".format(
                 solutionIndex, solution.get("SolutionNameMin", "<unnamed>")
             ),
