@@ -694,14 +694,13 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
     EXPECT_GT(ws, 0u) << "Dynamic mode with partial tiles must request workspace";
 
-    // The workspace must be at least partialTileSize; the per-XCD work-queue
-    // region (cacheLineBytes * numXCD = 128 * 8 = 1024 B on gfx942/gfx950) is
-    // included by both query and launch so they agree.
+    // The workspace must cover the partial tiles. Query and launch agree
+    // because both size it from partialTileSize(grid).
     EXPECT_GE(ws, env.solution.partialTileSize(grid))
         << "Workspace must cover at least partialTileSize(grid)";
 }
 
-TEST(StreamK5WorkspaceRegressionTest, StaticModeOmitsQueueRegion)
+TEST(StreamK5WorkspaceRegressionTest, StaticModeWorkspaceIsPartialTilesOnly)
 {
     StreamK5AnalyticalEnv env;
     env.solution.sizeMapping.workspaceSizePerElemC = 4;
@@ -720,8 +719,8 @@ TEST(StreamK5WorkspaceRegressionTest, StaticModeOmitsQueueRegion)
 
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
 
-    // Static (SK3) path does not use the work-queue, so workspace
-    // should be exactly partialTileSize — no per-XCD work-queue region.
+    // The static (SK3) path sizes the workspace from the partial tiles alone,
+    // so it must come out exactly partialTileSize(staticGrid).
     EXPECT_EQ(ws, env.solution.partialTileSize(grid))
         << "OFF workspace must equal partialTileSize(staticGrid)";
 }
@@ -947,8 +946,9 @@ TEST(StreamKDynamicQueueXcdGateTest, MissingAnalyticalHardwareIsUnsupported)
     // Unknown hardware (null analyticalHardware -> unknown NUM_XCD / baked
     // queue count == 0) must be treated as UNSUPPORTED so the dynamic-queue
     // solution is excluded from selection and a non-dynamic-queue solution
-    // serves the GEMM, rather than staying selectable while the per-XCD counter
-    // workspace is sized with an unknown (0) queue count (under-allocation).
+    // serves the GEMM, rather than staying selectable while the flag-region
+    // clamp in getSKGrid computes its work-queue prefix from an unknown (0)
+    // queue count and so leaves the grid bounded by the whole region.
     hip::HipAMDGPU noAnalytical;
     noAnalytical.processor     = AMDGPU::Processor::gfx942;
     noAnalytical.deviceName    = "test-gfx942-no-analytical";
@@ -998,4 +998,117 @@ TEST(StreamKDynamicQueueXcdGateTest, KeepsNonDynamicQueueSolutionsOnMi300a)
         << "Non-StreamK solution must remain selectable on MI300A";
     EXPECT_TRUE(streamKDynamicQueueSupportedRef(3, /*effectiveDynamic=*/false, hwA))
         << "SK3-static solution must remain selectable on MI300A";
+}
+
+// ===========================================================================
+// StreamKFlagBound -- the bound getSKGrid puts on a Stream-K grid.
+//
+// A Stream-K flag region is one block of StreamKFlagElements ints, private to
+// one (stream, problem) pair. The dynamic-queue kernels (StreamK 4, and the
+// StreamK 4 sub-path of StreamK 5) put the per-XCD work-queue counters at the
+// base of that block and start the ready flags after them, so they can index
+// fewer entries than the block holds. A grid sized against the whole block
+// would run its last workgroups off the end of the block. Blocks are laid out
+// as adjacent problem slots within a stream, so the overrun lands on the next
+// problem's flags, or on the next stream's from the last slot of a block.
+//
+// skGrid defaults to the CU count, which is inside the bound on the parts we
+// ship, but TENSILE_STREAMK_GRID_MULTIPLIER scales it uncapped. Both that and
+// TENSILE_STREAMK_FIXED_GRID latch into a function-local static on first read,
+// so they cannot be set from inside a running test; these drive
+// AMDGPU::skFixedGrid, the field the latter feeds, directly.
+// ===========================================================================
+
+namespace
+{
+    // gfx950 has 8 XCDs and a 128-byte cache line, so the counters take
+    // 8 * 128 = 1024 bytes = 256 ints before the first flag.
+    constexpr size_t kQueuePrefixElements = 256;
+
+    // Pin the grid the clamp has to cut back. skFixedGrid is the first arm of
+    // getSKGrid's if-chain, so it wins over skMaxCUs and skGridMultiplier,
+    // which keep whatever values the environment left on the device; clearing
+    // skDynamicGrid additionally keeps origami out of the decision.
+    void pinGridToWholeFlagRegion(StreamK5AnalyticalEnv& env)
+    {
+        env.device.skDynamicGrid = 0;
+        env.device.skFixedGrid   = static_cast<int>(StreamKFlagElements);
+    }
+
+    // 8192 x 8064 over the env's 128x128 macro tile is 64 x 63 = 4032 tiles:
+    // not a multiple of the pinned grid, so partial tiles exist and the flags
+    // are read. K is small enough that the tree-fixup bounds above the clamp
+    // leave the grid alone.
+    ContractionProblemGemm makeFlagBoundProblem()
+    {
+        return makeGemmProblem(8192, 8064, 512);
+    }
+
+    size_t clampedGrid(StreamK5AnalyticalEnv& env, ContractionProblemGemm& problem)
+    {
+        auto tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+        EXPECT_NE(tiles % StreamKFlagElements, 0u)
+            << "grid must leave partial tiles to fix up";
+        return env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree);
+    }
+} // namespace
+
+// Grid plus counters fills exactly one block, which is what makes the clamp
+// the right one rather than merely safe: an entry more would overrun the
+// block, an entry less would be grid left unused.
+TEST(StreamKFlagBound, DynamicQueueGridStopsBeforeTheNextBlock)
+{
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.streamK = 4;
+    pinGridToWholeFlagRegion(env);
+    auto problem = makeFlagBoundProblem();
+
+    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements - kQueuePrefixElements);
+}
+
+TEST(StreamKFlagBound, StaticGridKeepsTheWholeBlock)
+{
+    // StreamK 3 indexes its flags from offset 0, so tightening it for the
+    // work-queue prefix would cost it grid it is entitled to.
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.streamK = 3;
+    pinGridToWholeFlagRegion(env);
+    auto problem = makeFlagBoundProblem();
+
+    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements);
+}
+
+// StreamK 5 picks its sub-path at runtime, so which of the two bounds applies
+// is decided by streamK5EffectiveDynamic() rather than by sizeMapping alone.
+// These two pin both answers.
+TEST(StreamKFlagBound, StreamK5DynamicSubPathStopsBeforeTheNextBlock)
+{
+    StreamK5AnalyticalEnv env; // initStreamK5Solution leaves streamK == 5
+    pinGridToWholeFlagRegion(env);
+    auto problem = makeFlagBoundProblem();
+    problem.setParams().setStreamKTileSchedulingMode(1); // ON -> dynamic (SK4)
+
+    ASSERT_TRUE(env.solution.streamK5EffectiveDynamic(problem, env.device))
+        << "mode=ON must resolve StreamK 5 to the dynamic (SK4) sub-path";
+
+    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements - kQueuePrefixElements)
+        << "SK5 on its dynamic sub-path carries the work-queue prefix, so its "
+           "grid must stop short of the block by that many entries";
+}
+
+TEST(StreamKFlagBound, StreamK5StaticSubPathKeepsTheWholeBlock)
+{
+    StreamK5AnalyticalEnv env; // initStreamK5Solution leaves streamK == 5
+    pinGridToWholeFlagRegion(env);
+    auto problem = makeFlagBoundProblem();
+    problem.setParams().setStreamKTileSchedulingMode(0); // OFF -> static (SK3)
+    problem.setParams().setSmCountTarget(0); // no cotenant, so no heuristic
+
+    ASSERT_FALSE(env.solution.streamK5EffectiveDynamic(problem, env.device))
+        << "mode=OFF with smCountTarget=0 must resolve StreamK 5 to the static "
+           "(SK3) sub-path";
+
+    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements)
+        << "SK5 on its static sub-path indexes from offset 0, so it keeps the "
+           "whole block";
 }
