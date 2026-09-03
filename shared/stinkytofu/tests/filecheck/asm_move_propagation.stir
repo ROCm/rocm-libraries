@@ -113,7 +113,7 @@ st.func @preserve_negated_source_after_propagation() {
 # CHECK-LABEL: @compose_vop3_neg_with_mapped_neg
 # CHECK: v0 = "st.v_mov_b32"(-v1)
 # CHECK: v2 = "st.v_add_f32"(v0, v3)
-# CHECK: mod.vop3 = { neg_src0 = true }
+# CHECK-SAME: mod.vop3 = { neg_src0 = true }
 st.func @compose_vop3_neg_with_mapped_neg() {
 ^entry:
   v0 = "st.v_mov_b32"(-v1) { issueCycles = 1, latencyCycles = 1 }

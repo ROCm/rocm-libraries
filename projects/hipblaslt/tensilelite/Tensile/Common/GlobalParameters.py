@@ -259,9 +259,6 @@ globalParameters["DumpTensors"] = (
 # If PrintMax* is greater than the dimension, the middle elements will be replaced with "..."
 
 
-# device selection
-globalParameters["Platform"] = 0  # select opencl platform
-
 # shouldn't need to change
 globalParameters["ClientExecutionLockPath"] = (
     None  # Path for a file lock to ensure only one client is executed at once.  filelock module is required if this is enabled.
@@ -443,6 +440,10 @@ defaultInternalSupportParams = {
     # but WGM is not.
     "SupportCustomWGM": True,
     "SupportCustomStaggerU": True,
+    # Kernel distributes Stream-K extra iters within each tile when
+    # skGrid % skTiles == 0. Default False so older/custom kernels do not
+    # claim the capability; newly generated StreamK 3 / SK5 set it True.
+    "SupportStreamKPerTileExtraIters": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,
@@ -464,7 +465,7 @@ defaultBenchmarkCommonParameters = [
     {"LdsBlockSizePerPadMetadata": [-1]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
-    {"MaxOccupancy": [40]},
+    {"MaxOccupancy": [64]},
     {"MaxLDS": [-1]},
     {"VectorWidthA": [-1]},
     {"VectorWidthB": [-1]},
@@ -838,6 +839,14 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
 ]
 
 
+def validateRuntimeLanguage(runtimeLanguage):
+    if runtimeLanguage is not None and runtimeLanguage not in {"HIP", "HSA"}:
+        printExit(
+            f"Unsupported RuntimeLanguage {runtimeLanguage!r}. "
+            "Supported runtime languages are HIP and HSA."
+        )
+
+
 def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
     Assign Global Parameters
@@ -846,6 +855,8 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
 
     global globalParameters
+
+    validateRuntimeLanguage(config.get("RuntimeLanguage"))
 
     # Minimum Required Version
     if "MinimumRequiredVersion" in config:

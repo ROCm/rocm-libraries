@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from rocke.core.arch import validate_arch
 from rocke.core.ir import (
     BF16,
     F16,
@@ -433,6 +434,7 @@ def _reject_fp8_format_arch_mismatch(
 
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
+    arch: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Return whether CK DSL can run this problem without fallback today.
 
@@ -458,7 +460,9 @@ def supports_native_unified_attention(
     if problem.dtype not in UNIFIED_DTYPES:
         return False, f"unsupported dtype {problem.dtype}"
     if problem.use_fp8:
-        rejected = _reject_fp8_format_arch_mismatch(problem, _resolve_attention_arch())
+        rejected = _reject_fp8_format_arch_mismatch(
+            problem, arch or _resolve_attention_arch()
+        )
         if rejected is not None:
             return rejected
         if problem.q_dtype is not None and problem.q_dtype not in ("fp16", "bf16"):
@@ -563,9 +567,10 @@ def supports_native_unified_attention_tiled(
 
 def supports_native_unified_attention_3d_tiled(
     problem: UnifiedAttentionProblem,
+    arch: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Return whether the optimized tiled MFMA 3D split-KV path can run this."""
-    arch = _resolve_attention_arch()
+    arch = arch or _resolve_attention_arch()
     rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected
@@ -4109,7 +4114,9 @@ def _get_scalar_launcher(
         arch = _resolve_attention_arch()
         spec = UnifiedAttention2DSpec(problem=problem)
         artifact = compile_kernel(
-            build_unified_attention_2d(spec), arch=arch, capture_ir_text=False
+            build_unified_attention_2d(spec, arch=arch),
+            arch=arch,
+            capture_ir_text=False,
         )
         _ATTN_CACHE[cache_key] = (artifact.hsaco, artifact.kernel_name)
     hsaco, kname = _ATTN_CACHE[cache_key]
@@ -4397,14 +4404,23 @@ class UnifiedAttention2DSpec:
         )
 
 
-def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
+def build_unified_attention_2d(
+    spec: UnifiedAttention2DSpec, *, arch: str = "gfx950"
+) -> KernelDef:
     """Build a scalar-correct 2D unified-attention kernel.
 
     One workgroup computes one output element `(query_token, query_head, dim)`.
     This is deliberately a correctness kernel: it implements the full paged
     online-softmax semantics for fp16/bf16 without relying on Triton. The
     optimized MFMA/tiled kernel will replace this body once parity is locked.
+
+    The body is arch-neutral -- one scalar element per workgroup, no MMA atom, no
+    LDS, no cross-lane op -- so `arch` selects nothing here; it is validated and
+    the emitted `KernelDef` is identical for every target. It is still part of the
+    signature because a kernel descriptor has to name a target without calling the
+    builder, and that only works if every builder has the same shape.
     """
+    validate_arch(arch)
     p = spec.problem
     if p.dtype not in ("fp16", "bf16"):
         raise ValueError("scalar 2D kernel currently supports fp16/bf16")
@@ -4619,8 +4635,15 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
         )
 
 
-def build_unified_attention_3d(spec: UnifiedAttention3DSpec) -> KernelDef:
-    """Build scalar-correct split-3D segment attention kernel."""
+def build_unified_attention_3d(
+    spec: UnifiedAttention3DSpec, *, arch: str = "gfx950"
+) -> KernelDef:
+    """Build scalar-correct split-3D segment attention kernel.
+
+    Arch-neutral like the 2D builder: `arch` is validated, not consumed. See
+    `build_unified_attention_2d` for why it is in the signature anyway.
+    """
+    validate_arch(arch)
     p = spec.problem
     dtype = spec.dtype_ir
     b = IRBuilder(spec.kernel_name())
@@ -4762,7 +4785,15 @@ class UnifiedAttentionReduceSpec:
         )
 
 
-def build_unified_attention_reduce(spec: UnifiedAttentionReduceSpec) -> KernelDef:
+def build_unified_attention_reduce(
+    spec: UnifiedAttentionReduceSpec, *, arch: str = "gfx950"
+) -> KernelDef:
+    """Build the scalar cross-segment reduction that finishes a split-3D attention.
+
+    Arch-neutral like the 2D builder: `arch` is validated, not consumed. See
+    `build_unified_attention_2d` for why it is in the signature anyway.
+    """
+    validate_arch(arch)
     p = spec.problem
     dtype = spec.dtype_ir
     b = IRBuilder(spec.kernel_name())

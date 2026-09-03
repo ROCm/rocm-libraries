@@ -231,7 +231,7 @@ def test_form_library_logic_unwraps_dict_architecture():
 def test_normalize_bias_type_args_flattens_nested():
     # LibraryIO._writeSolutionsHeader wrote "[{}]".format([7]) -> [[7]] for
     # years, so existing benchmark data files carry the nested shape while the
-    # benchmark config schema takes a flat list. See DECISIONS D21.
+    # benchmark config schema takes a flat list. See DECISIONS D24.
     assert M.normalizeBiasTypeArgs([[7]]) == [7]
     assert M.normalizeBiasTypeArgs([[0, 4]]) == [0, 4]
 

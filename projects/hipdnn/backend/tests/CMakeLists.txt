@@ -107,6 +107,7 @@ add_executable(
     TestEnginePluginResourceManager.cpp
     TestExecutionPlanSerializationApi.cpp
     TestGraphAndPlanSerializationApi.cpp
+    TestHipdnnBackendWriteRanking.cpp
     TestLastErrorManager.cpp
     TestBackendEnumStringUtils.cpp
     TestFlatbufferUtilities.cpp
@@ -122,6 +123,9 @@ add_executable(
     TestHeuristicPluginManagerValidationPaths.cpp
     TestSelectionHeuristic.cpp
     TestHeuristicPluginResourceManager.cpp
+    heuristics/TestAutotuneCacheEnv.cpp
+    heuristics/TestAutotuneCacheKey.cpp
+    heuristics/TestAutotuneRankingStore.cpp
     heuristics/TestConfigBuiltIn.cpp
     heuristics/TestDeviceProperties.cpp
     heuristics/TestEngineOverrideConfig.cpp
@@ -143,6 +147,38 @@ target_link_libraries(
     hipdnn_backend_private
     hipdnn_test_sdk
     ${CMAKE_DL_LIBS}
+)
+
+# Standalone helper process for TestAutotuneRankingStore's cross-process cache cases.
+# Not a gtest binary and not registered via add_hipdnn_test(); hipdnn_backend_tests
+# spawns it and resolves it next to its own executable at runtime.
+#
+# The name ends in `_test` on purpose. TheRock packages hipDNN's test artifact by the
+# glob `bin/*hipdnn_*_test*` (ml-libs/artifact-hipdnn.toml), which requires `_test`
+# AFTER the `hipdnn_` prefix; a name that misses the glob is built but never staged, and
+# the test then fails at runtime because the helper is absent beside the test binary.
+# For the same reason the install stays uncomponented: restricting it to the development
+# component would drop it from the test artifact again.
+#
+# Only the helper's FILENAME is baked in, not $<TARGET_FILE:...>: an absolute path would
+# name the build tree, which does not exist once CI installs the test binaries and runs
+# ctest from the install prefix. This mirrors hipdnn_line_store_lock_helper_test in
+# data_sdk/tests/CMakeLists.txt, which solves the identical problem.
+add_executable(hipdnn_autotune_cross_process_helper_test heuristics/AutotuneCrossProcessHelper.cpp)
+target_link_libraries(hipdnn_autotune_cross_process_helper_test Threads::Threads hipdnn_backend_private)
+target_compile_definitions(hipdnn_autotune_cross_process_helper_test PRIVATE HIPDNN_BACKEND_COMPILATION)
+target_compile_options(hipdnn_autotune_cross_process_helper_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_target_properties(
+    hipdnn_autotune_cross_process_helper_test
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+)
+
+# The test spawns the helper, so it must exist before the test runs and ship alongside it.
+add_dependencies(hipdnn_backend_tests hipdnn_autotune_cross_process_helper_test)
+install(TARGETS hipdnn_autotune_cross_process_helper_test RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+target_compile_definitions(
+    hipdnn_backend_tests PRIVATE
+    HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_NAME="$<TARGET_FILE_NAME:hipdnn_autotune_cross_process_helper_test>"
 )
 
 target_compile_definitions(

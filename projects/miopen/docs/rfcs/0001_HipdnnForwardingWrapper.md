@@ -56,7 +56,7 @@ The MIOpen layering refactor that earlier drafts named as a second prerequisite 
 3. **Env var and logging mapping.** Translate MIOpen's debug/tuning/logging surface to hipDNN's, scoped to the variables that frameworks actually use in production.
 4. **Performance baselining.** Publish end-to-end performance numbers across the wrapper-pass-through and wrapper-forwarding configurations now that the provider's direct private linkage is already in place from Phase 1.
 
-> **Open question — wrapper ownership.** Long-term ownership of the wrapper layer (the new `MIOpen Public` artifact, the routing policy module, and the env-var translation work in Phase 3) is not yet assigned. Candidates include an integration team or the FDE function. Needs alignment with @BradPepersAMD before Phase 1 exit so that on-call rotations, bug triage, and the eventual default-flip decision (§9) have a clear DRI.
+> **Wrapper ownership.** Ownership and maintenance of the wrapper layer (the new `MIOpen Public` artifact, the routing policy module, and the env-var translation work in Phase 3) belong to the **Shim team — Mitch Ousdahl and Nolan Hanna — until further notice.** This covers on-call rotation, bug triage, and the DRI role for the eventual default-flip decision (§9). Ownership may shift in the future (for example, to an integration team or the FDE function), but this assignment holds until that change is decided and communicated.
 
 ## 2. Problem Statement
 

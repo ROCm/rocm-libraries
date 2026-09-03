@@ -264,6 +264,17 @@ public:
         return hipdnnBackendGetGlobalLogLevel_ext(level);
     }
 
+    hipdnnStatus_t writeEngineRankingResultsExt(hipdnnHandle_t handle,
+                                                hipdnnBackendDescriptor_t graphDescriptor,
+                                                const int64_t* engineIdsInRankOrder,
+                                                size_t engineIdCount,
+                                                hipdnnAutotuneCacheWriteOutcome_ext_t* outcome
+                                                = nullptr) override
+    {
+        return hipdnnBackendWriteEngineRankingResults_ext(
+            handle, graphDescriptor, engineIdsInRankOrder, engineIdCount, outcome);
+    }
+
 private:
     hipdnn_data_sdk::utilities::Version _version;
 };

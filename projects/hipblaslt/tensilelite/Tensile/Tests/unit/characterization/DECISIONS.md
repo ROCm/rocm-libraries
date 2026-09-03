@@ -282,21 +282,52 @@ field tuple position.
 
 **ADR:** [`adr/0002-knownbugs-key-on-solution-name.md`](adr/0002-knownbugs-key-on-solution-name.md)
 
-**Decision:** `TensileLogic.KnownBugs` now keys documented `--check-all` skips on `(path, solution_name)` instead of positional `(path, solution_index)`, which shifts on re-tuning; `solution_index` support is dropped. Intended behavior change, not a pinned bug. Motivating context: ROCM-7144.
+**Decision:** `TensileLogic.KnownBugs` now keys documented `--check-all` skips on
+`(path, solution_name)` (the solution's stable `SolutionNameMin`) instead of the
+positional `(path, solution_index)`; `solution_index` support is dropped. The
+`test_knownbugs_char.py` goldens for `test_is_known_bug_hit_and_miss` and
+`test_load_roundtrip_multi` were re-recorded to match. This is an intended
+behavior change (not a pinned bug): positional indices shift on re-tuning and
+forced manual edits to `known_bugs.yaml`, whereas the content-derived name is
+stable and self-invalidating. Motivating context: ROCM-7144.
 
-## D21 — TensileLibLogicToYaml/LibraryIO: BiasTypeArgs written one level too deep (fixed, goldens flipped)
+**Note:** the two golden nodes were hand-edited to match syrupy's amber format
+and must be confirmed byte-identical via `--snapshot-update` in a build
+environment; the `-m unit` lane needs the compiled rocisa module, which is not
+available where this change was authored.
 
-**ADR:** [`adr/0012-flatten-biastypeargs-solutions-header.md`](adr/0012-flatten-biastypeargs-solutions-header.md)
+## D21 — `test_bigfile_capped_emit` decoupled from live `library/src` tuning data
+
+**ADR:** [`adr/0012-decouple-bigfile-tests-from-library-src.md`](adr/0012-decouple-bigfile-tests-from-library-src.md)
+
+**Decision:** Replace the 10 `_BIG` entries' live `library/src` tuning-data references with vendored, trimmed, self-contained fixtures under `_codegen/data/bigfiles/`; add `test_no_library_src_dependency_char.py` as a standing AST-scan regression guard against the coupling reappearing.
+
+## D22 — `test_bigfile_capped_emit` basename churn from upstream StreamK/GSU codegen changes
+
+**Context:** After rebasing D21's fixtures onto current `develop`, 3 of the 10 `test_bigfile_capped_emit` cases (`equality_gfx950_HSS_big`, `gfx950_origami_MX`, `gfx1201_I8II`) failed on basename only — `err` stayed `0` and each fixture's solution count matched its `cap` exactly (6 solutions in, 6 emitted), so the affected kernels are unchanged in identity, just renamed. Root cause: `Tensile/Components/GSU.py`, `GlobalWriteBatch.py`, `StreamK.py`, and `KernelWriterAssembly.py` changed on `develop` (notably #9401 "enable PrefetchAcrossPersistent for SK4 and SK5" and #11245 "CompactLoopStore for D-store, MBSK, and StreamK") between when these fixtures were baselined and now, shifting the content-derived `MinNaming` hash for a subset of solutions that happen to hit those codegen paths. Same category as D16/D17.
+
+**Decision:** Re-recorded only the 3 affected snapshot nodes via `--snapshot-update`; verified locally beforehand that both old and new basenames refer to the same 6 vendored solutions per fixture (no solution added/dropped/reordered-in-or-out of the capped set), and that assembly still emits cleanly (`err == 0`) for all of them.
+
+## D23 — Canonical code-object linker input order
+
+**ADR:** [`adr/0013-canonical-code-object-link-order.md`](adr/0013-canonical-code-object-link-order.md)
+
+**Decision:** Sort every code object's input paths immediately before linking,
+so default and explicitly grouped code objects share one deterministic physical
+kernel order even though their inputs originate from different collection types.
+
+## D24 — TensileLibLogicToYaml/LibraryIO: BiasTypeArgs written one level too deep (fixed, goldens flipped)
+
+**ADR:** [`adr/0014-flatten-biastypeargs-solutions-header.md`](adr/0014-flatten-biastypeargs-solutions-header.md)
 
 **Decision:** `LibraryIO._writeSolutionsHeader` wrapped `BiasTypeArgs` (and its `GateTypeArgs` copy) in a second pair of brackets, so solutions headers carried `[[7]]` where the benchmark config schema takes `[7]`. Fixed at the writer, normalized on read in `TensileLibLogicToYaml` for the files already on disk, and the one `test_writesolutions_char` golden (`test_header_with_bias_and_activation`) re-recorded. Intended behavior change, not a pinned bug.
 
-## D22 — TensileLibLogicToYaml: benchmark solution offset scanned, not assumed
+## D25 — TensileLibLogicToYaml: benchmark solution offset scanned, not assumed
 
-**Decision:** `BENCHMARK_SOLUTION_OFFSET = 4` assumed `MinimumRequiredVersion`, `ProblemSizes`, `BiasTypeArgs` and `ActivationArgs` were all present, but `_writeSolutionsHeader` writes each optional entry only when it is set — and `GateTypeArgs` adds a fifth. A file without bias/activation put the first solution at index 2, and one with a gate put a header entry at index 4. Replaced with `splitBenchmarkHeader`, which scans the known optional keys in order exactly as `LibraryIO.parseSolutionsData` does. Found while fixing D21; no golden changes.
+**Decision:** `BENCHMARK_SOLUTION_OFFSET = 4` assumed `MinimumRequiredVersion`, `ProblemSizes`, `BiasTypeArgs` and `ActivationArgs` were all present, but `_writeSolutionsHeader` writes each optional entry only when it is set — and `GateTypeArgs` adds a fifth. A file without bias/activation put the first solution at index 2, and one with a gate put a header entry at index 4. Replaced with `splitBenchmarkHeader`, which scans the known optional keys in order exactly as `LibraryIO.parseSolutionsData` does. Found while fixing D24; no golden changes.
 
-## D23 — TensileLibLogicToYaml: the skipMI / MI-disabled crash is fixed, D14's pin flipped
+## D26 — TensileLibLogicToYaml: the skipMI / MI-disabled crash is fixed, D14's pin flipped
 
-**ADR:** [`adr/0013-fix-formgroups-none-crash.md`](adr/0013-fix-formgroups-none-crash.md), superseding [`adr/0010-pin-formgroups-none-crash.md`](adr/0010-pin-formgroups-none-crash.md)
+**ADR:** [`adr/0015-fix-formgroups-none-crash.md`](adr/0015-fix-formgroups-none-crash.md), superseding [`adr/0010-pin-formgroups-none-crash.md`](adr/0010-pin-formgroups-none-crash.md)
 
 **Decision:** D14 pinned the `AttributeError` that `formGroups` raised when `formForkParams` passed the string sentinel `"None"` on the skipMI / MI-disabled path (AIHPBLAS-4409). PR #11538 fixes it: that branch now builds a real `{"WorkGroup": ...}` group. `test_form_fork_params_skip_mi_raises` is replaced by `test_form_fork_params_skip_mi_emits_workgroup`, which asserts the working behavior, plus a companion test pinning the `KeyError` a solution with no `WorkGroup` still raises. ADR 0010 anticipated exactly this flip.
-
