@@ -312,7 +312,6 @@ def _get_arch_data() -> Dict:
 
     try:
         from arch_specs_generated import (
-            ARCH_FAMILY_MAP,
             WARP_SUPPORTED_COMBINATIONS,
             WARP_TILE_SUPPORTED_COMBINATIONS,
             TRAIT_UNSUPPORTED_COMBINATIONS,
@@ -320,7 +319,6 @@ def _get_arch_data() -> Dict:
         )
 
         _arch_data_cache = {
-            "arch_family": ARCH_FAMILY_MAP,
             "warp_combos": WARP_SUPPORTED_COMBINATIONS,
             "warp_tile_combos": WARP_TILE_SUPPORTED_COMBINATIONS,
             "trait_unsupported": TRAIT_UNSUPPORTED_COMBINATIONS,
@@ -328,7 +326,6 @@ def _get_arch_data() -> Dict:
         }
     except ImportError:
         _arch_data_cache = {
-            "arch_family": {"gfx90a": "cdna2", "gfx942": "cdna3"},
             "warp_combos": {
                 "gfx942": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
                 "gfx90a": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
@@ -406,8 +403,12 @@ def needs_pipeline_expansion(config: dict) -> bool:
 # rather than re-deriving one. It lives here, next to valid_wave_configs() /
 # valid_warp_configs(), because this module is already the codegen-side owner of
 # the arch tables loaded from arch_specs_generated.py (which is generated from
-# arch_specs.json, the single data source). Nothing below hardcodes a gfx string:
-# every decision reads one of those tables.
+# arch_specs.json, the single data source).
+#
+# SCOPE, up front: this filter narrows gfx1250 and nothing else. Which arches it
+# may narrow is a single explicit table (ARCH_VALIDITY_RULES below) rather than a
+# property derived from the arch data, so no arch acquires a restriction by
+# implication. See that table for the rule schema and the evidence per row.
 #
 # Why this exists (measured on gfx1250 / MI400, grouped rowcolquant+tensorquant
 # default_config sweep, 11,840 result rows):
@@ -424,51 +425,57 @@ def needs_pipeline_expansion(config: dict) -> bool:
 # Both are enumeration defects, not kernel defects.
 
 
-def _arch_family(arch: str) -> str:
-    """Family tag ("cdna3", "rdna4", ...) for *arch* from the arch table."""
-    return _get_arch_data().get("arch_family", {}).get(arch, "")
-
-
-def _is_wave32_arch(arch: str) -> bool:
-    """True for the RDNA/WMMA families, which execute in wave32.
-
-    Read from ARCH_FAMILY_MAP rather than pattern-matching the gfx string, so a
-    new arch is classified by adding a row to arch_specs.json.
-    """
-    return _arch_family(arch).startswith("rdna")
-
-
-def _warp_tile_table_is_exhaustive(arch: str) -> bool:
-    """True when the arch's warp-tile table is a hardware closure rather than a
-    whitelist, i.e. a warp tile absent from it cannot exist on the hardware.
-
-    True for the wave32/WMMA families: WMMA has one fragment shape family,
-    M = N = 16, and every RDNA row of WARP_TILE_SUPPORTED_COMBINATIONS reflects
-    exactly that. A 32x32 warp tile is not a WMMA instruction, so emitting it is
-    always wrong.
-
-    False for CDNA/MFMA. Those rows were transcribed from Old-TE's supported
-    list, which is a curated whitelist rather than the full MFMA instruction
-    set, so treating an absent entry as "impossible" would silently delete
-    working kernels. On CDNA the table is therefore advisory only.
-    """
-    return _is_wave32_arch(arch)
-
-
-# Per-arch cap on the number of warps in a block for one (pipeline, scheduler).
-# A data table rather than an inline arch test, so a new limitation is one row.
+# ---------------------------------------------------------------------------
+# The opt-in table -- the ONLY thing that turns any rule on
+# ---------------------------------------------------------------------------
 #
-# gfx1250 / compv3+intrawave: the compv3 intrawave pipeline is hand-scheduled for
-# wave64 MFMA. On gfx1250 (wave32) an 8-warp block either miscompiles
-# (ROCm/rocm-libraries#11161: on-device max_rel 0.14-0.87 against an fp32 CPU
-# reference) or fails to emit its device symbol -- the grouped rowcolquant/
-# tensorquant gfx1250 sweep aborted at launch on 3220 rows and every one of them
-# was warp_m*warp_n == 8. <= 4-warp compv3 is bit-accurate there. Deliberately NOT
-# applied to gfx1100/gfx1200/gfx1201: no measurement exists for those parts, and
-# their whole warp table is 8-warp, so a family-wide rule would silently delete
-# all of their compv3 kernels.
-PIPELINE_MAX_WARPS_PER_BLOCK: Dict[str, Dict[Tuple[str, str], int]] = {
-    "gfx1250": {("compv3", "intrawave"): 4},
+# An arch is gated if and only if it has a row here. There is no family closure,
+# no wave32/wave64 inference, no "the table would have allowed it anyway"
+# reasoning: an arch that is absent from this dict exits arch_config_supported()
+# on the first statement and can never be narrowed by any rule below, present or
+# future. That is a structural guarantee, not a property of the current table
+# contents, and it is what keeps gfx90a / gfx942 / gfx950 byte-identical.
+#
+# An earlier revision of this filter derived the warp-tile rule from a family
+# closure (ARCH_FAMILY_MAP -> "rdna*" => the table is exhaustive) and applied the
+# warp-map rule to *every* arch. The family closure was correct for the warp-tile
+# rule but the unconditional warp-map rule was not: measured on a raw expansion of
+# the grouped rowcolquant/tensorquant default_config ranges it deleted 9,144 of
+# 35,496 gfx942 candidates and 6,624 of 35,496 on gfx950, because
+# WARP_SUPPORTED_COMBINATIONS is a curated Old-TE whitelist (gfx942 has no
+# [4,2,1] / [2,4,1] / [4,4,1] row) rather than the set of warp maps the hardware
+# can run. Losing gfx9 coverage to fix gfx1250 is not an acceptable trade, so the
+# gate is now opt-in per arch instead of opt-out per rule.
+#
+# Row schema:
+#   "warp_map"            : bool -- [warp_m, warp_n, warp_k] must be in
+#                           WARP_SUPPORTED_COMBINATIONS[arch].
+#   "warp_tile"           : bool -- [warp_tile_m, warp_tile_n, warp_tile_k] must
+#                           be in WARP_TILE_SUPPORTED_COMBINATIONS[arch][key].
+#                           Only set this where the arch's row of that table is a
+#                           hardware closure, i.e. an absent entry really cannot
+#                           execute. True for gfx1250: WMMA has one fragment
+#                           family, M = N = 16, so a 32x32 warp tile is not an
+#                           instruction. NOT true of the CDNA rows, which is
+#                           precisely why no CDNA arch has a row here at all.
+#   "max_warps_per_block" : {(pipeline, scheduler): cap} -- warp_m * warp_n cap.
+#
+# gfx1250 evidence, both rules (grouped rowcolquant + tensorquant default_config
+# sweep on MI400, 11,840 result rows):
+#   * warp_tile: 2,908 rows returned wrong numbers and 100% of them were
+#     32x32x32; 0 of the 3,760 16x16x64 rows were wrong.
+#   * max_warps_per_block: 3,220 rows aborted at launch and 100% of them were
+#     warp_m*warp_n == 8. The compv3 intrawave pipeline is hand-scheduled for
+#     wave64 MFMA; <=4-warp compv3 is bit-accurate. Corroborated on device by
+#     ROCm/rocm-libraries#11161 (max_rel 0.14-0.87 vs an fp32 CPU reference).
+#     Deliberately not extended to gfx1100/gfx1200/gfx1201: no measurement exists
+#     for those parts and their whole warp table is 8-warp.
+ARCH_VALIDITY_RULES: Dict[str, Dict[str, Any]] = {
+    "gfx1250": {
+        "warp_map": True,
+        "warp_tile": True,
+        "max_warps_per_block": {("compv3", "intrawave"): 4},
+    },
 }
 
 
@@ -495,37 +502,49 @@ def arch_config_supported(
 ) -> bool:
     """Return True iff this configuration may be emitted for *arch*.
 
-    ``arch`` of None/empty disables every check, so a caller that genuinely has
-    no arch keeps its current behaviour. Unknown arch or missing table entry is
-    likewise permissive -- the gate never rejects on absence of data.
+    **The gate is opt-in per arch.** If *arch* is falsy, unknown, or simply has
+    no row in ARCH_VALIDITY_RULES, this returns True immediately and no rule can
+    run. Today only gfx1250 has a row, so on gfx90a / gfx942 / gfx950 -- and on
+    every other arch -- this function is a constant-True no-op by construction,
+    whatever the arch tables happen to contain. Adding an arch to the gate is a
+    deliberate, evidence-backed edit to ARCH_VALIDITY_RULES; it never happens as
+    a side effect of a table gaining or losing a row.
 
-    Three rules, in order:
+    Rules, applied only to a gated arch and only where its row enables them:
 
-    1. **Warp map.** ``[warp_m, warp_n, warp_k]`` must appear in
-       WARP_SUPPORTED_COMBINATIONS[arch] (Old-TE's validate_warp_configuration).
-    2. **Warp tile.** ``[warp_tile_m, warp_tile_n, warp_tile_k]`` must appear in
-       WARP_TILE_SUPPORTED_COMBINATIONS[arch][dtype_key] -- enforced only where
-       that table is a hardware closure (see _warp_tile_table_is_exhaustive).
-    3. **Warps-per-block cap.** ``warp_m * warp_n`` must not exceed
-       PIPELINE_MAX_WARPS_PER_BLOCK[arch][(pipeline, scheduler)] where one is
-       recorded. See that table for the measurement behind each row.
+    1. **Warp map** (``"warp_map"``) -- ``[warp_m, warp_n, warp_k]`` must appear
+       in WARP_SUPPORTED_COMBINATIONS[arch].
+    2. **Warp tile** (``"warp_tile"``) -- ``[warp_tile_m, warp_tile_n,
+       warp_tile_k]`` must appear in
+       WARP_TILE_SUPPORTED_COMBINATIONS[arch][dtype_key].
+    3. **Warps-per-block cap** (``"max_warps_per_block"``) -- ``warp_m *
+       warp_n`` must not exceed the cap recorded for (pipeline, scheduler).
+
+    Within a gated arch the rules still never reject on absence of data: a
+    missing table row leaves the corresponding rule inert.
     """
-    if not arch:
+    rules = ARCH_VALIDITY_RULES.get(arch or "")
+    if not rules:
         return True
 
     data = _get_arch_data()
 
-    if warp_m is not None and warp_n is not None and warp_k is not None:
+    if (
+        rules.get("warp_map")
+        and warp_m is not None
+        and warp_n is not None
+        and warp_k is not None
+    ):
         allowed = data["warp_combos"].get(arch)
         if allowed and [warp_m, warp_n, warp_k] not in allowed:
             return False
 
     if (
-        dtype is not None
+        rules.get("warp_tile")
+        and dtype is not None
         and warp_tile_m is not None
         and warp_tile_n is not None
         and warp_tile_k is not None
-        and _warp_tile_table_is_exhaustive(arch)
     ):
         key = arch_warp_tile_key(dtype, dtype_b)
         table = data["warp_tile_combos"].get(arch, {}).get(key)
@@ -533,7 +552,7 @@ def arch_config_supported(
             return False
 
     if warp_m is not None and warp_n is not None and pipeline and scheduler:
-        cap = PIPELINE_MAX_WARPS_PER_BLOCK.get(arch, {}).get((pipeline, scheduler))
+        cap = rules.get("max_warps_per_block", {}).get((pipeline, scheduler))
         if cap is not None and warp_m * warp_n > cap:
             return False
 

@@ -10,6 +10,7 @@ Phase 1a TDD: these tests are written BEFORE the implementation exists.
 Run: python3 -m pytest tests/test_codegen_common.py -v
 """
 
+import itertools
 import logging
 import sys
 import unittest
@@ -20,6 +21,7 @@ DISPATCHER_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
 from codegen_common import (  # noqa: E402
+    ARCH_VALIDITY_RULES,
     TileConfig,
     arch_config_supported,
     arch_warp_tile_key,
@@ -683,30 +685,53 @@ class TestCentralArchFilter(unittest.TestCase):
             warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
             pipeline="compv3", scheduler="intrawave"))
 
-    def test_cdna_warp_tile_table_is_advisory_not_a_closure(self):
-        """The gfx9 MFMA rows are Old-TE whitelists, not the full instruction
-        set, so an absent entry must NOT reject -- that is what keeps the
-        gfx942/gfx950 emitted-kernel sets byte-identical."""
-        for arch in ("gfx942", "gfx950"):
+    def test_only_gfx1250_is_gated(self):
+        """The gate is opt-in per arch. This is the load-bearing invariant: no
+        arch outside ARCH_VALIDITY_RULES can ever be narrowed."""
+        self.assertEqual(set(ARCH_VALIDITY_RULES), {"gfx1250"})
+
+    def test_gfx9_is_a_constant_true_no_op(self):
+        """Exhaustive over the sweep axis space: on gfx90a/gfx942/gfx950 the
+        predicate must return True for EVERY input, including inputs the arch
+        tables do not list.
+
+        An earlier revision applied the warp-map rule to every arch, which
+        deleted 9,144 of 35,496 gfx942 candidates and 6,624 of 35,496 gfx950
+        candidates from a raw expansion of the grouped quant default_config
+        ranges -- WARP_SUPPORTED_COMBINATIONS is a curated Old-TE whitelist
+        (gfx942 has no [4,2,1] / [2,4,1] / [4,4,1] row), not the set of warp maps
+        the hardware can run. Losing gfx9 coverage to fix gfx1250 is not an
+        acceptable trade, so this test fails if any rule ever reaches gfx9."""
+        def axes():
+            return itertools.product(
+                (4, 2, 1), (4, 2, 1), (1, 2),      # warp_m, warp_n, warp_k
+                (4, 16, 32), (16, 32, 64), (8, 16, 32, 64, 128),  # warp tile
+                ("fp8", "bf8", "fp16", "bf16", "int8", "fp32"),
+                ("compv3", "compv4", "mem"),
+                ("intrawave", "interwave"),
+            )
+
+        for arch in ("gfx90a", "gfx942", "gfx950"):
+            for wm, wn, wk, wtm, wtn, wtk, dt, pipe, sched in axes():
+                if not arch_config_supported(
+                    arch, dtype=dt, warp_m=wm, warp_n=wn, warp_k=wk,
+                    warp_tile_m=wtm, warp_tile_n=wtn, warp_tile_k=wtk,
+                    pipeline=pipe, scheduler=sched,
+                ):
+                    self.fail(
+                        f"{arch} rejected {(wm, wn, wk)} {(wtm, wtn, wtk)} "
+                        f"{dt}/{pipe}/{sched} -- the gate must be a no-op on gfx9"
+                    )
+
+    def test_ungated_wave32_archs_are_also_untouched(self):
+        """gfx1100/gfx1200/gfx1201 are wave32 too, but no measurement exists for
+        them, so they must stay ungated -- their whole warp table is 8-warp and a
+        family-wide rule would delete every one of their compv3 kernels."""
+        for arch in ("gfx1100", "gfx1200", "gfx1201"):
             self.assertTrue(arch_config_supported(
-                arch, dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
-                warp_tile_m=4, warp_tile_n=64, warp_tile_k=16,
+                arch, dtype="fp8", warp_m=2, warp_n=4, warp_k=1,
+                warp_tile_m=32, warp_tile_n=32, warp_tile_k=32,
                 pipeline="compv3", scheduler="intrawave"), arch)
-
-    def test_cdna_has_no_warps_per_block_cap(self):
-        self.assertTrue(arch_config_supported(
-            "gfx950", dtype="fp8", warp_m=4, warp_n=4, warp_k=1,
-            warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
-            pipeline="compv3", scheduler="intrawave"))
-
-    def test_warp_map_gate_uses_the_arch_table(self):
-        # [4, 4, 1] is listed for gfx950 but not for gfx942.
-        common = dict(dtype="fp16", warp_tile_m=32, warp_tile_n=32,
-                      warp_tile_k=16, pipeline="compv3", scheduler="intrawave")
-        self.assertTrue(arch_config_supported(
-            "gfx950", warp_m=4, warp_n=4, warp_k=1, **common))
-        self.assertFalse(arch_config_supported(
-            "gfx942", warp_m=4, warp_n=4, warp_k=1, **common))
 
     def test_warp_tile_key(self):
         self.assertEqual(arch_warp_tile_key("fp8"), "fp8_fp8_fp32")
