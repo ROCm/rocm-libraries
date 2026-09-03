@@ -164,46 +164,19 @@ if(HIPSPARSELT_ENABLE_HIP)
         find_package(hipblaslt CONFIG REQUIRED)
         message(STATUS "hipSPARSELt uses the staged hipBLASLt package.")
     else()
-        message(STATUS
-            "hipSPARSELt uses private source-tree TensileLite support.")
         cmake_path(GET HIPBLASLT_TENSILELITE_PATH PARENT_PATH _hipblaslt_source_dir)
         list(APPEND CMAKE_MODULE_PATH "${_hipblaslt_source_dir}/cmake")
-        include(hipblaslt_python)
-        hipblaslt_find_python(Development.Module)
-        set(HIPBLASLT_BUNDLE_PYTHON_DEPS ON)
-        set(HIPBLASLT_PYTHON_DEPS _rocisa)
         block()
-            set(TENSILELITE_BUILD_SHARED_LIBS OFF)
-            set(BUILD_TESTING OFF)
+            set(HIPBLASLT_ENABLE_TENSILELITE_ONLY ON)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
                 set(HIPBLASLT_ENABLE_YAML ON)
-                find_package(LLVM REQUIRED)
             else()
                 set(HIPBLASLT_ENABLE_YAML OFF)
-                find_package(msgpack-cxx CONFIG)
-                if(msgpack-cxx_FOUND)
-                    set(hipblaslt_msgpack_target msgpack-cxx)
-                else()
-                    find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
-                    set(hipblaslt_msgpack_target msgpackc-cxx)
-                endif()
             endif()
-            set(ORIGAMI_BUILD_SHARED_LIBS OFF)
-            set(ORIGAMI_ENABLE_FETCH ON)
-            set(ORIGAMI_BUILD_TESTING OFF)
-            set(ORIGAMI_ENABLE_PYTHON OFF)
             add_subdirectory(
-                "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami"
-                "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/origami"
-                EXCLUDE_FROM_ALL
-            )
-            set(TENSILELITE_ENABLE_HOST ON)
-            set(TENSILELITE_ENABLE_CLIENT OFF)
-            set(TENSILELITE_BUILD_TESTING OFF)
-            add_subdirectory(
-                "${HIPBLASLT_TENSILELITE_PATH}"
-                "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/tensilelite"
+                "${_hipblaslt_source_dir}"
+                "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/hipblaslt"
                 EXCLUDE_FROM_ALL
             )
         endblock()
@@ -214,12 +187,6 @@ if(HIPSPARSELT_ENABLE_HIP)
     )
 
     if(HIPSPARSELT_ENABLE_DEVICE)
-        if(NOT EXISTS "${HIPBLASLT_TENSILELITE_PATH}/Tensile/bin/TensileLogic")
-            message(FATAL_ERROR
-                "hipSPARSELt device codegen needs the hipBLASLt tensilelite source at "
-                "'${HIPBLASLT_TENSILELITE_PATH}'; set -DHIPBLASLT_TENSILELITE_PATH.")
-        endif()
-
         include(hipblaslt_codegen)
         set(_hipsparselt_tensile_out "${CMAKE_BINARY_DIR}/Tensile")
         set(_hipsparselt_codegen_product_args "")
