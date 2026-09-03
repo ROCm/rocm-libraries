@@ -121,8 +121,10 @@ struct OpNode final : Node
         {
             return spec->lazy(args, d);
         }
-        // Evaluate every argument once, so a null is detected before the
-        // operator coerces it and so each argument is evaluated exactly once.
+        // Evaluate every argument once, so unresolved values are detected
+        // before the operator coerces them and so each argument is evaluated
+        // exactly once. Arrays propagate unresolved children: a predicate must
+        // not answer from a partially evaluated literal array.
         std::vector<Value> v;
         v.reserve(args.size());
         for(const auto& c : args)
@@ -131,7 +133,7 @@ struct OpNode final : Node
         }
         for(const Value& x : v)
         {
-            if(x.isNull())
+            if(x.containsUnresolved())
             {
                 return {};
             }

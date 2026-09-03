@@ -22,6 +22,9 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+/// The only variable-reference sigil supported by the expression language.
+inline constexpr char VARIABLE_SIGIL = '$';
+
 /// How deeply a rule may nest. Compilation walks the document recursively
 /// (rank pins, then alias expansion, then lowering) and evaluation walks the
 /// resulting tree the same way, so without a bound a deeply nested rule --

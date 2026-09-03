@@ -28,9 +28,9 @@
 //   - [N] array subscripts:   arr[0], rows[2].name, grid[0][1]
 //   - dot-form array indices: arr.1 (resolves as an index only against an
 //                             existing array; use arr[1] to force array creation)
-//   - an optional leading variable sigil ('$' by default) is stripped, so both
+//   - an optional leading variable sigil (VARIABLE_SIGIL) is stripped, so both
 //     "q.dims[0]" and "$q.dims[0]" address the same location
-//   - the empty path (or a bare sigil) addresses the whole document
+//   - the empty path (or a bare variable sigil) addresses the whole document
 //
 // getData follows the language convention: an unresolved path reads as null
 // (Value()). setData is a mutation and reports a malformed path or an
@@ -43,11 +43,14 @@
 // Full reference: docs/JsonExpression.md.
 
 #include <hipdnn_plugin_sdk/ingestor/JsonExpression.hpp>
+#include <hipdnn_plugin_sdk/ingestor/jsonexpr/Error.hpp>
 
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -59,9 +62,8 @@ class JsonDataSource
 {
 public:
     JsonDataSource() = default;
-    explicit JsonDataSource(nlohmann::json doc, char sigil = '$')
+    explicit JsonDataSource(nlohmann::json doc)
         : _doc(std::move(doc))
-        , _sigil(sigil)
     {
     }
 
@@ -82,9 +84,9 @@ public:
     Value getData(const std::string& path) const
     {
         std::vector<Segment> segs;
-        if(!tokenize(path, _sigil, segs))
+        if(!tokenize(path, segs))
         {
-            return {}; // malformed subscript -> not found
+            return {}; // malformed path -> not found
         }
         const nlohmann::json* cur = &_doc;
         for(const auto& seg : segs)
@@ -135,7 +137,7 @@ public:
     void setData(const std::string& path, const Value& value)
     {
         std::vector<Segment> segs;
-        if(!tokenize(path, _sigil, segs))
+        if(!tokenize(path, segs))
         {
             throw std::invalid_argument("JsonDataSource::setData: malformed path '" + path + "'");
         }
@@ -239,17 +241,22 @@ private:
         }
     }
 
-    /// Split a path into segments. Strips one optional leading sigil. Returns
-    /// false on a malformed path: an unterminated subscript, an empty segment
-    /// (`a..b`, or a trailing `.`), or text wedged between a `]` and the next
-    /// separator (`q.dims[0]bogus`). Accepting those would let setData create
-    /// a key nobody wrote, under a contract that says it throws instead.
-    static bool tokenize(const std::string& raw, char sigil, std::vector<Segment>& out)
+    /// Split a path into segments. Strips one optional leading variable sigil.
+    /// Returns false on a malformed path: an unterminated subscript, a leading
+    /// dot after the optional sigil, an empty segment (`a..b`, or a trailing
+    /// `.`), or text wedged between a `]` and the next separator
+    /// (`q.dims[0]bogus`). Accepting those would let setData create a key
+    /// nobody wrote, under a contract that says it throws instead.
+    static bool tokenize(const std::string& raw, std::vector<Segment>& out)
     {
         std::size_t pos = 0;
-        if(!raw.empty() && raw[0] == sigil)
+        if(!raw.empty() && raw[0] == VARIABLE_SIGIL)
         {
             ++pos; // strip the variable sigil
+        }
+        if(pos < raw.size() && raw[pos] == '.')
+        {
+            return false; // leading empty segment
         }
         bool afterSubscript = false;
         while(pos < raw.size())
@@ -344,7 +351,16 @@ private:
         {
             return {j.get<bool>()};
         }
-        if(j.is_number_integer() || j.is_number_unsigned())
+        if(j.is_number_unsigned())
+        {
+            const auto u = j.get<std::uint64_t>();
+            if(u > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+            {
+                return {};
+            }
+            return {static_cast<std::int64_t>(u)};
+        }
+        if(j.is_number_integer())
         {
             return {j.get<std::int64_t>()};
         }
@@ -400,7 +416,6 @@ private:
     }
 
     nlohmann::json _doc;
-    char _sigil = '$';
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor::jsonexpr

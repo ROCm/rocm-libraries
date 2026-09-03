@@ -42,10 +42,10 @@ using LazyFn = Value (*)(const std::vector<NodePtr>&, const IDataSource&);
 
 /// Every eager numeric operator funnels its result through here.
 ///
-/// A NaN or infinite result compares UNORDERED, so every ordering test on it is
-/// false and its NEGATION is true -- a criterion would ACCEPT input it never
-/// meaningfully evaluated. Declining instead keeps an undecidable computation
-/// unresolved, which is what null already means here.
+/// A NaN or infinite result cannot participate in ordering, and a criterion
+/// must not accept data it never meaningfully evaluated. Declining instead
+/// keeps an undecidable computation unresolved, which is what null already
+/// means here.
 ///
 /// This has to be the single exit for all of them, not a guard per operator:
 /// NaN arrives as an *operand* too (Value::toNumber yields NaN for a
@@ -198,16 +198,29 @@ constexpr bool acceptsGreaterOrEqual(Value::Ordering c)
     return c == Value::Ordering::GREATER || c == Value::Ordering::EQUAL;
 }
 
-/// A NaN operand compares UNORDERED, which every predicate above rejects, so
-/// an ordering test against NaN is false rather than throwing.
+/// A non-finite operand compares UNORDERED. Ordering is then unanswerable, not
+/// false: a surrounding `!` must not turn "could not compare" into accepted.
+inline Value comparePairResult(Value::Ordering c, OrderingAccepts accepts)
+{
+    return c == Value::Ordering::UNORDERED ? Value() : Value(accepts(c));
+}
+
 inline Value compareValues(const std::vector<Value>& v, OrderingAccepts accepts)
 {
-    // The 3-arg form is the between-chain: a < b < c.
+    // The 3-arg form is the between-chain: a < b < c. Check both links before
+    // answering: any unordered link makes the whole chain unanswerable, even if
+    // another link is already false.
     if(v.size() >= 3)
     {
-        return {accepts(Value::compare(v[0], v[1])) && accepts(Value::compare(v[1], v[2]))};
+        const Value::Ordering first = Value::compare(v[0], v[1]);
+        const Value::Ordering second = Value::compare(v[1], v[2]);
+        if(first == Value::Ordering::UNORDERED || second == Value::Ordering::UNORDERED)
+        {
+            return {};
+        }
+        return {accepts(first) && accepts(second)};
     }
-    return {accepts(Value::compare(v[0], v[1]))};
+    return comparePairResult(Value::compare(v[0], v[1]), accepts);
 }
 
 inline Value lessThan(const std::vector<Value>& v)
@@ -314,7 +327,7 @@ inline Value conditional(const std::vector<NodePtr>& args, const IDataSource& d)
     for(; i + 1 < args.size(); i += 2)
     {
         const Value cond = args[i]->eval(d);
-        if(cond.isNull())
+        if(cond.containsUnresolved())
         {
             return {}; // an unresolved condition picks no branch
         }
@@ -336,7 +349,7 @@ inline Value conjunction(const std::vector<NodePtr>& args, const IDataSource& d)
     for(const auto& c : args)
     {
         cur = c->eval(d);
-        if(cur.isNull())
+        if(cur.containsUnresolved())
         {
             sawNull = true;
             continue;
@@ -360,7 +373,7 @@ inline Value disjunction(const std::vector<NodePtr>& args, const IDataSource& d)
     for(const auto& c : args)
     {
         cur = c->eval(d);
-        if(cur.isNull())
+        if(cur.containsUnresolved())
         {
             sawNull = true;
             continue;
@@ -373,12 +386,14 @@ inline Value disjunction(const std::vector<NodePtr>& args, const IDataSource& d)
     return sawNull ? Value() : cur;
 }
 
-/// First arg is a variable reference; a null result means the path did not
-/// resolve in the data source, so fall back to the default.
+/// First arg is a variable reference; a result that does not fully resolve
+/// means the data source could not supply the value, so fall back to the
+/// default. An array carrying an unresolved element counts: handing back a
+/// value with a hole in it is the fallback failing to do its job.
 inline Value valueOrDefault(const std::vector<NodePtr>& args, const IDataSource& d)
 {
     const Value v = args[0]->eval(d);
-    return v.isNull() ? args[1]->eval(d) : v;
+    return v.containsUnresolved() ? args[1]->eval(d) : v;
 }
 
 /// Presence keys on *existence*, the same mechanism as valueOrDefault above:
@@ -386,11 +401,31 @@ inline Value valueOrDefault(const std::vector<NodePtr>& args, const IDataSource&
 /// propagate that null -- asking "was this supplied?" always yields a real
 /// boolean. Both fold with `and` over their arguments, so one call decides a
 /// whole list.
-inline Value presence(const std::vector<NodePtr>& args, const IDataSource& d, bool wantNull)
+///
+/// The two take *opposite* predicates rather than one negated flag, because
+/// both must fail closed on a value that only partly resolves -- an array
+/// carrying an unresolved element is neither wholly supplied nor wholly
+/// absent, so `present` and `not_present` are both false on it. Negating one
+/// flag would instead make `not_present` true there, and the documented
+/// `{"or": [{"not_present": ["$x"]}, {"and": [{"present": ["$x"]}, ...]}]}`
+/// guard would accept input whose field reads never ran.
+using PresencePredicate = bool (*)(const Value&);
+
+inline bool isWhollySupplied(const Value& v)
+{
+    return !v.containsUnresolved();
+}
+inline bool isWhollyAbsent(const Value& v)
+{
+    return v.isNull();
+}
+
+inline Value
+    presence(const std::vector<NodePtr>& args, const IDataSource& d, PresencePredicate holds)
 {
     for(const auto& c : args)
     {
-        if(c->eval(d).isNull() != wantNull)
+        if(!holds(c->eval(d)))
         {
             return {false};
         }
@@ -400,11 +435,11 @@ inline Value presence(const std::vector<NodePtr>& args, const IDataSource& d, bo
 
 inline Value present(const std::vector<NodePtr>& args, const IDataSource& d)
 {
-    return presence(args, d, false);
+    return presence(args, d, &isWhollySupplied);
 }
 inline Value notPresent(const std::vector<NodePtr>& args, const IDataSource& d)
 {
-    return presence(args, d, true);
+    return presence(args, d, &isWhollyAbsent);
 }
 } // namespace ops
 } // namespace hipdnn_plugin_sdk::ingestor::jsonexpr::detail

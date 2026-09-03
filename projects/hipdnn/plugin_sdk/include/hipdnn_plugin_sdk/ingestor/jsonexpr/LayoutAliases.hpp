@@ -16,8 +16,10 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <string>
 #include <string_view>
@@ -87,7 +89,7 @@ inline std::string knownLayoutAliases()
 }
 
 /// The variable path in a sigil-prefixed string, or nullptr if `j` is not one.
-inline const std::string* variablePath(const nlohmann::json& j, char sigil)
+inline const std::string* variablePath(const nlohmann::json& j)
 {
     if(!j.is_string())
     {
@@ -95,7 +97,7 @@ inline const std::string* variablePath(const nlohmann::json& j, char sigil)
     }
     const auto& s = j.get_ref<const nlohmann::json::string_t&>();
     // "$$x" is an escaped literal, and a bare "$" is rejected in compileNode.
-    if(s.size() < 2 || s[0] != sigil || s[1] == sigil)
+    if(s.size() < 2 || s[0] != VARIABLE_SIGIL || s[1] == VARIABLE_SIGIL)
     {
         return nullptr;
     }
@@ -106,14 +108,14 @@ inline const std::string* variablePath(const nlohmann::json& j, char sigil)
 /// string is a variable reference ("$k.stride_order") or an escaped literal
 /// ("$$nhwc") -- both are strings, and neither names a layout, so comparing
 /// one tensor's layout against another's must not be read as a typo'd alias.
-inline bool isLayoutAliasCandidate(const nlohmann::json& j, char sigil)
+inline bool isLayoutAliasCandidate(const nlohmann::json& j)
 {
     if(!j.is_string())
     {
         return false;
     }
     const auto& s = j.get_ref<const nlohmann::json::string_t&>();
-    return s.empty() || s[0] != sigil;
+    return s.empty() || s[0] != VARIABLE_SIGIL;
 }
 
 /// True for a path whose last segment is `segment` -- ".stride_order" or
@@ -126,9 +128,9 @@ inline bool pathEndsWithSegment(const std::string& path, std::string_view segmen
 }
 
 /// True for a reference whose last path segment is `stride_order`.
-inline bool isStrideOrderRef(const nlohmann::json& j, char sigil)
+inline bool isStrideOrderRef(const nlohmann::json& j)
 {
-    const std::string* s = variablePath(j, sigil);
+    const std::string* s = variablePath(j);
     return s != nullptr && pathEndsWithSegment(*s, ".stride_order");
 }
 
@@ -149,12 +151,53 @@ inline std::string tensorKey(const std::string& sigilPath)
     return path.substr(0, path.rfind('.'));
 }
 
+/// True when `j` is a numeric rank literal that can be carried exactly as an
+/// int64_t pin. Floating-point inputs are accepted only when they are finite,
+/// integral, and exactly representable.
+inline bool rankPinLiteral(const nlohmann::json& j, std::int64_t& value)
+{
+    if(j.is_number_unsigned())
+    {
+        const auto raw = j.get<nlohmann::json::number_unsigned_t>();
+        if(raw > static_cast<nlohmann::json::number_unsigned_t>(
+               std::numeric_limits<std::int64_t>::max()))
+        {
+            return false;
+        }
+        value = static_cast<std::int64_t>(raw);
+        return true;
+    }
+    if(j.is_number_integer())
+    {
+        value = j.get<std::int64_t>();
+        return true;
+    }
+    if(j.is_number_float())
+    {
+        // Within +/-2^53 every integral double is exactly an int64_t, so the
+        // bound plus the integrality check together guarantee the conversion
+        // below is lossless.
+        const double raw = j.get<double>();
+        constexpr double maxExactInteger = 9007199254740992.0; // 2^53
+        if(!std::isfinite(raw) || raw < -maxExactInteger || raw > maxExactInteger)
+        {
+            return false;
+        }
+        if(raw != std::trunc(raw))
+        {
+            return false;
+        }
+        value = static_cast<std::int64_t>(raw);
+        return true;
+    }
+    return false;
+}
+
 /// Collect `{"==": ["$x.rank", N]}` rank pins that hold unconditionally: the
 /// root, and anything reachable from it through `and` only. A pin inside an
 /// `or` / `if` / `!` arm is conditional and cannot contradict an alias, so it
 /// is deliberately not collected.
 inline void collectRankPins(const nlohmann::json& j,
-                            char sigil,
                             std::map<std::string, std::int64_t>& pins,
                             std::size_t depth = 0)
 {
@@ -166,11 +209,18 @@ inline void collectRankPins(const nlohmann::json& j,
     const auto it = j.begin();
     const std::string& key = it.key();
     const nlohmann::json& val = it.value();
-    if(key == "and" && val.is_array())
+    if(key == "and")
     {
-        for(const auto& e : val)
+        if(val.is_array())
         {
-            collectRankPins(e, sigil, pins, depth + 1);
+            for(const auto& e : val)
+            {
+                collectRankPins(e, pins, depth + 1);
+            }
+        }
+        else
+        {
+            collectRankPins(val, pins, depth + 1);
         }
         return;
     }
@@ -180,9 +230,9 @@ inline void collectRankPins(const nlohmann::json& j,
     }
     for(std::size_t i = 0; i < 2; ++i)
     {
-        const std::string* s = variablePath(val.at(i), sigil);
-        const nlohmann::json& other = val.at(1 - i);
-        if(s == nullptr || !other.is_number_integer())
+        const std::string* s = variablePath(val.at(i));
+        std::int64_t rank = 0;
+        if(s == nullptr || !rankPinLiteral(val.at(1 - i), rank))
         {
             continue;
         }
@@ -190,7 +240,7 @@ inline void collectRankPins(const nlohmann::json& j,
         {
             // First pin wins; a second, contradictory one makes the criteria
             // unsatisfiable on its own terms, which is not the alias's problem.
-            pins.emplace(tensorKey(*s), other.get<std::int64_t>());
+            pins.emplace(tensorKey(*s), rank);
         }
     }
 }
@@ -237,7 +287,6 @@ inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
 /// runs this pass first, would reject at that halved depth while reporting the
 /// full documented limit.
 inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
-                                          char sigil,
                                           const std::map<std::string, std::int64_t>& rankPins,
                                           std::size_t depth = 0);
 
@@ -245,24 +294,22 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
 /// elements of an argument array sit one level below the operator, and a bare
 /// non-array value sits one level below it too.
 inline nlohmann::json expandOperatorValue(const nlohmann::json& val,
-                                          char sigil,
                                           const std::map<std::string, std::int64_t>& rankPins,
                                           std::size_t depth)
 {
     if(!val.is_array())
     {
-        return expandLayoutAliases(val, sigil, rankPins, depth + 1);
+        return expandLayoutAliases(val, rankPins, depth + 1);
     }
     nlohmann::json out = nlohmann::json::array();
     for(const auto& e : val)
     {
-        out.push_back(expandLayoutAliases(e, sigil, rankPins, depth + 1));
+        out.push_back(expandLayoutAliases(e, rankPins, depth + 1));
     }
     return out;
 }
 
 inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
-                                          char sigil,
                                           const std::map<std::string, std::int64_t>& rankPins,
                                           std::size_t depth)
 {
@@ -273,7 +320,7 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
         nlohmann::json out = nlohmann::json::array();
         for(const auto& e : j)
         {
-            out.push_back(expandLayoutAliases(e, sigil, rankPins, depth + 1));
+            out.push_back(expandLayoutAliases(e, rankPins, depth + 1));
         }
         return out;
     }
@@ -297,14 +344,14 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
             {
                 const nlohmann::json& side = val.at(i);
                 const nlohmann::json& ref = val.at(1 - i);
-                if(isStrideOrderRef(ref, sigil) && isLayoutAliasCandidate(side, sigil))
+                if(isStrideOrderRef(ref) && isLayoutAliasCandidate(side))
                 {
                     args.push_back(resolveLayoutAlias(side, ref.get<std::string>(), rankPins));
                 }
                 else
                 {
                     // An operand of the argument array: one level below the operator.
-                    args.push_back(expandLayoutAliases(side, sigil, rankPins, depth + 1));
+                    args.push_back(expandLayoutAliases(side, rankPins, depth + 1));
                 }
             }
             out[key] = std::move(args);
@@ -314,7 +361,7 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
         // {"in": [$x.stride_order, [<alias-or-array>, ...]]} -- the documented
         // way to accept a set of layouts. Only the haystack's own elements are
         // aliases; a nested expression there is left alone.
-        if(binary && key == "in" && isStrideOrderRef(val.at(0), sigil) && val.at(1).is_array())
+        if(binary && key == "in" && isStrideOrderRef(val.at(0)) && val.at(1).is_array())
         {
             const std::string refPath = val.at(0).get<std::string>();
             nlohmann::json hay = nlohmann::json::array();
@@ -322,15 +369,15 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
             {
                 // The haystack is an operand (depth + 1) and is itself an
                 // array, so its elements are a further level down.
-                hay.push_back(isLayoutAliasCandidate(e, sigil)
+                hay.push_back(isLayoutAliasCandidate(e)
                                   ? resolveLayoutAlias(e, refPath, rankPins)
-                                  : expandLayoutAliases(e, sigil, rankPins, depth + 2));
+                                  : expandLayoutAliases(e, rankPins, depth + 2));
             }
             out[key] = nlohmann::json::array({val.at(0), std::move(hay)});
             continue;
         }
 
-        out[key] = expandOperatorValue(val, sigil, rankPins, depth);
+        out[key] = expandOperatorValue(val, rankPins, depth);
     }
     return out;
 }

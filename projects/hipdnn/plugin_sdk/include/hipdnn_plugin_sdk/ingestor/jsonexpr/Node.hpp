@@ -57,7 +57,12 @@ struct ArrayNode final : Node
         a.reserve(items.size());
         for(const auto& it : items)
         {
-            a.push_back(it->eval(data));
+            Value item = it->eval(data);
+            if(item.containsUnresolved())
+            {
+                return {};
+            }
+            a.push_back(std::move(item));
         }
         return {std::move(a)};
     }

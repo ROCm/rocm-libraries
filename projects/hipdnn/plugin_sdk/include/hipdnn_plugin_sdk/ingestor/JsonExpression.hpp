@@ -25,8 +25,8 @@
 // Two conventions drive most of the design, and both are documented where they
 // are implemented rather than restated here:
 //
-//   - A string prefixed with a sigil (default '$') is a variable reference and
-//     the only way to read data; there is no `var` operator. See Compiler.hpp.
+//   - A string prefixed with '$' is a variable reference and the only way to
+//     read data; there is no `var` operator. See Compiler.hpp.
 //   - Null is "unresolved", not a value: an unresolved path means a field is
 //     absent, so operators propagate null rather than coercing it to
 //     false/0/not-equal and silently passing a narrowing predicate. `and`/`or`
@@ -119,12 +119,12 @@ private:
 /// expanded to their canonical integer arrays first, so the compiled tree and
 /// evaluation see only arrays.
 template <class DataT>
-Expression<DataT> compile(const nlohmann::json& rule, char varSigil = '$')
+Expression<DataT> compile(const nlohmann::json& rule)
 {
     std::map<std::string, std::int64_t> rankPins;
-    detail::collectRankPins(rule, varSigil, rankPins);
-    const nlohmann::json expanded = detail::expandLayoutAliases(rule, varSigil, rankPins);
-    return Expression<DataT>(detail::compileNode(expanded, varSigil));
+    detail::collectRankPins(rule, rankPins);
+    const nlohmann::json expanded = detail::expandLayoutAliases(rule, rankPins);
+    return Expression<DataT>(detail::compileNode(expanded));
 }
 
 /// True when any variable referenced by `expr` has `root` as its first path

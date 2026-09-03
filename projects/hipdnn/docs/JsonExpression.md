@@ -23,7 +23,7 @@ in the implementation, which is split by layer under
 
 | Header | Contents |
 | --- | --- |
-| `Error.hpp` | `JsonExpressionCompileError` |
+| `Error.hpp` | `JsonExpressionCompileError`, `VARIABLE_SIGIL`, depth limit |
 | `Value.hpp` | the runtime value type |
 | `DataSource.hpp` | the type-erased data-source contract |
 | `Node.hpp` | compiled tree nodes |
@@ -96,10 +96,14 @@ or descends into an object; the empty path replaces the whole document.
 `setData` throws `std::invalid_argument` on a malformed path, a non-numeric
 index applied to an array, or an index at or above `MAX_ARRAY_INDEX` — a `[N]`
 subscript grows the array to `N`, so an unbounded index would turn a typo into
-an allocation of arbitrary size. It validates the whole path before writing
-anything, so a throwing call leaves the document unchanged rather than part-way
-written. Objects and null in the document read back as `Value` null, matching
-`Value`'s scalar/array-only model.
+an allocation of arbitrary size. A path may not start with `.` (after the
+optional sigil), and `getData` reads any malformed path as null rather than
+guessing at it. It validates the whole path before writing anything, so a
+throwing call leaves the document unchanged rather than part-way written.
+Objects and null in the document read back as `Value` null, matching `Value`'s
+scalar/array-only model — as does an unsigned integer too large for `int64_t`,
+since narrowing it would silently answer from a number the document does not
+contain.
 
 ## `Value`
 
@@ -107,20 +111,20 @@ A json-like tagged value with no external dependency. Alternatives: null, bool,
 `int64_t`, `double`, `std::string`, and `Array` (`std::vector<Value>`). Numeric
 results are stored as integers when exactly integral (so `1 + 1` is `2`, not
 `2.0`). Key members: the `is*()` / `as*()` inspectors, `truthy()`, `toNumber()`,
-`dump()`, strict `operator==`, and the static `compare`, which returns a
-`Value::Ordering` (`LESS` / `EQUAL` / `GREATER` / `UNORDERED`, the last being the
-NaN case that makes every ordering test false).
+`dump()`, strict `operator==`, `containsUnresolved()`, and the static `compare`,
+which returns a `Value::Ordering` (`LESS` / `EQUAL` / `GREATER` / `UNORDERED`,
+the last being the non-finite case that makes ordering predicates **decline**
+rather than answer).
 
 There is intentionally no object alternative — nested structure is reached
 through the data source's path accessor, not carried in a `Value`.
 
 ## Variables
 
-A variable reference is a string prefixed with a sigil (`$` by default) — that
-is the *only* way to read data. There is no `var` operator; writing one is a
-compile-time error rather than a second spelling of the same thing. Strings
-without the sigil are literals, so a variable can appear anywhere a literal
-can:
+A variable reference is a string prefixed with `$` — that is the *only* way to
+read data. There is no `var` operator; writing one is a compile-time error
+rather than a second spelling of the same thing. Strings without `$` are
+literals, so a variable can appear anywhere a literal can:
 
 | Reference    | Meaning                                    |
 | ------------ | ------------------------------------------ |
@@ -130,9 +134,6 @@ can:
 | `"$arr.1"`   | dot-form array index                       |
 | `"$"`        | whole document — rejected at compile time  |
 | `"$$text"`   | escaped string literal `"$text"`           |
-
-Pass a different sigil as the second argument to `compile` if your keys begin
-with `$`.
 
 ## Layout aliases
 
@@ -180,8 +181,9 @@ expressions that quietly never match:
 - an alias whose **rank contradicts a rank pin on the same tensor**, e.g.
   `{"and": [{"==": ["$x.rank", 4]}, {"==": ["$x.stride_order", "ndhwc"]}]}` —
   every alias is fixed-rank, so a rank-5 alias on a tensor pinned to rank 4
-  can never hold. Only pins reachable through `and` are considered; a pin
-  inside an `or` / `if` arm is conditional and cannot contradict the alias.
+  can never hold. Rank pins are exact integral numeric literals (`4` or
+  `4.0`). Only pins reachable through `and` are considered; a pin inside an
+  `or` / `if` arm is conditional and cannot contradict the alias.
 
   The tensor is the whole path ahead of the final `.rank` / `.stride_order`
   segment, so `$inputs[0]` and `$inputs[1]` are two tensors and a pin on one
@@ -201,9 +203,11 @@ expressions that quietly never match:
 `JsonExpressionCompileError`. "Operand types" describes what each operator does
 with the values it gets, not a static type system — the language is dynamically
 typed, and *number* means the operand is put through `Number()`-style coercion
-(`toNumber()`), so a numeric string works where a number is wanted. Every
-operator below except the last three yields `null` when any operand is `null`
-(see [Null is unknown](#null-is-unknown-and-it-propagates)).
+(`toNumber()`), so a numeric string works where a number is wanted. Most
+operators below yield `null` when an operand is unresolved — `null`, or an
+array carrying an unresolved element; `and` / `or`, `present`, `not_present`,
+and `value_or_default` have the special handling described in their rows and in
+[Null is unknown](#null-is-unknown-and-it-propagates).
 
 ### Data access
 
@@ -214,7 +218,7 @@ for that case:
 
 | Operator | Operands | Operand types | Description |
 | --- | --- | --- | --- |
-| `value_or_default` | 2 | value: any expression; default: any expression | Returns the first operand when it resolves, the second otherwise. Keys on *existence*, not truthiness, so a present `0`, `""`, or `false` is returned rather than the fallback. The default is evaluated lazily, so `{"value_or_default": ["$a", "$b"]}` reads "this field, else that one". |
+| `value_or_default` | 2 | value: any expression; default: any expression | Returns the first operand when it resolves *completely*, the second otherwise — so a value carrying an unresolved element takes the fallback rather than being handed back with a hole in it. Keys on *existence*, not truthiness, so a present `0`, `""`, or `false` is returned rather than the fallback. The default is evaluated lazily, so `{"value_or_default": ["$a", "$b"]}` reads "this field, else that one". |
 
 ### Logic and control
 
@@ -230,7 +234,7 @@ for that case:
 
 | Operator | Operands | Operand types | Description |
 | --- | --- | --- | --- |
-| `==` | 2 | any | Strict equality — no type coercion, so `1 == "1"` is false. An integer and a double of equal value still compare equal. Two integers compare exactly, so magnitudes past 2^53 are not conflated by a detour through `double`. |
+| `==` | 2 | any | Strict equality — no type coercion, so `1 == "1"` is false. Two integers compare exactly, so magnitudes past 2^53 are not conflated by a detour through `double`. An integer and a double compare equal only when the double names that integer exactly, for the same reason. |
 | `!=` | 2 | any | Strict inequality, the negation of `==`. |
 | `<` | 2–3 | number (coerced); strings compare lexicographically | Less-than. The 3-operand form is the between-chain `a < b < c`. |
 | `<=` | 2–3 | number (coerced); strings compare lexicographically | Less-than-or-equal, with the same between-chain form. |
@@ -284,21 +288,25 @@ not resolve.
 
 ### Presence
 
-These and `value_or_default` are the only operators that do not propagate a
-`null` operand — answering "was this supplied?" always yields a real boolean.
+These and `value_or_default` are the presence operators: answering "was this
+supplied?" always yields a real boolean rather than propagating `null`.
+
+Both fail closed on a value that only *partly* resolves — an array with an
+unresolved element is neither wholly supplied nor wholly absent, so both
+answer `false`. See [Null is unknown](#null-is-unknown-and-it-propagates).
 
 | Operator | Operands | Operand types | Description |
 | --- | --- | --- | --- |
-| `present` | 1+ | any, normally variable references | True when *every* operand resolves to a non-null value. An `and`-fold, so one call decides a whole list. |
-| `not_present` | 1+ | any, normally variable references | True when *every* operand resolves to `null`. Also an `and`-fold. |
+| `present` | 1+ | any, normally variable references | True when *every* operand resolves completely — non-null, and carrying no unresolved element. An `and`-fold, so one call decides a whole list. |
+| `not_present` | 1+ | any, normally variable references | True when *every* operand is wholly `null`. Also an `and`-fold. |
 
 ## Null is unknown, and it propagates
 
-`null` means *unresolved*, not a value. Every operator except `present`,
-`not_present`, and `value_or_default` returns `null` when any argument is
-`null`, rather than coercing it to `false`/`0`/not-equal. This matters whenever
-a data source has optional fields, where an unresolved path means the field is
-absent rather than false: if `null` coerced, a narrowing check such as
+`null` means *unresolved*, not a value. Most operators return `null` when any
+argument is `null`, rather than coercing it to `false`/`0`/not-equal. This
+matters whenever a data source has optional fields, where an unresolved path
+means the field is absent rather than false: if `null` coerced, a narrowing
+check such as
 `{"!=": ["$bias.dtype", "BFLOAT16"]}` would evaluate **true** on input carrying
 no `bias` at all, accepting data it never actually examined. Two `null`s are not
 equal to each other either — the question is unanswerable, so `==` and `!=` both
@@ -315,21 +323,35 @@ Once every argument resolves, value semantics follow JavaScript: `false`, `0`,
 arithmetic and ordering. A `null` root is falsy, so an undecided expression
 declines.
 
+An **array is unresolved when any element is**, however deeply nested. That
+holds whether the array is written into the rule or handed back by the data
+source — a `stride_order` whose second entry could not be represented reads as
+`[3, null, 1, 0]`, and comparing it against a literal would otherwise answer a
+confident `false` from a value the language never fully read. The presence
+operators fail closed in *both* directions here: a partly-resolved value is
+neither wholly supplied nor wholly absent, so `present` and `not_present` are
+**both** `false` on it. That is what keeps the guard above from accepting such
+a value through its `not_present` arm.
+
 ## Unresolvable arithmetic declines
 
 `null` is not the only way a value can fail to resolve. `Number()` coercion
 turns a non-numeric string or a multi-element array into `NaN`, and arithmetic
-can overflow to an infinity — and a `NaN` compares **unordered**, so every
-ordering test on it is `false` **and so is its negation**. A criterion built on
-one would accept input it never meaningfully evaluated:
+can overflow to an infinity. A non-finite operand cannot be ordered against
+anything, and the danger is what a naive implementation does next: if an
+ordering test simply answered `false`, its **negation would answer `true`**,
+and a criterion built on one would accept input it never meaningfully
+evaluated:
 
 ```json
 {"!": [{"<": [{"log2": "$q.dtype"}, 8]}]}
 ```
 
-With `dtype` a name rather than a number, `log2` would yield `NaN`, the `<`
-would be `false`, and the `!` would make the whole criterion `true` — the kernel
-applies on the strength of a question nobody answered.
+With `dtype` a name rather than a number, `log2` yields `NaN`. Were the `<` to
+report `false`, the `!` would make the whole criterion `true` — the kernel
+applying on the strength of a question nobody answered. So ordering against a
+non-finite operand yields `UNORDERED`, and the predicate **declines** instead:
+`null` in, `null` out, negation included.
 
 So every arithmetic and math operator yields `null` unless its result is
 finite, which puts an unresolvable computation back under the ordinary
@@ -338,7 +360,8 @@ negation. `min` and `max` decline outright rather than skipping an unresolvable
 operand, since answering from fewer operands than were written is the same
 failure wearing a quieter face.
 
-Malformed rules (unknown operator, wrong argument count, a non-operator object)
+Malformed rules (unknown operator, wrong argument count, a non-operator object,
+an unsigned integer literal too large for `int64_t`)
 raise `JsonExpressionCompileError` at `compile` time, so evaluation stays on the
 fast path. Nesting deeper than `MAX_EXPRESSION_DEPTH` is rejected the same way:
 compilation and evaluation both recurse per level, and rules are read from

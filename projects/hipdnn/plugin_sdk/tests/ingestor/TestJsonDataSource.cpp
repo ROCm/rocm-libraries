@@ -7,7 +7,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
+#include <type_traits>
 
 #include <hipdnn_plugin_sdk/ingestor/JsonDataSource.hpp>
 #include <hipdnn_plugin_sdk/ingestor/JsonExpression.hpp>
@@ -16,6 +19,9 @@ namespace jexpr = hipdnn_plugin_sdk::ingestor::jsonexpr;
 
 using json = nlohmann::json;
 using V = jexpr::Value;
+
+static_assert(!std::is_constructible_v<jexpr::JsonDataSource, json, char>,
+              "JsonDataSource uses the shared variable sigil and has no custom sigil API");
 
 // ---------------------------------------------------------------------------
 // JsonDataSource: the sample nlohmann::json-backed data source (getData/setData).
@@ -38,11 +44,27 @@ TEST(TestJsonDataSource, GetResolvesPathsAndSubscripts)
     EXPECT_EQ(src.getData("q.dims["), V()); // malformed subscript
 }
 
-TEST(TestJsonDataSource, GetStripsOptionalSigil)
+TEST(TestJsonDataSource, UsesFixedVariableSigil)
 {
     const jexpr::JsonDataSource src{json{{"q", {{"dims", {8, 16}}}}}};
     EXPECT_EQ(src.getData("$q.dims[0]"), src.getData("q.dims[0]"));
     EXPECT_EQ(src.getData("$q.dims[0]"), V(8));
+}
+
+TEST(TestJsonDataSource, GetRejectsLeadingDotPaths)
+{
+    const jexpr::JsonDataSource src{json{{"q", 1}}};
+    EXPECT_EQ(src.getData(".q"), V());
+    EXPECT_EQ(src.getData("$.q"), V());
+}
+
+TEST(TestJsonDataSource, SetRejectsLeadingDotPathsWithoutMutation)
+{
+    jexpr::JsonDataSource src{json{{"q", 1}}};
+    EXPECT_THROW(src.setData(".q", V(2)), std::invalid_argument);
+    EXPECT_EQ(src.document(), json({{"q", 1}}));
+    EXPECT_THROW(src.setData("$.q", V(2)), std::invalid_argument);
+    EXPECT_EQ(src.document(), json({{"q", 1}}));
 }
 
 TEST(TestJsonDataSource, SetScalarCreatesNestedObjects)
@@ -90,6 +112,19 @@ TEST(TestJsonDataSource, SetRoundTripsValueKinds)
     EXPECT_EQ(src.getData("s"), V("amd"));
     EXPECT_EQ(src.getData("d"), V(1.5));
     EXPECT_EQ(src.getData("a"), V(V::Array{V(1), V("two"), V(false)}));
+}
+
+TEST(TestJsonDataSource, GetDeclinesUnsignedIntegersOutsideInt64Range)
+{
+    constexpr auto maxInt64 = std::numeric_limits<std::int64_t>::max();
+    const auto maxUnsigned = static_cast<std::uint64_t>(maxInt64);
+    const jexpr::JsonDataSource src{json{{"max", maxUnsigned},
+                                         {"tooLarge", maxUnsigned + 1U},
+                                         {"arr", json::array({maxUnsigned + 1U})}}};
+
+    EXPECT_EQ(src.getData("max"), V(maxInt64));
+    EXPECT_EQ(src.getData("tooLarge"), V());
+    EXPECT_EQ(src.getData("arr[0]"), V());
 }
 
 TEST(TestJsonDataSource, SetThenEvaluateReflectsChange)

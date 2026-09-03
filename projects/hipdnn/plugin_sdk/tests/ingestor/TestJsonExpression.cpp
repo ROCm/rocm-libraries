@@ -8,8 +8,10 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <iterator>
+#include <limits>
 #include <ostream>
 #include <set>
 #include <string>
@@ -290,6 +292,21 @@ TEST(TestJsonExpression, LayoutAliasContradictingARankPinRejected)
                      {{"and", json::array({aliasRank5, {{"==", json::array({4, "$x.rank"})}}})}})),
                  jexpr::JsonExpressionCompileError);
 
+    // A single-operand `and` can be written with a bare operand value, not just
+    // a one-element array, and still makes the pin unconditional.
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(
+                     json({{"and", json::array({json({{"and", rankFour}}), aliasRank5})}})),
+                 jexpr::JsonExpressionCompileError);
+
+    // Integral floating-point rank literals are exact pins too.
+    const json rankFourFloat = json({{"==", json::array({"$x.rank", 4.0})}});
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(
+                     json({{"and", json::array({rankFourFloat, aliasRank5})}})),
+                 jexpr::JsonExpressionCompileError);
+    EXPECT_NO_THROW(jexpr::compile<jexpr::JsonDataSource>(json(
+        {{"and",
+          json::array({rankFourFloat, {{"==", json::array({"$x.stride_order", "nhwc"})}}})}})));
+
     // A pin on a *different* tensor does not constrain this alias.
     EXPECT_NO_THROW(jexpr::compile<jexpr::JsonDataSource>(
         json({{"and",
@@ -504,6 +521,94 @@ TEST(TestJsonExpression, NullPropagatesThroughEveryOtherOperator)
     // Two unresolved references are not "equal": the question is unanswerable.
     EXPECT_TRUE(eval(json({{"==", json::array({"$nope", "$missing"})}})).isNull());
     EXPECT_TRUE(eval(json({{"!=", json::array({"$nope", "$missing"})}})).isNull());
+    // An array literal is unresolved if any child is unresolved, even nested.
+    // Otherwise equality/membership would answer false from a partial array and
+    // a surrounding negation would fail open.
+    const json unresolvedArrayEq
+        = json({{"==", json::array({json::array({"$nope"}), json::array()})}});
+    EXPECT_TRUE(eval(unresolvedArrayEq).isNull());
+    EXPECT_TRUE(eval(json({{"!", json::array({unresolvedArrayEq})}})).isNull());
+    const json nestedUnresolvedArrayEq = json(
+        {{"==",
+          json::array({json::array({json::array({"$nope"})}), json::array({json::array({1})})})}});
+    EXPECT_TRUE(eval(nestedUnresolvedArrayEq).isNull());
+    EXPECT_TRUE(eval(json({{"!", json::array({nestedUnresolvedArrayEq})}})).isNull());
+    const json unresolvedMembership
+        = json({{"in", json::array({99, json::array({1, json::array({"$nope"})})})}});
+    EXPECT_TRUE(eval(unresolvedMembership).isNull());
+    EXPECT_TRUE(eval(json({{"!", json::array({unresolvedMembership})}})).isNull());
+}
+
+TEST(TestJsonExpression, UnresolvedArrayFromTheDataSourceDeclinesEverywhere)
+{
+    // The array literals above are written into the rule. This is the other
+    // direction, and the one real data takes: the data source itself hands
+    // back an array with a hole in it. An unsigned value past int64_t range
+    // reads as null (JsonDataSource::toValue), so `strides` resolves to
+    // [1, null] -- a value that partly resolved.
+    //
+    // Every operator must treat that the same way it treats a bare null. The
+    // lazy operators are the ones worth pinning: they control their own
+    // argument evaluation, so they do not pass through OpNode's guard and
+    // need the check on their own.
+    const json doc = json{{"strides", json::array({1U, 18446744073709551000ULL})},
+                          {"clean", json::array({1, 2})}};
+    const jexpr::JsonDataSource src{doc};
+    const auto run
+        = [&src](const json& rule) { return jexpr::compile<jexpr::JsonDataSource>(rule)(src); };
+
+    ASSERT_EQ(src.getData("strides"), V(V::Array{V(1), V()})) << "precondition: the hole exists";
+
+    // Eager path.
+    EXPECT_TRUE(run(json({{"==", json::array({"$strides", json::array({1, 2})})}})).isNull());
+    EXPECT_TRUE(run(json({{"!!", json::array({"$strides"})}})).isNull());
+
+    // Lazy path: a condition that did not resolve picks no branch.
+    EXPECT_TRUE(run(json({{"if", json::array({"$strides", "taken", "else"})}})).isNull());
+
+    // Kleene and/or: an unresolved operand is unknown, not truthy.
+    EXPECT_TRUE(run(json({{"and", json::array({"$strides", true})}})).isNull());
+    EXPECT_TRUE(run(json({{"or", json::array({"$strides", false})}})).isNull());
+
+    // value_or_default must supply the fallback rather than hand back a value
+    // with a hole in it.
+    EXPECT_EQ(run(json({{"value_or_default", json::array({"$strides", "fallback"})}})),
+              V("fallback"));
+    EXPECT_EQ(run(json({{"value_or_default", json::array({"$clean", "fallback"})}})),
+              V(V::Array{V(1), V(2)}));
+
+    // Presence fails closed in BOTH directions: a partly-resolved value is
+    // neither wholly supplied nor wholly absent. If `not_present` answered
+    // true here, the documented absent-field guard below would accept input
+    // whose field reads never ran.
+    EXPECT_EQ(run(json({{"present", json::array({"$strides"})}})), V(false));
+    EXPECT_EQ(run(json({{"not_present", json::array({"$strides"})}})), V(false));
+    EXPECT_EQ(run(json({{"present", json::array({"$clean"})}})), V(true));
+    EXPECT_EQ(run(json({{"not_present", json::array({"$absent"})}})), V(true));
+
+    // The documented absent-field guard, across every shape the field can
+    // take. What matters is that it never ACCEPTS on a value the language
+    // could not resolve -- whether it declines with null or answers a definite
+    // false is secondary, since a null root is falsy either way.
+    const auto guarded = [](const char* var) {
+        return json(
+            {{"or",
+              json::array(
+                  {json({{"not_present", json::array({var})}}),
+                   json({{"and",
+                          json::array(
+                              {json({{"present", json::array({var})}}),
+                               json({{"==", json::array({var, json::array({1, 2})})}})})}})})}});
+    };
+    // A hole-y value is not absent, so the first arm is false; it is not
+    // wholly supplied either, so the second arm cannot run. Both presence
+    // operators answer a definite false, so the guard rejects outright.
+    EXPECT_EQ(run(guarded("$strides")), V(false))
+        << "the absent-field guard must not accept a hole-y value";
+    EXPECT_FALSE(run(guarded("$strides")).truthy());
+    // ...while the shapes it exists to serve still behave.
+    EXPECT_EQ(run(guarded("$absent")), V(true));
+    EXPECT_EQ(run(guarded("$clean")), V(true));
 }
 
 TEST(TestJsonExpression, KleeneAndOrShortCircuitPastUnknown)
@@ -535,9 +640,9 @@ TEST(TestJsonExpression, DivisionAndDomainErrorsFailClosed)
     EXPECT_TRUE(eval(json({{"rsqrt", 0}})).isNull());
     EXPECT_TRUE(eval(json({{"rsqrt", -4}})).isNull());
     // pow declines on a domain error or an overflow for the same reason: a
-    // NaN/inf result compares UNORDERED, so every ordering test on it is
-    // false and its negation is true -- a criterion would ACCEPT input it
-    // never meaningfully evaluated.
+    // non-finite result leaves later ordering unanswerable, so the arithmetic
+    // step stays unresolved instead of handing a predicate data it cannot
+    // meaningfully evaluate.
     EXPECT_TRUE(eval(json({{"pow", json::array({-8, 0.5})}})).isNull());
     EXPECT_TRUE(eval(json({{"pow", json::array({10, 400})}})).isNull());
     // ...so the surrounding predicate declines rather than passing.
@@ -587,6 +692,23 @@ TEST(TestJsonExpression, UnresolvableNumericOperandsDecline)
     EXPECT_EQ(eval(json({{"abs", -5}})), V(5));
 }
 
+TEST(TestJsonExpression, OrderingDeclinesOnNonFiniteCoercedOperands)
+{
+    const json nanCompare = json({{"<", json::array({"$name", 8})}});
+    EXPECT_TRUE(eval(nanCompare).isNull());
+    EXPECT_TRUE(eval(json({{"!", json::array({nanCompare})}})).isNull());
+
+    const json infCompare = json({{"<", json::array({"1e309", 8})}});
+    EXPECT_TRUE(eval(infCompare).isNull());
+    EXPECT_TRUE(eval(json({{"!", json::array({infCompare})}})).isNull());
+
+    const json chain = json({{"<", json::array({1, "$name", 3})}});
+    EXPECT_TRUE(eval(chain).isNull());
+
+    const json falseThenUnordered = json({{"<", json::array({5, 1, "$name"})}});
+    EXPECT_TRUE(eval(falseThenUnordered).isNull());
+}
+
 TEST(TestJsonExpression, IntegersCompareExactlyAboveTwoToThe53)
 {
     // Routed through double, 2^53 and 2^53+1 are the same value. This language
@@ -605,6 +727,18 @@ TEST(TestJsonExpression, IntegersCompareExactlyAboveTwoToThe53)
     EXPECT_EQ(evalWide(json({{"<", json::array({"$bytes", big + 1})}})), V(true));
     EXPECT_EQ(evalWide(json({{">=", json::array({"$bytes", big + 1})}})), V(false));
     EXPECT_EQ(evalWide(json({{"==", json::array({"$bytes", big})}})), V(true));
+
+    const double roundedBig = static_cast<double>(big);
+    EXPECT_NE(V(big + 1), V(roundedBig));
+    EXPECT_EQ(V::compare(V(big + 1), V(roundedBig)), V::Ordering::GREATER);
+    EXPECT_EQ(V::compare(V(roundedBig), V(big + 1)), V::Ordering::LESS);
+
+    const jexpr::JsonDataSource mixed{json{{"bytes", big + 1}}};
+    const auto evalMixed
+        = [&mixed](const json& rule) { return jexpr::compile<jexpr::JsonDataSource>(rule)(mixed); };
+    EXPECT_EQ(evalMixed(json({{"==", json::array({"$bytes", roundedBig})}})), V(false));
+    EXPECT_EQ(evalMixed(json({{">", json::array({"$bytes", roundedBig})}})), V(true));
+    EXPECT_EQ(evalMixed(json({{"<=", json::array({"$bytes", roundedBig})}})), V(false));
     // Cross-kind numeric equality still coerces, as documented.
     EXPECT_EQ(eval(json({{"==", json::array({4, 4.0})}})), V(true));
 }
@@ -698,6 +832,22 @@ TEST(TestJsonExpression, MalformedRulesThrowAtCompileTime)
                  jexpr::JsonExpressionCompileError);
     EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(json({{"abs", json::array({1, 2})}})),
                  jexpr::JsonExpressionCompileError);
+}
+
+TEST(TestJsonExpression, UnsignedIntegerLiteralsMustFitInInt64)
+{
+    const auto maxInt = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    EXPECT_EQ(eval(json(maxInt)), V(std::numeric_limits<std::int64_t>::max()));
+    EXPECT_EQ(
+        eval(json({{"+", json::array({json(maxInt), -std::numeric_limits<std::int64_t>::max()})}})),
+        V(0));
+
+    const std::uint64_t tooLarge = maxInt + 1U;
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(json(tooLarge)),
+                 jexpr::JsonExpressionCompileError);
+    EXPECT_THROW(
+        jexpr::compile<jexpr::JsonDataSource>(json({{"==", json::array({json(tooLarge), 0})}})),
+        jexpr::JsonExpressionCompileError);
 }
 
 TEST(TestJsonExpression, VariablesCollectsReferencedPaths)

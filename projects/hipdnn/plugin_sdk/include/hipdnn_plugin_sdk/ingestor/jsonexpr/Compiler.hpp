@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -29,7 +30,17 @@ inline Value jsonScalarToValue(const nlohmann::json& j)
     {
         return {j.get<bool>()};
     }
-    if(j.is_number_integer() || j.is_number_unsigned())
+    if(j.is_number_unsigned())
+    {
+        const auto raw = j.get<nlohmann::json::number_unsigned_t>();
+        if(raw > static_cast<nlohmann::json::number_unsigned_t>(
+               std::numeric_limits<std::int64_t>::max()))
+        {
+            throw JsonExpressionCompileError("unsigned integer literal exceeds int64_t range");
+        }
+        return {static_cast<std::int64_t>(raw)};
+    }
+    if(j.is_number_integer())
     {
         return {j.get<std::int64_t>()};
     }
@@ -40,9 +51,9 @@ inline Value jsonScalarToValue(const nlohmann::json& j)
     return {}; // null
 }
 
-inline NodePtr compileNode(const nlohmann::json& j, char sigil, std::size_t depth = 0);
+inline NodePtr compileNode(const nlohmann::json& j, std::size_t depth = 0);
 
-inline NodePtr compileObject(const nlohmann::json& j, char sigil, std::size_t depth)
+inline NodePtr compileObject(const nlohmann::json& j, std::size_t depth)
 {
     if(j.size() != 1)
     {
@@ -71,23 +82,23 @@ inline NodePtr compileObject(const nlohmann::json& j, char sigil, std::size_t de
         node->args.reserve(val.size());
         for(const auto& e : val)
         {
-            node->args.push_back(compileNode(e, sigil, depth + 1));
+            node->args.push_back(compileNode(e, depth + 1));
         }
     }
     else
     {
-        node->args.push_back(compileNode(val, sigil, depth + 1));
+        node->args.push_back(compileNode(val, depth + 1));
     }
     checkArity(*spec, node->args.size(), key);
     return node;
 }
 
-inline NodePtr compileNode(const nlohmann::json& j, char sigil, std::size_t depth)
+inline NodePtr compileNode(const nlohmann::json& j, std::size_t depth)
 {
     checkExpressionDepth(depth);
     if(j.is_object())
     {
-        return compileObject(j, sigil, depth);
+        return compileObject(j, depth);
     }
     if(j.is_array())
     {
@@ -95,18 +106,18 @@ inline NodePtr compileNode(const nlohmann::json& j, char sigil, std::size_t dept
         n->items.reserve(j.size());
         for(const auto& e : j)
         {
-            n->items.push_back(compileNode(e, sigil, depth + 1));
+            n->items.push_back(compileNode(e, depth + 1));
         }
         return n;
     }
     if(j.is_string())
     {
         const auto& s = j.get_ref<const nlohmann::json::string_t&>();
-        if(s.empty() || s[0] != sigil)
+        if(s.empty() || s[0] != VARIABLE_SIGIL)
         {
             return std::make_unique<LiteralNode>(Value(s));
         }
-        if(s.size() >= 2 && s[1] == sigil)
+        if(s.size() >= 2 && s[1] == VARIABLE_SIGIL)
         {
             return std::make_unique<LiteralNode>(Value(s.substr(1))); // "$$x" -> "$x"
         }

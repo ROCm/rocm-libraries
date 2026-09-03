@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <ostream>
 #include <string>
 #include <variant>
@@ -118,6 +119,28 @@ public:
         return std::holds_alternative<Array>(_v);
     }
 
+    /// Null is the language's unresolved marker. Arrays propagate that marker:
+    /// an eager operator must not answer from a partially evaluated array.
+    bool containsUnresolved() const
+    {
+        if(isNull())
+        {
+            return true;
+        }
+        if(!isArray())
+        {
+            return false;
+        }
+        for(const Value& item : asArray())
+        {
+            if(item.containsUnresolved())
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     bool asBool() const
     {
         return std::get<bool>(_v);
@@ -176,8 +199,9 @@ public:
                           _v);
     }
 
-    /// Structural equality (== / !=). Integers and doubles of equal value
-    /// compare equal; differing kinds do not.
+    /// Structural equality (== / !=). Integers and doubles compare equal only
+    /// when the double names that integer exactly; non-numeric differing kinds
+    /// do not.
     bool operator==(const Value& o) const
     {
         if(isInt() && o.isInt())
@@ -187,6 +211,14 @@ public:
             // strides and byte offsets, where that is a wrong decision rather
             // than a rounding error.
             return asInt() == o.asInt();
+        }
+        if(isInt() && o.isDouble())
+        {
+            return intEqualsDouble(asInt(), o.asDouble());
+        }
+        if(isDouble() && o.isInt())
+        {
+            return intEqualsDouble(o.asInt(), asDouble());
         }
         if(isNumber() && o.isNumber())
         {
@@ -201,8 +233,8 @@ public:
         return !(*this == o);
     }
 
-    /// Ordering result of `compare`. UNORDERED is the NaN case, and makes every
-    /// ordering test false.
+    /// Ordering result of `compare`. UNORDERED is the non-finite numeric case,
+    /// and makes ordering predicates decline.
     enum class Ordering
     {
         LESS,
@@ -211,8 +243,10 @@ public:
         UNORDERED
     };
 
-    /// Three-way compare for ordering. Two strings compare lexically; anything
-    /// else is compared as a number, and a NaN operand yields UNORDERED.
+    /// Three-way compare for ordering. Two strings compare lexically; int64 and
+    /// double values compare without rounding the integer operand through
+    /// double. Anything else is compared as a number, and a non-finite operand
+    /// yields UNORDERED.
     static Ordering compare(const Value& a, const Value& b)
     {
         if(a.isString() && b.isString())
@@ -238,9 +272,17 @@ public:
             }
             return x > y ? Ordering::GREATER : Ordering::EQUAL;
         }
+        if(a.isInt() && b.isDouble())
+        {
+            return compareIntAndDouble(a.asInt(), b.asDouble());
+        }
+        if(a.isDouble() && b.isInt())
+        {
+            return reverse(compareIntAndDouble(b.asInt(), a.asDouble()));
+        }
         const double x = a.toNumber();
         const double y = b.toNumber();
-        if(std::isnan(x) || std::isnan(y))
+        if(!std::isfinite(x) || !std::isfinite(y))
         {
             return Ordering::UNORDERED;
         }
@@ -278,6 +320,73 @@ public:
     }
 
 private:
+    static constexpr double INT64_UPPER_EXCLUSIVE_AS_DOUBLE = 9223372036854775808.0;
+
+    static bool doubleRepresentsInt64(double d)
+    {
+        return std::isfinite(d) && std::trunc(d) == d
+               && d >= static_cast<double>(std::numeric_limits<std::int64_t>::min())
+               && d < INT64_UPPER_EXCLUSIVE_AS_DOUBLE;
+    }
+
+    static bool intEqualsDouble(std::int64_t i, double d)
+    {
+        return doubleRepresentsInt64(d) && i == static_cast<std::int64_t>(d);
+    }
+
+    /// The build enforces -Wswitch-default, so the unreachable `default:` is
+    /// required rather than dead: every Ordering is already handled above it.
+    static Ordering reverse(Ordering c)
+    {
+        switch(c)
+        {
+        case Ordering::LESS:
+            return Ordering::GREATER;
+        case Ordering::GREATER:
+            return Ordering::LESS;
+        case Ordering::EQUAL:
+        case Ordering::UNORDERED:
+        default:
+            return c;
+        }
+    }
+
+    static Ordering compareIntAndDouble(std::int64_t i, double d)
+    {
+        if(!std::isfinite(d))
+        {
+            return Ordering::UNORDERED;
+        }
+        if(d < static_cast<double>(std::numeric_limits<std::int64_t>::min()))
+        {
+            return Ordering::GREATER;
+        }
+        if(d >= INT64_UPPER_EXCLUSIVE_AS_DOUBLE)
+        {
+            return Ordering::LESS;
+        }
+
+        const std::int64_t whole = static_cast<std::int64_t>(d);
+        if(i < whole)
+        {
+            return Ordering::LESS;
+        }
+        if(i > whole)
+        {
+            return Ordering::GREATER;
+        }
+
+        const double wholeAsDouble = static_cast<double>(whole);
+        if(wholeAsDouble < d)
+        {
+            return Ordering::LESS;
+        }
+        if(wholeAsDouble > d)
+        {
+            return Ordering::GREATER;
+        }
+        return Ordering::EQUAL;
+    }
     static double stringToNumber(const std::string& s)
     {
         std::size_t b = 0;
