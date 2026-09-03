@@ -37,7 +37,12 @@ from pathlib import Path
 
 import pytest
 
-_TOOL = Path(__file__).resolve().parents[1] / "tools" / "reconcile_applicability.py"
+_TOOLS = Path(__file__).resolve().parents[1] / "tools"
+_TOOL = _TOOLS / "reconcile_applicability.py"
+
+sys.path.insert(0, str(_TOOLS))
+
+from launch_surface import find_repo_root  # noqa: E402
 
 #: A stub standing in for both the kernel factory and the library entry point. Which
 #: shapes each serves is controlled per-test by the thresholds baked into the module.
@@ -510,3 +515,131 @@ class TestServingWhatTheReferenceDeclines:
         result = env.run(env.profile(family="dense", opt_in=False), env.shapes(_LONG))
         assert "asked nothing" not in result.stderr
         assert "agreement about nothing" not in result.stderr
+
+
+class TestTheRealGfx950SinkDeclinesStayFactual:
+    """The reconciler does not check reason TEXT, only that every declines KEY
+    matches a shape (mutating all six reasons to ``""`` or ``"lol"`` still exits 1
+    with an identical report) -- so a stale reason is invisible to every existing
+    gate. This class is the substitute: it re-derives, from the source files the
+    reasons cite, the two facts those reasons assert, and fails if either drifts.
+
+    Host-only: reads committed C++/JSON, no build or device needed.
+    """
+
+    _REPO_ROOT = find_repo_root(Path(__file__).resolve().parent)
+    _DECLINES = (
+        Path(__file__).resolve().parents[1]
+        / "configs"
+        / "gfx950_attention_dense.declines.json"
+    )
+    _GPU_PLAN = (
+        _REPO_ROOT
+        / "dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail"
+        / "GpuSdpaFwdPlan.hpp"
+    )
+    _CPU_PLAN = (
+        _REPO_ROOT
+        / "projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities"
+        / "cpu_graph_executor/detail/SdpaFwdPlan.hpp"
+    )
+
+    def _require_declines(self):
+        """Every test in this class defends a claim made by a row of
+        `gfx950_attention_dense.declines.json`. That file is a gfx950 pack
+        deliverable, so on a checkout without the pack there are no rows whose
+        framing could go stale and nothing to assert -- skip rather than fail.
+        This covers the two tests that re-derive a claim from the reference
+        sources as well as the three that read the rows directly: the CPU
+        reference only carries the `SUPPORTED: attention sinks` marker on a
+        branch that also ships these rows, so asserting on it elsewhere tests a
+        file the branch never claimed anything about."""
+        if not self._DECLINES.exists():
+            pytest.skip(
+                "gfx950_attention_dense.declines.json not present in this checkout"
+            )
+
+    def _reasons(self):
+        self._require_declines()
+        return json.loads(self._DECLINES.read_text())
+
+    def test_every_reason_is_substantive_not_a_placeholder(self):
+        """A reason mutated to ``""`` or ``"lol"`` must not be able to hide again:
+        require real prose, not merely a non-empty string."""
+        for name, reason in self._reasons().items():
+            assert len(reason) >= 80, (
+                f"{name}: decline reason is too short to be a real justification "
+                f"({len(reason)} chars) -- got {reason!r}"
+            )
+
+    def test_no_reason_claims_the_cpu_reference_cannot_verify_sinks(self):
+        """The exact staleness this finding fixed: a reason asserting sinks are
+        unverifiable BY ANYTHING is false once the CPU plan computes them
+        (SdpaFwdPlan.hpp). Guards against the claim silently regressing."""
+        for name, reason in self._reasons().items():
+            lowered = reason.lower()
+            assert "cannot verify it" not in lowered, (
+                f"{name}: reason claims sinks are unverifiable outright, but the "
+                f"test_sdk CPU reference computes them -- see SdpaFwdPlan.hpp"
+            )
+            assert "no reference executor available" not in lowered, (
+                f"{name}: reason claims no reference executor can verify sinks, "
+                f"which is false now that the CPU reference does"
+            )
+
+    def test_every_reason_names_the_abi_slot_and_the_gpu_reference(self):
+        """The two facts that replaced the stale claim: the 5-slot ABI has no
+        sink_ptr, and the GPU reference (this engine's CI executor) still
+        declines sinks. Both must survive in every row, not just some."""
+        for name, reason in self._reasons().items():
+            assert (
+                "5-argument" in reason or "5-slot" in reason
+            ), f"{name}: reason must name the 5-argument/5-slot kernarg ABI limit"
+            assert "GPU reference" in reason or "GpuSdpaFwdPlan" in reason, (
+                f"{name}: reason must name the GPU reference executor as the one "
+                f"that still declines sinks"
+            )
+
+    def test_the_gpu_reference_still_declines_sinks_as_claimed(self):
+        """Re-derive the claim from source rather than trusting the reason's
+        prose: GpuSdpaFwdPlan.hpp must still return false on
+        sink_token_tensor_uid. If this ever flips, every reason in the file
+        needs to be rewritten, not just this test updated."""
+        self._require_declines()
+        if not self._GPU_PLAN.exists():
+            pytest.skip("GpuSdpaFwdPlan.hpp not present in this checkout")
+        text = self._GPU_PLAN.read_text()
+        idx = text.find("sink_token_tensor_uid")
+        assert idx != -1, "GpuSdpaFwdPlan.hpp no longer mentions sink_token_tensor_uid"
+        # Read the body of the `if` that TESTS sinks, not a character window around
+        # the mention. A window is satisfied by any neighbouring `return false` --
+        # including the block-sparse and FP8 branches that bracket this one -- so it
+        # stays green through the one mutation that matters: flipping this branch to
+        # accept sinks while its neighbours still decline. Scope to the braces.
+        open_brace = text.find("{", idx)
+        close_brace = text.find("}", open_brace)
+        assert open_brace != -1 and close_brace != -1, (
+            "could not locate the braced body of the branch testing "
+            "sink_token_tensor_uid in GpuSdpaFwdPlan.hpp -- the check was "
+            "restructured and this test needs rewriting, not relaxing"
+        )
+        branch_body = text[open_brace : close_brace + 1]
+        assert "return false" in branch_body, (
+            "GpuSdpaFwdPlan.hpp's sink_token_tensor_uid branch no longer returns "
+            "false -- the GPU reference may now accept sinks, which would make "
+            f"every declines.json row's central claim stale. Branch body: {branch_body!r}"
+        )
+
+    def test_the_cpu_reference_still_computes_sinks_as_claimed(self):
+        """The other half: SdpaFwdPlan.hpp must still mark sinks SUPPORTED rather
+        than declining them, or the "ABI-and-CI-coverage gap, not unverifiable"
+        framing in every reason becomes false again."""
+        self._require_declines()
+        if not self._CPU_PLAN.exists():
+            pytest.skip("SdpaFwdPlan.hpp not present in this checkout")
+        text = self._CPU_PLAN.read_text()
+        assert "SUPPORTED: attention sinks" in text, (
+            "SdpaFwdPlan.hpp no longer marks sinks as supported -- the CPU "
+            "reference may have regressed to declining sink_token_tensor_uid, "
+            "which would make declines.json's framing stale again"
+        )

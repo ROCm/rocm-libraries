@@ -322,3 +322,199 @@ class TestGateCatchesPolicyTwins:
         result = gate.run("twin_small", "twin_small", "twin_big_same", "twin_big_same")
         assert result.returncode == 0, result.stdout + result.stderr
         assert "policy twin" not in result.stdout
+
+
+class TestAnEmptyPolicyBlockIsAnAnswerNotSilence:
+    """`policies:` absent and `policies: {}` are DIFFERENT claims.
+
+    Absent means nobody asked, and the gate must narrow and say so. `{}` asserts the
+    kernel has no policy-owned knob -- a real, checkable fact about a kernel whose
+    builder takes a spec with no tri-state fields (gfx950 attention_dense: every
+    tri-state on its gfx942 sibling lives on a private subclass that does not exist
+    there, and `_use_exp2_fast` is not defined in the module at all).
+
+    Collapsing them makes an honest profile look negligent: the gate reported
+    'NOT CHECKED ... supply a profile so the policy checks actually execute' at an
+    author who HAD supplied one, and coverage_gate.py turned that into a hard FAIL.
+    The pressure that creates is to invent a policy entry to quiet the tool, which
+    would then be checked against a function that does not exist.
+    """
+
+    def _empty_policy_profile(self, gate) -> Path:
+        profile = gate.tmp / "empty_policies.yaml"
+        profile.write_text(
+            "bundle: test_engine\n"
+            f"provider_root: {gate.tmp}\n"
+            "vocabulary:\n  dtype: [BF16, FP16]\n"
+            "policies: {}\n"
+        )
+        return profile
+
+    def _run(self, gate, profile, tag="small"):
+        return subprocess.run(
+            [sys.executable, str(_TOOL), tag, tag, "--profile", str(profile)],
+            cwd=gate.tmp,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_an_explicit_empty_block_is_not_reported_as_narrowed(self, gate):
+        result = self._run(gate, self._empty_policy_profile(gate))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (
+            "metadata-matches-binary" not in result.stdout
+        ), "an answered question must not be reported as an unasked one"
+        assert "GATE PASSED:" in result.stdout, (
+            "the unqualified pass line is the point: a vacuous check is satisfied, "
+            "not skipped"
+        )
+
+    def test_omitting_the_key_entirely_still_narrows(self, gate):
+        """The control. If this also passed unqualified, the distinction would be
+        gone in the other direction and a genuinely unchecked set would report
+        clean."""
+        profile = gate.tmp / "no_policies.yaml"
+        profile.write_text(
+            "bundle: test_engine\n"
+            f"provider_root: {gate.tmp}\n"
+            "vocabulary:\n  dtype: [BF16, FP16]\n"
+        )
+        result = self._run(gate, profile)
+        assert result.returncode == 0
+        assert "NOT CHECKED" in result.stdout
+        assert "metadata-matches-binary" in result.stdout
+        assert "GATE PASSED on what it checked" in result.stdout
+
+    def test_the_structural_checks_still_bite_under_an_empty_block(self, gate):
+        """`policies: {}` must not become a way to quiet the WHOLE gate. A sentinel
+        needs no kernel knowledge and must still fail."""
+        bad = copy.deepcopy(gate.small)
+        bad[0]["metadata"]["use_exp2_fast"] = -1
+        gate.write("sentinel_set", bad)
+        result = self._run(gate, self._empty_policy_profile(gate), tag="sentinel_set")
+        assert result.returncode == 1
+        assert "unset sentinel" in result.stdout
+
+
+class TestMetadataMustAgreeWithTheSpecItIsBuiltFrom:
+    """Property (4a): a metadata key that is ALSO a spec key must match it.
+
+    This needs no profile, no policy and no kernel knowledge -- it is the descriptor
+    checked against ITSELF. It did not exist until a review demonstrated the hole by
+    mutation: property (4) iterated `profile.policies` and nothing else, so a kernel
+    correctly declaring `policies: {}` had property (4) checking NOTHING while the
+    gate printed a clean pass.
+
+    The case that matters most is the one the shipping commit names as "the dangerous
+    direction": a descriptor labelled aligned whose binary is actually ragged. The C++
+    matcher tests catch that at the matcher rung; this is the STATIC rung, which
+    coverage_gate.py's docstring insists is separate precisely because each catches
+    what the other cannot. A mislabelled tree that reaches STATIC clean still builds
+    and still packs.
+    """
+
+    def test_catches_a_flag_whose_metadata_contradicts_its_spec(self, gate):
+        bad = copy.deepcopy(gate.small)
+        bad[0]["kernel_source"]["spec"]["ragged"] = True
+        bad[0]["metadata"]["ragged"] = 0
+        gate.write("bad", bad)
+        result = gate.run("bad", "bad")
+        assert result.returncode == 1, result.stdout
+        assert "metadata contradicts the spec" in result.stdout
+        assert "ragged" in result.stdout
+
+    def test_catches_a_shape_field_whose_metadata_contradicts_its_spec(self, gate):
+        bad = copy.deepcopy(gate.small)
+        bad[0]["metadata"]["head_size"] = 64  # spec still says 128
+        gate.write("bad", bad)
+        result = gate.run("bad", "bad")
+        assert result.returncode == 1, result.stdout
+        assert "head_size" in result.stdout
+
+    def test_a_true_spec_flag_with_a_zero_metadata_default_is_caught(self, gate):
+        # The direction the ABI guard cares about: the descriptor's own build spec
+        # says it was compiled WITH a feature that adds kernarg slots, while its
+        # metadata -- what the matcher compares -- claims it was not.
+        bad = copy.deepcopy(gate.small)
+        bad[0]["kernel_source"]["spec"]["varlen"] = True
+        bad[0]["metadata"]["varlen"] = 0
+        gate.write("bad", bad)
+        result = gate.run("bad", "bad")
+        assert result.returncode == 1, result.stdout
+        assert "varlen" in result.stdout
+
+    def test_runs_without_a_profile_at_all(self, gate):
+        # The point of (4a) being profile-free: it is the half of property (4) that
+        # needs no kernel knowledge, so a narrowed run must still perform it.
+        bad = copy.deepcopy(gate.small)
+        bad[0]["metadata"]["head_size"] = 64
+        gate.write("bad", bad)
+        result = gate.run("bad", "bad", profiled=False)
+        assert result.returncode == 1, result.stdout
+        assert "metadata contradicts the spec" in result.stdout
+
+    def test_bool_and_int_spellings_of_the_same_value_agree(self, gate):
+        # Control. A spec carries Python True where metadata carries 1; that is a
+        # spelling difference, not a mislabelling, and reporting it would make the
+        # check unusable on every real descriptor set.
+        ok = copy.deepcopy(gate.small)
+        ok[0]["kernel_source"]["spec"]["ragged"] = False
+        ok[0]["metadata"]["ragged"] = 0
+        ok[1]["kernel_source"]["spec"]["ragged"] = True
+        ok[1]["metadata"]["ragged"] = 1
+        gate.write("ok", ok)
+        result = gate.run("ok", "ok")
+        assert result.returncode == 0, result.stdout
+
+    def test_a_declared_vocabulary_translation_is_not_a_mismatch(self, gate):
+        # Control. dtype is spelled "bf16" in the spec and "BF16" in metadata BY
+        # DESIGN -- that is what the vocabulary declaration means. The shipped
+        # fixtures are exactly this shape, so a check that flagged it would fail
+        # every set in the tree.
+        result = gate.run("small", "small")
+        assert result.returncode == 0, result.stdout
+        assert "metadata contradicts the spec" not in result.stdout
+
+    def test_an_undeclared_string_field_is_not_guessed_at(self, gate):
+        # Without a vocabulary declaration there is no way to know whether two
+        # spellings of a string are a translation or a defect, so the check declines
+        # to guess rather than inventing a failure. Numeric fields carry no such
+        # ambiguity and ARE compared with no profile -- proven by
+        # test_runs_without_a_profile_at_all above.
+        ok = copy.deepcopy(gate.small)
+        gate.write("ok", ok)
+        result = gate.run("ok", "ok", profiled=False)
+        assert result.returncode == 0, result.stdout
+
+    def test_an_undeclared_string_field_is_named_not_silently_skipped(self, gate):
+        # The decline above must not be invisible: a field nobody can judge is a
+        # liability the author should see, exactly like the policy-knob narrowing
+        # TestGateDegradesLoudly pins.
+        ok = copy.deepcopy(gate.small)
+        gate.write("ok", ok)
+        result = gate.run("ok", "ok", profiled=False)
+        assert result.returncode == 0, result.stdout
+        assert "NOT CHECKED" in result.stdout
+        assert "UNDECLARED STRING" in result.stdout
+        assert "dtype" in result.stdout
+
+    def test_a_string_field_absent_from_a_declared_vocabulary_is_still_compared(
+        self, gate
+    ):
+        # Regression for the escape a review found on the real gfx950 tree: a
+        # profile's `vocabulary:` block declares dtype but says nothing about
+        # persist_decode, a second string field the two layers also both carry.
+        # Once a vocabulary section exists at all, the author had the exact place
+        # to declare persist_decode translated and did not -- so an unmentioned
+        # string field is compared raw, same as any plain field, instead of being
+        # waved through as "undeclared and therefore ambiguous".
+        bad = copy.deepcopy(gate.small)
+        bad[0]["kernel_source"]["spec"]["persist_decode"] = "auto"
+        bad[0]["metadata"]["persist_decode"] = "manual"
+        gate.write("bad", bad)
+        result = gate.run("bad", "bad")
+        assert result.returncode == 1, result.stdout
+        assert "metadata contradicts the spec" in result.stdout
+        assert "persist_decode" in result.stdout
+        assert "spec='auto'" in result.stdout
+        assert "metadata='manual'" in result.stdout

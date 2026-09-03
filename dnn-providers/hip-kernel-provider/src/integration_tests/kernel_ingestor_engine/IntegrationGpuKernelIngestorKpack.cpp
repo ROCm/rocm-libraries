@@ -763,6 +763,177 @@ TEST_F(IntegrationGpuKernelIngestorKpack, TheModelsChoiceExecutesCorrectly)
 
     executeAndVerify(*graph, workspace.get(), /*seed=*/0);
 }
+// The reset sweep reaches the attention packs too
+//
+// resetIngestorModuleCachesForTesting() is driven off the SAME ingestorPacks() table
+// TestIngestorPacksModuleCacheOwnership (host-side, tests/engines/kernel_ingestor_engine/
+// TestIngestorPacks.cpp) checks for internal consistency. That host-side test proves the
+// table's two fields agree; it cannot prove the reset actually clears a LIVE module,
+// because it links no device and calls no pointer. This tier closes that gap for the two
+// attention packs specifically: PACKED_ENGINE_NAME above only ever exercised
+// hipkernel:pointwise_packed, so a broken reset wire on either attention pack's entry
+// would pass every existing suite, GPU and host alike.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// One shipped, aligned (non-ragged), causal BF16 variant per pack -- small enough to
+/// build quickly, and its `causal_mask`/BSHD shape is exactly what each matcher's
+/// graph_match derives TOP_LEFT_CAUSAL from. Picked from the descriptors each pack
+/// actually ships (Gfx*AttentionDenseNative.cpp's kernelMatches requires an EXACT
+/// shape match against baked metadata), not invented: a shape neither pack shipped
+/// would report "no engine offered this graph" here, which is a different failure
+/// than the one this tier exists to catch.
+struct AttentionDenseFixture
+{
+    std::string engineName;
+    int64_t batch;
+    int64_t numQueryHeads;
+    int64_t numKvHeads;
+    int64_t seqLen;
+    int64_t headSize;
+};
+
+/// Builds a single-node SDPA graph in the BSHD layout both attention packs require
+/// (Gfx*AttentionDenseNative.cpp's hasBshdStrides) and pins it to `fixture.engineName`
+/// so the graph is served by that pack specifically rather than whichever engine wins
+/// the ranking -- the same pinning discipline ExecutesAPackagedKernelOnDevice above
+/// uses for the pointwise pack.
+std::shared_ptr<Graph> buildAttentionDenseGraph(const AttentionDenseFixture& fixture)
+{
+    auto graph = std::make_shared<Graph>();
+    graph->set_io_data_type(DataType::BFLOAT16)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    const std::vector<int64_t> qDims{
+        fixture.batch, fixture.numQueryHeads, fixture.seqLen, fixture.headSize};
+    const std::vector<int64_t> kvDims{
+        fixture.batch, fixture.numKvHeads, fixture.seqLen, fixture.headSize};
+
+    auto q = Graph::tensor(TensorAttributes()
+                               .set_name("Q")
+                               .set_dim(qDims)
+                               .set_stride(generateStrides(qDims))
+                               .set_data_type(DataType::BFLOAT16));
+    auto k = Graph::tensor(TensorAttributes()
+                               .set_name("K")
+                               .set_dim(kvDims)
+                               .set_stride(generateStrides(kvDims))
+                               .set_data_type(DataType::BFLOAT16));
+    auto v = Graph::tensor(TensorAttributes()
+                               .set_name("V")
+                               .set_dim(kvDims)
+                               .set_stride(generateStrides(kvDims))
+                               .set_data_type(DataType::BFLOAT16));
+
+    SdpaAttributes attrs;
+    attrs.set_causal_mask(true).set_attn_scale(1.0F
+                                               / std::sqrt(static_cast<float>(fixture.headSize)));
+    auto [o, stats] = graph->sdpa(q, k, v, attrs);
+    static_cast<void>(stats);
+    o->set_name("O").set_output(true).set_data_type(DataType::BFLOAT16);
+
+    graph->set_preferred_engine_id_ext(fixture.engineName);
+    return graph;
+}
+
+} // namespace
+
+class IntegrationGpuKernelIngestorAttentionDenseResetP
+    : public hip_kernel_provider::test_utilities::
+          IntegrationGraphVerificationHarness<float, AttentionDenseFixture>
+{
+protected:
+    /// Runs the pinned graph to completion, asserting the named engine actually served
+    /// it -- the same attributability discipline buildAndCompilePacked() uses for the
+    /// pointwise pack above, so a silently-wrong pin cannot be mistaken for a passing
+    /// reset case.
+    void executeOnPinnedAttentionEngine(Graph& graph, const std::string& engineName)
+    {
+        auto result = graph.build_operation_graph(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(engineName);
+        std::vector<int64_t> rankedEngineIds;
+        result = graph.get_ranked_engine_ids(rankedEngineIds);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_NE(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), engineId),
+                  rankedEngineIds.end())
+            << engineName << " did not offer itself for the pinned graph";
+
+        result = graph.create_execution_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        result = graph.check_support();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        result = graph.build_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        int64_t servingEngineId = 0;
+        ASSERT_EQ(graph.get_execution_plan_engine_id(servingEngineId).code, ErrorCode::OK);
+        ASSERT_EQ(servingEngineId, engineId)
+            << "engine id " << servingEngineId << " served the pinned graph, not " << engineName;
+
+        int64_t workspaceSize = 0;
+        result = graph.get_workspace_size(workspaceSize);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_GE(workspaceSize, 0);
+        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+
+        executeAndVerify(graph, workspace.get(), /*seed=*/0);
+    }
+};
+
+/// Proves resetIngestorModuleCachesForTesting() reaches the attention packs, not just
+/// hipkernel:pointwise_packed -- the coverage gap FINDING B1 named. Runs the graph
+/// once to populate the pack's module cache, resets every pack's cache (the same call
+/// ...SurvivesABrokenArchive makes), then runs it again: a reset that silently missed
+/// this pack's entry would be unobservable here (the resident module would just keep
+/// serving), but a reset that crashed, corrupted the cache, or dropped a module a live
+/// plan still needed would fail the second run. Combined with the host-side
+/// TestIngestorPacksModuleCacheOwnership test, which proves the table entry for each
+/// pack is wired at all, this is the device-side half: proof the wire actually works.
+TEST_P(IntegrationGpuKernelIngestorAttentionDenseResetP, SurvivesAResetAfterFirstDispatch)
+{
+    const auto& fixture = GetParam();
+    const auto arch = hip_kernel_provider_common::getDeviceString(_stream);
+
+    const auto archContentRoot = packagedDescriptorRoot().parent_path();
+    if(findKpackArchivesForArch(archContentRoot, arch).empty())
+    {
+        GTEST_SKIP() << "nothing was packaged for this device (" << arch
+                     << "): " << archContentRoot / arch
+                     << " does not exist. Environmental -- the build packs per arch and "
+                        "this device is outside GPU_TARGETS.";
+    }
+
+    {
+        auto graph = buildAttentionDenseGraph(fixture);
+        ASSERT_NO_FATAL_FAILURE(executeOnPinnedAttentionEngine(*graph, fixture.engineName));
+    }
+
+    ASSERT_EQ(resetProviderModuleCaches(), "");
+
+    {
+        auto graph = buildAttentionDenseGraph(fixture);
+        ASSERT_NO_FATAL_FAILURE(executeOnPinnedAttentionEngine(*graph, fixture.engineName));
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    IntegrationGpuKernelIngestorAttentionDenseResetP,
+    ::testing::Values(
+        // hipkernel:gfx942_attention_dense.kdp.json: BF16, causal, batch=1, Sq=Skv=256,
+        // Hq=8, Hkv=1, D=128, block_m=256 (256 % 256 == 0, aligned).
+        AttentionDenseFixture{"hipkernel:Gfx942AttentionDense", 1, 8, 1, 256, 128},
+        // hipkernel:gfx950_attention_dense.kdp.json: BF16, causal, batch=1, Sq=Skv=512,
+        // Hq=32, Hkv=8, D=128, ragged=0 (512 % 256 == 0 and 512 % block_n(64) == 0).
+        AttentionDenseFixture{"hipkernel:Gfx950AttentionDense", 1, 32, 8, 512, 128}),
+    [](const ::testing::TestParamInfo<AttentionDenseFixture>& info) {
+        return info.param.engineName == "hipkernel:Gfx942AttentionDense" ? "Gfx942" : "Gfx950";
+    });
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration
 

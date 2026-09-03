@@ -31,7 +31,13 @@ from pathlib import Path
 
 import pytest
 
-_TOOL = Path(__file__).resolve().parents[1] / "tools" / "variant_reachability.py"
+_TOOLS = Path(__file__).resolve().parents[1] / "tools"
+_TOOL = _TOOLS / "variant_reachability.py"
+
+sys.path.insert(0, str(_TOOLS))
+
+import variant_reachability  # noqa: E402
+from launch_surface import find_repo_root  # noqa: E402
 
 # One KMD, shared by every test: a `dtype` field compared by equality and a
 # `block_n` tile compared by divisibility (declared via --divides), mirroring the
@@ -238,3 +244,149 @@ class TestBundleDiscovery:
         result = env.run(kdp, shapes)
         assert result.returncode == 2
         assert "no sibling" in result.stdout + result.stderr
+
+
+class TestGfx950RealBundle:
+    """The real 84-variant gfx950 bundle against the real 93-shape corpus --
+    the case the module docstring and `TestHistoricalCase` above only model in
+    miniature. Nothing here needs a device or a build: `.kdp.json`/`.kmd.json`
+    are committed descriptor JSON and the corpus is a committed shape list.
+
+    A second-pass review found that `gfx950_attention_dense.profile.yaml` had
+    no `score:` block, so this exact bundle ran NARROWED -- every applicable
+    variant reported reachable without ever checking which one the native
+    scorer would pick. The review also established, by actually computing
+    `applicable()` over all 84 descriptors x 93 shapes, that the gap was inert:
+    no shape has more than one applicable variant, so no ranking, tie, or
+    fall-through is ever evaluated by this bundle today. The tests below pin
+    both halves of that finding so a second `block_n` (or any change that
+    makes ranking start to matter) cannot silently go unranked again: the
+    first test fails the day the corpus and bundle stop being that narrow,
+    and the second fails if the declared ranking ever disagrees with the
+    narrowed (unranked) verdict while the bundle is still that narrow.
+    """
+
+    _REPO_ROOT = find_repo_root(Path(__file__).resolve().parent)
+    _KDP = (
+        _REPO_ROOT
+        / "dnn-providers/hip-kernel-provider/descriptor-packaging/examples"
+        / "descriptors/rocKE/gfx950_attention_dense/gfx950_attention_dense.kdp.json"
+    )
+    _SHAPES = (
+        Path(__file__).resolve().parents[1]
+        / "configs/gfx950_attention_dense.shapes.json"
+    )
+    _PROFILE = (
+        Path(__file__).resolve().parents[1]
+        / "configs/gfx950_attention_dense.profile.yaml"
+    )
+    _FIELD_MAP_AND_DIVIDES = (
+        "--field-map",
+        "nhead_q=num_query_heads",
+        "--field-map",
+        "nhead_k=num_kv_heads",
+        "--field-map",
+        "seqlen_k=seqlen_kv",
+        "--field-map",
+        "hdim_q=head_size",
+        "--divides",
+        "block_n=seqlen_kv",
+    )
+
+    @classmethod
+    def _require_assets(cls):
+        """The bundle, the corpus and the profile are gfx950 deliverables that
+        exist only on a branch carrying that pack. On a checkout without them --
+        the tooling branch these shared tests also run on -- there is nothing to
+        assert about, so skip rather than fail: an absent asset is a branch fact,
+        not a regression. `TestHistoricalCase` above models the same property in
+        miniature and runs everywhere, so skipping here does not leave the
+        behaviour unguarded."""
+        for label, path in (
+            ("gfx950_attention_dense.kdp.json", cls._KDP),
+            ("gfx950_attention_dense.shapes.json", cls._SHAPES),
+            ("gfx950_attention_dense.profile.yaml", cls._PROFILE),
+        ):
+            if not path.exists():
+                pytest.skip(f"{label} not present in this checkout")
+
+    def test_no_shape_has_more_than_one_applicable_variant_today(self):
+        """The inertness claim, checked directly rather than inferred from the
+        tool's own report: with 84 descriptors sharing one `block_n` value, if
+        any corpus shape ever admits two applicable variants this assertion is
+        the first thing to fail, which is exactly when a declared ranking
+        starts doing real work instead of being a no-op."""
+        self._require_assets()
+        defaults, descriptors = variant_reachability.load_bundle(str(self._KDP))
+        shapes = json.loads(self._SHAPES.read_text())
+        field_map = {
+            "nhead_q": "num_query_heads",
+            "nhead_k": "num_kv_heads",
+            "seqlen_k": "seqlen_kv",
+            "hdim_q": "head_size",
+        }
+        divides = {"block_n": "seqlen_kv"}
+        metas = {
+            d["name"]: variant_reachability._resolved_metadata(d, defaults)
+            for d in descriptors
+        }
+        remapped = [variant_reachability._remap(s, field_map) for s in shapes]
+        counts = [
+            sum(
+                1
+                for meta in metas.values()
+                if variant_reachability.applicable(meta, s, divides)
+            )
+            for s in remapped
+        ]
+        assert max(counts) <= 1, (
+            "a corpus shape now admits more than one applicable variant -- the "
+            "declared `score:` block in gfx950_attention_dense.profile.yaml is "
+            "no longer a no-op and its correctness needs to be re-verified, "
+            "not assumed"
+        )
+
+    def test_declared_ranking_matches_the_narrowed_verdict(self, tmp_path):
+        """Runs the real tool twice against the real bundle: once with no
+        ranking declared (narrowed), once with the profile's `score:` block.
+        Both must land on the identical 82 SELECTED / 0 APPLICABLE-BUT-NEVER-
+        WINS / 2 UNREACHABLE verdict established by the review -- proof that
+        declaring the ranking changed nothing observable today, which is the
+        claim the profile comment makes."""
+        self._require_assets()
+        narrowed = subprocess.run(
+            [
+                sys.executable,
+                str(_TOOL),
+                "--kdp",
+                str(self._KDP),
+                "--shapes",
+                str(self._SHAPES),
+                *self._FIELD_MAP_AND_DIVIDES,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        declared = subprocess.run(
+            [
+                sys.executable,
+                str(_TOOL),
+                "--kdp",
+                str(self._KDP),
+                "--shapes",
+                str(self._SHAPES),
+                "--profile",
+                str(self._PROFILE),
+                *self._FIELD_MAP_AND_DIVIDES,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert narrowed.returncode == declared.returncode
+        assert "NO RANKING DECLARED" in narrowed.stdout
+        assert "NO RANKING DECLARED" not in declared.stdout
+        assert "ranking declared  block_n (max wins)" in declared.stdout
+        for out in (narrowed.stdout, declared.stdout):
+            assert "SELECTED                    82" in out
+            assert "APPLICABLE-BUT-NEVER-WINS   0" in out
+            assert "UNREACHABLE                 2" in out

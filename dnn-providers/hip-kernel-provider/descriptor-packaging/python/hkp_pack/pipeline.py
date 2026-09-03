@@ -3,8 +3,6 @@ import hashlib
 import json
 import os
 import shutil
-import time
-from contextlib import contextmanager
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -162,134 +160,6 @@ def _ukd_extra(ukd):
     }
 
 
-def _pack_jobs():
-    """Worker count for the rocke prewarm. 0/1 disables it.
-
-    Defaults to the CPU count capped at 32 -- comgr is memory-hungry and the
-    return is flat past that. HKP_PACK_JOBS overrides, and HKP_PACK_JOBS=1 is
-    the escape hatch back to the pure-serial path when a compile error needs a
-    clean traceback.
-    """
-    env = os.environ.get("HKP_PACK_JOBS")
-    if env:
-        try:
-            return max(0, int(env))
-        except ValueError:
-            raise HkpPackError(f"HKP_PACK_JOBS must be an integer, got '{env}'")
-    return min(32, os.cpu_count() or 1)
-
-
-def _timing_enabled():
-    """Whether to emit the per-phase breakdown. Off unless HKP_PACK_TIMING is set.
-
-    Wall clock around the whole pack answers "how long", never "where". The three
-    phases below have very different scaling -- the prewarm is parallel, the
-    descriptor walk and kpack assembly are serial -- so a single number cannot say
-    whether more workers would help, and the claim that the serial half dominates
-    had never actually been measured. `1`, `true`, `yes`, `on` all enable it.
-    """
-    return os.environ.get("HKP_PACK_TIMING", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-
-
-@contextmanager
-def _phase(name, arch, log, out=None):
-    """Time one named phase, recording into `out` and logging when enabled.
-
-    A no-op beyond the bare timer when HKP_PACK_TIMING is unset, so the default
-    build pays one perf_counter pair per phase and prints nothing new -- log
-    output is parsed by CI and by the timing scripts in WIP/, so it must not
-    change shape unless asked.
-    """
-    t0 = time.perf_counter()
-    try:
-        yield
-    finally:
-        dt = time.perf_counter() - t0
-        if out is not None:
-            out[name] = out.get(name, 0.0) + dt
-        if _timing_enabled():
-            log(f"hkp_pack[timing] {arch} {name}={dt:.2f}s")
-
-
-def _compile_one_rocke(job):
-    """Top-level so it is picklable. Returns (vk, co_path, symbol) or an error."""
-    vk, source, builder, spec, arch, out_dir = job
-    try:
-        co_path, symbol = compile_rocke_variant(source, builder, spec, arch, out_dir)
-        return (vk, str(co_path), symbol, None)
-    except Exception as exc:  # surfaced verbatim in the parent
-        return (vk, None, None, f"{type(exc).__name__}: {exc}")
-
-
-def _prewarm_rocke_variants(
-    flat, arch, inter_arch_dir, variant_co, variant_symbol, log
-):
-    """Compile every distinct rocke variant for arch in parallel, into the caches.
-
-    Purely a cache fill. `_compile_ukd_variant` still runs serially afterwards and
-    still owns every decision -- it just finds `vk` already present and skips the
-    expensive call. That keeps one code path for correctness (dedup keys, symbol
-    capture, error text) and makes this an optimisation that cannot change output:
-    a variant this misses is simply compiled serially, as before.
-
-    Each variant is an independent `rocke build -> comgr lower -> write .co`, keyed
-    by a content hash of (source, builder, spec), so workers never contend and the
-    written filenames cannot collide.
-    """
-    jobs = {}
-    for kdp in flat.kdps():
-        if not arch_matches(kdp.doc, arch):
-            continue
-        for entry in kdp.doc["kernelDescriptors"]:
-            if isinstance(entry, str):
-                continue
-            ks = entry.get("kernel_source") or {}
-            if ks.get("kind") != "rocke":
-                continue
-            vk = rocke_variant_key(ks["source"], ks["builder"], ks["spec"])
-            if vk in jobs or vk in variant_co:
-                continue
-            jobs[vk] = (
-                vk,
-                ks["source"],
-                ks["builder"],
-                ks["spec"],
-                arch,
-                inter_arch_dir,
-            )
-
-    workers = _pack_jobs()
-    if len(jobs) < 2 or workers < 2:
-        return
-    workers = min(workers, len(jobs))
-    log(
-        f"hkp_pack: compiling {len(jobs)} rocke variants for {arch} on {workers} workers"
-    )
-    failures = []
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        for vk, co_path, symbol, err in pool.map(
-            _compile_one_rocke, jobs.values(), chunksize=1
-        ):
-            if err is not None:
-                failures.append((vk, err))
-                continue
-            variant_co[vk] = Path(co_path)
-            variant_symbol[vk] = symbol
-    if failures:
-        # Re-raise the first, with the count: the serial pass would stop at the
-        # first bad variant too, and a wall of parallel tracebacks hides it.
-        vk, err = failures[0]
-        raise HkpPackError(
-            f"{len(failures)} rocke variant(s) failed to compile for {arch}; "
-            f"first was '{vk}': {err}"
-        )
-
-
 def _compile_ukd_variant(
     ukd,
     where,
@@ -316,7 +186,7 @@ def _compile_ukd_variant(
     if kind == "hip":
         entry = ks["entry"]
         build = ks["build"]
-        vk = hip_variant_key(hip_source_relpath(rel_dir, source), build)
+        vk = _variant_key_for(ukd, rel_dir)
         if vk not in variant_co:
             variant_co[vk] = compile_hip_variant(
                 hipcc,
@@ -340,7 +210,7 @@ def _compile_ukd_variant(
     elif kind == "rocke":
         builder = ks["builder"]
         spec = ks["spec"]
-        vk = rocke_variant_key(source, builder, spec)
+        vk = _variant_key_for(ukd, rel_dir)
         if vk not in variant_co:
             co_path, captured = compile_rocke_variant(
                 source, builder, spec, arch, inter_arch_dir
@@ -382,9 +252,377 @@ def _write_text_at(base, rel_dir, name, text):
     _dest_at(base, rel_dir, name).write_text(text, encoding="utf-8")
 
 
-def compile_intermediate(
-    flat, source_root, arch, hipcc, inter_arch_dir, log=print, timings=None
+@dataclass(frozen=True)
+class _VariantJob:
+    """One distinct variant the prewarm compiles, as a picklable record.
+
+    Every field is a str or a plain dict so the record crosses a process
+    boundary without a custom reducer. `hipcc` and `arch` travel by value
+    rather than through an environment variable or a module global, so the
+    worker is a pure function of its argument.
+    """
+
+    vk: str
+    kind: str
+    ukd: dict
+    rel_dir: str
+    source_root: str
+    out_dir: str
+    hipcc: str
+    arch: str
+
+
+def _selected_entries(doc, arch, ukd_by_id):
+    """Yield the entries of doc that ship for arch.
+
+    Yields `(entry_id, ukd_doc, sdesc)`: for a standalone-UKD id ref, the id
+    string, that UKD's doc, and its Descriptor; for an inline UKD, `None`, the
+    entry dict itself, and `None`. The Descriptor rather than its rel_dir,
+    because the walk needs its `path.name` for the error context and for the
+    shipped filename as well as its `rel_dir` for the variant key.
+
+    All three arch filters live here and nowhere else, so the prewarm and the
+    serial walk cannot select different variant sets. `ukd_by_id` arrives as a
+    parameter rather than being reached for through `flat`, which leaves the
+    generator no way to enumerate a standalone UKD no KDP references: an orphan
+    is legal input the walk never compiles.
+    """
+    if not arch_matches(doc, arch):
+        return
+    for entry in doc["kernelDescriptors"]:
+        if isinstance(entry, str):
+            sdesc = ukd_by_id[entry]
+            if arch_matches(sdesc.doc, arch):
+                yield entry, sdesc.doc, sdesc
+        elif arch_matches(entry, arch):
+            yield None, entry, None
+
+
+def _prewarm_jobs(flat, source_root, arch):
+    """The distinct variant jobs the walk will compile.
+
+    Selection comes from the same generator the walk consumes, so the job set
+    equals the walk's set by construction rather than by a second reading of
+    the same filters. Dedup is on the variant key and keeps first-seen order,
+    which is walk order: the pool compiles each distinct variant once, in the
+    order the serial path would have reached them.
+
+    A kind `_variant_key_for` declines to key is dropped here, leaving the walk
+    to reach it and report whatever it produces.
+
+    `out_dir` and `hipcc` are left empty because they belong to the pack run
+    rather than to the selection; `_prewarm_variants` fills them in before
+    dispatch.
+    """
+    ukd_by_id = flat.ukd_by_id()
+    jobs = []
+    seen = set()
+    for kdp in flat.kdps():
+        for sid, ukd, sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
+            rel_dir = sdesc.rel_dir if sid is not None else kdp.rel_dir
+            vk = _variant_key_for(ukd, rel_dir)
+            if vk is None or vk in seen:
+                continue
+            seen.add(vk)
+            jobs.append(
+                _VariantJob(
+                    vk=vk,
+                    kind=ukd["kernel_source"]["kind"],
+                    ukd=ukd,
+                    rel_dir=Path(rel_dir).as_posix(),
+                    source_root=str(source_root),
+                    out_dir="",
+                    hipcc="",
+                    arch=arch,
+                )
+            )
+    return jobs
+
+
+def _compile_one_variant(job):
+    """Compile one variant in a worker process, returning a result tuple.
+
+    `(vk, co_path, symbol, None)` on success, `(vk, None, None, "Name: text")`
+    on any failure. Failures are returned rather than raised: rocke and comgr
+    exceptions are not guaranteed picklable, and an exception that cannot cross
+    the process boundary takes the diagnosis with it.
+
+    No key is computed here. `job.vk` was computed in the parent, under
+    whatever key functions were in force there; a key recomputed in the child
+    would resolve the real functions and disagree with the walk.
+    """
+    try:
+        ks = job.ukd["kernel_source"]
+        if job.kind == "hip":
+            co_path = compile_hip_variant(
+                job.hipcc,
+                job.source_root,
+                job.rel_dir,
+                ks["source"],
+                ks["build"],
+                job.arch,
+                job.out_dir,
+            )
+            # The hip symbol is authored, not captured from the artifact, which
+            # is why it is read here rather than returned by the producer.
+            symbol = ks["entry"]
+        elif job.kind == "rocke":
+            co_path, symbol = compile_rocke_variant(
+                ks["source"],
+                ks["builder"],
+                ks["spec"],
+                job.arch,
+                job.out_dir,
+            )
+        else:
+            # Unreachable while `_variant_key_for` keys only these two kinds. A
+            # raise rather than a fall-through, because a third keyable kind
+            # added there would otherwise compile as rocke and yield a plausible
+            # artefact from the wrong producer.
+            raise HkpPackError(
+                f"no variant compiler for kernel source kind '{job.kind}'"
+            )
+    except Exception as exc:
+        return job.vk, None, None, f"{type(exc).__name__}: {exc}"
+    return job.vk, str(co_path), symbol, None
+
+
+def _cgroup_v2_cpu_quota():
+    """Whole CPUs allowed by cgroup v2, or None when unlimited or absent.
+
+    Linux only; the other probes in `_cpu_budget` bound the pool elsewhere.
+    Read from the filesystem because no Python API reports it. A container
+    given `--cpus=8` keeps a full affinity mask and is throttled instead, so
+    this is the only source that sees the limit at all.
+
+    Walked from this process's own cgroup up to the root, taking the tightest
+    limit: where the limit sits depends on whether a cgroup namespace is in
+    play, not on which framework imposed it. With one (Docker, Kubernetes) the
+    container's cgroup appears as the root and `/sys/fs/cgroup/cpu.max` carries
+    the limit; without one (Slurm, a systemd login session) the process sits in
+    a nested scope whose root has no `cpu.max` at all, so reading only the root
+    would report "unlimited" for every limited job on such a host.
+    """
+    root = Path("/sys/fs/cgroup")
+    try:
+        # The v2 line is `0::<path>`; a v1-only host has no such line.
+        rel = next(
+            line[3:].strip().lstrip("/")
+            for line in Path("/proc/self/cgroup").read_text().splitlines()
+            if line.startswith("0::")
+        )
+    except (OSError, StopIteration):
+        return None
+
+    quotas = []
+    node = root.joinpath(rel) if rel else root
+    while True:
+        quotas.append(_read_cpu_max(node / "cpu.max"))
+        if node == root or node.parent == node:
+            break
+        node = node.parent
+
+    quotas = [q for q in quotas if q]
+    return min(quotas) if quotas else None
+
+
+def _read_cpu_max(path):
+    """Whole CPUs from one `cpu.max` file, or None when unlimited or absent."""
+    try:
+        quota, period = path.read_text().split()
+    except (OSError, ValueError):
+        return None
+    if quota == "max":
+        return None
+    try:
+        # Floors to at least one: a sub-CPU allocation would otherwise disable
+        # the pool entirely.
+        return max(1, int(quota) // int(period))
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
+def _cpu_budget():
+    """CPUs this process may actually use, rather than the host's core count.
+
+    `os.cpu_count()` reports the machine, but a containerised or scheduled pack
+    -- Docker, Kubernetes and Slurm alike -- is usually given a slice of it, and
+    one worker per host core oversubscribes that slice badly. Each source below
+    sees a limit the others cannot, so the smallest wins.
+    """
+    limits = [_cgroup_v2_cpu_quota()]
+
+    process_cpu_count = getattr(os, "process_cpu_count", None)
+    if process_cpu_count is not None:
+        # 3.13+, and honours the affinity mask on every platform that has one.
+        limits.append(process_cpu_count())
+    elif hasattr(os, "sched_getaffinity"):
+        # Linux only, so it cannot be the only affinity source -- this packer
+        # runs on Windows too, where the host count below is all there is.
+        limits.append(len(os.sched_getaffinity(0)))
+
+    limits = [limit for limit in limits if limit]
+    return min(limits) if limits else (os.cpu_count() or 1)
+
+
+def _pack_jobs():
+    """Worker count for the prewarm, from `HKP_PACK_JOBS`.
+
+    Unset means `min(32, _cpu_budget())`. The cap is per-worker startup, not
+    memory: a worker costs roughly 250 ms to stand up its rocke+comgr import,
+    so past a few dozen the next worker costs more than the compile work it
+    takes on. Measured on gfx942, a 1672-variant pack bottoms out near 48
+    workers -- 19.5 s against 402 s serial -- and by 128 is back to its
+    16-worker time, while peaking at 2.2 GiB throughout.
+
+    32 is a compromise, not an optimum: the turnover moves with pack size, and
+    the same host wants about 12 workers for 200 variants and 48 for 1672.
+    Overshooting costs far more than undershooting -- 200 variants take 6.8 s
+    on 12 workers and 16.9 s on 32 -- so the constant sits below the large-pack
+    optimum deliberately.
+
+    `HKP_PACK_JOBS=1` forces serial execution: the prewarm returns without a
+    pool and the walk compiles every variant itself, which is the escape hatch
+    for debugging a compile failure with a single clean traceback.
+
+    Anything that is not an integer of 1 or more is a hard error, including `0`
+    and negatives. Neither is clamped, because clamping lands them on the serial
+    path: `-4` would read as "compiled on 4 workers" and run on one, and `0`
+    means "auto" elsewhere in this repository while it would mean "serial" here.
+
+    An explicit value is never reduced to `_cpu_budget()` -- choosing to
+    oversubscribe is the caller's call to make.
+
+    An environment variable rather than a CLI flag or a CMake cache variable
+    because it reaches through the CMake custom command with no plumbing.
+    """
+    env = os.environ.get("HKP_PACK_JOBS")
+    if env is None:
+        return min(32, _cpu_budget())
+    try:
+        jobs = int(env)
+    except ValueError:
+        raise HkpPackError(f"HKP_PACK_JOBS must be an integer, got '{env}'") from None
+    if jobs < 1:
+        raise HkpPackError(f"HKP_PACK_JOBS must be 1 or greater, got {jobs}")
+    return jobs
+
+
+def _variant_key_for(ukd, rel_dir):
+    """Content-hash variant key, or None for a kind the prewarm skips.
+
+    The single place either key function is called, so the walk and the prewarm
+    cannot key one variant two ways.
+
+    `hip_variant_key` and `rocke_variant_key` are resolved as globals of this
+    module on every call -- never through a function-local import, an alias
+    bound at import time, or a recomputation inside a worker process. Each of
+    those shortcuts binds the real function past any substitution made on this
+    module.
+
+    A kind that carries no compilable source yields None rather than raising.
+    The walk stays the sole reporter of whatever failure such a UKD produces:
+    were this to raise, the prewarm would pre-empt it with an error of its own,
+    from a different call site and with a different traceback.
+    """
+    ks = ukd["kernel_source"]
+    kind = ks["kind"]
+    if kind == "hip":
+        return hip_variant_key(hip_source_relpath(rel_dir, ks["source"]), ks["build"])
+    if kind == "rocke":
+        return rocke_variant_key(ks["source"], ks["builder"], ks["spec"])
+    return None
+
+
+def _prewarm_variants(
+    flat,
+    source_root,
+    arch,
+    hipcc,
+    inter_arch_dir,
+    variant_co,
+    variant_symbol,
+    log=print,
 ):
+    """Compile this arch's distinct variants concurrently into the caches.
+
+    The walk then finds each key already present and skips the expensive call.
+    Records, symbols and doc rewriting stay entirely the walk's: this only
+    populates two dicts.
+
+    Fails fast, matching the serial path: the first failing variant in walk
+    order raises and the queued jobs are cancelled, so a broken builder costs
+    the jobs already in flight rather than the whole pack. Nothing is written
+    into either cache when that happens -- a partly-filled cache would let the
+    walk skip compiles whose artefacts were never produced.
+    """
+    jobs = [
+        replace(job, out_dir=str(inter_arch_dir), hipcc=str(hipcc))
+        for job in _prewarm_jobs(flat, source_root, arch)
+    ]
+
+    workers = _pack_jobs()
+    if len(jobs) < 2 or workers < 2:
+        return
+    workers = min(workers, len(jobs))
+    log(f"hkp_pack: compiling {len(jobs)} variants for {arch} on {workers} workers")
+
+    # The pool is built here, per arch, and never kept in a module global.
+    # Workers snapshot `sys.path` at process start, so a pool reused across
+    # runs would freeze whichever path list existed when it was first built and
+    # break imports the parent has since arranged.
+    pool = ProcessPoolExecutor(max_workers=workers)
+    results = []
+    failure = None
+    try:
+        # Consumed lazily rather than collected with `list`, so the first
+        # failure stops the pack instead of riding out every remaining job.
+        # `map` yields in submission order, which is walk order, so the variant
+        # this stops on is the one the serial path would have named -- breaking
+        # on the first result to *complete* would hand that choice to the
+        # scheduler.
+        for result in pool.map(_compile_one_variant, jobs, chunksize=1):
+            if result[3] is not None:
+                failure = result
+                break
+            results.append(result)
+    except Exception as exc:
+        # A worker that is killed rather than raising surfaces here, and
+        # the exception is not an HkpPackError -- so unconverted it would
+        # sail past run_pipeline's per-arch handler and discard every other
+        # arch's work.
+        raise HkpPackError(
+            f"the variant compile pool for {arch} failed "
+            f"({type(exc).__name__}: {exc}); a worker process died -- an OOM "
+            "kill, a crash inside the toolchain, or an interrupt. Retrying "
+            "with a lower HKP_PACK_JOBS addresses the first of those"
+        ) from exc
+    finally:
+        # `map` submits every job up front, so the queue outlives the break.
+        # Finalising its result generator already cancels the pending futures;
+        # `cancel_futures` restates that next to the `wait` it qualifies. Jobs
+        # already running finish either way, bounding the waste at the worker
+        # count rather than the pack size.
+        pool.shutdown(wait=True, cancel_futures=True)
+
+    if failure is not None:
+        # One variant named, no failure count: the pack stops at the first
+        # failure, so a count would describe how far the pool happened to get
+        # rather than how many variants are broken. Named by UKD id, which is
+        # what a reader can look up in the descriptors; the content-hash key is
+        # not.
+        named = next((job.ukd.get("id") for job in jobs if job.vk == failure[0]), None)
+        raise HkpPackError(
+            f"variant '{named or failure[0]}' failed to compile for {arch}: "
+            f"{failure[3]}"
+        )
+
+    for vk, co_path, symbol, _err in results:
+        variant_co[vk] = Path(co_path)
+        variant_symbol[vk] = symbol
+
+
+def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=print):
     """Compile every hip UKD in the KDPs targeting arch and stage a per-arch tree.
 
     Writes inter_arch_dir with: hsaco-form KDP JSON (inline UKDs rewritten
@@ -404,19 +642,16 @@ def compile_intermediate(
     standalone_ukds = {}
     ukd_by_id = flat.ukd_by_id()
 
-    # Fill the variant caches in parallel before the serial walk below. Pure
-    # optimisation: the walk still decides everything, and simply finds the
-    # expensive results already computed.
-    with _phase("prewarm", arch, log, timings):
-        _prewarm_rocke_variants(
-            flat, arch, inter_arch_dir, variant_co, variant_symbol, log
-        )
-
-    # The serial descriptor walk starts here. Timed with an explicit mark rather
-    # than a `with` block: the loop below is the bulk of this function, and
-    # indenting it under a context manager would bury a one-line measurement in a
-    # hundred-line reindent.
-    _walk_t0 = time.perf_counter()
+    _prewarm_variants(
+        flat,
+        source_root,
+        arch,
+        hipcc,
+        inter_arch_dir,
+        variant_co,
+        variant_symbol,
+        log,
+    )
 
     for kdp in flat.kdps():
         doc = kdp.doc
@@ -430,19 +665,17 @@ def compile_intermediate(
         ukds = []
         entries = []
         new_kds = []
-        for entry in new_doc["kernelDescriptors"]:
-            if isinstance(entry, str):
+        for sid, entry, sdesc in _selected_entries(new_doc, arch, ukd_by_id):
+            if sid is not None:
                 # A reference to a standalone UKD: compile it once per arch and
-                # keep the string in the KDP; it ships as its own file. Skip it
-                # in this shard unless its own arch applies here.
-                sdesc = ukd_by_id[entry]
-                if not arch_matches(sdesc.doc, arch):
+                # keep the string in the KDP; it ships as its own file. Listing
+                # it precedes the compile-once check, so a UKD two KDPs
+                # reference appears in both and is compiled for the first only.
+                entries.append(sid)
+                new_kds.append(sid)
+                if sid in standalone_ukds:
                     continue
-                entries.append(entry)
-                new_kds.append(entry)
-                if entry in standalone_ukds:
-                    continue
-                sukd = sdesc.doc
+                sukd = entry
                 where = f"standalone UKD {sdesc.path.name}"
                 vk, symbol, fields = _compile_ukd_variant(
                     sukd,
@@ -455,7 +688,7 @@ def compile_intermediate(
                     variant_co,
                     variant_symbol,
                 )
-                standalone_ukds[entry] = StandaloneUKD(
+                standalone_ukds[sid] = StandaloneUKD(
                     id=sukd.get("id"),
                     name=sukd.get("name"),
                     metadata=sukd.get("metadata"),
@@ -470,9 +703,6 @@ def compile_intermediate(
                 continue
 
             ukd = entry
-            # An inline UKD ships in this shard only when its own arch applies.
-            if not arch_matches(ukd, arch):
-                continue
             where = f"UKD '{ukd.get('id')}' in {kdp.path.name}"
             vk, symbol, fields = _compile_ukd_variant(
                 ukd,
@@ -548,12 +778,6 @@ def compile_intermediate(
             sidecar.name,
             sidecar.source.read_bytes(),
         )
-
-    _walk_dt = time.perf_counter() - _walk_t0
-    if timings is not None:
-        timings["walk"] = timings.get("walk", 0.0) + _walk_dt
-    if _timing_enabled():
-        log(f"hkp_pack[timing] {arch} walk={_walk_dt:.2f}s")
 
     return IntermediateArch(
         arch=arch,
@@ -797,31 +1021,14 @@ def pack_arch(
         )
 
     prune_result = prune(flat, arch)
-    surviving_generics = [
-        generic
-        for generic in flat.generics()
-        if generic.id in prune_result.reachable_generic_ids
-    ]
-    for generic in surviving_generics:
-        _write_bytes_at(
-            out_arch_dir,
-            generic.rel_dir,
-            generic.path.name,
-            generic.path.read_bytes(),
-        )
-
-    # Gated on the same reachability set, deliberately derived from the surviving
-    # descriptors rather than added to it. reachable_generic_ids is a walk over
-    # descriptor *ids* that drops anything not in generic_by_id(), so a sidecar --
-    # which has a filename and no id -- could never enter it. Deriving keeps that
-    # walk untouched and makes a sidecar's fate exactly its descriptor's.
-    for sidecar in flat.sidecars_for(surviving_generics):
-        _write_bytes_at(
-            out_arch_dir,
-            sidecar.rel_dir,
-            sidecar.name,
-            sidecar.source.read_bytes(),
-        )
+    for generic in flat.generics():
+        if generic.id in prune_result.reachable_generic_ids:
+            _write_bytes_at(
+                out_arch_dir,
+                generic.rel_dir,
+                generic.path.name,
+                generic.path.read_bytes(),
+            )
 
     return ArchResult(arch=arch, out_dir=out_arch_dir, kpack_path=kpack_path)
 
@@ -874,16 +1081,8 @@ def run_pipeline(
             )
             continue
         try:
-            timings = {}
-            arch_t0 = time.perf_counter()
             inter = compile_intermediate(
-                flat,
-                source_root,
-                arch,
-                hipcc,
-                inter_root / arch,
-                log=log,
-                timings=timings,
+                flat, source_root, arch, hipcc, inter_root / arch, log=log
             )
             # Stage this arch into a sibling temp dir and rename it into place
             # only once pack_arch returns cleanly. pack_arch creates
@@ -895,18 +1094,17 @@ def run_pipeline(
             staging = out_root / f".{arch}.staging"
             if staging.exists():
                 shutil.rmtree(staging)
-            with _phase("assemble", arch, log, timings):
-                result = pack_arch(
-                    flat,
-                    inter,
-                    staging,
-                    kpack_mod,
-                    comp,
-                    expected_sha256=expected_sha256,
-                    hipcc=hipcc,
-                    rocke_wheel_stamp=rocke_wheel_stamp,
-                    group=group,
-                )
+            result = pack_arch(
+                flat,
+                inter,
+                staging,
+                kpack_mod,
+                comp,
+                expected_sha256=expected_sha256,
+                hipcc=hipcc,
+                rocke_wheel_stamp=rocke_wheel_stamp,
+                group=group,
+            )
             if out_arch_dir.exists():
                 shutil.rmtree(out_arch_dir)
             staging.rename(out_arch_dir)
@@ -915,24 +1113,6 @@ def run_pipeline(
                 out_dir=out_arch_dir,
                 kpack_path=out_arch_dir / KPACK_DIR_NAME / _kpack_filename(arch, group),
             )
-            if _timing_enabled():
-                total = time.perf_counter() - arch_t0
-                parts = " ".join(
-                    f"{k}={timings.get(k, 0.0):.2f}s"
-                    for k in ("prewarm", "walk", "assemble")
-                )
-                # `other` is whatever the three named phases do not account for
-                # (staging renames, tree cleanup). Reported rather than dropped so
-                # the parts visibly sum to the total.
-                named = sum(
-                    timings.get(k, 0.0) for k in ("prewarm", "walk", "assemble")
-                )
-                serial = timings.get("walk", 0.0) + timings.get("assemble", 0.0)
-                log(
-                    f"hkp_pack[timing] {arch} TOTAL={total:.2f}s {parts} "
-                    f"other={total - named:.2f}s "
-                    f"serial={100.0 * serial / total if total else 0.0:.0f}%"
-                )
         except HkpPackError as exc:
             # One arch failing must not destroy the other arches' work: a
             # wildcard-arch UKD hitting an arch-restricted builder should shrink

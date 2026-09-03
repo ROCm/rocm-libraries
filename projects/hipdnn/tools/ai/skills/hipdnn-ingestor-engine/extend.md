@@ -161,7 +161,8 @@ cd $REPO
 $GEN/.venv/bin/python $GEN/tools/verify_variant_sets.py \
     extended <the widened descriptor tree> --profile $GEN/configs/$SLUG.profile.yaml
 $GEN/.venv/bin/python $GEN/tools/variant_reachability.py \
-    --kdp <the widened .kdp.json> --shapes $SHAPES <your --field-map/--divides/--score flags>
+    --kdp <the widened .kdp.json> --shapes $SHAPES \
+    <your --field-map/--divides flags> --score-field <field> --score-prefer max
 ```
 
 Every property those check is a property OF THE SET, so adding one kernel can break any of

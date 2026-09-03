@@ -109,6 +109,44 @@ class TestPublishedCsv:
         assert rc != 0
         assert "unknown mask spelling" in output
 
+    def test_an_unknown_dtype_spelling_is_refused_not_passed_through(self, tmp_path):
+        """The CSV reader once built `dtype` from `row.get("dtype") or "bf16"`
+        directly, bypassing `_DTYPE_SPELLINGS` entirely -- the graph-corpus and
+        rocKE-bench readers both refuse an unrecognised dtype, and the CSV path
+        silently wrote it straight into the corpus instead. An unrecognised dtype
+        here builds the wrong binary and still validates, exactly like the mask
+        case above; a decline is the correct answer, not a passthrough."""
+        rc, output, shapes = _mine(tmp_path, _HEADER + _row(dtype="fp8_e4m3"))
+        assert rc != 0, f"bad dtype must be refused, not mined: {shapes}"
+        assert "unknown dtype spelling" in output
+
+    def test_every_dtype_spelling_normalises_the_same_as_the_other_readers(
+        self, tmp_path
+    ):
+        """The converse of the refusal above: every spelling `_DTYPE_SPELLINGS`
+        already recognises must still mine cleanly through the CSV path, and
+        normalise to the same canonical value the graph/rocKE-bench readers
+        produce -- the fix must not narrow what a valid CSV can express."""
+        for spelling, canonical in (
+            ("bf16", "bf16"),
+            ("bfloat16", "bf16"),
+            ("torch.bfloat16", "bf16"),
+            ("fp16", "fp16"),
+            ("float16", "fp16"),
+            ("half", "fp16"),
+            ("torch.float16", "fp16"),
+        ):
+            rc, output, shapes = _mine(tmp_path, _HEADER + _row(dtype=spelling))
+            assert rc == 0, f"{spelling!r} must mine cleanly: {output}"
+            assert shapes[0]["dtype"] == canonical
+
+    def test_an_absent_dtype_falls_back_to_bf16(self, tmp_path):
+        """A row that simply does not say is a fallback, not a refusal --
+        distinct from a row that says something this table does not recognise."""
+        rc, output, shapes = _mine(tmp_path, _HEADER + _row(dtype=""))
+        assert rc == 0, output
+        assert shapes[0]["dtype"] == "bf16"
+
     def test_windowed_rows_are_excluded_loudly_not_folded_onto_causal(self, tmp_path):
         """Folding `swin` onto `causal` collapsed seven distinct shape keys in an
         earlier join. Excluded by default, included on request, never merged."""
@@ -327,3 +365,218 @@ class TestCausalityComesFromTheGraphNotTheFilename:
             {"causal_mask": False, "left_bound": None, "right_bound": None},
         )
         assert sorted(s["mask_type"] for s in self._mine(tmp_path)) == [0, 1]
+
+    def test_a_non_numeric_left_bound_is_refused_not_resolved_to_causal(self, tmp_path):
+        """`left_bound` drives the branch below (`>= 0` -> window, else causal),
+        and a non-numeric value fell through neither comparison, landing on
+        `return _MASK_TYPE["causal"]` by default -- the same wrong-answer-not-a-
+        decline failure this reader exists to refuse for mask and dtype."""
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            {"causal_mask": False, "left_bound": "unbounded", "right_bound": 0},
+        )
+        out = tmp_path / "shapes.json"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(_MINE),
+                "--graphs",
+                str(tmp_path / "graphs"),
+                "--include-windowed",
+                "--out",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "non-numeric left_bound" in (result.stdout + result.stderr)
+
+
+class TestRocKeBenchTree:
+    """The third source: rocKE's own benchmark tree.
+
+    For an arch with no published results CSV -- gfx950 at the time this was added --
+    it is the ONLY source that says what the kernel team measures, so a miner that
+    cannot read it sizes a variant set from sample graphs alone.
+
+    These files are JSONL (one record per line), not JSON documents: `json.load`
+    raises "Extra data" on every one of them.
+    """
+
+    def _trace(self, path: Path, *records) -> None:
+        path.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+
+    def _record(self, **over) -> dict:
+        base = {
+            "ALL_DECODE": False,
+            "kind": "2d",
+            "num_seqs": 1,
+            "num_query_heads": 64,
+            "num_kv_heads": 8,
+            "head_size": 64,
+            "max_seqlen_q": 4096,
+            "max_seqlen_k": 4096,
+            "q_dtype": "torch.bfloat16",
+            "window_size": [-1, -1],
+            "has_sinks": False,
+        }
+        base.update(over)
+        return base
+
+    def _mine_bench(self, tmp_path: Path, *records):
+        tree = tmp_path / "bench"
+        tree.mkdir(exist_ok=True)
+        self._trace(tree / "prefill_shapes.json", *records)
+        out = tmp_path / "shapes.json"
+        result = subprocess.run(
+            [sys.executable, str(_MINE), "--rocke-bench", str(tree), "--out", str(out)],
+            capture_output=True,
+            text=True,
+        )
+        shapes = json.loads(out.read_text()) if out.exists() else []
+        return result, shapes
+
+    def test_a_jsonl_trace_is_read_at_all(self, tmp_path):
+        """Guards the format itself: these are one-record-per-line, and a reader
+        using json.load gets 'Extra data' and silently mines nothing."""
+        result, shapes = self._mine_bench(
+            tmp_path, self._record(), self._record(max_seqlen_q=8192, max_seqlen_k=8192)
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert len(shapes) == 2
+
+    def test_an_unwindowed_prefill_trace_is_causal(self, tmp_path):
+        """`[-1, -1]` is unbounded both ways, which for a prefill suite is full
+        causal -- the paired live benchmark labels its W=0 arm 'full-causal'."""
+        _, shapes = self._mine_bench(tmp_path, self._record(window_size=[-1, -1]))
+        assert shapes[0]["mask_type"] == 1
+        assert shapes[0]["sliding_window"] == 0
+
+    def test_a_windowed_trace_carries_its_WIDTH_not_just_its_kind(self, tmp_path):
+        """THE regression this class exists for. Dropping the width sends
+        sliding_window=0 to the dispatcher, which resolves to plain causal -- the
+        kernel then computes a full causal triangle for a banded request and returns
+        a WRONG ANSWER instead of declining. The mask kind alone does not encode it.
+        """
+        _, shapes = self._mine_bench(tmp_path, self._record(window_size=[127, 0]))
+        assert shapes[0]["mask_type"] == 2, "a finite left bound is a window"
+        assert shapes[0]["sliding_window"] == 128, (
+            "the window WIDTH must reach the request; 127 is the left bound and the "
+            "band includes the current token"
+        )
+
+    def test_sinks_are_carried_rather_than_filtered(self, tmp_path):
+        """Whether an integration SHIPS a sink variant is a scope decision made
+        downstream. Filtering the shape out here hides it from the step-9
+        reconciler, which is exactly where a declined-but-servable shape is
+        supposed to surface."""
+        _, shapes = self._mine_bench(tmp_path, self._record(has_sinks=True))
+        assert shapes[0]["use_sinks"] is True
+        assert shapes[0]["_provenance"]["has_sinks"] is True
+
+    def test_a_trace_with_no_recorded_causality_is_skipped_not_defaulted(
+        self, tmp_path
+    ):
+        """No record in rocKE's shipped traces carries a causal/mask key, so
+        causality comes from window_size or from nowhere. Defaulting it picks which
+        branch the dispatcher resolves and which kernels get built."""
+        result, shapes = self._mine_bench(
+            tmp_path, self._record(window_size=None), self._record()
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert len(shapes) == 1, "the unknown-mask record must not be mined"
+        assert "no recorded causality" in result.stdout
+
+    def test_an_unknown_dtype_spelling_is_refused(self, tmp_path):
+        """Three vocabularies meet in this miner and none agree. A guessed dtype
+        builds a different binary and still validates."""
+        result, _ = self._mine_bench(
+            tmp_path, self._record(q_dtype="torch.float8_e4m3")
+        )
+        assert result.returncode != 0
+        assert "unknown dtype spelling" in result.stderr
+
+    def test_decode_records_are_excluded(self, tmp_path):
+        """ALL_DECODE marks a decode trace; a prefill kernel does not serve it."""
+        _, shapes = self._mine_bench(
+            tmp_path, self._record(ALL_DECODE=True), self._record()
+        )
+        assert len(shapes) == 1
+
+
+class TestGradientSpellingsAreBothExcluded:
+    """`sample_sdpa_backward` spells its gradients `dq`/`dk`/`dv`/`do`, not
+    `d_query`. The original marker set matched neither, so the graph passed the
+    backward filter and was caught only incidentally by its `float` dtype -- a
+    backward graph using a servable dtype would have been mined as forward, and one
+    of that class takes the DEVICE down mid-sweep."""
+
+    @pytest.mark.parametrize("gradient", ["d_query", "dq", "dk", "dv", "do"])
+    def test_either_gradient_spelling_excludes_the_graph(self, tmp_path, gradient):
+        corpus = tmp_path / "graphs"
+        corpus.mkdir()
+        tensors = [
+            {"name": "q", "dims": [1, 32, 4096, 128], "data_type": "bf16"},
+            {"name": "k", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
+            {"name": gradient, "dims": [1, 32, 4096, 128], "data_type": "bf16"},
+        ]
+        (corpus / "innocent.json").write_text(json.dumps({"tensors": tensors}))
+        out = tmp_path / "shapes.json"
+        result = subprocess.run(
+            [sys.executable, str(_MINE), "--graphs", str(corpus), "--out", str(out)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1, "no forward shapes should have been mined"
+        assert "no shapes mined" in result.stderr
+
+    def test_the_node_type_alone_excludes_a_backward_graph(self, tmp_path):
+        """Belt and braces: the graph DECLARES what it is, so the op type is the
+        primary marker and tensor names are the fallback."""
+        corpus = tmp_path / "graphs"
+        corpus.mkdir()
+        (corpus / "g.json").write_text(
+            json.dumps(
+                {
+                    "tensors": [
+                        {"name": "q", "dims": [1, 32, 4096, 128], "data_type": "bf16"},
+                        {"name": "k", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
+                    ],
+                    "nodes": [{"type": "SdpaBackwardAttributes"}],
+                }
+            )
+        )
+        out = tmp_path / "shapes.json"
+        result = subprocess.run(
+            [sys.executable, str(_MINE), "--graphs", str(corpus), "--out", str(out)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1, "a declared backward graph must not be mined"
+
+    def test_a_forward_graph_with_similar_names_is_still_mined(self, tmp_path):
+        """Control: the exclusion must not fire on an ordinary forward graph whose
+        tensors merely start with d (`descale_q`), or the corpus empties silently."""
+        corpus = tmp_path / "graphs"
+        corpus.mkdir()
+        (corpus / "g.json").write_text(
+            json.dumps(
+                {
+                    "tensors": [
+                        {"name": "q", "dims": [1, 32, 4096, 128], "data_type": "bf16"},
+                        {"name": "k", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
+                        {"name": "descale_q", "dims": [1]},
+                    ],
+                    "nodes": [{"type": "SdpaAttributes"}],
+                }
+            )
+        )
+        out = tmp_path / "shapes.json"
+        result = subprocess.run(
+            [sys.executable, str(_MINE), "--graphs", str(corpus), "--out", str(out)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert len(json.loads(out.read_text())) == 1

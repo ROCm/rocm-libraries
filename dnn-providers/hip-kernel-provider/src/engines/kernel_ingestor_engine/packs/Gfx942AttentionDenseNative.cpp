@@ -148,7 +148,6 @@ constexpr std::string_view DTYPE_TOKEN = "attention_dense.dtype";
 // rather than to any one UHD.
 constexpr std::string_view FLOPS_TOKEN = "attention_dense.flops";
 constexpr std::string_view BYTES_TOKEN = "attention_dense.bytes";
-
 /// hipDNN tensor axes. The LOGICAL order is always (B, H, S, D) regardless of the
 /// memory layout, which lives in the strides -- see SdpaAttributes.hpp's class doc.
 constexpr uint32_t BATCH_AXIS = 0;
@@ -591,7 +590,6 @@ std::optional<int64_t> attentionFlopsFor(const AttentionDenseProblem& problem, i
     return checkedProduct(
         {4, problem.batch, macsPerSequence, problem.numQueryHeads, problem.headSize});
 }
-
 /**
  * @brief Graph-scoped applicability for the whole engine.
  *
@@ -887,7 +885,6 @@ std::optional<BoundTokens> gfx942AttentionDenseGraphMatches(const MatchContext& 
     {
         bound[std::string(BYTES_TOKEN)] = *bytes;
     }
-
     return bound;
 }
 

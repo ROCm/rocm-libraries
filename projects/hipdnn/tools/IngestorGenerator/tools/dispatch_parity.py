@@ -301,9 +301,14 @@ def build_config(
     # binary is actually built with, so ask it rather than leaving a hole.
     arch_decl = profile.get("arch_spec") or {}
     arch_defaults: dict = {}
+    # Every field the BUILDER's spec accepts, defaulted or not. Distinct from
+    # arch_defaults: a pinned knob must be written into the spec whenever the
+    # builder would accept it, including fields whose default is MISSING.
+    arch_field_names: set = set()
     if arch_decl:
         arch_cls = _import(*_required(arch_decl, "arch_spec", "module", "class"))
         for field in dataclasses.fields(arch_cls):
+            arch_field_names.add(field.name)
             if field.default is not dataclasses.MISSING:
                 arch_defaults[field.name] = field.default
     knobs = knobs or {}
@@ -320,6 +325,23 @@ def build_config(
                 f"--knobs entry '{knob}' must be a non-empty list of values, got "
                 f"{values!r}. An empty list's cross-product is empty, which would "
                 f"silently emit ZERO kernels instead of failing here."
+            )
+        # A knob the BUILDER's spec does not accept can only ever be written to
+        # metadata, which makes both arms name the SAME binary under two catalog
+        # entries: identical kernels, one of which the matcher will prefer for
+        # reasons that have nothing to do with the knob. The sweep then measures
+        # 1.000x and reports "no effect" for a knob whose other side was never
+        # compiled. Refuse rather than emit that, and say which of the two real
+        # cases the author is in -- a typo, or a knob that needs the arch spec
+        # promoted the way the builder does it.
+        if arch_field_names and knob not in arch_field_names:
+            raise ParityError(
+                f"--knobs names '{knob}', which the builder's spec class "
+                f"({arch_decl.get('module')}.{arch_decl.get('class')}) does not "
+                f"accept, so pinning it would change the catalog entry without "
+                f"changing the compiled binary -- both arms would be the same "
+                f"kernel and the sweep would measure nothing. Either the name is "
+                f"wrong, or the field is not a build-time knob of this kernel."
             )
     kernels = []
     for index, resolution in enumerate(resolutions):
@@ -380,8 +402,13 @@ def build_config(
                 variant_metadata[knob] = (
                     int(value) if isinstance(value, bool) else value
                 )
-                if knob in variant_spec:
-                    variant_spec[knob] = value
+                # Write it into the SPEC, not only the metadata. The spec is what
+                # the builder compiles, and an arch-private knob is absent from the
+                # shared spec the dispatcher returns -- so a `knob in variant_spec`
+                # guard silently skips exactly the knobs most worth sweeping, and
+                # both arms build one binary. The refusal above guarantees the
+                # builder accepts this field, so setting it is always legal.
+                variant_spec[knob] = value
             name = _kernel_name(slug, resolution.spec, index)
             if pinned:
                 name += "." + "_".join(f"{k}{pinned[k]}" for k in axis_names)

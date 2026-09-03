@@ -488,3 +488,141 @@ class TestTheShippingCrossProduct:
         assert all(
             v == {0, 1} for v in by_shape.values()
         ), "every shape must appear under both pinned values"
+
+
+class TestAPinnedKnobReachesTheBinary:
+    """The arms must be different KERNELS, not one kernel under two catalog names.
+
+    `--knobs` used to write the pinned value into `metadata` and into the spec only
+    `if knob in variant_spec`. The dispatcher returns the SHARED spec, and every
+    arch-private knob -- `use_exp2_fast`, `block_m`, the LDS pads -- is absent from
+    it, which is precisely the set most worth sweeping. So the guard skipped exactly
+    those: both arms carried the same spec, `hkp_pack` compiled ONE binary, and the
+    two descriptors differed only in the catalog key the matcher compares.
+
+    Nothing downstream called that an error. `verify_variant_sets.py` did flag it
+    ("mislabel their binary"), but the runbook's own 4a-3 worked example produced it,
+    so the gate read as the tool being wrong. The measurable symptom is the worst
+    kind: the sweep reports ~1.000x and the knob is recorded as "no effect", when its
+    other side was never compiled.
+    """
+
+    def test_both_arms_build_distinct_specs(self, tmp_path):
+        """The regression test proper: N shapes x K arms must be N*K binaries."""
+        result, out = _run_parity(
+            tmp_path, "--knobs", '{"use_exp2_fast": [0, 1]}', name="spec.yaml"
+        )
+        if result.returncode != 0:
+            pytest.skip("dispatcher unavailable")
+        kernels = _emitted_kernels(out)
+        specs = {
+            json.dumps(k["kernel_source"]["spec"], sort_keys=True) for k in kernels
+        }
+        assert len(specs) == len(kernels), (
+            f"{len(kernels)} descriptors collapse to {len(specs)} distinct specs -- "
+            f"the pinned knob did not reach the spec, so the arms share a binary"
+        )
+
+    def test_the_pinned_value_is_in_the_spec_not_only_the_metadata(self, tmp_path):
+        """Metadata is what the matcher compares; the spec is what gets compiled.
+        Agreeing on one while diverging on the other is the tri-state trap."""
+        result, out = _run_parity(
+            tmp_path, "--knobs", '{"use_exp2_fast": [0, 1]}', name="layers.yaml"
+        )
+        if result.returncode != 0:
+            pytest.skip("dispatcher unavailable")
+        for kernel in _emitted_kernels(out):
+            spec_value = kernel["kernel_source"]["spec"].get("use_exp2_fast")
+            assert spec_value is not None, (
+                f"{kernel['name']}: pinned knob absent from the spec, so the "
+                f"builder's own policy -- not the pin -- decides the binary"
+            )
+            assert int(bool(spec_value)) == kernel["metadata"]["use_exp2_fast"], (
+                f"{kernel['name']}: spec says {spec_value!r} and metadata says "
+                f"{kernel['metadata']['use_exp2_fast']!r}; the matcher would select "
+                f"this descriptor for a binary built the other way"
+            )
+
+    def test_the_emitted_arms_pass_the_variant_set_gate(self, tmp_path):
+        """End to end, because the unit assertions above are reconstructions and
+        the gate is what actually ships. This failed before the fix."""
+        result, out = _run_parity(
+            tmp_path, "--knobs", '{"use_exp2_fast": [0, 1]}', name="gated.yaml"
+        )
+        if result.returncode != 0:
+            pytest.skip("dispatcher unavailable")
+        tree = tmp_path / "tree"
+        generated = subprocess.run(
+            [
+                sys.executable,
+                str(_GENERATE),
+                "--config",
+                str(out),
+                "--output-dir",
+                str(tree),
+            ],
+            cwd=_GENERATE.parent,
+            capture_output=True,
+            text=True,
+        )
+        assert generated.returncode == 0, generated.stdout + generated.stderr
+        gated = subprocess.run(
+            [
+                sys.executable,
+                str(_GATE),
+                "--profile",
+                str(_PROFILE),
+                "arms",
+                str(tree / "descriptors"),
+            ],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert gated.returncode == 0, gated.stdout + gated.stderr
+        assert "GATE PASSED" in gated.stdout
+
+    def test_a_knob_the_builder_cannot_take_is_refused(self, tmp_path):
+        """The other half. A metadata-only field can never change the binary, so
+        crossing on it manufactures duplicate kernels; refuse instead of emitting
+        a set whose arms are identical by construction."""
+        import yaml
+
+        profile = yaml.safe_load(_PROFILE.read_text())
+        profile["metadata_fields"] = list(profile["metadata_fields"]) + ["role"]
+        profile["kmd_fields"] = list(profile["kmd_fields"]) + [
+            {"name": "role", "type": "string"}
+        ]
+        # provider_root is repo-relative and the tool runs from _REPO_ROOT, so it
+        # survives being written to a temp path unchanged.
+        doctored = tmp_path / "role.profile.yaml"
+        doctored.write_text(yaml.safe_dump(profile))
+        shapes = tmp_path / "shapes.json"
+        shapes.write_text(json.dumps(_shapes()))
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(_PARITY),
+                "--profile",
+                str(doctored),
+                "--shapes",
+                str(shapes),
+                "--knobs",
+                '{"role": ["segment", "reduce"]}',
+                "--out",
+                str(tmp_path / "role.yaml"),
+            ],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "does not accept" in result.stderr
+
+    def test_a_real_spec_knob_is_not_refused(self, tmp_path):
+        """Control for the refusal above: it must reject metadata-only fields
+        WITHOUT rejecting the ordinary case, or 4a-3 stops working entirely."""
+        result, _ = _run_parity(
+            tmp_path, "--knobs", '{"block_n": [64, 32]}', name="ok.yaml"
+        )
+        assert result.returncode == 0, result.stdout + result.stderr

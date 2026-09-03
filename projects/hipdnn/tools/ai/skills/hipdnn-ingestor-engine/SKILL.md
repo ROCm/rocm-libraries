@@ -28,14 +28,12 @@ files tells you what you owe before you return.
 | `workloads.md` | Sent from runbook 2a, 3 and 8e. Real workload shapes: deciding what to compile, and proving it runs. | How |
 | `extend.md` | The **extend** flow: adding a pack or kernel to an engine that already exists. | How |
 
-**This skill is op-agnostic.** hipDNN spans convolution, matmul, normalization, attention,
-quantization and more, and every step here is written to work for any of them: the
-operation catalog is enumerated, never assumed, and every discovery step is a command you
-run against *your* kernel. Where a worked example names a specific operation it is there to
-make a shape concrete — read it as an illustration, never as a description of your kernel.
-Run the command; do not reuse the example's answer. A different kernel's spec fields,
-layout, ABI and baked constants will all differ, and the failure mode for assuming
-otherwise is silently wrong numbers.
+**This skill is op-agnostic.** Every step works for any hipDNN operation: the operation
+catalog is enumerated, never assumed, and every discovery step is a command you run
+against *your* kernel. A worked example naming a specific operation is an illustration,
+not a description of yours — run the command, never reuse the example's answer. Spec
+fields, layout, ABI and baked constants all differ per kernel, and assuming otherwise
+produces silently wrong numbers.
 
 ## Completion contract — read this before starting
 
@@ -69,11 +67,14 @@ completed stage — it is a stall, and the cure is to write down what you have, 
 uncertain rows, and move.
 
 **Check at stage 1 that stage 8 is reachable.** The shared reference executors are dense
-and stride-based and decline paged KV, varlen, ragged tensors and block-sparse/sinks —
-see `dnn-providers/integration-tests/README.md` § *What the reference executors cannot
-verify*, which owns that list. A kernel requiring one of those has nothing to be verified
-against, and you will not find out until stage 8, after the descriptors, hooks and build
-are already done. For a first integration, pick a kernel the shared references cover.
+and stride-based and decline paged KV, varlen, ragged tensors and block-sparse — see
+`dnn-providers/integration-tests/README.md` § *What the reference executors cannot
+verify*, which owns that list. Attention sinks are a narrower case: the CPU reference
+computes them, but the GPU reference still declines them, so a kernel needing sinks is
+reachable only if your integration is verified against the CPU executor. A kernel
+requiring one of the fully-declined features has nothing to be verified against, and you
+will not find out until stage 8, after the descriptors, hooks and build are already done.
+For a first integration, pick a kernel the shared references cover.
 
 **Stage 8 has a second prerequisite, and it is hardware.** The engine's `arch` list is
 the arch the test must run on — packs arch-prune before the matcher, so a clean run on
@@ -87,13 +88,12 @@ ssh <slurm-login> "sbatch --test-only -p <part> -A <acct> --gres=gpu:<type>:1 \
     --time=00:20:00 --wrap=hostname"                                # may I, and when
 ```
 
-`--test-only` is the one that answers it: it reports the estimated start time, and it
-reports an access failure without consuming a submission. A partition can be visible in
-`sinfo` and still reject you (`invalid partition specified`) when your account has no
-association with it. Do this before mining, not after the build: a scarce single-GPU arch
-class behind a deep queue can turn a 9-stage run into a 7b run for reasons that have
-nothing to do with the integration, and knowing on day one lets you stage artifacts to a
-less contended site while the other work proceeds.
+`--test-only` is the one that answers it: it reports the estimated start time, and reports
+an access failure without consuming a submission. A partition can be visible in `sinfo`
+and still reject you (`invalid partition specified`) when your account has no association
+with it. Do this before mining, not after the build — a scarce arch behind a deep queue
+turns a 9-stage run into a 7b run for reasons unrelated to the integration, and knowing on
+day one lets you stage artifacts elsewhere while the other work proceeds.
 
 If the arch is unreachable, say so at stage 1 and get a decision, exactly as with an
 unverifiable feature. A run that reaches stage 7b with the device test queued is a
@@ -295,11 +295,11 @@ more variants.
 - **The packer is single-threaded.** Its cost scales with the shape you compile, not just
   the count, so a variant-count budget that looks like a design limit is partly a tooling
   artifact. Time one pack and check whether it saturates the machine before you shrink a
-  set to fit it (ALMIOPEN-2546).
+  set to fit it.
 - **Descriptors land in the packager's tree, not the engine tree**, because `hkp_pack`
-  rejects the engine tree's dialect (ALMIOPEN-2549). RUNBOOK step 4 has the detail. This
-  is a known deviation, not your layout mistake — but say so in your report rather than
-  leaving the next reader to rediscover it.
+  rejects the engine tree's dialect. RUNBOOK step 4 has the detail. This is a known
+  deviation, not your layout mistake — but say so in your report rather than leaving the
+  next reader to rediscover it.
 
 ## Reference materials this skill relies on
 
@@ -317,10 +317,10 @@ more variants.
   with their native halves in the sibling `packs/` directory. **Read them as shape
   references, not as your destination:** they are `direct_load` (`kind: embedded_source`),
   and `hkp_pack` rejects that kind, so a `packaged` integration cannot currently be
-  authored in that tree. RUNBOOK step 4 has the detail and the ticket (ALMIOPEN-2549);
-  your descriptors go to the packager's `PRODUCTION_SOURCE_ROOT` until it is fixed.
-- A's frozen CLI: `generate.py --config <yaml> --output-dir <dir> [--dry-run] [--force]`,
+  authored in that tree. RUNBOOK step 4 has the detail; your descriptors go to the
+  packager's `PRODUCTION_SOURCE_ROOT` until it is fixed.
+- The generator's CLI: `generate.py --config <yaml> --output-dir <dir> [--dry-run] [--force]`,
   under `projects/hipdnn/tools/IngestorGenerator/`.
-- B's frozen CLI and `--json` shape:
+- The validator's CLI and `--json` shape:
   `hipdnn_validate_descriptors <root>... [--native-source <cpp>]... [--expect-engine <name>]... [--json]`,
   built from `projects/hipdnn/tools/IngestorGenerator/ValidateDescriptors.cpp`.

@@ -12,6 +12,9 @@
 /dnn-providers/miopen-provider/                     @ROCm/dnn-providers-core
 /dnn-providers/hipblaslt-provider/                  @ROCm/dnn-providers-core
 /dnn-providers/hip-kernel-provider/                 @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
+# Shared rocke root (docs, build glue, tools) -- must precede the platform/style/library
+# lines below, since CODEOWNERS is last-match-wins and this would otherwise swallow them.
+/dnn-providers/hip-kernel-provider/rocke/           @ROCm/rocke-platform @ROCm/rocke-lib @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
 /dnn-providers/hip-kernel-provider/rocke/platform/  @ROCm/rocke-platform @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
 /dnn-providers/hip-kernel-provider/rocke/style/     @ROCm/rocke-platform @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
 /dnn-providers/hip-kernel-provider/rocke/library/   @ROCm/rocke-lib @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers

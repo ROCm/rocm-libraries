@@ -22,19 +22,11 @@ cache beat a warm network one by more than 10x, so on a network home the cache c
 more than it saves. `AMD_COMGR_CACHE=0` disables caching outright, which is a
 diagnostic rather than a fix.
 
-Two knobs belong to the packer itself:
+One knob belongs to the packer itself:
 
 | Variable | Effect |
 |---|---|
 | `HKP_PACK_JOBS` | Prewarm worker count. Defaults to `min(32, ncpu)`; `1` forces the serial path for a clean traceback. |
-| `HKP_PACK_TIMING` | Set to `1` to print the per-phase split (`prewarm` / `walk` / `assemble`) instead of one opaque total. |
-
-`HKP_PACK_TIMING=1` is the way to find out where a slow pack is actually spending
-time before reaching for either knob:
-
-```
-hkp_pack[timing] gfx942 TOTAL=41.33s prewarm=40.45s walk=0.47s assemble=0.41s other=0.00s serial=2%
-```
 
 ## Running the tests
 

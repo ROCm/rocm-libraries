@@ -128,12 +128,20 @@ distorts the very timings you are about to measure.
 ## 3. Performance
 
 `tools/sweep.sh` runs the timed phases. It takes a config —
-`configs/sweep-isolation.env.example` is the worked one — rather than being forked per
-comparison:
+`configs/sweep-isolation.env.example` is the worked one, and
+`configs/gfx950_attention_dense.sweep.env` is the gfx950 attention_dense one — rather
+than being forked per comparison:
 
 ```bash
 SWEEP_CONFIG=my-sweep.env $GEN/tools/sweep.sh
 ```
+
+**`EXCLUDE_TENSORS` must name the exact backward-gradient tensor set
+`tools/mine_shapes.py` filters on** (`BACKWARD_GRADIENT_TENSOR_NAMES`), never a
+hand-copied subset — `tests/test_sweep_configs.py` checks every committed
+`configs/*.sweep.env` and `configs/*.env.example` against that one source of truth,
+so a value that drifts from it fails the test suite rather than silently gating
+nothing on a real backward graph.
 
 Read its header before changing anything. Every structural choice exists because
 **clocks usually cannot be pinned on a shared machine**, so the harness controls for

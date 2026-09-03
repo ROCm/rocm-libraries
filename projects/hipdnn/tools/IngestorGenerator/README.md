@@ -162,16 +162,41 @@ build.
 Exit 0 means: every root loaded with zero ERROR diagnostics, every `--expect-engine`
 name is present, and (if given) every `--native-source` check is clean. **This proves
 parse, cross-reference, symbol resolution, and construction -- nothing about
-`graph_match`/matcher correctness**, which needs a real graph and a real device. See
-`Knowledge/hipdnn/ingestor/06-gotchas.md` ("Enumeration proves much less than it
-looks") for the PR #10839 cautionary tale: an engine enumerated cleanly on gfx90a and
-failed all 27 cases on gfx942 because the packs happened to arch-prune before the
+`graph_match`/matcher correctness**, which needs a real graph and a real device.
+Enumeration proves much less than it looks: PR #10839's engine enumerated cleanly on
+gfx90a and failed all 27 cases on gfx942, because the packs arch-pruned before the
 matcher ever ran on gfx90a.
 
 `tests/test_round_trip.py` checks this in as a permanent (though `-m round_trip`
 opt-in, since it depends on a validator binary this repo does not build by default)
 regression: point `HIPDNN_VALIDATE_DESCRIPTORS` at your build's binary and run
 `.venv/bin/python -m pytest -m round_trip`.
+
+## The pipeline tools
+
+`generate.py` emits a bundle; these audit it. All are host-only and need no GPU. Each
+reads the same per-kernel `configs/<slug>.profile.yaml`, so they cannot disagree about
+which kernel they are discussing.
+
+| Tool | Answers | Invocation |
+|---|---|---|
+| `tools/verify_variant_sets.py` | Do the descriptors nest, are their loader tuples unique, and does each one's metadata agree with the spec its binary was built from? | `verify_variant_sets.py [--profile P] LABEL ROOT...` |
+| `tools/variant_reachability.py` | Can any shape in the corpus actually select each variant, or is one dead weight? | `variant_reachability.py --kdp K --shapes S [--profile P]` |
+| `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? | `launch_surface.py PROFILE --check [--allow-unguarded]` |
+| `tools/coverage_gate.py` | Three rungs: descriptors well-formed, engine loads, engine serves. Rung 3 needs a device and reports NOT RUN without one. | `coverage_gate.py --tree T [--profile P] [--validator V]` |
+| `tools/knob_sweep.py` | Which knob arms are worth measuring, isolation first then pairwise. | `knob_sweep.py --profile P --shapes S [--plan]` |
+| `tools/dispatch_parity.py` | Do the emitted descriptors match what the kernel's real dispatcher resolves? | see `--help` |
+| `tools/reconcile_applicability.py` | Does this engine decline anything the reference library serves? | `reconcile_applicability.py --profile P --shapes S [--declines D]` |
+| `tools/mine_shapes.py` | Build the shape corpus, refusing categoricals it does not recognise. | see `--help` |
+
+A green tool proves only what it asked. `coverage_gate.py` is explicit about this: it
+reports rung 3 as NOT RUN rather than passing, because nothing host-side can prove the
+engine served a graph.
+
+`tools/sweep.sh` drives a measurement sweep and requires `EXCLUDE_TENSORS` with no
+default -- the tensor names marking graphs that are unservable and dangerous for your op
+(for attention, backward graphs, marked by their gradient tensors). An op with no such
+class must say `EXCLUDE_TENSORS=none` explicitly. See `tools/README-sweeps.md`.
 
 ## Configs
 

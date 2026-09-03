@@ -107,7 +107,7 @@ If a requested component has no matching target, say that it was not present in 
   `libamd_comgr` lowering, whose on-disk cache defaults to `~/.cache/comgr`. On a machine
   whose home is a network filesystem that makes every lookup a network round trip and slows
   packing by an order of magnitude. Export `AMD_COMGR_CACHE_DIR` to a RAM disk or local disk
-  (e.g. `/tmp/comgr-cache`); `HKP_PACK_TIMING=1` prints the packer's per-phase split.
+  (e.g. `/tmp/comgr-cache`).
 - `scripts/cmake_run.py`, `scripts/discover_test_targets.py`, `scripts/windows_rocm_setup.py`, and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently.
 - Windows DLL loading is handled by `cmake_run.py`, which sets PATH in Python's subprocess environment before launching CMake or test binaries.
 - Windows comgr staging: before launching any target or binary on Windows, `cmake_run.py` stages the wheel's `amd_comgr.dll` into `<build-dir>/bin` (via `comgr_stage.py`) so MIOpen's runtime JIT does not load the driver's stale `System32` comgr. This happens on every Windows run, not just for a specific kernel path; GCN-assembly Winograd solvers are the common failure (`[BuildAsm] comgr status = ERROR` / `unknown emulation: no-xnack`), but the version mismatch is not limited to them. This needs `--rocm-bin` to be passed. The copy is skipped when the staged comgr already matches the wheel's PE version, so it adds no cost on repeat runs. Disable with `--no-stage-comgr` if ever needed. To confirm which comgr loaded, run a test with `MIOPEN_LOG_LEVEL=7 MIOPEN_ENABLE_LOGGING=1` and grep for `COMgr v.` (a low version indicates the stale System32 copy; the wheel's is newer).

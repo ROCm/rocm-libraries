@@ -3,11 +3,15 @@
 ## declaration edit (ingestor_packs.hpp.txt) are required -- see that fragment's
 ## header for why.
 ##
-## The THIRD field is the pack's kpack module-cache reset, called by
-## resetIngestorModuleCachesForTesting(). It is driven off this same table so a pack
-## that gains a cache cannot be left out of the reset sweep:
-##   * packaged/kpack kernels  -> &reset<Name>ModuleCache (declare it in the .hpp too,
-##                                 and define it OUTSIDE the pack's anonymous namespace)
-##   * embedded_source kernels -> nullptr (no archive, nothing to drop)
+## The struct is (label, registerSymbols, ownsModuleCache, resetModuleCache).
+## ownsModuleCache and resetModuleCache must agree -- TestIngestorPacksModuleCacheOwnership
+## asserts `ownsModuleCache == (resetModuleCache != nullptr)` for every pack, so the two
+## fields below are always emitted as a pair:
+##   * packaged/kpack kernels  -> true, &reset<Name>ModuleCache (declare it in the .hpp
+##                                 too, and define it OUTSIDE the pack's anonymous
+##                                 namespace)
+##   * embedded_source kernels -> false, nullptr (no archive, nothing to drop)
+## This generator always emits embedded_source shape; hand-edit both fields together
+## if the generated pack turns out to need a kpack cache.
 ## Check the IngestorPack struct before splicing: this row must match it field for field.
-        {"{{ config.engine.name }}", &{{ config.register_symbols_fn }}, nullptr},
+        {"{{ config.engine.name }}", &{{ config.register_symbols_fn }}, false, nullptr},

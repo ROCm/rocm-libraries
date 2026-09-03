@@ -92,6 +92,22 @@ class Profile:
         self.provider_root = raw.get("provider_root")
         self.vocabulary = dict(raw.get("vocabulary") or {})
         self.policies = dict(raw.get("policies") or {})
+        # ABSENT and EXPLICITLY EMPTY are different claims, and collapsing them is
+        # the same mistake this gate exists to catch one layer down. A profile with
+        # no `policies:` key has not been asked the question -- the check is narrowed
+        # and says so. A profile that writes `policies: {}` ASSERTS the kernel has no
+        # policy-owned knob, which is a fact about the kernel (gfx950 attention_dense
+        # takes the shared spec; every tri-state on its gfx942 sibling belongs to a
+        # private subclass that does not exist here). That assertion is checkable and
+        # is checked: an empty declaration with a policy-shaped field present would
+        # still fail below.
+        self.policies_declared = "policies" in raw
+        # Same ABSENT-vs-EXPLICIT distinction as `policies_declared`, and needed for
+        # the same reason: (4a) below must tell "no vocabulary block exists, so an
+        # undeclared string field is genuinely ambiguous" from "a vocabulary block
+        # exists and simply never mentions this field", which is not ambiguous -- the
+        # author had the exact place to declare a translation and did not.
+        self.vocabulary_declared = "vocabulary" in raw
         self._resolvers: dict = {}
 
     @classmethod
@@ -367,7 +383,120 @@ def check(label: str, root: str, profile: Profile):
     else:
         unchecked.append("vocabulary (no 'vocabulary' in profile)")
 
-    # (4) Metadata matches the binary it names, for every policy-owned knob.
+    # (4) Metadata matches the binary it names.
+    #
+    # TWO KINDS OF FIELD, and only one of them needs kernel knowledge.
+    #
+    # (4a) PLAIN FIELDS: a metadata key that is ALSO a spec key. The spec is what the
+    # builder compiles and the metadata is what the matcher compares, so if a
+    # descriptor carries both they must agree -- no policy, no profile, no kernel
+    # knowledge required. This is a property of the descriptor against ITSELF.
+    #
+    # This check used to not exist. Property (4) iterated `profile.policies` and
+    # nothing else, so a kernel with no policy-owned knobs -- which `policies: {}`
+    # correctly declares for gfx950 -- had property (4) checking NOTHING while the
+    # gate still printed a clean pass. A review demonstrated the consequence by
+    # mutation: flipping a descriptor's metadata.ragged to 0 while its spec still
+    # said True passed the gate 84/84 OK. That is the exact "dangerous direction" the
+    # shipping commit names -- an aligned-labelled descriptor whose binary is
+    # boundary-padded -- caught downstream by the C++ matcher unit tests but invisible
+    # at the STATIC rung, which coverage_gate.py's own docstring insists is a separate
+    # rung precisely because each catches what the other cannot. The same hole
+    # swallowed a head_size mismatch and, once they existed, varlen/paged both ways.
+    # ANY field with a declared vocabulary is exempt from the plain comparison, not
+    # just the dict-form ones. A vocabulary declaration means the two layers spell the
+    # value DIFFERENTLY ON PURPOSE -- builder "bf16", matcher "BF16" -- so comparing
+    # them raw reports a mislabelling that is only a translation. The dict form maps
+    # the translation and the list form declares the matcher's legal set; both say
+    # "this field is translated". Property (5) checks the metadata side against the
+    # legal set, which is the check that actually applies to a translated field.
+    translated_fields = set(profile.vocabulary)
+    vocabulary_maps = {
+        field: mapping
+        for field, mapping in profile.vocabulary.items()
+        if isinstance(mapping, dict)
+    }
+
+    def _comparable(value):
+        """One representation for values the two layers spell differently.
+
+        A spec carries Python `True`; metadata carries `1`. Normalising here rather
+        than special-casing bool keeps the check from reporting a mislabelling that is
+        only a spelling difference.
+        """
+        if isinstance(value, bool):
+            return str(int(value))
+        return str(value)
+
+    plain_mismatches = []
+    undeclared_string_fields = set()
+    for descriptor in descriptors:
+        spec = descriptor["kernel_source"].get("spec") or {}
+        if not spec:
+            continue
+        for field, meta_value in descriptor["metadata"].items():
+            if field not in spec or field in profile.policies:
+                continue
+            spec_value = spec[field]
+            if field in translated_fields:
+                # Translated on purpose. Where the profile gives the MAPPING, apply it
+                # and still compare -- that catches a descriptor whose metadata names
+                # a different dtype than its spec builds. Where it declares only the
+                # legal set, there is nothing to translate WITH, so property (5) owns
+                # the field entirely and this comparison must not guess.
+                if field not in vocabulary_maps:
+                    continue
+                if isinstance(spec_value, str):
+                    spec_value = vocabulary_maps[field].get(spec_value, spec_value)
+            elif isinstance(spec_value, str) or isinstance(meta_value, str):
+                # An UNDECLARED string field: no `vocabulary:` entry names it. Whether
+                # that means "same spelling both layers" or "translated, just not
+                # written down" depends on whether the profile has a vocabulary
+                # section AT ALL.
+                #
+                # No section at all: there is nowhere an author COULD have declared a
+                # translation, so an undeclared string is genuinely ambiguous -- the
+                # common, correct `spec: "bf16"` / `metadata: "BF16"` pairing must not
+                # become a false failure. Recorded rather than silently dropped: a
+                # field nobody can judge is a fact the author should see, not a check
+                # that quietly asked nothing.
+                #
+                # A section exists and just never mentions this field: the author had
+                # the exact place to say "this field is translated" and did not, so
+                # there is nothing left to guess -- compare it raw like any plain
+                # field. This is the branch that closes the escape a review found on
+                # the real gfx950 tree: `persist_decode` written only in
+                # kernel_source.spec, with a vocabulary section present that declares
+                # `dtype` and says nothing about `persist_decode`, let 84 descriptors
+                # carry a contradicting `metadata.persist_decode` and still pass.
+                if not profile.vocabulary_declared:
+                    undeclared_string_fields.add(field)
+                    continue
+            if _comparable(spec_value) != _comparable(meta_value):
+                plain_mismatches.append(
+                    f"{descriptor['name']}: {field} spec={spec_value!r} "
+                    f"metadata={meta_value!r}"
+                )
+    if plain_mismatches:
+        failures.append(
+            f"{len(plain_mismatches)} descriptor field(s) whose metadata contradicts "
+            f"the spec their binary is built from, e.g. {plain_mismatches[0]}"
+        )
+    if undeclared_string_fields:
+        # A field nobody can judge is a liability the author should SEE, not a check
+        # that quietly asked nothing -- named rather than folded into an unqualified
+        # pass. Only reachable with no `vocabulary:` block in the profile at all: once
+        # one exists, an unmentioned field is compared raw above instead of landing
+        # here.
+        unchecked.append(
+            "metadata-matches-binary for UNDECLARED STRING field(s) "
+            f"{', '.join(sorted(undeclared_string_fields))} (no 'vocabulary' in "
+            f"profile to judge them against)"
+        )
+
+    # (4b) POLICY-OWNED KNOBS: absent from the spec means the kernel's own policy
+    # decided at build time, so the binary is definite but only the policy can say
+    # what it chose. This is the half that needs kernel knowledge.
     if profile.policies:
         for knob in profile.policies:
             mislabelled = []
@@ -384,8 +513,16 @@ def check(label: str, root: str, profile: Profile):
                     f"{len(mislabelled)} descriptors mislabel their binary on "
                     f"'{knob}', e.g. {mislabelled[0]}"
                 )
+    elif profile.policies_declared:
+        # `policies: {}` -- the author asserts this kernel has no policy-owned knob.
+        # Nothing for (4b) to compare, and nothing MISSING either. This no longer
+        # means property (4) as a whole checks nothing: (4a) above runs
+        # unconditionally and needs no profile at all.
+        pass
     else:
-        unchecked.append("metadata-matches-binary (no 'policies' in profile)")
+        unchecked.append(
+            "metadata-matches-binary for POLICY knobs (no 'policies' in profile)"
+        )
 
     binaries = {_binary_key(k, profile) for k in descriptors}
     verdict = "OK" if not failures else "FAIL"

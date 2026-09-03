@@ -443,6 +443,7 @@ ROCFFT_EXPORT rocfft_status
  *
  *  ::rocfft_execution_info_set_store_callback_data can optionally be
  *  used to set the `cbdata` value received by the callback function.
+ *  rocFFT will pass nullptr for `cbdata` by default.
  *
  *  Currently, `shared_mem_bytes` must be 0.  Callbacks are not
  *  supported on transforms that use planar formats for either input
@@ -807,9 +808,9 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_store_callback(rocfft_exec
  *  used at plan creation.
  *
  *  The provided data pointers replace any previously-specified
- *  store callback data for this execution info handle.  `cb_data` may be
- *  nullptr, to indicate that all store callbacks should receive
- *  nullptr for their `cbdata` parameters.
+ *  store callback data for this execution info handle.  `cb_data` may
+ *  be nullptr along with a count of zero, to indicate that all store
+ *  callbacks should receive nullptr for their `cbdata` parameters.
  *
  *  @param[in] info execution info handle
  *  @param[in] cb_data callback function data, passed to the JIT-compiled store callback when it is called

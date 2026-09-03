@@ -767,6 +767,18 @@ cross-product has to happen where the specs are. The tool prints the arithmetic
 (`N servable shapes x K combinations`) so the descriptor count is a number you read
 rather than one you discover at pack time.
 
+**A pinned knob is written into the SPEC as well as the metadata, and it has to be.**
+The spec is what the builder compiles; the metadata is only what the matcher compares.
+Pinning one without the other emits two catalog entries over ONE binary — the arms are
+the same kernel, the sweep measures 1.000x, and the knob gets recorded as "no effect"
+when its other side was never compiled. This is the same three-layer trap as any
+tri-state, in the one place the tool rather than the author controls it, and it is why
+`--knobs` now refuses a name the builder's spec class does not accept: such a field can
+only ever reach the catalog, never the binary. If you get that refusal, either the name
+is wrong or the field is not a build-time knob of this kernel — it is never something to
+work around. Declare the builder's own spec class in the profile's `arch_spec:` block,
+or the tool has nothing to check the name against.
+
 **GATE, three parts, all of them hard:**
 
 1. **Descriptor count is capped in the low thousands.** Past that the pack time, the
@@ -919,8 +931,8 @@ and `pointwise/` engines. That is the release-and-bundling location.
 under its source root and hard-fails on any `kind` it does not produce; the engine tree's
 existing descriptors are `kind: embedded_source`, which is not in that set. Point
 `PRODUCTION_SOURCE_ROOT` at the engine tree and the pack dies on `conv_fwd` before it ever
-reaches yours. Tracked as **ALMIOPEN-2549**; when that lands, this step becomes "author in
-the engine tree" and the copy disappears.
+reaches yours. When `hkp_pack` learns the engine tree's dialect, this step becomes "author
+in the engine tree" and the copy disappears.
 
 Until then `$SRC_ROOT` resolves — on a CI-shaped build — to
 `$PROVIDER/descriptor-packaging/examples/descriptors`. **That tree is a pinned test
@@ -929,7 +941,7 @@ asserts its directory set *exactly*. Adding your integration means editing that 
 
 Do it, but understand what you are doing: that test exists to stop the example tree
 growing real integrations, and you are widening a guardrail rather than passing it. Note
-it at step 9 as a known deviation and cite the ticket. If you find yourself editing a test
+it at step 9 as a known deviation. If you find yourself editing a test
 to make room for your work and it feels like an obstacle, that is the signal to stop and
 ask whether you are in the right tree — the answer here is no, and it is a packager gap
 rather than your mistake.
@@ -976,25 +988,8 @@ PYTHONPATH=$PROVIDER/descriptor-packaging/python:$PROVIDER/rocke/library:$PROVID
 ```
 Produces:      a packed tree that loads, plus a clean desk check
 Gate:          5a count printed; 5b skipped=False; 5c success:true, 0 ERROR; 5d clean
-Typical time:  30 minutes, plus pack time (comgr lowering dominates; see below)
+Typical time:  30 minutes, plus pack time (comgr can take minutes per arch)
 ```
-
-**Before running 5b, put the comgr cache on local storage.** comgr caches its
-compilation results at `~/.cache/comgr` by default, and on a machine whose home is a
-network filesystem every lookup is a network round trip — packing a few thousand
-kernels goes from tens of seconds to tens of minutes. This is the difference between
-"pack time" being a coffee break and being the whole afternoon:
-
-```bash
-export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache   # RAM disk or local disk
-export HKP_PACK_TIMING=1                      # print the per-phase split
-```
-
-Measured on a 2,711-kernel set at 32 workers: 13 s warm on tmpfs, 47 s cold on tmpfs,
-597 s warm on a network home. A *cold* local cache beats a *warm* networked one by
-more than 10x. With `HKP_PACK_TIMING=1` the packer reports where the time went
-(`prewarm` is the parallel comgr lowering, `walk` and `assemble` are serial), so a
-slow pack is diagnosable instead of merely slow.
 
 Each proves something different. Run all three.
 

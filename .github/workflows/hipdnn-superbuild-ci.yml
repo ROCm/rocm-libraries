@@ -181,19 +181,13 @@ jobs:
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
             -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP=ON \
-            -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE=ON \
             -DENABLE_CLANG_TIDY=OFF \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PATH/Scripts/python.exe" \
             -DPython3_EXECUTABLE="$VENV_PATH/Scripts/python.exe"
 
-      # See the Linux job: the packer's per-phase split, which one ninja edge
-      # cannot convey. Enabled here too so the Windows lane reports the cost of
-      # its (currently kernel-free) pack rather than leaving it unmeasured.
       - name: Build
-        env:
-          HKP_PACK_TIMING: 1
         run: cmake --build build
 
       # Packing is skipped with a STATUS message, so a resolution regression
@@ -201,14 +195,15 @@ jobs:
       # producer is asserted here: its arch list is hardcoded in its own
       # CMakeLists, so it packs on every lane.
       #
-      # The hkp PRODUCT root is deliberately NOT asserted on Windows. It is
-      # wired (above) so the pack path is exercised rather than dormant, but
-      # every shipped KDP today declares arch gfx942 and this lane builds
-      # gfx1151, so all of them prune and the packer reports "no kernels for
-      # gfx1151, skipping" without emitting an archive. That is the correct
-      # outcome, not a failure -- so requiring a product kpack here would fail
-      # the lane for doing the right thing. The Linux job asserts it, because
-      # there the arch matches and an empty tree really is a defect.
+      # The hkp PRODUCT root is wired here for the HIP producer only; rocKE
+      # production packing stays OFF on this lane. rocKE lowers through
+      # libamd_comgr resolved by ctypes, and only the Linux job locates that
+      # library (HKP_ROCKE_COMGR_LIB, from the _rocm_sdk_core wheel), so
+      # PRODUCTION_ENABLE_ROCKE here fails configure outright. Nothing is lost:
+      # every shipped KDP declares arch gfx942 and this lane builds gfx1151, so
+      # all of them prune and the packer would emit no archive either way. The
+      # Linux job asserts the product tree, because there the arch matches and
+      # an empty tree really is a defect.
       - name: Verify kpack archives were produced
         shell: bash
         run: |
@@ -435,14 +430,7 @@ jobs:
             -DPython_EXECUTABLE="$VENV_PATH/bin/python" \
             -DPython3_EXECUTABLE="$VENV_PATH/bin/python"
 
-      # HKP_PACK_TIMING makes the packer print its per-phase split (parallel
-      # rocke prewarm vs serial descriptor walk vs kpack assembly). Ninja reports
-      # one edge for the whole pack, so without this the log can say how long
-      # packing took but never where the time went -- and the interleaved edges
-      # around it make even the total an upper bound.
       - name: Build
-        env:
-          HKP_PACK_TIMING: 1
         run: cmake --build build
 
       # Packing is skipped with a STATUS message, so a resolution regression
@@ -471,11 +459,15 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
 
-      - name: Validate golden data against CPU ref (nightly)
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        env:
-          HIPDNN_TEST_VERIFICATION_MODE: golden-check
-        run: ctest --test-dir build --output-on-failure -L external_integration_test
+      # Golden-data validation used to live here as a schedule-gated re-run of the
+      # external integration targets with HIPDNN_TEST_VERIFICATION_MODE=golden-check.
+      # That spelling is retired: it is now the hipdnn_golden_data_tests binary,
+      # registered as an ordinary ctest target, so the "Run tests" step above already
+      # covers it -- once per run rather than once per provider, and with no env var.
+      #
+      # Note it validates nothing until the golden .bin blobs are pulled: this
+      # workflow sparse-checks-out .dvc but never runs `dvc pull`, so every bundle
+      # currently registers as "without golden data".
 
       - name: Patch ROCm SDK with superbuild outputs
         run: cmake --install build --prefix "$ROCM_SDK_PATH"

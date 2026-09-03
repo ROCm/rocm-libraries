@@ -13,17 +13,21 @@ const std::vector<IngestorPack>& ingestorPacks()
     // Function-local static: entries are plain function pointers, so this cannot fail
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
-        {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
+        {"hipkernel:Pointwise", &registerPointwiseSymbols, true, &resetPointwiseModuleCache},
         // No kpack archive: its kernels are embedded_source, so there is no module to
         // drop and nothing for a reset to do.
-        {"hipkernel:ConvFwd", &registerConvFwdSymbols, nullptr},
+        {"hipkernel:ConvFwd", &registerConvFwdSymbols, false, nullptr},
         // Packaged/kpack: its kernels are lowered rocKE builders resolved out of the
         // per-arch .kpack archive, so it owns a module cache the reset sweep must
-        // reach. The generator's fragment emitted `nullptr` in this slot; that would
-        // have left this pack out of resetIngestorModuleCachesForTesting() while its
-        // own fragment header states the rule that says otherwise.
+        // reach. TestIngestorPacksModuleCacheOwnership asserts `ownsModuleCache` and
+        // `resetModuleCache` agree for every entry in this table, so a pack that sets
+        // `ownsModuleCache = true` here without wiring the reset pointer -- the shape
+        // the generator's fragment used to emit, `nullptr` in this slot -- now fails
+        // that test by name instead of leaving this pack silently out of
+        // resetIngestorModuleCachesForTesting().
         {"hipkernel:Gfx942AttentionDense",
          &registerGfx942AttentionDenseSymbols,
+         true,
          &resetGfx942AttentionDenseModuleCache},
     };
     return s_packs;
