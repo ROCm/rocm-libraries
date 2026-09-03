@@ -22,7 +22,11 @@ from dispatch.gdn import (
     gdn_sweep_space,
 )
 from dispatch.gdn.gfx950 import ARCH, TUNED_SPEC_IDS, tile_for_batch
-from kernels.gfx950.gdn_decode import gdn_decode_grid, is_valid_spec
+from kernels.gfx950.gdn_decode import (
+    gdn_decode_grid,
+    gdn_decode_signature,
+    is_valid_spec,
+)
 
 _TILE = lambda s: (s.num_warps, s.warp_threads_k, s.blocks_per_v_dim)  # noqa: E731
 
@@ -159,6 +163,37 @@ class TestSweepSpace(unittest.TestCase):
 
     def test_sweep_space_of_a_bad_request_is_empty(self):
         self.assertEqual(gdn_sweep_space(_req(8, num_v_heads=33)), ())
+
+
+class TestDispatchResultContract(unittest.TestCase):
+    """The result must be sufficient to drive a launch on its own.
+
+    A caller should not need to reach back into the kernel module for the
+    signature or the grid; if the result disagrees with the spec it carries,
+    kernel arguments would be packed against one layout and the kernel compiled
+    against another.
+    """
+
+    def test_build_returns_the_kernel_the_spec_names(self):
+        for batch in (1, 16, 64, 256):
+            with self.subTest(batch=batch):
+                result = dispatch_gdn_decode(_req(batch))
+                kernel = result.build()
+                self.assertEqual(kernel.name, result.spec.kernel_name())
+
+    def test_signature_matches_the_spec(self):
+        for batch in (1, 16, 64, 256):
+            with self.subTest(batch=batch):
+                result = dispatch_gdn_decode(_req(batch))
+                self.assertEqual(
+                    tuple(result.signature),
+                    tuple(gdn_decode_signature(result.spec)),
+                )
+
+    def test_compile_key_names_arch_and_abi(self):
+        kid = dispatch_gdn_decode(_req(16)).kernel_id
+        self.assertIn(ARCH, kid.compile_key)
+        self.assertIn("rocke-gdn-decode", kid.compile_key)
 
 
 if __name__ == "__main__":

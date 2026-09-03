@@ -143,3 +143,44 @@ def test_state_dtype_variant_is_correct(harness):
     assert ok, why
     out_err, state_err = harness["check"](spec, 8)
     assert max(out_err, state_err) <= harness["TOL"]
+
+
+@requires_gfx950
+def test_end_to_end_through_the_dispatch_result(harness):
+    """Drive a launch from the dispatch result alone, as a caller would.
+
+    Every other lane reaches into the kernel module for the signature and grid.
+    This one uses only what ``dispatch_gdn_decode`` hands back -- the built
+    kernel, its signature, its grid and block -- so a disagreement between the
+    dispatcher's launch contract and the kernel it selected shows up as wrong
+    numbers rather than passing unnoticed.
+    """
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+
+    batch = 16
+    result = dispatch_gdn_decode(GdnDecodeRequest(batch=batch, arch=ARCH))
+
+    artifact = compile_kernel(result.build(), arch=ARCH)
+    launcher = KernelLauncher(
+        hsaco=artifact.hsaco,
+        kernel_name=artifact.kernel_name,
+        signature=result.signature,
+    )
+
+    inp = harness["make_inputs"](result.spec, batch)
+    ref_out, ref_state = harness["ref_fp32"](result.spec, inp)
+    values, _ = harness["prepare"](result.spec, inp, batch)
+    cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
+    with no_fence():
+        launcher(values, config=cfg)
+    torch.cuda.synchronize()
+
+    written = inp["write_indices"].long()
+    out_err = (values["out"].float() - ref_out).abs().max().item()
+    state_err = (values["state"].float()[written] - ref_state).abs().max().item()
+    assert max(out_err, state_err) <= harness["TOL"], (
+        f"dispatch-driven launch disagreed with the reference: "
+        f"out={out_err:.3e} state={state_err:.3e}"
+    )
