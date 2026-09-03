@@ -133,6 +133,27 @@ TEST(TestSupportClaimWriter, EmptyObservationsLeaveExistingSidecarUntouched)
 }
 
 // ---------------------------------------------------------------------------
+// Net-new sidecar with only unsupported observations is not created
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimWriter, SingleGraphNetNewEmptyClaimsSkipped)
+{
+    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const auto bundlePath = dir.path() / "Small.json";
+
+    const std::vector<SupportObservation> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", false),
+    };
+
+    const auto summary = writeObservedSupportClaims(observations);
+    EXPECT_EQ(summary.filesSkipped, 1u);
+    EXPECT_EQ(summary.filesWritten, 0u);
+
+    const auto sidecarPath = dir.path() / "Small.support.json";
+    EXPECT_FALSE(std::filesystem::exists(sidecarPath));
+}
+
+// ---------------------------------------------------------------------------
 // Resolved decline erases platform, collapsing empty arch and engine
 // ---------------------------------------------------------------------------
 
@@ -258,6 +279,28 @@ TEST(TestSupportClaimWriter, SweepGroupsCasesWithIdenticalSupport)
     const auto& engineGroups = json["claims"]["MIOPEN_ENGINE"];
     ASSERT_EQ(engineGroups.size(), 1u);
     EXPECT_EQ(engineGroups[0]["cases"].size(), 2u);
+}
+
+// ---------------------------------------------------------------------------
+// Sweep: net-new sidecar with only unsupported observations is not created
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimWriter, SweepNetNewEmptyClaimsSkipped)
+{
+    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const auto sweepPath = dir.path() / "sweep.json";
+
+    const std::vector<SupportObservation> observations = {
+        sweepCaseObservation(sweepPath, "case_a", "MIOPEN_ENGINE", "gfx942", "linux", false),
+        sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx942", "linux", false),
+    };
+
+    const auto summary = writeObservedSupportClaims(observations);
+    EXPECT_EQ(summary.filesSkipped, 1u);
+    EXPECT_EQ(summary.filesWritten, 0u);
+
+    const auto sidecarPath = dir.path() / "support.json";
+    EXPECT_FALSE(std::filesystem::exists(sidecarPath));
 }
 
 // ---------------------------------------------------------------------------

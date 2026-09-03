@@ -173,18 +173,16 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
         target.observations.push_back(observation);
     }
 
-    // A sidecar with no observations is never a key here, so the RFC §9.2
-    // empty-write guard needs no explicit check: an absent observation set
-    // cannot reach the file, let alone null a claim in it.
     for(const auto& [sidecarPath, target] : targetsBySidecarPath)
     {
         const auto& fileObservations = target.observations;
+        const bool fileExisted = std::filesystem::exists(sidecarPath);
 
         if(target.isSweep)
         {
             SweepSupportClaims existing;
             existing.version = 1;
-            if(std::filesystem::exists(sidecarPath))
+            if(fileExisted)
             {
                 try
                 {
@@ -245,6 +243,13 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
             }
 
             const auto regrouped = regroupSweepClaims(flat, existing.version);
+
+            if(!fileExisted && regrouped.claims.empty())
+            {
+                ++summary.filesSkipped;
+                continue;
+            }
+
             const auto jsonContent = dumpCanonical(toJson(regrouped));
             writeIfChanged(sidecarPath, jsonContent, summary);
         }
@@ -252,7 +257,7 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
         {
             SupportClaims existing;
             existing.version = 1;
-            if(std::filesystem::exists(sidecarPath))
+            if(fileExisted)
             {
                 std::ifstream existingFile(sidecarPath);
                 if(existingFile)
@@ -282,6 +287,12 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& 
             {
                 overlaySingleGraphCell(
                     existing, obs.engineName, obs.arch, obs.platform, obs.engineIsSupported);
+            }
+
+            if(!fileExisted && existing.claims.empty())
+            {
+                ++summary.filesSkipped;
+                continue;
             }
 
             const auto jsonContent = dumpCanonical(toJson(existing));
