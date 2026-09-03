@@ -1,0 +1,74 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
+#
+# While XDL and CSMACC are the only units with work outstanding they complete in
+# issue order, so a CSMACC producer's wait counts everything issued after it on
+# either unit -- a weaker wait than its own unit's followers alone.
+
+#===----------------------------------------------------------------------===#
+# One CSMACC and one matrix op follow the producer. Its own unit sees 1 follower;
+# the shared order sees 2.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @shared_order_counts_both_units
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 2
+# CHECK: ds_load_b32
+
+st.func @shared_order_counts_both_units() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v190 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Interleaved vadd/wmma: 3 ops follow the producer, all counted.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @shared_order_interleaved
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 3
+# CHECK: ds_load_b32
+
+st.func @shared_order_interleaved() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v190 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A matrix op issued BEFORE the producer is not a follower and must not widen the
+# count -- it may complete out of order with the producer.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @shared_order_ignores_earlier_matrix_op
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK: ds_load_b32
+
+st.func @shared_order_ignores_earlier_matrix_op() {
+^entry:
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v190 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A TRANS op issued after the producer breaks the completion order, so the count
+# falls back to the producer's own unit.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @shared_order_declined_when_other_unit_issues
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK: ds_load_b32
+
+st.func @shared_order_declined_when_other_unit_issues() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v191 = "st.v_rcp_f32"(v192) { issueCycles = 1, latencyCycles = 10 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v190 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}

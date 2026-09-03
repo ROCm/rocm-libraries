@@ -1,0 +1,22 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
+
+# CHECK-LABEL: @csmacc_live_across_join
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: ds_load_b32
+
+# A CSMACC producer (v0) live across a join. One path issues 2 matrix ops after it,
+# the other issues none. The merged state must reflect the path with FEWER followers,
+# so the wait must be the stronger one -- va_vdst(0), not 2.
+st.func @csmacc_live_across_join() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_cbranch_scc1"("label_join", SCC0)
+  Successors: ^bb_many, ^label_join
+^bb_many:
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  Successors: ^label_join
+^label_join:
+  v190 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
