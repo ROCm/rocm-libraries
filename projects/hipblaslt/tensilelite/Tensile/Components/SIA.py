@@ -29,7 +29,6 @@ from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32, TensorLoadToLds
 
 from ..Common import roundUp, print2
-from ..Common.DecouplePgr import decoupledOneBlockBoth
 from ..Component import SIA
 
 from copy import deepcopy
@@ -76,7 +75,7 @@ class SIA3(SIA):
         if not writer.states.scheduleLocalWrite:
             noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter)
             writer.states.lwStartMfmaIndex = writer.states.lwEndMfmaIndex
-            if kernel["1LDSBuffer"] or kernel["DirectToLds"] or decoupledOneBlockBoth(kernel):
+            if kernel["1LDSBuffer"] or kernel["DirectToLds"]:
                 writer.states.sync1LdsMfmaIndex = max(writer.states.lwStartMfmaIndex - 1, 0)
         else:
             itemsLWToSched, numWritesToSched = prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=isNGLL)
@@ -621,12 +620,14 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             imod.add(writer.codes.gl2Prefetch)
     else:
         # put everything in the header (original behavior for PGR=0/1):
-        for tc in writer._dcpThickThinIssueOrder(kernel):
-            writer.codes.unrollLoopHeader.add(getattr(writer.codes, f"dtlsM0Update{tc}"))
-            writer.codes.unrollLoopHeader.add(getattr(writer.codes, f"globalRead{tc}"))
-            mx = "MXSA" if tc == "A" else "MXSB"
-            writer.codes.unrollLoopHeader.add(getattr(writer.codes, f"dtlsM0Update{mx}"))
-            writer.codes.unrollLoopHeader.add(getattr(writer.codes, f"globalRead{mx}"))
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadA)
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSA)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA)
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSB)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB)
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateB)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadB)
         writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata) if kernel["ProblemType"]["Sparse"] else None
         writer.codes.unrollLoopHeader.add(globalReadIncACode)
         writer.codes.unrollLoopHeader.add(globalReadIncBCode)
@@ -979,7 +980,7 @@ def assignLWSchedIndexSIA3(writer, kernel, numLocalWritesPerSched, localWriteEnd
     if writer.states.lwStartMfmaIndex < writer.states.grEndMfmaIndex:
           # adjust lwStartMfmaIndex for PGR1
           writer.states.lwStartMfmaIndex = writer.states.grEndMfmaIndex
-    if kernel["1LDSBuffer"] or kernel["DirectToLds"] or decoupledOneBlockBoth(kernel):
+    if kernel["1LDSBuffer"] or kernel["DirectToLds"]:
         writer.states.sync1LdsMfmaIndex = max(writer.states.lwStartMfmaIndex - 1, 0)
     startIter = writer.states.lwStartMfmaIndex//numMfmaPerIter
     assert startIter < localWriteEndIter+1 # startIter should be at or before the endIter
