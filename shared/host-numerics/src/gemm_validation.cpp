@@ -30,20 +30,11 @@ void remapComparisonLocations(ComparisonReport& result, const Tensor& observed,
 
 void runSelectedReference(const GemmInvocation& request, Tensor& selectedOutput,
                           GemmBackend backend) {
-    if (backend == GemmBackend::Automatic) {
-        const GemmSupportInfo blockedSupport = detail::queryBlockedGemmSupport(request);
-        if (blockedSupport && blockedSupport.preferredForAutomaticExecution)
-            return (void)detail::runBlockedGemmToSelectedOutput(request, selectedOutput);
-        backend = GemmBackend::Pointwise;
-    }
+    if (backend == GemmBackend::Automatic) backend = GemmBackend::Blocked;
 
     const GemmSupportInfo support = queryGemmSupport(request, backend);
     if (!support) throw std::invalid_argument(support.reason);
-
-    if (backend == GemmBackend::Blocked)
-        (void)detail::runBlockedGemmToSelectedOutput(request, selectedOutput);
-    else
-        (void)detail::runPointwiseGemmToSelectedOutput(request, selectedOutput);
+    (void)detail::runBlockedGemmToSelectedOutput(request, selectedOutput);
 }
 }  // namespace
 

@@ -1954,13 +1954,14 @@ class TensorAndGemmTests(unittest.TestCase):
             scale_b=hv.from_numpy(scale_b),
             bias=hv.from_numpy(bias[:, None]),
             output_scale=0.25,
-            backend=hv.GemmBackend.Pointwise,
+            backend=hv.GemmBackend.Blocked,
         )
         np.testing.assert_array_equal(hv.to_numpy(result), expected)
 
     def test_gemm_api_requires_explicit_c(self):
         self.assertFalse(hasattr(hv, "GemmOptions"))
         self.assertFalse(hasattr(hv, "GemmEpilogue"))
+        self.assertFalse(hasattr(hv.GemmBackend, "Pointwise"))
         self.assertFalse(hasattr(hv.GemmBackend, "Blas"))
         self.assertFalse(hasattr(hv.GemmBackend, "Mixed"))
 
@@ -2130,35 +2131,31 @@ class TensorAndGemmTests(unittest.TestCase):
         finite_c = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         finite_a = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         finite_b = np.asarray([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
-        for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
-            with self.subTest(backend=backend):
-                alpha_zero = hv.reference_gemm(
-                    hv.from_numpy(np.full((2, 2), np.nan, dtype=np.float32)),
-                    hv.from_numpy(np.full((2, 2), np.inf, dtype=np.float32)),
-                    hv.from_numpy(finite_c),
-                    hv.ScalarType.Float32,
-                    hv.ScalarType.Float32,
-                    alpha=0.0,
-                    beta=2.0,
-                    backend=backend,
-                )
-                np.testing.assert_array_equal(hv.to_numpy(alpha_zero), 2.0 * finite_c)
+        alpha_zero = hv.reference_gemm(
+            hv.from_numpy(np.full((2, 2), np.nan, dtype=np.float32)),
+            hv.from_numpy(np.full((2, 2), np.inf, dtype=np.float32)),
+            hv.from_numpy(finite_c),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            alpha=0.0,
+            beta=2.0,
+            backend=hv.GemmBackend.Blocked,
+        )
+        np.testing.assert_array_equal(hv.to_numpy(alpha_zero), 2.0 * finite_c)
 
-                beta_zero = hv.reference_gemm(
-                    hv.from_numpy(finite_a),
-                    hv.from_numpy(finite_b),
-                    hv.from_numpy(np.full((2, 2), np.inf, dtype=np.float32)),
-                    hv.ScalarType.Float32,
-                    hv.ScalarType.Float32,
-                    alpha=1.0,
-                    beta=0.0,
-                    backend=backend,
-                )
-                np.testing.assert_array_equal(
-                    hv.to_numpy(beta_zero), finite_a @ finite_b
-                )
+        beta_zero = hv.reference_gemm(
+            hv.from_numpy(finite_a),
+            hv.from_numpy(finite_b),
+            hv.from_numpy(np.full((2, 2), np.inf, dtype=np.float32)),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            alpha=1.0,
+            beta=0.0,
+            backend=hv.GemmBackend.Blocked,
+        )
+        np.testing.assert_array_equal(hv.to_numpy(beta_zero), finite_a @ finite_b)
 
-    def test_gemm_finalization_matches_numpy_on_both_backends(self):
+    def test_gemm_finalization_matches_numpy(self):
         a = np.asarray([[1.0, -2.0], [3.0, 4.0]], dtype=np.float32)
         b = np.asarray([[5.0, 6.0], [-7.0, 8.0]], dtype=np.float32)
         c = np.asarray([[2.0, -3.0], [4.0, 5.0]], dtype=np.float32)
@@ -2173,22 +2170,20 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         expected = np.float32(np.maximum(combined, np.float32(0.0)) * output_scale)
 
-        for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
-            with self.subTest(backend=backend):
-                observed = hv.reference_gemm(
-                    hv.from_numpy(a),
-                    hv.from_numpy(b),
-                    hv.from_numpy(c),
-                    hv.ScalarType.Float32,
-                    hv.ScalarType.Float32,
-                    alpha=float(alpha),
-                    beta=float(beta),
-                    scale_c=float(scale_c),
-                    activation=hv.Activation.Relu,
-                    output_scale=float(output_scale),
-                    backend=backend,
-                )
-                np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+        observed = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            alpha=float(alpha),
+            beta=float(beta),
+            scale_c=float(scale_c),
+            activation=hv.Activation.Relu,
+            output_scale=float(output_scale),
+            backend=hv.GemmBackend.Blocked,
+        )
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_float64_gemm_matches_numpy(self):
         a = np.asarray([[0.25, -1.5], [2.0, 3.25]], dtype=np.float64)
@@ -2463,7 +2458,7 @@ class TensorAndGemmTests(unittest.TestCase):
             np.asarray([[0.125]], dtype=np.float32),
         )
 
-    def test_compute_input_quantization_matches_numpy_on_both_backends(self):
+    def test_compute_input_quantization_matches_numpy(self):
         a = np.asarray(
             [[1.001, -2.003, 0.3333], [4.007, -0.499, 2.999]],
             dtype=np.float32,
@@ -2501,22 +2496,16 @@ class TensorAndGemmTests(unittest.TestCase):
                 hv.from_numpy(scale_b_column),
             ],
         )
-        backend_outputs = []
-        for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
-            with self.subTest(backend=backend):
-                observed = hv.reference_gemm(
-                    hv.from_numpy(a),
-                    hv.from_numpy(b),
-                    hv.from_numpy(c),
-                    hv.ScalarType.Float32,
-                    hv.ScalarType.Float32,
-                    backend=backend,
-                    **arguments,
-                )
-                output = hv.to_numpy(observed)
-                np.testing.assert_array_equal(output, expected)
-                backend_outputs.append(output)
-        np.testing.assert_array_equal(backend_outputs[0], backend_outputs[1])
+        observed = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            backend=hv.GemmBackend.Blocked,
+            **arguments,
+        )
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_gemm_output_scale_and_saturating_conversion(self):
         scaled_half = hv.reference_gemm(
@@ -2544,7 +2533,7 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(saturated_int8), np.asarray([[127]], dtype=np.int8)
         )
 
-    def test_saturating_int8_rounding_matches_numpy_on_both_backends(self):
+    def test_saturating_int8_rounding_matches_numpy(self):
         a = np.asarray(
             [
                 [
@@ -2566,24 +2555,18 @@ class TensorAndGemmTests(unittest.TestCase):
         c = np.zeros_like(a, dtype=np.int8)
         expected = np.clip(np.rint(a), -128, 127).astype(np.int8)
 
-        backend_outputs = []
-        for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
-            with self.subTest(backend=backend):
-                observed = hv.reference_gemm(
-                    hv.from_numpy(a),
-                    hv.from_numpy(b),
-                    hv.from_numpy(c),
-                    hv.ScalarType.Int8,
-                    hv.ScalarType.Float32,
-                    backend=backend,
-                    output_conversion=hv.OutputConversion.SaturatingInt8,
-                )
-                output = hv.to_numpy(observed)
-                np.testing.assert_array_equal(output, expected)
-                backend_outputs.append(output)
-        np.testing.assert_array_equal(backend_outputs[0], backend_outputs[1])
+        observed = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Int8,
+            hv.ScalarType.Float32,
+            backend=hv.GemmBackend.Blocked,
+            output_conversion=hv.OutputConversion.SaturatingInt8,
+        )
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
-    def test_block_scaled_gemm_matches_numpy_on_both_backends(self):
+    def test_block_scaled_gemm_matches_numpy(self):
         a = np.ones((1, 16), dtype=np.float32)
         b = np.ones((16, 1), dtype=np.float32)
         c = np.zeros((1, 1), dtype=np.float32)
@@ -2599,25 +2582,19 @@ class TensorAndGemmTests(unittest.TestCase):
             dtype=np.float32,
         )
 
-        backend_outputs = []
-        for backend in (hv.GemmBackend.Pointwise, hv.GemmBackend.Blocked):
-            with self.subTest(backend=backend):
-                observed = hv.reference_gemm(
-                    hv.from_numpy(a),
-                    hv.from_numpy(b),
-                    hv.from_numpy(c),
-                    hv.ScalarType.Float32,
-                    hv.ScalarType.Float32,
-                    backend=backend,
-                    block_scale_a=hv.from_numpy(scale_a),
-                    block_scale_b=hv.from_numpy(scale_b),
-                    block_size_a=8,
-                    block_size_b=8,
-                )
-                output = hv.to_numpy(observed)
-                np.testing.assert_array_equal(output, expected)
-                backend_outputs.append(output)
-        np.testing.assert_array_equal(backend_outputs[0], backend_outputs[1])
+        observed = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            backend=hv.GemmBackend.Blocked,
+            block_scale_a=hv.from_numpy(scale_a),
+            block_scale_b=hv.from_numpy(scale_b),
+            block_size_a=8,
+            block_size_b=8,
+        )
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_selected_output_gemm(self):
         a = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)

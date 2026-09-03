@@ -3,8 +3,13 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
+#include <complex>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <optional>
 #include <roc/host_numerics/comparison.hpp>
 #include <roc/host_numerics/gemm.hpp>
 #include <span>
@@ -82,26 +87,188 @@ void configureFinalizer(GemmTestCase& problem, const std::vector<float>& columnB
     problem.activation = Activation::Relu;
 }
 
-struct ParityRunInfo {
-    GemmTestRunInfo pointwise;
-    GemmTestRunInfo blocked;
-};
-
-ParityRunInfo runParity(GemmTestCase& pointwiseProblem, GemmTestCase& blockedProblem,
-                        const roc::host_numerics::Tensor& pointwiseOutput,
-                        const roc::host_numerics::Tensor& blockedOutput,
-                        const char* mismatchMessage) {
+Tensor expectedFloatResult(const GemmTestCase& problem) {
     using namespace roc::host_numerics;
 
-    const GemmTestRunInfo pointwise = referenceGemm(pointwiseProblem, GemmBackend::Pointwise);
-    const GemmTestRunInfo blocked = referenceGemm(blockedProblem, GemmBackend::Blocked);
-    require(blocked.backendUsed == GemmBackend::Blocked,
-            "Blocked backend run information mismatch.");
-    require(compare(blockedOutput, pointwiseOutput).passed(), mismatchMessage);
-    return {
-        .pointwise = pointwise,
-        .blocked = blocked,
+    const size_t rows = problem.a.shape()[0];
+    const size_t reductions = problem.a.shape()[1];
+    const size_t columns = problem.b.shape()[1];
+    Tensor expected = makeOutput(rows, columns, untouchedValue);
+    const auto selected = problem.outputSelection.indices(problem.d.elementCount());
+    const auto scaleValue = [&](const std::optional<Tensor>& scale, size_t row, size_t column) {
+        return scale ? scale->broadcastTo(Shape{rows, columns}).loadAs<float>({row, column}) : 1.0f;
     };
+
+    for (const size_t linearIndex : selected) {
+        const auto coordinates =
+            problem.d.shape().coordinates(linearIndex, problem.outputSelection.indexOrder());
+        const size_t row = coordinates[0];
+        const size_t column = coordinates[1];
+        float accumulation = 0.0f;
+        for (size_t blockBase = 0; blockBase < reductions;) {
+            const size_t remainingA = problem.blockScaleA
+                                          ? problem.blockSizeA - blockBase % problem.blockSizeA
+                                          : reductions - blockBase;
+            const size_t remainingB = problem.blockScaleB
+                                          ? problem.blockSizeB - blockBase % problem.blockSizeB
+                                          : reductions - blockBase;
+            const size_t blockEnd =
+                blockBase + std::min({reductions - blockBase, remainingA, remainingB});
+            float partial = 0.0f;
+            for (size_t reduction = blockBase; reduction < blockEnd; ++reduction) {
+                float aValue = problem.a.loadAs<float>({row, reduction});
+                float bValue = problem.b.loadAs<float>({reduction, column});
+                for (const Tensor& scale : problem.preQuantizationScalesA)
+                    aValue *= scale.broadcastTo(problem.a.shape()).loadAs<float>({row, reduction});
+                for (const Tensor& scale : problem.preQuantizationScalesB)
+                    bValue *=
+                        scale.broadcastTo(problem.b.shape()).loadAs<float>({reduction, column});
+                partial += aValue * bValue;
+            }
+            if (problem.blockScaleA)
+                partial *=
+                    problem.blockScaleA->loadAs<float>({row, blockBase / problem.blockSizeA});
+            if (problem.blockScaleB)
+                partial *=
+                    problem.blockScaleB->loadAs<float>({column, blockBase / problem.blockSizeB});
+            accumulation += partial;
+            blockBase = blockEnd;
+        }
+
+        float result = problem.alpha.as<float>() * scaleValue(problem.scaleA, row, column) *
+                           scaleValue(problem.scaleB, row, column) *
+                           scaleValue(problem.scaleAlpha, row, column) * accumulation +
+                       problem.beta.as<float>() * problem.scaleC.as<float>() *
+                           problem.c.loadAs<float>({row, column});
+        if (problem.bias)
+            result += problem.bias->broadcastTo(Shape{rows, columns}).loadAs<float>({row, column});
+        if (problem.activation == Activation::Relu) result = std::max(0.0f, result);
+        require(problem.activation == Activation::None || problem.activation == Activation::Relu,
+                "The test-only float oracle received an unsupported activation.");
+        result *= problem.outputScale.as<float>();
+        expected.storeFrom({row, column}, result);
+    }
+    return expected;
+}
+
+GemmTestRunInfo runAndCheck(GemmTestCase& problem, const Tensor& output,
+                            const char* mismatchMessage) {
+    using namespace roc::host_numerics;
+
+    const Tensor expected = expectedFloatResult(problem);
+    const GemmTestRunInfo run = referenceGemm(problem, GemmBackend::Blocked);
+    require(run.backendUsed == GemmBackend::Blocked, "Blocked backend run information mismatch.");
+    require(compare(output, expected).passed(), mismatchMessage);
+    return run;
+}
+
+float roundThrough(roc::host_numerics::ScalarType type, float value) {
+    using namespace roc::host_numerics;
+    Tensor scalar(type, Shape{1});
+    scalar.storeFrom({0}, value);
+    return scalar.loadAs<float>({0});
+}
+
+void testReducedPrecisionAccumulators() {
+    using namespace roc::host_numerics;
+
+    constexpr size_t reductions = 64;
+    const std::vector<float> values(reductions, 0.1f);
+    for (const ScalarType type : {ScalarType::Float16, ScalarType::BFloat16}) {
+        Tensor a = Tensor::copyValuesWithConversion(type, Shape{1, reductions},
+                                                    std::span<const float>(values));
+        Tensor b = Tensor::copyValuesWithConversion(type, Shape{reductions, 1},
+                                                    std::span<const float>(values));
+        Tensor c(type, Shape{1, 1});
+        Tensor d(type, Shape{1, 1});
+        GemmTestCase problem(a, b, c, d, type);
+
+        float expected = 0.0f;
+        float fullPrecision = 0.0f;
+        for (size_t reduction = 0; reduction < reductions; ++reduction) {
+            const float product = roundThrough(
+                type, a.loadAs<float>({0, reduction}) * b.loadAs<float>({reduction, 0}));
+            expected = roundThrough(type, expected + product);
+            fullPrecision += a.loadAs<float>({0, reduction}) * b.loadAs<float>({reduction, 0});
+        }
+
+        const GemmTestRunInfo run = referenceGemm(problem, GemmBackend::Blocked);
+        require(run.backendUsed == GemmBackend::Blocked && d.loadAs<float>({0, 0}) == expected,
+                "Blocked GEMM did not preserve reduced-precision accumulation.");
+
+        problem.accumulationRounding = AccumulationRounding::FullPrecision;
+        referenceGemm(problem, GemmBackend::Blocked);
+        require(d.loadAs<float>({0, 0}) == roundThrough(type, fullPrecision) &&
+                    d.loadAs<float>({0, 0}) != expected,
+                "Blocked GEMM did not honor full-precision accumulation.");
+    }
+}
+
+void testSelectedBlockAccumulatorFamilies() {
+    using namespace roc::host_numerics;
+
+    constexpr size_t rows = 32;
+    constexpr size_t columns = 32;
+    constexpr size_t reductions = 64;
+    const OutputSelection selection = OutputSelection::explicitIndices({0});
+
+    const std::vector<float> reducedA(rows * reductions, 0.1f);
+    const std::vector<float> reducedB(reductions * columns, 0.1f);
+    const std::vector<float> reducedC(rows * columns, 0.0f);
+    for (const ScalarType accumulatorType : {ScalarType::Float16, ScalarType::BFloat16}) {
+        Tensor output = makeOutput(rows, columns, untouchedValue);
+        GemmTestCase problem =
+            makeProblem(reducedA, reducedB, reducedC, output, rows, reductions, columns);
+        problem.accumulatorType = accumulatorType;
+        problem.outputSelection = selection;
+
+        float expected = 0.0f;
+        for (size_t reduction = 0; reduction < reductions; ++reduction) {
+            const float product = roundThrough(accumulatorType, 0.1f * 0.1f);
+            expected = roundThrough(accumulatorType, expected + product);
+        }
+        const GemmTestRunInfo run = referenceGemm(problem, GemmBackend::Blocked);
+        require(run.outputElementsWritten == 1 && run.outputElementsCovered == rows * columns &&
+                    output.loadAs<float>({0, 0}) == expected &&
+                    output.loadAs<float>({0, 1}) == untouchedValue,
+                "Selected blocked GEMM mishandled reduced-precision accumulation.");
+    }
+
+    const std::vector<int32_t> integerA(rows * 2, std::numeric_limits<int32_t>::max());
+    const std::vector<int32_t> integerB(2 * columns, 2);
+    const std::vector<int32_t> integerC(rows * columns, 0);
+    const std::vector<int32_t> integerInitial(rows * columns, -99);
+    Tensor integerOutput = Tensor::copyNativeValues<int32_t>(Shape{rows, columns}, integerInitial);
+    GemmTestCase integerProblem(Tensor::copyNativeValues<int32_t>(Shape{rows, 2}, integerA),
+                                Tensor::copyNativeValues<int32_t>(Shape{2, columns}, integerB),
+                                Tensor::copyNativeValues<int32_t>(Shape{rows, columns}, integerC),
+                                integerOutput, ScalarType::Int32);
+    integerProblem.outputSelection = selection;
+    const GemmTestRunInfo integerRun = referenceGemm(integerProblem, GemmBackend::Blocked);
+    const int32_t wrappedProduct =
+        std::bit_cast<int32_t>(static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) * 2U);
+    const int32_t wrappedSum = std::bit_cast<int32_t>(static_cast<uint32_t>(wrappedProduct) * 2U);
+    require(integerRun.outputElementsCovered == rows * columns &&
+                integerOutput.loadAs<int32_t>({0, 0}) == wrappedSum &&
+                integerOutput.loadAs<int32_t>({0, 1}) == -99,
+            "Selected blocked GEMM mishandled Int32 wrapping accumulation.");
+
+    using Complex = std::complex<float>;
+    const std::vector<Complex> complexA(rows * 2, Complex(1.0f, 2.0f));
+    const std::vector<Complex> complexB(2 * columns, Complex(3.0f, 4.0f));
+    const std::vector<Complex> complexC(rows * columns, Complex(0.0f, 0.0f));
+    const std::vector<Complex> complexInitial(rows * columns, Complex(-99.0f, -99.0f));
+    Tensor complexOutput = Tensor::copyNativeValues<Complex>(Shape{rows, columns}, complexInitial);
+    GemmTestCase complexProblem(Tensor::copyNativeValues<Complex>(Shape{rows, 2}, complexA),
+                                Tensor::copyNativeValues<Complex>(Shape{2, columns}, complexB),
+                                Tensor::copyNativeValues<Complex>(Shape{rows, columns}, complexC),
+                                complexOutput, ScalarType::ComplexFloat32);
+    complexProblem.outputSelection = selection;
+    const GemmTestRunInfo complexRun = referenceGemm(complexProblem, GemmBackend::Blocked);
+    require(complexRun.outputElementsCovered == rows * columns &&
+                complexOutput.loadAs<Complex>({0, 0}) == Complex(-10.0f, 20.0f) &&
+                complexOutput.loadAs<Complex>({0, 1}) == Complex(-99.0f, -99.0f),
+            "Selected blocked GEMM mishandled complex accumulation.");
 }
 
 void requireOnlySelectedOutputsStored(const roc::host_numerics::Tensor& output,
@@ -174,7 +341,6 @@ void testExplicitSelectionBlockPlan() {
     const std::vector<float> b = makeValues(reductionElements, columns, 2);
     const std::vector<float> c = makeValues(rows, columns, 3);
     const std::vector<float> bias = makeValues(1, columns, 4);
-    Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection = OutputSelection::explicitIndices({
         44 * columns + 69,
@@ -184,21 +350,14 @@ void testExplicitSelectionBlockPlan() {
         2 * columns + 3,
     });
 
-    GemmTestCase pointwiseProblem =
-        makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
     GemmTestCase blockedProblem =
         makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
-    pointwiseProblem.outputSelection = selection;
     blockedProblem.outputSelection = selection;
-    configureFinalizer(pointwiseProblem, bias);
     configureFinalizer(blockedProblem, bias);
 
-    const ParityRunInfo run =
-        runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
-                  "Explicit blocked selection differs from the pointwise reference.");
-    require(run.pointwise.outputElementsWritten == 4 && run.pointwise.outputElementsCovered == 4,
-            "Pointwise explicit selection counts changed unexpectedly.");
-    require(run.blocked.outputElementsWritten == 4 && run.blocked.outputElementsCovered == 1518,
+    const GemmTestRunInfo run =
+        runAndCheck(blockedProblem, blockedOutput, "Explicit blocked selection result mismatch.");
+    require(run.outputElementsWritten == 4 && run.outputElementsCovered == 1518,
             "Explicit blocked selection reported the wrong output counts.");
     requireOnlySelectedOutputsStored(blockedOutput, selection);
 }
@@ -212,25 +371,17 @@ void testStridedSelectionBlockPlan() {
     const std::vector<float> b = makeValues(reductionElements, columns, 6);
     const std::vector<float> c = makeValues(rows, columns, 7);
     const std::vector<float> bias = makeValues(1, columns, 8);
-    Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection = OutputSelection::strided(3, 509);
 
-    GemmTestCase pointwiseProblem =
-        makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
     GemmTestCase blockedProblem =
         makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
-    pointwiseProblem.outputSelection = selection;
     blockedProblem.outputSelection = selection;
-    configureFinalizer(pointwiseProblem, bias);
     configureFinalizer(blockedProblem, bias);
 
-    const ParityRunInfo run =
-        runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
-                  "Strided blocked selection differs from the pointwise reference.");
-    require(run.pointwise.outputElementsWritten == 6 && run.pointwise.outputElementsCovered == 6,
-            "Pointwise strided selection counts changed unexpectedly.");
-    require(run.blocked.outputElementsWritten == 6 && run.blocked.outputElementsCovered == 2272,
+    const GemmTestRunInfo run =
+        runAndCheck(blockedProblem, blockedOutput, "Strided blocked selection result mismatch.");
+    require(run.outputElementsWritten == 6 && run.outputElementsCovered == 2272,
             "Strided blocked selection reported the wrong output counts.");
     requireOnlySelectedOutputsStored(blockedOutput, selection);
 }
@@ -257,13 +408,10 @@ void testBlockScaledSelectionBlockPlan() {
         scaleB[column * scaleBlocks + 1] = column % 3 == 0 ? 1.0f : 4.0f;
     }
 
-    Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection =
         OutputSelection::explicitIndices({0, 32 * columns + 32, 32 * columns + 34});
 
-    GemmTestCase pointwiseProblem =
-        makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
     GemmTestCase blockedProblem =
         makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
     const Tensor blockScaleA = Tensor::copyNativeStorage<float>(
@@ -272,23 +420,15 @@ void testBlockScaledSelectionBlockPlan() {
     const Tensor blockScaleB = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{columns, scaleBlocks}),
         std::span<const float>(scaleB));
-    pointwiseProblem.blockScaleA = blockScaleA;
-    pointwiseProblem.blockSizeA = 8;
-    pointwiseProblem.blockScaleB = blockScaleB;
-    pointwiseProblem.blockSizeB = 8;
     blockedProblem.blockScaleA = blockScaleA;
     blockedProblem.blockSizeA = 8;
     blockedProblem.blockScaleB = blockScaleB;
     blockedProblem.blockSizeB = 8;
-    pointwiseProblem.outputSelection = selection;
     blockedProblem.outputSelection = selection;
 
-    const ParityRunInfo run =
-        runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
-                  "Block-scaled blocked selection differs from the pointwise reference.");
-    require(run.pointwise.outputElementsWritten == 3 && run.pointwise.outputElementsCovered == 3,
-            "Pointwise block-scaled selection counts changed unexpectedly.");
-    require(run.blocked.outputElementsWritten == 3 && run.blocked.outputElementsCovered == 1027,
+    const GemmTestRunInfo run = runAndCheck(blockedProblem, blockedOutput,
+                                            "Block-scaled blocked selection result mismatch.");
+    require(run.outputElementsWritten == 3 && run.outputElementsCovered == 1027,
             "Block-scaled blocked selection reported the wrong output counts.");
     requireOnlySelectedOutputsStored(blockedOutput, selection);
 }
@@ -302,20 +442,16 @@ void testBlockScaleAppliedAfterCompleteScaleSegment() {
     std::fill(b.begin() + reductionElements / 2, b.end(), -1.0e37f);
     const std::vector<float> c(1, 0.0f);
     const std::array<float, 1> scaleA{8.0f};
-    Tensor pointwiseOutput = makeOutput(1, 1, untouchedValue);
     Tensor blockedOutput = makeOutput(1, 1, untouchedValue);
 
-    GemmTestCase pointwiseProblem = makeProblem(a, b, c, pointwiseOutput, 1, reductionElements, 1);
     GemmTestCase blockedProblem = makeProblem(a, b, c, blockedOutput, 1, reductionElements, 1);
     const Tensor blockScaleA = Tensor::copyNativeValues<float>(Shape{1, 1}, scaleA);
-    pointwiseProblem.blockScaleA = blockScaleA;
-    pointwiseProblem.blockSizeA = reductionElements;
     blockedProblem.blockScaleA = blockScaleA;
     blockedProblem.blockSizeA = reductionElements;
 
-    runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
-              "Blocked GEMM applied a one-sided block scale before its complete reduction "
-              "segment.");
+    runAndCheck(blockedProblem, blockedOutput,
+                "Blocked GEMM applied a one-sided block scale before its complete reduction "
+                "segment.");
     require(std::isfinite(blockedOutput.loadAs<float>({0, 0})),
             "Blocked GEMM overflowed scale-segment partial sums.");
 }
@@ -333,26 +469,18 @@ void testOneSidedBlockScaling() {
     const Tensor blockScale = Tensor::copyNativeValues<float>(Shape{2, 2}, scales);
 
     const auto checkOneSide = [&](bool scaleOperandA, const std::array<float, 4>& expected) {
-        Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
         Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
-        GemmTestCase pointwiseProblem =
-            makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
         GemmTestCase blockedProblem =
             makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
         if (scaleOperandA) {
-            pointwiseProblem.blockScaleA = blockScale;
-            pointwiseProblem.blockSizeA = 8;
             blockedProblem.blockScaleA = blockScale;
             blockedProblem.blockSizeA = 8;
         } else {
-            pointwiseProblem.blockScaleB = blockScale;
-            pointwiseProblem.blockSizeB = 8;
             blockedProblem.blockScaleB = blockScale;
             blockedProblem.blockSizeB = 8;
         }
 
-        runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
-                  "One-sided block scaling differs between Pointwise and Blocked GEMM.");
+        runAndCheck(blockedProblem, blockedOutput, "One-sided block scaling result mismatch.");
         require(
             compare(blockedOutput, Tensor::copyNativeValues<float>(Shape{rows, columns}, expected))
                 .passed(),
@@ -370,20 +498,15 @@ void testOneSidedBlockScalingWithZeroReductionExtent() {
     constexpr size_t columns = 2;
     const std::vector<float> empty;
     const std::vector<float> c{1.0f, 2.0f, 3.0f, 4.0f};
-    Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
-    GemmTestCase pointwiseProblem = makeProblem(empty, empty, c, pointwiseOutput, rows, 0, columns);
     GemmTestCase blockedProblem = makeProblem(empty, empty, c, blockedOutput, rows, 0, columns);
     const Tensor emptyScale(ScalarType::Float32, Shape{rows, 0});
-    pointwiseProblem.blockScaleA = emptyScale;
-    pointwiseProblem.blockSizeA = 8;
     blockedProblem.blockScaleA = emptyScale;
     blockedProblem.blockSizeA = 8;
-    pointwiseProblem.beta = 2.0f;
     blockedProblem.beta = 2.0f;
 
-    runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
-              "One-sided block scaling read scales for an empty reduction dimension.");
+    runAndCheck(blockedProblem, blockedOutput,
+                "One-sided block scaling read scales for an empty reduction dimension.");
     require(compare(blockedOutput,
                     Tensor::copyNativeValues<float>(Shape{rows, columns},
                                                     std::array<float, 4>{2.0f, 4.0f, 6.0f, 8.0f}))
@@ -391,7 +514,7 @@ void testOneSidedBlockScalingWithZeroReductionExtent() {
             "One-sided zero-K block scaling did not apply beta to C.");
 }
 
-void testFullSelectionParity() {
+void testFullSelection() {
     constexpr size_t rows = 35;
     constexpr size_t reductionElements = 17;
     constexpr size_t columns = 34;
@@ -400,28 +523,20 @@ void testFullSelectionParity() {
     const std::vector<float> b = makeValues(reductionElements, columns, 12);
     const std::vector<float> c = makeValues(rows, columns, 13);
     const std::vector<float> bias = makeValues(1, columns, 14);
-    Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
 
-    GemmTestCase pointwiseProblem =
-        makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
     GemmTestCase blockedProblem =
         makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
-    configureFinalizer(pointwiseProblem, bias);
     configureFinalizer(blockedProblem, bias);
 
-    const ParityRunInfo run =
-        runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
-                  "Full blocked selection differs from the pointwise reference.");
-    require(run.pointwise.outputElementsWritten == rows * columns &&
-                run.pointwise.outputElementsCovered == rows * columns,
-            "Pointwise full selection counts changed unexpectedly.");
-    require(run.blocked.outputElementsWritten == rows * columns &&
-                run.blocked.outputElementsCovered == rows * columns,
-            "Full blocked selection did not preserve complete-output accounting.");
+    const GemmTestRunInfo run =
+        runAndCheck(blockedProblem, blockedOutput, "Full blocked selection result mismatch.");
+    require(
+        run.outputElementsWritten == rows * columns && run.outputElementsCovered == rows * columns,
+        "Full blocked selection did not preserve complete-output accounting.");
 }
 
-void testAutomaticSelectionUsesComponentCostPolicy() {
+void testAutomaticSelectionUsesBlockedBackend() {
     using namespace roc::host_numerics;
 
     constexpr size_t rows = 32;
@@ -434,8 +549,7 @@ void testAutomaticSelectionUsesComponentCostPolicy() {
     GemmTestCase problem = makeProblem(a, b, c, output, rows, reductionElements, columns);
 
     const GemmSupportInfo fullSupport = queryGemmSupport(problem, GemmBackend::Blocked);
-    require(fullSupport.supported && fullSupport.preferredForAutomaticExecution,
-            "Blocked cost policy rejected dense reusable work.");
+    require(fullSupport.supported, "Blocked backend rejected dense work.");
     const GemmTestRunInfo full = referenceGemm(problem);
     require(full.backendUsed == GemmBackend::Blocked && !full.fallbackReason,
             "Automatic GEMM did not select Blocked for dense reusable work.");
@@ -444,17 +558,18 @@ void testAutomaticSelectionUsesComponentCostPolicy() {
     fillTensor(output, untouchedValue);
     problem.outputSelection = OutputSelection::explicitIndices({0});
     const GemmSupportInfo sparseSupport = queryGemmSupport(problem, GemmBackend::Blocked);
-    require(sparseSupport.supported && !sparseSupport.preferredForAutomaticExecution,
-            "Blocked cost policy preferred one sparse output block.");
+    require(sparseSupport.supported, "Blocked backend rejected sparse work.");
     const GemmTestRunInfo sparse = referenceGemm(problem);
-    require(sparse.backendUsed == GemmBackend::Pointwise && !sparse.fallbackReason,
-            "Automatic GEMM did not keep sparse work Pointwise.");
+    require(sparse.backendUsed == GemmBackend::Blocked && !sparse.fallbackReason,
+            "Automatic GEMM did not use Blocked for sparse work.");
+    require(sparse.outputElementsWritten == 1 && sparse.outputElementsCovered == rows * columns,
+            "Sparse blocked GEMM reported the wrong write or coverage count.");
     require(output.loadAs<float>({0, 0}) == firstOutput,
             "Automatic backend selection changed the selected numerical result.");
     requireOnlySelectedOutputsStored(output, problem.outputSelection);
 }
 
-void testParallelFullSelectionParity() {
+void testParallelFullSelection() {
     constexpr size_t rows = 128;
     constexpr size_t reductionElements = 128;
     constexpr size_t columns = 128;
@@ -462,20 +577,16 @@ void testParallelFullSelectionParity() {
     const std::vector<float> a = makeValues(rows, reductionElements, 15);
     const std::vector<float> b = makeValues(reductionElements, columns, 16);
     const std::vector<float> c = makeValues(rows, columns, 17);
-    Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
 
-    GemmTestCase pointwiseProblem =
-        makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
     GemmTestCase blockedProblem =
         makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
 
-    const ParityRunInfo run =
-        runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
-                  "Parallel blocked GEMM differs from the pointwise reference.");
-    require(run.blocked.outputElementsWritten == rows * columns &&
-                run.blocked.outputElementsCovered == rows * columns,
-            "Parallel blocked GEMM reported the wrong output counts.");
+    const GemmTestRunInfo run =
+        runAndCheck(blockedProblem, blockedOutput, "Parallel blocked GEMM result mismatch.");
+    require(
+        run.outputElementsWritten == rows * columns && run.outputElementsCovered == rows * columns,
+        "Parallel blocked GEMM reported the wrong output counts.");
 }
 
 void testOverlappingOutputIsRejectedAcrossBackends() {
@@ -494,8 +605,6 @@ void testOverlappingOutputIsRejectedAcrossBackends() {
     Tensor output(ScalarType::Float32, Layout(Shape{rows, columns}, {0, 0}));
     GemmTestCase problem = makeProblem(a, b, c, output, rows, reductionElements, columns);
 
-    require(!queryGemmSupport(problem, GemmBackend::Pointwise),
-            "Pointwise GEMM accepted overlapping destination elements.");
     require(!queryGemmSupport(problem, GemmBackend::Blocked),
             "Blocked GEMM accepted overlapping destination elements.");
     require(!queryGemmSupport(problem, GemmBackend::Automatic),
@@ -513,8 +622,7 @@ void testOutputAliasingContract() {
     GemmTestCase exactCAndD =
         makeProblem(a, b, c, makeOutput(extent, extent, 0), extent, extent, extent);
     exactCAndD.d = exactCAndD.c;
-    require(queryGemmSupport(exactCAndD, GemmBackend::Pointwise) &&
-                queryGemmSupport(exactCAndD, GemmBackend::Blocked),
+    require(static_cast<bool>(queryGemmSupport(exactCAndD, GemmBackend::Blocked)),
             "GEMM rejected an exact in-place C and D tensor.");
     exactCAndD.beta = 1.0;
     referenceGemm(exactCAndD, GemmBackend::Blocked);
@@ -526,20 +634,18 @@ void testOutputAliasingContract() {
     GemmTestCase overlapsA =
         makeProblem(a, b, c, makeOutput(extent, extent, 0), extent, extent, extent);
     overlapsA.d = overlapsA.a;
-    require(!queryGemmSupport(overlapsA, GemmBackend::Pointwise) &&
-                !queryGemmSupport(overlapsA, GemmBackend::Blocked),
+    require(!queryGemmSupport(overlapsA, GemmBackend::Blocked),
             "GEMM accepted destination storage that overlaps A.");
 
     GemmTestCase differentlyMappedCAndD =
         makeProblem(a, b, c, makeOutput(extent, extent, 0), extent, extent, extent);
     differentlyMappedCAndD.d =
         differentlyMappedCAndD.c.shareStorageWithLayout(Layout(Shape{extent, extent}, {1, 2}));
-    require(!queryGemmSupport(differentlyMappedCAndD, GemmBackend::Pointwise) &&
-                !queryGemmSupport(differentlyMappedCAndD, GemmBackend::Blocked),
+    require(!queryGemmSupport(differentlyMappedCAndD, GemmBackend::Blocked),
             "GEMM accepted differently mapped overlapping C and D tensors.");
 }
 
-void testParallelPointwiseSelection() {
+void testParallelSparseSelection() {
     using namespace roc::host_numerics;
 
     constexpr size_t rows = 64;
@@ -558,22 +664,27 @@ void testParallelPointwiseSelection() {
     problem.outputSelection =
         OutputSelection::primeStride(output.elementCount(), output.elementCount(), 128);
 
-    referenceGemm(problem, GemmBackend::Pointwise);
+    const GemmTestRunInfo run = referenceGemm(problem, GemmBackend::Blocked);
 
     const std::vector<size_t> selected = problem.outputSelection.indices(output.elementCount());
+    require(
+        run.outputElementsWritten == selected.size() && run.outputElementsCovered == rows * columns,
+        "Sparse blocked GEMM did not report its touched output blocks.");
     for (const size_t linearIndex : selected) {
         const size_t row = linearIndex / columns;
         const size_t column = linearIndex % columns;
         require(output.loadAs<float>({row, column}) ==
                     static_cast<float>((row + 1) * reductionElements),
-                "Parallel pointwise GEMM produced an incorrect selected output.");
+                "Parallel blocked GEMM produced an incorrect selected output.");
     }
     require(output.loadAs<float>({0, 1}) == sentinel,
-            "Parallel pointwise GEMM changed an unselected output.");
+            "Parallel blocked GEMM changed an unselected output.");
 }
 }  // namespace
 
 int main() {
+    testReducedPrecisionAccumulators();
+    testSelectedBlockAccumulatorFamilies();
     testFinalizerAndSmallEdgeBlock();
     testExplicitSelectionBlockPlan();
     testStridedSelectionBlockPlan();
@@ -581,11 +692,11 @@ int main() {
     testBlockScaleAppliedAfterCompleteScaleSegment();
     testOneSidedBlockScaling();
     testOneSidedBlockScalingWithZeroReductionExtent();
-    testFullSelectionParity();
-    testAutomaticSelectionUsesComponentCostPolicy();
-    testParallelFullSelectionParity();
+    testFullSelection();
+    testAutomaticSelectionUsesBlockedBackend();
+    testParallelFullSelection();
     testOverlappingOutputIsRejectedAcrossBackends();
     testOutputAliasingContract();
-    testParallelPointwiseSelection();
+    testParallelSparseSelection();
     return 0;
 }

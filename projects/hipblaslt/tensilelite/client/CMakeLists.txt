@@ -1,17 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Shared core for tensilelite-client and cpu-gemm-driver.
-#
-# Both executables consume nearly the same sources, link line, include
-# directories, compile definitions, C++ standard, and sanitizer flags. Owning
-# them on a single STATIC helper target removes a `foreach(target ...)` loop
-# that applied identical properties to two targets, a `COMMON_CLIENT_SOURCES`
-# variable that hid the source list from `target_sources` (and from IDE
-# navigation), and three duplicated `target_include_directories` calls.
-#
-# Each executable is now a thin wrapper that adds only its `main` translation
-# unit and links to this helper.
+# Shared core for the TensileLite client and its tests.
 add_library(tensilelite-client-common STATIC)
 add_library(tensilelite::client-common ALIAS tensilelite-client-common)
 
@@ -193,13 +183,6 @@ endif()
 
 add_executable(tensilelite-client "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
 target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
-
-add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
-target_link_libraries(cpu-gemm-driver
-    PRIVATE
-        tensilelite-client-common
-        roc::host-numerics
-)
 
 # rocprofiler-sdk is only used by tensilelite-client (in-process counters).
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
