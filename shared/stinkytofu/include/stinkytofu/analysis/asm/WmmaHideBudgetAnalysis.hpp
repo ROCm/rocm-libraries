@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>

@@ -245,7 +245,8 @@ class KernelWriterAssembly(KernelWriter):
   def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
 
     deviceLdsSize = self.states.archCaps["DeviceLDS"]
-    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(deviceLdsSize, ldsSize)
+    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(
+        deviceLdsSize, ldsSize, self.states.archCaps["LdsGranularity"])
 
     if not doubleVgpr:
       vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr)
@@ -279,14 +280,20 @@ class KernelWriterAssembly(KernelWriter):
     return lastVgprs, initOccupancy
 
   @staticmethod
-  def getLdsLimitedOccupancy(deviceLdsSize, ldsSize):
+  def getLdsLimitedOccupancy(deviceLdsSize, ldsSize, granularity):
+    """Max. number of workgroups that can run on the same CU due to LDS size
+
+    granularity is the archCaps["LdsGranularity"] allocation granule: a workgroup
+    occupies a whole number of granules, so the rounding can cost a workgroup at a
+    boundary.
+    """
     if ldsSize == 0:
       # No LDS usage: LDS is not the binding constraint.
       # Return a large sentinel so other limits (VGPR, wave cap) win in min().
-      return deviceLdsSize // 256
+      return deviceLdsSize // granularity
     # As ldsSize gets large, rounding might push us slightly higher than deviceLdsSize.
     # Clamp at deviceLdsSize
-    ldsSize = min(ldsSize + 255, deviceLdsSize) & 0xffffff00 # 256-byte granularity
+    ldsSize = min(ldsSize + granularity - 1, deviceLdsSize) & ~(granularity - 1)
 
     ldsLimitedOccupancy = deviceLdsSize//ldsSize
     return ldsLimitedOccupancy
@@ -16016,15 +16023,24 @@ class KernelWriterAssembly(KernelWriter):
               kernel["ActivationFuncCall"] = False
               activationLabelList = {}
 
+        # A MultipleBuffer write only stores raw partial sums to the workspace;
+        # beta*C is applied afterwards by the conversion kernel. Kernels compiled
+        # as MultipleBuffer never generate a beta variant here (hasBeta above is
+        # False), so a dual-path kernel must drop it on its MultipleBuffer path
+        # too, otherwise beta*C lands in the partials and gets applied twice.
+        modeBetas = betas
+        if globalWriteMode in ("MB", "OptNLL_MB"):
+          modeBetas = [beta for beta in betas if not beta] or [False]
+
         betaModules, currentInstLength = self.generateBetaModules(
-            kernel, tPA, tPB, activation, applyAlpha, betas, edge, atomic,
+            kernel, tPA, tPB, activation, applyAlpha, modeBetas, edge, atomic,
             vectorWidths, elements, activationLabelList, tmpVgpr, cvtVgprStruct,
             activationSetPCStruct, activationEnumStrList, actPCMaxTempSgpr,
             isInsertActFunctionCallAddrCalc, toActModuleList, writeLabels, endLabel,
             vectorDataTypes, factorDims, globalWriteMode, hasMultipleGlobalWriteModes)
 
         # Check if branch exceeds and add beta zero check
-        betaBranchCheckModule = self.checkBetaBranchExceeds(kernel, betas, betaModules, writeLabels, globalWriteMode)
+        betaBranchCheckModule = self.checkBetaBranchExceeds(kernel, modeBetas, betaModules, writeLabels, globalWriteMode)
 
         # Append the beta modules to the main module
         module.appendModule(betaBranchCheckModule)
@@ -19466,21 +19482,28 @@ class KernelWriterAssembly(KernelWriter):
       # isSparseTrack/isMetadata apply to the K dimension (index 3).
       # For unrolledMajor (TN): K is dim0. For tlu (NN): K is dim1.
       dim0IsK = unrolledMajor
-      if is6bit:
-        # F6: 0.75 bytes/element. dim0 in bytes = elements * 3 / 4.
-        # NOTE: F6 currently dense-only (TN GEMM). Composition with isSparseTrack/isMetadata
-        # is not yet exercised — both code paths assume they are mutually exclusive.
-        with self.allocTmpSgpr(1, tag="initTDMDescriptor_tmpF6") as tmpF6:
-          mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(sizeRefName(dim0Idx)), "F6: elements / 4"))
-          mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
-          mod.add(comp.setTensorDim0(descSgprName(1), tmpF6.idx, self, 0))
-      else:
-        mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(dim0Idx), self, sizeShifter, False,
-                                    isSparseTrack=isSparseTrack if dim0IsK else False,
-                                    isMetadata=isMetadata if dim0IsK else False))
-      mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(dim1Idx), self, 0, False,
-                                  isSparseTrack=isSparseTrack if not dim0IsK else False,
-                                  isMetadata=isMetadata if not dim0IsK else False))
+      # Clamp M/N free-dim to remaining rows/cols so the last workgroup's load
+      # stays in bounds. isSparseTrack only marks K; metadata/isTdmIter clamp elsewhere.
+      applyMNEdge = not isMetadata and not isTdmIter
+      with self.allocTmpSgpr(1, tag="initTDMDescriptor_tmpMNEdge") as tmpMN:
+        if applyMNEdge:
+          mod.add(SMulI32(sgpr(tmpMN.idx), mt, sgpr(f"WorkGroup{ti}"), f"MT{ti}({mt}) * wgId"))
+          mod.add(SSubI32(sgpr(tmpMN.idx), sgpr(sizeRefName(ti)), sgpr(tmpMN.idx), f"remaining M/N = Size{INDEX_CHARS[ti]} - MT*wgId"))
+        dim0Src = tmpMN.idx if (applyMNEdge and not dim0IsK) else sizeRefName(dim0Idx)
+        dim1Src = tmpMN.idx if (applyMNEdge and dim0IsK) else sizeRefName(dim1Idx)
+        if is6bit:
+          # F6: 0.75 bytes/element. dim0 in bytes = elements * 3 / 4. Dense-only (TN).
+          with self.allocTmpSgpr(1, tag="initTDMDescriptor_tmpF6") as tmpF6:
+            mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(sizeRefName(dim0Idx)), "F6: elements / 4"))
+            mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
+            mod.add(comp.setTensorDim0(descSgprName(1), tmpF6.idx, self, 0))
+        else:
+          mod.add(comp.setTensorDim0(descSgprName(1), dim0Src, self, sizeShifter, False,
+                                      isSparseTrack=isSparseTrack if dim0IsK else False,
+                                      isMetadata=isMetadata if dim0IsK else False))
+        mod.add(comp.setTensorDim1(descSgprName(1), dim1Src, self, 0, False,
+                                    isSparseTrack=isSparseTrack if not dim0IsK else False,
+                                    isMetadata=isMetadata if not dim0IsK else False))
       if is6bit:
         mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0 * 3 // 4, self, 0))
       else:
