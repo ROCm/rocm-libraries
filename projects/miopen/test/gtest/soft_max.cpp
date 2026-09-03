@@ -687,15 +687,18 @@ struct GPU_Softmax_NonContiguous_FP32
     : public testing::TestWithParam<std::tuple<std::tuple<std::vector<size_t>, std::vector<size_t>>,
                                                miopenSoftmaxAlgorithm_t,
                                                miopenSoftmaxMode_t,
+                                               std::tuple<float, float>,
                                                int,
                                                int,
                                                int>>
 {
     void RunForward()
     {
-        auto&& handle                                                         = get_handle();
-        auto [tensorDimsStrides, algo, mode, xdx_offset, y_offset, dy_offset] = GetParam();
-        auto [dims, strides]                                                  = tensorDimsStrides;
+        auto&& handle = get_handle();
+        auto [tensorDimsStrides, algo, mode, alphaBeta, xdx_offset, y_offset, dy_offset] =
+            GetParam();
+        auto [dims, strides] = tensorDimsStrides;
+        auto [alpha, beta]   = alphaBeta;
 
         auto in_host   = tensor<float>{dims, strides}.generate(tensor_elem_gen_integer{5});
         size_t n_elems = dims[0] * strides[0];
@@ -716,7 +719,6 @@ struct GPU_Softmax_NonContiguous_FP32
                         xbuf[off(n, c, h, w) + xdx_offset] =
                             static_cast<float>((n * 13 + c * 7 + h * 3 + w + 1) % 5);
 
-        const float alpha = 1.0f, beta = 0.0f;
         auto in_dev  = handle.Write(xbuf);
         auto out_dev = handle.Write(ybuf);
 
@@ -784,6 +786,7 @@ struct GPU_Softmax_NonContiguous_FP32
                                 algo == MIOPEN_SOFTMAX_LOG
                                     ? xbuf[off(n, c, h, w) + xdx_offset] - mx - sum
                                     : std::exp(xbuf[off(n, c, h, w) + xdx_offset] - mx) / sum;
+                            ref        = alpha * ref + beta * ybuf[off(n, c, h, w) + y_offset];
                             double err = std::abs(ref - res[off(n, c, h, w) + y_offset]);
                             if(ref != 0.0)
                             {
@@ -829,6 +832,7 @@ struct GPU_Softmax_NonContiguous_FP32
                                 algo == MIOPEN_SOFTMAX_LOG
                                     ? xbuf[off(n, c, h, w) + xdx_offset] - mx - sum
                                     : std::exp(xbuf[off(n, c, h, w) + xdx_offset] - mx) / sum;
+                            ref        = alpha * ref + beta * ybuf[off(n, c, h, w) + y_offset];
                             double err = std::abs(ref - res[off(n, c, h, w) + y_offset]);
                             if(ref != 0.0)
                             {
@@ -847,9 +851,11 @@ struct GPU_Softmax_NonContiguous_FP32
 
     void RunBackward()
     {
-        auto&& handle                                                         = get_handle();
-        auto [tensorDimsStrides, algo, mode, xdx_offset, y_offset, dy_offset] = GetParam();
-        auto [dims, strides]                                                  = tensorDimsStrides;
+        auto&& handle = get_handle();
+        auto [tensorDimsStrides, algo, mode, alphaBeta, xdx_offset, y_offset, dy_offset] =
+            GetParam();
+        auto [dims, strides] = tensorDimsStrides;
+        auto [alpha, beta]   = alphaBeta;
 
         auto in_host   = tensor<float>{dims, strides}.generate(tensor_elem_gen_integer{5});
         size_t n_elems = dims[0] * strides[0];
@@ -881,7 +887,6 @@ struct GPU_Softmax_NonContiguous_FP32
             }
         }
 
-        const float alpha = 1.0f, beta = 0.0f;
         auto dy_dev = handle.Write(dybuf);
         auto y_dev  = handle.Write(ybuf);
         auto dx_dev = handle.Write(dxbuf);
@@ -939,6 +944,7 @@ struct GPU_Softmax_NonContiguous_FP32
                             {
                                 ref = (ref - channel_dot) * ybuf[off(n, c, h, w) + y_offset];
                             }
+                            ref        = alpha * ref + beta * dxbuf[off(n, c, h, w) + xdx_offset];
                             double err = std::abs(ref - res[off(n, c, h, w) + xdx_offset]);
                             if(ref != 0.0)
                             {
@@ -976,6 +982,7 @@ struct GPU_Softmax_NonContiguous_FP32
                             {
                                 ref = (ref - channel_dot) * ybuf[off(n, c, h, w) + y_offset];
                             }
+                            ref        = alpha * ref + beta * dxbuf[off(n, c, h, w) + xdx_offset];
                             double err = std::abs(ref - res[off(n, c, h, w) + xdx_offset]);
                             if(ref != 0.0)
                             {
@@ -1008,17 +1015,67 @@ std::vector<std::tuple<std::vector<size_t>, std::vector<size_t>>> nonContiguousT
 
 } // namespace
 
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Softmax_NonContiguous_FP32,
-                         testing::Combine(testing::ValuesIn(nonContiguousTestCases()),
-                                          testing::Values(MIOPEN_SOFTMAX_FAST,
-                                                          MIOPEN_SOFTMAX_ACCURATE,
-                                                          MIOPEN_SOFTMAX_LOG),
-                                          testing::Values(MIOPEN_SOFTMAX_MODE_INSTANCE,
-                                                          MIOPEN_SOFTMAX_MODE_CHANNEL),
-                                          testing::Values(0, 11),
-                                          testing::Values(0, 13),
-                                          testing::Values(0, 17)));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_Softmax_NonContiguous_FP32,
+    testing::Combine(
+        testing::ValuesIn(nonContiguousTestCases()),
+        testing::Values(MIOPEN_SOFTMAX_FAST, MIOPEN_SOFTMAX_ACCURATE, MIOPEN_SOFTMAX_LOG),
+        testing::Values(MIOPEN_SOFTMAX_MODE_INSTANCE, MIOPEN_SOFTMAX_MODE_CHANNEL),
+        testing::ValuesIn(std::vector<std::tuple<float, float>>{{1.0f, 0.0f}, {0.5f, 0.5f}}),
+        testing::Values(0, 11),
+        testing::Values(0, 13),
+        testing::Values(0, 17)));
+
+// --- Mixed packing (packed x, non-packed/strided y) --------------------
+// No forward softmax solver actually supports mixed packing, so the correct
+// behavior is to fail cleanly (miopenStatusNotImplemented) rather than silently
+// mis-address memory.
+// Parameterized (with a single trivial value) so the test's full name is
+// "Smoke/GPU_Softmax_MixedPacking_FP32.ForwardPackedXStridedY/0" -- the
+// leading "Smoke/" prefix (from INSTANTIATE_TEST_SUITE_P) is required for
+// TheRock CI's "*/GPU_Softmax*" filter (see test_categories.yaml) to select
+// it; a bare TEST_F would not match that glob (no "Prefix/" component).
+struct GPU_Softmax_MixedPacking_FP32 : public testing::TestWithParam<int>
+{
+};
+
+TEST_P(GPU_Softmax_MixedPacking_FP32, ForwardPackedXStridedY)
+{
+    auto&& handle = get_handle();
+
+    const std::vector<size_t> dims = {2, 32, 1, 1};
+    // Packed would be {32, 1, 1, 1}; pad the N stride so y is non-packed.
+    const std::vector<size_t> strided_strides = {40, 1, 1, 1};
+
+    auto x_host = tensor<float>{miopenTensorNCHW, dims}.generate(tensor_elem_gen_integer{5});
+    auto y_host = tensor<float>{dims, strided_strides};
+
+    ASSERT_TRUE(x_host.desc.IsPacked()) << "test setup: x must be packed";
+    ASSERT_FALSE(y_host.desc.IsPacked()) << "test setup: y must be non-packed";
+
+    const size_t n_elems_y = dims[0] * strided_strides[0];
+
+    std::vector<float> ybuf(n_elems_y, -42.0f);
+
+    const float alpha = 1.0f, beta = 0.0f;
+    auto x_dev = handle.Write(x_host.data);
+    auto y_dev = handle.Write(ybuf);
+
+    // No forward solver supports mixed packing -> SoftmaxForward must throw
+    // (miopenStatusNotImplemented)
+    EXPECT_ANY_THROW(miopen::SoftmaxForward(handle,
+                                            &alpha,
+                                            &beta,
+                                            x_host.desc,
+                                            x_dev.get(),
+                                            y_host.desc,
+                                            y_dev.get(),
+                                            MIOPEN_SOFTMAX_ACCURATE,
+                                            MIOPEN_SOFTMAX_MODE_INSTANCE));
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Softmax_MixedPacking_FP32, testing::Values(0));
 
 // --- Extra coverage: non-zero x/y offsets --
 // Findings from the tests below (both DISABLED -- see caveats):
@@ -1097,65 +1154,61 @@ TEST_F(GPU_Softmax_Offset_FP32, DISABLED_ForwardNonZeroOffset_FindRace)
 }
 
 // --- Divergent __syncthreads() deadlock ----------------------------
-// CSR-Stream path (NUM_BATCH>1) with grid_size not a multiple of num_batch:
-// whole wavefronts hit `if(o >= OUTER_SIZE) return;` and skip the block-wide
-// __syncthreads() inside reduce_block(), while surviving lanes wait on it
-// forever. {3,8,1,1} INSTANCE ACCURATE: inner=8 (aligned, so no fault masks the
-// hang), outer=3, local=1024 -> num_batch=512; batches 3..511 (waves 1..15)
-// early-return while wave 0 reaches the barrier -> hang.
-//
-// DISABLED because it WILL WEDGE THE GPU. Run intentionally only, under an
-// external timeout:
-//   ./bin/test_soft_max --gtest_also_run_disabled_tests \
-//       --gtest_filter='*Softmax_Deadlock*'
-struct GPU_Softmax_Deadlock_FP32 : public testing::Test
+// Since a
+// bare TEST_F's name ("GPU_Softmax_Deadlock_FP32.*") has no "Prefix/" and so
+// would NOT match test_categories.yaml's "*/GPU_Softmax*" glob (nor would
+// TheRock ever pass --gtest_also_run_disabled_tests), converted to a
+// Smoke-prefixed parameterized suite via INSTANTIATE_TEST_SUITE_P so its full
+// name becomes "Smoke/GPU_Softmax_Deadlock_FP32.CsrStreamPartialBlock/<N>" and
+// is selected by CI like the other Smoke/GPU_Softmax_* suites in this file.
+struct SoftmaxDeadlockCand
+{
+    std::vector<size_t> dims;
+    miopenSoftmaxMode_t mode;
+};
+
+struct GPU_Softmax_Deadlock_FP32 : public testing::TestWithParam<SoftmaxDeadlockCand>
 {
 };
 
-TEST_F(GPU_Softmax_Deadlock_FP32, DISABLED_CsrStreamPartialBlock)
+TEST_P(GPU_Softmax_Deadlock_FP32, CsrStreamPartialBlock)
 {
-    auto&& handle = get_handle();
+    auto&& handle    = get_handle();
+    const auto& cand = GetParam();
 
-    // Each candidate is a CSR-Stream config (inner<local, BATCH_SIZE>1) whose
-    // grid is not a multiple of num_batch, so the last block mixes surviving
-    // lanes (which reach reduce_block's __syncthreads) with early-returning
-    // lanes / whole wavefronts.
-    struct Cand
-    {
-        std::vector<size_t> dims;
-        miopenSoftmaxMode_t mode;
-    };
-    const std::vector<Cand> cands = {
-        {{3, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // 15/16 waves return, 1 survives
-        {{7, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},
-        {{70, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},  // ~2 waves survive, rest return
-        {{100, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // multiple surviving waves
-        {{5, 16, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},
-        {{2, 8, 3, 3}, MIOPEN_SOFTMAX_MODE_CHANNEL}, // stride=H*W=9 path
-    };
+    auto input  = tensor<float>{miopenTensorNCHW, cand.dims}.generate(tensor_elem_gen_integer{5});
+    auto output = tensor<float>{miopenTensorNCHW, cand.dims};
 
-    for(const auto& cand : cands)
-    {
-        auto input =
-            tensor<float>{miopenTensorNCHW, cand.dims}.generate(tensor_elem_gen_integer{5});
-        auto output = tensor<float>{miopenTensorNCHW, cand.dims};
+    const float alpha = 1.0f, beta = 0.0f;
+    auto in_dev  = handle.Write(input.data);
+    auto out_dev = handle.Write(output.data);
 
-        const float alpha = 1.0f, beta = 0.0f;
-        auto in_dev  = handle.Write(input.data);
-        auto out_dev = handle.Write(output.data);
-
-        miopen::SoftmaxForward(handle,
-                               &alpha,
-                               &beta,
-                               input.desc,
-                               in_dev.get(),
-                               output.desc,
-                               out_dev.get(),
-                               MIOPEN_SOFTMAX_ACCURATE,
-                               cand.mode);
-        handle.Finish(); // a hang would manifest here
-        auto res = handle.Read<float>(out_dev, output.data.size());
-        for(auto v : res)
-            EXPECT_TRUE(std::isfinite(v));
-    }
+    miopen::SoftmaxForward(handle,
+                           &alpha,
+                           &beta,
+                           input.desc,
+                           in_dev.get(),
+                           output.desc,
+                           out_dev.get(),
+                           MIOPEN_SOFTMAX_ACCURATE,
+                           cand.mode);
+    handle.Finish(); // a hang would manifest here
+    auto res = handle.Read<float>(out_dev, output.data.size());
+    for(auto v : res)
+        EXPECT_TRUE(std::isfinite(v));
 }
+
+// Each candidate is a CSR-Stream config (inner<local, BATCH_SIZE>1) whose
+// grid is not a multiple of num_batch, so the last block mixes surviving
+// lanes (which reach reduce_block's __syncthreads) with early-returning
+// lanes / whole wavefronts.
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_Softmax_Deadlock_FP32,
+    testing::Values(
+        SoftmaxDeadlockCand{{3, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // 15/16 waves return
+        SoftmaxDeadlockCand{{7, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},
+        SoftmaxDeadlockCand{{70, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},  // ~2 waves survive
+        SoftmaxDeadlockCand{{100, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // multiple survive
+        SoftmaxDeadlockCand{{5, 16, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},
+        SoftmaxDeadlockCand{{2, 8, 3, 3}, MIOPEN_SOFTMAX_MODE_CHANNEL})); // stride=H*W=9 path

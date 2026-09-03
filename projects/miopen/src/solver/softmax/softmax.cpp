@@ -66,7 +66,7 @@ bool Softmax::IsApplicable(
         {
             return false;
         }
-        if(!problem.GetXDesc().IsPacked() && !problem.GetYDesc().IsPacked())
+        if(!problem.GetXDesc().IsPacked() || !problem.GetYDesc().IsPacked())
         {
             return false;
         }
