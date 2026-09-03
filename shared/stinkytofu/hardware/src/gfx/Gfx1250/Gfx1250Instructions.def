@@ -229,6 +229,7 @@ DEF_BATCH(.format = DS_STORE,
 // v_wmma_scale_* — VOP3PX2 (128-bit), inherit fields from MXWMMA_SCALE
 DEF_BATCH(.format = MXWMMA_SCALE, .flags = {WMMA_XDL},
     VWmmaScaleF3216x16x128F8f6f4Inst, "v_wmma_scale_f32_16x16x128_f8f6f4",
+        .cost = {1, 8}, .costOverride = { { MatrixFmtModifiers(FP4, FP4), 1, 4 } },
         .coissue = 0x00C8, .coissueOverride = { { MatrixFmtModifiers(FP4, FP4), 0x0008 } },
     VWmmaScaleF3232x16x128F4Inst, "v_wmma_scale_f32_32x16x128_f4",
         .coissue = 0x00A8,
