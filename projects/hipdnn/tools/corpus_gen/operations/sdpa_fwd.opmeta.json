@@ -434,5 +434,29 @@
       "$q.seqlen_k",
       "$q.head_dim"
     ]
+  },
+  "// elements": "Q and O are Sq-long, K and V are Sk-long, all B*H*D wide: B*H*D*(2*Sq + 2*Sk). Element count across every tensor the operation touches, inputs and outputs. Dtype-free on purpose: bytes is elements times the dtype width, and the width table belongs to the tool rather than repeated as a nested dtype lookup in seven declarations. gbs = bytes / measured time, which is the metric that ranks a memory-bound kernel where tflops cannot.",
+  "elements": {
+    "*": [
+      "$q.batch",
+      "$q.heads",
+      "$q.head_dim",
+      {
+        "+": [
+          {
+            "*": [
+              2,
+              "$q.seqlen_q"
+            ]
+          },
+          {
+            "*": [
+              2,
+              "$q.seqlen_k"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }
