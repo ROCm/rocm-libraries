@@ -359,9 +359,11 @@ class TileMma:
                     f"fragment={fragment.dtype.name!r}, expected {want.name!r}"
                 )
 
-        # MMA safety: the hardware pairs A-slot-s with B-slot-s and sums over K, so A and B must
-        # share the same positional K-distribution (M/N register order is free; K order need not be
-        # canonical). A mismatched pair is rejected with a fix hint.
+        # MMA safety (pairwise half of the sound MAC; correctness SOT: docs/mma_is_machinery.md): the
+        # hardware pairs A-slot-s with B-slot-s and sums over K, so A and B must share the same positional
+        # K-distribution (M/N register order is free -- you choose the constant; K order need not be
+        # canonical). Per-operand soundness (M/N fixed per output) holds by construction here (fragments
+        # are atom register-reorders). A mismatched pair is rejected with a fix hint.
         # Validate K PER ATOM: the driver pairs (mi,ki)*(nj,ki), so A's m_sub M-atoms and B's n_sub
         # N-atoms each only need their atom-K to match -- comparing the whole (multi-atom) fragments
         # would falsely reject rectangular wave tiles where m_sub != n_sub (register counts differ).

@@ -58,6 +58,16 @@ def test_tiling_gemm_16x16x64_subtiled_k_on_gfx90a() -> None:
     assert report["max_abs_diff"] == 0.0, report
 
 
+def test_tiling_gemm_interleaved_a_transform_on_gfx90a() -> None:
+    # Load A in the interleaved (AOS) layout, then transform_fragment (a register `reorder`) to the
+    # MMA form. k_iter=2 makes the interleave non-trivial. Bit-exact vs the canonical-load path.
+    spec = TilingGemmSpec(tile=(16, 16, 32), atom=(16, 16, 16))
+    report = run_and_verify(256, 256, 256, spec=spec, arch="gfx90a", interleave_a=True)
+    assert report["op_id"] == "mfma_f32_16x16x16f16"
+    assert report["bit_exact"], report
+    assert report["max_abs_diff"] == 0.0, report
+
+
 def test_tiling_gemm_32x32x16_subtiled_mn_on_gfx90a() -> None:
     # 2x2 M/N subtile grid over a 16x16x16 atom -> the mma walks the M x N grid internally.
     spec = TilingGemmSpec(tile=(32, 32, 16), atom=(16, 16, 16))
