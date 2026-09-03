@@ -20,16 +20,19 @@ Two outcomes (plus a hard reject):
 
 MMA safety (:func:`validate_operands`): the MFMA/WMMA hardware multiply-accumulates by pairing
 A-slot-s with B-slot-s and summing over K. The sum is order-independent, so the K-slot ordering is
-FREE -- the ONLY validity constraint is that A and B share the SAME positional K-distribution (they
-agree on which logical K sits in each paired slot). M/N register order is free, and K need NOT match
-any "canonical" atom order: interleaved-A x interleaved-B is valid as long as their K-dists match.
-Fragments reaching the check are register-reorders of the atom (same lane ownership by construction),
-so a positional A-vs-B K-match is sufficient. It is what ``TileMma.__call__`` uses to reject a
-mismatched operand pair with a constructive message.
+FREE -- the sole CROSS-OPERAND constraint is that A and B share the SAME positional K-distribution (they
+agree on which logical K sits in each paired slot). Per-operand soundness (one M per output on A, one N
+on B) is the OTHER half of the sound MAC, checked separately by :func:`operand_soundness`; here it holds
+by construction -- fragments reaching this check are register-reorders of the atom (same lane ownership).
+M/N register order is free, and K need NOT match any "canonical" atom order: interleaved-A x interleaved-B
+is valid as long as their K-dists match, so a positional A-vs-B K-match is sufficient here. It is what
+``TileMma.__call__`` uses to reject a mismatched operand pair with a constructive message. Correctness
+SOT: ``docs/mma_is_machinery.md`` (the three-condition sound MAC).
 """
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,7 +42,8 @@ from .register_mapper import RegisterMapper
 
 __all__ = ["TransformPlan", "interleave_idx", "k_distribution", "classify_transform", "validate_operands",
            "derive_c_distribution", "Diagnostic", "diagnose_k_match", "as_forward_map",
-           "operand_soundness", "mma_compatible", "mma_pair_compatible", "transform_fragment"]
+           "operand_soundness", "mma_compatible", "mma_pair_compatible", "transform_fragment",
+           "describe_edge", "name_permutation", "reorder_between", "ReorderPlan"]
 
 
 def interleave_idx(gather: int, stride: int, count: int, length: int | None = None) -> tuple[int, ...]:
@@ -70,6 +74,23 @@ def interleave_idx(gather: int, stride: int, count: int, length: int | None = No
         local = i % count
         perm[i] = block + (local % inner) * stride + (local // inner)
     return tuple(perm)
+
+
+def name_permutation(perm: tuple[int, ...]) -> str:
+    """Recognise a register-permutation as a closed-form ``interleave_idx`` and name it EXACTLY (the concrete
+    function + params + the per-register lambda), else fall back to the raw tuple. So a viz/log can state the
+    ACTUAL reorder a ``transform_fragment`` emitted -- e.g. the CRC C-shuffle is ``interleave_idx(1, 16, 64)``,
+    ``dst = (r%4)*16 + (r//4)`` -- instead of a vague 'in-register reorder'."""
+    n = len(perm)
+    if tuple(perm) == tuple(range(n)):
+        return "identity (no reorder)"
+    for stride in range(2, n):                                  # count == n (single block); gather==1
+        if n % stride:
+            continue
+        if tuple(perm) == interleave_idx(1, stride, n):
+            inner = n // stride
+            return f"interleave_idx(1, {stride}, {n})   dst = (r%{inner})*{stride} + (r//{inner})"
+    return f"reorder perm={perm}"
 
 
 def _forward_map(enc: WarpDistributionEncoding) -> tuple[dict[tuple[int, int], tuple[int, ...]], RegisterMapper]:
@@ -163,6 +184,128 @@ def classify_transform(source, target) -> TransformPlan:
     return _classify_maps(as_forward_map(source), as_forward_map(target))
 
 
+@dataclass(frozen=True)
+class ReorderPlan:
+    """A discovered IN-REGISTER reorder that bridges a COALESCED (memory-order) register frame to the
+    REQUESTED (consumer-order) frame -- e.g. the ``v_perm_b32`` that turns a coalesced ``ds_read`` landing
+    order into the MMA-operand order. Everything is DERIVED per case (never a stored/hardcoded interleave
+    param): ``label`` is :func:`name_permutation`; ``tier`` is the cost-ladder rung
+    (``tiling_interleaving_design.md`` §7a) -- a *dword*-aligned reorder is a register renumber, a *sub-dword*
+    reorder is a real ``v_perm_b32`` repack; ``vperm_per_lane`` is the emitted-op estimate; ``cost`` is the
+    one-line render string. A returned plan ALWAYS means a real reorder (identity -> ``reorder_between``
+    returns ``None``)."""
+    tier: str                                  # "reorder (dword)" | "reorder (sub-dword, Nx)" | "cross_lane"
+    permutation: tuple[int, ...] | None
+    label: str                                 # name_permutation(perm), e.g. "interleave_idx(1, 8, 32) ..."
+    vperm_per_lane: int
+    cost: str
+
+
+def _dword_aligned(perm: tuple[int, ...], pack: int) -> bool:
+    """True iff ``perm`` moves whole ``pack``-sized dword blocks as units (register renumber); False iff it
+    splits a dword (a sub-dword repack -- a real ``v_perm_b32``). ``pack`` = elements per 32-bit register."""
+    if pack <= 1:
+        return True
+    for b in range(0, len(perm), pack):
+        if perm[b] % pack != 0 or any(perm[b + j] != perm[b] + j for j in range(pack)):
+            return False
+    return True
+
+
+def reorder_between(coalesced_fwd, requested_fwd, *, pack) -> "ReorderPlan | None":
+    """Detect + classify the IN-REGISTER reorder bridging a COALESCED (memory-order) register frame to the
+    REQUESTED (consumer-order) frame. Both args are ``{(lane,reg)->coord}`` forward maps (or encodings)
+    holding the **same per-lane data**; ``pack`` = elements per 32-bit register (f16=2, f32=1, f8=4 -- REQUIRED,
+    no silent default: it decides dword vs sub-dword). Returns ``None`` when the two frames are already equal
+    (no reorder -> no panel). GENERIC: nothing is hardcoded -- :func:`classify_transform` is ground truth and
+    :func:`name_permutation` only LABELS the permutation it finds. Raises if the two frames do NOT hold the
+    same per-lane data (that means the wrong pair was passed -- a within-lane reorder keeps each lane's element
+    set; never silently reinterpret it as cross-lane)."""
+    src = as_forward_map(coalesced_fwd)
+    tgt = as_forward_map(requested_fwd)
+    def _per_lane(m):
+        d: dict[int, set] = {}
+        for (l, _r), c in m.items():
+            d.setdefault(l, set()).add(c)
+        return d
+    if _per_lane(src) != _per_lane(tgt):
+        raise ValueError(
+            "reorder_between: the two frames do not hold the same per-lane data -- the wrong pair was passed "
+            "(a within-lane reorder keeps each lane's element set). Fix the inputs; do not force a reorder.")
+    plan = classify_transform(src, tgt)
+    if plan.tier == "cross_lane":                              # element changes lane -> NOT the two-panel model
+        return ReorderPlan("cross_lane", None, "cross_lane (DPP / ds_bpermute)", 0,
+                           "cross_lane: element changes lane -- needs ds_bpermute/DPP (last resort)")
+    perm = plan.permutation
+    if perm == tuple(range(len(perm))):
+        return None                                            # identity -> no reorder
+    label = name_permutation(perm)
+    if _dword_aligned(perm, pack):
+        return ReorderPlan("reorder (dword)", perm, label, 0,
+                           f"reorder (dword-aligned): {label} -- register renumber, ~0 v_perm")
+    ndword = -(-len(perm) // max(1, pack))                     # ceil(nregs / pack): dest dwords repacked
+    return ReorderPlan(f"reorder (sub-dword, {pack}x)", perm, label, ndword,
+                       f"reorder (sub-dword, {pack} elem/dword): {label}, ~{ndword} v_perm_b32/lane")
+
+
+def _axis_permutation(smap: dict[tuple[int, int], tuple[int, ...]],
+                      tmap: dict[tuple[int, int], tuple[int, ...]]) -> tuple[int, ...] | None:
+    """The fixed axis permutation ``pi`` with ``tmap[k] == tuple(smap[k][pi[i]] for i)`` for EVERY shared
+    key, or ``None``. Identity ``pi`` = a pure rename (numeric coords unchanged); a non-identity ``pi`` = a
+    transpose / axis swap. Both maps must share keys and coord rank."""
+    if set(smap) != set(tmap):
+        return None
+    ndim = len(next(iter(smap.values())))
+    for pi in itertools.permutations(range(ndim)):
+        if all(tmap[k] == tuple(smap[k][i] for i in pi) for k in smap):
+            return pi
+    return None
+
+
+def describe_edge(src, tgt=None, *, src_dims=("d0", "d1"), tgt_dims=None, to_space=None, relabel=False):
+    """Classify + describe ONE pipeline edge -> ``(kind, why)``. A datum's LABEL is its identity and flows
+    INVARIANT across every space; it changes ONLY on an explicit ``relabel`` edge. Kinds:
+
+    - ``identity``   -- ``src == tgt``; nothing changed.
+    - ``reposition`` -- register -> memory space (``to_space`` set): label INVARIANT; only the datum's physical
+      storage-axis alignment / address changes. ✗ NEVER a *label* transpose -- the memref's axis order is
+      positional, not a relabel of the datum. Free -- absorbed into addressing; renders INTO the space.
+    - ``reorder``    -- register->register lane-uniform register permutation (cost: register shuffle).
+    - ``cross_lane`` -- register->register element changes lane / non-uniform (cost: cross-lane movement).
+    - ``relabel``    -- EXPLICIT (``relabel=True``) axis-permutation + rename that *changes the label*. The ONE
+      sanctioned label change: reinterpreting a FINISHED tile's axes when it is reused as a downstream input
+      (e.g. a computed C ``(M,N)`` re-viewed as an input ``(M,K)``/``(N,K)``). ✗ NOT AB-swap -- that is a
+      machine-input ROUTING (operand->opposite slot), labels INVARIANT, C DERIVES; not a relabel and not an
+      edge kind. Raises unless ``src->tgt`` is a consistent axis permutation (``pi``).
+
+    ``src``/``tgt`` are ``WarpDistributionEncoding`` or forward maps. ``src_dims``/``tgt_dims`` name the axes
+    (used to phrase the ``why``). This is the single classifier every arrow label routes through, so a free
+    edge is never a silent no-op (the ``why`` is mandatory on ``reposition``/``relabel``).
+    SOT: ``docs/label_flow_and_transforms.md`` (storage != label; source-swap != relabel)."""
+    sd, td = tuple(src_dims), tuple(tgt_dims) if tgt_dims is not None else tuple(src_dims)
+    if relabel:
+        if tgt is None:
+            raise ValueError("an explicit relabel needs a target layout")
+        pi = _axis_permutation(as_forward_map(src), as_forward_map(tgt))
+        if pi is None:
+            raise ValueError("declared relabel is not a consistent axis permutation/rename of the source")
+        swapped = pi != tuple(range(len(pi)))
+        how = "axes swapped" if swapped else "renamed"
+        return "relabel", f"{sd}->{td} reinterpret ({how}); free (label CHANGES)"
+    if to_space is not None:
+        # A store/read is a REPOSITION: the datum's physical storage-axis alignment / address changes, its
+        # LABEL never does. ✗ NEVER phrase this as a label transpose (`(M,K)->(K,M)`): the memref's axis order
+        # is POSITIONAL, not a relabel of the datum. SOT: docs/label_flow_and_transforms.md.
+        return "reposition", f"place into {to_space}; free (label invariant)"
+    s, t = as_forward_map(src), as_forward_map(tgt)
+    if s == t:
+        return "identity", "no change"
+    tier = classify_transform(s, t).tier
+    why = {"reorder": "lane-uniform register permutation (register shuffle)",
+           "cross_lane": "element changes lane (cross-lane: LDS / DPP)"}[tier]
+    return tier, why
+
+
 def _atom_k_signature(
     per_lane_k: tuple[tuple[int, ...], ...], atoms: int, role: str
 ) -> tuple[tuple[tuple[int, ...], ...], str]:
@@ -201,12 +344,14 @@ def validate_operands(
 ) -> tuple[bool, str]:
     """MMA safety: A and B must share the SAME positional K-distribution PER ATOM.
 
-    The MFMA/WMMA hardware pairs A-slot-s with B-slot-s and sums over K; the sum is
-    order-independent, so the K-slot ordering is FREE -- the sole validity constraint is that A and B
-    agree on which logical K sits in each paired slot. M/N register order is unconstrained, and K need
-    NOT match any "canonical" atom order (interleaved-A x interleaved-B is valid iff their K-dists
-    match). Fragments reaching here are register-reorders of the atom (same lane ownership by
-    construction), so a positional A-vs-B K-match is sufficient for a correct contraction.
+    This is the PAIRWISE half of the sound MAC (correctness SOT: ``docs/mma_is_machinery.md``). The
+    MFMA/WMMA hardware pairs A-slot-s with B-slot-s and sums over K; the sum is order-independent, so the
+    K-slot ordering is FREE -- the sole CROSS-OPERAND constraint is that A and B agree on which logical K
+    sits in each paired slot. Per-operand soundness (M/N fixed per output) is the other half, checked by
+    :func:`operand_soundness`; here it holds by construction -- fragments reaching this check are
+    register-reorders of the atom (same lane ownership). M/N register order is unconstrained, and K need
+    NOT match any "canonical" atom order (interleaved-A x interleaved-B is valid iff their K-dists match),
+    so a positional A-vs-B K-match is sufficient here for a correct contraction.
 
     ``a_free_atoms`` / ``b_free_atoms`` are the free-dim atom counts (M-atoms for A, N-atoms for B) the
     driver walks. A rectangular wave tile has ``a_free_atoms != b_free_atoms``, so the WHOLE-fragment
@@ -321,6 +466,8 @@ def diagnose_k_match(a_enc, b_enc) -> Diagnostic:
     - ``warning`` -- K order differs but each lane holds the SAME K set: reconcilable by an IN-REGISTER
       reorder (the transform is named, not performed).
     - ``error``   -- lanes hold DIFFERENT K sets: no in-register reorder reconciles them.
+
+    Correctness SOT: ``docs/mma_is_machinery.md`` (this is the pairwise K-match, sound-MAC condition 3).
     """
     ka, kb = _kdist_from_fwd(as_forward_map(a_enc)), _kdist_from_fwd(as_forward_map(b_enc))
     if len(ka) != len(kb):
@@ -351,6 +498,8 @@ def operand_soundness(layout, canon: WarpDistributionEncoding, *, free_axis: int
     - every A label's M (B label's N) must be FIXED -- one free-label across the row's positions;
     - the K-labels must be WELL-FORMED -- the same multiset as the machine's contraction K-set for that row.
     ``ok`` iff both hold on every machine output-row; else ``error`` naming the first offending row.
+
+    Correctness SOT: ``docs/mma_is_machinery.md`` (this is per-operand soundness, sound-MAC conditions 1-2).
     """
     sup = as_forward_map(layout)
     cm = RegisterMapper(canon)
@@ -370,7 +519,7 @@ def operand_soundness(layout, canon: WarpDistributionEncoding, *, free_axis: int
         if sup_k != can_k:
             return Diagnostic("error",
                 f"{role} not sound: machine output-row {cf} K-labels {sup_k} != contraction set "
-                f"{can_k} -- malformed/duplicated K (rule 2)")
+                f"{can_k} -- malformed/duplicated K (rule 3: well-formed K)")
     return Diagnostic("ok", f"{role} sound: fixed free-label + well-formed K on every machine output-row")
 
 
@@ -400,7 +549,9 @@ def mma_pair_compatible(a_enc, b_enc, *, a_canon: WarpDistributionEncoding,
                         b_canon: WarpDistributionEncoding, k_axis: int = 1) -> Diagnostic:
     """Full A x B check: BOTH operands sound (:func:`operand_soundness`) AND their K-dists match
     positionally (the relationship, :func:`diagnose_k_match`). Observer only. ``ok`` iff the pair is a
-    valid, meaningful MMA; else the first failing operand's soundness error, or the K-match diagnostic."""
+    valid, meaningful MMA; else the first failing operand's soundness error, or the K-match diagnostic.
+    The full sound MAC = per-operand soundness (conditions 1-2) + pairwise K-match (3); correctness SOT:
+    ``docs/mma_is_machinery.md``."""
     for enc, canon, role in ((a_enc, a_canon, "A"), (b_enc, b_canon, "B")):
         d = operand_soundness(enc, canon, k_axis=k_axis, role=role)
         if d.severity != "ok":
