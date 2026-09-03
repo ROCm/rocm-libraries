@@ -139,6 +139,15 @@ jobs:
             --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
           # Hardcoded for testing hipsolver
+          echo ""
+          echo "=============================================="
+          echo "OVERWRITING GITHUB_OUTPUT FOR TESTING"
+          echo "=============================================="
+          echo "changed_projects=projects/hipsolver"
+          echo "run_all_tests=false"
+          echo "skip_tests=false"
+          echo "=============================================="
+          echo ""
           echo 'changed_projects=projects/hipsolver' >> $GITHUB_OUTPUT
           echo 'run_all_tests=false' >> $GITHUB_OUTPUT
           echo 'skip_tests=false' >> $GITHUB_OUTPUT
