@@ -69,39 +69,6 @@ set(TENSILELITE_LIBLOGIC_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
     CACHE PATH "Path to the hipSPARSELt TensileLite logic files."
 )
-set(TENSILELITE_BUILD_PARALLEL_LEVEL "" CACHE STRING
-    "Number of CPU cores to use for building device libraries (uses nproc if unset).")
-set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE BOOL
-    "Keep the temporary device-library build directory.")
-set(TENSILELITE_ASM_DEBUG OFF CACHE BOOL
-    "Keep debug information in generated device libraries.")
-set(TENSILELITE_LOGIC_FILTER "" CACHE STRING
-    "Glob used to select logic files; empty selects all logic files.")
-set(TENSILELITE_NO_COMPRESS OFF CACHE BOOL
-    "Do not compress device code object files.")
-set(TENSILELITE_EXPERIMENTAL OFF CACHE BOOL
-    "Process experimental logic files.")
-set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE BOOL
-    "Emit comments in generated assembly.")
-set(TENSILELITE_OFFLOADBUNDLER "" CACHE FILEPATH
-    "Path to clang-offload-bundler.")
-set(TENSILELITE_LIBRARY_FORMAT "msgpack" CACHE STRING
-    "Device library serialization format (msgpack or yaml).")
-set_property(CACHE TENSILELITE_LIBRARY_FORMAT PROPERTY STRINGS msgpack yaml)
-set(Tensile_NO_LAZY_LIBRARY_LOADING OFF CACHE BOOL
-    "Disable lazy loading of device libraries.")
-mark_as_advanced(
-    TENSILELITE_BUILD_PARALLEL_LEVEL
-    TENSILELITE_KEEP_BUILD_TMP
-    TENSILELITE_ASM_DEBUG
-    TENSILELITE_LOGIC_FILTER
-    TENSILELITE_NO_COMPRESS
-    TENSILELITE_EXPERIMENTAL
-    TENSILELITE_ENABLE_ASM_COMMENTS
-    TENSILELITE_OFFLOADBUNDLER
-    TENSILELITE_LIBRARY_FORMAT
-    Tensile_NO_LAZY_LIBRARY_LOADING
-)
 option(HIPSPARSELT_ENABLE_CLIENT "Build hipSPARSELt clients." ON)
 if(HIPSPARSELT_ENABLE_CLIENT)
     option(HIPSPARSELT_ENABLE_BENCHMARKS "Build benchmark client." ON)
@@ -201,7 +168,8 @@ if(HIPSPARSELT_ENABLE_HIP)
             "hipSPARSELt uses private source-tree TensileLite support.")
         cmake_path(GET HIPBLASLT_TENSILELITE_PATH PARENT_PATH _hipblaslt_source_dir)
         list(APPEND CMAKE_MODULE_PATH "${_hipblaslt_source_dir}/cmake")
-        find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
+        include(hipblaslt_python)
+        hipblaslt_find_python(Development.Module)
         set(HIPBLASLT_BUNDLE_PYTHON_DEPS ON)
         set(HIPBLASLT_PYTHON_DEPS _rocisa)
         block()
@@ -254,30 +222,22 @@ if(HIPSPARSELT_ENABLE_HIP)
 
         include(hipblaslt_codegen)
         set(_hipsparselt_tensile_out "${CMAKE_BINARY_DIR}/Tensile")
-        set(_hipsparselt_yaml_format OFF)
-        if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
-            set(_hipsparselt_yaml_format ON)
+        set(_hipsparselt_codegen_product_args "")
+        if(HIPSPARSELT_ENABLE_ASAN)
+            list(APPEND _hipsparselt_codegen_product_args ASAN ON)
         endif()
-        set(_hipsparselt_lazy_load ON)
+        if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
+            list(APPEND _hipsparselt_codegen_product_args YAML_FORMAT ON)
+        endif()
         if(Tensile_NO_LAZY_LIBRARY_LOADING)
-            set(_hipsparselt_lazy_load OFF)
+            list(APPEND _hipsparselt_codegen_product_args LAZY_LOAD OFF)
         endif()
         create_device_library(
             LOGIC_PATH "${TENSILELITE_LIBLOGIC_PATH}"
             OUTPUT_DIR "${_hipsparselt_tensile_out}"
             CODEGEN_ROOT "${HIPBLASLT_TENSILELITE_PATH}"
             PYTHON_EXECUTABLE "${Python_EXECUTABLE}"
-            OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
-            JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
-            LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
-            ASAN "${HIPSPARSELT_ENABLE_ASAN}"
-            YAML_FORMAT "${_hipsparselt_yaml_format}"
-            NO_COMPRESS "${TENSILELITE_NO_COMPRESS}"
-            EXPERIMENTAL "${TENSILELITE_EXPERIMENTAL}"
-            LAZY_LOAD "${_hipsparselt_lazy_load}"
-            ASM_COMMENTS "${TENSILELITE_ENABLE_ASM_COMMENTS}"
-            KEEP_BUILD_TMP "${TENSILELITE_KEEP_BUILD_TMP}"
-            ASM_DEBUG "${TENSILELITE_ASM_DEBUG}"
+            ${_hipsparselt_codegen_product_args}
         )
 
         if(WIN32)
@@ -296,9 +256,6 @@ endif()
 set(BUILD_SHARED_LIBS "${HIPSPARSELT_BUILD_SHARED_LIBS}")
 add_subdirectory(library)
 
-# The shared source-provider build embeds its private static TensileLite
-# support. Static hipsparselt and staged/TheRock builds export or link the
-# hipBLASLt provider instead.
 set(_hipsparselt_requires_hipblaslt OFF)
 if(HIPSPARSELT_ENABLE_HIP
         AND (HIPSPARSELT_ENABLE_THEROCK OR NOT BUILD_SHARED_LIBS))

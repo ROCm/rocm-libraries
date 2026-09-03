@@ -87,6 +87,40 @@ def test_create_device_library_accepts_explicit_source_root(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_create_device_library_uses_defaults_and_allows_overrides(tmp_path):
+    logic_path = TENSILELITE_ROOT / "Tensile" / "Tests" / "unit"
+    result = _configure(
+        tmp_path,
+        "set(TENSILELITE_BUILD_PARALLEL_LEVEL 2)\n"
+        "set(TENSILELITE_NO_COMPRESS ON)\n"
+        "create_device_library(\n"
+        "  TARGET generic-defaults\n"
+        f'  CODEGEN_ROOT "{TENSILELITE_ROOT.as_posix()}"\n'
+        f'  LOGIC_PATH "{logic_path.as_posix()}"\n'
+        f'  OUTPUT_DIR "{(tmp_path / "default-output").as_posix()}"\n'
+        f'  PYTHON_EXECUTABLE "{Path(sys.executable).as_posix()}"\n'
+        '  CXX_COMPILER "/usr/bin/c++"\n'
+        "  ARCHES gfx950\n"
+        ")\n"
+        "create_device_library(\n"
+        "  TARGET explicit-override\n"
+        f'  CODEGEN_ROOT "{TENSILELITE_ROOT.as_posix()}"\n'
+        f'  LOGIC_PATH "{logic_path.as_posix()}"\n'
+        f'  OUTPUT_DIR "{(tmp_path / "override-output").as_posix()}"\n'
+        f'  PYTHON_EXECUTABLE "{Path(sys.executable).as_posix()}"\n'
+        '  CXX_COMPILER "/usr/bin/c++"\n'
+        "  ARCHES gfx950\n"
+        "  JOBS 3\n"
+        "  NO_COMPRESS OFF\n"
+        ")",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    build_ninja = (tmp_path / "build" / "build.ninja").read_text()
+    assert "--jobs=2" in build_ninja
+    assert "--jobs=3" in build_ninja
+    assert build_ninja.count("--no-compress") == 1
+
+
 def test_create_device_library_rejects_incomplete_source_root(tmp_path):
     result = _configure(
         tmp_path,

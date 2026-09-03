@@ -52,6 +52,9 @@ endif()
 if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${hipblaslt_SOURCE_DIR}/library")
 endif()
+if(NOT HIPBLASLT_CODEGEN_ROOT)
+    set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
+endif()
 
 # The Python process imports host libraries such as _rocisa, so it must use the
 # host sanitizer runtime selected by either a standalone hipBLASLt build or its
@@ -64,6 +67,17 @@ if(HIPBLASLT_ENABLE_ASAN
     list(APPEND _codegen_host_sanitizer_args HOST_ASAN)
 elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
     list(APPEND _codegen_host_sanitizer_args HOST_TSAN)
+endif()
+
+set(_codegen_product_args "")
+if(HIPBLASLT_ENABLE_ASAN)
+    list(APPEND _codegen_product_args ASAN "${HIPBLASLT_ENABLE_ASAN}")
+endif()
+if(HIPBLASLT_ENABLE_YAML)
+    list(APPEND _codegen_product_args YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}")
+endif()
+if(NOT DEFINED HIPBLASLT_ENABLE_LAZY_LOAD OR NOT HIPBLASLT_ENABLE_LAZY_LOAD)
+    list(APPEND _codegen_product_args LAZY_LOAD "${HIPBLASLT_ENABLE_LAZY_LOAD}")
 endif()
 
 # gfx1250's two ASIC revisions (v0/v1) need different tuned kernels; the runtime
@@ -93,22 +107,10 @@ endif()
 create_device_library(
     LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
     OUTPUT_DIR "${HIPBLASLT_TENSILE_LIBPATH}"
-    CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite"
-    PYTHON_EXECUTABLE "${Python3_EXECUTABLE}"
     ARCHES ${_main_arches}
     REQUIRE_GFX1250V0_OVERLAY ${_main_requires_gfx1250v0_overlay}
-    OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
-    JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
-    LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
     ${_codegen_host_sanitizer_args}
-    ASAN "${HIPBLASLT_ENABLE_ASAN}"
-    YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}"
-    NO_COMPRESS "${TENSILELITE_NO_COMPRESS}"
-    EXPERIMENTAL "${TENSILELITE_EXPERIMENTAL}"
-    LAZY_LOAD "${HIPBLASLT_ENABLE_LAZY_LOAD}"
-    ASM_COMMENTS "${TENSILELITE_ENABLE_ASM_COMMENTS}"
-    KEEP_BUILD_TMP "${TENSILELITE_KEEP_BUILD_TMP}"
-    ASM_DEBUG "${TENSILELITE_ASM_DEBUG}"
+    ${_codegen_product_args}
 )
 
 if(_build_gfx1250v0)
@@ -125,25 +127,13 @@ if(_build_gfx1250v0)
         TARGET tensilelite-device-libraries-gfx1250v0
         LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
         OUTPUT_DIR "${_gfx1250v0_output_dir}"
-        CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite"
-        PYTHON_EXECUTABLE "${Python3_EXECUTABLE}"
         ARCHES gfx1250v0
         # hipBLASLt owns the gfx1250/gfx1250v0 split for its own corpus, but
         # hipSPARSELt reuses this CMakeLists with a no-split corpus. Let the
         # embedding caller choose whether this target requires the directory.
         REQUIRE_GFX1250V0_OVERLAY ${HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY}
-        OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
-        JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
-        LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
         ${_codegen_host_sanitizer_args}
-        ASAN "${HIPBLASLT_ENABLE_ASAN}"
-        YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}"
-        NO_COMPRESS "${TENSILELITE_NO_COMPRESS}"
-        EXPERIMENTAL "${TENSILELITE_EXPERIMENTAL}"
-        LAZY_LOAD "${HIPBLASLT_ENABLE_LAZY_LOAD}"
-        ASM_COMMENTS "${TENSILELITE_ENABLE_ASM_COMMENTS}"
-        KEEP_BUILD_TMP "${TENSILELITE_KEEP_BUILD_TMP}"
-        ASM_DEBUG "${TENSILELITE_ASM_DEBUG}"
+        ${_codegen_product_args}
     )
 endif()
 

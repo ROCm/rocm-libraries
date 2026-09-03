@@ -166,7 +166,14 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                 set(STINKYTOFU_BUILD_PYTHON OFF CACHE BOOL
                     "Build StinkyTofu Python bindings" FORCE)
             endif()
-            add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
+            if(ROCISA_STANDALONE)
+                add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
+            else()
+                block(SCOPE_FOR VARIABLES)
+                    set(BUILD_SHARED_LIBS OFF)
+                    add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
+                endblock()
+            endif()
             set(_stinkytofu_from_subdirectory TRUE)
         endif()
     endif()
@@ -235,11 +242,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     )
     if(_stinkytofu_from_subdirectory AND _stinkytofu_shared)
         if(ROCISA_STANDALONE)
-            # A wheel cannot assume a ROCm-prefix stinkytofu exists, so carry
-            # the source-built library beside _rocisa.
             set_target_properties(_rocisa PROPERTIES INSTALL_RPATH "$ORIGIN")
-            # Windows has no RPATH; copy stinkytofu.dll next to _rocisa.pyd so
-            # the loader finds it at runtime.
             if(WIN32)
                 add_custom_command(TARGET _rocisa POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -248,10 +251,6 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                 )
             endif()
         else()
-            # hipBLASLt installs the source-built runtime in
-            # ${CMAKE_INSTALL_LIBDIR}. Keep $ORIGIN first for the
-            # self-contained test artifact and reach that library dir from
-            # lib/hipblaslt/rocisa in the production layout.
             install(TARGETS stinkytofu
                 LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel NAMELINK_SKIP
                 RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT devel)
