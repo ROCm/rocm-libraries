@@ -201,7 +201,7 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
 # a duplicate compile and can never serve a wrong binary -- so these are recorded,
 # not asserted against. lazy_rescale is a gfx950-only lever (this builder never reads
 # spec.lazy_rescale) that the SHARED kernel_name() nevertheless tags with `lazyrs`.
-_NAME_ONLY_SPEC_FIELDS = frozenset({"lazy_rescale"})
+_NAME_ONLY_SPEC_FIELDS = frozenset({"lazy_rescale", "lds_v_row_pad", "wide_lds_dma"})
 
 # Second LEGAL values per field. Every candidate is filtered through
 # supports_attention_dense before use, so a candidate that is illegal for a given
@@ -222,7 +222,9 @@ _SPEC_PERTURBATIONS = {
     "paged": (),  # unbuildable (not yet supported)
     "block_size": (),  # unbuildable (paged-only, paged not supported)
     "num_kv_blocks": (),  # unbuildable (paged-only, paged not supported)
+    "block_m": (128, 512),
     "block_n": (32, 128),
+    "lds_v_row_pad": (0, 16),
     "waves_per_eu": (3, 4),
     "lds_k_group_pad": (0, 16),
     "persistent": (True, False),
@@ -231,6 +233,7 @@ _SPEC_PERTURBATIONS = {
     "persist_decode": ("qb_major", "hkv_major"),
     "lazy_rescale": (False, True),
     "use_sinks": (),  # unbuildable (not yet supported)
+    "wide_lds_dma": (False, True),
 }
 
 # The gfx942-private half of the same table: fields Gfx942AttentionDenseSpec adds on
@@ -238,7 +241,6 @@ _SPEC_PERTURBATIONS = {
 # check below can name which half a missing field belongs to; both halves are applied
 # to the SAME object, since there is one spec and one builder signature.
 _PRIVATE_PERTURBATIONS = {
-    "block_m": (128, 512),
     "lds_row_pad": (0, 16),
     "v_row_pad": (0, 64),
     "use_cfvst": (False, True),
@@ -583,16 +585,13 @@ _CONTRACT_GRID = [
     dict(batch=4),
     dict(batch=64, seqlen_q=16384, seqlen_kv=16384, num_kv_heads=8),
     dict(waves_per_eu=4),
-    # --- private: block_m ---
+    # --- shared tile geometry: block_m ---
     dict(block_m=_BLOCK_M),  # the default, spelled out
     dict(block_m=128),  # accepted: halves the query tile
-    dict(block_m=48),  # REJECTED: not a multiple of 32 (wave floor)
+    # 1920 keeps this row constructible under the shared spec's exact tiling
+    # check; gfx942 support then rejects the 48-row non-wave-aligned geometry.
+    dict(block_m=48, seqlen_q=1920, seqlen_kv=1920),
     dict(block_m=1024),  # REJECTED: 2048-thread CTA > the 1024 max
-    # REJECTED: 2048 % 320 != 0, so the last query tile runs past seqlen_q and Q/O
-    # (plain global_load_vN, no bounds check) read and write out of bounds. 320 is a
-    # multiple of 32 and of block_n and fits a 640-thread CTA, so this row reaches
-    # the seqlen check rather than tripping an earlier one.
-    dict(seqlen_q=2048, block_m=320),
     # --- private: lds_row_pad / v_row_pad (the pad-value sweep surface) ---
     dict(lds_row_pad=0),  # accepted: the unpadded A/B arm
     dict(lds_row_pad=2),  # REJECTED: not a multiple of 4 elements

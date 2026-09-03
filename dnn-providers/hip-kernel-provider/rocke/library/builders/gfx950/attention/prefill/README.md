@@ -22,10 +22,15 @@ rocke IR DSL. Forward-only, bf16/fp16, head_dim 64/128, MHA or GQA.
   (~94% at Sq=8192) plus a masked diagonal tail.
 - **depth-1 cluster split** fusing exp2 into the PV MFMA loop for MFMA/VALU co-exec.
 - **vectorized O store**.
+- **qualified wide LDS DMA** — the aligned persistent D128/BN64 path can use two
+  `buffer_load_dwordx4 ... lds` operations per operand/wave with 520/544-half
+  slab-padded K/V layouts. IGLP-1 owns this loop schedule and K-major PV traversal
+  keeps the 256-VGPR kernel spill-free.
 
 Shape (batch / seqlen / heads / head_dim / causal / dtype) is baked at build time
-(dense, statically-sized ABI). `block_n` (KV tile), `waves_per_eu`, and
-`lds_k_group_pad` are the performance knobs.
+(dense, statically-sized ABI). Tile/resource knobs are `block_n`, `waves_per_eu`,
+and `lds_k_group_pad`; persistent scheduling knobs are `num_persistent`,
+`persist_decode`, `interleave`, and `wide_lds_dma`.
 
 ## Persistent (grid-stride) mode
 
@@ -35,9 +40,52 @@ a 1-D grid of `num_persistent` long-lived CTAs grid-strides over the
 setup + K/V-prime cold-start is amortized once per CU instead of once per query-block.
 This closes the causal fixed-cost amortization gap. `num_persistent=256` = one 8-wave
 block per CU on MI355X (256 CUs) at 2 waves/SIMD; larger oversubscribes the CUs (tail
-loss). The work-item decode is `persist_decode="auto"` by default: it resolves to the
-**hkv-major** L2-locality decode when balance-safe (GQA and `gqa*NQB*B >= 2*NP`, e.g.
-128/8 at Sq=8192) and falls back to **qb-major** otherwise.
+loss). The work-item decode is `persist_decode="auto"` by default. Auto selects:
+
+1. **gqa-pair** when its one-phase balance equation
+   (`NP == NQB*Hkv*B`, with even `NQB` and GQA ratio) holds;
+2. **gqa-pair-2phase** when its two-phase balance equation
+   (`NP == NQB*Hkv*B*gqa/2`, with even `NQB`) holds;
+3. **hkv-major** when its broader GQA balance condition
+   (`gqa*NQB*B >= 2*NP`) holds; or
+4. **qb-major** otherwise.
+
+### Balanced GQA-pair decode
+
+`persist_decode="gqa_pair"` maps two neighboring CTAs to one
+`(low_qb, high_qb, hkv, batch)` group. Each CTA handles half of the local query
+heads at both complementary query blocks. The complementary blocks have constant
+combined causal cost, while consecutive local query heads reuse the same K/V head
+through L2.
+
+The explicit mode requires persistent causal attention, aligned sequence lengths,
+even `NQB` and GQA ratio, and `NP == NQB*Hkv*B`. It composes numerically with
+`interleave`, attention sinks, and aligned sliding-window attention. Auto uses it
+for aligned non-windowed causal shapes whenever the balance equation holds.
+Sliding-window requests fall back to qb-major because complementary query blocks
+do not have constant combined work under a finite window. MHA (`Hq == Hkv`) also
+falls back because it has no grouped query heads to reuse.
+
+`persist_decode="gqa_pair_2phase"` assigns one query head to each CTA and processes
+complementary query blocks in two grid-stride phases. Auto selects it when
+`NP == NQB*Hkv*B*gqa/2`; this covers, for example, the D128 Hq32/Hkv8 S4096 and
+Hq64/Hkv8 S2048 dashboard shapes at NP=256.
+
+### Wide LDS DMA
+
+`wide_lds_dma=True` is the gfx950 D128/BN64 persistent fast path. It changes the
+per-row 32-bit DMA layout into FlyDSL-compatible slabs:
+
+- K: `8 × 2 × 520` half elements per tile (`+8` padding per 512-half slab);
+- V: `8 × 2 × 544` half elements per tile (`+32` padding);
+- two 128-bit-per-lane DMA instructions per operand/wave;
+- 68,096 B total double-buffered LDS, down from 75,776 B;
+- IGLP-1 instead of the narrow path's manual scheduling directives.
+
+The dispatcher enables it for aligned persistent causal D128/BN64 fp16 and bf16
+shapes without sliding windows, sinks, or ragged lengths. GQA-pair selection is
+independent: MHA and GQA shapes whose pair equations do not hold still use wide
+DMA with qb-major or hkv-major work ordering.
 
 ## Measured (MI355X, bf16, D=128, Hq=128, Hkv=8, causal, Sq=8192)
 
@@ -55,18 +103,61 @@ number pinned to its exact config (grid / decode / V-pad / lazy):
 The load-bearing, clock-invariant deltas: hkv-major vs qb-major ≈ **1.04×** (L2 hit
 57%→~93%), V-pad 0→32 ≈ **+5%** (clears the transposed-PV bank conflicts), lazy ≈
 **+2%**. The shipped default (`persistent=True`, `persist_decode="auto"`,
-`lazy_rescale=True`, `ROCKE_DENSE_VPAD=32`) is the last row. All configs are 0 VGPR
+`lazy_rescale=True`, `lds_v_row_pad=32`) is the last row. All configs are 0 VGPR
 spill and parity-identical vs `torch.nn.functional.scaled_dot_product_attention`
 (max abs err ~1.46e-3 at Sq=8192).
+
+## Measured Llama-3-8B target (MI355X, fp16)
+
+For `B=1, Sq=Skv=8192, Hq=32, Hkv=8, D=128, causal`, five-round same-GPU
+ABBA measurements repeated twice for the final wide-DMA+IGLP kernel:
+
+- unchanged qb-major baseline: 750.2–752.6 TFLOPS median;
+- gqa-pair + wide DMA + IGLP-1: 903.2–903.7 TFLOPS median;
+- paired ratio: 1.20028–1.20110x;
+- max absolute error: `1.92e-4`;
+- resources: 256 VGPR, 68,096 B LDS, zero scratch/spills, 256 CTAs;
+- static load-to-LDS instructions: 64→16; total ISA instructions: 2,239→2,041.
+
+The gqa-pair step raised estimated L2 hit rate 32.0%→65.1%, halved fetch volume
+934→463 MB, and raised MFMA utilization 32.8%→40.5%. The final ATT trace shows
+wide DMA + IGLP reducing LDS-wait share 30.3%→7.6% and the mapped PV MFMA
+callsite 19.4%→5.3%.
+
+## Ungated dashboard sweep (MI355X)
+
+The capability-gated policy was measured against the previous exact-shape policy
+on the 90 unique dense shapes from the 2026-09-02 Solera export. Both runs used
+the same n07 GPU and robust per-shape timing (five samples, each targeting at
+least 100 ms, with the median reported):
+
+- 90/90 shapes passed numerical parity; 53 used wide DMA and 17 used a balanced
+  GQA-pair mapping;
+- geometric-mean throughput improved **5.20%** over all 90 shapes and **8.88%**
+  over the 55 shapes whose emitted kernel changed;
+- the 16 shapes whose pair mapping changed improved **16.3%** geometric mean
+  (the 11 D128/wide shapes moving from qb-major to a pair mapping improved
+  **19.9%**); wide DMA with unchanged work ordering improved its 37-shape cohort
+  by **6.08%**;
+- wins against the dashboard FlyDSL values increased from 45/82 to 54/82;
+- the largest gains were Hq32/Hkv8 S4096: fp16 **669→845 TFLOPS (+26.2%)** and
+  bf16 **689→885 TFLOPS (+28.5%)**;
+- no changed shape regressed by 1%; the only negative changed-shape delta was
+  fp16 Hq128/Hkv8 S8192 at **-0.4%**, within run noise.
 
 ## Usage
 
 ```bash
 # parity + benchmark (default shapes 256/512/2048/8192)
 python attention_dense_prefill.py                 # default (one CTA per query-block/head)
+python attention_dense_prefill.py --block-m 128   # explicit query-tile geometry
 python attention_dense_prefill.py --persistent    # persistent grid-stride (NP=256)
 python attention_dense_prefill.py --bn 128        # sweep block_n
+python attention_dense_prefill.py --vpad 16       # explicit V-row LDS pad
 python attention_dense_prefill.py --persistent --np 256 --interleave
+python attention_dense_prefill.py --persistent --persist-decode gqa_pair
+python attention_dense_prefill.py --persistent --persist-decode gqa_pair_2phase
+python attention_dense_prefill.py --persistent --persist-decode gqa_pair --wide-lds-dma
 ```
 
 Programmatic:
@@ -78,6 +169,7 @@ spec = AttentionDenseSpec(
     batch=1, seqlen_q=8192, seqlen_kv=8192,
     num_query_heads=128, num_kv_heads=8, head_size=128,
     causal=True, dtype="bf16",
+    block_m=256, block_n=64, lds_v_row_pad=32,
     persistent=True, num_persistent=256,   # grid-stride persistent variant
 )
 kernel = build_attention_dense(spec)       # -> KernelDef; compile with backend="python"
@@ -94,7 +186,7 @@ req = AttentionRequest(
     hdim_q=128, hdim_v=128, arch="gfx950", dtype="bf16", mask_type=1,
     algorithm="attention_dense",   # opt-in; "auto" keeps the unified 2D/3D path
     # dense_persistent="auto"      # "auto"|"on"|"off"; auto => persistent for large Sq
-    # dense_persist_decode="auto"  # "auto"|"qb_major"|"hkv_major"
+    # dense_persist_decode="auto"  # also accepts gqa_pair / gqa_pair_2phase
 )
 res  = dispatch_attention(req)                 # res.spec.kernel_name() -> ...persist256_hkvmaj
 spec = dense_spec_for_request(req)             # launch-ready best-config AttentionDenseSpec
@@ -103,7 +195,11 @@ run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1/128**0.5)
 
 `dense_persistent="auto"` turns on the persistent grid-stride variant once there is
 enough work to fill the grid (`⌈Sq/256⌉·Hq·B >= num_persistent`) — i.e. the large-Sq
-prefill regime — so the dispatcher reaches the ~948-TFLOPS path, not the default grid.
+prefill regime — so the dispatcher reaches the persistent path, not the default
+grid. Aligned causal D128/BN64 shapes enable wide DMA/IGLP; auto then chooses a
+balanced pair mapping when its CTA-count equation holds. The kernel name exposes
+the decisions through `wdma`, `gqapair`, or `gqapair2` tokens. Callers may also
+request either pair mapping explicitly.
 
 ## Tuning — lds_k_group_pad
 
@@ -146,15 +242,10 @@ original sweep result.
 
 ## TODO / follow-ups
 
-1. **Q-reload (enables the inner-loop unroll)** — the QK B-operand (`q_packs`,
-   `K_STEPS × vec8` ≈ 32 VGPR) is held resident across the whole KV loop. ISA
-   probing shows the kernel is at **243/256 VGPR, 0 spill** (flyDSL fits a *2-tile*
-   pipeline in ~252 VGPR), so a depth-2 software-pipeline unroll — the lever that
-   would lift MFMA utilization ~45% → ~70% and close the flyDSL gap — is
-   register-blocked. Re-reading Q per use (L2-resident) instead of holding all
-   packs frees ~32 VGPR toward that unroll. (Pairs with a P-LDS publish for the
-   lagged relayout, another ~16 VGPR.) Standalone it is perf-neutral; it is a
-   prerequisite for the 2-tile unroll.
+1. **Two-tile pipeline remains register-blocked.** A true Q-reload reduced the
+   target kernel from 248 to 231 VGPR, but repeated global-load/address work
+   dropped performance to ~398 TFLOPS. `NBUF=3` reached 256 VGPR, 85 spills,
+   344 B scratch, and ~288 TFLOPS. Neither experiment ships.
 2. **Improve varlen performance** — the packed `varlen` path (default builder,
    `cu_seqlens_q/kv`) currently trails the dense/persistent path and flyDSL on
    ragged batches. Follow-ups: extend the hkv-major L2-locality decode and the
