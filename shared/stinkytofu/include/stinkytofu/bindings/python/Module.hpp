@@ -98,10 +98,17 @@
     X(DsReadDrainLatency, int)                    \
     X(DsReadThrottleLatency, int)                 \
     X(DsReadPerWmma, int)                         \
+    X(TensorLoadWmmaSpace, int)                   \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \
     X(ArchName, std::string)
+
+// Keep transition disabled by default to preserve legacy full-throttle pacing:
+// entries=0 skips the transition range, and factor=1.0 is the full interval.
+#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)       \
+    X(DsReadThrottleTransitionFactor, double, 1.0) \
+    X(DsReadThrottleTransitionEntries, int, 0)
 
 namespace stinkytofu {
 /**
@@ -142,6 +149,9 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
 #define GEN_MEMBER_OPTION(name, type) type name{};
         MODULE_OPTIONS_LIST(GEN_MEMBER_OPTION)
 #undef GEN_MEMBER_OPTION
+#define GEN_MEMBER_OPTION_WITH_DEFAULT(name, type, value) type name = value;
+        MODULE_OPTIONS_WITH_DEFAULTS_LIST(GEN_MEMBER_OPTION_WITH_DEFAULT)
+#undef GEN_MEMBER_OPTION_WITH_DEFAULT
     };
 
     /**

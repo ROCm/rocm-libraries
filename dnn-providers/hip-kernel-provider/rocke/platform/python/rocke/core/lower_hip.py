@@ -163,6 +163,34 @@ def _name(v: Value) -> str:
     return v.name[1:] if v.name.startswith("%") else v.name
 
 
+# Vector-load/store element type -> ext_vector_type prefix (see the _ROCKE_VEC
+# typedefs in the prologue). fp8/bf8 share the i8 byte-storage view.
+_VEC_PREFIX = {
+    "f16": "f16x",
+    "bf16": "bf16x",
+    "f32": "f32x",
+    "i32": "i32x",
+    "i16": "i16x",
+    "i8": "i8x",
+    "fp8e4m3": "i8x",
+    "bf8e5m2": "i8x",
+}
+
+
+def _vec_prefix(elem_name: str, op_desc: str) -> str:
+    """Vector prefix for a vector load/store ``elem_type``. Validate rather than
+    silently falling back to f16, which would reinterpret the bits of another
+    type: an ``i32`` load viewed as ``f16x4`` then assigned to an ``i32x4``
+    converts the values instead of moving them."""
+    try:
+        return _VEC_PREFIX[elem_name]
+    except KeyError:
+        raise NotImplementedError(
+            f"{op_desc}: unsupported element type {elem_name!r} "
+            f"(supported: {sorted(_VEC_PREFIX)})"
+        ) from None
+
+
 def _f32_literal(val: float) -> str:
     """Format a Python float for C++ float literal context.
 
@@ -238,7 +266,16 @@ class _Lowerer:
         # or WMMA (RDNA/wave32), and whether ``ds_read_*_tr_*`` is available.
         from .arch import ArchTarget
 
-        self.arch = ArchTarget.from_gfx(arch or _DEFAULT_HIP_ARCH)
+        # Only an omitted arch (``None``) takes the baseline default; an arch
+        # that was passed but is empty/unknown is a caller bug, so surface it
+        # rather than silently lowering for a different target. ``from_gfx``
+        # raises on an unknown gfx string.
+        if arch is not None and not arch.strip():
+            raise ValueError(
+                "arch must be a gfx target string (e.g. 'gfx950'), not "
+                f"{arch!r}; pass None to use the {_DEFAULT_HIP_ARCH} baseline"
+            )
+        self.arch = ArchTarget.from_gfx(arch if arch is not None else _DEFAULT_HIP_ARCH)
 
     # -------------------- arch seam --------------------
 
@@ -427,7 +464,7 @@ class _Lowerer:
         ptr, idx = op.operands
         vec = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        prefix = _vec_prefix(elem_name, "global_load_vN")
         self._emit(
             f"{prefix}{vec} {_name(op.result)} = "
             f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"
@@ -443,16 +480,7 @@ class _Lowerer:
             raise RuntimeError("smem store_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {
-            "f16": "f16x",
-            "bf16": "bf16x",
-            "f32": "f32x",
-            "i32": "i32x",
-            "i16": "i16x",
-            "i8": "i8x",
-            "fp8e4m3": "i8x",
-            "bf8e5m2": "i8x",
-        }.get(elem_name, "f16x")
+        prefix = _vec_prefix(elem_name, "smem_store_vN")
         self._emit(
             f"*reinterpret_cast<{prefix}{vec}*>(&{storage}[{idx_str}]) = {_name(value)};"
         )
@@ -1076,17 +1104,46 @@ class _Lowerer:
     def _op_tile_s_setprio(self, op: Op) -> None:
         self._emit(f"__builtin_amdgcn_s_setprio({int(op.attrs['level'])});")
 
-    def _op_memref_global_store_vN(self, op: Op) -> None:
-        ptr, idx, val = op.operands
-        vec = int(op.attrs["vec"])
-        self._emit(
-            f"*reinterpret_cast<f16x{vec}*>({_name(ptr)} + {_name(idx)}) = "
-            f"{_name(val)};"
-        )
+    def _op_tile_inline_asm(self, op: Op) -> None:
+        """General AMDGPU inline-asm for the HIP backend (ADDITIVE).
 
-    def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
-        ptr, idx, val = op.operands
-        self._emit(f"atomicAdd({_name(ptr)} + {_name(idx)}, {_name(val)});")
+        Emits GCC-style ``asm volatile("<tmpl>" : <out> : <ins> : <clob>)``.
+        rocKE templates use LLVM ``$N`` placeholders (``$0`` = output if any,
+        then inputs in operand order); GCC C++ asm uses ``%N`` so we translate.
+        Constraints are the LLVM comma list (``"=v,v"``): leading ``=``/``+``
+        entries are outputs, the rest inputs. A ``"memory"`` clobber is added
+        for side-effecting asm so raw-address ds_reads order against the
+        surrounding LDS writes/barriers.
+        """
+        import re as _re
+
+        # TODO: support multi-output inline asm (inline_asm_multi) in the HIP backend.
+        if len(op.results) > 1:
+            raise NotImplementedError(
+                "HIP backend inline asm supports at most one output; "
+                f"got {len(op.results)} (inline_asm_multi not yet lowered)"
+            )
+
+        template = _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
+        parts = [c.strip() for c in op.attrs["constraints"].split(",") if c.strip()]
+        side = "volatile " if op.attrs.get("sideeffect", True) else ""
+        in_names = [_name(o) for o in op.operands]
+        clob = op.attrs.get(
+            "clobber", "memory" if op.attrs.get("sideeffect", True) else ""
+        )
+        clob_str = f' : "{clob}"' if clob else ""
+        if op.results:
+            out_c = parts[0]
+            in_cs = parts[1:]
+            res = op.results[0]
+            self._emit(f"{_type_to_hip(res.type)} {_name(res)};")
+            outs = f'"{out_c}"({_name(res)})'
+            ins = ", ".join(f'"{c}"({n})' for c, n in zip(in_cs, in_names))
+            self._emit(f'asm {side}("{template}" : {outs} : {ins}{clob_str});')
+        else:
+            ins = ", ".join(f'"{c}"({n})' for c, n in zip(parts, in_names))
+            inner = (" " + ins) if ins else ""
+            self._emit(f'asm {side}("{template}" : :{inner}{clob_str});')
 
     def _op_vector_extract(self, op: Op) -> None:
         (v,) = op.operands
@@ -1701,7 +1758,7 @@ class _Lowerer:
         ptr, idx, val = op.operands
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        prefix = _vec_prefix(elem_name, "global_store_vN")
         self._emit(
             f"*reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)}) = "
             f"{_name(val)};"
@@ -1718,7 +1775,8 @@ class _Lowerer:
         indices = op.operands[1:]
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        # Validate rather than silently reinterpreting an unmapped type as f16.
+        prefix = _vec_prefix(elem_name, "smem_load_vN")
         storage = smem.op.attrs.get("_storage")
         if storage is None:
             raise RuntimeError("smem load_vN before smem_alloc was lowered")

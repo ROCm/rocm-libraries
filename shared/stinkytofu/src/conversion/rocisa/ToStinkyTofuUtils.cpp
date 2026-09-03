@@ -62,6 +62,7 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 #ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
 #include "HelloWorldPass.hpp"  // declares stinkytofu::registerHelloWorldPassPlugin()
@@ -1276,18 +1277,6 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const bool hasPGR = (pgrStartIdx != -1 && loopBodyIdx != -1 && pgrStartIdx <= loopBodyIdx);
     static const std::string kPGR = "loopWithPrefetch";
 
-    // Recursively check whether an item's subtree contains a Label with \p name.
-    std::function<bool(const rocisa::Item*, const std::string&)> containsLabel =
-        [&](const rocisa::Item* item, const std::string& name) -> bool {
-        if (const auto* lbl = dynamic_cast<const rocisa::Label*>(item))
-            return lbl->getLabelName() == name;
-        if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
-            for (const auto& child : mod->itemList)
-                if (containsLabel(child.get(), name)) return true;
-        }
-        return false;
-    };
-
     // Recursively check whether an item is, or contains, a Module named \p name.
     std::function<bool(const rocisa::Item*, const std::string&)> containsModule =
         [&](const rocisa::Item* item, const std::string& name) -> bool {
@@ -1299,39 +1288,20 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         return false;
     };
 
-    // Auto-detect the expertScheduleMode2 region: from the top-level item whose
-    // subtree contains label_Preload_Offset_Start (kernel-body entry, before the
-    // first VGPR producer) through Module("noLoadLoopBody"). This is the region
-    // the wait-alu / mode2 ScopeAdaptor operates on — it deliberately excludes
-    // the epilogue (Global Write), where all activation calls live and which must
-    // stay in mode0.
-    // Anchor the region start at label_ASM_Start, the main-body entry. It
-    // precedes label_Preload_Offset_Start in program order, so starting here
-    // keeps BOTH entry labels inside the region: the non-preload path enters at
-    // label_ASM_Start and falls through; the kernarg-preload path jumps to
-    // label_Preload_Offset_Start (further in). InsertWaitAluPass then enables
-    // mode2 at each entry label it finds, covering both paths. Fall back to
-    // label_Preload_Offset_Start if label_ASM_Start is somehow absent.
-    int scopeStartIdx = -1;
-    int scopeEndIdx = -1;
+    // Tag every top-level item whose subtree holds Module("GlobalWriteElements"),
+    // from the first such item through the last. Covers both the main store
+    // epilogue and the separate GSU-split OptNLL store.
+    int epilogueStartIdx = -1;
+    int epilogueEndIdx = -1;
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
-        const auto& item = module.itemList[i];
-        if (scopeStartIdx == -1 && containsLabel(item.get(), "label_ASM_Start")) {
-            scopeStartIdx = i;
-        }
-        if (containsModule(item.get(), "noLoadLoopBody")) scopeEndIdx = i;
-    }
-    if (scopeStartIdx == -1) {
-        for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
-            if (containsLabel(module.itemList[i].get(), "label_Preload_Offset_Start")) {
-                scopeStartIdx = i;
-                break;
-            }
+        if (containsModule(module.itemList[i].get(), "GlobalWriteElements")) {
+            if (epilogueStartIdx == -1) epilogueStartIdx = i;
+            epilogueEndIdx = i;
         }
     }
-    const bool hasScope =
-        (scopeStartIdx != -1 && scopeEndIdx != -1 && scopeStartIdx <= scopeEndIdx);
-    static const std::string kScope = "expertScheduleMode2";
+    const bool hasEpilogue =
+        (epilogueStartIdx != -1 && epilogueEndIdx != -1 && epilogueStartIdx <= epilogueEndIdx);
+    static const std::string kEpilogue = "globalWriteEpilogue";
 
     // Traverse top-level items, injecting the loopWithPrefetch group name
     // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx]
@@ -1339,10 +1309,10 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
         const auto& item = module.itemList[i];
         const bool inPGR = hasPGR && (i >= pgrStartIdx && i <= loopBodyIdx);
-        const bool inScope = hasScope && (i >= scopeStartIdx && i <= scopeEndIdx);
+        const bool inEpilogue = hasEpilogue && (i >= epilogueStartIdx && i <= epilogueEndIdx);
 
         std::vector<const std::string*> base;
-        if (inScope) base.push_back(&kScope);
+        if (inEpilogue) base.push_back(&kEpilogue);
         if (inPGR) base.push_back(&kPGR);
         base.push_back(&module.name);
 
@@ -1441,6 +1411,19 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
           "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
           "[\"gfx1250\"]).");
+    m.def(
+        "isMnemonicSupportedByStinkyTofu",
+        [](const std::string& mnemonic, nb::object arch_obj) {
+            std::array<int, 3> archArray = convertArch(arch_obj);
+            const auto* info =
+                ArchHelper::getInstance().getArchInfo(archArray[0], archArray[1], archArray[2]);
+            if (!info) return false;
+            const auto& map = info->getMnemonicToIsaOpcodeMap();
+            return map.find(mnemonic) != map.end();
+        },
+        nb::arg("mnemonic"), nb::arg("arch"),
+        "Check if StinkyTofu has a hardware instruction definition for the mnemonic on this "
+        "architecture. Lets rocisa ask before emitting an instruction StinkyTofu cannot lower.");
     // Wrapper class to add signature support to StinkyAsmModule
     class StinkyAsmModuleWithSignature {
        private:
@@ -1499,10 +1482,28 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             if (signature_) {
                 int64_t totalBytes = module_->getTotalInstructionBytes();
                 if (totalBytes >= 0) signature_->setTotalInstructionBytes(totalBytes);
+                refreshSgprCount();
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
             return result;
+        }
+
+        /// A pass that rewrites operands invalidates the declared SGPR count, so
+        /// it is taken from the final code here rather than trusted from the
+        /// producer. Only that count moves: everything else in the descriptor
+        /// says what the hardware does before entry. Never raised, so a flow
+        /// whose registers did not move keeps the producer's number.
+        void refreshSgprCount() const {
+            stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+            uint32_t required = 0;
+            for (const auto* function : module_->getFunctions()) {
+                if (function == nullptr) continue;
+                required = std::max(required, stinkytofu::requiredSgprCount(
+                                                  *function, kd.numSgprPreload, kd.sgprWorkGroup));
+            }
+            if (required == 0 || static_cast<int>(required) >= kd.totalSgprs) return;
+            signature_->setGprs(kd.totalVgprs, kd.totalAgprs, static_cast<int>(required));
         }
 
         // Plugin data forwarding
@@ -1605,6 +1606,9 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     }
 
                 MODULE_OPTIONS_LIST(SET_MODULE_OPTION)
+#define SET_MODULE_OPTION_WITH_DEFAULT(name, type, value) SET_MODULE_OPTION(name, type)
+                MODULE_OPTIONS_WITH_DEFAULTS_LIST(SET_MODULE_OPTION_WITH_DEFAULT)
+#undef SET_MODULE_OPTION_WITH_DEFAULT
 #undef SET_MODULE_OPTION
 #undef DEBUG_SET_MODULE_OPTION
             }

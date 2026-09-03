@@ -3,17 +3,20 @@
 
 include "norm_common.fbs";
 
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 table LayernormBackwardAttributes {
-    dy_tensor_uid:           long;
-    x_tensor_uid:            long;
-    scale_tensor_uid:        long;
-    mean_tensor_uid:         long = null;
-    inv_variance_tensor_uid: long = null;
-    epsilon_tensor_uid:      long = null;
-    dx_tensor_uid:           long;
-    dscale_tensor_uid:       long;
-    dbias_tensor_uid:        long;
+    dy_tensor_uid:           long (cache_uid);
+    x_tensor_uid:            long (cache_uid);
+    scale_tensor_uid:        long (cache_uid);
+    mean_tensor_uid:         long = null (cache_uid);
+    inv_variance_tensor_uid: long = null (cache_uid);
+    epsilon_tensor_uid:      long = null (cache_uid);
+    dx_tensor_uid:           long (cache_uid);
+    dscale_tensor_uid:       long (cache_uid);
+    dbias_tensor_uid:        long (cache_uid);
     normalized_dim_count:    long;
 }

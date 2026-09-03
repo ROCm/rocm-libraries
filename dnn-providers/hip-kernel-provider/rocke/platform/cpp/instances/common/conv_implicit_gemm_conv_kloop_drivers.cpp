@@ -541,7 +541,7 @@ void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx)
         rocke_b_region_enter(b, ife.else_region);
         {
             /* fetch tile 0 -> regs, store -> LDS, barrier_0 */
-            wavelet_fetch(ctx, rocke_b_const_i32(b, 0), &a_staged, &b_staged);
+            wavelet_fetch(ctx, ctx->c0, &a_staged, &b_staged);
             rocke_b_s_waitcnt(b, 0, -1, -1); /* vmcnt=0 */
             wavelet_store(ctx, &a_staged, &b_staged, A_smem, B_smem);
             rocke_b_s_waitcnt(b, -1, 0, -1); /* lgkmcnt=0 */

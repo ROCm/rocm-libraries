@@ -1,0 +1,57 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --WaitAwareScheduleRepairPass --print-output
+#
+# Carry stops drifting where an anchor actually needs it.
+#
+# The two v_add results are deferred out of their own windows, because each window
+# spends its budget on its own mandatory DS producers. They drift forward until
+# the last WMMA, which reads v[500:507] and so depends on both of them. That
+# dependency cannot be satisfied after the anchor, so the whole accumulated carry
+# is flushed immediately in front of it rather than moving on.
+#
+# CHECK-LABEL: @wait_aware_schedule_repair_dependency_flush
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# Both deferred v_adds are flushed here: the anchor reads what they write.
+# CHECK-NEXT: v500 = "st.v_add_f32"
+# CHECK-NEXT: v501 = "st.v_add_f32"
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# Nothing is left to place after the anchor.
+# CHECK-NOT: v_add_f32
+
+st.func @wait_aware_schedule_repair_dependency_flush() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[400:407], v[0:7]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+
+  v[100:103] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[104:107] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[108:111] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v500 = "st.v_add_f32"(v600, v601) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_wait_dscnt"(6) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 6, dscnt = -1, kmcnt = -1 } }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[208:215], v[400:407], v[8:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+
+  v[112:115] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[116:119] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[120:123] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 80, gds = false }, mod.memtoken = { tokens = [0] } }
+  v501 = "st.v_add_f32"(v602, v603) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_wait_dscnt"(3) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 3, dscnt = -1, kmcnt = -1 } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[216:223], v[400:407], v[16:23]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+
+  v[124:127] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 96, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[128:131] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 112, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[132:135] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 128, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 0, dscnt = -1, kmcnt = -1 } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[500:507], v[400:407], v[24:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+}

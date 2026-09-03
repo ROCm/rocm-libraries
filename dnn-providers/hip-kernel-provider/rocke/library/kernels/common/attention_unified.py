@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from rocke.core.arch import validate_arch
 from rocke.core.ir import (
     BF16,
     F16,
@@ -124,6 +125,18 @@ class UnifiedAttentionProblem:
     # cache; 0 means "unknown" (assume small / fast i32 path). The
     # dispatcher fills this from the K tensor when available.
     num_kv_blocks: int = 0
+    # Arch the split-KV SEGMENT CLAMP keys on, threaded from the dispatch request.
+    #
+    # This is NOT the spec's authoritative arch. The 3D spec CLASS and every other
+    # tuning field (tile_size_override, waves_per_eu, the hoist / wide-KV gates)
+    # still come from the running box via ``_resolve_attention_arch`` -- see
+    # ``builders/common/attention_spec_builder.py::_tiled_3d_spec_from_problem``.
+    # ``num_segments`` is the one field keyed here, so that an off-box
+    # tuner/benchmark passing an explicit ``num_cus`` while targeting one arch
+    # never picks up another arch's clamp. When the two sources disagree the
+    # clamp stops describing the kernel that actually gets built; unifying them
+    # is tracked separately. ``None`` => fall back to the running-box arch.
+    clamp_arch: Optional[str] = None
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -433,6 +446,7 @@ def _reject_fp8_format_arch_mismatch(
 
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
+    arch: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Return whether CK DSL can run this problem without fallback today.
 
@@ -458,7 +472,9 @@ def supports_native_unified_attention(
     if problem.dtype not in UNIFIED_DTYPES:
         return False, f"unsupported dtype {problem.dtype}"
     if problem.use_fp8:
-        rejected = _reject_fp8_format_arch_mismatch(problem, _resolve_attention_arch())
+        rejected = _reject_fp8_format_arch_mismatch(
+            problem, arch or _resolve_attention_arch()
+        )
         if rejected is not None:
             return rejected
         if problem.q_dtype is not None and problem.q_dtype not in ("fp16", "bf16"):
@@ -563,9 +579,10 @@ def supports_native_unified_attention_tiled(
 
 def supports_native_unified_attention_3d_tiled(
     problem: UnifiedAttentionProblem,
+    arch: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Return whether the optimized tiled MFMA 3D split-KV path can run this."""
-    arch = _resolve_attention_arch()
+    arch = arch or _resolve_attention_arch()
     rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected
@@ -2872,28 +2889,44 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
 
 
 # Reference CU count for the split-KV segment clamp below. This is NOT the device
-# count (routing resolves that live, per AICK-1722); it is the tuned pre-bump
+# count (routing resolves that live); it is the tuned pre-bump
 # baseline -- the segment count the formula produced at the historical num_cus=120
 # -- used only as the safe ceiling so raising num_cus cannot over-split 3D shapes.
 _PRE_BUMP_CUS = 120
+
+
+def _pre_bump_segments(problem: UnifiedAttentionProblem) -> int:
+    """Segment count the split-KV formula produced at the historical
+    ``num_cus=120`` (target 480) for this shape -- the arch-independent safe
+    ceiling every arch's clamp bounds to, so raising ``num_cus`` can never
+    over-split an already-3D shape. One source of truth (gfx942 / gfx950, and
+    gfx1250 when it lands) rather than pasted per arch.
+    """
+    num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
+    min_seg = 16 if problem.block_size <= 16 else 8
+    return max(
+        min(_next_power_of_2((_PRE_BUMP_CUS * 4 + num_2d - 1) // num_2d), 128),
+        min_seg,
+    )
 
 
 def _num_segments(problem: UnifiedAttentionProblem) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
+    # Key the clamp on the arch this problem targets when the dispatcher threaded
+    # it through; fall back to the running-box arch otherwise. This keeps an
+    # off-box build targeting one arch from picking up another arch's clamp.
+    # NOTE ``clamp_arch`` governs THIS field only -- the spec class and the other
+    # tuning fields still resolve from the running box.
+    arch = problem.clamp_arch or _resolve_attention_arch()
     # Routing uses the device CU count (num_cus*4) so under-filled grids flip
     # 2D->3D; but the split-KV segment count must stay bounded, else the reduce
     # round-trip over-splits 3D shapes. The PRE-BUMP baseline (segments the same
     # formula produced at the reference num_cus=120 -> target=480) is the
     # universally-safe ceiling: clamping to it can never do worse than shipped.
-    if _resolve_attention_arch() == "gfx942" and problem.sliding_window == 0:
-        num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
-        min_seg = 16 if problem.block_size <= 16 else 8
-        pre_bump = max(
-            min(_next_power_of_2((_PRE_BUMP_CUS * 4 + num_2d - 1) // num_2d), 128),
-            min_seg,
-        )
+    if arch == "gfx942" and problem.sliding_window == 0:
+        pre_bump = _pre_bump_segments(problem)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
             if problem.max_seqlen_k <= 2048:
@@ -2918,6 +2951,36 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             # is unmeasured -> clamp to the pre-bump baseline so the routing bump can
             # never over-split prefill (identical to the shipped num_cus=120 split).
             return min(segments, pre_bump)
+    if (
+        arch == "gfx950"
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+    ):
+        # CONSERVATIVE gfx950 clamp: bound EVERY already-3D shape to the pre-bump
+        # (num_cus=120 -> target 480) baseline split, capturing the 2D->3D reroute
+        # win with zero over-split regression.
+        #
+        # For DEFAULT callers -- num_cus resolved from the device -- this is
+        # exactly the shipped split, byte-identical. A caller that ALREADY passed
+        # an explicit num_cus > 120 is the one exception: that path was previously
+        # unclamped and is now capped, so it gets a coarser split than before.
+        #
+        # ESCAPE HATCH: an explicit ``target_ctas > 0`` skips this clamp entirely
+        # (the guard above), restoring the pre-clamp split. It has to be the guard
+        # and not a bigger target: ``target_ctas`` raises the RAW split through
+        # ``_effective_target_ctas``, but ``_pre_bump_segments`` is derived from the
+        # fixed ``_PRE_BUMP_CUS`` and ignores it, so ``min(segments, pre_bump)``
+        # would cap any target straight back to the 120-baseline ceiling. That is
+        # also why the knob's contract ("replaces num_cus*4 for routing AND
+        # segmentation") only holds here if the clamp steps aside.
+        #
+        # UNLIKE the gfx942 branch above, this one has no measured carve-outs:
+        # every shape is clamped, none falls through. Carve-outs for shapes where
+        # a finer split is measured to win on gfx950 can be added here later, each
+        # gated by its own measurement -- never assumed from gfx942, whose CU
+        # count, LDS, and reduce cost all differ.
+        pre_bump = _pre_bump_segments(problem)
+        return min(segments, pre_bump)
     return segments
 
 
@@ -4109,7 +4172,9 @@ def _get_scalar_launcher(
         arch = _resolve_attention_arch()
         spec = UnifiedAttention2DSpec(problem=problem)
         artifact = compile_kernel(
-            build_unified_attention_2d(spec), arch=arch, capture_ir_text=False
+            build_unified_attention_2d(spec, arch=arch),
+            arch=arch,
+            capture_ir_text=False,
         )
         _ATTN_CACHE[cache_key] = (artifact.hsaco, artifact.kernel_name)
     hsaco, kname = _ATTN_CACHE[cache_key]
@@ -4397,14 +4462,23 @@ class UnifiedAttention2DSpec:
         )
 
 
-def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
+def build_unified_attention_2d(
+    spec: UnifiedAttention2DSpec, *, arch: str = "gfx950"
+) -> KernelDef:
     """Build a scalar-correct 2D unified-attention kernel.
 
     One workgroup computes one output element `(query_token, query_head, dim)`.
     This is deliberately a correctness kernel: it implements the full paged
     online-softmax semantics for fp16/bf16 without relying on Triton. The
     optimized MFMA/tiled kernel will replace this body once parity is locked.
+
+    The body is arch-neutral -- one scalar element per workgroup, no MMA atom, no
+    LDS, no cross-lane op -- so `arch` selects nothing here; it is validated and
+    the emitted `KernelDef` is identical for every target. It is still part of the
+    signature because a kernel descriptor has to name a target without calling the
+    builder, and that only works if every builder has the same shape.
     """
+    validate_arch(arch)
     p = spec.problem
     if p.dtype not in ("fp16", "bf16"):
         raise ValueError("scalar 2D kernel currently supports fp16/bf16")
@@ -4619,8 +4693,15 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
         )
 
 
-def build_unified_attention_3d(spec: UnifiedAttention3DSpec) -> KernelDef:
-    """Build scalar-correct split-3D segment attention kernel."""
+def build_unified_attention_3d(
+    spec: UnifiedAttention3DSpec, *, arch: str = "gfx950"
+) -> KernelDef:
+    """Build scalar-correct split-3D segment attention kernel.
+
+    Arch-neutral like the 2D builder: `arch` is validated, not consumed. See
+    `build_unified_attention_2d` for why it is in the signature anyway.
+    """
+    validate_arch(arch)
     p = spec.problem
     dtype = spec.dtype_ir
     b = IRBuilder(spec.kernel_name())
@@ -4762,7 +4843,15 @@ class UnifiedAttentionReduceSpec:
         )
 
 
-def build_unified_attention_reduce(spec: UnifiedAttentionReduceSpec) -> KernelDef:
+def build_unified_attention_reduce(
+    spec: UnifiedAttentionReduceSpec, *, arch: str = "gfx950"
+) -> KernelDef:
+    """Build the scalar cross-segment reduction that finishes a split-3D attention.
+
+    Arch-neutral like the 2D builder: `arch` is validated, not consumed. See
+    `build_unified_attention_2d` for why it is in the signature anyway.
+    """
+    validate_arch(arch)
     p = spec.problem
     dtype = spec.dtype_ir
     b = IRBuilder(spec.kernel_name())

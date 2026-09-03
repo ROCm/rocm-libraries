@@ -6208,11 +6208,14 @@ def build_gfx942_4warp_gqa(
             b.mod(col, b.const_i32(8)),
         )
 
-    # fp16 swizzle-hoist: precompute the LDS swizzle columns once per lane (buf_off drops
-    # out - it is 0 mod 16 - so swz depends only on key/col) instead of recomputing swz()
-    # on every K/V store and read. fp16-only: trims ~12 VGPR + ~6% wall-clock; bf16 regresses
-    # (spills at the 256-VGPR cap), so bf16 keeps the byte-identical per-access swz path.
-    _SWZH = HD128_PIPE and spec.dtype == "fp16"
+    # LDS swizzle-hoist: precompute the bank-swizzle columns once per lane instead
+    # of recomputing swz() (div/mod/xor/mul/add integer VALU) on every K/V store
+    # and read. Enabled for bf16 as well as fp16: this cohort is the small-tile
+    # BN=32 wide-flash path (HD128_PIPE => BS<=32), whose register pressure leaves
+    # headroom for the precomputed columns (the earlier bf16 spill concern was for
+    # larger tiles this path never uses). buf_off is 0 mod 16 so swz depends only
+    # on key/col, letting the columns be hoisted out of the tile loop.
+    _SWZH = HD128_PIPE and spec.dtype in ("fp16", "bf16")
     SWZ_ST, SWZ_K, SWZ_V = [], {}, {}
     if _SWZH:
         _mia = ld.m_in_atom
@@ -6353,6 +6356,9 @@ def build_gfx942_4warp_gqa(
                     Sm[kt][i] = b.select(mask_cond, ninf, raw)
                 else:
                     Sm[kt][i] = raw
+        # exp2_fast: both exp arguments (m_old-m_new and Sm*sc-m_new) are <= 0 by the
+        # running-max invariant, so exp2's overflow/underflow range-reduction guard is
+        # unnecessary and v_exp_f32 flushes the tail correctly.
         m_new, alpha, l_new, Bp = _online_softmax_rescale(
             b,
             Sm,
@@ -6367,7 +6373,7 @@ def build_gfx942_4warp_gqa(
             zf=zf,
             bperm=bperm,
             dtype=dtype,
-            exp=b.exp2,
+            exp=b.exp2_fast,
         )
         # In-place rescale-then-accumulate (HD128_PIPE / D128 sliding-window path only):
         # fold acc *= alpha, then MFMA-accumulate PV directly into acc, dropping the separate

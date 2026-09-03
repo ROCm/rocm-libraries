@@ -438,6 +438,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT";
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
         return "HIPDNN_ATTR_ENGINE_DEVICEPROP";
+    case HIPDNN_ATTR_ENGINE_NAME_EXT:
+        return "HIPDNN_ATTR_ENGINE_NAME_EXT";
 
     case HIPDNN_ATTR_KERNEL_CACHE_IS_ENGINECFG_KERNEL_CACHED:
         return "HIPDNN_ATTR_KERNEL_CACHE_IS_ENGINECFG_KERNEL_CACHED";

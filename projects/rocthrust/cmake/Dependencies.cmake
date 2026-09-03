@@ -269,6 +269,14 @@ if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
   endif()
 endif()
 
+# Search for libhipcxx if requested (default: ON)
+if(${ROCTHRUST_USE_LIBHIPCXX})
+  find_package(libhipcxx)
+  if (NOT TARGET libhipcxx::libhipcxx)
+    message(STATUS "libhipcxx installation not found. Using deprecated rocThrust fallback implementation.  Please switch to using libhipcxx.")
+  endif()
+endif()
+
 # Test dependencies
 if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)

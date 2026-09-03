@@ -24,9 +24,82 @@ from .enum import SignatureValueKind as _SVK
 from .instruction import (
     Instruction as _Instruction,
     MacroInstruction as _MacroInstruction,
+    GlobalReadInstruction as _GlobalReadInstruction,
+    TensorLoadToLds as _TensorLoadToLds,
 )
 
 _P = "rocisa.code"
+
+
+def _forward_memtoken(rocisa_item: Any, logical: Any) -> None:
+    """Copy the rocisa memory token onto lowered logical instruction(s).
+
+    Mirrors the native converter (``ToStinkyTofuUtils.cpp``) which unconditionally
+    forwards ``inst->getMemToken()`` as a ``MemTokenData`` modifier. The token
+    drives LDS dependency tracking in ``StinkyBuildImplicitDependencyPass``; if it
+    is dropped, the DAG scheduler cannot see LDS store->load / barrier ordering and
+    may reorder ``tensor_load_to_lds``, corrupting the tensor descriptor.
+    """
+    getter = getattr(rocisa_item, "getMemToken", None)
+    if not callable(getter):
+        return
+    mt = getter()
+    if mt is None:
+        return
+    tokens = getattr(mt, "tokens", None)
+    if tokens is None:
+        return
+    targets = logical if isinstance(logical, list) else (logical,)
+    for inst in targets:
+        setter = getattr(inst, "set_memtoken", None)
+        if callable(setter):
+            setter(tokens)
+
+
+# Synthetic instruction-group name that marks the DAG-scheduler region spanning
+# the persistent prefetch prologue + main loop. Must match the registered gfx125x
+# group name (see Gfx1250Backend.cpp) and native's kPGR literal.
+_PGR_GROUP = "loopWithPrefetch"
+
+
+def _contains_prefetch_load(item: Any) -> bool:
+    """True if *item* is, or recursively contains, a prefetch global/tensor load.
+
+    Mirrors native ``ToStinkyTofuUtils.cpp`` (isPrefetchLoadInst / containsPrefetchLoad):
+    MUBUF / GLOBAL / FLAT reads and ``tensor_load_to_lds``.
+    """
+    if isinstance(item, (_GlobalReadInstruction, _TensorLoadToLds)):
+        return True
+    sub = getattr(item, "itemList", None)
+    if sub:
+        for child in sub:
+            if _contains_prefetch_load(child):
+                return True
+    return False
+
+
+def _detect_pgr_range(items: Sequence[Any]) -> Optional[tuple]:
+    """Positional ``loopWithPrefetch`` range over top-level *items*.
+
+    Returns ``(pgrStartIdx, loopBodyIdx)`` = [first item whose subtree contains a
+    prefetch load, last direct ``Module("loopBody")``], or ``None`` when absent.
+
+    Mirrors native's positional group injection (ToStinkyTofuUtils.cpp): the
+    adaptor's structural ``begin_group``/``end_group`` only tags the submodule
+    literally named ``loopWithPrefetch``, missing sibling prologue/prefetch/stagger
+    blocks that native folds into the same DAG-scheduler region. Without this the
+    O3 pipeline optimizes a smaller region and mis-schedules the prefetch loads.
+    """
+    pgr_start = -1
+    loop_body_idx = -1
+    for i, it in enumerate(items):
+        if pgr_start == -1 and _contains_prefetch_load(it):
+            pgr_start = i
+        if isinstance(it, Module) and getattr(it, "name", "") == "loopBody":
+            loop_body_idx = i
+    if pgr_start != -1 and loop_body_idx != -1 and pgr_start <= loop_body_idx:
+        return (pgr_start, loop_body_idx)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1389,11 +1462,12 @@ class Module(Item):
 
         lm_label = logical_name if logical_name is not None else (self.name or "kernel")
         lm = _st.LogicalModule(lm_label)
-        self._populate_logical_module(lm)
+        pgr_range = _detect_pgr_range(self.itemList)
+        self._populate_logical_module(lm, pgr_range)
 
         return _PostProcessModule(_st.lower_logical_module(lm, list(arch), options))
 
-    def _populate_logical_module(self, lm: Any) -> None:
+    def _populate_logical_module(self, lm: Any, pgr_range: Any = None) -> None:
         """In-order walk adding instructions and .set directives to *lm*.
 
         Preserves source ordering: when a ``ValueSet`` appears between two
@@ -1405,54 +1479,73 @@ class Module(Item):
         Named sub-Modules emit begin_group/end_group markers so the C++
         lowering pipeline can reconstruct instruction-group ranges (used by
         ScopeAdaptor passes like ESM2, RegionClone, DAG scheduler).
+
+        ``pgr_range`` (root call only): ``(pgrStartIdx, loopBodyIdx)`` over
+        ``self.itemList``. Items in that inclusive index range are wrapped in a
+        synthetic ``loopWithPrefetch`` group, replicating native's positional
+        group injection so the DAG-scheduler region spans the same instructions.
         """
-        for it in self.itemList:
-            if isinstance(it, Module):
-                if it.name:
-                    lm.begin_group(it.name)
-                it._populate_logical_module(lm)
-                if it.name:
-                    lm.end_group(it.name)
-                continue
-            if isinstance(it, ValueSet):
-                text = it.toString().strip()  # ".set <sym>, <val>"
-                prefix = ".set "
-                if text.startswith(prefix):
-                    rest = text[len(prefix):]
-                    comma = rest.find(", ")
-                    if comma != -1:
-                        sym = rest[:comma]
-                        val = rest[comma + 2:]
-                        lm.add_set_directive(sym, val)
-                continue
-            if isinstance(it, Label):
-                lm.add_label(it.getLabelName(), it.alignment, it.comment or "")
-                continue
-            if isinstance(it, TextBlock):
-                lm.add_textblock(it.text)
-                continue
-            # Skip SDelayAlu instructions — the optimization pipeline handles
-            # all hazard insertion (InsertWaitAluPass for ESM2, InsertDelayAluPass
-            # for non-ESM2 regions).  The adaptor previously emitted these as
-            # s_nop 0 placeholders that survived the pipeline unrecognized.
-            if getattr(it, "instStr", "") == "s_delay_alu":
-                continue
-            handle = getattr(it, "to_stinky_logical", None)
-            if not callable(handle):
-                continue
-            logical = handle()
-            if logical is None:
-                continue
-            comment = getattr(it, "comment", None) or ""
-            if isinstance(logical, list):
-                for inst in logical:
-                    if comment and not inst.comment:
-                        inst.comment = comment
-                    lm.add(inst)
-            else:
-                if comment and not logical.comment:
-                    logical.comment = comment
-                lm.add(logical)
+        for idx, it in enumerate(self.itemList):
+            if pgr_range is not None and idx == pgr_range[0]:
+                lm.begin_group(_PGR_GROUP)
+            self._populate_one_item(lm, it)
+            if pgr_range is not None and idx == pgr_range[1]:
+                lm.end_group(_PGR_GROUP)
+
+    def _populate_one_item(self, lm: Any, it: Any) -> None:
+        """Emit a single ``itemList`` entry into *lm* (see ``_populate_logical_module``)."""
+        if isinstance(it, Module):
+            if it.name:
+                lm.begin_group(it.name)
+            it._populate_logical_module(lm)
+            if it.name:
+                lm.end_group(it.name)
+            return
+        if isinstance(it, ValueSet):
+            text = it.toString().strip()  # ".set <sym>, <val>"
+            prefix = ".set "
+            if text.startswith(prefix):
+                rest = text[len(prefix):]
+                comma = rest.find(", ")
+                if comma != -1:
+                    sym = rest[:comma]
+                    val = rest[comma + 2:]
+                    lm.add_set_directive(sym, val)
+            return
+        if isinstance(it, Label):
+            lm.add_label(it.getLabelName(), it.alignment, it.comment or "")
+            return
+        if isinstance(it, TextBlock):
+            lm.add_textblock(it.text)
+            return
+        # Skip SDelayAlu instructions — the optimization pipeline handles
+        # all hazard insertion (InsertWaitAluPass for ESM2, InsertDelayAluPass
+        # for non-ESM2 regions).  The adaptor previously emitted these as
+        # s_nop 0 placeholders that survived the pipeline unrecognized.
+        if getattr(it, "instStr", "") == "s_delay_alu":
+            return
+        handle = getattr(it, "to_stinky_logical", None)
+        if not callable(handle):
+            return
+        logical = handle()
+        if logical is None:
+            return
+        comment = getattr(it, "comment", None) or ""
+        # Forward the rocisa memory token (LDS dependency tracking) onto the
+        # lowered logical instruction(s), mirroring the native converter
+        # (ToStinkyTofuUtils.cpp: inst->getMemToken() -> MemTokenData). Without
+        # this the DAG scheduler cannot see LDS store->load / barrier ordering
+        # and may reorder tensor_load_to_lds, corrupting the tensor descriptor.
+        _forward_memtoken(it, logical)
+        if isinstance(logical, list):
+            for inst in logical:
+                if comment and not inst.comment:
+                    inst.comment = comment
+                lm.add(inst)
+        else:
+            if comment and not logical.comment:
+                logical.comment = comment
+            lm.add(logical)
 
     def _collect_logical_insts(self) -> List[Any]:
         """Legacy helper for tests: collect logical instructions in-order."""
@@ -1467,6 +1560,7 @@ class Module(Item):
             logical = handle()
             if logical is None:
                 continue
+            _forward_memtoken(it, logical)
             if isinstance(logical, list):
                 out.extend(logical)
             else:
@@ -2366,7 +2460,7 @@ def SrdUpperValue(isa):  # noqa: N802 (matches rocisa public API)
     if hasattr(isa, "major"):
         major = int(isa.major)
         minor = int(isa.minor)
-        stepping = int(isa.stepping)
+        stepping = int(getattr(isa, "stepping", None) or getattr(isa, "patch", 0))
     else:
         major = int(isa[0])
         minor = int(isa[1])

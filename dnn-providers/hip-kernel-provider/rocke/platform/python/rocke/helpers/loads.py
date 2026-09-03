@@ -445,7 +445,9 @@ class CoalescedTileLoader:
 
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
-        c_cols_per_vec = b.const_i32(self.cols_per_vec)
+        c_span = b.const_i32(
+            self.rows_per_vec if self.vector_axis == "row" else self.cols_per_vec
+        )
         c_elem_bytes = b.const_i32(elem_bytes)
         c0 = b.const_i32(0)
         c_oob = b.const_i32(self.oob_sentinel)
@@ -455,9 +457,9 @@ class CoalescedTileLoader:
         fetched = []
         for e in range(self.vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_cols_per_vec)
-            col_v = b.mod(vec_idx, c_cols_per_vec)
-            col = b.mul(col_v, c_load_vec) if self.load_vec > 1 else col_v
+            row, col = self._decode_row_col(
+                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            )
 
             off_elems, valid = descriptor(b, row, col)
             off_bytes = b.mul(off_elems, c_elem_bytes)
@@ -479,7 +481,7 @@ class CoalescedTileLoader:
     ) -> None:
         """Store a register tile (returned by :meth:`fetch`) into LDS."""
         for row, col, v in fetched:
-            b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
+            self._store_tile(b, smem_dst, row, col, v)
 
 
 # ---------------------------------------------------------------------
