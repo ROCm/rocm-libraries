@@ -349,7 +349,7 @@ void dumpBuffer(const char* title, hipDataType To, HipHostBuffer& buf, size_t M,
     return;
 }
 
-std::vector<hipblaslt::host_numerics::MatmulValidationCase::PointwiseTolerance>
+std::vector<hipblaslt::host_numerics::MatmulValidationCase::AllCloseTolerance>
     matmulValidationTolerances(const Arguments&                                  arg,
                                std::span<const hipblaslt::client::MatmulProblem> matmulProblems,
                                hipDataType                                       inputTypeA,
@@ -357,8 +357,8 @@ std::vector<hipblaslt::host_numerics::MatmulValidationCase::PointwiseTolerance>
                                hipDataType                                       outputType,
                                hipDataType                                       computeType)
 {
-    using PointwiseTolerance = hipblaslt::host_numerics::MatmulValidationCase::PointwiseTolerance;
-    std::vector<PointwiseTolerance> tolerances(matmulProblems.size());
+    using AllCloseTolerance = hipblaslt::host_numerics::MatmulValidationCase::AllCloseTolerance;
+    std::vector<AllCloseTolerance>  tolerances(matmulProblems.size());
     const bool                      bfloat16Output = outputType == HIP_R_16BF;
 
     if(arg.unit_check && hipblaslt_get_arch_major() == 11 && realDataTypeSize(inputTypeA) == 2
@@ -3110,19 +3110,19 @@ void testing_matmul_with_bias(const Arguments&                                  
     };
 
     const hipblaslt::host_numerics::MatmulValidationOptions validationOptions{
-        .comparePointwise = bool(arg.unit_check),
-        .compareNorm      = bool(arg.norm_check),
-        .searchAllClose   = bool(arg.allclose_check),
-        .computeUlp       = bool(arg.ulp_check),
-        .assertNorm       = arg.norm_check_assert,
-        .computeType      = arg.compute_type,
-        .inputTypeA       = arg.a_type,
-        .inputTypeB       = arg.b_type,
+        .compareAllClose = bool(arg.unit_check),
+        .compareNorm     = bool(arg.norm_check),
+        .searchAllClose  = bool(arg.allclose_check),
+        .computeUlp      = bool(arg.ulp_check),
+        .assertNorm      = arg.norm_check_assert,
+        .computeType     = arg.compute_type,
+        .inputTypeA      = arg.a_type,
+        .inputTypeB      = arg.b_type,
     };
 
     auto makeValidationCases =
-        [&](const std::vector<hipblaslt::host_numerics::MatmulValidationCase::PointwiseTolerance>&
-                pointwiseTolerances) {
+        [&](const std::vector<hipblaslt::host_numerics::MatmulValidationCase::AllCloseTolerance>&
+                allCloseTolerances) {
             using hipblaslt::host_numerics::HostComparisonRequest;
             using hipblaslt::host_numerics::MatmulValidationCase;
 
@@ -3150,7 +3150,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 MatmulValidationCase validationCase;
-                validationCase.pointwiseTolerance = pointwiseTolerances.front();
+                validationCase.allCloseTolerance = allCloseTolerances.front();
                 validationCase.outputs.reserve(matmulProblems.front().batchCount);
                 for(int batch = 0; batch < matmulProblems.front().batchCount; ++batch)
                 {
@@ -3174,7 +3174,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 const auto&          normalizedProblem = matmulProblems[gemmIdx];
                 const auto&          preparedProblem   = preparedProblems[gemmIdx];
                 MatmulValidationCase validationCase;
-                validationCase.pointwiseTolerance = pointwiseTolerances[gemmIdx];
+                validationCase.allCloseTolerance = allCloseTolerances[gemmIdx];
                 validationCase.outputs.push_back(output(normalizedProblem.m,
                                                         normalizedProblem.n,
                                                         normalizedProblem.d.leadingDimension(),
@@ -3212,14 +3212,14 @@ void testing_matmul_with_bias(const Arguments&                                  
                 }
                 if(arg.gradient && arg.bias_vector)
                 {
-                    auto pointwise      = output(preparedProblem.biasElements,
-                                            1,
-                                            preparedProblem.biasElements,
-                                            preparedProblem.biasElements,
-                                            normalizedProblem.batchCount,
-                                            hBias_gold[gemmIdx].buf(),
-                                            hBias[gemmIdx].buf(),
-                                            Tbias);
+                    auto selected       = output(preparedProblem.biasElements,
+                                           1,
+                                           preparedProblem.biasElements,
+                                           preparedProblem.biasElements,
+                                           normalizedProblem.batchCount,
+                                           hBias_gold[gemmIdx].buf(),
+                                           hBias[gemmIdx].buf(),
+                                           Tbias);
                     auto norm           = output(normalizedProblem.m,
                                        1,
                                        normalizedProblem.m,
@@ -3228,7 +3228,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                        hBias_gold[gemmIdx].buf(),
                                        hBias[gemmIdx].buf(),
                                        Tbias);
-                    validationCase.bias = MatmulValidationCase::SideOutput{pointwise, norm, false};
+                    validationCase.bias = MatmulValidationCase::SideOutput{selected, norm, false};
                 }
                 validationCases.push_back(std::move(validationCase));
             }
@@ -3236,10 +3236,10 @@ void testing_matmul_with_bias(const Arguments&                                  
         };
 
     auto validateOutputs = [&](hipblaslt::host_numerics::MatmulValidationMetrics metrics) {
-        const auto pointwiseTolerances
+        const auto allCloseTolerances
             = matmulValidationTolerances(arg, matmulProblems, TiA, TiB, To, Tc);
         readValidationSideOutputs();
-        const auto validationCases = makeValidationCases(pointwiseTolerances);
+        const auto validationCases = makeValidationCases(allCloseTolerances);
         CHECK_SUCCESS(hipblaslt::host_numerics::validateMatmulOutputs(
             validationOptions, validationCases, metrics));
     };

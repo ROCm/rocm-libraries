@@ -32,16 +32,16 @@ namespace hipblaslt::host_numerics
     using ::roc::host_numerics::scalarTypeInfo;
     using ::roc::host_numerics::Shape;
 
-    enum class HostPointwiseComparison
+    enum class HostAllCloseMode
     {
-        /// Skip finite-value pointwise acceptance.
+        /// Skip finite-value all-close acceptance.
         Disabled,
 
         /// Apply the hipBLASLt unit-check policy: exact comparison for narrow and integer
         /// storage, or at most four encoded ULPs for float32/float64 real or complex storage.
         Unit,
 
-        /// Apply an absolute pointwise tolerance supplied by HostComparisonRequest.
+        /// Apply an absolute all-close tolerance supplied by HostComparisonRequest.
         Near,
 
         /// Apply the scale-aware symmetric tolerance
@@ -76,17 +76,17 @@ namespace hipblaslt::host_numerics
         /// hipBLASLt storage type shared by expected and observed.
         hipDataType type = HIPBLASLT_DATATYPE_INVALID;
 
-        /// Finite-value pointwise acceptance policy.
-        HostPointwiseComparison pointwise = HostPointwiseComparison::Disabled;
+        /// Finite-value all-close acceptance policy.
+        HostAllCloseMode allCloseMode = HostAllCloseMode::Disabled;
 
-        /// Absolute tolerance used only when pointwise is Near.
+        /// Absolute tolerance used only when allCloseMode is Near.
         double absoluteTolerance = 0.0;
 
-        /// Symmetric relative coefficient used only when pointwise is SymmetricRelative.
+        /// Symmetric relative coefficient used only when allCloseMode is SymmetricRelative.
         double symmetricRelativeTolerance = 0.0;
 
         /// Collect NaN/infinity agreement statistics in comparison, independently of finite
-        /// pointwise acceptance.
+        /// all-close acceptance.
         bool requireSpecialValueConsistency = false;
 
         /// Sum the independently computed relative Frobenius error for each batch.
@@ -95,13 +95,13 @@ namespace hipblaslt::host_numerics
         /// Search the built-in absolute/relative tolerance candidates for the first passing pair.
         bool findAllCloseTolerance = false;
 
-        /// Compute ULP summary statistics independently of the primary pointwise policy.
+        /// Compute ULP summary statistics independently of the primary all-close policy.
         bool computeUnitsInLastPlace = false;
     };
 
     struct HostComparisonReport
     {
-        /// Primary pointwise result and/or special-value statistics requested by comparison.
+        /// Primary all-close result and/or special-value statistics requested by comparison.
         ComparisonReport comparison;
 
         /// ULP metrics requested by computeUnitsInLastPlace.
@@ -138,14 +138,14 @@ namespace hipblaslt::host_numerics
             const ScalarType  scalar = scalarType(type);
             ComparisonOptions options;
             options.equalNaNs                  = true;
-            options.computePointwiseStatistics = false;
+            options.computeElementwiseStatistics = false;
             options.computeFrobenius           = false;
             options.maxReportedMismatches      = 10;
 
             if(scalar == ScalarType::Float32 || scalar == ScalarType::Float64
                || scalar == ScalarType::ComplexFloat32 || scalar == ScalarType::ComplexFloat64)
             {
-                options.pointwise           = false;
+                options.allClose            = false;
                 options.computeUlp          = true;
                 options.ulpType             = scalar;
                 options.maximumUlpTolerance = 4.0;
@@ -165,13 +165,13 @@ namespace hipblaslt::host_numerics
             = request.rows != 0 && request.columns != 0 && request.batchCount != 0;
         if(!hasElements)
         {
-            if(request.pointwise != HostPointwiseComparison::Disabled
+            if(request.allCloseMode != HostAllCloseMode::Disabled
                || request.requireSpecialValueConsistency)
                 (void)scalarType(request.type);
             return report;
         }
 
-        const bool runPrimaryComparison = request.pointwise != HostPointwiseComparison::Disabled
+        const bool runPrimaryComparison = request.allCloseMode != HostAllCloseMode::Disabled
                                           || request.requireSpecialValueConsistency;
         if(!runPrimaryComparison && !request.computeUnitsInLastPlace
            && !request.computeRelativeFrobeniusError && !request.findAllCloseTolerance)
@@ -188,28 +188,28 @@ namespace hipblaslt::host_numerics
             = copyTensorFromEncodedStorage(request.observed, scalarType(request.type), layout);
 
         ComparisonOptions options;
-        switch(request.pointwise)
+        switch(request.allCloseMode)
         {
-        case HostPointwiseComparison::Unit:
+        case HostAllCloseMode::Unit:
             options = detail::unitComparisonOptions(request.type);
             break;
-        case HostPointwiseComparison::Near:
+        case HostAllCloseMode::Near:
             options                            = nearComparisonOptions(request.absoluteTolerance);
-            options.computePointwiseStatistics = false;
+            options.computeElementwiseStatistics = false;
             options.computeFrobenius           = false;
             options.maxReportedMismatches      = 10;
             break;
-        case HostPointwiseComparison::SymmetricRelative:
+        case HostAllCloseMode::SymmetricRelative:
             options.symmetricRelativeTolerance = request.symmetricRelativeTolerance;
             options.strictTolerance            = true;
             options.equalNaNs                  = true;
-            options.computePointwiseStatistics = false;
+            options.computeElementwiseStatistics = false;
             options.computeFrobenius           = false;
             options.maxReportedMismatches      = 10;
             break;
-        case HostPointwiseComparison::Disabled:
-            options.pointwise                  = false;
-            options.computePointwiseStatistics = false;
+        case HostAllCloseMode::Disabled:
+            options.allClose                     = false;
+            options.computeElementwiseStatistics = false;
             options.computeFrobenius           = false;
             options.maxReportedMismatches      = 0;
             break;
@@ -220,7 +220,7 @@ namespace hipblaslt::host_numerics
         if(request.requireSpecialValueConsistency)
         {
             options.equalNaNs                  = true;
-            options.computePointwiseStatistics = true;
+            options.computeElementwiseStatistics = true;
         }
         if(runPrimaryComparison)
             report.comparison = compare(observed, expected, options);
@@ -228,8 +228,8 @@ namespace hipblaslt::host_numerics
         if(request.computeUnitsInLastPlace)
         {
             ComparisonOptions unitsInLastPlaceOptions;
-            unitsInLastPlaceOptions.pointwise                  = false;
-            unitsInLastPlaceOptions.computePointwiseStatistics = false;
+            unitsInLastPlaceOptions.allClose                     = false;
+            unitsInLastPlaceOptions.computeElementwiseStatistics = false;
             unitsInLastPlaceOptions.computeFrobenius           = false;
             unitsInLastPlaceOptions.computeUlp                 = true;
             unitsInLastPlaceOptions.ulpType                    = scalarType(request.type);
@@ -247,9 +247,9 @@ namespace hipblaslt::host_numerics
                     "hipBLASLt norm comparison requires byte-addressable output storage.");
 
             ComparisonOptions frobeniusOptions;
-            frobeniusOptions.pointwise                  = false;
+            frobeniusOptions.allClose                     = false;
             frobeniusOptions.equalNaNs                  = true;
-            frobeniusOptions.computePointwiseStatistics = false;
+            frobeniusOptions.computeElementwiseStatistics = false;
             frobeniusOptions.computeFrobenius           = true;
             frobeniusOptions.maxReportedMismatches      = 0;
             frobeniusOptions.selection
@@ -278,7 +278,7 @@ namespace hipblaslt::host_numerics
         if(request.findAllCloseTolerance)
         {
             ComparisonOptions allCloseOptions          = allCloseComparisonOptions();
-            allCloseOptions.computePointwiseStatistics = false;
+            allCloseOptions.computeElementwiseStatistics = false;
             allCloseOptions.computeFrobenius           = false;
             allCloseOptions.maxReportedMismatches      = 0;
             allCloseOptions.selection

@@ -958,7 +958,7 @@ class TensorAndGemmTests(unittest.TestCase):
 
     def test_explicit_legacy_relative_norm_policy(self):
         options = hv.ComparisonOptions()
-        options.pointwise = False
+        options.all_close = False
         options.compute_frobenius = True
         options.relative_frobenius_tolerance = 1.0
         options.strict_tolerance = True
@@ -987,8 +987,8 @@ class TensorAndGemmTests(unittest.TestCase):
 
         magnitude = hv.allclose_comparison_options(1.0, 0.0)
         self.assertEqual(
-            magnitude.complex_pointwise_mode,
-            hv.ComplexPointwiseMode.Magnitude,
+            magnitude.complex_comparison_mode,
+            hv.ComplexComparisonMode.Magnitude,
         )
         self.assertFalse(hv.compare(observed, expected, magnitude).passed)
         self.assertEqual(
@@ -997,10 +997,10 @@ class TensorAndGemmTests(unittest.TestCase):
         )
 
         componentwise = hv.allclose_comparison_options(1.0, 0.0)
-        componentwise.complex_pointwise_mode = hv.ComplexPointwiseMode.Componentwise
+        componentwise.complex_comparison_mode = hv.ComplexComparisonMode.Componentwise
         self.assertTrue(hv.compare(observed, expected, componentwise).passed)
 
-        magnitude.compute_pointwise_statistics = False
+        magnitude.compute_elementwise_statistics = False
         magnitude.compute_frobenius = False
         self.assertFalse(hv.compare(observed, expected, magnitude).passed)
 
@@ -1062,8 +1062,8 @@ class TensorAndGemmTests(unittest.TestCase):
             )
         )
         componentwise_search = hv.allclose_comparison_options()
-        componentwise_search.complex_pointwise_mode = (
-            hv.ComplexPointwiseMode.Componentwise
+        componentwise_search.complex_comparison_mode = (
+            hv.ComplexComparisonMode.Componentwise
         )
         self.assertIsNotNone(
             hv.find_allclose_tolerance(
