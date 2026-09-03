@@ -173,17 +173,6 @@ extern "C" SHARED_PUBLIC rppStatus_t rppSetBatchSize(rppHandle_t handle, size_t 
  */
 extern "C" SHARED_PUBLIC rppStatus_t rppGetBatchSize(rppHandle_t handle, size_t* batchSize);
 
-/*! \brief Get the string representation of a RPP status code.
- * \details Function to convert a <tt> \ref RppStatus</tt> value returned by any RPP tensor API
- * function into its enumerator name, for logging and error reporting.
- * \param [in] status A <tt> \ref RppStatus</tt> enumeration.
- * \ingroup group_rpp
- * \return A null-terminated string with static storage duration holding the enumerator name (for
- * example "RPP_ERROR_INVALID_SRC_LAYOUT"), or "RPP_STATUS_UNKNOWN" if the value does not name an
- * enumerator. The caller must not free the returned pointer.
- */
-extern "C" SHARED_PUBLIC const char* rppGetStatusString(RppStatus status);
-
 #if RPP_BACKEND_HIP
 
 /*! \brief Set accelerator stream given a RPP handle.
