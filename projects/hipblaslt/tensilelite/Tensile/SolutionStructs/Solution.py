@@ -2487,6 +2487,10 @@ class Solution(collections.abc.Mapping):
       else:
         state["VectorWidthB"] = 1
 
+    # Element sizes that have a ds_load_tr* read: ds_load_tr4_b64, tr6_b96,
+    # tr8_b64 and tr16_b128. Keep in step with the arms of isLDSTrEnabled below.
+    _LDS_TR_READ_BYTES = (0.5, 0.75, 1, 2)
+
     def isLDSTrEnabled(asmCaps: Dict, hasLDSTrans: bool, unrollMajorLDS: bool, dtv: bool, numBytes: int):
       if unrollMajorLDS:
         return False
@@ -2779,6 +2783,13 @@ class Solution(collections.abc.Mapping):
     if tdmInst not in (0, 3):
       reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")
       return
+
+    for tc, numBytes in (("A", numBytesA), ("B", numBytesB)):
+      if state["enableTDM%s"%tc] and numBytes in _LDS_TR_READ_BYTES \
+         and not state["UnrollMajorLDS%s"%tc] and not state["enableLDSTr%s"%tc]:
+        reject(state, printRejectionReason,
+               "TileMajor%s with TDM requires LDSTrInst=True"%tc)
+        return
 
     if state["enableTDMMetadata"] and state["ProblemType"]["MetadataLayout"]:
       # reject if NumWaves > metadata k-major dimension (DepthU * 0.25 // 2)
