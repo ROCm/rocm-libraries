@@ -22,8 +22,10 @@
 
 #include "../KernelIngestorTestFixtures.hpp"
 
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelHeuristicFactory.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/NativeScorerRegistry.hpp>
@@ -37,6 +39,8 @@
 #include <exception>
 #include <filesystem>
 #include <string>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace hipdnn_plugin_sdk::ingestor
@@ -48,6 +52,21 @@ namespace
 // 1 a problem token. Two slots from two namespaces is the minimum that can show the
 // interaction reaching the model.
 const std::vector<std::string> SIGNATURE = {R"("$kernel.tile_m")", R"("$q.seqlen")"};
+
+/// The same two slots in RFC 0019 §7.2's canonical spelling: a bare reference, which is what
+/// tools/uhd_gen writes and what a hand-authored `.uhd.json` most naturally carries. It is
+/// deliberately NOT valid JSON, so anything reaching for a raw `json::parse` instead of
+/// FeatureExtractor::parseSignatureEntry drops every entry -- and the §6.3 axis set that
+/// follows comes back empty rather than wrong, which no assertion on a ranking can see.
+///
+/// computeHash() canonicalizes both spellings, so this hashes identically to SIGNATURE and the
+/// two are interchangeable everywhere except in the parse under test.
+const std::vector<std::string> BARE_SIGNATURE = {"$kernel.tile_m", "$q.seqlen"};
+
+/// One slot, read from the kernel, for the cases that rank through a whole engine. A `$q.*`
+/// slot would bind nothing there -- the fixture graph matcher binds no tokens -- so the model
+/// would fail closed for a reason unrelated to what those cases are about.
+const std::vector<std::string> ENGINE_SIGNATURE = {R"("$kernel.tile_m")"};
 
 /// The knobs a conformant UED would expose for SIGNATURE. RFC 0019 §6.3 check 2 requires
 /// `set(UED.knobs) == set($kernel.* axes the model reads)`, so a fixture that omitted these
@@ -155,6 +174,10 @@ struct Fixture
     std::string objective;
     bool calibrated;
     std::string scoreTransform;
+    /// The signature the artifact was built for. Carried so `modelDescriptor(dir, fixture)`
+    /// describes the model that was actually written: a case varying the spelling of the
+    /// signature would otherwise write one signature and declare another.
+    std::vector<std::string> signature;
 };
 
 /// Writes a GBDT artifact into @p dir and reports what a descriptor over it must say.
@@ -176,13 +199,17 @@ Fixture writeFixture(const std::filesystem::path& dir,
                      /// The target transform the model was trained under; its inverse runs at
                      /// score time. "exp" inverts as a logarithm, which is out of domain for a
                      /// negative prediction.
-                     const std::string& scoreTransform = "identity")
+                     const std::string& scoreTransform = "identity",
+                     /// The feature signature to train against. Defaults to SIGNATURE; a caller
+                     /// passing another is varying either the spelling or the slot count, and
+                     /// the artifact's feature count follows it so the two cannot drift.
+                     const std::vector<std::string>& signature = SIGNATURE)
 {
-    const std::string signatureHash = uhd::FeatureExtractor::computeHash(SIGNATURE);
+    const std::string signatureHash = uhd::FeatureExtractor::computeHash(signature);
 
     hipdnn_test_sdk::utilities::GbdtModelTestBuilder model;
     model.setFeaturesHash(modelHash.empty() ? signatureHash : modelHash)
-        .setNumFeatures(static_cast<int32_t>(SIGNATURE.size()))
+        .setNumFeatures(static_cast<int32_t>(signature.size()))
         .setTrainingArches({"gfx942"})
         .addTree(tree);
     model.buildToFile((dir / "model.bin").string());
@@ -191,7 +218,8 @@ Fixture writeFixture(const std::filesystem::path& dir,
             signatureHash,
             objective,
             calibrated.value_or(objective != "min"),
-            scoreTransform};
+            scoreTransform,
+            signature};
 }
 
 /// The descriptor the loader would produce for a tree_data UHD in @p dir.
@@ -200,15 +228,16 @@ HeuristicDescriptor modelDescriptor(const std::filesystem::path& dir,
                                     const std::string& objective = "max",
                                     bool calibrated = true,
                                     const std::string& scoreTransform = "identity",
-                                    const std::string& featuresHash = {})
+                                    const std::string& featuresHash = {},
+                                    const std::vector<std::string>& signature = SIGNATURE)
 {
     HeuristicDescriptor descriptor;
     descriptor.id = testId(0xEE);
     descriptor.name = "test model heuristic";
     descriptor.adapter = UhdAdapter::TREE_DATA;
-    descriptor.featuresSignature = SIGNATURE;
+    descriptor.featuresSignature = signature;
     descriptor.featuresHash
-        = featuresHash.empty() ? uhd::FeatureExtractor::computeHash(SIGNATURE) : featuresHash;
+        = featuresHash.empty() ? uhd::FeatureExtractor::computeHash(signature) : featuresHash;
     descriptor.objective = objective;
     descriptor.score.units = "tflops";
     descriptor.score.calibrated = calibrated;
@@ -227,7 +256,9 @@ HeuristicDescriptor modelDescriptor(const std::filesystem::path& dir, const Fixt
                            fixture.modelFileName,
                            fixture.objective,
                            fixture.calibrated,
-                           fixture.scoreTransform);
+                           fixture.scoreTransform,
+                           {},
+                           fixture.signature);
 }
 
 /// A `.uhd.json` as an author would write it, naming @p artifact.
@@ -1146,6 +1177,217 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<SelectionCondition>& info) {
         return std::string(info.param.name);
     });
+
+/// RFC 0019 §6.3 check 2 compares two sets, and the comparison is only as good as the two
+/// sides. An empty set on either side compares equal to an empty set on the other, so a
+/// defect that empties one passes vacuously on every engine whose model happens to read no
+/// `$kernel.*` feature -- and rejects every engine whose model does. The three cases below
+/// pin each side and then the comparison itself.
+namespace
+{
+
+/// gfx942, matching the fixtures' training arch, so the out-of-distribution path stays out
+/// of the engine-level cases. The shared StubDeviceResolver reports gfx000.
+class Gfx942DeviceResolver : public IDeviceResolver<testing::StubHandle>
+{
+public:
+    DeviceId deviceId(const testing::StubHandle& /*handle*/) const override
+    {
+        return 0;
+    }
+
+    const DeviceProperties& deviceProperties(DeviceId /*deviceId*/) const override
+    {
+        return _properties;
+    }
+
+private:
+    DeviceProperties _properties = gfx942();
+};
+
+KernelDescriptor kernelDescriptorWith(uint8_t tag, int64_t tileM, int64_t priority)
+{
+    KernelDescriptor kernel;
+    kernel.id = testId(tag);
+    kernel.name = "kernel_tile_" + std::to_string(tileM);
+    kernel.source.sourceFile = "Test.cpp";
+    kernel.source.entryPoint = "TestKernel";
+    kernel.metadata = {{"tile_m", MetadataValue{tileM}}};
+    kernel.priority = priority;
+    return kernel;
+}
+
+/// A whole engine's descriptor set: a UED exposing @p knobs, the model in @p dir, and a
+/// catalog whose declared order is the opposite of what that model prefers.
+///
+/// `split_k` is in the schema but on no kernel, purely so a case can expose it as a knob the
+/// model has no axis for -- GenericEngine refuses a knob its schema does not declare, so a
+/// mismatch has to be a field that exists.
+DescriptorSet engineSetRankingOnTileM(const std::filesystem::path& dir,
+                                      const Fixture& fixture,
+                                      std::vector<std::string> knobs)
+{
+    DescriptorSet set;
+    set.engine.id = testing::ENGINE_ID;
+    set.engine.name = "test:uhd_knob_contract";
+    set.engine.heuristicId = testId(0xEE);
+    set.engine.metadataSchemaId = testing::SCHEMA_ID;
+    set.engine.knobs = std::move(knobs);
+    set.engine.graphMatchNativeSymbol = testing::GRAPH_MATCH_SYMBOL;
+
+    set.schema.id = testing::SCHEMA_ID;
+    set.schema.name = "test schema";
+    set.schema.fields
+        = {{"tile_m", MetadataType::INT, MetadataValue{int64_t{64}}},
+           {"split_k", MetadataType::INT, MetadataValue{int64_t{1}}},
+           {testing::BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}}};
+
+    set.heuristic = modelDescriptor(dir, fixture);
+    set.dispatches = testing::makeStubDispatches();
+
+    KernelDescriptorPack pack;
+    pack.id = testing::PACK_ID;
+    pack.name = "test pack";
+    pack.engineId = testing::ENGINE_ID;
+    pack.dispatchId = testing::DISPATCH_ID;
+    // Small tile at high priority, large tile at low: declared order and the model disagree,
+    // so the two provenances are distinguishable by more than the log line alone.
+    pack.kernels = {kernelDescriptorWith(0x01, 64, 100), kernelDescriptorWith(0x02, 128, 1)};
+    set.packs = {std::move(pack)};
+
+    return set;
+}
+
+/// Builds the engine @p set describes through the production entry point and ranks its
+/// catalog once, returning what RFC 0019 §12's trace said decided.
+///
+/// Through makeEngine() rather than makeStateManager(): makeEngine is where the UED is moved
+/// from, and therefore the only place the knobs can be read after they are gone.
+std::string provenanceOfEngineRanking(DescriptorSet set)
+{
+    const testing::ScopedTestSymbols symbols;
+    const testing::StubWorkspaceHandler handler;
+    const testing::ScopedDispatchRegistration<testing::StubHandle> dispatch(
+        "hipdnn.kernel_ingestor.test.dispatch", handler);
+
+    const Gfx942DeviceResolver resolver;
+    auto engine
+        = makeEngine<testing::StubHandle, testing::StubSettings, testing::StubContext>(
+            std::move(set), resolver);
+    if(engine == nullptr)
+    {
+        return "<no engine>";
+    }
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const testing::StubHandle handle;
+    const testing::TestGraph graph(testing::makeGraphId(0x71));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper emptyConfig(nullptr,
+                                                                                        0);
+    testing::StubContext context;
+    engine->initializeExecutionContext(handle, graph, emptyConfig, context);
+
+    if(recorder.hasLogContaining("decided_by=model"))
+    {
+        return "model";
+    }
+    if(recorder.hasLogContaining("decided_by=declared_order"))
+    {
+        return "declared_order";
+    }
+    return "<no trace>: " + recorder.getRecordedLogsAsString();
+}
+
+} // namespace
+
+TEST(TestIngestorUhdKernelHeuristic, TheAxisSetReadsRfc0019sBareReferenceSpelling)
+{
+    // One side of the §6.3 comparison, on its own. A bare reference is the canonical spelling
+    // and is not valid JSON; reading the axes with a plain json::parse throws on every entry
+    // and yields an empty set, which the comparison cannot distinguish from "the model reads
+    // no kernel feature". Asserting the exact set, not merely that it is non-empty, so an
+    // axis silently dropped from a mixed signature is caught too.
+    const auto axes = kernelAxesOf(BARE_SIGNATURE);
+
+    EXPECT_FALSE(axes.empty()) << "an empty axis set is indistinguishable from agreement";
+    EXPECT_EQ(axes, (std::unordered_set<std::string>{"tile_m"}));
+
+    // `$q.*` stays out, and an entry that really is a JsonLogic expression still contributes
+    // the axes it reads -- both spellings have to work through the one parse.
+    const auto mixed = kernelAxesOf({"$kernel.tile_m",
+                                     R"("$q.seqlen")",
+                                     R"({"*": [{"var": "$kernel.split_k"}, 2]})"});
+    EXPECT_EQ(mixed, (std::unordered_set<std::string>{"tile_m", "split_k"}));
+}
+
+TEST(TestIngestorUhdKernelHeuristic, ABareReferenceSignatureStillSatisfiesTheKnobAxisCheck)
+{
+    // The same side, reached through the check that consumes it. A UED exposing exactly the
+    // knob its model ranks on is conformant, and must get its model -- an axis set emptied by
+    // the parse turns that into "exposes [tile_m], model ranks on <none>" and refuses it.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_bare_signature");
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTiles(),
+                                      "max",
+                                      {},
+                                      std::nullopt,
+                                      "identity",
+                                      BARE_SIGNATURE);
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), "e", KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto ranked = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    EXPECT_EQ(ranked.size(), 2U);
+    EXPECT_TRUE(recorder.hasLogContaining("decided_by=model"))
+        << "a conformant bare-reference signature was refused its model";
+}
+
+TEST(TestIngestorUhdEngineKnobContract, MakeEngineCarriesTheUedsKnobsIntoTheModelCheck)
+{
+    // The other side of the §6.3 comparison, through the production path. makeEngine moves
+    // the UED into the engine; the knobs must be read before that move, or the check sees an
+    // empty exposed set and refuses the model of every engine that declares a knob at all.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_make_engine_knobs");
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTiles(),
+                                      "max",
+                                      {},
+                                      std::nullopt,
+                                      "identity",
+                                      ENGINE_SIGNATURE);
+
+    EXPECT_EQ(provenanceOfEngineRanking(engineSetRankingOnTileM(dir.path(), fixture, {"tile_m"})),
+              "model");
+}
+
+TEST(TestIngestorUhdEngineKnobContract, AnEngineExposingAKnobItsModelDoesNotRankOnIsRefused)
+{
+    // The comparison itself, so neither of the two cases above can be satisfied by a check
+    // that has quietly stopped comparing anything. Same engine, same model; the UED adds a
+    // knob the model has no axis for, which §6.3 requires be refused.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_make_engine_knob_mismatch");
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTiles(),
+                                      "max",
+                                      {},
+                                      std::nullopt,
+                                      "identity",
+                                      ENGINE_SIGNATURE);
+
+    EXPECT_EQ(provenanceOfEngineRanking(
+                  engineSetRankingOnTileM(dir.path(), fixture, {"tile_m", "split_k"})),
+              "declared_order");
+}
 
 } // namespace hipdnn_plugin_sdk::ingestor
 
