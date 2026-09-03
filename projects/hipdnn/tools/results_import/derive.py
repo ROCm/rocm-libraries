@@ -38,9 +38,9 @@ class UnsupportedExpression(Exception):
 #: declare them today, and a rounded width would make `gbs` quietly wrong for the first one that
 #: does. Adding a dtype here is the deliberate step that should accompany declaring it.
 DTYPE_BYTES: Mapping[str, int] = {
-    "float32": 4,
-    "float16": 2,
-    "bfloat16": 2,
+    "fp32": 4,
+    "fp16": 2,
+    "bf16": 2,
     "int8": 1,
     "fp8_e4m3": 1,
     "fp8_e5m2": 1,
