@@ -85,7 +85,7 @@ T asm_thread_load(void* ptr)
         ROCPRIM_DEVICE ROCPRIM_INLINE type asm_thread_load<cache_modifier, type>(void* ptr) \
         {                                                                                   \
             interim_type retval;                                                            \
-            if(ROCPRIM_IS_RDNA4())                                                          \
+            if(ROCPRIM_IS_CDNA5())                                                          \
             {                                                                               \
                 asm volatile(#asm_operator " %0, %1 th:TH_DEFAULT scope:SCOPE_DEV\n\t"      \
                                            "s_wait_loadcnt_dscnt(%2)"                       \
