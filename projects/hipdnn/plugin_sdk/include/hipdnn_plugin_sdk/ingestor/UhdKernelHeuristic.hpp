@@ -121,12 +121,16 @@ inline std::unordered_set<std::string> kernelAxesOf(const std::vector<std::strin
     std::unordered_set<std::string> axes;
     for(const auto& entry : signature)
     {
-        // An entry is a JsonLogic expression; a bare reference is not valid JSON on its own,
-        // so it arrives quoted and parses to a string.
+        // Through FeatureExtractor's own parse, not a second one. RFC 0019 §7.2 allows a
+        // bare reference (`$kernel.block_size`) as well as a JsonLogic expression, and a
+        // bare reference is not valid JSON -- so parsing entries directly threw on every
+        // one of them, the catch below swallowed it, and the axis set came back empty.
+        // The §6.3 comparison then read "exposes [block_size], model ranks on <none>" and
+        // refused every bare-reference signature ever trained.
         try
         {
-            for(const auto& variable :
-                uhd::JsonLogicEvaluator::extractVariables(nlohmann::json::parse(entry)))
+            for(const auto& variable : uhd::JsonLogicEvaluator::extractVariables(
+                    uhd::FeatureExtractor::parseSignatureEntry(entry)))
             {
                 constexpr std::string_view PREFIX = "$kernel.";
                 if(variable.rfind(PREFIX, 0) == 0)

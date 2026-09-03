@@ -1021,14 +1021,31 @@ def pack_arch(
         )
 
     prune_result = prune(flat, arch)
-    for generic in flat.generics():
-        if generic.id in prune_result.reachable_generic_ids:
-            _write_bytes_at(
-                out_arch_dir,
-                generic.rel_dir,
-                generic.path.name,
-                generic.path.read_bytes(),
-            )
+    surviving_generics = [
+        generic
+        for generic in flat.generics()
+        if generic.id in prune_result.reachable_generic_ids
+    ]
+    for generic in surviving_generics:
+        _write_bytes_at(
+            out_arch_dir,
+            generic.rel_dir,
+            generic.path.name,
+            generic.path.read_bytes(),
+        )
+
+    # Gated on the same reachability set, deliberately derived from the surviving
+    # descriptors rather than added to it. reachable_generic_ids is a walk over
+    # descriptor *ids* that drops anything not in generic_by_id(), so a sidecar --
+    # which has a filename and no id -- could never enter it. Deriving keeps that
+    # walk untouched and makes a sidecar's fate exactly its descriptor's.
+    for sidecar in flat.sidecars_for(surviving_generics):
+        _write_bytes_at(
+            out_arch_dir,
+            sidecar.rel_dir,
+            sidecar.name,
+            sidecar.source.read_bytes(),
+        )
 
     return ArchResult(arch=arch, out_dir=out_arch_dir, kpack_path=kpack_path)
 

@@ -103,6 +103,15 @@ Catalog catalogAgainstPriority(int64_t seqlen)
     return catalog;
 }
 
+/// The knobs an engine shipping this model would declare.
+///
+/// RFC 0019 §6.3 check 2 requires the engine's exposed knobs to be exactly the model's
+/// `$kernel.*` axes, and the fixture's signature is `["$kernel.tile_m", "$q.seqlen"]`, so
+/// `tile_m` is the whole set. Passing it is not test scaffolding: a caller that omits it
+/// is describing an engine that varies nothing, and a model ranking on `tile_m` there is
+/// the broken contract the check exists to refuse.
+const std::vector<std::string> KNOBS = {"tile_m"};
+
 } // namespace
 
 TEST(TestIngestorUhdGeneratedModel, TheToolsOwnOutputLoads)
@@ -114,7 +123,7 @@ TEST(TestIngestorUhdGeneratedModel, TheToolsOwnOutputLoads)
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
-    const auto heuristic = makeKernelHeuristic(generatedDescriptor());
+    const auto heuristic = makeKernelHeuristic(generatedDescriptor(), {}, KNOBS);
 
     ASSERT_NE(heuristic, nullptr);
     EXPECT_EQ(recorder.getRecordedLogCount(), 0U)
@@ -124,7 +133,7 @@ TEST(TestIngestorUhdGeneratedModel, TheToolsOwnOutputLoads)
 
 TEST(TestIngestorUhdGeneratedModel, TheModelDecidesTheOrderRatherThanPriority)
 {
-    const auto heuristic = makeKernelHeuristic(generatedDescriptor());
+    const auto heuristic = makeKernelHeuristic(generatedDescriptor(), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -145,7 +154,7 @@ TEST(TestIngestorUhdGeneratedModel, TheSameCatalogRanksDifferentlyForADifferentP
     // The case that separates a model from a static order. Both rankings above
     // could be produced by a constant; only a model that reads $q.seqlen flips
     // when the problem does, and that flip is the reason a UHD exists at all.
-    const auto heuristic = makeKernelHeuristic(generatedDescriptor());
+    const auto heuristic = makeKernelHeuristic(generatedDescriptor(), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
