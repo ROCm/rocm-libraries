@@ -48,7 +48,11 @@ inline const char* toString(ObservedSupport support)
 
 // One (graph, engine, arch, platform) cell of observed support, as seen on the
 // hardware the run happened on.
-struct SupportObservation
+//
+// Not SupportVerdict.hpp's SupportObservation, which is the enforcing side: what a
+// sidecar promised and whether we got to read it. This one is the authoring side --
+// what the engines actually took, with no sidecar involved.
+struct ObservedSupportCell
 {
     // Says which sidecar this cell belongs in and, for a sweep, which case
     // within it. Carried rather than re-derived: the writer must agree with the
@@ -93,7 +97,7 @@ public:
     SupportObservationLog& operator=(SupportObservationLog&&) = delete;
 
     // Upsert: higher verdict wins (SUPPORTED > DECLINED > UNKNOWN).
-    void record(const SupportObservation& observation)
+    void record(const ObservedSupportCell& observation)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         CellKey key{observation.claimLocator.sidecarPath,
@@ -113,14 +117,14 @@ public:
     }
 
     // Bridge: reconstruct the flat vector that SupportClaimWriter consumes.
-    std::vector<SupportObservation> all() const
+    std::vector<ObservedSupportCell> all() const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        std::vector<SupportObservation> result;
+        std::vector<ObservedSupportCell> result;
         result.reserve(_cells.size());
         for(const auto& [key, val] : _cells)
         {
-            result.push_back(SupportObservation{
+            result.push_back(ObservedSupportCell{
                 SupportClaimLocator{key.sidecarPath, key.caseId, val.diagnosticPath},
                 key.engineName,
                 key.arch,

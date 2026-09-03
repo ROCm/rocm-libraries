@@ -72,5 +72,5 @@ For the full per-variant and per-dtype detail matrix, run: `python3 dnn-provider
 | **RMSNormBackward** | — | — | ✅ 960/960 | — | — |
 | **Reduction** | — | — | — | — | — |
 | **ResampleFwd** | — | — | — | — | — |
-| **Sdpa** | 🟡 12/50 | — | — | — | — |
+| **Sdpa** | 🟡 12/53 | — | — | — | — |
 | **SdpaBackward** | — | — | — | — | — |
