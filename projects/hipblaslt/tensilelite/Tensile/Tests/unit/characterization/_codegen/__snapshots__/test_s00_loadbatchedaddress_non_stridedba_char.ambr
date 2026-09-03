@@ -2,7 +2,7 @@
 # name: test_s00_loadbatchedaddress_non_stridedba_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_GB_UserArgs_MT64x256x16_MI16x2I_1wB6TFO2ydpVZ4sS7nmypAwQ9qo4GPboRQNtYrn0=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_GB_UserArgs_MT64x256x16_MI16xHASJvSaoBAbfJKB23Wx-KDvF205nvW4bllF1SKKSB2Y=',
       'err': 0,
     }),
   ])

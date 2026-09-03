@@ -2,7 +2,7 @@
 # name: test_s02b_globalreadguardk_body_tail_loop_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bljk_S_B_UserArgs_MT64x64x16_MI16x16x1f2dAMUF25DUJ0wgvIp0Rd5fv6xdniDgIQm8qgjWZckY=',
+      'basename': 'Cijk_Ailk_Bljk_S_B_UserArgs_MT64x64x16_MI16x16x1bL2IkUz_LBlnCHa9vcn7RADCb2qfxdC8f5pry1yZjrI=',
       'err': 0,
     }),
   ])

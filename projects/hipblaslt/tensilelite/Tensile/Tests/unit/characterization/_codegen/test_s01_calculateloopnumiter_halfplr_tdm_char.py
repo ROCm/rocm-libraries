@@ -2,25 +2,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""S01 - KernelWriterAssembly calculateLoopNumIter HalfPLR + TDMSplit undo.
+"""Characterize rejection of the disabled TDMSplit configuration.
 
-Drives the designed HalfPLR + TDMSplit single-wave config
-(``data/test_data/_designed/gfx1250/s01_calculateloopnumiter_halfplr_tdm.yaml``)
-through the config-driven emit harness. Targets the ``calculateLoopNumIter``
-HalfPLR TDM re-enable / LDS-align and TDMSplit tail-undo cluster in
-``Tensile/KernelWriterAssembly.py`` (lines 7558-7589):
-
-  - the single-wave HalfPLR "re-enable TDM & align LDS buffer" arm
-    (SMovB32 tdm{A,B}Group0 when NumWaves<=1), and
-  - the TDMSplit tail-undo guard and single-wave undo
-    (SkipUndoLabel + SCmpLeU32 + SCBranchSCC1, SSubU32 tdm{A,B}Group0).
-
-``HalfPLR=1`` forces SuppressNoLoadLoop, MIWaveGroup (1,1) forces the
-single-wave (NumWaves==1) arm, and ``TDMSplit=True`` with PGR>=2 (not Sparse)
-enters the undo block, so emit fires all target lines during assignDerived +
-emission.
-
-CPU-only; no GPU, no compile, no hardware. pytestmark = pytest.mark.unit.
+The designed config requests the single-wave HalfPLR and TDMSplit combination.
+``Solution.assignDerivedParameters`` rejects every solution because TDMSplit is
+currently disabled, so the config cannot reach the corresponding
+``KernelWriterAssembly.calculateLoopNumIter`` code. These tests record that
+boundary without claiming coverage of unreachable emitter lines.
 """
 
 import os
@@ -43,22 +31,19 @@ _CONFIG = os.path.join(
 )
 
 
-def test_s01_calculateloopnumiter_halfplr_tdm_emits():
-    """HalfPLR + TDMSplit single-wave config emits kernels with err==0."""
+def test_s01_calculateloopnumiter_halfplr_tdm_is_rejected():
+    """The disabled combination produces no kernel."""
     results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
-    assert len(results) >= 1, f"expected >=1 kernel, got {len(results)}"
-    for base, src, err in results:
-        assert err == 0, f"kernel {base!r} emitted with err={err}"
-        assert base.startswith("Cijk_")
-        assert ".amdgcn_target" in src, f"kernel {base!r}: missing .amdgcn_target"
-        assert "gfx1250" in src, f"kernel {base!r}: wrong arch in assembly"
+    assert results == []
 
 
-def test_s01_calculateloopnumiter_halfplr_tdm_golden(snapshot):
-    """P3 golden: order-invariant {basename, err} digest of the emit."""
-    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
-    digest = sorted(
-        ({"basename": b, "err": e} for (b, _s, e) in results),
-        key=lambda d: d["basename"],
-    )
-    assert digest == snapshot
+def test_s01_calculateloopnumiter_halfplr_tdm_reports_reason(capsys, monkeypatch):
+    """The rejection names TDMSplit instead of silently dropping the config."""
+    import Tensile.BenchmarkProblems as benchmark_problems
+
+    def serial_map(function, objects, *_args, **_kwargs):
+        return [function(*args) for args in objects]
+
+    monkeypatch.setattr(benchmark_problems, "ParallelMap2", serial_map)
+    emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+    assert "reject: TDMSplit is currently disabled" in capsys.readouterr().out

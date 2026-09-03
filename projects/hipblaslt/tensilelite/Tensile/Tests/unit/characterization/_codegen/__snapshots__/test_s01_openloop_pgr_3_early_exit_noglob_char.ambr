@@ -2,7 +2,7 @@
 # name: test_s01_openloop_pgr_3_early_exit_noglob_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_BH_UserArgs_MT32x32x256_MI16ZLKGGXfJZRzU0ELurVd_r92gVpeb5ryAOxnXIW7yctM=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_BH_UserArgs_MT32x32x256_MI168W_H2lVFelPLiw3hoFPgnbhf8MVi3lH3Trg5D7Q8FOE=',
       'err': 0,
     }),
   ])

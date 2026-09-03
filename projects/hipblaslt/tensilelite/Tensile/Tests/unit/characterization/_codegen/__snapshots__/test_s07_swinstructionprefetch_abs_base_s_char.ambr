@@ -2,7 +2,7 @@
 # name: test_s07_swinstructionprefetch_abs_base_s_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4BS_BH_UserArgs_MT16x16x128_MI160vzHQgfxERd1J9cCqPsUBCu2NnySiCR5JmpMr8e-4KI=',
+      'basename': 'Cijk_Alik_Bljk_F4BS_BH_UserArgs_MT16x16x128_MI16ddmWB6uIZtSTPGt_sRwyn5m7M_aobksH06EzUmuNV1Q=',
       'err': 0,
     }),
   ])

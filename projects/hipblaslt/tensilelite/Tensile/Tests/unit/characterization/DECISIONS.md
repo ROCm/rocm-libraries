@@ -397,3 +397,12 @@ and an in-tree `rocisa` build. Seventy-one nodes retain their kernel counts and
 emitter return codes. Four reviewed nodes change count, and every retained
 kernel still emits with return code `0`; ADR 0014 records those cases and the
 upstream cause.
+
+## D28 — Correct the disabled TDMSplit characterization
+
+**ADR:** [`adr/0015-correct-disabled-tdmsplit-test.md`](adr/0015-correct-disabled-tdmsplit-test.md)
+
+**Decision:** Replace the unreachable TDMSplit emission and saved-result checks
+with assertions that normal solution derivation returns no kernels and reports
+`TDMSplit is currently disabled`. The test no longer claims coverage of emitter
+code that product validation prevents it from reaching.
