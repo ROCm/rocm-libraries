@@ -537,7 +537,6 @@ class FmhaFwdKernel:
             dvpad=self.F_pipeline.F_dvpad,
             skip=self.F_pipeline.F_skip,
             sink=self.F_pipeline.F_sink,
-            tr_load=self.F_pipeline.F_trload,
             occupancy=int(self.F_tile.F_occupancy),
         )
 
