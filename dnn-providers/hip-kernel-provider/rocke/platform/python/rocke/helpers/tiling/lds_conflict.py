@@ -19,7 +19,7 @@ THE CARDINAL RULE (unchanged): never state a conflict number until (1) you have 
 counters for it AND (2) this simulator predicts those exact counters from the address map. If the
 sim does not reproduce the measurement, the MODEL is wrong -- fix it, do not "meet in the middle".
 
-THE MECHANISM (validated bit-exact, gfx90a MI210; SOT: helpers/tiling/docs/lds_banks.md §1.4)
+THE MECHANISM (validated bit-exact, gfx90a; SOT: helpers/tiling/docs/lds_banks.md §1.4)
 --------------------------------------------------------------------------------------------
 The CDNA2 LDS *write* datapath is NOT the naive per-address replay counter. The naive rule
 `sum_bank (distinct_addresses - 1)` OVER-COUNTS K-aliased stores ~8-9x. The write port has two
@@ -289,7 +289,7 @@ class ConflictModelError(AssertionError):
     middle'. This is a hard stop, not a warning."""
 
 
-def gate(sim, measured, *, tol=1e-6, label="", absolute=False):
+def gate(sim, measured, *, tol=1e-6, rtol=2e-2, label="", absolute=False):
     """HARD gate: assert the simulator reproduces the measured HARDWARE. The authoritative quantity is
     `conflicts_per_access = BC/(IDX-BC)` -- a RATIO with an IDENTICAL definition on both sides
     (`simulate` and `parse_counter_csv`), so it is comparable REGARDLESS of scale: per-served-group sim
@@ -303,7 +303,12 @@ def gate(sim, measured, *, tol=1e-6, label="", absolute=False):
     ConflictModelError on any mismatch -- there is no soft path (enforcement of the cardinal rule). A NaN
     on either side is itself a failure: a degenerate counter (e.g. IDX==BC) is never a silent pass."""
     tag = f"[{label}] " if label else ""
-    keys = [("conflicts_per_access", tol)]
+    # conflicts_per_access is the scale-invariant HW-match quantity, but it is a LIVE whole-run RATIO with
+    # sub-percent counter noise (steady-state variance + the ~0 ADDR-broadcast events) -- an absolute 1e-6
+    # tol is a corpus/exact-arithmetic tolerance, unreachable on hardware. Gate it with a small RELATIVE
+    # tolerance instead: a WRONG model is off by whole conflict factors (3 vs 7, 3 vs 1), never by 0.2%.
+    # BC/IDX (absolute=True, the per-instruction corpus) stay strict -- those are exact by construction.
+    keys = [("conflicts_per_access", max(tol, rtol * abs(float(measured.get("conflicts_per_access", 0.0)))))]
     if absolute:
         keys = [("BC", 0.5), ("IDX", 0.5)] + keys
     checked = False
@@ -709,10 +714,15 @@ def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, measured_cp
     assert shown_lanes, (
         f"{operand_label} at pad{subject_pad}: no >=2-way pile to show (already conflict-free?)")
 
-    # --- GATE 2: the fix pad is conflict-free per the validated stripe-alignment rule (== HW) ---
+    # --- GATE 2: the fix pad is conflict-free per the validated stripe-alignment rule (== HW). The rule is
+    # DEPTH-AWARE: a wide store (b128) into a wide tile K-aliases at a deeper stripe unit (e.g. depth 16, not
+    # the depth-8 default), so the check MUST pass the pad0 K-alias depth read off THIS store's map -- exactly
+    # as `recommend_pad` does. Omitting it uses the depth-8 default and spuriously rejects a pad the GPU
+    # confirms conflict-free (e.g. A b128 into a 256-wide tile: pad16 measures BC=0 but depth-8 predicts 1). ---
     fix_stride_dw = (tile_free + fix_pad) // per_dword
-    assert predict_pad_sweep(fix_stride_dw, wtag, a) == 0.0, (
-        f"{operand_label} fix pad{fix_pad} not conflict-free by the validated rule")
+    pad0_depth = max((d for h in r.get("detail", {}).values() for d in h.values()), default=None)
+    assert predict_pad_sweep(fix_stride_dw, wtag, a, pad0_depth=pad0_depth) == 0.0, (
+        f"{operand_label} fix pad{fix_pad} not conflict-free by the validated (depth-aware) rule")
 
     def fix_bank(lane):
         return conflict_free_bank_of(lane, a)
@@ -840,6 +850,16 @@ def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch="gfx90a", operand_
     #    pad0, the default; `sim` is then the pad0 histogram.)
     pad0_depth = max((d for h in sim.get("detail", {}).values() for d in h.values()), default=None)
     fix_pad = recommend_pad(tile_free, wtag, a, pad0_depth=pad0_depth, dtype_bytes=per_dword)
+    # MODEL-SIDE fix gate (== render GATE 2). The conflict-FREE verdict is a half-stripe PARITY property, which
+    # the address-map `simulate` (naive bank=dword mod NB histogram) is structurally blind to -- it reproduces
+    # the magnitude of CONFLICTED pads but can never reach 0 at the parity-resolved pads (e.g. a depth-16 b128
+    # store: sim keeps a spurious residual at pad16/48 where HW = 0). So the fix is validated by the DEPTH-AWARE
+    # stripe rule (`is_conflict_free`), never by `simulate` on the padded strides. This brings the correct model
+    # predictor into the analysis path so a report is model-gated even without a GPU (the GPU stays the arbiter).
+    if fix_pad is not None:
+        assert is_conflict_free((tile_free + fix_pad) // per_dword, wtag, a, pad0_depth=pad0_depth), (
+            f"{operand_label} recommended pad {fix_pad} is not conflict-free by the stripe rule -- "
+            f"recommend_pad and is_conflict_free disagree (model bug).")
     fix_verified_hw = False
     if verify_fix and measure is not None and fix_pad is not None:
         fm = measure(fix_pad, mode="store")
@@ -884,29 +904,45 @@ def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch="gfx90a", operand_
 # real GPU and add a `_VALIDATION_CORPUS[<name>]` entry, (3) run `selftest(<name>)` until it PASSES.
 # Until an arch has its own corpus, `selftest` REFUSES it (no silent cross-arch validation).
 #
-# hists   : per-INSTRUCTION measured histograms. Each store is K-aliased so every used bank has the
-#           same depth. (name, banks_used, depth, n_phases, footprint_dwords, HW_IDX, HW_BC).
-# pad_sweep: measured store-mirror pad sweep. (operand, wtag, tile_free, pad, HW conflicts/access);
-#           row stride in dwords = (tile_free + pad) / 2.
+# A bank conflict is a property of the PHYSICAL store geometry ONLY -- the store WIDTH, the LDS row
+# stride, the K-alias depth -- NEVER of which operand (A/B) or tensor it came from. So the corpus is keyed
+# by PHYSICAL descriptors, context-agnostic: two stores with the same (wtag, tile_free) but a different
+# K-alias depth are DIFFERENT rows (e.g. a b128 store into a 256-wide tile is depth-8 for one coop layout,
+# depth-16 for another) -- the depth is what the model reads, not the operand.
+#
+# hists   : per-INSTRUCTION measured histograms. Each store is K-aliased so every used bank has the same
+#           depth. (name, banks_used, depth, n_phases, footprint_dwords, HW_IDX, HW_BC). `name` is a
+#           physical descriptor (wtag / footprint / banks), not a tensor.
+# pad_sweep: measured store-mirror pad sweep. (wtag, tile_free, pad, HW conflicts/access, pad0_depth);
+#           row stride in dwords = (tile_free + pad) / 2. `pad0_depth` = the pad0 K-alias depth of THAT
+#           geometry (read off its address map), which sets the stripe unit NB*W/depth. The legacy depth-8
+#           rows keep pad0_depth=8 (== the old 4*W default); a wider/deeper alias needs a nearer pad (the
+#           b128 depth-16 store into a 256-wide tile is conflict-free at +16, not +32).
 _VALIDATION_CORPUS = {
-    "gfx90a": {  # MI210, rocprofv3, bit-exact isolation probes
+    "gfx90a": {  # rocprofv3, bit-exact isolation probes
         "hists": [
-            ("A b64  pad0", 4, 8, 2, 128, 16, 12),
-            ("A b64  pad8", 16, 2, 2, 128, 8, 4),
-            ("A b32  pad0", 8, 8, 2, 128, 32, 28),
-            ("A b32  pad8", 32, 2, 2, 128, 8, 4),
-            ("B b128 pad0", 4, 8, 4, 256, 16, 8),
-            ("B b128 pad8", 8, 4, 4, 256, 16, 8),
-            ("B b64  pad0", 8, 8, 2, 256, 32, 24),
-            ("B b32  pad0", 16, 8, 2, 128, 32, 28),
+            ("b64  fp128 b4  pad0", 4, 8, 2, 128, 16, 12),
+            ("b64  fp128 b16 pad8", 16, 2, 2, 128, 8, 4),
+            ("b32  fp128 b8  pad0", 8, 8, 2, 128, 32, 28),
+            ("b32  fp128 b32 pad8", 32, 2, 2, 128, 8, 4),
+            ("b128 fp256 b4  pad0", 4, 8, 4, 256, 16, 8),
+            ("b128 fp256 b8  pad8", 8, 4, 4, 256, 16, 8),
+            ("b64  fp256 b8  pad0", 8, 8, 2, 256, 32, 24),
+            ("b32  fp128 b16 pad0", 16, 8, 2, 128, 32, 28),
         ],
         "pad_sweep": [
-            ("A", "b64", 128, 0, 3.0), ("A", "b64", 128, 8, 1.0), ("A", "b64", 128, 16, 0.0),
-            ("A", "b64", 128, 24, 1.0), ("A", "b64", 128, 32, 1.0), ("A", "b64", 128, 40, 1.0),
-            ("A", "b64", 128, 48, 0.0),
-            ("B", "b128", 256, 0, 1.0), ("B", "b128", 256, 8, 1.0), ("B", "b128", 256, 16, 1.0),
-            ("B", "b128", 256, 24, 1.0), ("B", "b128", 256, 32, 0.0), ("B", "b128", 256, 40, 1.0),
-            ("B", "b128", 256, 48, 1.0), ("B", "b128", 256, 56, 1.0), ("B", "b128", 256, 64, 1.0),
+            # (wtag, tile_free, pad, HW conflicts/access, pad0_depth) -- purely physical, no operand.
+            ("b64", 128, 0, 3.0, 8), ("b64", 128, 8, 1.0, 8), ("b64", 128, 16, 0.0, 8),
+            ("b64", 128, 24, 1.0, 8), ("b64", 128, 32, 1.0, 8), ("b64", 128, 40, 1.0, 8),
+            ("b64", 128, 48, 0.0, 8),
+            ("b128", 256, 0, 1.0, 8), ("b128", 256, 8, 1.0, 8), ("b128", 256, 16, 1.0, 8),
+            ("b128", 256, 24, 1.0, 8), ("b128", 256, 32, 0.0, 8), ("b128", 256, 40, 1.0, 8),
+            ("b128", 256, 48, 1.0, 8), ("b128", 256, 56, 1.0, 8), ("b128", 256, 64, 1.0, 8),
+            # b128 into a 256-wide tile at a DEPTH-16 K-alias (unit NB*W/16 = 8) -- rocprof-measured on
+            # gfx90a. pad0's 3.0 MAGNITUDE is a `simulate`/hists fact, not a stripe-rule one
+            # (predict_pad_sweep is the conflict-free VERDICT: 0 at the odd half-stripe pads 16, 48).
+            ("b128", 256, 8, 1.0, 16), ("b128", 256, 16, 0.0, 16), ("b128", 256, 24, 1.0, 16),
+            ("b128", 256, 32, 1.0, 16), ("b128", 256, 48, 0.0, 16),
         ],
     },
 }
@@ -950,14 +986,14 @@ def selftest(arch=GFX90A, verbose=True):
     if verbose:
         print(f"\n== pad-sweep stripe-alignment rule vs measured conflicts/access ({a.name}) ==")
         print(f"{'config':16s} | stride_dw s | {'sim c/a':>7} {'HW c/a':>7} | ok")
-    for op, wtag, tf, pad, hw in corpus["pad_sweep"]:
+    for wtag, tf, pad, hw, pad0_depth in corpus["pad_sweep"]:
         stride = (tf + pad) // 2
-        sim = predict_pad_sweep(stride, wtag, a)
+        sim = predict_pad_sweep(stride, wtag, a, pad0_depth=pad0_depth)
         row_ok = abs(sim - hw) < 1e-9
         ok &= row_ok
         if verbose:
-            print(f"{op + ' ' + wtag + ' pad' + str(pad):16s} | {stride:8d} {stride % a.NB:2d} | "
-                  f"{sim:7.2f} {hw:7.2f} | {'OK' if row_ok else 'FAIL'}")
+            print(f"{wtag + ' tf' + str(tf) + ' d' + str(pad0_depth) + ' pad' + str(pad):22s} | "
+                  f"{stride:8d} {stride % a.NB:2d} | {sim:7.2f} {hw:7.2f} | {'OK' if row_ok else 'FAIL'}")
     if verbose:
         print("\nGATE:", "PASS" if ok else "FAIL - model wrong, do not trust any number it produces")
     return ok
