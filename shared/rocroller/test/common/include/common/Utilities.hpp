@@ -109,8 +109,8 @@ double relativeNormL2(std::vector<T> const& observed, std::vector<T> const& expe
     if(observed.size() != expected.size())
         throw std::invalid_argument("rocRoller comparison vectors have different sizes.");
     roc::host_numerics::ComparisonOptions options;
-    options.pointwise                              = false;
-    options.computePointwiseStatistics             = true;
+    options.allClose                               = false;
+    options.computeElementwiseStatistics           = true;
     options.computeFrobenius                       = true;
     options.computeUlp                             = false;
     options.maxReportedMismatches                  = 0;

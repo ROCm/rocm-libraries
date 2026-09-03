@@ -604,22 +604,22 @@ TEST(HostNumericsComparisonBridge, UnitNearAndSpecialValuePolicies)
     request.observed         = observed.data();
     request.type             = HIP_R_32F;
 
-    request.pointwise = hipblaslt::host_numerics::HostPointwiseComparison::Unit;
+    request.allCloseMode = hipblaslt::host_numerics::HostAllCloseMode::Unit;
     EXPECT_TRUE(hipblaslt::host_numerics::compareHost(request).comparison.passed());
 
-    request.pointwise         = hipblaslt::host_numerics::HostPointwiseComparison::Near;
+    request.allCloseMode      = hipblaslt::host_numerics::HostAllCloseMode::Near;
     request.absoluteTolerance = 1e-6;
     EXPECT_TRUE(hipblaslt::host_numerics::compareHost(request).comparison.passed());
 
     expected[0]       = 0.0f;
     observed[0]       = 2.0f * std::numeric_limits<float>::epsilon();
-    request.pointwise = hipblaslt::host_numerics::HostPointwiseComparison::SymmetricRelative;
+    request.allCloseMode = hipblaslt::host_numerics::HostAllCloseMode::SymmetricRelative;
     request.symmetricRelativeTolerance = 3.0f * std::numeric_limits<float>::epsilon();
     EXPECT_TRUE(hipblaslt::host_numerics::compareHost(request).comparison.passed());
     request.symmetricRelativeTolerance = std::numeric_limits<float>::epsilon();
     EXPECT_FALSE(hipblaslt::host_numerics::compareHost(request).comparison.passed());
 
-    request.pointwise = hipblaslt::host_numerics::HostPointwiseComparison::Disabled;
+    request.allCloseMode                   = hipblaslt::host_numerics::HostAllCloseMode::Disabled;
     request.requireSpecialValueConsistency = true;
     EXPECT_EQ(hipblaslt::host_numerics::compareHost(request).comparison.nonFiniteMismatches, 0);
 }
@@ -639,7 +639,7 @@ TEST(HostNumericsComparisonBridge, RunsTheCombinedHostComparisonProgram)
     request.expected         = expected.data();
     request.observed         = observed.data();
     request.type             = HIP_R_32F;
-    request.pointwise        = hipblaslt::host_numerics::HostPointwiseComparison::Unit;
+    request.allCloseMode                   = hipblaslt::host_numerics::HostAllCloseMode::Unit;
     request.requireSpecialValueConsistency = true;
     request.computeRelativeFrobeniusError  = true;
     request.findAllCloseTolerance          = true;
@@ -671,7 +671,7 @@ TEST(HostNumericsComparisonBridge, KeepsReportedUlpNonFinitePolicySeparate)
     request.expected         = &nan;
     request.observed         = &nan;
     request.type             = HIP_R_32F;
-    request.pointwise        = hipblaslt::host_numerics::HostPointwiseComparison::Unit;
+    request.allCloseMode                   = hipblaslt::host_numerics::HostAllCloseMode::Unit;
     request.requireSpecialValueConsistency = true;
     request.computeUnitsInLastPlace        = true;
 
@@ -681,16 +681,16 @@ TEST(HostNumericsComparisonBridge, KeepsReportedUlpNonFinitePolicySeparate)
     EXPECT_TRUE(std::isinf(report.unitsInLastPlaceComparison.maximumUlp));
 }
 
-TEST(HostNumericsComparisonBridge, EmptyPointwiseRequestsStillValidateTheProductType)
+TEST(HostNumericsComparisonBridge, EmptyAllCloseRequestsStillValidateTheProductType)
 {
     using namespace hipblaslt::host_numerics;
 
     HostComparisonRequest request;
     request.type      = HIPBLASLT_DATATYPE_INVALID;
-    request.pointwise = HostPointwiseComparison::Unit;
+    request.allCloseMode = HostAllCloseMode::Unit;
     EXPECT_THROW(compareHost(request), std::invalid_argument);
 
-    request.pointwise                     = HostPointwiseComparison::Disabled;
+    request.allCloseMode                  = HostAllCloseMode::Disabled;
     request.computeRelativeFrobeniusError = true;
     EXPECT_NO_THROW(compareHost(request));
 }

@@ -368,7 +368,7 @@ namespace TensileLite
             ComparisonOptions options
                 = validationComparisonOptions(tensor.dataType(), threshold);
             options.selection = outputSelection;
-            options.computePointwiseStatistics = false;
+            options.computeElementwiseStatistics = false;
             options.computeFrobenius = false;
             options.reportMatchingElements = m_printValids;
             options.maxReportedMismatches

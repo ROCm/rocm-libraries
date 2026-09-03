@@ -21,7 +21,7 @@ namespace
         const std::array<T, 1> expectedStorage{expected};
         ComparisonOptions      options
             = TensileLite::Client::validationComparisonOptions(type, threshold);
-        options.computePointwiseStatistics = false;
+        options.computeElementwiseStatistics = false;
         options.computeFrobenius           = false;
         const ComparisonReport report      = TensileLite::Client::compareHostBuffers(
             type,
