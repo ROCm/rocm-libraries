@@ -461,6 +461,7 @@ int main(int argc, char** argv) noexcept
                 std::cerr << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
                           << "  written: " << writeSummary.filesWritten
                           << "  unchanged: " << writeSummary.filesUnchanged
+                          << "  skipped: " << writeSummary.filesSkipped
                           << "  errors: " << writeSummary.errors.size() << "\n";
                 for(const auto& error : writeSummary.errors)
                 {
