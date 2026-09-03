@@ -310,7 +310,10 @@ instruction-issue tradeoff. The model, the width ladder, and the binding-stage d
 ## 6. `TileMma` -- the resolver + subtile driver (where the defaults live)
 
 `TileMma(shape, *, a, b, c, target, tiling=None)`. `shape` is the **wave tile**. Everything
-below is resolved for you and is inspectable.
+below is resolved for you and is inspectable. The **intrinsic** SSOT is **`traits/data/mma_traits.json`**
+(atom shapes + dtypes = the hardware truth; resolved automatically, never hand-edit it). Its **canonical**
+A/B/C encodings are the **baseline/fallback** layout — a starting place, NOT a requirement: you are free to
+hand-roll valid non-canonical (interleaved / custom) layouts (canonical is never required — `mma_is_machinery.md`).
 
 ### Default: single MMA, everything resolved from traits
 ```python

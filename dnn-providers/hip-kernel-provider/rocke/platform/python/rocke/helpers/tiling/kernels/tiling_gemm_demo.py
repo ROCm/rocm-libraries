@@ -31,6 +31,7 @@ from .. import (
     make_tensor_desc,
     make_window,
     store_fragment,
+    transform_fragment,
 )
 
 
@@ -88,6 +89,7 @@ def is_valid_spec(spec: TilingGemmSpec, arch: str = "gfx90a") -> tuple[bool, str
 def build_tiling_gemm(
     spec: TilingGemmSpec, M_LEN: int, N_LEN: int, K_LEN: int, *, arch: str = "gfx90a",
     lda: int | None = None, ldb: int | None = None, ldc: int | None = None,
+    interleave_a: bool = False,
 ):
     """Build a dense-RCR f16->f32(->f16 store) GEMM KernelDef from a spec.
 
@@ -150,8 +152,9 @@ def build_tiling_gemm(
         k_base = b.const_i32(tile_k_base)
         a_win = make_window(a_td, (m_tile_base, k_base))  # clip defaults to the desc lengths
         b_win = make_window(b_td, (n_tile_base, k_base))
-        a_fragment = load_fragment(b, a_ptr, a_win, mma.a_desc, lane)
-        b_fragment = load_fragment(b, b_ptr, b_win, mma.b_desc, lane)
+
+        a_fragment = load_fragment(b, a_ptr, a_win, mma.a_desc(), lane)
+        b_fragment = load_fragment(b, b_ptr, b_win, mma.b_desc(), lane)
         accumulator = mma(b, a_fragment, b_fragment, accumulator)
 
     c_win = make_window(c_td, (m_tile_base, n_tile_base))
@@ -181,19 +184,20 @@ def _run_gemm_numpy(launcher, config, arrays: dict, scalars: dict) -> None:
 
 def run_and_verify(
     M_LEN: int = 256, N_LEN: int = 256, K_LEN: int = 256,
-    *, spec: Optional[TilingGemmSpec] = None, arch: str = "gfx90a",
+    *, spec: Optional[TilingGemmSpec] = None, arch: str = "gfx90a", interleave_a: bool = False,
 ) -> dict:
     """Compile, launch on the GPU, and verify C = A @ B against a NUMPY golden reference.
 
     torch-free: numpy host arrays + `DeviceMem` device buffers. ``spec`` defaults to a 16x16x16
-    single-atom tile (the M1 config)."""
+    single-atom tile (the M1 config). ``interleave_a=True`` loads A in the interleaved (AOS) layout
+    and `transform_fragment`s it to the MMA form -- proving the register-reorder path bit-exact."""
     from rocke.helpers.compile import compile_kernel
     from rocke.helpers.spec import SignatureBuilder
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     if spec is None:
         spec = TilingGemmSpec(tile=(16, 16, 16))
-    kernel, mma = build_tiling_gemm(spec, M_LEN, N_LEN, K_LEN, arch=arch)
+    kernel, mma = build_tiling_gemm(spec, M_LEN, N_LEN, K_LEN, arch=arch, interleave_a=interleave_a)
     TILE_M, TILE_N, _TILE_K = spec.tile
     artifact = compile_kernel(kernel, arch=arch)
     signature = (
