@@ -37,10 +37,9 @@ operand_traffic_t compute_operand_traffic(
     const context_t& context,
     size_t transaction_bytes = heuristic_defaults_t::DRAM_SECTOR_BYTES);
 
-// Safe Tensile-params accessor: returns the config's tensile params if present,
-// else a default-constructed instance.  The prediction model must not throw for
-// configs without a Tensile backend (tests, Python bindings, direct callers);
-// only PredictionLibrary populates the backend.
+// Safe Tensile-params accessor: config's params if present, else a default.
+// The model must not throw for configs without a Tensile backend (tests,
+// Python bindings, direct callers); only PredictionLibrary populates it.
 static const tensile_params_t& tparams(const config_t& config) {
   static const tensile_params_t kDefaultTensile{};
   return config.has_tensile_params() ? config.tensile() : kDefaultTensile;
@@ -94,10 +93,9 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   active_cus           = cus;
   mem_bw_limited       = compute_mem_bw_from_occupancy(hardware, active_cus);
   write_mem_bw_limited = compute_mem_bw_from_occupancy(hardware, num_output_tiles);
-  // Per-CU wave-pass count, capped so the 0.95^N amortization saturates
-  // around the first few resident WGs.  Without the cap, batched problems
-  // (real_occupancy in the tens or hundreds) drive occupancy_factor toward 0
-  // and erase per-tile prologue/epilogue cost as a ranking signal.
+  // Per-CU wave-pass count, capped so the occupancy amortization saturates at a
+  // few resident WGs; else deep batches drive occupancy_factor toward 0 and
+  // erase per-tile prologue/epilogue cost as a ranking signal.
   real_occupancy = static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor, N_CU));
   const size_t real_occupancy_for_factor =
       std::min(static_cast<size_t>(real_occupancy), heuristic_defaults_t::OCCUPANCY_AMORT_CAP);
@@ -238,9 +236,8 @@ double calculate_output_utilization(const problem_t& problem,
   return useful / launched;
 }
 
-// Round the number of elements to the nearest multiple of `transaction_bytes`.
-// Used by the memory-latency model where the "natural" coalesced load width is
-// not always a full 128-byte L1 line (e.g. bf16 DepthU=32 is a 64-byte load).
+// Round element count up to a multiple of `transaction_bytes`, since the
+// coalesced load width is not always a full 128-byte L1 line.
 size_t round_elements_to_NB(size_t elements,
                             size_t element_size_bits,
                             size_t transaction_bytes) {
@@ -939,11 +936,9 @@ size_t compute_mt_compute_latency(const problem_t& problem,
   return L_MT;
 }
 
-// LocalSplitU reduction cost: after the mainloop, the `lsu` partial MT_MxMT_N
-// tiles held by the lsu waves are reduced through LDS (write partials -> barrier
-// -> read + accumulate).  Ported from Formocast getLocalSplitKOverhead
-// (formocast.cpp); returned in raw cycles to match L_compute's basis.  Charged
-// once per output tile.  Zero when lsu <= 1.
+// LocalSplitU reduction cost: the lsu waves' partial MT_MxMT_N tiles are reduced
+// through LDS (write -> barrier -> read + accumulate). Raw cycles to match
+// L_compute; charged once per output tile. Zero when lsu <= 1.
 static double compute_lsu_reduction_latency(const problem_t& problem,
                                             const hardware_t& hardware,
                                             const config_t& config) {
@@ -1171,29 +1166,11 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
 
   if (N_CU == 0 || total == 0 || grid.m == 0 || grid.n == 0) return {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
-  // Per-tile data volumes.
-  //
-  // Each WG processes a 2-D block of (MT_M_active x k_per_split) elements of A
-  // and (k_per_split x MT_N_active) elements of B.  We use min(M, MT_M) /
-  // min(N, MT_N) so out-of-bounds rows/columns (Tensile's bounded
-  // `buffer_load`s) don't count as DRAM traffic.
-  //
-  // The DRAM layout has one of K, M, or N as the contiguous axis; cache-line
-  // round-up is applied ONCE on the full contig extent that one WG processes.
-  // The previous formulation rounded per K-iter (slice of MT_K), which
-  // over-counts cache lines when MT_K * a_bytes < cache_line: adjacent
-  // K-iters' rows are physically contiguous in DRAM and share cache lines.
-  //
-  //   Layout       | contig axis | row count       | bytes per row
-  //   ----------------------------------------------------------------
-  //   TN (a_T=T)   | K           | MT_M_active     | k_per_split * a_bytes
-  //   NN (a_T=N)   | M           | k_per_split     | MT_M_active * a_bytes
-  //   NT (b_T=T)   | N           | k_per_split     | MT_N_active * b_bytes
-  //   NN (b_T=N)   | K           | MT_N_active     | k_per_split * b_bytes
-  //
-  // Assumes natural leading dim (lda == K for TN, lda == M for NN, etc.) so
-  // adjacent rows are contiguous in DRAM.  This holds for the bench problems
-  // we model; if a user passes padded `lda > K`, this would under-count.
+  // Per-tile data volumes (from context.traffic).  Cache-line round-up is
+  // applied once on the full contig extent a WG processes, not per K-iter:
+  // adjacent K-iters' rows are contiguous in DRAM and share cache lines.
+  // min(M, MT_M) / min(N, MT_N) excludes OOB rows/cols (bounded buffer_load),
+  // and natural leading dims (unpadded lda) are assumed.
   constexpr double cl   = static_cast<double>(heuristic_defaults_t::DRAM_SECTOR_BYTES);
   const bool a_temporal = config.cache_hints_a < 4;
   const bool b_temporal = config.cache_hints_b < 4;
@@ -1309,15 +1286,11 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   const double l2_residency_a   = (a_load > 0.0) ? std::min(l2_cap / effective_load_a, 1.0) : 1.0;
   const double l2_residency_b   = (b_load > 0.0) ? std::min(l2_cap / effective_load_b, 1.0) : 1.0;
 
-  // Pollution penalty:
-  // When a temporal operand competes with another temporal stream, that
-  // stream can evict lines even if the operand's own footprint would fit.
-  // Model that asymmetrically based on how much of each operand's
-  // effective working set comes from the other stream.
+  // Pollution penalty: two competing temporal streams can evict each other's
+  // lines even when a footprint would fit alone.  Modeled asymmetrically via
+  // each operand's interference_frac below.
   double pollution_rate_a = 1.0;
   double pollution_rate_b = 1.0;
-  // Pollution requires two competing temporal streams; the per-operand
-  // asymmetry comes from interference_frac_{a,b} below.
   const bool both_temporal = a_temporal && b_temporal;
   if (both_temporal && l2_residency_a < 1.0 && effective_load_a > 0.0) {
     const double interference_frac_a = a_interference / effective_load_a;
@@ -1371,22 +1344,9 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   }
 
   // Implicit L1 residency + request amplification (skinny-dimension GEMMs):
-  // When one output dimension is tiny, the operand along that dim is reused
-  // across many WGs (and across many wavefronts within a WG), so some of its
-  // traffic never reaches L2. Physically this happens whenever that reused
-  // operand's per-iteration footprint fits in L1, regardless of whether
-  // the OTHER operand is temporal or non-temporal.
-  //
-  // The only difference the other operand makes:
-  //   * If it's non-temporal (NT), it bypasses L1 -> all 32 KB are dedicated
-  //     to the reused stripe.
-  //   * If it's also temporal, it steals some L1 capacity. Each WG on a CU
-  //     sees a fresh slice of it, so that operand itself does NOT get an L1
-  //     hit here (its working-set union overflows L1), but it does shrink
-  //     the headroom available to the reused stripe.
-  //
-  // Combined L1 footprint only counts temporal operands; NT operands bypass
-  // L1 entirely and contribute 0.
+  // when one output dim is tiny, the operand along it is reused across many WGs,
+  // so traffic never reaches L2 whenever its per-iter footprint fits in L1.
+  // Only temporal operands count toward the L1 footprint; NT operands bypass L1.
   cache_hit_rates_t rates{};
   auto& [H_mem_l1_A, H_mem_l1_B, H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B] = rates;
   {
@@ -1485,17 +1445,9 @@ double compute_memory_latency(const problem_t& problem,
   const auto [H_mem_l1_A, H_mem_l1_B, H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B] =
       estimate_cache_hit_rates(problem, hardware, config, context);
 
-  // 2) Total loads per CU per K-iter (A + B, with MX scale bytes).
-  //
-  // Per-WG byte counts use the same physical formulation as
-  // estimate_cache_hit_rates: round once on the full contig extent that one WG
-  // processes (whole K span, with k_per_split for split-K), and use
-  // min(M, MT_M) / min(N, MT_N) so out-of-bounds rows/columns (which Tensile's
-  // bounded buffer descriptors return as zero without DRAM traffic) don't count
-  // as real bytes.  Per-K-iter bytes are then whole-tile-bytes
-  // divided by the number of K-iters the WG executes (k_per_split / MT_K),
-  // not by k_per_split element count.  This keeps L_mem in per-K-iter cycles
-  // so that L_mem_stream = L_mem * num_main_iters has consistent units.
+  // 2) Total loads per CU per K-iter (A + B, with MX scale bytes).  Same
+  // formulation as estimate_cache_hit_rates (whole-tile bytes / K-iters), keeping
+  // L_mem in per-K-iter cycles so L_mem_stream = L_mem * num_main_iters is consistent.
   const operand_traffic_t& traffic = context.traffic;
   double Ld_CU_bytes = traffic.a_iter_bytes + traffic.b_iter_bytes;
 
@@ -1505,11 +1457,9 @@ double compute_memory_latency(const problem_t& problem,
   if (b_bits < 8 && problem.b_mx_block_size != 0)
     Ld_CU_bytes += math::safe_ceil_div(config.mt.nk(), problem.b_mx_block_size);
 
-  // 3) Total loads by all CUs, split by operand (per K-iter).
-  //
-  // Cross-tile cache-line sharing is modeled on load volume, not as a cache
-  // hit-rate boost. When M (or N) is small, neighbouring tiles' rows/columns
-  // pack into the same 64B cache line, reducing the unique bytes fetched.
+  // 3) Total loads by all CUs, split by operand (per K-iter).  Cross-tile
+  // cache-line sharing is modeled on load volume (cl_share): when M/N is small,
+  // neighbouring tiles pack into the same cache line, cutting unique bytes.
   double Ld_A_total =
       traffic.a_iter_bytes * static_cast<double>(num_active_cus) * traffic.a_cl_share;
   double Ld_B_total =
@@ -1654,10 +1604,9 @@ double compute_epilogue_latency(const problem_t& problem,
   const size_t sector_bytes = std::max<size_t>(heuristic.epilogue_cache_line_bytes, 1);
   const bool store_axis_m   = tparams(config).source_swap;
 
-  // Natural contiguous accumulator run along the store axis.  SourceSwap stores
-  // along M, the stride-1 D axis, and MFMA output contributes contiguous M rows
-  // per lane.  Without SourceSwap, stores walk the non-contiguous N direction
-  // unless a store-remap path exists, so model only scalar-contiguous lanes.
+  // Natural contiguous store-axis run.  SourceSwap stores along stride-1 M with
+  // contiguous MFMA rows per lane; without it, stores walk non-contiguous N, so
+  // model only scalar-contiguous lanes.
   const size_t natural_svw_base =
       store_axis_m ? std::max<size_t>(config.mi.m / 4, 1) : static_cast<size_t>(1);
   const size_t natural_svw = std::max<size_t>(1, std::min(natural_svw_base, max_isa_store_elems));
@@ -1747,8 +1696,8 @@ double compute_epilogue_latency(const problem_t& problem,
     plan.useful_bytes = static_cast<double>(active_elements) * store_elem_bytes;
 
     // Count memory sectors per logical store group.  Ideal/narrow paths coalesce
-    // the group payload.  Wide-split/non-contiguous paths touch one sector group
-    // per contiguous sub-run, matching the SVW8-with-natural4 failure mode.
+    // the group payload; wide-split/non-contiguous paths touch one sector group
+    // per contiguous sub-run.
     const double useful_per_group = plan.useful_bytes / std::max(logical_groups, 1.0);
     const double subrun_bytes = useful_per_group / static_cast<double>(split_count);
     const double sectors_per_group =
@@ -1813,12 +1762,9 @@ double compute_epilogue_latency(const problem_t& problem,
       }
     }
 
-    // Critical path over the SIMD-issue lanes.  With wave_num_epi > simds_per_cu
-    // waves must run in ceil(wave_num/simds) serial batches: the slowest single
-    // wave repeats for each batch.  Take the max of:
-    //   (a) wave_batches × max_wave — serialized-batch bound (e.g. 6-wave WG on
-    //       4-SIMD CU: 2 rounds × max_wave, not 1.5 × max_wave from total/4).
-    //   (b) total / wave_issue_parallelism — throughput bound.
+    // Critical path over SIMD-issue lanes: max of the serialized-batch bound
+    // (wave_batches x max_wave, since waves run in ceil(wave_num/simds) rounds)
+    // and the throughput bound (total / wave_issue_parallelism).
     auto critical_path = [&](double max_wave, double total) {
       return std::max(max_wave * wave_batches,
                       total / static_cast<double>(wave_issue_parallelism));
@@ -1877,19 +1823,11 @@ double compute_epilogue_latency(const problem_t& problem,
   if (has_m_edge && has_n_edge)
     epilogue_corner = compute_tile_epilogue(m_remainder, n_remainder, true);
 
-  // Aggregate the per-tile-type costs into a representative per-tile epilogue.
-  //
-  // The kernel launches grid_m x grid_n output tiles; at most one M-row and one
-  // N-column are partial (edge/scalar) tiles.  How much those (often expensive,
-  // scalar) edge tiles matter depends on HOW MANY tiles there are:
-  //   * Few tiles (num_output_tiles <= N_CU): every tile runs concurrently in a
-  //     single wave, so the slowest tile sets the wall-clock -> take the max.
-  //   * Many tiles (> N_CU): tiles pipeline over timesteps and each CU drains a
-  //     representative mix, so throughput is the tile-count-weighted average.
-  // The edge tile-count fraction is 1/grid in that direction: a lone scalar
-  // M-edge row among 1000 M-tiles is ~0.1% of the work, but one of two M-tiles
-  // is 50%.  This is the key fix for skinny shapes: a single scalar edge tile
-  // must not dominate a large grid (and must dominate a tiny one).
+  // Aggregate per-tile-type costs into a representative per-tile epilogue.  At
+  // most one M-row and one N-column are partial (edge/scalar) tiles; their weight
+  // depends on tile count.  Few tiles (<= N_CU) run concurrently so the slowest
+  // sets wall-clock (max); many tiles pipeline, so weight by count-fraction
+  // (1/grid per edge direction) so a lone scalar edge can't dominate a big grid.
   const double f_m_edge =
       has_m_edge ? 1.0 / static_cast<double>(std::max<size_t>(grid_m, 1)) : 0.0;
   const double f_n_edge =
@@ -1922,11 +1860,9 @@ double compute_epilogue_latency(const problem_t& problem,
       if (c.second > best_w) { best_w = c.second; selected_epilogue = *c.first; }
   }
 
-  // Fraction of the representative epilogue that is scalar-edge store work
-  // (the M-edge and corner plans, scalar_path=true).  The scalar store path is a
-  // serialized per-element predicated loop exposed only when store-bound;
-  // reported here so compute_tile_latency can amplify it gated by store_exposure
-  // rather than by occupancy.
+  // Fraction of the representative epilogue that is scalar-edge store work: a
+  // serialized per-element predicated loop exposed only when store-bound.
+  // Reported so compute_tile_latency can gate its amplification on store_exposure.
   if (scalar_store_fraction != nullptr) {
     auto store_terms = [](const tile_epilogue_plan_t& p) {
       return p.bounds + p.store_issue + p.store_memory;
@@ -1977,12 +1913,9 @@ double compute_epilogue_latency(const problem_t& problem,
   return L_epilogue;
 }
 
-// Apply D-store cache hint behavior to the HBM-baseline epilogue latency.
-//
-// compute_epilogue_latency() intentionally returns a store-bandwidth baseline.
-// The cached-D L2 advantage depends on how exposed the epilogue is relative to
-// the mainloop, so compute_tile_latency() supplies store_exposure =
-// L_epilogue_hbm / (L_mainloop + L_epilogue_hbm).
+// Apply D-store cache-hint behavior to the HBM-baseline epilogue latency.  The
+// cached-D L2 advantage depends on epilogue exposure, so compute_tile_latency()
+// supplies store_exposure = L_epilogue_hbm / (L_mainloop + L_epilogue_hbm).
 static double apply_epilogue_store_cache_model(const problem_t& problem,
                                                const hardware_t& hardware,
                                                const config_t& config,
@@ -2070,16 +2003,15 @@ static double apply_epilogue_store_cache_model(const problem_t& problem,
     }
   } else {
     // NTD=4 (streaming) path. Traffic penalties are relative to cached stores
-    // landing in L2; when D is much larger than L2, cached stores would thrash
-    // as well, so the streaming penalty fades for the regimes where streaming
-    // measured best.
+    // landing in L2; when D >> L2 cached stores would thrash too, so the
+    // streaming penalty fades.
     const bool   d_is_16bit       = (context.d_bytes <= 2);
     const size_t m_tiles_ntd      = math::safe_ceil_div(
         problem.size.m, std::max<size_t>(config.mt.m, 1));
     const bool   single_partial_m = (m_tiles_ntd <= 1)
                                   && (problem.size.m < config.mt.m);
-    // Fade the streaming penalty only for 16-bit output when D >> L2; extending
-    // the fade to fp32/tf32 regressed (cached-D wins there), so keep the gate.
+    // Fade the streaming penalty only for 16-bit output when D >> L2; for
+    // fp32/tf32 cached-D wins, so keep the gate.
     const double ntd4_pen_gate =
         (d_is_16bit && !single_partial_m) ? d_l2_fit : 1.0;
     const double traf = 1.0 + (ntd4_traffic_factor - 1.0) * ntd4_pen_gate;
@@ -2145,10 +2077,9 @@ double compute_tile_latency(const problem_t& problem,
   const auto&  heuristic        = context.heuristic;
   const bool   debug            = context.debug;
 
-  // LocalSplitU: splits the per-WG K-range across LSU waves inside one workgroup
-  // (reduced via LDS), as opposed to splitting_factor which splits K across
-  // workgroups (reduced via DRAM workspace).  The two compose on K; LSU==1 makes
-  // every LSU hook below a strict no-op.
+  // LocalSplitU splits the per-WG K-range across LSU waves (reduced via LDS);
+  // splitting_factor instead splits K across WGs (via DRAM workspace). They
+  // compose on K; LSU==1 makes every LSU hook below a no-op.
   const long lsu = std::max<long>(tparams(config).local_split_u, 1);
 
   // Per-K-iter cycle costs (simple MFMA-only compute model; bytes/BW memory).
@@ -2156,61 +2087,44 @@ double compute_tile_latency(const problem_t& problem,
   double L_mem     = compute_memory_latency(problem, hardware, config, context);
 
   // ---------------------------------------------------------------------------
-  // Per-wave aspect pressure.
-  //
-  // The MFMA-only L_compute above counts MFMAs and divides by parallel_mi_cu,
-  // but ignores secondary effects of the wave/MIWT layout that gate effective
-  // throughput:
-  //   (a) occupancy must be high enough to hide exposed memory stalls
-  //       (occupancy_score);
-  //   (b) enough workgroups must be co-resident per CU to overlap work across
-  //       workgroup boundaries  (wg_score).
-  //
-  // Each effect is a score in [0, 1]; their product is a throughput multiplier
-  // applied to L_compute (the only term that captures MFMA throughput). The
-  // multiplier (1 / score) is capped at 1.5x so that a
-  // single mis-scored term cannot dominate the predicted latency.
+  // Per-wave aspect pressure.  The MFMA-only L_compute ignores wave/MIWT-layout
+  // effects that gate throughput: (a) occupancy to hide exposed memory stalls
+  // (occupancy_score) and (b) WG co-residency per CU (wg_score).  Their product
+  // in [0,1] scales L_compute; the 1/score multiplier is capped at 1.5x so one
+  // mis-scored term can't dominate the prediction.
   // ---------------------------------------------------------------------------
   const size_t MIWG_M_pw = std::max<size_t>(tparams(config).wave_group_m, 1);
   const size_t MIWG_N_pw = std::max<size_t>(tparams(config).wave_group_n, 1);
-  // LocalSplitU adds lsu extra waves per workgroup (all resident on the same CU),
-  // raising resident waves/SIMD and improving mainloop latency hiding.
+  // LocalSplitU adds lsu waves/WG (same CU), raising resident waves/SIMD.
   const size_t waves_per_wg = MIWG_M_pw * MIWG_N_pw * static_cast<size_t>(lsu);
 
-  // Occupancy.
-  //
-  // config.occupancy (Tensile CUOccupancy) is the resident workgroups per
-  // CU: min over the LDS-, VGPR-, accVGPR-, and SGPR-limited occupancies,
-  // each expressed in WGs/CU. Latency hiding, however, is driven by resident
-  // waves per SIMD, so convert: waves/SIMD = WGs/CU * waves/WG / SIMD_per_CU.
+  // Occupancy.  config.occupancy (Tensile CUOccupancy) is resident WGs/CU, but
+  // latency hiding is driven by resident waves/SIMD, so convert:
+  // waves/SIMD = WGs/CU * waves/WG / SIMD_per_CU.
   const double wgs_per_cu = static_cast<double>(std::max(config.occupancy, 1));
   const double waves_per_simd =
       wgs_per_cu * static_cast<double>(waves_per_wg) / static_cast<double>(hardware.simds_per_cu());
   const double occupancy_score = std::clamp(
       waves_per_simd / heuristic_defaults_t::TARGET_OCCUPANCY, 0.0, 1.0);
 
-  // Occupancy only helps by hiding *exposed* memory stalls: the portion of
-  // per-iter memory latency the prefetch pipeline cannot overlap behind
-  // compute. For compute-bound tiles (L_compute >= L_mem) memory is fully
-  // hidden, so the occupancy penalty must fade.
+  // Occupancy only hides *exposed* memory stalls; for compute-bound tiles
+  // (L_compute >= L_mem) memory is fully hidden, so the penalty must fade.
   const double exposed_mem_frac = std::clamp(
       (L_mem - L_compute) / std::max(L_mem, 1.0), 0.0, 1.0);
   const double occupancy_score_eff =
       1.0 - (1.0 - occupancy_score) * exposed_mem_frac;
 
-  // Workgroup co-residency: how many workgroups fit on a CU to overlap work
-  // across WG boundaries. config.occupancy is already resident WGs/CU, so it
-  // is used directly, which (unlike a max-occupancy wave-slot ceiling) also
-  // penalises register-starved kernels.
+  // Workgroup co-residency: WGs/CU available to overlap work across WG
+  // boundaries. config.occupancy is used directly so register-starved kernels
+  // are penalised (unlike a max-occupancy wave-slot ceiling).
   const double wg_score = std::clamp(
       wgs_per_cu / heuristic_defaults_t::TARGET_WG_SLOTS_PER_CU, 0.0, 1.0);
 
   // Combined throughput score: occupancy * wg.
   double per_wave_score = occupancy_score_eff * wg_score;
 
-  // Cap the multiplier. An uncapped product can fall to ~0.06 (single wave,
-  // register spilling), implying a 16x compute inflation; real low-occupancy
-  // kernels lose closer to 30-50%. Cap the penalty at 1.5x L_compute.
+  // Cap the multiplier: an uncapped score can imply an unrealistic compute
+  // inflation, but real low-occupancy kernels lose far less. Cap at 1.5x.
   constexpr double PER_WAVE_MIN_SCORE = 1.0 / 1.5;
   per_wave_score = std::max(per_wave_score, PER_WAVE_MIN_SCORE);
 
@@ -2230,24 +2144,19 @@ double compute_tile_latency(const problem_t& problem,
   }
 
   // K-loop structure.  ISA splits K into floor(K/MT_K) full iters + a tail;
-  // split-K then shards the full iters across WGs (ceiling-divided).  The
-  // tail iter is charged to every WG: while StreamK only runs the tail on
-  // the WG that completes a tile, attempts to model that have been worse
-  // overall than the uniform-tail charge, so we keep the simple shape.
+  // split-K shards the full iters across WGs.  The tail iter is charged to
+  // every WG (a uniform charge that models better than StreamK's per-tile tail).
   const long total_full_iters = static_cast<long>(K / MT_K);
-  // LocalSplitU shortens the per-wave mainloop only to the extent it unlocks new
-  // SIMD parallelism.  The lsu waves time-share the CU's SIMDs, so once the base
-  // wave-group already saturates them, extra lsu waves interleave and give no
-  // compute speedup.  Gain = min(base*lsu, simds) / min(base, simds), capped at
-  // simds/base.  (splitting_factor, by contrast, splits K across whole WGs.)
+  // LocalSplitU shortens the per-wave mainloop only insofar as it unlocks new
+  // SIMD parallelism: once the base wave-group saturates the SIMDs, extra lsu
+  // waves interleave with no speedup.  Gain = min(base*lsu, simds)/min(base, simds).
   const size_t simds_per_cu = hardware_t::get_simds_per_cu(hardware.arch);
   const size_t base_waves =
       std::max<size_t>(static_cast<size_t>(tparams(config).wave_group_m), 1) *
       std::max<size_t>(static_cast<size_t>(tparams(config).wave_group_n), 1);
   // LSU deepening (a shorter per-wave K-loop) only pays off on smaller shapes;
-  // on large GEMMs it mis-tunes (256x256x32 -> 64x64x128 canary).  Confine the
-  // LSU iteration gain to a small-shape box; outside it, LSU does not shorten
-  // the modelled K-loop.
+  // on large GEMMs it mis-tunes.  Confine the LSU iteration gain to a small-shape
+  // box; outside it, LSU does not shorten the modelled K-loop.
   const bool deepening_box =
       (std::min(problem.size.m, problem.size.n) <= heuristic_defaults_t::DEEPEN_MN_MAX
        && std::max(problem.size.m, problem.size.n) <= heuristic_defaults_t::DEEPEN_MAX_DIM
@@ -2285,13 +2194,9 @@ double compute_tile_latency(const problem_t& problem,
   // ---------------------------------------------------------------------------
   // 1. Prologue (PGR first-load stall)
   // ---------------------------------------------------------------------------
-  // The prologue issues PGR global loads but the CU stalls at vmcnt only for
-  // the oldest — roughly 1 x L_mem.  When k_iters == 0 the pipeline never
-  // runs, so the prologue is skipped.
-  //
-  // No ETP scaling here: memory traffic is bounded to active lanes by
-  // Tensile's buffer descriptors, so OOB lanes don't generate DRAM traffic
-  // and shouldn't inflate L_mem.  The compute-only ETP is applied below.
+  // The prologue stalls at vmcnt only on the oldest PGR load (~1 x L_mem);
+  // skipped when k_iters == 0.  No ETP: loads are bounded to active lanes, so
+  // OOB lanes generate no DRAM traffic (compute-only ETP is applied below).
   const double L_prologue = (k_iters > 0)
       ? (L_mem * occupancy_factor)
       : 0.0;
@@ -2299,12 +2204,9 @@ double compute_tile_latency(const problem_t& problem,
   // ---------------------------------------------------------------------------
   // 2. MainLoop = L_main + L_ngll + L_nll + L_tail + L_pgr_stall + bookkeeping
   //
-  // ETP (= 1/utilization) is applied **only to compute terms** here.  MFMA
-  // and LDS-read pipes spend cycles on every wave-wide lane regardless of
-  // whether the output is in-bounds, so wasted lanes inflate compute wall
-  // time.  Memory traffic is bounded to active lanes (Tensile bounded
-  // buffer_load), so OOB lanes contribute zero DRAM bytes and shouldn't
-  // be ETP-scaled.
+  // ETP (= 1/utilization) applies only to compute terms: MFMA/LDS pipes spend
+  // cycles on every wave-wide lane, so OOB lanes inflate compute time.  Memory
+  // is bounded to active lanes, so its bytes are not ETP-scaled.
   // ---------------------------------------------------------------------------
 
   // L_main — steady-state main iters with load + compute overlap.  Falls
@@ -2335,17 +2237,14 @@ double compute_tile_latency(const problem_t& problem,
       : std::max(L_mem, L_compute * effective_tile_penalty) * eff_scale
             + L_cvt * effective_tile_penalty;
 
-  // L_tail — the residual partial-K window (K % MT_K > 0).  Charges the work
-  // executed over tail_k slices (memory share uses actual bytes so 128B
-  // alignment doesn't make a half-size tail look free; memory is NOT ETP-scaled
-  // since loads are bounded, while compute and per-sub-iter bookkeeping are),
-  // plus, when this is the ONLY iteration (k_iters == 0), the unamortised
-  // remainder of the MT_K-wide DepthU window (see end of block).
+  // L_tail — the residual partial-K window (K % MT_K > 0).  Memory share uses
+  // actual bytes (so 128B alignment can't make a half-size tail look free) and
+  // is not ETP-scaled; compute and per-sub-iter bookkeeping are.
   double L_tail = 0.0;
   if (tail_k > 0) {
     constexpr size_t alignment_bytes = heuristic_defaults_t::DRAM_SECTOR_BYTES;
-    // Sector-rounded A+B bytes for a K-window of `k` slices.  Rounding is
-    // applied to whichever axis is contiguous in DRAM. The tail and full iters share this helper, so
+    // Sector-rounded A+B bytes for a K-window of `k` slices, rounded on the
+    // DRAM-contiguous axis; shared by the tail and full iters.
     auto iter_bytes = [&](size_t k) -> double {
       return compute_operand_window_bytes(problem, config, context, k, alignment_bytes);
     };
@@ -2353,13 +2252,9 @@ double compute_tile_latency(const problem_t& problem,
 
     const double L_tail_mem      = tail_mem_fraction * L_mem;
     const double L_tail_compute  = tail_fraction * L_compute * effective_tile_penalty;
-    // Per-sub-iter bookkeeping (barrier / scalar branch / masked ds_read)
-    // is wave-wide and does not have OOB-lane waste, so it is not
-    // ETP-scaled.  When the kernel is heavily compute-bound (high ETP from
-    // very low M*N utilization), the per-sub-iter branch/barrier pipelines
-    // behind the dominant MFMA chain — empirically the overhead acts more
-    // like a small constant than a per-sub-iter charge.  Fade overhead to
-    // ~20% of nominal once ETP exceeds ~10.
+    // Per-sub-iter bookkeeping (barrier / branch / masked ds_read) is wave-wide,
+    // so not ETP-scaled.  On heavily compute-bound tiles it pipelines behind the
+    // MFMA chain, acting like a constant, so fade the overhead at high ETP.
     const double tail_overhead_scale = (effective_tile_penalty > heuristic_defaults_t::TAIL_OVERHEAD_COMPUTE_BOUND_ETP)
         ? heuristic_defaults_t::TAIL_OVERHEAD_COMPUTE_BOUND_SCALE
         : 1.0;
@@ -2373,13 +2268,10 @@ double compute_tile_latency(const problem_t& problem,
     // covering both k_iters == 0 and the k_iters >= 1 tail consistently.)
   }
 
-  // L_pgr_stall — PGR pipeline fill/drain exposure: PGR only pays off after
-  // ~pgr+1 main iters; below that, expose a linearly fading number of L_mem
-  // chunks scaled by the memory share of a K-iter so compute-heavy tiles
-  // don't pay a full drain charge that HW hides behind NGLL/NLL.  Cap the
-  // unamortized count at `k_iters`: with only k_iters K-iters of work, the
-  // kernel cannot stall on more than k_iters prefetch fills (k_iters=1 with
-  // PGR=2 issues exactly one prefetch, not three).  No ETP: pure memory.
+  // L_pgr_stall — PGR fill/drain exposure: PGR only pays off after ~pgr+1 main
+  // iters; below that, expose a fading count of L_mem chunks scaled by a K-iter's
+  // memory share.  Capped at k_iters (can't stall on more fills than iters of
+  // work).  No ETP: pure memory.
   const double pgr_unamortized_iters =
       std::min(static_cast<double>(k_iters),
                static_cast<double>(pgr + 1) - static_cast<double>(num_main_iters));
@@ -2389,21 +2281,17 @@ double compute_tile_latency(const problem_t& problem,
             * L_mem * pgr_mem_exposure * eff_scale
       : 0.0;
 
-  // Per-K-iteration loop bookkeeping (branch / counter / barrier).  PGR3+
-  // kernels keep more global reads in flight, and in hardware much of this
-  // bookkeeping overlaps the prefetch pipeline.  Keep the full charge for
-  // PGR1/2, but expose only a fraction for deeper PGR.
+  // Per-K-iter loop bookkeeping (branch / counter / barrier).  Deeper PGR keeps
+  // more reads in flight and overlaps most of this, so expose only a fraction.
   const double pgr_loop_overlap =
       (pgr >= 3) ? (1.0 / static_cast<double>(pgr - 1)) : 1.0;
   const double L_loop_overhead =
       heuristic_defaults_t::K_ITER_LOOP_OVERHEAD * static_cast<double>(k_iters) * pgr_loop_overlap;
 
-  // Sub-cache-line DepthU narrow-load penalty.  When K is the coalesced load
-  // axis (transA=T for A, transB=N for B), the coalesced load spans MT_K*bpe
-  // bytes; below the 128 B cache line the wave issues under-filled loads every
-  // K-iter.  Modelled per-K-iter from MT_K and the count of K-coalesced operands
-  // only (not byte volume / MT_M / MT_N, which would bias NN toward small MT_N).
-  // TN weights both operands, NN only B, NT neither; scaled by k_iters, additive.
+  // Sub-cache-line DepthU narrow-load penalty.  When K is the coalesced load axis
+  // (transA=T / transB=N), a load spanning MT_K*bpe < cache line issues
+  // under-filled every K-iter.  Keyed on MT_K and the count of K-coalesced
+  // operands only (byte volume would bias NN toward small MT_N).
   constexpr double phys_cl = static_cast<double>(heuristic_defaults_t::CACHE_LINE_BYTES);
   const double a_bytes_du  = static_cast<double>(a_bits) / 8.0;
   const double b_bytes_du  = static_cast<double>(b_bits) / 8.0;
@@ -2418,12 +2306,9 @@ double compute_tile_latency(const problem_t& problem,
   const double L_narrow_load = narrow_load_factor * static_cast<double>(k_iters)
                              * heuristic_defaults_t::NARROW_LOAD_ITER_PENALTY;
 
-  // DepthU load waste: an MT_K that does not divide K rounds the K-loop up to a
-  // full final window, loading ceil(K/MT_K)*MT_K deep but using only K.  The
-  // extra (loaded - K) depth is wasted, measured identically whether it shows up
-  // as an oversized single window (MT_K > K) or a partial tail iter, so equally
-  // wasteful MT_K tie rather than biasing toward the deeper tile.  Zero when MT_K
-  // divides K.
+  // DepthU load waste: an MT_K that doesn't divide K loads ceil(K/MT_K)*MT_K deep
+  // but uses only K; the extra depth is wasted, measured the same whether it's an
+  // oversized window (MT_K > K) or a partial tail.  Zero when MT_K divides K.
   const double K_problem = static_cast<double>(K);
   const double loaded_depth = (K_problem > 0.0)
       ? std::ceil(K_problem / mt_k_dd) * mt_k_dd : 0.0;
@@ -2439,12 +2324,10 @@ double compute_tile_latency(const problem_t& problem,
   // and penalising it would flip the model to a costlier MT_K>K.
   const bool exact_one_iter_large_k = K >= heuristic_defaults_t::EXACT_ONE_ITER_K_MIN;
 
-  // Batched few-iteration fill/drain penalty.  A batched GEMM pays the PGR
-  // fill/drain once per tile; a short K-loop (deep MT_K vs K) amortizes it over
-  // little work, so HW prefers shallower MT_K / more iters for batched micro-GEMMs.
-  // Penalize by how far the K-loop length (main iters + partial tail) falls short
-  // of a target.  Fires even with a tail present (unlike no_steady_state below),
-  // and gated to batch > 1 so streaming batch==1 large-N shapes are untouched.
+  // Batched few-iteration fill/drain penalty.  A batched GEMM pays PGR fill/drain
+  // once per tile; a short K-loop amortizes it poorly, so HW prefers shallower
+  // MT_K.  Penalize by how far the K-loop length falls short of a target; gated
+  // to batch > 1 so streaming batch==1 large-N shapes are untouched.
 
   const double k_loop_len = static_cast<double>(k_iters) + (tail_k > 0 ? 1.0 : 0.0);
   const double batched_fill_ratio =
@@ -2454,16 +2337,14 @@ double compute_tile_latency(const problem_t& problem,
           : 0.0;
 
   // Unbatched single fill+drain regime (batch==1, num_main_iters==0): the whole
-  // K-loop lives in the PGR fill/drain window, so the kernel never reaches steady
-  // state and the per-wave-deep fill is exposed unamortized.  Base tax for a
-  // genuine single iter; deeper tiles are charged by DepthU fill excess so the
-  // model can't escape a penalized k_iters==2 tile by hopping to a deeper one.
+  // K-loop lives in the PGR fill/drain window, never reaching steady state, so
+  // the per-wave-deep fill is exposed.  Base tax plus DepthU fill excess so the
+  // model can't escape a penalized shallow tile by hopping to a deeper one.
   const bool no_steady_state =
       (problem.batch == 1 && num_main_iters == 0 && k_iters >= 1 && tail_k == 0
        && exact_one_iter_large_k && !deepening_box);
   // LocalSplitU splits DepthU across LSU waves, so the exposed fill is only
-  // MT_K/LSU deep per wave -- a large workgroup DepthU realised via LSU does not
-  // pay a deep single-wave fill.  (lsu is defined above in the occupancy block.)
+  // MT_K/LSU deep per wave rather than a deep single-wave fill.
   const double per_wave_du = mt_k_dd / static_cast<double>(lsu);
   const double fill_depth_excess =
       std::max(0.0, per_wave_du * a_bytes_du / phys_cl - 1.0);
@@ -2473,11 +2354,9 @@ double compute_tile_latency(const problem_t& problem,
       : 0.0;
 
   // M-edge waste: when the whole M fits one tile (grid_M == 1, M <= MT_M), an
-  // oversized MT_M computes MT_M rows but uses only M, with no other full M-tile
-  // to amortize the waste.  ETP under-charges this single-tile case, so a modest
-  // penalty tips it back to an M-clean tile.  Restricted to grid_M == 1: for
-  // grid_M >= 2 ETP already accounts for the one partial tile, so charging here
-  // would double-count.  Zero when MT_M divides M (or M >= MT_M).
+  // oversized MT_M computes rows it doesn't use with nothing to amortize against,
+  // and ETP under-charges this single-tile case.  Restricted to grid_M == 1 (for
+  // grid_M >= 2 ETP already covers the partial tile).  Zero when MT_M divides M.
   const double m_dd = static_cast<double>(std::max<size_t>(config.mt.m, 1));
   const double M_problem = static_cast<double>(problem.size.m);
   const double m_edge_ratio = (M_problem > 0.0 && M_problem <= m_dd)
@@ -2498,10 +2377,9 @@ double compute_tile_latency(const problem_t& problem,
   // 3. Epilogue (per-tile store; compute is already covered by NLL)
   // ---------------------------------------------------------------------------
   // Below the occupancy that saturates the store/return pipeline, un-overlapped
-  // epilogue store latency is exposed and scales ~1/occupancy.  config.occupancy
-  // is the register-limited resident waves/CU (CUOccupancy); saturation point is
-  // calibrated to gfx950.  Only multiplies the epilogue term, so it is negligible
-  // for mainloop-bound tiles and only bites store-bound shapes.
+  // epilogue store latency is exposed and scales ~1/occupancy (config.occupancy =
+  // register-limited resident waves/CU).  Multiplies only the epilogue term, so
+  // it bites store-bound shapes but not mainloop-bound ones.
   const double cu_occ_epi = static_cast<double>(std::max(config.occupancy, 1));
   const double epi_occ_exposure = std::max(1.0, heuristic_defaults_t::EPILOGUE_OCC_SATURATION / cu_occ_epi);
   double scalar_store_fraction = 0.0;
@@ -2518,10 +2396,9 @@ double compute_tile_latency(const problem_t& problem,
                                                        L_epilogue_hbm,
                                                        store_exposure);
 
-  // Scalar/edge stores are a serialized per-element predicated loop that is only
-  // exposed when the kernel is store-bound; a long mainloop hides them.  Gate on
-  // store-boundedness (not occupancy, which stays healthy even at CUOccupancy=1)
-  // by amplifying the scalar store portion in proportion to store_exposure.
+  // Scalar/edge stores (a serialized per-element predicated loop) are exposed
+  // only when store-bound; amplify them in proportion to store_exposure rather
+  // than occupancy (which stays healthy even at CUOccupancy=1).
   const double scalar_store_mult =
       1.0 + (heuristic_defaults_t::SCALAR_STORE_EXPOSED_PENALTY - 1.0) * scalar_store_fraction * store_exposure;
   L_epilogue *= scalar_store_mult;
@@ -2530,10 +2407,9 @@ double compute_tile_latency(const problem_t& problem,
   // 5. Total tile latency
   // ---------------------------------------------------------------------------
   const double L_tile_fixed = heuristic.tile_fixed_overhead;
-  // Discount for hand-optimized kernels that beat the analytical model (set by
-  // apply_tf32_heuristics); 1.0 otherwise.  The hand-tuned speedup only holds in
-  // a clean XCD-aligned split-K regime, so suppress the discount when the split
-  // factor and XCD count don't divide each other (uneven split-K across XCDs).
+  // Discount for hand-optimized kernels that beat the model (set by
+  // apply_tf32_heuristics); 1.0 otherwise.  The speedup only holds for
+  // XCD-aligned split-K, so suppress it when sf and NUM_XCD don't divide.
   double weight_tile_total = heuristic.weight_tile_total;
   if (weight_tile_total < 1.0) {  // a hand-opt discount is in effect
     const size_t sf  = std::max<size_t>(context.splitting_factor, 1);
@@ -2597,6 +2473,9 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("lsu: " << lsu);
     OLOG_DEBUG("L_lsu_reduce: " << L_lsu_reduce);
     OLOG_DEBUG("L_tile_fixed: " << L_tile_fixed);
+    // Both hand-tuning discounts, to check for double-counting on hand-opt tiles.
+    OLOG_DEBUG("eff_scale (main_loop_efficiency): " << eff_scale);
+    OLOG_DEBUG("weight_tile_total: " << weight_tile_total);
     OLOG_DEBUG("L_tile_total: " << L_tile_total);
   }
 
@@ -2766,11 +2645,9 @@ double compute_total_latency(const problem_t& problem,
   // 2) Compute latency of a timestep
   double L_timestep = compute_timestep_latency(problem, hardware, config, context);
 
-  // 3) Compute latency for all scheduling rounds.
-  // `num_timesteps` is the number of waves of workgroups that must pass
-  // through the available CUs.  Occupancy can hide stalls inside a tile, but
-  // it does not reduce the number of scheduling rounds, so it belongs in the
-  // per-tile latency model rather than as a divisor here.
+  // 3) Latency for all scheduling rounds.  num_timesteps = WG waves passing
+  // through the CUs.  Occupancy hides stalls inside a tile but doesn't cut the
+  // round count, so it belongs in the per-tile model, not as a divisor here.
   double total_latency             = L_timestep * context.num_timesteps;
 
   //  4) Kernel launch overhead

@@ -343,18 +343,15 @@ static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
     return sk_grid;
   }
 
-  // Keep SK when DP would waste too much of its last wave (DP_eff < 80%),
-  // independent of the SK grid size — a low-DP_eff shape beats a DP grid whose
-  // last wave is largely idle.
+  // Keep SK when DP would leave its last wave largely idle (DP_eff < 80%).
   if (cu_count > 0) {
     const size_t dp_waves    = (tiles + cu_count - 1) / cu_count;
     const size_t dp_cu_steps = dp_waves * cu_count;
     if (tiles < 0.8 * dp_cu_steps) return sk_grid;
   }
 
-  // DP_eff >= 80%: DP fills its waves well, so force DP if any CTA would straddle
-  // a tile boundary (floor iters not a multiple of iters_per_tile) — those CTAs
-  // write partial workspace + need a fixup pass, and DP wins across aspect ratios.
+  // DP fills its waves well: force DP if any CTA would straddle a tile boundary,
+  // since those CTAs write partial workspace and need an extra fixup pass.
   const size_t iters_total = tiles * iters_per_tile;
   const size_t floor_iters = iters_total / sk_grid;
   return (floor_iters % iters_per_tile != 0) ? tiles : sk_grid;
