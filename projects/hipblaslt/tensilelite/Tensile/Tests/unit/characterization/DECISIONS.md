@@ -406,3 +406,11 @@ upstream cause.
 with assertions that normal solution derivation returns no kernels and reports
 `TDMSplit is currently disabled`. The test no longer claims coverage of emitter
 code that product validation prevents it from reaching.
+
+## D29 — Refresh S00-S07 emit results after develop changes
+
+**ADR:** [`adr/0016-refresh-s00-s07-results-after-develop.md`](adr/0016-refresh-s00-s07-results-after-develop.md)
+
+**Decision:** Re-record only the 20 failing S00-S07 saved-result nodes with an
+in-tree `rocisa` build. Every node retains its kernel count and emitter return
+codes; only the content-derived basenames change.
