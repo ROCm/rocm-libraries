@@ -67,6 +67,22 @@ def _engine_name(hipdnn, engine_id) -> str:
     return hex(engine_id & 0xFFFFFFFFFFFFFFFF)
 
 
+def _ws(graph, getter) -> int:
+    """A workspace getter's value, or 0 when it does not apply / is unbound.
+
+    The plan-spec and compiled-plan paths each have their own sizer, and a
+    getter for the path not taken may be absent or may raise rather than
+    return 0. Callers want the max across both, so a miss must read as 0.
+    """
+    fn = getattr(graph, getter, None)
+    if fn is None:
+        return 0
+    try:
+        return int(fn() or 0)
+    except Exception:  # noqa: BLE001 -- wrong path for this getter
+        return 0
+
+
 class NotApplicable(RuntimeError):
     """Internal: the engine cannot serve this graph/shape. Always caught and
     turned into a native fallback -- never escapes to the model."""
@@ -194,11 +210,28 @@ class OpOverride:
             if not ranked:
                 raise NotApplicable(f"no engine applicable for {describe}")
 
-            if st.select_mode == "default":
-                # Hand the graph to hipDNN and let it select across every loaded
-                # engine. The backend Config policy (HIPDNN_HEUR_CONFIG_PATH)
-                # participates here, so a rule file can decide the engine per
-                # graph/shape without any code change.
+            # THE TWO PATHS ARE MUTUALLY EXCLUSIVE. hipDNN offers either the
+            # compiled-plan path (create_execution_plans -> build_plans) or the
+            # plan-spec path (add_engine*() -> build_plans(ALL) -> autotune);
+            # calling add_all_engines() after create_execution_plans() is
+            # rejected outright. So tuning REPLACES heuristic selection here, it
+            # does not follow it.
+            #
+            # The sweep itself cannot run at this point -- it needs the real
+            # device pointers, which only exist at execute time -- so it is
+            # deferred to the first _execute() for this graph (see _maybe_tune).
+            tuning = self._tuning_requested()
+            if tuning:
+                # Plan-spec path: collect every applicable engine as a candidate.
+                err = g.add_all_engines()
+                if err.is_bad():
+                    raise NotApplicable(f"add_all_engines: {err.get_message()}")
+            elif st.select_mode == "default":
+                # Compiled-plan path. Hand the graph to hipDNN and let it select
+                # across every loaded engine. The backend Config policy
+                # (HIPDNN_HEUR_CONFIG_PATH) participates here, so a rule file --
+                # including one a previous tuning run wrote -- can decide the
+                # engine per graph/shape without any code change.
                 err = g.create_execution_plans([st.hipdnn.HeuristicMode.FALLBACK])
                 if err.is_bad():
                     raise NotApplicable(f"create_execution_plans: {err.get_message()}")
@@ -213,26 +246,16 @@ class OpOverride:
                         f"create_execution_plan_ext: {err.get_message()}"
                     )
 
-            # In tune mode the candidate set is collected instead of a single
-            # heuristic plan being built: add_all_engines() + build_plans(ALL)
-            # compiles every applicable engine so the sweep has something to
-            # time. The sweep itself cannot run here -- it needs the real device
-            # pointers, which only exist at execute time -- so it is deferred to
-            # the first _execute() for this graph (see _maybe_tune).
-            tuning = self._tuning_requested()
-            if tuning:
-                err = g.add_all_engines()
-                if err.is_bad():
-                    raise NotApplicable(f"add_all_engines: {err.get_message()}")
-
-            err = g.check_support()
-            if err.is_bad():
-                raise NotApplicable(f"check_support: {err.get_message()}")
             if tuning:
                 # ALL, not the default: the sweep ranks compiled plans, so every
-                # candidate has to be compiled before it can be timed.
+                # candidate has to be compiled before it can be timed. check_support()
+                # belongs to the compiled-plan path and is skipped here -- an
+                # unsupported candidate simply fails to compile and drops out.
                 err = g.build_plans(st.hipdnn.BuildPlanPolicy.ALL)
             else:
+                err = g.check_support()
+                if err.is_bad():
+                    raise NotApplicable(f"check_support: {err.get_message()}")
                 err = g.build_plans()
             if err.is_bad():
                 raise NotApplicable(f"build_plans: {err.get_message()}")
@@ -251,10 +274,17 @@ class OpOverride:
         entry = {
             "graph": g,
             # Under tuning the workspace must cover EVERY candidate, not just the
-            # heuristic pick, or an unmeasurable engine is held out of the timing
-            # loop and the cache write is refused as a partial sweep.
+            # heuristic pick: a short workspace holds an applicable engine out of
+            # the timing loop while leaving it a live candidate for a later run,
+            # and the cache write is then refused as a partial sweep. The two
+            # getters cover the two paths -- get_estimated_max_workspace_size()
+            # sizes the plan-spec path this build used, get_autotune_workspace_size()
+            # the compiled-plan path -- so take the max and let a zero from the
+            # inapplicable one fall away.
             "ws": (
-                max(g.get_workspace_size(), g.get_autotune_workspace_size())
+                max(_ws(g, "get_estimated_max_workspace_size"),
+                    _ws(g, "get_autotune_workspace_size"),
+                    _ws(g, "get_workspace_size"))
                 if tuning
                 else g.get_workspace_size()
             ),
