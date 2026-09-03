@@ -2,7 +2,7 @@
 # name: test_s08_callrvwfor950mx_gfx950_mx_auto_l_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgc5uW2YMA-lGQ8_Qv5miE36TFKhNLh1tQeRRhAH0AGVU=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgJ7N8wsrgbEO0ZvQ4FWZ9KKwe2KzGP8gzajwFRmLOkyg=',
       'err': 0,
     }),
   ])

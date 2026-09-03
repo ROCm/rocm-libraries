@@ -2,7 +2,7 @@
 # name: test_s09_assignderivedparameters_sparse_m_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_HHS_BH_SPBML0_UserArgs_MT64x64x32EAzu_T3H_9ZuqeywN3gOMy1_HVT-z9OUiXPXUha866o=',
+      'basename': 'Cijk_Ailk_Bjlk_HHS_BH_SPBML0_UserArgs_MT64x64x32oGXJSgE2XBHhqrONf1LBZh0iqiqaw7i3xw048nRq7uU=',
       'err': 0,
     }),
   ])

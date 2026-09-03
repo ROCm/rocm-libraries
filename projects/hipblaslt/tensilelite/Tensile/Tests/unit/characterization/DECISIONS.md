@@ -414,3 +414,11 @@ code that product validation prevents it from reaching.
 **Decision:** Re-record only the 20 failing S00-S07 saved-result nodes with an
 in-tree `rocisa` build. Every node retains its kernel count and emitter return
 codes; only the content-derived basenames change.
+
+## D30 — Refresh S08-S11 emit results after develop changes
+
+**ADR:** [`adr/0017-refresh-s08-s11-results-after-develop.md`](adr/0017-refresh-s08-s11-results-after-develop.md)
+
+**Decision:** Re-record only the 11 failing S08-S11 saved-result nodes with an
+in-tree `rocisa` build. Every node retains its kernel count and emitter return
+codes; only the content-derived basenames change.
