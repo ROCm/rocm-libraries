@@ -392,6 +392,35 @@ class GemmOracleTests(unittest.TestCase):
         np.testing.assert_array_equal(hv.to_numpy(output), expected)
         self.assertEqual(backend, hv.GemmBackend.Blocked)
 
+    def test_mxfp4_scale_is_applied_after_the_complete_segment(self):
+        reductions = 16
+        left = np.ones((1, reductions), dtype=np.float32)
+        right = np.ones((reductions, 1), dtype=np.float32)
+        right[reductions // 2 :] = -1.0
+        scale_a = hv.Tensor.from_storage(
+            hv.ScalarType.E8M0,
+            [1, 1],
+            bytes([254]),  # 2**127: scaling either half separately overflows float32.
+        )
+        output = hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1]))
+
+        backend = hv.reference_gemm_into(
+            hv.from_numpy(left, hv.ScalarType.Float4E2M1),
+            hv.from_numpy(right, hv.ScalarType.Float4E2M1),
+            hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1])),
+            output,
+            accumulator_type=hv.ScalarType.Float32,
+            block_scale_a=scale_a,
+            block_size_a=reductions,
+            backend=hv.GemmBackend.Blocked,
+        )
+
+        self.assertTrue(np.isfinite(hv.to_numpy(output)[0, 0]))
+        np.testing.assert_array_equal(
+            hv.to_numpy(output), np.zeros((1, 1), dtype=np.float32)
+        )
+        self.assertEqual(backend, hv.GemmBackend.Blocked)
+
     def test_one_sided_block_scales_are_independent(self):
         left = np.ones((2, 4), dtype=np.float32)
         right = np.ones((4, 2), dtype=np.float32)
