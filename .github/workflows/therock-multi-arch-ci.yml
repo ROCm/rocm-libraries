@@ -109,13 +109,18 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
+      test_projects: ${{ steps.test-projects.outputs.test_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github/repos-config.json
+          sparse-checkout: |
+            .github/repos-config.json
+            .github/scripts/ci_utils.py
+            .github/scripts/multi_arch_test_projects.py
+            .github/scripts/therock_matrix.py
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
@@ -139,13 +144,25 @@ jobs:
             --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
 
+      - name: Select multi-arch test projects
+        id: test-projects
+        run: |
+          python3 .github/scripts/multi_arch_test_projects.py \
+            --changed-projects "${{ steps.configure.outputs.changed_projects }}"
+
   setup:
     needs: [ci-env, configure]
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-09-03
     with:
       build_variant: "release"
-      # Limit GPU families for rocm-libraries CI
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}
+      # Limit GPU families for rocm-libraries CI.
+      # gfx125X (CDNA5/gfx1250) is included build-only on every PR/push: no test
+      # hardware exists for it yet (see amdgpu_family_matrix.py in TheRock, family
+      # key "gfx125x": test-runs-on is empty everywhere), but legacy therock-ci.yml
+      # built it on every PR/push before Multi-Arch CI became the default, and this
+      # restores that parity so gfx1250 build breaks are caught same-PR instead of
+      # only nightly.
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
@@ -167,8 +184,21 @@ jobs:
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
       ref: 2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-09-03
-      # Pass external repo info for stage-impact analysis
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      # Pass external repo info for stage-impact analysis.
+      # extra_cmake_options is appended to the cmake configure line of every
+      # build stage, scoped to this repository's CI runs. TheRock keeps
+      # HIPKERNELPROVIDER_ENABLE_ROCKE OFF by default; enabling it here is what
+      # gives rocKE build and test signal while it is still in development.
+      # Keep the value constant: the flag state file participates in every
+      # subproject's configure fingerprint, and stage reuse does not key on
+      # flags (TheRock#3399), so a per-PR value would churn fingerprints and
+      # let baselines built with the opposite value look reusable.
+      external_repo: >-
+        {
+          "repository": "${{ github.repository }}",
+          "ref": "${{ github.sha }}",
+          "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
+        }
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
@@ -190,7 +220,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
       ref: 2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-09-03
@@ -216,7 +246,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
       ref: 2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-09-03

@@ -65,6 +65,10 @@ jobs:
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (github.event_name == 'workflow_dispatch' && github.repository) || '' }}
+      # Python/PyTorch/JAX builds are not supported with ASAN yet
+      build_python_packages: false
+      build_pytorch: false
+      build_jax: false
       repository: ROCm/TheRock
       ref: 2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-09-03
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'

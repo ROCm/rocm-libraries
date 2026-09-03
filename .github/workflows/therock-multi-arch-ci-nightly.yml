@@ -4,7 +4,10 @@
 # Multi-Arch Nightly CI for rocm-libraries
 #
 # This workflow runs TheRock's multi-arch CI pipeline on a nightly schedule.
-# It builds and tests for gfx94X, gfx950 (Linux) and gfx1151 (Windows).
+# It builds and tests for gfx94X, gfx950 (Linux) and gfx1151 (Windows), and
+# additionally build-only validates gfx125X (CDNA5/gfx1250) on Linux since no
+# test hardware exists for that family yet (see amdgpu_family_matrix.py in
+# TheRock, family key "gfx125x": test-runs-on is empty everywhere).
 #
 # For manual triggering with custom GPU families, use therock-multi-arch-ci.yml.
 
@@ -34,8 +37,11 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@2160ee4c6fe45ceccb07fc21a01feb7269ac93c8 # 2026-09-03
     with:
       build_variant: "release"
-      # Limit GPU families for nightly CI: gfx94X, gfx950 (Linux) and gfx1151 (Windows)
-      linux_amdgpu_families: 'gfx94X,gfx950'
+      # Limit GPU families for nightly CI: gfx94X, gfx950 (Linux) and gfx1151 (Windows).
+      # gfx125X (CDNA5/gfx1250) is included build-only on Linux: no test hardware
+      # exists for it yet, but this still catches build breaks in math-libs/stinkytofu
+      # gfx1250 codegen ahead of hardware becoming available.
+      linux_amdgpu_families: 'gfx94X,gfx950,gfx125X'
       windows_amdgpu_families: 'gfx1151'
       linux_test_labels: ''
       windows_test_labels: ''
