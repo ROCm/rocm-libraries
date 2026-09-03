@@ -11,17 +11,25 @@
 # difference below was introspected from the real dataclass and the real factory rather
 # than assumed from the sibling:
 #
-#   * The gfx950 builder's spec IS the shared `AttentionDenseSpec` (23 fields). gfx942's
-#     is a 30-field SUBCLASS. The seven extra fields -- block_m, iglp, lds_row_pad,
-#     use_cfvst, use_exp2_fast, use_v_swizzle, v_row_pad -- are gfx942-private and do
-#     not exist here. Porting them would declare knobs the builder cannot take.
+#   * The gfx950 builder's spec IS the shared `AttentionDenseSpec` (26 fields as of
+#     ROCm/rocm-libraries#11627; 23 before it). gfx942's is a 30-field SUBCLASS. Five
+#     of its extras -- iglp, lds_row_pad, use_cfvst, use_exp2_fast, use_v_swizzle --
+#     are still gfx942-private and do not exist here.
 #   * There is therefore NO `policies:` block. `_use_exp2_fast` does not exist in the
 #     gfx950 module; the tri-state that cost five measurement sweeps on gfx942 has no
 #     counterpart on this kernel. An empty policies map is correct, not an omission.
-#   * `block_m` is NOT a field. gfx950 bakes `_BLOCK_M = 256` as a module constant, so
-#     the matcher's tile predicate compares against a compile-time constant and there
-#     is no knob to declare. gfx942 needed it in kmd_fields; declaring it here would
-#     describe a tile the binary has no way to vary.
+#   * `block_m` IS A FIELD, as of #11627. This file used to assert the opposite, and
+#     that claim is now false in a way nothing catches: the module deleted
+#     `_BLOCK_M = 256` and replaced it with `DENSE_TILE_GEOMETRIES` (default bm256,
+#     bm128) plus a real spec field (attention_dense.py:168), with
+#     `num_waves = block_m // 32` (:483). It is in kmd_fields below and compared in
+#     kernelMatches like any other baked shape field, because a bm128 binary otherwise
+#     has its tile predicate evaluated against 256 and is launched on the wrong grid,
+#     with no build break anywhere. NOTE the two questions are separate and only one is
+#     settled: block_m is a MATCHER field (settled, above) but NOT a sweep axis --
+#     `_DENSE_GEOMETRY = "default"` is hardcoded at dispatch/attention/gfx950.py:30, so
+#     the dispatcher resolves bm256 for every request and per RUNBOOK 4a that makes it
+#     a value the library ships rather than a tuning axis.
 #   * `num_persistent` is 256 (the MI355X CU count), not gfx942's 304. And unlike the
 #     gfx942 factory, this one does NOT remap the shared default -- it takes
 #     `req.dense_num_persistent` verbatim.
@@ -29,8 +37,9 @@
 #     tuning policy for it, so it is CONSTANT across dispatch decisions rather than
 #     per-(head_size, dtype) as on gfx942.
 #
-# And four fields gfx942 has no analogue for at all -- ragged, sliding_window,
-# use_sinks, persist_decode -- are discussed at their kmd_fields entries below.
+# And five fields gfx942 has no analogue for at all -- ragged, sliding_window,
+# use_sinks, persist_decode, wide_lds_dma -- are discussed at their kmd_fields entries
+# below.
 
 bundle: gfx950_attention_dense
 
@@ -106,8 +115,9 @@ engine:
   # time against a real device, if ever. The matcher still compares dtype; it just
   # is not a selectable knob. gfx942 omits it for the same reason.
   knobs: [head_size, num_query_heads, num_kv_heads, seqlen_q, seqlen_kv,
-          batch, causal, block_n, waves_per_eu, persistent, num_persistent,
-          ragged, sliding_window, use_sinks, lazy_rescale]
+          batch, causal, block_m, block_n, waves_per_eu, persistent, num_persistent,
+          ragged, sliding_window, use_sinks, lazy_rescale, wide_lds_dma,
+          lds_v_row_pad]
 
 kmd_fields:
   - {name: dtype, type: string}
@@ -118,6 +128,11 @@ kmd_fields:
   - {name: seqlen_kv, type: int, default_value: 256}
   - {name: head_size, type: int, default_value: 128}
   - {name: causal, type: int, default_value: 0}
+  # block_m: NEW with #11627, and the reason the engine's geometry header stopped
+  # hardcoding 256. The default MUST be the dispatcher's own geometry -- both
+  # kernelMatches and prepare() fall back to it for a descriptor that predates the
+  # field, so a wrong default silently re-creates the bug this entry fixes.
+  - {name: block_m, type: int, default_value: 256}
   - {name: block_n, type: int, default_value: 64}
   - {name: waves_per_eu, type: int, default_value: 2}
   # persistent and num_persistent are in the KMD because prepare() BRANCHES on them:
@@ -168,18 +183,48 @@ kmd_fields:
   # chosen" (the second layer sliding_window and use_sinks already had).
   - {name: varlen, type: int, default_value: 0}
   - {name: paged, type: int, default_value: 0}
+  # wide_lds_dma: NEW with #11627, and the single most dangerous field on this list to
+  # get wrong, because it is a RULE the dispatcher computes rather than a constant it
+  # reads (dispatch/attention/gfx950.py:84-93):
+  #
+  #     wide_lds_dma = persistent and hdim_q == 128 and hdim_v == 128
+  #                    and dtype in (fp16, bf16) and mask_type != 0
+  #                    and sw == 0 and not use_sinks and not ragged
+  #
+  # That conjunction is satisfied by most of what this engine ships -- hdim=128,
+  # bf16/fp16, causal, non-ragged, persistent -- so hand-transcribing `false` would
+  # mislabel the majority of the set. Per verify_variant_sets invariant 4, `absent` and
+  # `explicitly false` are different kernels whenever the policy would have answered
+  # true. The ONLY correct way to populate it is to regenerate through
+  # dispatch_parity.py, which applies the rule rather than reading a value; RUNBOOK 4a
+  # names this exact trap. It is in the catalog because `kernel_name()` appends `wdma`
+  # (attention_dense.py:566) -- it is part of binary identity, and the emitted LDS
+  # layout, DMA width and PV traversal all differ.
+  - {name: wide_lds_dma, type: int, default_value: 0}
+  # lds_v_row_pad: NEW with #11627, set by the factory from the tile geometry table
+  # (gfx950.py:105) and therefore CONSTANT at 32 for every shape the dispatcher
+  # resolves. In the catalog rather than omitted because it is IR-live and appears in
+  # `kernel_name()` on the D64 path (:544): a descriptor that does not state it takes
+  # the dataclass default, and a harness that omits a VALUED field freezes the config
+  # at whatever the default happened to be. The measured verdict is in the sweep block.
+  - {name: lds_v_row_pad, type: int, default_value: 32}
 
 # NOT in kmd_fields, and each for a reason rather than by oversight:
 #
-#   * `persist_decode` -- a STRING tri-state ("auto"/"qb_major"/"hkv_major") resolved by
-#     the spec's own `resolved_persist_decode` property, which needs the whole spec
-#     (gqa, nqb, batch, num_persistent) and so cannot be expressed by the `policies:`
-#     mechanism (a module-level function taking positional spec keys). It is excluded
-#     because NO graph field maps to it and prepare() does not branch on it: the grid is
-#     (num_persistent, 1, 1) whichever decode is chosen. The spec carries it verbatim,
-#     so the binary is definite and the descriptor reproduces it exactly. If a future
-#     change makes the ENGINE read it, it must move into this list -- that is the
-#     block_m trap on gfx942, and the launch_surface --check below is what catches it.
+#   * `persist_decode` -- a STRING tri-state resolved by the spec's own
+#     `resolved_persist_decode` property, which needs the whole spec (gqa, nqb, batch,
+#     num_persistent) and so cannot be expressed by the `policies:` mechanism (a
+#     module-level function taking positional spec keys). #11627 widened its domain
+#     from {auto, qb_major, hkv_major} to also include `gqa_pair` and
+#     `gqa_pair_2phase`, each with its own CTA-count precondition
+#     (attention_dense.py:447-480), and taught `auto` to prefer them where those
+#     equations hold (:514-521). It is STILL excluded, and for the unchanged reason:
+#     no graph field maps to it and prepare() does not branch on it -- the grid is
+#     (num_persistent, 1, 1) for every decode. The spec carries it verbatim, so the
+#     binary is definite and the descriptor reproduces it exactly. If a future change
+#     makes the ENGINE read it, it must move into this list -- that is the block_m trap
+#     that #11627 actually sprang, and the launch_surface --check below is what would
+#     have caught the C++ half of it.
 #   * `varlen`, `paged`, `block_size`, `num_kv_blocks` -- structurally out of scope. The
 #     reference executors decline varlen and paged KV, and the graph-side declines are
 #     in graph_match. The dispatcher never sets them for a dense request.
@@ -198,6 +243,7 @@ metadata_fields:
   - seqlen_kv
   - head_size
   - causal
+  - block_m
   - block_n
   - waves_per_eu
   - persistent
@@ -211,6 +257,12 @@ metadata_fields:
   # is a different question than "what was this binary built with".
   - varlen
   - paged
+  # BOTH NEW with #11627. wide_lds_dma is dispatcher-RESOLVED per shape, so it must
+  # reach the catalog or every descriptor claims a layout it was not built with;
+  # lds_v_row_pad is constant at 32 but IR-live, so the same argument applies with a
+  # narrower blast radius.
+  - wide_lds_dma
+  - lds_v_row_pad
 
 # The builder's OWN spec class. On gfx942 this is the private subclass; here the builder
 # takes the SHARED dataclass, so this names the same class the dispatcher returns. It is
@@ -235,6 +287,44 @@ arch_spec:
 # ---------------------------------------------------------------------------
 
 sweep:
+  block_m:
+    values: [256]
+    verdict: >-
+      NEW as a field with #11627, and it is NOT an axis -- the two questions "is this a
+      matcher field" and "is this a sweep axis" have different answers here and only
+      the first changed. `_DENSE_GEOMETRY = "default"` is hardcoded at
+      dispatch/attention/gfx950.py:30, so the factory resolves block_m=256 for every
+      request it serves; per RUNBOOK 4a a knob CONSTANT across every dispatch decision
+      is a value the library ships, not a tuning axis, and sweeping it measures a
+      configuration rocKE would never resolve to. The kernel's own comment
+      (attention_dense.py:164-167) calls bm128 "an explicit 4-wave EXPERIMENT
+      geometry", not a shipping one. It IS in kmd_fields and IS compared in
+      kernelMatches, because a bm128 descriptor must not be evaluated against a
+      256-tile predicate. Promoting it to an axis needs a dispatcher change first.
+
+  lds_v_row_pad:
+    values: [32]
+    verdict: >-
+      SETTLED BY MEASUREMENT, in the kernel's own source (attention_dense.py:106-111):
+      a sweep at GQA-8 S=8192 gives LDS bank conflicts {0: 30, 8: 29, 16: 11, 32: 0}
+      and throughput rising monotonically to 32, i.e. +8 buys nothing and only +32
+      fully clears the V-read conflicts. The factory reads it from the tile-geometry
+      table, so it is also constant across dispatch decisions. Two independent reasons
+      not to sweep it; listed so both are visible.
+
+  wide_lds_dma:
+    values: [false, true]
+    verdict: >-
+      NOT AN AXIS, and NOT a constant either -- the third case. The dispatcher DERIVES
+      it per request (gfx950.py:84-93) exactly as it derives `persistent` and `ragged`,
+      so it is excluded automatically for the same reason those are: pinning it would
+      build a wide-DMA binary for a shape the library would not have chosen one for, or
+      the reverse. Both values are listed so the exclusion reads as "the dispatcher
+      varies this" rather than "nobody considered it". OPEN QUESTION for the PR author,
+      carried to step 3: if wide_lds_dma is intended as an exposed KNOB rather than a
+      policy-resolved field, this entry becomes a real axis and the sizing conversation
+      gains a fourth dimension.
+
   block_n:
     values: [64, 128]
     hazard: >-
@@ -312,11 +402,16 @@ sweep:
   persist_decode:
     values: ["auto"]
     verdict: >-
-      Resolved by the spec's own property from (gqa, nqb, batch, num_persistent);
-      "auto" is strictly >= qb_major by construction (it falls back where hkv_major
-      would lose). Pinning either concrete value discards that fallback for every shape
-      where it would have chosen the other way -- the same shape of trap as any
-      tri-state. Leave it at auto.
+      Resolved by the spec's own property from (gqa, nqb, batch, num_persistent).
+      #11627 widened the domain to five values -- qb_major, hkv_major, gqa_pair,
+      gqa_pair_2phase, auto -- and taught `auto` to prefer the two new pair mappings
+      wherever their CTA-count equations hold (num_persistent == NQB*Hkv*B, or
+      == NQB*Hkv*B*gqa/2), falling back to hkv_major and then qb_major. So `auto`
+      remains strictly >= every concrete value by construction, and pinning one
+      discards that fallback for every shape where it would have chosen otherwise --
+      the same shape of trap as any tri-state, now with five sides rather than three.
+      Leave it at auto. Whether the widened `auto` re-resolves any SHIPPED shape to a
+      different binary is a dispatch_parity question, answered by regenerating.
 
   varlen:
     values: [false]
@@ -374,32 +469,42 @@ score:
 launch_surface:
   - name: grid
     python_source: >-
-      kernels/gfx950/attention_dense.py:attention_dense_grid (~1874-1881) -- persistent
+      kernels/gfx950/attention_dense.py:attention_dense_grid (~2302-2310) -- persistent
       returns (num_persistent, 1, 1); default returns
-      (ceil(seqlen_q/256), num_query_heads, batch). The ceil is LIVE here, unlike
-      gfx942: ragged shapes have a partial last query block.
+      (ceil(seqlen_q/block_m), num_query_heads, batch). The DIVISOR IS THE VARIANT'S
+      OWN TILE as of #11627, not the module constant 256 it used to be. The ceil is
+      LIVE here, unlike gfx942: ragged shapes have a partial last query block.
     cpp_mirror: >-
       dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp:gfx950AttentionDenseGeometry
-    kmd_fields: [seqlen_q, num_query_heads, batch, persistent, num_persistent, ragged]
+    kmd_fields: [seqlen_q, num_query_heads, batch, persistent, num_persistent, ragged,
+                 block_m]
     guard: >-
       gfx950AttentionDenseGeometry throws HIPDNN_PLUGIN_STATUS_BAD_PARAM at prepare() on a
-      non-positive seqlen_q/num_query_heads/batch or an unusable
-      persistent+num_persistent pair, rather than launching an empty or negative grid.
+      non-positive seqlen_q/num_query_heads/batch, an unusable persistent+num_persistent
+      pair, or a block_m that is not a positive multiple of 32, rather than launching an
+      empty, negative or wrongly-tiled grid.
     test: >-
       dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseGeometry.cpp
 
   - name: block
     python_source: >-
-      kernels/gfx950/attention_dense.py:attention_dense_block (~1883-1885) --
-      (num_waves * 64, 1, 1), where num_waves is the property _BLOCK_M // 32 = 8.
-      A CONSTANT 512 threads, unlike gfx942 where it is derived from spec.block_m.
+      kernels/gfx950/attention_dense.py:attention_dense_block (~2313-2315) --
+      (num_waves * 64, 1, 1), where num_waves is the property block_m // 32 (:483-484).
+      NOT A CONSTANT. This entry previously recorded it as "a CONSTANT 512 threads,
+      unlike gfx942 where it is derived from spec.block_m", and warned in its own guard
+      that "a future block_m knob would silently invalidate it". #11627 added exactly
+      that knob, and the warning came true: the CTA is block_m*2 lanes, 512 only at
+      block_m=256. `launch_surface.py --check` could not catch this -- the surface WAS
+      declared; its content went wrong -- which is why the kmd_fields list below is the
+      part that matters.
     cpp_mirror: >-
       dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp:gfx950AttentionDenseGeometry
-    kmd_fields: []
+    kmd_fields: [block_m]
     guard: >-
-      none needed: the value is a compile-time constant on both sides. It is listed
-      rather than omitted because "constant" is the claim being made, and a future
-      block_m knob would silently invalidate it.
+      the same block_m validity check as the grid surface: gfx950AttentionDenseGeometry
+      refuses a block_m that is not a positive multiple of 32, and kernelMatches
+      additionally refuses any value outside the two tiles supports_attention_dense
+      admits (256, 128) or violating block_m % block_n == 0 / block_n % num_waves == 0.
     test: >-
       dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseGeometry.cpp
 
@@ -460,23 +565,31 @@ launch_surface:
 
   - name: applicability
     python_source: >-
-      kernels/gfx950/attention_dense.py:supports_attention_dense (~457-467) -- a thin
-      arch gate that RECONSTRUCTS the spec and reports its ValueError. The real
-      constraint table is AttentionDenseSpec.__post_init__ (~233-380): head_size in
-      (64, 128), seqlen_q % 256 and seqlen_kv % block_n unless ragged, GQA
-      divisibility, sliding_window requires causal and W % block_n == 0, waves_per_eu
-      in [1, 8]. Two refusal LAYERS, and the predicate only sees the second -- which is
-      why dispatch_parity.py constructs inside the try.
+      kernels/gfx950/attention_dense.py:supports_attention_dense (~581-609) -- an arch
+      gate that RECONSTRUCTS the spec and reports its ValueError, and, since #11627,
+      THREE tile rules of its own that the spec does not carry: block_m in {128, 256},
+      block_m % block_n == 0, and block_n % num_waves == 0 (num_waves = block_m // 32).
+      The rest of the constraint table is AttentionDenseSpec.__post_init__ (~264-480):
+      head_size in (64, 128), seqlen_q % block_m and seqlen_kv % block_n unless ragged,
+      GQA divisibility, sliding_window requires causal and W % block_n == 0,
+      waves_per_eu in [1, 8], and the wide_lds_dma precondition block (~431-446). Two
+      refusal LAYERS -- and now the predicate layer carries substantive rules of its
+      own rather than only the arch string, which is why dispatch_parity.py constructs
+      inside the try AND calls the predicate.
     cpp_mirror: >-
       dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp:gfx950AttentionDenseGraphMatches
       and kernelMatches
     kmd_fields:
       [dtype, head_size, num_query_heads, num_kv_heads, seqlen_q, seqlen_kv, batch,
-       causal, block_n, ragged, sliding_window, use_sinks]
+       causal, block_m, block_n, ragged, sliding_window, use_sinks, varlen, paged,
+       wide_lds_dma, persistent]
     guard: >-
       kernelMatches requires strict equality between the graph's derived shape and
       every one of these KMD fields, plus the tile divisibility the ragged flag
-      relaxes; a mismatch on any field declines the candidate rather than launching it.
+      relaxes -- now evaluated against the variant's OWN block_m rather than a
+      compile-time 256 -- plus the two predicate tile rules and the wide_lds_dma
+      self-consistency check. A mismatch on any field declines the candidate rather
+      than launching it.
     test: >-
       dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
 

@@ -24,18 +24,24 @@
  * THREE DIFFERENCES FROM THE gfx942 TWIN, each verified against the source rather
  * than assumed from the sibling:
  *
- *  1. **block_m is not a parameter.** gfx950 bakes `_BLOCK_M = 256` as a module
- *     constant (attention_dense.py:88) and `attention_dense_block` derives the CTA
- *     from the `num_waves` property, which is `_BLOCK_M // 32` -- not from a spec
- *     field. There is no block_m knob to pass, so the block is the CONSTANT 512
- *     lanes for every variant this engine ships. Taking a block_m argument here
- *     would invite a caller to vary something the binary cannot.
+ *  1. **block_m IS a parameter, as of ROCm/rocm-libraries#11627.** It was not before:
+ *     the module baked `_BLOCK_M = 256` as a constant and this header pinned 256 to
+ *     match. #11627 deleted that constant, replaced it with a tile-geometry table
+ *     (`DENSE_TILE_GEOMETRIES` = {default: bm256, bm128: bm128}) and a real spec field
+ *     `block_m` (attention_dense.py:168), and made `num_waves` the property
+ *     `block_m // 32` (:483). So the CTA size is `block_m * 2` lanes, 512 only at
+ *     block_m=256, and the grid's ceil divides by the variant's own tile.
+ *
+ *     Pinning 256 here after that change compiles, validates, desk-checks and passes
+ *     every mechanical gate while launching a bm128 binary with the wrong grid and
+ *     twice the threads it was built for. That is why block_m is now read from the
+ *     descriptor and compared in kernelMatches like any other baked shape field.
  *
  *  2. **The ceiling is LIVE, not defensive.** On gfx942 `Sq % block_m == 0` is
  *     enforced by the predicate, so the ceil is exact and written only for
  *     term-by-term comparison with the Python. gfx950 serves RAGGED shapes, where
- *     `seqlen_q % 256 != 0` is legal and the last query block is partial
- *     (attention_dense.py:1878 keeps the ceil for exactly that reason). Truncating
+ *     `seqlen_q % block_m != 0` is legal and the last query block is partial
+ *     (attention_dense.py:2307 keeps the ceil for exactly that reason). Truncating
  *     here would drop the final block: the tail rows are never written, and nothing
  *     reports it.
  *
@@ -46,15 +52,17 @@
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
-/// The query-block tile, baked into the gfx950 kernel as `_BLOCK_M`
-/// (kernels/gfx950/attention_dense.py:88). Not a spec field and not a knob: the
-/// causal mask and the P relayout both assume it.
-inline constexpr int64_t GFX950_ATTENTION_DENSE_BLOCK_M = 256;
-
 /// Lanes per wave64 wave, and the divisor `num_waves` uses. `attention_dense_block`
-/// is `(num_waves * 64, 1, 1)` with `num_waves = _BLOCK_M // 32`.
-inline constexpr int64_t GFX950_WAVE_LANES = 64;
-inline constexpr int64_t GFX950_ROWS_PER_WAVE = 32;
+/// is `(num_waves * 64, 1, 1)` with `num_waves = block_m // 32`
+/// (kernels/gfx950/attention_dense.py:483-484, 2313-2315).
+inline constexpr int64_t GFX950_WAVE_LANES     = 64;
+inline constexpr int64_t GFX950_ROWS_PER_WAVE  = 32;
+
+/// The tile geometries the kernel's own `supports_attention_dense` admits
+/// (attention_dense.py:591-598, derived from `DENSE_TILE_GEOMETRIES`). A descriptor
+/// naming anything else describes a binary the builder refuses to emit.
+inline constexpr int64_t GFX950_ATTENTION_DENSE_BLOCK_M_DEFAULT = 256;
+inline constexpr int64_t GFX950_ATTENTION_DENSE_BLOCK_M_BM128   = 128;
 
 /// The grid and block a variant must launch with.
 struct Gfx950AttentionDenseGeometry
@@ -75,13 +83,14 @@ struct Gfx950AttentionDenseGeometry
 /**
  * @brief The launch geometry for one variant, from its KMD metadata alone.
  *
- * Mirrors `attention_dense_grid` (kernels/gfx950/attention_dense.py:1874-1881):
+ * Mirrors `attention_dense_grid` (kernels/gfx950/attention_dense.py:2302-2310):
  *
  *     if spec.persistent: return (spec.num_persistent, 1, 1)
- *     nqb = (spec.seqlen_q + _BLOCK_M - 1) // _BLOCK_M   # ceil: ragged partial block
+ *     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m  # ceil: ragged partial
  *     return (nqb, spec.num_query_heads, spec.batch)
  *
- * and `attention_dense_block` (:1883-1885), `(num_waves * 64, 1, 1)`.
+ * and `attention_dense_block` (:2313-2315), `(num_waves * 64, 1, 1)` with
+ * `num_waves = block_m // 32` (:483-484).
  *
  * BOTH ARMS MATTER. The persistent grid-stride variant is a different binary that
  * expects a 1-D grid of `num_persistent` CTAs. Launching it on the default 3-D grid
@@ -91,6 +100,10 @@ struct Gfx950AttentionDenseGeometry
  * cleanly having written nothing, which is the silent-wrong-answer case this file
  * defends against; prepare() is the last place a named failure is cheap.
  *
+ * @param blockM   The variant's own `block_m`, from the KMD. NOT a constant: see the
+ *                 file header. A descriptor that omits it resolves to the KMD's
+ *                 `default_value`, which is why that default must be 256 -- the
+ *                 dispatcher's own geometry -- and why kernelMatches compares it.
  * @param kernelName Only for the diagnostic, so a failure names the descriptor.
  */
 inline Gfx950AttentionDenseGeometry gfx950AttentionDenseGeometry(int64_t seqLenQ,
@@ -98,6 +111,7 @@ inline Gfx950AttentionDenseGeometry gfx950AttentionDenseGeometry(int64_t seqLenQ
                                                                  int64_t batch,
                                                                  int64_t persistent,
                                                                  int64_t numPersistent,
+                                                                 int64_t blockM,
                                                                  const std::string& kernelName)
 {
     // A persistent variant with no usable CTA count would launch an empty or negative
@@ -119,13 +133,25 @@ inline Gfx950AttentionDenseGeometry gfx950AttentionDenseGeometry(int64_t seqLenQ
             "gfx950 attention_dense: kernel '" + kernelName
                 + "' declares a non-positive seqlen_q, num_query_heads or batch");
     }
+    // block_m divides in BOTH the block size and the default grid's ceil, so a
+    // non-positive value is a divide-by-zero or a negative CTA count rather than a
+    // wrong answer. Both tile geometries the kernel admits are checked in
+    // kernelMatches; this is the last-resort guard for a descriptor that reached
+    // prepare() with neither.
+    if(blockM <= 0 || blockM % GFX950_ROWS_PER_WAVE != 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "gfx950 attention_dense: kernel '" + kernelName
+                + "' declares a block_m that is not a positive multiple of 32");
+    }
 
     Gfx950AttentionDenseGeometry geometry;
-    // Constant across every shipped variant: block_m is baked, not a knob. Written as
-    // the same expression the Python evaluates rather than the literal 512, so the two
-    // halves can be diffed term for term.
-    geometry.blockX = static_cast<unsigned>(GFX950_ATTENTION_DENSE_BLOCK_M / GFX950_ROWS_PER_WAVE
-                                            * GFX950_WAVE_LANES);
+    // `num_waves * 64` with `num_waves = block_m // 32`. Written as the expression the
+    // Python evaluates rather than a literal, so the two halves diff term for term --
+    // and so this stops being 512 the moment a bm128 variant ships.
+    geometry.blockX =
+        static_cast<unsigned>(blockM / GFX950_ROWS_PER_WAVE * GFX950_WAVE_LANES);
     if(persistent != 0)
     {
         geometry.gridX = static_cast<unsigned>(numPersistent);
@@ -136,8 +162,7 @@ inline Gfx950AttentionDenseGeometry gfx950AttentionDenseGeometry(int64_t seqLenQ
     {
         // CEIL, and it is load-bearing here: a ragged shape has a partial final query
         // block, and truncating drops it.
-        geometry.gridX = static_cast<unsigned>((seqLenQ + GFX950_ATTENTION_DENSE_BLOCK_M - 1)
-                                               / GFX950_ATTENTION_DENSE_BLOCK_M);
+        geometry.gridX = static_cast<unsigned>((seqLenQ + blockM - 1) / blockM);
         geometry.gridY = static_cast<unsigned>(numQueryHeads);
         geometry.gridZ = static_cast<unsigned>(batch);
     }

@@ -47,7 +47,13 @@
  *     sinks. Those declines are load-bearing rather than cosmetic: the kernel's
  *     signature grows extra pointer slots for either feature, and the shipped launch
  *     passes exactly five arguments.
- *   - NO block_m. It is a baked module constant here, not a KMD field.
+ *   - block_m IS a KMD field, as of ROCm/rocm-libraries#11627. This header used to say
+ *     the opposite ("NO block_m. It is a baked module constant here, not a KMD
+ *     field"), and that was true of the pre-#11627 kernel. The PR deleted the module
+ *     constant and made it a spec field with two legal tile geometries, so the
+ *     matcher's tile rule now divides by the CANDIDATE's tile rather than a
+ *     compile-time 256, and refuses a descriptor whose tile the builder would not
+ *     emit. The cases at the end of this file are what defend that.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -332,20 +338,29 @@ struct KernelSpec
     int64_t batch = BATCH;
     int64_t causal = 1;
     int64_t blockN = 64;
-    // No block_m: gfx950 bakes _BLOCK_M=256 as a module constant, so there is
-    // no such KMD field to vary. A candidate carrying one would be describing a
-    // tile the binary cannot have.
+    // block_m IS a KMD field as of ROCm/rocm-libraries#11627, which deleted the
+    // module constant `_BLOCK_M = 256` and replaced it with a spec field offering two
+    // tile geometries. This struct previously carried a comment asserting the
+    // opposite. 256 is the dispatcher's own geometry and the matcher's fallback for a
+    // descriptor that omits the field.
+    int64_t blockM = 256;
     int64_t ragged = 0;
     int64_t slidingWindow = 0;
     int64_t useSinks = 0;
     int64_t varlen = 0;
     int64_t paged = 0;
+    int64_t persistent = 0;
+    int64_t wideLdsDma = 0;
     /// Emit the ABI-extension fields at all. A descriptor predating them omits them
     /// entirely, and the matcher must read that silence as "not built with it"
     /// rather than throwing -- getIntMetadata THROWS on a missing key, so this
     /// distinction is the difference between a routine non-match and an exception
     /// escaping the matcher.
     bool emitAbiFields = true;
+    /// Emit `block_m` at all. Same silence question, different field: a descriptor
+    /// generated before #11627 carries no block_m, and the matcher must fall back to
+    /// the dispatcher's 256 rather than throwing or declining.
+    bool emitBlockM = true;
 };
 
 hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
@@ -368,13 +383,19 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("causal"), spec.causal},
         {std::string("block_n"), spec.blockN},
         {std::string("ragged"), spec.ragged},
+        {std::string("persistent"), spec.persistent},
     };
+    if(spec.emitBlockM)
+    {
+        kernel.metadata[std::string("block_m")] = spec.blockM;
+    }
     if(spec.emitAbiFields)
     {
         kernel.metadata[std::string("sliding_window")] = spec.slidingWindow;
         kernel.metadata[std::string("use_sinks")] = spec.useSinks;
         kernel.metadata[std::string("varlen")] = spec.varlen;
         kernel.metadata[std::string("paged")] = spec.paged;
+        kernel.metadata[std::string("wide_lds_dma")] = spec.wideLdsDma;
     }
     return kernel;
 }
@@ -868,14 +889,121 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesARaggedCandidateForCrossAttenti
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesAnAlignedCandidateWhoseTileDoesNotDivideSeqLenKv)
 {
-    // block_n divides Skv on the aligned path. block_m is not checked against a KMD
-    // field because gfx950 has none -- it is the baked constant 256.
+    // block_n divides Skv on the aligned path; block_m divides Sq, against the
+    // CANDIDATE's own tile since #11627 made it a field.
     GraphSpec graph;
     graph.seqLenKv = 288; // not a multiple of 64
     graph.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
     KernelSpec kernel;
     kernel.seqLenKv = 288;
     kernel.blockN = 64;
+    EXPECT_FALSE(matchesKernel(graph, kernel));
+}
+
+// ---------------------------------------------------------------------------
+// block_m: a KMD field since #11627, and every one of these cases passes vacuously
+// against the old compile-time 256.
+// ---------------------------------------------------------------------------
+
+TEST(TestGfx950AttentionDenseKernelMatch, ABm128CandidateServesATileItAloneDivides)
+{
+    // Sq=384 is three bm128 blocks and one-and-a-half bm256 ones. Against a
+    // hardcoded 256 the graph is classified RAGGED, so an aligned bm128 candidate --
+    // the binary actually built for it -- is refused. This is the match the old code
+    // silently lost.
+    GraphSpec graph;
+    graph.seqLenQ = 384;
+    graph.seqLenKv = 384;
+    KernelSpec kernel;
+    kernel.seqLenQ = 384;
+    kernel.seqLenKv = 384;
+    kernel.blockM = 128;
+    kernel.blockN = 64;
+    EXPECT_TRUE(matchesKernel(graph, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, ABm256CandidateIsRefusedForATileItDoesNotDivide)
+{
+    // The control for the case above, and the half that matters for correctness: the
+    // same Sq=384 graph against a bm256 ALIGNED candidate. 384 % 256 != 0, so this
+    // binary's grid does not cover the shape and it must be declined.
+    GraphSpec graph;
+    graph.seqLenQ = 384;
+    graph.seqLenKv = 384;
+    KernelSpec kernel;
+    kernel.seqLenQ = 384;
+    kernel.seqLenKv = 384;
+    kernel.blockM = 256;
+    EXPECT_FALSE(matchesKernel(graph, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, ADescriptorWithoutBlockMFallsBackToTheDispatcherTile)
+{
+    // A descriptor generated before #11627 carries no block_m at all. getIntMetadata
+    // THROWS on a missing key, so reading it unconditionally would turn a routine
+    // match into an exception escaping the matcher. The only sound reading of the
+    // silence is the dispatcher's own geometry -- 256 -- which is what the shipped
+    // pre-#11627 set was compiled with.
+    const GraphSpec graph;
+    KernelSpec kernel;
+    kernel.emitBlockM = false;
+    EXPECT_TRUE(matchesKernel(graph, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesATileGeometryTheBuilderWouldNotEmit)
+{
+    // `supports_attention_dense` admits block_m in {128, 256} only
+    // (kernels/gfx950/attention_dense.py:591-598). A descriptor naming anything else
+    // describes a binary that does not exist.
+    const GraphSpec graph;
+    KernelSpec kernel;
+    kernel.blockM = 512;
+    EXPECT_FALSE(matchesKernel(graph, kernel));
+
+    kernel.blockM = 64;
+    EXPECT_FALSE(matchesKernel(graph, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesATileWhoseBlockNViolatesThePredicate)
+{
+    // Two rules #11627 added to the predicate: block_m % block_n == 0 (the causal KV
+    // partition) and block_n % num_waves == 0 (so K/V DMA rows distribute evenly),
+    // with num_waves = block_m // 32. block_n=96 divides neither 256 nor 128.
+    const GraphSpec graph;
+    KernelSpec kernel;
+    kernel.blockM = 256;
+    kernel.blockN = 96;
+    EXPECT_FALSE(matchesKernel(graph, kernel));
+}
+
+// ---------------------------------------------------------------------------
+// wide_lds_dma: dispatcher-RESOLVED, so not a decline -- but a descriptor whose
+// wide_lds_dma contradicts its own metadata names a binary the builder refuses.
+// ---------------------------------------------------------------------------
+
+TEST(TestGfx950AttentionDenseKernelMatch, AWideDmaCandidateIsNotDeclinedOutright)
+{
+    // The trap this guards against is over-rejection. wide_lds_dma is what the
+    // dispatcher resolves for MOST of what this engine ships -- hdim=128, bf16,
+    // causal, non-ragged, persistent -- so treating it like the ABI-extending
+    // features and declining it wholesale would decline the majority of the set.
+    const GraphSpec graph;
+    KernelSpec kernel;
+    kernel.wideLdsDma = 1;
+    kernel.persistent = 1;
+    kernel.headSize = 128;
+    kernel.blockN = 64;
+    EXPECT_TRUE(matchesKernel(graph, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesAWideDmaCandidateThatIsNotPersistent)
+{
+    // `wide_lds_dma requires persistent=True` (attention_dense.py:432). A descriptor
+    // claiming both wide DMA and a non-persistent grid describes no binary.
+    const GraphSpec graph;
+    KernelSpec kernel;
+    kernel.wideLdsDma = 1;
+    kernel.persistent = 0;
     EXPECT_FALSE(matchesKernel(graph, kernel));
 }
 

@@ -104,7 +104,7 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
 
-// KMD fields this engine varies along. No BLOCK_M_FIELD: see the file comment.
+// KMD fields this engine varies along.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
@@ -114,6 +114,34 @@ constexpr std::string_view SEQLEN_KV_FIELD = "seqlen_kv";
 constexpr std::string_view BATCH_FIELD = "batch";
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view BLOCK_N_FIELD = "block_n";
+// block_m: the query-row tile. A KMD FIELD as of ROCm/rocm-libraries#11627, which
+// deleted the module constant `_BLOCK_M = 256` and replaced it with a spec field
+// (kernels/gfx950/attention_dense.py:168) plus a tile-geometry table offering 256 and
+// 128. It is read on TWO paths -- the aligned-tile predicate here, and the grid/block
+// arithmetic in prepare() -- and both were pinned to a compile-time 256. Leaving them
+// pinned builds, validates and desk-checks clean while a bm128 binary is launched with
+// half the CTAs it needs and twice the threads it was built for.
+constexpr std::string_view BLOCK_M_FIELD = "block_m";
+// wide_lds_dma and lds_v_row_pad: BOTH NEW with ROCm/rocm-libraries#11627, and both
+// are part of binary identity -- `kernel_name()` appends `wdma` (attention_dense.py:566)
+// and `vpad{n}` on the D64 path (:544), and both change the emitted LDS layout.
+//
+// Neither is an applicability axis, and neither is a decline. `wide_lds_dma` is
+// DISPATCHER-COMPUTED, not a constant: the factory resolves it per request from
+// `persistent and hdim==128 and dtype in (fp16,bf16) and causal and not sw and not
+// sinks and not ragged` (dispatch/attention/gfx950.py:84-93). Most of what this engine
+// ships satisfies that conjunction, so hand-writing `false` into the descriptors would
+// mislabel the majority of the set -- `absent` and `explicitly false` are different
+// kernels whenever the policy would have answered true (verify_variant_sets invariant
+// 4). The descriptors get the value by REGENERATING through dispatch_parity.py, never
+// by transcription.
+//
+// They are compared here only to refuse a descriptor naming a binary the builder would
+// not emit. The spec's own wide_lds_dma preconditions (attention_dense.py:431-446) are
+// otherwise transitively enforced: persistent, head_size, block_n, ragged, varlen and
+// paged are all KMD fields kernelMatches already pins.
+constexpr std::string_view WIDE_LDS_DMA_FIELD = "wide_lds_dma";
+constexpr std::string_view LDS_V_ROW_PAD_FIELD = "lds_v_row_pad";
 // The persistent grid-stride variant launches a DIFFERENT grid shape, so the launch
 // path must know which variant it holds.
 constexpr std::string_view PERSISTENT_FIELD = "persistent";
@@ -781,17 +809,86 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
-    // Tile divisibility, conditional on the variant's own ragged flag. block_m is the
-    // baked module constant, not a KMD field -- see the geometry header.
+    // Tile divisibility, conditional on the variant's own ragged flag, and evaluated
+    // against the variant's OWN tile on both axes.
+    //
+    // block_m used to be a compile-time 256 here, correctly, because the kernel baked
+    // it as a module constant. #11627 made it a spec field with two legal values, and
+    // the C++ kept comparing against 256: a bm128 variant would then have its tile
+    // predicate evaluated against a tile it was not built for, accept a graph whose
+    // `Sq % 128 == 0 but Sq % 256 != 0`, be classified ALIGNED, and launch on a grid
+    // sized for the wrong tile. Nothing about that fails to build.
+    //
+    // Read through tryGetMetadata for the same reason the four ABI features are: a
+    // descriptor predating the field legitimately omits it, and the only sound reading
+    // of that silence is the dispatcher's own geometry, which is the default 256.
     const int64_t blockN = intField(BLOCK_N_FIELD);
     if(blockN <= 0)
     {
         return false;
     }
+    int64_t blockM = GFX950_ATTENTION_DENSE_BLOCK_M_DEFAULT;
+    if(const auto declared = kernel.tryGetMetadata(std::string(BLOCK_M_FIELD));
+       declared.has_value())
+    {
+        const auto* held = std::get_if<int64_t>(&*declared);
+        if(held == nullptr)
+        {
+            return false;
+        }
+        blockM = *held;
+    }
+    // The kernel's own `supports_attention_dense` (attention_dense.py:591-608) admits
+    // exactly these two tiles and requires `block_m % block_n == 0` and
+    // `block_n % num_waves == 0` with `num_waves = block_m // 32`. A descriptor
+    // violating any of them names a binary the builder refuses to emit, so it cannot
+    // be a real candidate.
+    if(blockM != GFX950_ATTENTION_DENSE_BLOCK_M_DEFAULT
+       && blockM != GFX950_ATTENTION_DENSE_BLOCK_M_BM128)
+    {
+        return false;
+    }
+    if(blockM % blockN != 0 || blockN % (blockM / GFX950_ROWS_PER_WAVE) != 0)
+    {
+        return false;
+    }
+    // wide_lds_dma is not a decline and not an axis -- it is a per-shape value the
+    // DISPATCHER resolves, and the descriptors carry whatever it resolved. What this
+    // refuses is a descriptor whose wide_lds_dma contradicts the rest of its own
+    // metadata, i.e. one naming a binary `supports_attention_dense` would not emit
+    // (attention_dense.py:431-446). The remaining precondition in that block --
+    // lds_k_group_pad == 8 -- is a spec-construction rule the packer enforced and this
+    // engine has no field for.
+    if(featureIsSet(WIDE_LDS_DMA_FIELD))
+    {
+        if(intField(PERSISTENT_FIELD) == 0 || intField(HEAD_SIZE_FIELD) != 128
+           || blockN != 64 || intField(RAGGED_FIELD) != 0)
+        {
+            return false;
+        }
+        // `wide_lds_dma requires K/V slab padding of 8/32 elements` -- the V half is a
+        // KMD field, so it is checkable here. Read through tryGetMetadata for the same
+        // silence reason as block_m; the default is the tile table's own 32.
+        int64_t ldsVRowPad = 32;
+        if(const auto declared = kernel.tryGetMetadata(std::string(LDS_V_ROW_PAD_FIELD));
+           declared.has_value())
+        {
+            const auto* held = std::get_if<int64_t>(&*declared);
+            if(held == nullptr)
+            {
+                return false;
+            }
+            ldsVRowPad = *held;
+        }
+        if(ldsVRowPad != 32)
+        {
+            return false;
+        }
+    }
     // Whether THIS GRAPH is ragged, derived exactly as the dispatcher derives it
     // (dispatch/attention/gfx950.py::_dense_spec):
     //
-    //     ragged = (sq == sk) and ((sq % _BLOCK_M != 0) or (sk % block_n != 0))
+    //     ragged = (sq == sk) and ((sq % block_m != 0) or (sk % block_n != 0))
     //
     // The candidate's flag must AGREE with that, in both directions. Returning
     // "self-attention?" for the ragged arm was wrong and the test caught it: an
@@ -803,8 +900,18 @@ bool kernelMatches(const MatchContext& context,
     // two fields the dispatcher DERIVES rather than reads (the other is
     // `persistent`), so this is the one place the engine can disagree with the
     // library about which binary a shape wants.
+    //
+    // ONE DELIBERATE DIVERGENCE FROM THE DISPATCHER, and it is the right one. The
+    // factory derives `ragged` against the DEFAULT geometry's tile
+    // (`_DENSE_GEOMETRY = "default"`, hardcoded at dispatch/attention/gfx950.py:30),
+    // so it always divides by 256; the SPEC's own aligned-path rule
+    // (attention_dense.py:307) divides by `self.block_m`. Those agree for every set
+    // the dispatcher resolves, because it only ever emits bm256. They part company
+    // for a hand-added bm128 variant, and there the spec is the authority -- it is
+    // what the builder actually compiled. Dividing by 256 for a bm128 binary would
+    // call a `Sq=384` graph ragged when that binary tiles it exactly.
     const bool aligned
-        = problem.seqLenQ % GFX950_ATTENTION_DENSE_BLOCK_M == 0 && problem.seqLenKv % blockN == 0;
+        = problem.seqLenQ % blockM == 0 && problem.seqLenKv % blockN == 0;
     const bool graphIsRagged = problem.seqLenQ == problem.seqLenKv && !aligned;
     const bool kernelIsRagged = intField(RAGGED_FIELD) != 0;
     if(graphIsRagged != kernelIsRagged)
@@ -960,13 +1067,30 @@ public:
         // so a test can reach them without a device: this correspondence is unchecked
         // by the build, the packer and the validator, and it fails silently rather
         // than loudly. Every term comes from the KMD, so a variant launches the
-        // geometry it was actually compiled for. No block_m argument: gfx950 bakes it.
+        // geometry it was actually compiled for.
+        //
+        // block_m is now one of those terms. It reaches BOTH the ceil'd grid and the
+        // CTA size (`num_waves * 64`, `num_waves = block_m // 32`), so a bm128 binary
+        // launched with the old hardcoded 256 gets half the CTAs and twice the
+        // threads. Read through tryGetMetadata with the dispatcher's own default,
+        // matching kernelMatches, so a descriptor predating the field behaves as it
+        // did before rather than throwing.
+        int64_t blockM = GFX950_ATTENTION_DENSE_BLOCK_M_DEFAULT;
+        if(const auto declared = kernel.tryGetMetadata(std::string(BLOCK_M_FIELD));
+           declared.has_value())
+        {
+            if(const auto* held = std::get_if<int64_t>(&*declared); held != nullptr)
+            {
+                blockM = *held;
+            }
+        }
         const auto geometry = gfx950AttentionDenseGeometry(
             kernel.getIntMetadata(std::string(SEQLEN_Q_FIELD)),
             kernel.getIntMetadata(std::string(NUM_QUERY_HEADS_FIELD)),
             kernel.getIntMetadata(std::string(BATCH_FIELD)),
             kernel.getIntMetadata(std::string(PERSISTENT_FIELD)),
             kernel.getIntMetadata(std::string(NUM_PERSISTENT_FIELD)),
+            blockM,
             toString(kernel.kernelId));
 
         code.kernel->setBlockSize(geometry.blockX, 1, 1);
