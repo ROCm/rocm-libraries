@@ -350,16 +350,18 @@ TEST_F(HwInstDescTest, SWMMA_XDL_F32_16x16x64_BF16) {
     ASSERT_NE(desc, nullptr);
     EXPECT_TRUE(desc->has(IF_SWMMA));
     EXPECT_TRUE(desc->has(IF_WMMA_XDL));
+    EXPECT_TRUE(isMnemonicSupportedOnArch("v_swmmac_f32_16x16x64_bf16", arch));
 }
 
 // ---------------------------------------------------------------------------
-// Non-XDL SWMMAC: v_swmmac_f32_16x16x32_bf16
+// Non-XDL SWMMAC: v_swmmac_f32_16x16x32_bf16 — gfx12-only table entry, not gfx1250
 // ---------------------------------------------------------------------------
 TEST_F(HwInstDescTest, SWMMA_NonXDL_F32_16x16x32_BF16) {
     auto* desc = getDescByMnemonic("v_swmmac_f32_16x16x32_bf16");
     ASSERT_NE(desc, nullptr);
     EXPECT_TRUE(desc->has(IF_SWMMA));
     EXPECT_FALSE(desc->has(IF_WMMA_XDL));
+    EXPECT_FALSE(isMnemonicSupportedOnArch("v_swmmac_f32_16x16x32_bf16", arch));
 }
 
 // ---------------------------------------------------------------------------
