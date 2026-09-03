@@ -3,10 +3,14 @@
 # SPDX-License-Identifier: MIT
 """Benchmark scenario for the GDN single-token decode kernel.
 
-Sweeps the decode batch range and reports per-launch time for the default
-spec. Every scenario is correctness-gated first: a timing number from a
-numerically wrong kernel is worse than no number at all, so a shape that fails
-the gate is reported as such and excluded rather than timed.
+Sweeps the decode batch range and reports per-launch time for the
+configuration the dispatcher actually selects, so the numbers describe what
+production would run rather than one fixed tile. Because the tuned tile varies
+with batch, the selected tile is printed alongside each row.
+
+Every scenario is correctness-gated first: a timing number from a numerically
+wrong kernel is worse than no number at all, so a shape that fails the gate is
+reported as such and excluded rather than timed.
 
 Two timings are reported per shape because they answer different questions:
 
@@ -40,7 +44,10 @@ from builders.gfx950.gdn.gdn_decode import (
     make_inputs,
     prepare,
 )
-from kernels.gfx950.gdn_decode import GdnDecodeSpec, gdn_decode_grid
+from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+ARCH = "gfx950"
 
 DEFAULT_BATCHES = (1, 16, 64, 256)
 
@@ -120,23 +127,30 @@ def main() -> int:
         print("no HIP device visible", file=sys.stderr)
         return 2
 
-    spec = GdnDecodeSpec()
-    print(f"kernel: {spec.kernel_name()}  block={spec.block_size}")
-    print(f"{'batch':>6} {'grid':>8} {'eager_us':>10} {'device_us':>10}  correctness")
+    print(f"{'batch':>6} {'tile':>10} {'spec_id':>9} {'grid':>8} "
+          f"{'eager_us':>10} {'device_us':>10}  correctness")
 
     failures = 0
     for batch in (int(x) for x in args.batches.split(",")):
+        # Ask the dispatcher what production would run for this batch. The
+        # tuned tile varies across the batch range, so the spec is resolved per
+        # row rather than once for the whole sweep.
+        result = dispatch_gdn_decode(GdnDecodeRequest(batch=batch, arch=ARCH))
+        spec: GdnDecodeSpec = result.spec
+        tile = f"{spec.num_warps},{spec.warp_threads_k},{spec.blocks_per_v_dim}"
+        grid = result.grid[0]
+
         out_err, state_err = check(spec, batch)
         err = max(out_err, state_err)
         if err > TOL:
             failures += 1
-            print(f"{batch:>6} {gdn_decode_grid(batch, spec)[0]:>8} "
+            print(f"{batch:>6} {tile:>10} {result.candidate.spec_id:>9} {grid:>8} "
                   f"{'-':>10} {'-':>10}  FAIL max_err={err:.3e}")
             continue
         eager = eager_us(spec, batch)
         device = None if args.no_device else device_us(spec, batch)
         dev_s = f"{device:10.2f}" if device is not None else f"{'n/a':>10}"
-        print(f"{batch:>6} {gdn_decode_grid(batch, spec)[0]:>8} "
+        print(f"{batch:>6} {tile:>10} {result.candidate.spec_id:>9} {grid:>8} "
               f"{eager:10.2f} {dev_s}  max_err={err:.3e}")
 
     return 1 if failures else 0
