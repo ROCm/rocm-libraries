@@ -7,16 +7,21 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/LineStore.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -28,6 +33,7 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCacheFile.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -98,11 +104,15 @@ public:
     /// Matcher, dispatch, and graph_match symbols resolve here, eagerly, so a missing
     /// one excludes this engine at construction instead of throwing later from
     /// isApplicable().
-    ///
     /// @param describedBy Names the engine in the graph_match resolution failure, which
     ///        is the only one of the three that has no descriptor of its own to name:
     ///        the symbol lives on the UED, so without this the diagnostic would carry
     ///        the symbol string alone.
+    /// @param engineName The engine's own scoped name (`EngineDescriptor::name`), used to
+    ///        compose the on-disk winner-cache shard path -- not `describedBy`, which is
+    ///        a diagnostic string, not a path component. Defaults to empty so existing
+    ///        direct-construction call sites keep compiling; an empty name disables the
+    ///        disk cache rather than sharing one shard across every unnamed instance.
     KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
                                std::vector<DispatchDescriptor> dispatches,
@@ -110,7 +120,8 @@ public:
                                std::shared_ptr<IKernelHeuristic> heuristic,
                                const std::string& graphMatchSymbol,
                                const std::string& describedBy = {},
-                               size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY)
+                               size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
+                               std::string engineName = {})
         : _schema(std::move(schema))
         , _packs(std::move(packs))
         , _heuristic(std::move(heuristic))
@@ -118,6 +129,7 @@ public:
                             ? nullptr
                             : GraphMatchRegistry::resolve(graphMatchSymbol, describedBy))
         , _catalogCache(catalogCacheCapacity)
+        , _engineName(std::move(engineName))
     {
         if(_heuristic == nullptr)
         {
@@ -231,7 +243,17 @@ public:
 
     /// Records @p record under @p key, replacing any earlier ranking for it: a later
     /// sweep measured the current candidate set, and the coverage gate only widens.
-    void recordWinner(const WinnerKey& key, WinnerRecord record) const
+    ///
+    /// Write-back: if this manager has an engine name, the record is also appended to
+    /// the on-disk shard. Unlike the in-memory-only read-through path below, this holds
+    /// the shard's own file lock across the whole read-then-append sequence as one
+    /// critical section -- `_winnerCacheMutex` alone cannot serialize against a second
+    /// process sharing the file. If the shard's current ranking for this key already
+    /// matches, nothing is written and the on-disk record is adopted; if it differs, the
+    /// new ranking is appended and supersedes the old one under the reader's
+    /// last-line-wins merge. Any disk failure degrades to in-memory-only, keeping the
+    /// measurement just taken, logged once per manager.
+    void recordWinner(const WinnerKey& key, const WinnerRecord& record) const
     {
         if(record.empty())
         {
@@ -249,8 +271,10 @@ public:
             return;
         }
 
+        WinnerRecord adopted = writeBackToShard(key, record);
+
         const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
-        _winnerCache[key] = std::move(record);
+        _winnerCache[key] = std::move(adopted);
 
         if(_winnerCache.size() > WINNER_CACHE_WARNING_THRESHOLD && !_winnerCacheGrowthWarned)
         {
@@ -265,8 +289,24 @@ public:
 
     /// The ranking recorded for @p key, or nullopt. Returns a copy: the caller walks it
     /// outside the lock, and a reference would outlive the guard.
+    ///
+    /// Read-through: an in-memory miss loads @p key's on-disk shard once per shard (a
+    /// per-shard "already loaded" flag), taking only `_winnerCacheMutex` to merge
+    /// decoded entries into `_winnerCache` -- unlike write-back, this never holds a file
+    /// lock across the read.
     std::optional<WinnerRecord> winnerFor(const WinnerKey& key) const
     {
+        {
+            const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+            const auto found = _winnerCache.find(key);
+            if(found != _winnerCache.end())
+            {
+                return found->second;
+            }
+        }
+
+        loadShardIfAbsent(key.device.properties().gcnArchName);
+
         const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
         const auto found = _winnerCache.find(key);
         if(found == _winnerCache.end())
@@ -355,12 +395,17 @@ private:
             packDefinitions.reserve(pack.kernels.size());
             for(const auto& kernel : pack.kernels)
             {
-                if(kernel.source.kind != KernelSourceKind::EMBEDDED_SOURCE)
+                if(kernel.source.kind != KernelSourceKind::EMBEDDED_SOURCE
+                   && kernel.source.kind != KernelSourceKind::KPACK)
                 {
-                    throw std::invalid_argument(
-                        describeDescriptor("kernel", kernel.name, kernel.id)
-                        + " declares a source kind this build has no adapter for; only "
-                          "EMBEDDED_SOURCE is implemented");
+                    // Dropped, not thrown: an unadaptable kernel costs only itself, so its
+                    // pack keeps serving whichever siblings this build can dispatch.
+                    HIPDNN_PLUGIN_LOG_ERROR(
+                        "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
+                                     << " declares a source kind this build has no adapter for;"
+                                        " only EMBEDDED_SOURCE and KPACK are implemented,"
+                                        " dropping it");
+                    continue;
                 }
 
                 auto key = completeMetadata(kernel);
@@ -394,8 +439,14 @@ private:
                                                            kernel.source,
                                                            std::move(key),
                                                            kernel.priority,
-                                                           std::move(kernelArch)});
+                                                           std::move(kernelArch),
+                                                           kernel.originDirectory,
+                                                           kernel.name,
+                                                           kernel.treeRoot});
             }
+            // Pushed even when every kernel was dropped: _definitions is indexed by pack
+            // position, so skipping one entry would bind every later pack's definitions to
+            // the wrong pack and run the last index out of range.
             _definitions.push_back(std::move(packDefinitions));
         }
     }
@@ -660,14 +711,16 @@ private:
         orderFromWinnerRecord(const std::vector<KernelDefinition>& entries,
                               const MatchContext& context) const
     {
-        // Building a WinnerKey copies and folds the whole graph buffer, so reject on the
-        // never-benchmarked path before paying for one.
-        if(entries.empty() || winnerCacheSize() == 0)
+        // Cheap rejection first: mightHaveWinnerFor() accounts for an on-disk shard this
+        // process has not read yet, unlike a bare winnerCacheSize() check.
+        if(entries.empty() || !mightHaveWinnerFor(context.deviceProperties.gcnArchName))
         {
             return std::nullopt;
         }
 
-        const WinnerKey key{GraphContentKey{context.graph}, DeviceKey{context.deviceProperties}};
+        const WinnerKey key{
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
+            DeviceKey{context.deviceProperties}};
         if(!key.graph.isUsable())
         {
             // No bytes to key on; such graphs never match each other either.
@@ -690,6 +743,246 @@ private:
         return ordered;
     }
 
+    /// Is it worth building a WinnerKey for @p gcnArchName? True if the in-memory cache
+    /// holds anything, or this arch's shard has not been attempted yet. Probes the
+    /// stripped arch, matching how `loadShardIfAbsent()` latches.
+    bool mightHaveWinnerFor(const std::string& gcnArchName) const
+    {
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        return !_winnerCache.empty()
+               || _loadedWinnerShards.find(std::string(stripArchFeatures(gcnArchName)))
+                      == _loadedWinnerShards.end();
+    }
+
+    /// Loads the on-disk shard covering @p gcnArchName into `_winnerCache` once, tracked
+    /// by `_loadedWinnerShards`. File I/O runs with `_winnerCacheMutex` UNHELD, so a slow
+    /// disk read never blocks an unrelated call.
+    ///
+    /// The latch is keyed on the shard's own arch component, not the raw `gcnArchName`:
+    /// `stripArchFeatures()` maps several raw arch strings onto one shard, so keying it
+    /// raw would decode the same file once per variant.
+    ///
+    /// Only a shard that was actually read -- or one deterministically declined, which a
+    /// version mismatch is for the life of the process -- is latched. A transient open or
+    /// read failure is left unlatched so a later lookup retries, rather than disabling
+    /// this arch's cache for the manager's lifetime over one blip.
+    void loadShardIfAbsent(const std::string& gcnArchName) const
+    {
+        const std::string shardArch(stripArchFeatures(gcnArchName));
+
+        if(_engineName.empty())
+        {
+            // No engine name means no shard path; mark it loaded so later lookups take
+            // the fast in-memory-only path.
+            const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+            _loadedWinnerShards.insert(shardArch);
+            return;
+        }
+
+        {
+            const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+            if(_loadedWinnerShards.find(shardArch) != _loadedWinnerShards.end())
+            {
+                return;
+            }
+        }
+
+        std::vector<std::pair<WinnerKey, WinnerRecord>> decoded;
+        bool attemptSettled = false;
+        auto [shard, openStatus] = openWinnerCacheShard(_engineName, gcnArchName);
+        if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::VERSION_MISMATCH)
+        {
+            // Deterministic for this process: the shard's version line will not change
+            // under us, so there is nothing to retry.
+            attemptSettled = true;
+            logShardFailureOnce(WinnerShardFailureKind::VERSION_MISMATCH, gcnArchName);
+        }
+        else if(openStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK || !shard.has_value())
+        {
+            logShardFailureOnce(WinnerShardFailureKind::OPEN, gcnArchName);
+        }
+        else
+        {
+            auto [records, readStatus]
+                = hipdnn_data_sdk::utilities::readAllLines(*shard, &decodeWinnerRecordLine);
+            if(readStatus == hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+            {
+                attemptSettled = true;
+                decoded = std::move(records);
+            }
+            else
+            {
+                logShardFailureOnce(WinnerShardFailureKind::READ, gcnArchName);
+            }
+        }
+
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        if(!attemptSettled)
+        {
+            return;
+        }
+        if(!_loadedWinnerShards.insert(shardArch).second)
+        {
+            // Another thread's read-through raced this one and already merged.
+            return;
+        }
+        // Walk in reverse and never overwrite: within the file the last line for a key
+        // wins, and a key already in memory was put there by this process's own
+        // measurement, which is newer than anything the file can offer.
+        for(auto it = decoded.rbegin(); it != decoded.rend(); ++it)
+        {
+            if(!it->first.graph.isUsable())
+            {
+                // A key whose graph carries no content is not even equal to itself
+                // (GraphContentKey::operator==), so it can never be looked up -- and as
+                // a non-reflexive key it would violate unordered_map's requirements on
+                // KeyEqual. recordWinner() rejects these on the write side too.
+                continue;
+            }
+            _winnerCache.try_emplace(it->first, std::move(it->second));
+        }
+    }
+
+    /// Write-back: re-reads @p key's shard under its LineStore lock and appends
+    /// @p record unless the shard's current ranking for @p key already matches it, as
+    /// one critical section under the shard's own lock (mirrors
+    /// `LineStoreLockHelper.cpp`). The file lock rather than `_winnerCacheMutex`,
+    /// because the racing writer may be another process.
+    ///
+    /// A record is never immutable: a shard may hold several lines for one key, and the
+    /// reader resolves them last-line-wins (see `loadShardIfAbsent()`), so appending a
+    /// newer ranking is how a record is replaced. Without that, a catalog that gains a
+    /// kernel could never satisfy the coverage gate again, and every later run would
+    /// re-benchmark and discard the result forever.
+    ///
+    /// @return The on-disk record, if its ranked ids already match @p record's -- an
+    ///     unchanged catalog, so nothing is written; otherwise @p record itself, both
+    ///     when it was appended and on every disk failure, since write-back is
+    ///     best-effort and the caller's own measurement is the right value to keep in
+    ///     memory.
+    WinnerRecord writeBackToShard(const WinnerKey& key, WinnerRecord record) const
+    {
+        if(_engineName.empty())
+        {
+            return record;
+        }
+
+        const auto& gcnArchName = key.device.properties().gcnArchName;
+        auto [shard, openStatus] = openWinnerCacheShard(_engineName, gcnArchName);
+        if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::VERSION_MISMATCH)
+        {
+            logShardFailureOnce(WinnerShardFailureKind::VERSION_MISMATCH, gcnArchName);
+            return record;
+        }
+        if(openStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK || !shard.has_value())
+        {
+            logShardFailureOnce(WinnerShardFailureKind::OPEN, gcnArchName);
+            return record;
+        }
+
+        if(hipdnn_data_sdk::utilities::lockLineStore(*shard)
+           != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+        {
+            logShardFailureOnce(WinnerShardFailureKind::LOCK, gcnArchName);
+            return record;
+        }
+
+        const auto [existing, readStatus]
+            = hipdnn_data_sdk::utilities::readAllLines(*shard, &decodeWinnerRecordLine);
+        if(readStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+        {
+            hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+            logShardFailureOnce(WinnerShardFailureKind::READ, gcnArchName);
+            return record;
+        }
+
+        // Last-line-wins, mirroring the reader's merge order: compare against the LAST
+        // line for this key, not the first. Once a shard can hold a superseded line, the
+        // first match is stale and comparing against it would wrongly adopt it.
+        const WinnerRecord* onDiskWinner = nullptr;
+        for(const auto& [existingKey, existingRecord] : existing)
+        {
+            if(existingKey == key)
+            {
+                onDiskWinner = &existingRecord;
+            }
+        }
+
+        if(onDiskWinner != nullptr && rankedIdsEqual(*onDiskWinner, record))
+        {
+            // Same ranking already on disk: adopt it rather than appending a duplicate
+            // line for an unchanged catalog.
+            hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+            return *onDiskWinner;
+        }
+
+        if(hipdnn_data_sdk::utilities::appendLine(*shard, encodeWinnerRecordLine(key, record))
+           != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+        {
+            logShardFailureOnce(WinnerShardFailureKind::APPEND, gcnArchName);
+        }
+        hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+        return record;
+    }
+
+    enum class WinnerShardFailureKind
+    {
+        OPEN,
+        LOCK,
+        READ,
+        APPEND,
+        VERSION_MISMATCH,
+    };
+
+    /// Logs @p kind once per manager instance, never per call. Every kind here is a
+    /// disk-level decline, never a throw; the caller has already fallen back to
+    /// in-memory-only behavior by the time this runs.
+    void logShardFailureOnce(WinnerShardFailureKind kind, const std::string& gcnArchName) const
+    {
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        if(!_loggedShardFailureKinds.insert(kind).second)
+        {
+            return;
+        }
+        switch(kind)
+        {
+        case WinnerShardFailureKind::OPEN:
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: on-disk winner cache could not be opened for "
+                                   "engine '"
+                                   << _engineName << "' arch '" << gcnArchName
+                                   << "'; on-disk miss, in-memory behavior continues");
+            break;
+        case WinnerShardFailureKind::LOCK:
+            HIPDNN_PLUGIN_LOG_INFO(
+                "ingestor: could not lock the on-disk winner cache shard for engine '"
+                << _engineName << "' arch '" << gcnArchName
+                << "'; on-disk write-back skipped for this call");
+            break;
+        case WinnerShardFailureKind::READ:
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: on-disk winner cache for engine '"
+                                   << _engineName << "' arch '" << gcnArchName
+                                   << "' could not be read; on-disk miss, in-memory behavior "
+                                      "continues");
+            break;
+        case WinnerShardFailureKind::APPEND:
+            HIPDNN_PLUGIN_LOG_INFO(
+                "ingestor: could not append a benchmarked ranking to the on-disk winner "
+                "cache for engine '"
+                << _engineName << "' arch '" << gcnArchName
+                << "'; the ranking is kept in-memory only for this process");
+            break;
+        case WinnerShardFailureKind::VERSION_MISMATCH:
+            HIPDNN_PLUGIN_LOG_WARN("ingestor: on-disk winner cache for engine '"
+                                   << _engineName << "' arch '" << gcnArchName
+                                   << "' declined: version mismatch; on-disk miss, in-memory "
+                                      "behavior continues");
+            break;
+        default:
+            // Unreachable; present because clang-tidy requires an explicit default.
+            break;
+        }
+    }
+
     MetadataSchema _schema;
     std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
     std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
@@ -701,12 +994,23 @@ private:
     GraphMatchFn _graphMatchFn = nullptr;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
 
+    /// The engine's own scoped name, used to locate its on-disk winner-cache shard.
+    /// Empty disables the disk cache for this manager entirely.
+    std::string _engineName;
+
     /// Unbounded, never evicted, own mutex (see WINNER_CACHE_WARNING_THRESHOLD). Separate
     /// from _catalogCache's lock: a shared lock would serialize benchmarking write-back
     /// against ordinary catalog lookups.
     mutable std::unordered_map<WinnerKey, WinnerRecord, WinnerKeyHash> _winnerCache;
     mutable std::mutex _winnerCacheMutex;
     mutable bool _winnerCacheGrowthWarned = false;
+    /// Shard arch components (`stripArchFeatures(gcnArchName)`) whose on-disk shard has
+    /// been read, or deterministically declined; see loadShardIfAbsent(). Guarded by
+    /// _winnerCacheMutex.
+    mutable std::unordered_set<std::string> _loadedWinnerShards;
+    /// Failure kinds already logged once (see logShardFailureOnce()); guarded by
+    /// _winnerCacheMutex.
+    mutable std::unordered_set<WinnerShardFailureKind> _loggedShardFailureKinds;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

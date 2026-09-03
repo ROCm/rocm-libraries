@@ -251,7 +251,7 @@ protected:
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         std::string planName;
-        result = graph->get_plan_name(planName);
+        result = graph->get_plan_name(_handle, planName);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         outEngineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(planName);

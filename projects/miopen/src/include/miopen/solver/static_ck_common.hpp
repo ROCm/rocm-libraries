@@ -32,7 +32,6 @@
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_STATIC_CK_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM)
 
-#define WORKAROUND_SWDEV_229277_227616_229195 1
 // workaround for unnecessary VGPA <--> AGRP data movement when using mfma LLVM intrinsic
 #define WORKAROUND_SWDEV_229564 1
 // workaround for buffer load/store fp16/bfp16 intrinsic bug

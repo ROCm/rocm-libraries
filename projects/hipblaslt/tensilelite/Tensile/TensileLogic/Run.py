@@ -48,18 +48,20 @@ from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
 from Tensile.LibraryIO import readYAML
 from Tensile.Toolchain.Validators import validateToolchain
 
-from .ParseArguments import parseArguments
+from .ParseArguments import parseArguments, BUNDLED_KNOWN_BUGS
 from .KnownBugs import (
     KnownBugKey,
     is_known_bug,
     load_known_bugs,
     normalize_logic_relative_path,
+    load_bundled_known_bugs,
 )
 from .ValidChipId import _validateChipId
 from .ValidMatrixInstruction import _validateMatrixInstruction
 from .ValidWorkGroup import _validateWorkGroup
 from .ValidWorkGroupMappingXCC import _validateWorkGroupMappingXCC, reset_reported_failures
 from .HandleCustomKernel import handleCustomKernel, hasCustomKernel
+
 
 
 class Check(NamedTuple):
@@ -286,7 +288,11 @@ def main():
     jobs, isaInfoMap, logicPath, files, check, args = _setup()
 
     try:
-        known_bugs = load_known_bugs(args.KnownBugs)
+        known_bugs = (
+            load_bundled_known_bugs()
+            if args.KnownBugs is BUNDLED_KNOWN_BUGS
+            else load_known_bugs(args.KnownBugs)
+        )
     except (ValueError, RuntimeError) as e:
         print(f"Error: {e}", file=sys.stderr)
         exit(1)

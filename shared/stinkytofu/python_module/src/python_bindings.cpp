@@ -47,6 +47,7 @@
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
 namespace nb = nanobind;
@@ -57,6 +58,7 @@ void init_logical_count(nb::module_& m);
 
 NB_MODULE(_stinkytofu, m) {
     BackendRegistry::registerAllBackends();
+    AllocationRulesRegistry::registerAll();
     m.doc() = "StinkyTofu: High-Level IR for AMDGPU Assembly Generation (internal C++ module)";
 
     // ========================================================================
@@ -387,7 +389,7 @@ NB_MODULE(_stinkytofu, m) {
                 }
                 return r == nb::cast<StinkyRegister>(other);
             },
-            nb::arg("other").none(true))
+            nb::arg("other").none())
         .def(
             "__ne__",
             [](const StinkyRegister& r, const nb::object& other) -> bool {
@@ -396,7 +398,7 @@ NB_MODULE(_stinkytofu, m) {
                 }
                 return r != nb::cast<StinkyRegister>(other);
             },
-            nb::arg("other").none(true))
+            nb::arg("other").none())
 
         // --- Copy semantics (KernelWriter does copy.deepcopy on registers) -
         // StinkyRegister is value-like (trivially copyable for the union; the
@@ -628,7 +630,23 @@ NB_MODULE(_stinkytofu, m) {
             },
             nb::arg("op_sel") = std::vector<int>{}, nb::arg("op_sel_hi") = std::vector<int>{},
             nb::arg("byte_sel") = std::vector<int>{},
-            "Set VOP3P (op_sel/op_sel_hi/byte_sel) modifiers");
+            "Set VOP3P (op_sel/op_sel_hi/byte_sel) modifiers")
+        .def(
+            "set_memtoken",
+            [](LogicalInstruction& inst, const std::vector<int>& tokens) {
+                inst.memtoken = tokens;
+            },
+            nb::arg("tokens"),
+            "Set memory token IDs for LDS dependency tracking (forwarded to MemTokenData)")
+        .def(
+            "set_swaitcnt",
+            [](LogicalInstruction& inst, int vlcnt, int vscnt, int dlcnt, int dscnt, int kmcnt) {
+                inst.swaitcnt = std::array<int, 5>{vlcnt, vscnt, dlcnt, dscnt, kmcnt};
+            },
+            nb::arg("vlcnt") = -1, nb::arg("vscnt") = -1, nb::arg("dlcnt") = -1,
+            nb::arg("dscnt") = -1, nb::arg("kmcnt") = -1,
+            "Set per-counter s_waitcnt values (forwarded to SWaitCntData; gfx12+ "
+            "legalizeWaitCnt splits the s_waitcnt into typed waits)");
 
     // ========================================================================
     // Auto-generated Python bindings for all IR instructions (~273 classes)

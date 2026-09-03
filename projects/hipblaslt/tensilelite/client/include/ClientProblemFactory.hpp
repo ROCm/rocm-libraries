@@ -110,6 +110,7 @@ namespace TensileLite
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
+            bool                             m_fusedGemmA2A;
             int                              m_metadataLayout;
             int                              m_mxBlockA;
             int                              m_mxBlockB;
