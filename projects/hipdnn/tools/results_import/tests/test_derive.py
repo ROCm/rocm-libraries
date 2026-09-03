@@ -81,7 +81,7 @@ def test_every_declared_dtype_has_a_width():
 
 
 def test_metrics_are_derived_from_the_declaration_and_the_time():
-    query = dict(M=1024, N=1024, K=1024, dtype="float32")
+    query = dict(M=1024, N=1024, K=1024, dtype="fp32")
     got = derive_metrics(query, time_ms=1.0, opmeta=opmeta("matmul"))
 
     assert got["tflops"] == pytest.approx(2 * 1024**3 / 1e-3 / 1e12)
@@ -91,9 +91,9 @@ def test_metrics_are_derived_from_the_declaration_and_the_time():
 
 def test_dtype_changes_bandwidth_but_not_throughput():
     """The reason elements is declared rather than bytes: only one of the two metrics moves."""
-    query = dict(M=512, N=512, K=512, dtype="float32")
+    query = dict(M=512, N=512, K=512, dtype="fp32")
     wide = derive_metrics(query, 1.0, opmeta("matmul"))
-    narrow = derive_metrics(dict(query, dtype="float16"), 1.0, opmeta("matmul"))
+    narrow = derive_metrics(dict(query, dtype="fp16"), 1.0, opmeta("matmul"))
 
     assert narrow["tflops"] == wide["tflops"]
     assert narrow["gbs"] == pytest.approx(wide["gbs"] / 2)
@@ -102,7 +102,7 @@ def test_dtype_changes_bandwidth_but_not_throughput():
 def test_a_memory_bound_operation_reports_bandwidth_and_no_throughput():
     """layernorm declares no flops on purpose; a number there would be a convention we invented."""
     got = derive_metrics(
-        dict(batch=4, seq_len=128, hidden_dim=768, dtype="float16"), 1.0, opmeta("layernorm_fwd")
+        dict(batch=4, seq_len=128, hidden_dim=768, dtype="fp16"), 1.0, opmeta("layernorm_fwd")
     )
     assert got["tflops"] is None
     assert got["gbs"] is not None
@@ -115,7 +115,7 @@ def test_no_measurement_yields_null_never_a_winner(time_ms):
     A zero time is impossible rather than fast, and dividing by it gives an infinity that
     outranks every real measurement. Nothing here may manufacture a value from an absent one.
     """
-    got = derive_metrics(dict(M=8, N=8, K=8, dtype="float32"), time_ms, opmeta("matmul"))
+    got = derive_metrics(dict(M=8, N=8, K=8, dtype="fp32"), time_ms, opmeta("matmul"))
     assert got == {"tflops": None, "gbs": None}
 
 

@@ -71,9 +71,9 @@
     "dtype": {
       "type": "enum",
       "values": [
-        "float32",
-        "float16",
-        "bfloat16",
+        "fp32",
+        "fp16",
+        "bf16",
         "fp8_e4m3",
         "fp8_e5m2",
         "fp8_e4m3_fnuz",

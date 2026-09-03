@@ -26,8 +26,8 @@
     "dtype": {
       "type": "enum",
       "values": [
-        "float16",
-        "bfloat16"
+        "fp16",
+        "bf16"
       ]
     }
   },
@@ -424,7 +424,7 @@
   "// archetypes": "Recorded transformer configurations (RFC 0019.13 \u00a712.3). Decode and prefill are the same operation and different problems -- seqlen_q of 1 against a long cache is memory bound, and a square prefill is compute bound -- so each is anchored separately rather than left to a range over seqlen_q.",
   "// neighbourhood": "head_dim is absent on purpose: it takes one of a few values fixed by the model architecture, and an interpolated 96 or 112 is not a configuration anyone ships. seqlen_k mirrors seqlen_q at ratios >= 1, which keeps the declared seqlen_q <= seqlen_k relation satisfied by construction rather than by rejection.",
   "// mixture": "Same shares as conv_fwd; see the note there.",
-  "// flops": "4*batch*heads*seqlen_q*seqlen_k*head_dim -- two matmuls (QK^T and PV), each 2*Sq*Sk*D per head. The form RFC 0019.13 states directly. Not halved for is_causal: the count is the work the operation defines, and a kernel that skips the masked half shows up as a better tflops rather than a smaller problem.",
+  "// flops": "Effective, not dense: the work a causal mask leaves, which is what aiter and Triton report. A number that means the same thing outside AMD is worth more than one that flatters a kernel by crediting it for arithmetic the mask discarded. 4*batch*heads*Sq*Sk*head_dim is the dense count -- two matmuls, QK^T and PV, at 2*Sq*Sk*D each per head -- scaled by (1 - is_causal/2), since a causal mask leaves about half the entries of a square problem. Written as arithmetic on the boolean rather than a conditional so the declaration needs no `if`: is_causal reads as 1 or 0, giving a factor of 0.5 or 1.",
   "flops": {
     "*": [
       4,
@@ -432,7 +432,18 @@
       "$q.heads",
       "$q.seqlen_q",
       "$q.seqlen_k",
-      "$q.head_dim"
+      "$q.head_dim",
+      {
+        "-": [
+          1,
+          {
+            "/": [
+              "$q.is_causal",
+              2
+            ]
+          }
+        ]
+      }
     ]
   },
   "// elements": "Q and O are Sq-long, K and V are Sk-long, all B*H*D wide: B*H*D*(2*Sq + 2*Sk). Element count across every tensor the operation touches, inputs and outputs. Dtype-free on purpose: bytes is elements times the dtype width, and the width table belongs to the tool rather than repeated as a nested dtype lookup in seven declarations. gbs = bytes / measured time, which is the metric that ranks a memory-bound kernel where tflops cannot.",

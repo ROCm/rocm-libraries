@@ -8,10 +8,20 @@ from __future__ import annotations
 import json
 import pathlib
 
-import pandas as pd
 import pytest
 
-from results_import.importer import ValidationError, build_dataset, load_csvs, write_parquet
+# Module scope, before the imports that need it. pandas is what this module is written against,
+# and importing it at the top would make its absence a collection *error* -- indistinguishable
+# from a broken test -- where the derive suite beside it needs nothing but the standard library
+# and must keep running. The Parquet engine is skipped separately, at the one case that writes.
+pd = pytest.importorskip("pandas")
+
+from results_import.importer import (  # noqa: E402  (deliberately after the skip)
+    ValidationError,
+    build_dataset,
+    load_csvs,
+    write_parquet,
+)
 
 OPERATIONS = pathlib.Path(__file__).resolve().parents[2] / "corpus_gen" / "operations"
 
@@ -25,7 +35,7 @@ def matmul() -> dict:
 def rows(**overrides) -> pd.DataFrame:
     base = {
         "q.M": [1024, 1024], "q.N": [1024, 1024], "q.K": [1024, 1024],
-        "q.dtype": ["float32", "float32"],
+        "q.dtype": ["fp32", "fp32"],
         "kernel.tile_m": [64, 128], "device.cu_count": [80, 80],
         "minTimeMs": [1.0, 2.0], "avgTimeMs": [1.1, 2.1],
         "stddevMs": [0.01, 0.01], "iters": [10, 10],
@@ -145,7 +155,7 @@ def test_an_empty_csv_field_reads_back_as_a_null_metric(tmp_path, matmul):
     path.write_text(
         "q.M,q.N,q.K,q.dtype,kernel.tile_m,device.cu_count,"
         "minTimeMs,avgTimeMs,stddevMs,iters,error\n"
-        "1024,1024,1024,float32,64,80,,,,,HIP error 700\n"
+        "1024,1024,1024,fp32,64,80,,,,,HIP error 700\n"
     )
     out = build_dataset(load_csvs([path]), matmul)
     assert pd.isna(out["tflops"].iloc[0])

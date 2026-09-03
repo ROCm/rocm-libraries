@@ -27,8 +27,8 @@
     "dtype": {
       "type": "enum",
       "values": [
-        "float32",
-        "float16"
+        "fp32",
+        "fp16"
       ]
     }
   },
