@@ -603,11 +603,12 @@ endfunction()
 # ---------------------------------------------------------------------------
 # hkp_rocke_wheel_python_interp(<out_interp> <wheel_stamp>)
 #   Provision a build-local interpreter carrying the rocke + rocke_library
-#   wheels (built by the rocke-wheels target, which requires
-#   HIPKERNELPROVIDER_ENABLE_ROCKE). The production tool imports rocke/kernels
-#   from these installed wheels rather than the editable dev venv. The venv
-#   interpreter is an add_custom_command OUTPUT so the production command can
-#   depend on it for build ordering.
+#   wheels. With ROCKE_BUILD_PYENV ON they are built by the rocke-wheels target,
+#   which rides HIPKERNELPROVIDER_ENABLE_ROCKE; with it OFF there is no such
+#   target and the wheels are supplied through ROCKE_WHEEL_DIR. The production
+#   tool imports rocke/kernels from these wheels rather than the editable dev
+#   venv, in either provenance. The venv interpreter is an add_custom_command
+#   OUTPUT so the production command can depend on it for build ordering.
 #
 #   The venv is HERMETIC:
 #     - no --system-site-packages: the dev venv inherits it to pick up the
@@ -690,12 +691,20 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_require_ingestor_toolchain(<out_arches>)
-#   Assert what the ingestor needs to pack anything, and return the architecture
-#   list. Set HKP_HIPCC as a side effect.
+#   Assert what the ingestor needs to pack anything -- hipcc, a non-empty gfx
+#   list, and the rocke wheel supply -- and return the architecture list. Set
+#   HKP_HIPCC as a side effect.
 #
-#   Either prerequisite missing leaves the packer with no output root to create,
-#   and a consumer of a packed root reports that as a broken layout rather than
-#   as a missing prerequisite. Fail here instead, and name the remedy.
+#   Without hipcc or a gfx list the packer creates no output root at all, and a
+#   consumer of a packed root reports that as a broken layout rather than as a
+#   missing prerequisite. A missing wheel supply surfaces later still, inside the
+#   venv provisioning's pip install or import. Fail here for all three instead,
+#   and name the remedy.
+#
+#   The wheel check covers SUPPLY, not importability. The interpreter that
+#   imports rocke/kernels is the venv hkp_rocke_wheel_python_interp provisions,
+#   an add_custom_command OUTPUT that does not exist until the build runs; the
+#   import is asserted there, in the interpreter the pack step will use.
 # ---------------------------------------------------------------------------
 function(hkp_require_ingestor_toolchain out_arches)
     # hipcc is the perl/bat driver that honors --genco; on Windows it is
@@ -709,6 +718,36 @@ function(hkp_require_ingestor_toolchain out_arches)
             "hipcc, hipcc.bat, hipcc.bin.exe). Put the ROCm bin directory on "
             "PATH or CMAKE_PROGRAM_PATH, or set "
             "HIPDNN_ENABLE_KERNEL_INGESTOR=OFF.")
+    endif()
+
+    if(NOT ROCKE_WHEEL_DIR OR NOT ROCKE_WHEEL_VERSION)
+        message(FATAL_ERROR
+            "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and requires the rocke "
+            "wheels to pack rocKE kernels, but ROCKE_WHEEL_DIR "
+            "(${ROCKE_WHEEL_DIR}) and ROCKE_WHEEL_VERSION "
+            "(${ROCKE_WHEEL_VERSION}) are not both set. Leave "
+            "ROCKE_BUILD_PYENV=ON to have the build produce the wheels and set "
+            "both variables, or with ROCKE_BUILD_PYENV=OFF set ROCKE_WHEEL_DIR "
+            "and ROCKE_WHEEL_VERSION to the wheels you supply.")
+    endif()
+
+    # ROCKE_BUILD_PYENV=ON makes the wheels build outputs, absent until the build
+    # runs. Only with it OFF are they inputs, and only then can they be checked.
+    if(NOT ROCKE_BUILD_PYENV)
+        set(_platform_wheel
+            "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
+        set(_library_wheel
+            "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
+        if(NOT EXISTS "${_platform_wheel}" OR NOT EXISTS "${_library_wheel}")
+            message(FATAL_ERROR
+                "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and ROCKE_BUILD_PYENV "
+                "is OFF, so the rocke wheels must be supplied, but "
+                "ROCKE_WHEEL_DIR (${ROCKE_WHEEL_DIR}) does not hold both of:\n"
+                "    rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
+                "    rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
+                "Point ROCKE_WHEEL_DIR at a directory holding both, correct "
+                "ROCKE_WHEEL_VERSION, or set ROCKE_BUILD_PYENV=ON to build them.")
+        endif()
     endif()
 
     hkp_selected_arches(_arches _arch_source)
@@ -732,17 +771,18 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_add_packaging()
-#   Gate production packaging on ONE source root plus explicit per-producer
-#   switches. The root names a location; the switches say which producers may
-#   run.
+#   Gate production packaging on ONE source root, with a second switch selecting
+#   the interpreter the pack step runs under. The root names a location;
+#   producer selection is per-UKD on kernel_source.kind, so both producers are
+#   available to every root.
 #
 #   This function runs only under HIPDNN_ENABLE_KERNEL_INGESTOR, and asserts
 #   that option's prerequisites first through hkp_require_ingestor_toolchain.
 #
 #   Root empty = production packaging dormant. Root set but not a directory =
-#   fatal. Root set with neither switch on = fatal. Configure hard-fails when the
-#   rocke switch is on and its conjunction (ENABLE_ROCKE + wheel-env +
-#   importable) is incomplete. The tests are wired regardless.
+#   fatal. Root set with the rocke interpreter selected and comgr unresolvable =
+#   fatal, because no rocKE kernel could be lowered. The tests are wired
+#   regardless.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -755,13 +795,11 @@ function(hkp_add_packaging)
 Walked recursively; child folders under it scope the content (hip/, rocKE/, \
 per-integration folders) and each descriptor's authored subpath is preserved \
 into the staged and installed trees. Empty leaves production packaging dormant.")
-    set(HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP OFF CACHE BOOL
-        "Allow the hip producer to run over the production source root. \
-Requires a configure-discoverable hipcc.")
     set(HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE OFF CACHE BOOL
-        "Allow the rocKE producer to run over the production source root. \
-Requires HIPKERNELPROVIDER_ENABLE_ROCKE, the rocke wheel-env, and importable \
-rocke/kernels packages.")
+        "Run the production pack step under the rocke wheel interpreter, so \
+rocKE UKDs in the production source root can be lowered. OFF packs under the \
+base interpreter and provisions no venv, which is enough for a production root \
+holding no rocKE kernels.")
 
     set(_source_root "")
     if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
@@ -773,19 +811,6 @@ rocke/kernels packages.")
         set(_source_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
     endif()
 
-    # A root with no producer enabled would pack nothing and install an empty
-    # tree — the silent-empty-package failure mode. Name both switches so the
-    # fix is obvious.
-    if(_source_root
-       AND NOT HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP
-       AND NOT HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE)
-        message(FATAL_ERROR
-            "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is set but no "
-            "producer is enabled — set HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP "
-            "and/or HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE, otherwise the "
-            "pack step would ship an empty tree.")
-    endif()
-
     set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "" CACHE PATH
         "Explicit libamd_comgr for the rocKE producer to load. Forwarded into \
 ROCKE_COMGR_LIB for the pack step and the ctest entries. Needed on Windows, \
@@ -793,10 +818,8 @@ where a System32 amd_comgr.dll can shadow the ROCm one; empty lets rocke \
 resolve normally. Note rocke treats this as the first CANDIDATE, not an \
 assertion: an unloadable path silently falls through to the next candidate.")
 
-    # The rocKE producer requires the full conjunction: ENABLE_ROCKE (which
-    # builds the wheels), the wheel-env available, and rocke/kernels importable.
-    # Any missing piece is a configure hard-fail naming what is missing.
     set(_rocke_interp "")
+    set(_rocke_wheel_stamp "")
     # ROCKE_COMGR_LIB is rocke's RUNTIME environment variable (comgr.py:66,99,
     # core.cpp:471). Nothing in this repository ever set() or option()s it, so
     # reading it here was reading an always-empty variable and the forwarding
@@ -806,24 +829,13 @@ assertion: an unloadable path silently falls through to the next candidate.")
     set(_enable_rocke OFF)
     if(_source_root AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE)
         set(_enable_rocke ON)
-        if(NOT HIPKERNELPROVIDER_ENABLE_ROCKE)
-            message(FATAL_ERROR
-                "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE is ON but "
-                "HIPKERNELPROVIDER_ENABLE_ROCKE is OFF — enable it so the "
-                "rocke/kernels wheels are built and importable.")
-        endif()
-        if(NOT ROCKE_WHEEL_DIR)
-            message(FATAL_ERROR
-                "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE is ON but the "
-                "rocke wheel-env is not available (ROCKE_WHEEL_DIR unset).")
-        endif()
         hkp_probe_comgr_resolvable(_comgr_ok _comgr_detail)
         if(NOT _comgr_ok)
             message(FATAL_ERROR
                 "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE is ON but comgr "
                 "could not be resolved, so no rocKE kernel can be lowered. Set "
-                "HIPKERNELPROVIDER_ROCKE_COMGR_LIB to an explicit "
-                "libamd_comgr, or make one discoverable. Resolver said:\n"
+                "HIPKERNELPROVIDER_ROCKE_COMGR_LIB to an explicit libamd_comgr, "
+                "or make one discoverable. Resolver said:\n"
                 "${_comgr_detail}")
         endif()
         hkp_rocke_wheel_stamp(_rocke_wheel_stamp)

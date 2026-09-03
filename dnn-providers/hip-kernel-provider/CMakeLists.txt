@@ -287,15 +287,32 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     endif()
 endif()
 
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPKERNELPROVIDER_ENABLE_ROCKE)
+    message(FATAL_ERROR
+        "hip-kernel-provider: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and packs "
+        "rocKE kernels, but HIPKERNELPROVIDER_ENABLE_ROCKE is OFF, so the "
+        "rocKE engine and its Python wheels are never built and the pack "
+        "step would have nothing to lower rocKE kernels with. Configure "
+        "with -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON, or with "
+        "-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF.")
+endif()
+
 if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     message(STATUS "rocKE features enabled")
 
     # rocke/ = platform (engine + build-time Python). The engine's installed
     # CTest entries stage into EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider,
     # so add_subdirectory(rocke) must precede src/ below, which emits
-    # bin/hip_kernel_provider/CTestTestfile.cmake.
+    # bin/hip_kernel_provider/CTestTestfile.cmake. It must also precede
+    # descriptor-packaging below, whose ingestor-toolchain assertion reads the
+    # ROCKE_WHEEL_DIR and ROCKE_WHEEL_VERSION cache variables rocke/ sets.
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
+
+    # rocKE's installed Python CTest entries invoke a bare `python`, which the
+    # runtime image does not provide, so they cannot run from an installed tree.
+    # The installed C++ entries and the rocke Python frontend are unaffected.
+    set(ROCKE_INSTALL_PYTHON_TESTS OFF)
 
     add_subdirectory(rocke)
 else()
