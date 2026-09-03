@@ -74,12 +74,12 @@ else()
 endif()
 
 # CMake modules
-list(APPEND CMAKE_MODULE_PATH
-${CMAKE_CURRENT_SOURCE_DIR}/cmake
-${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules
-$ENV{ROCM_PATH}/lib/cmake/hip
-${HIP_PATH}/cmake $ENV{ROCM_PATH}/hip/cmake # FindHIP.cmake
-$ENV{ROCM_PATH}/llvm
+list(APPEND
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+  $ENV{ROCM_PATH}/lib/cmake/hip
+  ${HIP_PATH}/cmake $ENV{ROCM_PATH}/hip/cmake # FindHIP.cmake
+  $ENV{ROCM_PATH}/llvm
 )
 
 #
@@ -91,6 +91,11 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "Setting build type to 'Release' as none was specified.")
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+endif()
+
+set(ROCRAND_PROJECT_IS_TOP_LEVEL FALSE)
+if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  set(ROCRAND_PROJECT_IS_TOP_LEVEL TRUE)
 endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
@@ -229,34 +234,36 @@ if (BUILD_BENCHMARK)
 endif()
 
 # Package (make package)
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
-set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+if(ROCRAND_PROJECT_IS_TOP_LEVEL)
+  set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
+  set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
-if( HIP_RUNTIME_LOWER STREQUAL "rocclr" )
-    if(BUILD_ADDRESS_SANITIZER)
-        set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
-    else()
-        set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
-    endif()
-    rocm_package_add_dependencies("${DEPENDS_HIP_RUNTIME} >= 4.5.0")
-elseif( HIP_RUNTIME STREQUAL "cuda" )
-    rocm_package_add_dependencies("hip-nvcc >= 3.5.0")
-endif( )
+  if( HIP_RUNTIME_LOWER STREQUAL "rocclr" )
+      if(BUILD_ADDRESS_SANITIZER)
+          set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
+      else()
+          set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
+      endif()
+      rocm_package_add_dependencies("${DEPENDS_HIP_RUNTIME} >= 4.5.0")
+  elseif( HIP_RUNTIME STREQUAL "cuda" )
+      rocm_package_add_dependencies("hip-nvcc >= 3.5.0")
+  endif( )
 
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
+  set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
 
-if(HIP_COMPILER STREQUAL "nvcc")
-    set(package_name rocrand-alt)
-else()
-    set(package_name rocrand)
+  if(HIP_COMPILER STREQUAL "nvcc")
+      set(package_name rocrand-alt)
+  else()
+      set(package_name rocrand)
+  endif()
+
+  set(ROCRAND_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
+
+  rocm_create_package(
+      NAME ${package_name}
+      DESCRIPTION "rocRAND is a ROCm random number generation library"
+      MAINTAINER "rocRAND Maintainer <hiprand-maintainer@amd.com>"
+      LDCONFIG
+      # LDCONFIG_DIR ${ROCRAND_CONFIG_DIR}
+  )
 endif()
-
-set(ROCRAND_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
-
-rocm_create_package(
-    NAME ${package_name}
-    DESCRIPTION "rocRAND is a ROCm random number generation library"
-    MAINTAINER "rocRAND Maintainer <hiprand-maintainer@amd.com>"
-    LDCONFIG
-    # LDCONFIG_DIR ${ROCRAND_CONFIG_DIR}
-)
