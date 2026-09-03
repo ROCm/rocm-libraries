@@ -7,9 +7,10 @@
 
 #include <gtest/gtest.h>
 
-#include "KernelIngestorTestFixtures.hpp"
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+
+#include "KernelIngestorTestFixtures.hpp"
 
 /**
  * @file TestNativeRegistry.cpp

@@ -119,7 +119,6 @@ __all__ = [
     "ActivationMode",
     "PoolingMode",
     "BatchnormMode",
-    "HeuristicMode",
     "EngineInfo",
     "Knob",
     "KnobSetting",

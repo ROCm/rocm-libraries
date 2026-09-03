@@ -29,10 +29,8 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
-
-#include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
 
 /**
  * @file KernelIngestorTestFixtures.hpp
@@ -41,8 +39,6 @@
 namespace hipdnn_plugin_sdk::ingestor::testing
 {
 
-using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::GraphId;
-using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::makeGraphId;
 constexpr const char* BLOCK_SIZE = "block_size";
 constexpr const char* DTYPE = "dtype";
 constexpr const char* GRAPH_MATCH_SYMBOL = "hipdnn.kernel_ingestor.test.graph_match";
@@ -142,6 +138,15 @@ private:
         _tensors;
 };
 
+inline GraphId makeGraphId(uint8_t seed)
+{
+    GraphId id{};
+    id.fill(seed);
+    id[6] = static_cast<uint8_t>((id[6] & 0x0fU) | 0x40U);
+    id[8] = static_cast<uint8_t>((id[8] & 0x3fU) | 0x80U);
+    return id;
+}
+
 inline GraphId makeNonV4GraphId(uint8_t seed)
 {
     GraphId id{};
@@ -160,14 +165,6 @@ inline DeviceProperties testDeviceProperties()
     DeviceProperties properties;
     properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
-    // Non-zero memory facts, so a corpus row emitted through this fixture carries the
-    // `device.*` columns a merged multi-board sweep depends on, rather than a set of
-    // zeroes that would satisfy an "is the column present" check while proving nothing.
-    properties.multiProcessorCount = 304;
-    properties.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
-    properties.memoryBusWidth = 8192;
-    properties.memoryClockRate = 2600000;
-    properties.sharedMemPerBlock = 64 * 1024;
     return properties;
 }
 

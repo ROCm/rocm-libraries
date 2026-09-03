@@ -140,10 +140,7 @@ void typesBindings(nb::module_& m)
         .value("TRAINING", NormFwdPhase::TRAINING);
 
     // Bind HeuristicMode enum
-    nb::enum_<HeuristicMode>(m, "HeuristicMode")
-        .value("FALLBACK", HeuristicMode::FALLBACK)
-        .value("A", HeuristicMode::A)
-        .value("B", HeuristicMode::B);
+    nb::enum_<HeuristicMode>(m, "HeuristicMode").value("FALLBACK", HeuristicMode::FALLBACK);
 
     // Bind BehaviorNote enum
     nb::enum_<BehaviorNote>(m, "BehaviorNote")

@@ -20,7 +20,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
@@ -165,11 +165,10 @@ TEST(TestConvFwdBinding, BindsDtypeAsTheRuntimeSpellingNotTheFlatbufferEnumName)
     ASSERT_TRUE(floatBound.has_value());
     ASSERT_TRUE(halfBound.has_value());
 
-    // to_string(DataType)'s spelling, which is the vocabulary a UHD's generated
-    // `categorical_encoding` (RFC 0019 §6.5) is fitted on. EnumNameDataType would answer
-    // "FLOAT"/"HALF" and `float32`/`float16` are the plausible near-misses; a corpus
-    // recorded from real runs holds none of the three, so none has a code and a wrong
-    // spelling here costs the feature rather than warning.
+    // to_string(DataType)'s spelling, which is the vocabulary CategoricalEncoding.hpp
+    // encodes. EnumNameDataType would answer "FLOAT"/"HALF" and `float32`/`float16` are
+    // the plausible near-misses; the encoder knows none of the three and throws on the
+    // last, so a wrong spelling here costs the feature rather than warning.
     EXPECT_EQ(boundString(*floatBound, "conv_fwd.x.dtype"), "fp32");
     EXPECT_EQ(boundString(*floatBound, "conv_fwd.w.dtype"), "fp32");
     EXPECT_EQ(boundString(*floatBound, "conv_fwd.y.dtype"), "fp32");
@@ -229,8 +228,8 @@ TEST(TestConvFwdBinding, ByteCountFollowsTheOperandDtypeWidthAndFlopsDoesNot)
 /// reason the stronger assertion is absent, so its absence is not read as an oversight.
 TEST(TestConvFwdBinding, AMixedPrecisionConvIsRefusedSoPerOperandWidthCannotBeObservedHere)
 {
-    const GraphFixture fixture(
-        buildAsymmetricConvGraph(data_objects::DataType::FLOAT, data_objects::DataType::HALF));
+    const GraphFixture fixture(buildAsymmetricConvGraph(data_objects::DataType::FLOAT,
+                                                        data_objects::DataType::HALF));
 
     EXPECT_FALSE(matchesGraph(CONV_FWD, fixture.context()).has_value());
 }

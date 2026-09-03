@@ -1,8 +1,10 @@
 find_package(Threads REQUIRED)
 
-# Tensor sizing and initialization helpers require no device or plugin.
+# Sizing and enumeration only: no device, no plugins, no engine. Everything asserted here is
+# arithmetic over tensors and constraints the test constructs, which is what makes it able to
+# catch the failures that produce a plausible number rather than an error.
 add_executable(hipdnn_bench_tests
-    TestVariantPackBuilder.cpp TestTensorFillers.cpp
+    TestVariantPackBuilder.cpp TestKnobEnumeration.cpp TestTensorFillers.cpp
     TestCsvOutput.cpp)
 
 target_compile_options(hipdnn_bench_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

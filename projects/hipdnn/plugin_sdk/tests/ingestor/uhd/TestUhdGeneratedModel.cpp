@@ -99,37 +99,9 @@ Catalog catalogAgainstPriority(int64_t seqlen)
     large.metadata["tile_m"] = int64_t{128};
 
     catalog.entries = {small, large};
-    catalog.bound["q.seqlen"] = seqlen;
+    catalog.bound["seqlen"] = seqlen;
     return catalog;
 }
-
-/// The committed `dtype_selector` pair, whose signature reads a STRING field.
-///
-/// A second fixture rather than a richer first one: `tile_selector` is numeric
-/// throughout, and it has to stay that way to keep proving that a signature with
-/// no categorical field hashes exactly as it did before the field existed.
-HeuristicDescriptor dtypeDescriptor()
-{
-    const auto dir = fixtureDir() / "dtype_selector";
-    const auto path = dir / "dtype_selector.uhd.json";
-    std::ifstream stream(path);
-    auto descriptor = detail::parseHeuristicDescriptor(nlohmann::json::parse(stream), path);
-    descriptor.treeRoot = dir;
-    return descriptor;
-}
-
-/// The same two tiles, with the dtype the model actually splits on bound.
-Catalog catalogForDtype(const std::string& dtype)
-{
-    Catalog catalog = catalogAgainstPriority(1024);
-    for(auto& entry : catalog.entries)
-    {
-        entry.metadata["dtype"] = dtype;
-    }
-    return catalog;
-}
-
-const std::vector<std::string> DTYPE_KNOBS = {"dtype", "tile_m"};
 
 /// The knobs an engine shipping this model would declare.
 ///
@@ -141,6 +113,23 @@ const std::vector<std::string> DTYPE_KNOBS = {"dtype", "tile_m"};
 const std::vector<std::string> KNOBS = {"tile_m"};
 
 } // namespace
+
+TEST(TestIngestorUhdGeneratedModel, TheToolsOwnOutputLoads)
+{
+    // The whole chain in one assertion: the descriptor parses, its features_hash
+    // matches what the C++ extractor recomputes from the signature beside it, and
+    // model.bin resolves relative to the descriptor and loads. Any one of the
+    // three failing returns nullptr here.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const auto heuristic = makeKernelHeuristic(generatedDescriptor(), {}, KNOBS);
+
+    ASSERT_NE(heuristic, nullptr);
+    EXPECT_EQ(recorder.getRecordedLogCount(), 0U)
+        << "loading the tool's output must be silent: "
+        << recorder.getRecordedLogsAsString();
+}
 
 TEST(TestIngestorUhdGeneratedModel, TheModelDecidesTheOrderRatherThanPriority)
 {
@@ -182,29 +171,20 @@ TEST(TestIngestorUhdGeneratedModel, TheSameCatalogRanksDifferentlyForADifferentP
     EXPECT_EQ(shortSequence.front().kernelId, testId(0x01)) << "short sequence wants tile 64";
 }
 
-// ---- A signature that reads a string (RFC 0019 §6.5) ---------------------------
-
-TEST(TestIngestorUhdGeneratedModel, TheModelRanksOnTheStringItWasTrainedOn)
+TEST(TestIngestorUhdGeneratedModel, TheCommittedDescriptorNamesTheCommittedArtifact)
 {
-    // End to end: a category reaches the model as a number and changes the answer.
-    // The two catalogs differ ONLY in dtype -- same tiles, same priorities, same
-    // seqlen -- so a model that never saw the string cannot produce this flip, and a
-    // model reading it through the wrong codes produces the flip backwards.
-    const auto heuristic = makeKernelHeuristic(dtypeDescriptor(), {}, DTYPE_KNOBS);
-    ASSERT_NE(heuristic, nullptr);
+    // The artifact reference, checked as a file rather than inferred from a
+    // successful load. A fixture regenerated with a different --descriptor-name
+    // would still load while silently no longer matching what the docs describe.
+    const auto descriptorPath = fixtureDir() / "tile_selector.uhd.json";
+    ASSERT_TRUE(std::filesystem::exists(descriptorPath));
 
-    const testing::TestGraph graph;
-    auto properties = testing::testDeviceProperties();
-    properties.gcnArchName = "gfx942";
-    const MatchContext context{graph, 0, properties};
+    std::ifstream stream(descriptorPath);
+    const auto document = nlohmann::json::parse(stream);
+    EXPECT_EQ(document.at("adapter"), "tree_data");
+    EXPECT_EQ(document.at("tree_data").at("artifact"), "model.bin");
 
-    const auto wide = heuristic->rank(catalogForDtype("BF16"), context);
-    const auto narrow = heuristic->rank(catalogForDtype("FP16"), context);
-
-    ASSERT_EQ(wide.size(), 2U);
-    ASSERT_EQ(narrow.size(), 2U);
-    EXPECT_EQ(wide.front().kernelId, testId(0x02)) << "BF16 was trained to want tile 128";
-    EXPECT_EQ(narrow.front().kernelId, testId(0x01)) << "FP16 was trained to want tile 64";
+    EXPECT_TRUE(std::filesystem::exists(fixtureDir() / "model.bin"));
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

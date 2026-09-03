@@ -130,7 +130,6 @@ add_executable(
     heuristics/TestDeviceProperties.cpp
     heuristics/TestEngineOverrideConfig.cpp
     heuristics/TestStaticOrderingBuiltIn.cpp
-    heuristics/TestPredictionPolicies.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestEnginePluginOverride.cpp

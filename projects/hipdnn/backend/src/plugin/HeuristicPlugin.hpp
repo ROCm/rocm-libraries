@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "PluginCore.hpp"
-#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_plugin_sdk/HeuristicsPluginApi.h>
 
 namespace hipdnn_backend::plugin
@@ -68,12 +67,10 @@ struct HeuristicPluginFunctionTable
         = nullptr;
 
     // Trace retrieval (RFC 0019 §13)
-    hipdnnPluginStatus_t (*policyGetTrace)(hipdnnHeuristicPolicyDescriptor_t, int64_t, const char**)
+    hipdnnPluginStatus_t (*policyGetTrace)(hipdnnHeuristicPolicyDescriptor_t,
+                                           int64_t,
+                                           const char**)
         = nullptr;
-
-    // Optional prediction-aware ABI (0.1.0); absence preserves legacy behavior.
-    decltype(&hipdnnHeuristicPolicyFinalizeWithHost) policyFinalizeWithHost = nullptr;
-    decltype(&hipdnnHeuristicPolicyGetEngineConfig) policyGetEngineConfig = nullptr;
 };
 
 /**
@@ -156,10 +153,6 @@ public:
     // Selection execution
     virtual bool finalize(hipdnnHeuristicPolicyDescriptor_t desc) const;
     virtual std::vector<int64_t> getSortedEngineIds(hipdnnHeuristicPolicyDescriptor_t desc) const;
-    virtual bool finalizeWithHost(hipdnnHeuristicPolicyDescriptor_t desc,
-                                  const hipdnnHeuristicHostCallbacks_t* host) const;
-    virtual std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>
-        getEngineConfig(hipdnnHeuristicPolicyDescriptor_t desc, int64_t engineId) const;
 
     // Validation helpers shared between resolveSymbols() (run at load time) and
     // unit tests. Each helper throws HipdnnException on failure.

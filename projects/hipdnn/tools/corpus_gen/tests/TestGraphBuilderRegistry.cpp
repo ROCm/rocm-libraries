@@ -167,8 +167,10 @@ TEST(TestGraphBuilderRegistry, ArgumentsAreMatchedByNameNotByPosition)
       }
     })");
 
-    const ProblemPoint point{
-        {"M", int64_t{32}}, {"N", int64_t{16}}, {"K", int64_t{8}}, {"dtype", std::string("fp32")}};
+    const ProblemPoint point{{"M", int64_t{32}},
+                             {"N", int64_t{16}},
+                             {"K", int64_t{8}},
+                             {"dtype", std::string("fp32")}};
 
     const auto shuffled = buildGraphFor(parseOperationMetadata(reordered).metadata.value(), point);
     const auto ordered = buildGraphFor(matmulMetadata(),
@@ -233,24 +235,11 @@ TEST(TestGraphBuilderRegistry, EveryDataTypeTheBackendAcceptsCanBeNamed)
     // hand-written copy of that list here named ten, so a declaration asking for fp4_e2m1 or a
     // fnuz variant was refused exactly as a misspelling would be. A corpus cannot cover a dtype
     // it cannot spell, and nothing in the output distinguishes "unsupported" from "unnameable".
-    const std::vector<std::string> supported{"float",
-                                             "double",
-                                             "half",
-                                             "bfloat16",
-                                             "int8",
-                                             "uint8",
-                                             "int32",
-                                             "int64",
-                                             "boolean",
-                                             "fp8_e4m3",
-                                             "fp8_e5m2",
-                                             "fp8_e8m0",
-                                             "fp8_e4m3_fnuz",
-                                             "fp8_e5m2_fnuz",
-                                             "fp4_e2m1",
-                                             "fp6_e2m3",
-                                             "fp6_e3m2",
-                                             "int4"};
+    const std::vector<std::string> supported{
+        "float",     "double",       "half",         "bfloat16",      "int8",  "uint8",
+        "int32",     "int64",        "boolean",      "fp8_e4m3",      "fp8_e5m2",
+        "fp8_e8m0",  "fp8_e4m3_fnuz", "fp8_e5m2_fnuz", "fp4_e2m1",   "fp6_e2m3",
+        "fp6_e3m2",  "int4"};
 
     for(const auto& name : supported)
     {
@@ -264,10 +253,9 @@ TEST(TestGraphBuilderRegistry, EveryDataTypeTheBackendAcceptsCanBeNamed)
     EXPECT_EQ(detail::dataTypeFor("fp64"), detail::dataTypeFor("double"));
 
     // The numpy spellings are refused, not quietly accepted. Resolving them would build a valid
-    // graph and then write `float32` into the corpus's `q.dtype` column, so the
-    // `categorical_encoding` generated from that corpus would hold `float32` while the runtime
-    // binds `fp32` -- a spelling that corpus never held, with no code, refused at scoring.
-    // Failing here names the offending declaration instead.
+    // graph and then write `float32` into the corpus's `q.dtype` column, which the encoder in
+    // plugin_sdk .../ingestor/uhd/CategoricalEncoding.hpp throws on -- a corpus that fails only
+    // at training time. Failing here names the offending declaration instead.
     EXPECT_FALSE(detail::dataTypeFor("float32").has_value());
     EXPECT_FALSE(detail::dataTypeFor("float16").has_value());
     EXPECT_FALSE(detail::dataTypeFor("float64").has_value());
@@ -286,7 +274,8 @@ TEST(TestGraphBuilderRegistry, EveryShippedDeclarationNamesABuilderThatExists)
     const auto names = registeredBuilders();
 
     int declarationsSeen = 0;
-    for(const auto& file : std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
+    for(const auto& file :
+        std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
     {
         if(file.path().string().find(".opmeta.json") == std::string::npos)
         {
@@ -320,21 +309,13 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionMetadataBuildsRealGraphs)
     ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
 
     // ResNet50 conv1: 224x224x3 -> 112x112x64, 7x7 filter, stride 2, pad 3.
-    const ProblemPoint conv1{{"N", int64_t{64}},
-                             {"C", int64_t{3}},
-                             {"K", int64_t{64}},
-                             {"groups", int64_t{1}},
-                             {"H", int64_t{224}},
-                             {"W", int64_t{224}},
-                             {"R", int64_t{7}},
-                             {"S", int64_t{7}},
-                             {"pad_h", int64_t{3}},
-                             {"pad_w", int64_t{3}},
-                             {"stride_h", int64_t{2}},
-                             {"stride_w", int64_t{2}},
-                             {"dilation_h", int64_t{1}},
-                             {"dilation_w", int64_t{1}},
-                             {"dtype", std::string("fp16")}};
+    const ProblemPoint conv1{{"N", int64_t{64}},        {"C", int64_t{3}},
+                             {"K", int64_t{64}},        {"groups", int64_t{1}},   {"H", int64_t{224}},
+                             {"W", int64_t{224}},       {"R", int64_t{7}},
+                             {"S", int64_t{7}},         {"pad_h", int64_t{3}},
+                             {"pad_w", int64_t{3}},     {"stride_h", int64_t{2}},
+                             {"stride_w", int64_t{2}},  {"dilation_h", int64_t{1}},
+                             {"dilation_w", int64_t{1}}, {"dtype", std::string("fp16")}};
 
     const auto built = buildGraphFor(*parsed.metadata, conv1);
     ASSERT_TRUE(built.ok()) << built.error;
@@ -365,19 +346,12 @@ TEST(TestGraphBuilderRegistry, TheShippedMetadataCoversEveryDeclaredDtype)
     ASSERT_NE(dtype, nullptr);
     for(const auto& value : dtype->enumerable())
     {
-        ProblemPoint point{{"N", int64_t{1}},
-                           {"C", int64_t{2}},
-                           {"K", int64_t{2}},
-                           {"groups", int64_t{1}},
-                           {"H", int64_t{8}},
-                           {"W", int64_t{8}},
-                           {"R", int64_t{3}},
-                           {"S", int64_t{3}},
-                           {"pad_h", int64_t{0}},
-                           {"pad_w", int64_t{0}},
-                           {"stride_h", int64_t{1}},
-                           {"stride_w", int64_t{1}},
-                           {"dilation_h", int64_t{1}},
+        ProblemPoint point{{"N", int64_t{1}},         {"C", int64_t{2}},
+                           {"K", int64_t{2}},         {"groups", int64_t{1}},   {"H", int64_t{8}},
+                           {"W", int64_t{8}},         {"R", int64_t{3}},
+                           {"S", int64_t{3}},         {"pad_h", int64_t{0}},
+                           {"pad_w", int64_t{0}},     {"stride_h", int64_t{1}},
+                           {"stride_w", int64_t{1}},  {"dilation_h", int64_t{1}},
                            {"dilation_w", int64_t{1}}};
         point["dtype"] = value;
 
@@ -395,22 +369,15 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionAdmitsARealLayer)
     ASSERT_TRUE(file.good());
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+    ASSERT_FALSE(parsed.metadata->constraints.empty());
 
-    const ProblemPoint resnetLayer3{{"N", int64_t{64}},
-                                    {"C", int64_t{512}},
-                                    {"K", int64_t{512}},
-                                    {"groups", int64_t{1}},
-                                    {"H", int64_t{28}},
-                                    {"W", int64_t{28}},
-                                    {"R", int64_t{3}},
-                                    {"S", int64_t{3}},
-                                    {"pad_h", int64_t{0}},
-                                    {"pad_w", int64_t{0}},
-                                    {"stride_h", int64_t{1}},
-                                    {"stride_w", int64_t{1}},
-                                    {"dilation_h", int64_t{1}},
-                                    {"dilation_w", int64_t{1}},
-                                    {"dtype", std::string("fp16")}};
+    const ProblemPoint resnetLayer3{{"N", int64_t{64}},        {"C", int64_t{512}},
+                                    {"K", int64_t{512}},       {"groups", int64_t{1}},   {"H", int64_t{28}},
+                                    {"W", int64_t{28}},        {"R", int64_t{3}},
+                                    {"S", int64_t{3}},         {"pad_h", int64_t{0}},
+                                    {"pad_w", int64_t{0}},     {"stride_h", int64_t{1}},
+                                    {"stride_w", int64_t{1}},  {"dilation_h", int64_t{1}},
+                                    {"dilation_w", int64_t{1}}, {"dtype", std::string("fp16")}};
 
     EXPECT_TRUE(detail::satisfiesConstraints(*parsed.metadata, resnetLayer3))
         << "the shipped declaration rejects a 3x3 filter on a 28x28 input";
@@ -433,7 +400,8 @@ TEST(TestGraphBuilderRegistry, EveryDeclaredParameterReachesTheGraph)
     //
     // So: perturb one declared parameter at a time and require the emitted bytes to change.
     // Mechanical, and it is the check that would have caught every instance of this class.
-    for(const auto& entry : std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
+    for(const auto& entry : std::filesystem::directory_iterator(
+            HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
     {
         if(entry.path().string().find(".opmeta.") == std::string::npos)
         {
@@ -513,7 +481,8 @@ TEST(TestGraphBuilderRegistry, ADeclaredDtypeReachesTheGraphHeaderAndEveryTensor
     // deserialize. Verified by mutation: reintroducing that bug leaves the byte check green.
     //
     // So a dtype_of argument is followed to where it must arrive.
-    for(const auto& entry : std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
+    for(const auto& entry : std::filesystem::directory_iterator(
+            HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
     {
         if(entry.path().string().find(".opmeta.") == std::string::npos)
         {

@@ -62,22 +62,19 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestLruCache.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestNativeRegistry.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelHeuristic.cpp>
-    heuristics/uhd/TestCategoricalEncoding.cpp
-    heuristics/uhd/TestCustomLibraryAdapter.cpp
-    heuristics/uhd/TestInlineExpressions.cpp
-    heuristics/uhd/TestFeatureExtractor.cpp
-    heuristics/uhd/TestJsonLogicEvaluator.cpp
-    heuristics/uhd/TestNativeAdapter.cpp
-    heuristics/uhd/TestScoreTransform.cpp
-    heuristics/uhd/TestTableAdapter.cpp
-    heuristics/uhd/TestTreeDataAdapter.cpp
-    heuristics/uhd/TestSha256.cpp
-    heuristics/uhd/TestUhdAdapters.cpp
-    heuristics/uhd/TestEnginePredictor.cpp
-    heuristics/TestEngineFeatures.cpp
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestCategoricalEncoding.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestCustomLibraryAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestDerivedValues.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestFeatureExtractor.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestJsonLogicEvaluator.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestNativeAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestScoreTransform.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestTableAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestTreeDataAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestSha256.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdAdapters.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdKernelHeuristic.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdGeneratedModel.cpp>
-    $<$<BOOL:${HIPDNN_UHD_GEN_RUNNABLE}>:ingestor/uhd/TestUhdGenArtifact.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestMatchContext.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptors.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestArchGate.cpp>
@@ -106,7 +103,8 @@ target_compile_definitions(
 # TestCustomLibraryAdapter dlopen's this at runtime; it is the only consumer, and it moved here
 # with the adapter it covers. HIPDNN_TEST_PLUGIN_DIR is set by the top-level CMakeLists, so both
 # suites can name the same output directory.
-    add_library(hipdnn_test_scorer_lib SHARED heuristics/uhd/test_scorer_lib.cpp)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    add_library(hipdnn_test_scorer_lib SHARED ingestor/uhd/test_scorer_lib.cpp)
     set_target_properties(hipdnn_test_scorer_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)
     target_compile_options(hipdnn_test_scorer_lib PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
     add_dependencies(hipdnn_plugin_sdk_tests hipdnn_test_scorer_lib)
@@ -126,6 +124,7 @@ target_compile_definitions(
 
     target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE
         HIPDNN_TEST_PLUGIN_DIR="${HIPDNN_TEST_PLUGIN_DIR}")
+endif()
 
 target_link_libraries(
     hipdnn_plugin_sdk_tests
@@ -137,11 +136,6 @@ target_link_libraries(
     hip::host
 )
 
-# ContentCarryingTestGraph.hpp lives in flatbuffers_sdk's test tree (plugin_sdk depends on
-# flatbuffers_sdk, not the reverse, so the shared fixture cannot live here). No existing
-# include path exposes cross-SDK test headers, so add it explicitly.
-target_include_directories(hipdnn_plugin_sdk_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../flatbuffers_sdk/tests)
 if(HIPDNN_UHD_GEN_RUNNABLE)
     # The interpreter that satisfied the probe above, not whatever `python3` resolves to in
     # the test's environment; and the directory `python -m uhd_gen` has to run from, since
@@ -150,7 +144,6 @@ if(HIPDNN_UHD_GEN_RUNNABLE)
         PRIVATE HIPDNN_UHD_GEN_PYTHON="${Python3_EXECUTABLE}"
                 HIPDNN_UHD_GEN_TOOLS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools")
 endif()
-
 
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
@@ -173,20 +166,7 @@ add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
 # which add_hipdnn_test() cannot express) so they must apply it themselves.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_disk_cache_cross_process_dir "${CMAKE_CURRENT_BINARY_DIR}/disk_cache_cross_process")
-    set(_disk_cache_cross_process_env
-        "HIPDNN_CACHE_DIR=${_disk_cache_cross_process_dir};HIPDNN_DISABLE_CACHE=")
-
-    # Single source of truth for the two DISABLED_ test names and the pass regex, so a
-    # rename or a regex change is a one-line edit instead of two hand-typed copies (build
-    # tree below, installed-tree snippet further down) silently drifting apart.
-    set(_disk_cache_writer_filter
-        "TestIngestorWinnerCacheCrossProcess.DISABLED_WriterLeavesARecordOnDisk")
-    set(_disk_cache_reader_filter
-        "TestIngestorWinnerCacheCrossProcess.DISABLED_ReaderServesTheRecordTheWriterLeft")
-    # A filter matching zero tests still exits 0 ("[  PASSED  ] 0 tests"), so a rename or
-    # move of either DISABLED_ test above would silently turn its half into a no-op pass.
-    # Require gtest's own "ran exactly one" summary line instead of trusting the exit code.
-    set(_disk_cache_pass_regex "\\[==========\\] 1 test from 1 test suite ran\\.")
+    set(_disk_cache_cross_process_env "HIPDNN_CACHE_DIR=${_disk_cache_cross_process_dir}")
 
     add_test(NAME DiskCacheCrossProcess_Setup
              COMMAND ${CMAKE_COMMAND} -E rm -rf "${_disk_cache_cross_process_dir}")
@@ -196,93 +176,31 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_test(NAME DiskCacheCrossProcess_Writer
              COMMAND hipdnn_plugin_sdk_tests
                      --gtest_also_run_disabled_tests
-                     --gtest_filter=${_disk_cache_writer_filter})
+                     --gtest_filter=TestIngestorWinnerCacheCrossProcess.DISABLED_WriterLeavesARecordOnDisk)
     set_tests_properties(DiskCacheCrossProcess_Writer PROPERTIES
                          RUN_SERIAL TRUE
                          FIXTURES_REQUIRED DiskCacheCrossProcessClean
                          FIXTURES_SETUP DiskCacheCrossProcessWritten
                          ENVIRONMENT "${_disk_cache_cross_process_env}"
-                         PASS_REGULAR_EXPRESSION "${_disk_cache_pass_regex}")
+                         # A filter matching zero tests still exits 0 ("[  PASSED  ] 0
+                         # tests"), so a rename or move of the DISABLED_ test above would
+                         # silently turn this into a no-op pass. Require gtest's own
+                         # "ran exactly one" summary line instead of trusting the exit code.
+                         PASS_REGULAR_EXPRESSION "\\[==========\\] 1 test from 1 test suite ran\\.")
 
     add_test(NAME DiskCacheCrossProcess_Reader
              COMMAND hipdnn_plugin_sdk_tests
                      --gtest_also_run_disabled_tests
-                     --gtest_filter=${_disk_cache_reader_filter})
+                     --gtest_filter=TestIngestorWinnerCacheCrossProcess.DISABLED_ReaderServesTheRecordTheWriterLeft)
     set_tests_properties(DiskCacheCrossProcess_Reader PROPERTIES
                          RUN_SERIAL TRUE
                          FIXTURES_REQUIRED "DiskCacheCrossProcessClean;DiskCacheCrossProcessWritten"
                          ENVIRONMENT "${_disk_cache_cross_process_env}"
-                         PASS_REGULAR_EXPRESSION "${_disk_cache_pass_regex}")
+                         PASS_REGULAR_EXPRESSION "\\[==========\\] 1 test from 1 test suite ran\\.")
 
     # One call per test: the helper forwards its arguments positionally to the parser,
     # which takes a single explicit test name.
     _apply_hipdnn_test_category_labels(DiskCacheCrossProcess_Setup)
     _apply_hipdnn_test_category_labels(DiskCacheCrossProcess_Writer)
     _apply_hipdnn_test_category_labels(DiskCacheCrossProcess_Reader)
-
-    # install_hipdnn_ctest_files() (cmake/Tests.cmake) writes the installed
-    # CTestTestfile.cmake only from one bare add_test() per HIPDNN_TEST_TARGETS entry, so
-    # these three hand-registered, fixture-sequenced entries never ship. Generate the same
-    # three add_test()/set_tests_properties() pairs into a snippet installed beside the
-    # binary, and register the snippet's file name so install_hipdnn_ctest_files() includes
-    # it. Only what genuinely differs between trees is retyped here: a relative command
-    # (matching the relative form install_hipdnn_ctest_files() already emits for every
-    # other test) and a cache directory relative to ctest's installed working directory
-    # (${CMAKE_INSTALL_BINDIR}/hipdnn). The filter names, the pass regex, the fixture
-    # names, and the labels are all read back from the build-tree properties above via
-    # get_test_property(), so this snippet cannot drift from them.
-    #
-    # Escaping note: a property value read back with get_test_property() is already
-    # backslash-collapsed once (e.g. the regex above reads back as `\[==========...`,
-    # single backslash). Writing it into this snippet file with file(APPEND) is itself a
-    # second round of CMake string handling, and the snippet file is then reparsed a
-    # THIRD time as ctest script syntax when ctest loads it -- so anything containing a
-    # backslash must be re-escaped once more before being written, or ctest's own reparse
-    # strips it. string(REPLACE) makes that explicit instead of hand-counting backslashes.
-    string(REPLACE "\\" "\\\\" _disk_cache_pass_regex_for_file "${_disk_cache_pass_regex}")
-
-    set(_disk_cache_installed_snippet
-        "${CMAKE_CURRENT_BINARY_DIR}/DiskCacheCrossProcessTests.cmake")
-    file(WRITE "${_disk_cache_installed_snippet}"
-         "# Autogenerated: installed-tree copy of the DiskCacheCrossProcess_* ctest entries\n"
-         "# in projects/hipdnn/plugin_sdk/tests/CMakeLists.txt. Regenerated from those\n"
-         "# entries' own properties at configure time -- do not hand-edit.\n\n")
-
-    # A bare "cmake" (not the configure-time absolute ${CMAKE_COMMAND}) so the installed
-    # tree keeps working on a host where CMake lives at a different path than the one
-    # this project was configured on.
-    file(APPEND "${_disk_cache_installed_snippet}"
-         "add_test(DiskCacheCrossProcess_Setup \"cmake\" -E rm -rf disk_cache_cross_process)\n"
-         "set_tests_properties(DiskCacheCrossProcess_Setup PROPERTIES FIXTURES_SETUP DiskCacheCrossProcessClean)\n\n")
-
-    file(APPEND "${_disk_cache_installed_snippet}"
-         "add_test(DiskCacheCrossProcess_Writer \"../hipdnn_plugin_sdk_tests\" --gtest_also_run_disabled_tests --gtest_filter=${_disk_cache_writer_filter})\n"
-         "set_tests_properties(DiskCacheCrossProcess_Writer PROPERTIES\n"
-         "    RUN_SERIAL TRUE\n"
-         "    FIXTURES_REQUIRED DiskCacheCrossProcessClean\n"
-         "    FIXTURES_SETUP DiskCacheCrossProcessWritten\n"
-         "    ENVIRONMENT \"HIPDNN_CACHE_DIR=disk_cache_cross_process;HIPDNN_DISABLE_CACHE=\"\n"
-         "    PASS_REGULAR_EXPRESSION \"${_disk_cache_pass_regex_for_file}\")\n\n")
-
-    file(APPEND "${_disk_cache_installed_snippet}"
-         "add_test(DiskCacheCrossProcess_Reader \"../hipdnn_plugin_sdk_tests\" --gtest_also_run_disabled_tests --gtest_filter=${_disk_cache_reader_filter})\n"
-         "set_tests_properties(DiskCacheCrossProcess_Reader PROPERTIES\n"
-         "    RUN_SERIAL TRUE\n"
-         "    FIXTURES_REQUIRED \"DiskCacheCrossProcessClean;DiskCacheCrossProcessWritten\"\n"
-         "    ENVIRONMENT \"HIPDNN_CACHE_DIR=disk_cache_cross_process;HIPDNN_DISABLE_CACHE=\"\n"
-         "    PASS_REGULAR_EXPRESSION \"${_disk_cache_pass_regex_for_file}\")\n\n")
-
-    # ctest's CTestTestfile.cmake script interpreter understands add_test()/set_tests_properties()
-    # but not the generic set_property() command (it reports the test as unknown), so labels are
-    # emitted through set_tests_properties() instead, one call per test as its own statement.
-    foreach(_disk_cache_test DiskCacheCrossProcess_Setup DiskCacheCrossProcess_Writer DiskCacheCrossProcess_Reader)
-        get_test_property(${_disk_cache_test} LABELS _disk_cache_test_labels)
-        if(_disk_cache_test_labels)
-            file(APPEND "${_disk_cache_installed_snippet}"
-                 "set_tests_properties(${_disk_cache_test} PROPERTIES LABELS \"${_disk_cache_test_labels}\")\n")
-        endif()
-    endforeach()
-
-    install(FILES "${_disk_cache_installed_snippet}" DESTINATION ${CMAKE_INSTALL_BINDIR}/hipdnn)
-    set_property(GLOBAL APPEND PROPERTY HIPDNN_INSTALLED_CTEST_INCLUDES DiskCacheCrossProcessTests.cmake)
 endif()

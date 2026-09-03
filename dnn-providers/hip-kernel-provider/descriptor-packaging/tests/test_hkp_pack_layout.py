@@ -1055,9 +1055,7 @@ def test_example_tree_cross_references_resolve_to_the_right_types():
     ueds = 0
     for path in EXAMPLE_ROOT.rglob("*.ued.json"):
         doc = _read(path)
-        for role in ("sort_kernel_catalog", "predict_engine_tflops", "predict_applicable_kernels"):
-            for ref in doc.get(role, {}).values():
-                expect(ref, "uhd", f"{path.name} {role}")
+        expect(doc["heuristic"], "uhd", f"{path.name} heuristic")
         expect(doc["metadata"], "kmd", f"{path.name} metadata")
         ueds += 1
 
@@ -1150,22 +1148,17 @@ def test_a_model_uhds_artifact_reaches_the_shipped_tree(
     dest = _nest(root, "hip/pointwise", main_fixture)
 
     # The fixture's UHD is native, so it names no file. Make it the trained kind. Both
-    # UEDs already reference the shared UHD, so it survives the reachability walk and its
+    # UEDs already reference `uhd-shared`, so it survives the reachability walk and its
     # sidecar has to survive with it.
     (dest / "shared.uhd.json").write_text(
         json.dumps(
             {
-                "version": "1.0",
-                "id": "bb58374f-2972-57b1-a9cb-c358bddef2e5",
+                "version": "0.1",
+                "id": "uhd-shared",
                 "name": "Shared trained heuristic",
                 "adapter": "tree_data",
                 "features_signature": ["$kernel.block_size"],
-                "features_hash": "sha256:" + "0" * 16,
-                "trained_against": {
-                    "ued": {"id": "699a8b19-8e34-4f74-86d6-b6495a6483f3", "revision": "1.0"},
-                    "kmd": {"id": "799a8b19-8e34-4f74-86d6-b6495a6483f3", "revision": "1.0"},
-                    "umd": [],
-                },
+                "features_hash": "sha256:0000000000000000",
                 "objective": "max",
                 "tree_data": {"artifact": "shared_model.bin"},
             },

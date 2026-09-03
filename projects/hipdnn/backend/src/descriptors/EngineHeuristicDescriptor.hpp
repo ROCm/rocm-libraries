@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "BackendDescriptor.hpp"
-#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 
 namespace hipdnn_backend
 {
@@ -25,8 +24,6 @@ private:
     std::shared_ptr<const GraphDescriptor> _graph;
     std::vector<int64_t> _engineIds;
     hipdnnBackendHeurMode_t _heuristicMode = HIPDNN_HEUR_MODE_FALLBACK;
-    std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>>
-        _engineConfigs;
     bool _heuristicModeSet = false;
     bool _findFirst = false;
 

@@ -21,7 +21,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/IKernelCompiler.hpp"
@@ -192,11 +192,10 @@ std::string dataTypeName(data_objects::DataType dataType)
 /// The two runtime facts about a dtype the binding publishes.
 ///
 /// `spelling` is what `to_string(DataType)` in hipdnn_frontend/Types.hpp answers -- the
-/// only vocabulary a `$q.dtype` binding may hold, and the one a UHD's own
-/// `categorical_encoding` (RFC 0019 §6.5) is generated from. It is restated here rather
-/// than called because this provider does not link the frontend, and `EnumNameDataType`
-/// answers a different vocabulary ("FLOAT", "HALF") that no model-side encoding knows.
-/// Restated per pack for the same reason
+/// only vocabulary a `$q.dtype` binding may hold, and the one CategoricalEncoding.hpp
+/// encodes. It is restated here rather than called because this provider does not link
+/// the frontend, and `EnumNameDataType` answers a different vocabulary ("FLOAT", "HALF")
+/// that no model-side encoding knows. Restated per pack for the same reason
 /// `dataTypeName` and `findTensor` are: a pack's natives share no header.
 ///
 /// An empty `spelling` is `to_string`'s "unknown" fallthrough, and `bytes == 0` is a
@@ -307,7 +306,8 @@ std::optional<int64_t>
             return std::nullopt;
         }
         const auto operandBytes = checkedMultiply(*count, width);
-        if(!operandBytes.has_value() || total > std::numeric_limits<int64_t>::max() - *operandBytes)
+        if(!operandBytes.has_value()
+           || total > std::numeric_limits<int64_t>::max() - *operandBytes)
         {
             return std::nullopt;
         }
@@ -320,9 +320,8 @@ std::optional<int64_t>
 /// as `dims[i]`, and the derived `dtype`.
 ///
 /// dtype binds as the runtime spelling **string**, never a pre-encoded number: the
-/// integer code space belongs to the descriptor that ships the model -- its own
-/// `categorical_encoding` (RFC 0019 §6.5) -- and is applied downstream by the feature
-/// extractor, so a number here would freeze one model's code space inside the matcher
+/// integer code space is CategoricalEncoding.hpp's and is applied downstream by the
+/// feature extractor, so a number here would freeze that code space inside the matcher
 /// and drift from it silently.
 void bindTensorFields(BoundTokens& bound,
                       std::string_view root,

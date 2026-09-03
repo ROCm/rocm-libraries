@@ -11,10 +11,6 @@ add_subdirectory(bench)
 # a second gate inside the headers.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_subdirectory(corpus_gen)
-    add_executable(hipdnn_uhd_features uhd_gen/UhdFeatures.cpp)
-    target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
-    target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)
-    install(TARGETS hipdnn_uhd_features RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 add_executable(hipdnn_list_engines ListEngines.cpp)
@@ -48,22 +44,6 @@ if(Python3_Interpreter_FOUND)
         # pytest exits 5 when it collects nothing, which is what the suite's
         # importorskip guards produce when lightgbm/flatbuffers/numpy are absent.
         set_tests_properties(uhd_gen_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
-        if(TARGET hipdnn_uhd_features)
-            set_tests_properties(uhd_gen_tests PROPERTIES
-                ENVIRONMENT "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
-        endif()
-
-        # results_import derives RFC 0019.13 §8.3's tflops and gbs from each operation's
-        # declared flops/elements. Registered beside uhd_gen's suite and for the same reason:
-        # a wrong formula or byte width does not raise, it yields a plausible rate, and every
-        # model trained on that corpus ranks by a number wrong by a constant nobody sees.
-        # Needs no ML dependencies -- it is arithmetic over a declaration and a row.
-        add_test(
-            NAME results_import_tests
-            COMMAND ${Python3_EXECUTABLE} -m pytest -q
-                    ${CMAKE_CURRENT_SOURCE_DIR}/results_import/tests
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-        set_tests_properties(results_import_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
     else()
         message(WARNING
                 "uhd_gen tests NOT registered: pytest is not importable by "
@@ -186,17 +166,4 @@ endif()
     endif()
 
     _apply_hipdnn_test_category_labels(hipdnn_list_engines_smoke)
-endif()
-
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # ValidateDescriptors.cpp transitively includes <hip/hip_runtime.h> through
-    # DescriptorLoader.hpp -> MakeEngine.hpp -> GenericEngine.hpp ->
-    # EnginePluginTypeTraits.hpp, so it needs the same HIP wiring every ingestor test
-    # target already carries (plugin_sdk/tests/CMakeLists.txt).
-    find_package(hip REQUIRED)
-
-    add_executable(hipdnn_validate_descriptors IngestorGenerator/ValidateDescriptors.cpp)
-    target_compile_definitions(hipdnn_validate_descriptors PRIVATE __HIP_PLATFORM_AMD__)
-    target_link_libraries(hipdnn_validate_descriptors PRIVATE hipdnn_plugin_sdk hip::host)
-    install(TARGETS hipdnn_validate_descriptors RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
