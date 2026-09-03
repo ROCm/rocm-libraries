@@ -80,14 +80,6 @@ struct PassFeatureConfig {
         int dsReadQueueDepth = 0;
         int dsReadDrainLatency = 0;
         int dsReadThrottleLatency = 0;
-        /// Fraction of the full throttle interval used for the first
-        /// dsReadThrottleTransitionEntries issued beyond the queue depth.
-        /// Clamped to [0, 1]; 1.0 applies full throttling.
-        double dsReadThrottleTransitionFactor = 1.0;
-        /// Number of entries beyond queue depth that use the transition factor
-        /// before full throttling begins. 0 disables the transition; negative
-        /// means one queue depth.
-        int dsReadThrottleTransitionEntries = 0;
         int dsReadPerWmma = INT_MAX;
         int tensorLoadWmmaSpace = 0;
         /// Max cycle-distance between two adjacent barrier groups for

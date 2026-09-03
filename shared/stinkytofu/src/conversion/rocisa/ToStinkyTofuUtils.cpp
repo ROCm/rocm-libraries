@@ -1606,9 +1606,6 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     }
 
                 MODULE_OPTIONS_LIST(SET_MODULE_OPTION)
-#define SET_MODULE_OPTION_WITH_DEFAULT(name, type, value) SET_MODULE_OPTION(name, type)
-                MODULE_OPTIONS_WITH_DEFAULTS_LIST(SET_MODULE_OPTION_WITH_DEFAULT)
-#undef SET_MODULE_OPTION_WITH_DEFAULT
 #undef SET_MODULE_OPTION
 #undef DEBUG_SET_MODULE_OPTION
             }
