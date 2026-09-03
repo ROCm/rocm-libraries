@@ -642,7 +642,7 @@ struct fmha_bwd_launcher
     // Stream-async workspace preparation. Zeroes the dq_acc region (if the kernel
     // accumulates) and launches a single-thread device kernel that writes the
     // nsplits[]/offsets[] metadata straight into the device workspace. Every op is
-    // stream-ordered and capturable — there is no host callback, no pinned host staging,
+    // stream-ordered and capturable -- there is no host callback, no pinned host staging,
     // and no metadata D2H/H2D. seqstart_q_dev/seqstart_k_dev are read on-device in group
     // mode and must already be resident on the device.
     void prepare_workspace_async( //
