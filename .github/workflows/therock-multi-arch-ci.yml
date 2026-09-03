@@ -144,8 +144,14 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_variant: "release"
-      # Limit GPU families for rocm-libraries CI
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}
+      # Limit GPU families for rocm-libraries CI.
+      # gfx125X (CDNA5/gfx1250) is included build-only on every PR/push: no test
+      # hardware exists for it yet (see amdgpu_family_matrix.py in TheRock, family
+      # key "gfx125x": test-runs-on is empty everywhere), but legacy therock-ci.yml
+      # built it on every PR/push before Multi-Arch CI became the default, and this
+      # restores that parity so gfx1250 build breaks are caught same-PR instead of
+      # only nightly.
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
