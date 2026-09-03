@@ -1760,12 +1760,30 @@ is a ninth and tenth row here under the DoD below? The batched-over-`H_q`
 `[total_q, r_Q] × [r_Q, 192]` and `[B, r_Q] × [r_Q, 512]` shapes are not obviously
 covered by an existing universal-GEMM candidate; assume they are not until checked.
 
-**Definition of done — Python only, no C++ mirror.** MLA follows the dense attention
-kernels: it is authored in the Python engine alone. There is **no** `platform/cpp/`
-mirror for any row above, and no `check_byte_identity.py` obligation — the dual-engine
-byte-identity gate does not apply to this family. (§5's and §11's references to
-`platform/cpp/instances/gfx950/…` are citations of existing shipped code for the layout
-and `ds_read_tr` techniques they demonstrate, not work items.)
+**Definition of done — no C++ builder mirror.** MLA is authored in the Python engine
+alone: no row above owes a hand-written `platform/cpp/instances/…` port of its
+`build_*()`, and none owes a `.py`/`.c` builder-parity pair. This is a scope decision
+for the initial design, not a precedent — it is **not** a claim that MLA sits outside
+byte-identity. Two distinct things get called "the C++ mirror" and only the first is
+being skipped:
+
+| Layer | MLA | Mechanism |
+|---|---|---|
+| **Builder** — C++ port of `build_*()` constructing the `KernelDef` | **skipped** | per-family, hand-written |
+| **Lowerer** — `KernelDef` → LLVM IR | **applies** | family-agnostic, via the serialized `ck.dsl.ir/v1` artifact (`lower_serialized_ir`) |
+
+The lowerer is not opt-out: `cpp` is the default backend and
+[`CPP_UNPORTED_ARCHES`](../../../platform/python/rocke/core/backend.py) is currently
+empty, so every `KernelDef` — MLA's included — is lowered by the C++ engine unless the
+family is registered as an explicit `BackendCoverageGap`. `attention_dense` is the
+worked example of exactly this split: it has no builder mirror, yet
+`library/tests/test_attention_ir_cpp_parity.py` gates it for lowering byte-identity
+(`_FAMILIES = ("attention_dense", "attention_d256")`). Which of the two options above
+MLA takes is settled per row by the paragraph below.
+
+(§5's and §11's references to `platform/cpp/instances/gfx950/…` are citations of
+existing shipped code for the layout and `ds_read_tr` techniques they demonstrate, not
+work items.)
 
 What each row still owes, in the same change:
 
@@ -1781,14 +1799,26 @@ What each row still owes, in the same change:
 6. the bench-shape wiring of §8.2 and the support-matrix / doc updates for the new
    family.
 
-Any new IR op or spec trait required by the latent-space accumulator, the decoupled
-`hdim_kv` / `hdim_out` descriptor, the decode `BLOCK_H` head remap (§4), the *separate*
-prefill `BLOCK_H` head-block grid dim0 (§3 — an independently-sized second spec knob,
-not the §4 one), or the XCD-aware grid mapping (§4) lands in
-`platform/python/rocke/core/lower_llvm.py` only. It must not regress the goldens of any
-*other* family that shares those paths — run `library/tests/golden/` and
-`platform/tests/` before and after. This docs-only spike carries no such obligation; the
-implementation PRs do.
+**New IR ops are the one place the lowerer split bites.** The latent-space
+accumulator, the decoupled `hdim_kv` / `hdim_out` descriptor, the decode `BLOCK_H` head
+remap (§4), the *separate* prefill `BLOCK_H` head-block grid dim0 (§3 — an
+independently-sized second spec knob, not the §4 one), and the XCD-aware grid mapping
+(§4) each add an op or spec trait to
+`platform/python/rocke/core/lower_llvm.py`. Adding one there *alone* does not leave MLA
+Python-only — it breaks it: the C++ engine will reject an op it does not know, and
+because `cpp` is the default backend that is a hard failure at lower time, not a skip.
+Each such op must therefore resolve, in the same change, to exactly one of:
+
+- **mirror it in the C++ lowerer** (`platform/cpp/core/`) — note this is the *lowerer*,
+  not the builder the DoD above skips; or
+- **register MLA as a `BackendCoverageGap`** for that op, which makes the parity lane
+  report a skip with a named reason instead of a red, and lands the removal condition
+  with it.
+
+Either way it must not regress the goldens of any *other* family that shares those
+paths — run `library/tests/golden/` and `platform/tests/` before and after. Pick per
+op, not once for the family; the cheap ops are likely worth mirroring outright. This
+docs-only spike carries no such obligation; the implementation PRs do.
 
 ---
 
