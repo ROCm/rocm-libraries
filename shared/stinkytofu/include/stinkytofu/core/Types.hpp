@@ -80,6 +80,14 @@ struct PassFeatureConfig {
         int dsReadQueueDepth = 0;
         int dsReadDrainLatency = 0;
         int dsReadThrottleLatency = 0;
+        /// Fraction of the full throttle interval used for the first
+        /// dsReadThrottleTransitionEntries issued beyond the queue depth.
+        /// Clamped to [0, 1]; 1.0 applies full throttling.
+        double dsReadThrottleTransitionFactor = 1.0;
+        /// Number of entries beyond queue depth that use the transition factor
+        /// before full throttling begins. 0 disables the transition; negative
+        /// means one queue depth.
+        int dsReadThrottleTransitionEntries = 0;
         int dsReadPerWmma = INT_MAX;
         int tensorLoadWmmaSpace = 0;
         /// Max cycle-distance between two adjacent barrier groups for
@@ -88,6 +96,16 @@ struct PassFeatureConfig {
         /// Internal tuning knob only — deliberately not surfaced as a module
         /// option, so TensileLite cannot set it.
         int mergeBarrierThreshold = 0;
+        /// Run the per-window WMMA hide-budget pre-scan (analyzeWmmaHideBudget) at the
+        /// top of each scheduling region, and report it through --remarks.
+        ///
+        /// OFF by default. The pre-scan is a pure measurement — nothing in the pick
+        /// paths gates on its verdict yet — so running it in production would be cost
+        /// for no decision. A follow-up wires the budget into the scheduler and turns
+        /// this on. Internal knob only, like mergeBarrierThreshold above: deliberately
+        /// not surfaced as a module option, so TensileLite cannot set it and only
+        /// stinkytofu-opt --enable-wmma-hide-budget-prescan reaches it.
+        bool enableWmmaHideBudgetPrescan = false;
         /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
         /// after the scheduler and plant SCC-clobbering handshakes around workgroup
         /// barriers. Enables the scheduler's cluster-barrier SCC rule and the

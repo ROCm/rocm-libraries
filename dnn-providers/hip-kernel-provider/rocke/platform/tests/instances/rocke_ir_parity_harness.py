@@ -428,6 +428,33 @@ def build_attention_dense(arch, **over):
     return _build
 
 
+def build_kda_chunkwise_gfx942(kind, arch, **over):
+    """Build one representative gfx942 chunkwise KDA kernel."""
+
+    def _build():
+        from kernels.gfx942.kda_chunkwise import (
+            KdaChunkFusedSpec,
+            KdaChunkPrepSpec,
+            KdaChunkScanSpec,
+            build_kda_chunk_fused,
+            build_kda_chunk_prep,
+            build_kda_chunk_scan,
+        )
+
+        specs = {
+            "prep": (KdaChunkPrepSpec, build_kda_chunk_prep),
+            "scan": (KdaChunkScanSpec, build_kda_chunk_scan),
+            "fused": (KdaChunkFusedSpec, build_kda_chunk_fused),
+        }
+        try:
+            spec_type, builder = specs[kind]
+        except KeyError as exc:
+            raise ValueError(f"unknown gfx942 KDA kernel kind {kind!r}") from exc
+        return builder(spec_type(**over), arch=arch)
+
+    return _build
+
+
 def _d256_problem():
     """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16)."""
     from kernels.common.attention_unified import UnifiedAttentionProblem
@@ -1060,6 +1087,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1078,7 +1106,7 @@ def cases():
             tile_n=64,
             tile_k=32,
             pipeline="mem",
-            epilogue="default",
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1096,6 +1124,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1114,6 +1143,7 @@ def cases():
             tile_n=32,
             tile_k=16,
             split_k=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1131,6 +1161,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            dtype_d="fp32",
         ),
     )
     add(
@@ -1148,6 +1179,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            dtype_d="fp32",
         ),
     )
     # gfx90a wgrad mirrors the gfx942 MFMA path.
@@ -1166,6 +1198,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     # Grouped wgrad (grid-per-group, Gm=1) and group-merging (Gm=2). Guards the
@@ -1185,6 +1218,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1202,6 +1236,7 @@ def cases():
             tile_m=64,
             tile_n=64,
             tile_k=32,
+            epilogue="cshuffle",
         ),
     )
     # Grouped + cshuffle epilogue (MFMA): the LDS-staged store threads the
@@ -1224,8 +1259,8 @@ def cases():
             epilogue="cshuffle",
         ),
     )
-    # Grouped + split-K (MFMA): the group and the K-slice share block_id_z
-    # (z = groups*split_k) and the atomic epilogue folds group*kpg into k_out.
+    # Grouped + split-K + cshuffle (MFMA): the group and the K-slice share
+    # block_id_z (z = groups*split_k); cshuffle required for fp16 paired atomics.
     add(
         "conv_wgrad",
         "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4",
@@ -1242,6 +1277,7 @@ def cases():
             tile_n=64,
             tile_k=32,
             split_k=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1260,6 +1296,7 @@ def cases():
             tile_n=32,
             tile_k=16,
             split_k=4,
+            epilogue="cshuffle",
         ),
     )
     # gfx1250 WMMA grouped (wave32, 16x16x32 -- its only fp16/bf16 atom).
@@ -1278,6 +1315,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=32,
+            dtype_d="fp32",
         ),
     )
 
@@ -2042,6 +2080,31 @@ def cases():
             "irhash_grouped_gemm_950", "gfx950", 8192, 1024, 512, 64
         ),
     )
+
+    # Chunkwise KDA: all three emitted kernels, state-sensitive ABI variants,
+    # and DK64 fused coverage for the guarded partial Kt pass.
+    for _case_id, _kind, _over in (
+        ("prep_default", "prep", {}),
+        ("scan_default", "scan", {}),
+        (
+            "scan_h0_noht",
+            "scan",
+            {"has_initial_state": True, "store_final_state": False},
+        ),
+        ("fused_default", "fused", {}),
+        ("fused_dk64", "fused", {"head_k": 64}),
+        (
+            "fused_h0_noht",
+            "fused",
+            {"has_initial_state": True, "store_final_state": False},
+        ),
+    ):
+        add(
+            "kda_chunkwise",
+            f"kda_chunkwise/gfx942/{_case_id}",
+            "gfx942",
+            build_kda_chunkwise_gfx942(_kind, "gfx942", **_over),
+        )
     return out
 
 

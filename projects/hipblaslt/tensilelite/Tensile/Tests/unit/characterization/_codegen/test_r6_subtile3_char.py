@@ -335,6 +335,7 @@ def test_r6_grComputeSubtileOffsets_legacy_vgpr_fallback():
     from Tensile.Components.Subtile.SubtileGREmit import _grComputeSubtileOffsets_legacy
     from Tensile.Components.Subtile.Kernel import TileInfo, AB_B8
     from rocisa.code import Module
+    from rocisa.instruction import VAddU32
 
     kernel = _kernel_b8_wg11()
     # sgpr_start=253 >= MaxSgpr(256) - 3 — forces VGPR RegLists in alloc
@@ -350,11 +351,14 @@ def test_r6_grComputeSubtileOffsets_legacy_vgpr_fallback():
 
     m = Module()
     _grComputeSubtileOffsets_legacy(w, m, ti)
-    src = str(m)
-
-    # VGPR fallback emits v_add_u32 to bake soffset into each GR vgpr
-    assert "v_add_u32" in src or "VAddU32" in src, (
-        "VGPR fallback must emit v_add_u32; got:\n" + src[:500]
+    # Check the logical instruction rather than its ISA-specific spelling.
+    # gfx950 renders VAddU32 as v_add_u32; gfx1250 uses v_add_nc_u32.
+    adds = [item for item in m.items() if isinstance(item, VAddU32)]
+    expected_adds = sum(len(reg_list) for reg_list in vgpr_lists)
+    assert len(adds) == expected_adds, (
+        f"VGPR fallback must emit one VAddU32 per VGPR-backed offset; "
+        f"expected {expected_adds}, got {len(adds)}; "
+        f"items: {[type(item).__name__ for item in m.items()]}"
     )
 
 
