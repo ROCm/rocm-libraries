@@ -349,5 +349,5 @@ Each layer has a required test. Every checkbox in the [PR Checklist](#pr-checkli
 - [cuDNN Porting Guide](./PortingGuide.md)
 - [Operation Support Matrix](./OperationSupport.md)
 - [Building Guide](./Building.md)
-- [Testing Guide](./Testing.md)
+- [Testing Guide](./TESTING.md)
 - [HowTo Guide](./HowTo.md)
