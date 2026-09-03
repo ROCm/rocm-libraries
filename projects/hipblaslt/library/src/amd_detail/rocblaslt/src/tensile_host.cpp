@@ -36,6 +36,7 @@
 #include "Debug.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
+#include "rocblaslt_fused_a2a_peers.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
@@ -2088,6 +2089,15 @@ namespace
         tensileProblem.setScaleC(compute_type);
         tensileProblem.setScaleD(compute_type);
 
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
+            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+        }
+
         // set Actvation
         tensileProblem.setActivationType(is_act_enabled(prob.epilogue)
                                              ? TensileLite::ActivationType::Hipblaslt_all
@@ -2353,6 +2363,15 @@ namespace
         tensileProblem.setScaleB(compute_type, 1);
         tensileProblem.setScaleC(compute_type);
         tensileProblem.setScaleD(compute_type);
+
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
+            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+        }
 
         // set Actvation
         tensileProblem.setActivationType(is_act_enabled(prob.epilogue)
@@ -2627,6 +2646,21 @@ namespace
             inputs.activationArgs = {prob.act0, prob.act1};
             inputs.alpha          = static_cast<float>(std::get<hipblasLtHalf>(inputs.alpha));
             inputs.beta           = static_cast<float>(std::get<hipblasLtHalf>(inputs.beta));
+        }
+
+        // Device-side fused-A2A operands.
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            inputs.fusedA2ACounter = prob.Synchronizer;
+            inputs.fusedA2APeers  = rocblaslt::buildFusedA2APeerFields(prob.fused_a2a_peer_flag,
+                                                                      fusedInfo.a2aRecvPtrs,
+                                                                      prob.fused_a2a_world,
+                                                                      fusedInfo.commChannel,
+                                                                      fusedInfo.a2aSdmaQueues);
+            inputs.fusedA2AMyRank = prob.fused_a2a_rank;
+            inputs.fusedA2ADrain  = rocblaslt::fusedA2ADrainFor(fusedInfo.a2aCompletionMode);
         }
 
         return inputs;
@@ -3629,6 +3663,29 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             }
             status = hip2RocStatus(
                 adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
+            if(status == rocblaslt_status_success && prob.fused_a2a_world != 0)
+            {
+                RocblasltFusedEpilogueInfo a2aInfo;
+                if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, a2aInfo)
+                   && a2aInfo.hasA2APrefix)
+                {
+                    // Re-arm for the next launch: both blocks have to start at zero.
+                    // Slice 0 of the handle's Synchronizer is the whole region the
+                    // A2A counter block sits in.
+                    status = hip2RocStatus(hipMemsetAsync(
+                        prob.Synchronizer, 0, _rocblaslt_handle::c_syncGsuSlotBytes, prob.stream));
+                    if(status == rocblaslt_status_success)
+                        status = hip2RocStatus(hipMemsetAsync(
+                            static_cast<char*>(
+                                handle->device_comm_peer_flags[handle->device_comm_rank])
+                                + size_t(a2aInfo.commChannel)
+                                      * TensileLite::FUSED_A2A_FLAG_BLOCK_BYTES,
+                            0,
+                            TensileLite::FUSED_A2A_FLAG_BLOCK_BYTES,
+                            prob.stream));
+                }
+            }
+
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
         }

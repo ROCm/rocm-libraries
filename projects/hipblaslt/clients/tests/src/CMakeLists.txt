@@ -17,6 +17,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_multistream_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/row_uniformity_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_peer_fields_gtest.cpp
 )
 
 if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION)
