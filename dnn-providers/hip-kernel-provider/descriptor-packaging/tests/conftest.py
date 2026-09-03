@@ -53,11 +53,9 @@ def rocm_kpack_dir():
 def hipcc():
     """The hipcc driver used for real --genco compilation.
 
-    Resolved from HKP_HIPCC (set by CMake) or PATH. The build also sets
-    HIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC, which makes a missing hipcc a hard
-    failure; a standalone pytest run without it skips instead. A real hipcc
-    compile error is not caught here — it surfaces from the pipeline as a
-    failure.
+    Resolved from HKP_HIPCC (set by CMake) or PATH; a missing hipcc is a hard
+    failure. A real hipcc compile error is not caught here — it surfaces from
+    the pipeline as a failure.
     """
     exe = os.environ.get("HKP_HIPCC")
     if not exe:
@@ -67,10 +65,7 @@ def hipcc():
                 exe = found
                 break
     if not exe:
-        msg = "hipcc not found (set HKP_HIPCC or put hipcc on PATH)"
-        if os.environ.get("HIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC"):
-            pytest.fail(msg)
-        pytest.skip(msg)
+        pytest.fail("hipcc not found (set HKP_HIPCC or put hipcc on PATH)")
     return exe
 
 

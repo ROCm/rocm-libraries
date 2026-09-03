@@ -160,9 +160,9 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($sitePackages)) { throw "empty rocm_kpack python dir" }
           echo "KPACK_PYTHON_DIR=$sitePackages" >> $env:GITHUB_ENV
 
-      # Must precede configure: the descriptor-packaging ctest entries register
-      # DISABLED if pytest is not importable at configure time. The interpreter
-      # is named explicitly because it must be the one passed as
+      # Must precede configure: configuration fails if pytest is not importable
+      # by the interpreter descriptor-packaging registers its tests under. The
+      # interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
       - name: Install pytest
@@ -386,9 +386,9 @@ jobs:
           test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
           echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
 
-      # Must precede configure: the descriptor-packaging ctest entries register
-      # DISABLED if pytest is not importable at configure time. The interpreter
-      # is named explicitly because it must be the one passed as
+      # Must precede configure: configuration fails if pytest is not importable
+      # by the interpreter descriptor-packaging registers its tests under. The
+      # interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
       - name: Install pytest

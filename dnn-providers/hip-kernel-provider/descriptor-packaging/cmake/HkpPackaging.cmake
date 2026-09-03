@@ -924,9 +924,8 @@ endfunction()
 #   Register the pytest suite as two build-tree ctest entries running disjoint
 #   sets: a quick entry (`-m quick`, the no-compile subset) and a standard entry
 #   (`-m "not quick"`, the rest). Tier labels come from HKP_PACK_test_categories,
-#   whose cascade runs each test once per tier with no overlap. When
-#   Python3_EXECUTABLE cannot import pytest the entries register DISABLED so
-#   they list as skipped, not absent.
+#   whose cascade runs each test once per tier with no overlap. Configuration
+#   fails when Python3_EXECUTABLE cannot import pytest.
 #
 #   hipcc is a requirement of the whole ingestor, so the hipcc-dependent tests
 #   are hard-gated: their fixture fails on a missing hipcc rather than skipping.
@@ -959,11 +958,9 @@ silently stop running.")
     # conftest.py reads HIPKERNELPROVIDER_ROCM_KPACK_DIR, so that is the name
     # forwarded here regardless of which variable resolved it.
     #
-    # HKP_HIPCC names the hipcc that configure found, and the hard gate that
-    # makes the hipcc-dependent tests fail on a miss rides with it.
+    # HKP_HIPCC names the hipcc that configure found.
     set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}"
-        "HKP_HIPCC=${hipcc}"
-        "HIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC=ON")
+        "HKP_HIPCC=${hipcc}")
     if(rocm_kpack_dir)
         list(APPEND _pyenv "HIPKERNELPROVIDER_ROCM_KPACK_DIR=${rocm_kpack_dir}")
     endif()
@@ -977,31 +974,27 @@ silently stop running.")
             "HIPKERNELPROVIDER_KPACK_REQUIRE_COMGR=${HIPKERNELPROVIDER_KPACK_REQUIRE_COMGR}")
     endif()
 
-    # Without pytest, register the entries as DISABLED so they appear in the
-    # ctest listing as skipped rather than silently absent.
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
         RESULT_VARIABLE _pytest_rc
         OUTPUT_QUIET ERROR_QUIET)
-    set(_disabled "")
     if(NOT _pytest_rc EQUAL 0)
-        message(STATUS
-            "hkp: pytest not importable by ${Python3_EXECUTABLE}; registering "
-            "descriptor-packaging pytest tests as DISABLED.")
-        set(_disabled DISABLED TRUE)
+        message(FATAL_ERROR
+            "hkp: pytest is not importable by ${Python3_EXECUTABLE}, so the "
+            "descriptor-packaging tests cannot run. Install pytest for that "
+            "interpreter, or configure with "
+            "-DHIPKERNELPROVIDER_ENABLE_TESTS=OFF.")
     endif()
 
     add_test(NAME hip-kernel-provider-hkp-pack-quick
              COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m quick -v)
     set_tests_properties(hip-kernel-provider-hkp-pack-quick PROPERTIES
-        ENVIRONMENT "${_pyenv}"
-        ${_disabled})
+        ENVIRONMENT "${_pyenv}")
 
     add_test(NAME hip-kernel-provider-hkp-pack
              COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v)
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
-        ENVIRONMENT "${_pyenv}"
-        ${_disabled})
+        ENVIRONMENT "${_pyenv}")
 
     # Both entries are add_test()'d in this scope just above, so the YAML's
     # test_patterns match them via the directory-property loop. EXPLICIT_TESTS is
