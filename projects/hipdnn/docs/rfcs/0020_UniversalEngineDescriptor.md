@@ -716,9 +716,16 @@ the interpreter fails closed on anything undeclared:
   override shapes. That flag is the graph's state and is distinct from a matcher's
   `allow_override_shape`, which is the matcher's opt-in to accepting such a graph at all
   ([RFC 0018 § A.1](0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)).
-- **Attributes** — a matched node's scalar attributes, named by the node's pattern `id`: an
+- **Attributes** — a matched node's scalars, named by the node's pattern `id`: an
   `{"id": "sdpa_fwd"}` node exposes `$sdpa_fwd.dropout_probability`, a `{"id": "conv"}` node
   `$conv.dilation`. An optional attribute is asked about the same way, with those same operators.
+  The namespace spans two schema tables, which a reader never has to distinguish: the op's own
+  attribute table (the union arm `NodeAttributes` selects), **and the `Node` table's own scalars**,
+  of which `compute_data_type` is the one that is not `cache_ignore`. A node's compute precision is
+  a property of the node exactly as its dropout probability is, and a criterion gating it —
+  `{"==": ["$sdpa_fwd.compute_data_type", "FLOAT"]}` — would otherwise have nowhere to read it
+  from. Appendix B.3 states the generator rule, and the two tables cannot collide because a
+  duplicate bind name within one op is a build error.
 - **Kernel metadata** — `$kernel.<field>`, the values a UKD supplies for the fields its KMD declares
   (tile and vector constants, the dtype it targets, [RFC 0017 § 4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)).
   These are the one namespace the pattern does not bind: they come from the engine's KMD, and a
@@ -771,7 +778,7 @@ uint         = digit , { digit } ;
 |---|---|---|---|---|
 | Tensor | a pattern variable (`$q`) | the pattern | `uid`, `rank`, `dtype`, `stride_order`, `packed`, `virtual`, `is_runtime_pass_by_value`, `value_f32`, `dims[i]`, `strides[i]` | `Tensor` / `Int` / `Dtype` / `IntArray` / `Bool` / `Float` |
 | Graph | `$graph` | the pattern | `node_count`, `is_override_shape_enabled` | `Int` / `Bool` |
-| Attributes | a node `id` (`$sdpa_fwd`) | the pattern | `<attr-name>` | scalar |
+| Attributes | a node `id` (`$sdpa_fwd`) | the pattern | `<attr-name>`, from the op's attribute table or the `Node` table (Appendix B.3) | scalar |
 | Kernel | `$kernel` | the UKD, per candidate | `<field>` a UKD supplies ([RFC 0017 § 4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)) | scalar |
 | Device | `$device` | the `Handle` | `<field>` (`lds_size`, `warp_size`, …) | scalar |
 
@@ -1522,6 +1529,21 @@ build** rather than emitting a wrong registry:
   insulates an operand from a field rename. If a scalar ever needs that insulation, the additive
   extension is an optional `umd_name` on an unflagged field, used purely as a bind-name override; the
   flag remains the operand/result discriminator.
+- **The `Node` table's own scalars bind too.** The rules above run over each op's attribute table,
+  which is the table `NodeAttributes` selects. A node carries scalars outside it, on the `Node`
+  table itself, and `compute_data_type` is the one that matters: it is a per-node value the
+  frontend stamps, it is the field an author reaches for to gate a node's compute precision, and
+  under the attribute-table-only rule it would be unreachable — a criterion naming
+  `$sdpa_fwd.compute_data_type` would fail § 13.2's reference check at load while looking
+  perfectly ordinary. The generator therefore classifies the `Node` table's non-`cache_ignore`
+  scalar fields by the same rules and merges them into **every** op's scalar-attribute set, so
+  `$<node_id>.compute_data_type` binds on any matched node. Two properties keep the merge safe.
+  The names cannot collide: a `Node`-table name equal to an attribute-table name in the same op is
+  the existing duplicate-bind-name build error. And the set stays derived rather than hand-listed,
+  so a `Node` scalar added later binds without a spec edit, exactly as an attribute-table one
+  does. The graph-level `Graph` table is **not** merged: its `compute_data_type` is a default the
+  frontend stamps onto nodes that left theirs unset, so the node's own field is already the
+  resolved value, and publishing both would offer two spellings of one fact.
 
 ### B.4 Generation pipeline
 

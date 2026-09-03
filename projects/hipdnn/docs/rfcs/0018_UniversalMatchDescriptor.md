@@ -201,7 +201,7 @@ operators at all. Each is a **native matcher** the pack lists beside the descrip
 | **Divisibility** | `{"divisible": [{"*": ["$y.dims[0]", "$y.dims[2]", "$y.dims[3]"]}, "$kernel.MPerBlock"]}` | tile-fit / GEMM-dim gates |
 | **Layout** | `{"==": ["$q.stride_order", [3, 2, 1, 0]]}` ([§5](#5-layout-and-stride-order-criteria)) | `validateSupportedLayout` |
 | **Packing** | `"$q.packed"` (a bound boolean) | `validatePackedTensors` |
-| **Cross-tensor layout** | `{"==": ["$x.stride_order", "$y.stride_order"]}` (per pair) | `validateConsistentLayouts` |
+| **Cross-tensor layout** | `{"==": ["$x.stride_order", "$y.stride_order"]}` (per pair), or the per-axis form where the two tensors may differ in which axes are unit-extent ([§5](#5-layout-and-stride-order-criteria)) | `validateConsistentLayouts` |
 | **Attribute (value)** | `{"==": ["$sdpa_fwd.causal_mask", false]}`; absent-or `{"or": [{"not_present": ["$sdpa_fwd.dropout_probability"]}, {"==": ["$sdpa_fwd.dropout_probability", 0.0]}]}` | per-attr value gates |
 | **Attribute (one_of)** | `{"in": ["$sdpa_fwd.diagonal_alignment", ["TOP_LEFT", "BOTTOM_RIGHT"]]}` | enum-attribute set gates |
 | **Optional operand present/absent** | the operand is declared optional in the engine's pattern ([RFC 0020 § 4.3](0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)); `{"not_present": ["$attn_mask"]}` (absent) / `{"present": ["$bias"]}` (present); one call takes a list, so a pack declines every optional operand it cannot serve at once | `attn_mask_tensor_uid()` absent gate |
@@ -319,12 +319,41 @@ then N, which is NHWC.
   `{"==": ["$x.stride_order", "nhwc"]}` compiles to a comparison against `[3, 0, 2, 1]`
   (A.5). The array remains the single canonical form. The four convolution aliases are exactly the
   layouts `validateSupportedLayout` accepts today: NCHW/NHWC at rank 4, NCDHW/NDHWC at rank 5
-  (`ApplicabilityChecks.cpp:76`). The `bhsd` alias is an addition for the attention families, which
-  that oracle never covered.
+  (`ApplicabilityChecks.cpp:76`). The `bhsd` and `bshd` aliases are additions for the attention
+  families, which that oracle never covered. An alias is a whole-array comparison, so it inherits
+  the tie caveat below; a family that must separate BSHD from BHSD at a unit head count does not
+  use one.
+- **The encoding is lossy under stride ties.** `extractStrideOrder` sorts axes by descending
+  stride and breaks equal strides by original position, so a tensor with a **unit extent** encodes
+  identically under two layouts that disagree on that axis's stride. Over `dims [4,1,256,64]`,
+  BSHD strides `[16384,64,64,1]` and BHSD strides `[16384,16384,64,1]` both yield `[3,2,1,0]`,
+  where at `dims[1] > 1` they are the distinguishable `[3,1,2,0]` and `[3,2,1,0]`. A criterion
+  that must separate two layouts differing only on an axis a graph may make unit-extent
+  **MUST NOT** use `stride_order`. It reads the axes directly instead, exempting unit extents:
+
+  ```jsonc
+  // head axis is BSHD (stride == head size), or is a don't-care because the extent is 1
+  {"or": [{"==": ["$q.dims[1]", 1]},
+          {"==": ["$q.strides[1]", "$q.dims[3]"]}]}
+  ```
+
+  `$q.strides[i]` is published for exactly this
+  ([RFC 0020 § 6.1](0020_UniversalEngineDescriptor.md#61-the-published-field-set-normative)). The
+  exemption is sound rather than lenient: a stride on a unit-extent axis multiplies an index that
+  is always zero, so no address depends on it and a producer may declare anything there. This is
+  the rule `hasBshdStrides` states in the one attention engine in the tree, and it is not a corner
+  case: 336 of the 2,710 kernels in the shipped gfx942 `attention_dense` catalog (12.4%) are
+  `num_kv_heads == 1`.
 - **Cross-tensor consistency** is a JsonLogic equality between stride orders,
   `{"==": ["$x.stride_order", "$y.stride_order"]}`, one per pair and joined by the top-level `and`.
   It lowers `validateConsistentLayouts`. Layout-agnostic tensors (rank-1 scalars, pass-by-value) are
-  skipped as they are today.
+  skipped as they are today. **This form is a false decline whenever the two tensors differ in
+  which axes are unit-extent**, because each side is encoded independently and the tie rule then
+  resolves them differently. A shipped multi-query descriptor (`batch=1, Hq=8, Hkv=1,
+  Sq=Skv=1024, D=128`), correct BSHD on every operand, encodes `$q.stride_order` as `[3,1,2,0]`
+  and `$k.stride_order` as `[3,2,1,0]`: the pair-equality declines a graph the kernel serves. Two
+  tensors that may disagree on a unit extent are related per axis, in the `or` form above, not by
+  array equality.
 - **Packing** is the separate bound boolean `$q.packed` (written `"$q.packed"`), since a supported
   stride order does not imply the tensor is gap-free; it lowers `validatePackedTensors`.
 - `$q.stride_order` is an ordinary bound value ([§2](#2-the-symbol-table-criteria-read)),
@@ -388,6 +417,28 @@ closed. What changes is that this is the *only* place a name resolves to C++. Th
 therefore simple: a UMD file is pure data and always loads identically, and a pack that needs C++ is
 not a drop-in.
 
+**What the hatch gives up, and how a descriptor buys some of it back.** A criteria expression is
+an AST, so the compiler derives which `$kernel.*` fields it reads and uses that set twice: as the
+per-candidate memoization projection, and as the list checked against the engine's KMD
+([§8](#8-the-matcher-compilation-indexing-and-caching),
+[Appendix A.5](#a5-compile-time-validation-normative)). A `match_symbol` UMD has no AST, so neither
+is derivable: the shipped gfx942 `attention_dense` matcher declares `scope: "kernel"` and nothing
+else, while the C++ behind it reads ten KMD fields. The descriptor therefore declares them, in
+`kernel_fields` ([Appendix A.1](#a1-the-umd-descriptor-object)), and that one list restores both
+uses. Declaring it is optional; a criterion that does not is evaluated once per candidate and its
+metadata reads are unchecked until a live graph reaches them. This is the same trade
+[RFC 0020 § 4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative) records for the
+engine-scoped hatch, one scope down.
+
+**A native criterion owes totality itself.** The bounded, fail-closed guarantees of
+[§11](#11-security-and-hostile-input) — depth and step caps, checked arithmetic, a decline on any
+unknown symbol or out-of-range axis — are the interpreter's, and a `GraphCriterionFn` is arbitrary
+C++ that runs outside it. It MUST therefore be total over an **unvalidated** graph: a caller can
+present a tensor the frontend would have rejected, so a criterion checks rank and extents before it
+indexes an axis, uses width-safe arithmetic on any product of dims, and returns a verdict rather
+than throwing. The provider that ships the symbol owns that obligation, and the fuzzing corpus of
+[§11](#11-security-and-hostile-input) covers the registered symbols as well as the interpreter.
+
 Together with the UDD's custom-plan hatch
 ([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)), these form the graded
 ladder: fully declarative constraints, then a native matcher beside the descriptor for one gate that
@@ -448,13 +499,43 @@ failure it prunes every pack that lists it, so the most-shared checks (dtype, la
 evaluated first shrink the candidate set fast. A matcher that also reads `$kernel.*` declares
 `scope: "kernel"`. It is the same matcher re-evaluated once per distinct value of the `$kernel.*`
 fields it reads, memoized on those, pruning per kernel rather than per pack. The projection is what
-makes this pay. A kernel's full metadata tuple is unique by construction, so memoizing on the whole
-tuple would save nothing. A matcher reading one field instead collapses an engine's catalog to that
-field's handful of distinct values. The compiler already computes which `$kernel.*` fields a matcher
-reads ([§2](#2-the-symbol-table-criteria-read)), so the memoization key costs nothing extra. That
-same read set is what [Appendix A.5](#a5-compile-time-validation-normative) checks the declared
-`scope` against, in both directions. The two can never disagree at match time, because a descriptor
-where they disagree does not compile. Results are cached across queries.
+makes this pay, and how much it pays is a property of that projection rather than of the mechanism.
+A kernel's full metadata tuple is unique by construction, so memoizing on the whole tuple would
+save nothing. A matcher reading one low-cardinality field collapses an engine's catalog to that
+field's handful of distinct values. The saving is `1 - |projection| / |catalog|`, and it degrades
+smoothly as the read set widens.
+
+**A shape-specialized pack is the degenerate case, and [§3](#3-criteria-vocabulary)'s MUST is what
+makes it one.** Every quantity such a kernel bakes has to be pinned, so its matcher reads every
+baked quantity, so the projection approaches the full tuple that memoizes to nothing. Measured on
+the shipped gfx942 `attention_dense` catalog: 2,710 kernels, all metadata tuples distinct as
+stated, and the projection over the ten fields its matcher reads has 1,931 distinct values. 71.3%
+of candidates are still evaluated; memoization saves 28.7%, not an order of magnitude. Nothing is
+wrong there — the pack is correct precisely because it pins everything — but an author should not
+expect the collapse. What does pay at that end is the other thing the projection buys: it is a key,
+so the catalog is indexed on it and the matcher looks candidates up rather than scanning them.
+That index is the real saving for a shape-specialized pack, and it is available for exactly the
+same declared read set.
+
+The compiler already computes which `$kernel.*` fields a `criteria` matcher reads
+([§2](#2-the-symbol-table-criteria-read)), so for the declarative arm the memoization key costs
+nothing extra. That same read set is what
+[Appendix A.5](#a5-compile-time-validation-normative) checks the declared `scope` against, in both
+directions. The two can never disagree at match time, because a descriptor where they disagree does
+not compile.
+
+**A native criterion has no AST, so it has no derived read set.** A `match_symbol` UMD names C++
+that reads `KernelDefinition` directly, and nothing about that is visible to the compiler: the
+shipped gfx942 `attention_dense` matcher declares `scope: "kernel"` and no more, while the function
+behind it reads ten KMD fields plus a bound token. The descriptor closes that gap by declaring
+`kernel_fields` (A.1), which then serves as the memoization projection and as the KMD cross-check,
+exactly as the derived set does for the declarative arm. **A native criterion that omits
+`kernel_fields` is unmemoized**: it is evaluated once per candidate. That is stated rather than
+inferred, because the alternatives are both wrong — memoizing on the declared `scope` alone would
+be unsound, since the function may read anything, and memoizing on the full tuple would be a no-op
+dressed as a cache. Declaring the set is the price of the optimization, and paying it is optional.
+
+Results are cached across queries.
 
 ![Scope pruning: a graph-scoped matcher failing removes every kernel in a pack, a kernel-scoped matcher failing removes only the candidate](../images/umd_scope_pruning.svg)
 
@@ -505,6 +586,28 @@ deterministically, reusing the rule from RFC 0017 §5:
    is logged to the warning log so an unintended overlap is visible. That byte order carries no
    meaning; it is chosen for being stable across runs, load orders, and machines, not because a lower
    id is better.
+
+**Tier 3 is written as a last resort, and a constant-score engine promotes it to the primary
+selector.** Each tier only discriminates if its input varies. A UHD scoring on one axis that the
+catalog holds constant returns one number for every candidate, and a catalog whose UKDs all leave
+`priority` at its default ties again, so selection falls to the byte order tier 3 concedes is
+meaningless. That is the shipped gfx942 `attention_dense` state rather than a hypothetical: over
+655 distinct graph geometries, 652 (99.5%) leave more than one candidate after matching, 4.14 on
+average and up to 6; the scorer reads `block_n`, which takes the single value 64 across all 2,710
+kernels; and every `priority` is 0. The surviving candidates differ in `block_m` (64, 128 or 256),
+`persistent`, and `use_exp2_fast` — materially different binaries with materially different
+performance. Determinism holds, and it is worth keeping. Meaningfulness does not: the engine is
+choosing by UUID.
+
+This is a performance-correctness hazard, not a rare cosmetic one, and [§16](#16-risks) records it
+as such. Two things move a decision back up the ladder, and a pack shipping a catalog with
+more than one candidate per geometry SHOULD use one. **`priority` encodes a measured preference**
+directly, which is what the worked example's persistent pack does when it sets `priority: 10` on
+the cohort it measured 70% faster. **The autotune path measures rather than guesses**: the engine's
+self-measure lever benchmarks the catalog for a graph and caches the winner
+([RFC 0013](0013_Autotune.md)), so the tie is resolved by the device instead of by the id space,
+and the cached winner survives the run. A UHD whose feature set is too coarse to separate its own
+catalog is a signal to widen the model's features, not to accept the tie.
 
 Arbitration is a property of the generic engine over the set of matching UKDs; a UMD shared by several
 UKDs contributes each of them as a candidate. This closes the mutual-exclusion-by-construction
@@ -585,11 +688,23 @@ untrusted or simply malformed. All three must be bounded and must fail closed ra
   follow-up, caps expression depth and step count and uses checked arithmetic. It declines on an
   unknown symbol, an unrecognized operator key, an out-of-range axis, or a type error. Evaluation is
   therefore bounded and total: a criteria expression terminates and cannot trap.
+- **Those guarantees cover the expression language, and nothing else.** They are properties of the
+  interpreter, so they reach a `criteria` expression and stop there. A `GraphCriterionFn` or a
+  `GraphMatchFn` is arbitrary C++ running outside it: nothing caps its depth, checks its
+  arithmetic, or makes it total. The one attention engine in the tree illustrates the gap — its
+  32-bit-addressing check multiplies four `int64_t` dims unchecked, which is fine for the shapes it
+  serves and unguarded for a graph that lies about them. A native symbol therefore carries the
+  obligation itself ([§6](#6-the-native-matcher-escape-hatch)): total over an unvalidated graph,
+  width-safe on any product of dims, a verdict rather than a throw. The fuzzer below is what tests
+  that obligation, since no static check can state it.
 - **Quarantine, not cascade.** A bad descriptor is quarantined on load with a diagnostic; the rest load
   ([RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery)).
 - **Fuzzing.** A seed corpus of patterns, criteria, and graphs, plus a fuzzer over the loader and
   matcher, run under the existing AddressSanitizer (ASAN) build
-  ([§13](#13-testing-and-performance)). This backs the fail-closed requirement.
+  ([§13](#13-testing-and-performance)). This backs the fail-closed requirement. The graph half of
+  that corpus drives the registered native symbols too, which is the only mechanism that tests the
+  totality obligation above: an interpreter bound is a static property, a `GraphCriterionFn`'s is
+  not.
 
 ---
 
@@ -650,6 +765,20 @@ Matcher-specific coverage:
   pattern-plus-criteria pair. It asserts identical accept/reject decisions and identical bound
   values. The scaled dot-product attention (SDPA) forward builder
   ([§15](#15-worked-example-sdpa-forward)) is the first target.
+- **Documented criteria are executed, not just read.** Every criteria set published in this RFC or
+  in a worked example is a claim about a real kernel family, so it is run as one: each documented
+  set is evaluated against the shipped bundle corpus and the shipped descriptor catalog for the
+  family it describes, and must agree accept-for-accept with that family's native arm. This is the
+  same harness as the bullet above, pointed at the documents rather than at a converted engine.
+  It exists because the failure it catches has occurred: an RFC's criteria set and the shipped C++
+  for one kernel family disagreed on layout (a `stride_order` equality that false-declines a
+  multi-query graph, [§5](#5-layout-and-stride-order-criteria)), on mask precedence (a first-match
+  classifier transcribed in source order, reproducing a defect the C++ had already fixed), and on
+  two attribute references that do not resolve as written — none of which review caught, and all
+  of which one execution would have. The first instance is the gfx942 `attention_dense` family:
+  24 SDPA_FWD BSHD integration bundles and a 2,710-kernel catalog, against
+  [RFC 0017's worked example](examples/0017_UniversalKernelDescriptor_WorkedExample.md).
+  A worked example is a fixture, not prose.
 - **Symbol-resolution rejection.** A UMD referencing a symbol a given UED does not publish is rejected
   at pair-validation, naming the reference, both descriptors, and the pack that paired them. A UED
   pattern edit that removes a bound variable is caught the same way
@@ -734,7 +863,8 @@ pin them per candidate. The pack's matcher then constrains what that pattern bou
     // unsupported optional operands declined together; `not_present` always evaluates,
     // unlike a field read on an absent operand
     {"not_present": ["$attn_mask", "$page_table_k", "$page_table_v"]},
-    {"==": ["$graph.node_count", 1]}                               // exact: this kernel is the whole graph
+    {"==": ["$graph.node_count", 1]}                               // bounds the graph: the pattern
+                                                                   // does not (RFC 0020 § 4.3.1)
   ]}
   // arch is a pack property (KDP.arch), not a match criterion
   // mask self-consistency is a native matcher the pack lists
@@ -791,6 +921,33 @@ read, and what the paired UDD's grid and argument formulas reference
 - **Match overhead.** Per-candidate evaluation of the criteria expression is unbounded by the
   root-opcode index ([§8](#8-the-matcher-compilation-indexing-and-caching)). Mitigation: short-circuit
   evaluation, applicability-time caching, and the overhead test of [§13](#13-testing-and-performance).
+  Memoization is a weaker mitigation than it looks for a shape-specialized pack, whose
+  [§3](#3-criteria-vocabulary) pins force a near-unique projection: measured at 28.7% of candidates
+  skipped on the shipped gfx942 `attention_dense` catalog, not an order of magnitude
+  ([§8](#8-the-matcher-compilation-indexing-and-caching)). The saving there comes from indexing the
+  catalog on the projection rather than from cache hits.
+- **A constant-score heuristic makes the id tie-break the primary selector.** Arbitration's three
+  tiers ([§9](#9-arbitration)) each discriminate only if their input varies, and a UHD scoring on
+  an axis its catalog holds constant, over UKDs that all leave `priority` at its default, sends
+  essentially every graph to the stable-`id` byte order — the one tier that concedes it carries no
+  meaning. Measured on the shipped gfx942 `attention_dense` engine: 652 of 655 geometries (99.5%)
+  reach it, with 2 to 6 surviving candidates differing in `block_m`, `persistent`, and
+  `use_exp2_fast`. This is a *performance*-correctness hazard rather than a functional one, which
+  is why it is easy to ship: every answer is right, reproducible, and possibly slow, so no test
+  fails. Mitigation: `priority` states a measured preference where the model cannot, the autotune
+  winner cache ([RFC 0013](0013_Autotune.md)) resolves the tie by measurement, and the warning
+  logged at tier 3 is what makes an unintended tie visible at all. The residual risk is a pack that
+  ignores all three; nothing structural catches it, and it is recorded here as a review obligation
+  on any pack shipping several candidates per geometry.
+- **A native criterion's read set is a promise, not a derivation.** `kernel_fields`
+  ([Appendix A.1](#a1-the-umd-descriptor-object)) is hand-written, so a criterion that reads a
+  field it did not declare is memoized on too narrow a key and can return one candidate's verdict
+  for another. The declarative arm cannot have this bug, because its set comes from the AST.
+  Mitigation: the field is optional and omitting it is safe (the criterion is simply unmemoized,
+  [§8](#8-the-matcher-compilation-indexing-and-caching)), so an author opts into the risk
+  deliberately; when declared, A.5 check 6 verifies every name against the engine's KMD, and the
+  match-equivalence test of [§13](#13-testing-and-performance) drives the whole catalog through
+  both the memoized and unmemoized paths.
 - **Static-matcher parity.** Should a matcher ever be lowered to a static form, one that diverges
   from the interpreter is a silent correctness bug. Mitigation: the interpreter is the oracle and the
   parity test gates any lowering.
@@ -852,6 +1009,19 @@ read, and what the paired UDD's grid and argument formulas reference
   [§13](#13-testing-and-performance) against the hand-written builder to catch what static
   validation structurally cannot. Whether dims may be named at all is the shape-matching follow-up's
   ([RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs)).
+- **`stride_order` cannot separate every layout pair.** The encoding is derived by sorting strides,
+  so a unit-extent axis makes two different layouts collide on one array
+  ([§5](#5-layout-and-stride-order-criteria)). Two failures follow, and both are quiet. A
+  cross-tensor `stride_order` equality **falsely declines** a correct graph whose two tensors
+  differ in which axes are unit-extent — 12.4% of the shipped gfx942 `attention_dense` catalog is
+  `num_kv_heads == 1`, where exactly that happens. And at that extent the encoding **cannot
+  distinguish** the correct layout from the wrong one at all, so a matcher written on it accepts
+  both. Mitigation: §5 states the caveat and the per-axis stride form that avoids it, `$q.strides[i]`
+  is published for the purpose, and the match-equivalence tests of
+  [§13](#13-testing-and-performance) run the unit-extent cases against the hand-written oracle.
+  The residual is that `stride_order` remains the convenient spelling and the trap is silent, so a
+  family whose graphs may present a unit extent on a layout-bearing axis is expected to reach for
+  the per-axis form from the start.
 
 ---
 
@@ -986,10 +1156,14 @@ its criteria are evaluated over.
 | `criteria` | Expr | see below | — | A single expression whose static type is `Bool` (A.3) |
 | `scope` | `"graph"` \| `"kernel"` | yes | — | Which inputs the criteria read, and so what a failure prunes. A `graph` scope is evaluated once per `(graph, device)` and disqualifies every kernel in the pack. A `kernel` scope also reads `$kernel.*` and disqualifies only the candidate ([§8](#8-the-matcher-compilation-indexing-and-caching)). Scope is declared rather than inferred, so the pruning level is a stated contract. It is not a consequence of which tokens an expression happens to name |
 | `match_symbol` | string | no | — | The **native criterion** escape hatch: a symbol naming a `GraphCriterionFn` the provider ships, resolved through its registry ([§6](#6-the-native-matcher-escape-hatch)) |
+| `kernel_fields` | string[] | no | — | Permitted **only** alongside `match_symbol`: the `$kernel.*` fields the native criterion reads, declared by hand because a native criterion has no criteria AST for the compiler to derive them from. It is what a native criterion trades for memoization and for the KMD cross-check the declarative arm gets for free ([§6](#6-the-native-matcher-escape-hatch), [§8](#8-the-matcher-compilation-indexing-and-caching), A.5 check 3n). Omitted, the criterion is evaluated once per candidate and its metadata reads go unchecked. A `graph`-scoped UMD declaring it is refused, on the same grounds as a graph-scoped `criteria` reading `$kernel.*` |
 
 A UMD carries exactly one of `criteria` and `match_symbol`. One that declares neither states no
 check. One that declares both hides a conjunction inside a descriptor, which a pack instead states
 by listing two matcher ids ([§6](#6-the-native-matcher-escape-hatch)). Either is refused.
+`kernel_fields` appears only beside `match_symbol`. On a `criteria` UMD the compiler derives that
+set from the expression, so a hand-written one is a second statement of a derivable fact and a
+place for the two to disagree; it is refused rather than cross-checked.
 
 No other top-level keys are permitted, and an unknown key is refused. In particular, a UMD carries
 no `schema` member. The `.umd.json` filename already states the type, and a file whose name and body
@@ -1062,12 +1236,21 @@ matching
 
 | Alias | Array | | Alias | Array |
 |---|---|---|---|---|
-| `nchw` | `[3,2,1,0]` | | `ndhwc` | `[4,0,3,2,1]` |
-| `nhwc` | `[3,0,2,1]` | | `bhsd` | `[3,2,1,0]` |
-| `ncdhw` | `[4,3,2,1,0]` | | | |
+| `nchw` | `[3,2,1,0]` | | `bhsd` | `[3,2,1,0]` |
+| `nhwc` | `[3,0,2,1]` | | `bshd` | `[3,1,2,0]` |
+| `ncdhw` | `[4,3,2,1,0]` | | `ndhwc` | `[4,0,3,2,1]` |
 
 Every alias is fixed-rank. An alias compared against a tensor the criteria pin to a different rank
 is refused at compile, rather than declining silently at match time.
+
+`bhsd` and `nchw` expand to the same permutation. That is not a duplicate entry: the arrays are
+stride ranks over a logical axis order, and the two names give the same packing over differently
+named axes, so an author writes whichever names the axes their family thinks in. The pair also
+shows what an alias cannot do. Because an alias is a whole-array comparison, it inherits
+[§5](#5-layout-and-stride-order-criteria)'s tie caveat: at a unit head extent a BSHD tensor also
+encodes as `[3,2,1,0]`, so `{"==": ["$k.stride_order", "bshd"]}` declines a correct BSHD tensor
+whose head count is 1. A family that must separate the two spellings at that extent writes the
+per-axis stride reads of §5 instead of any alias.
 
 ### A.5 Compile-time validation (normative)
 
@@ -1096,6 +1279,16 @@ the UED ([§2](#2-the-symbol-table-criteria-read)).
    decision that cannot vary by candidate. The compiler already computes the `$kernel.*` read set
    to build the memoization projection ([§8](#8-the-matcher-compilation-indexing-and-caching)), so
    neither check costs a second walk.
+   3n. **The native counterpart.** A `match_symbol` UMD has no criteria AST, so nothing about it
+   is derivable and check 3 does not apply to it. What stands in its place is `kernel_fields`
+   (A.1), and it is optional. When present it MUST be a non-empty array of distinct names and the
+   `scope` MUST be `"kernel"`; a `graph`-scoped UMD declaring it is **refused**, for the reason
+   check 3 refuses the declarative form. When absent, the descriptor declares that it reads no
+   `$kernel.*`, or declines to say: either way the criterion is unmemoized
+   ([§8](#8-the-matcher-compilation-indexing-and-caching)) and check 6 has nothing to check. A
+   `kernel`-scoped UMD with neither `criteria` nor `kernel_fields` is accepted and diagnosed, on
+   the same terms as check 3's harmless converse: the runtime cannot tell whether it pays
+   per-candidate evaluation for a per-candidate decision.
 4. `match_symbol`, when present, is registered in the provider's registry
    ([§6](#6-the-native-matcher-escape-hatch)); an unregistered symbol refuses the descriptor
    rather than deferring the failure to match time.
@@ -1104,8 +1297,13 @@ the UED ([§2](#2-the-symbol-table-criteria-read)).
 
 5. Every `$`-reference in `criteria` resolves to a symbol that engine's pattern published: a
    pattern variable, a node `id`'s attribute, or a reserved `$graph.*` / `$device.*` root (A.2).
-6. Every `$kernel.*` field the criteria read is declared by that engine's KMD
-   ([§3](#3-criteria-vocabulary)).
+6. Every `$kernel.*` field the criteria read, and every name in `kernel_fields` when present, is
+   declared by that engine's KMD ([§3](#3-criteria-vocabulary)). A native criterion that omits
+   `kernel_fields` reads its metadata through `KernelDefinition` at match time, so this check
+   cannot run for it: a field it names that the KMD does not declare fails closed on a live graph
+   instead of erroring at load. This is the pack-scoped instance of the trade
+   [RFC 0020 § 4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative) records at
+   engine scope.
 
 Checks 5 and 6 are cached on `(matcher, engine)` and re-run when either side changes. A failure
 names the unresolved reference, both descriptors, and the pack that paired them

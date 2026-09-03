@@ -4,7 +4,7 @@ This document is the long-form companion to
 [RFC 0017: Universal Kernel Descriptors](../0017_UniversalKernelDescriptor.md). It carries the
 full worked example the main RFC summarises: the engine's pattern and the criteria that constrain
 it for a real SDPA forward kernel, the mask-mode classifier encoded as criteria data, one accept
-and two declines traced end to end, the dispatch geometry for both performance cohorts, and the
+and three declines traced end to end, the dispatch geometry for both performance cohorts, and the
 engine, metadata schema, and two kernel packs that bind them.
 
 Descriptor semantics are defined in
@@ -20,7 +20,7 @@ representative vocabulary RFC 0017 publishes.
 1. [One Pattern, Criteria Per Candidate Kernel](#1-one-pattern-criteria-per-candidate-kernel)
 2. [The Criteria](#2-the-criteria)
 3. [Encoding the Mask Classifier](#3-encoding-the-mask-classifier)
-4. [One Accept, Two Declines](#4-one-accept-two-declines)
+4. [One Accept, Three Declines](#4-one-accept-three-declines)
 5. [Dispatch Geometry from `$kernel.*`](#5-dispatch-geometry-from-kernel)
 6. [The Engine, Metadata, and Two Kernel Packs](#6-the-engine-metadata-and-two-kernel-packs)
 7. [What an Author Actually Writes](#7-what-an-author-actually-writes)
@@ -47,7 +47,7 @@ descriptor files.
 Every gate below traces to a real condition, either in `AttentionDenseSpec.__post_init__`, which
 validates the spec itself, or in the dispatch candidate's `support` function, which decides
 whether a request reaches this kernel at all. Showing *decline* correctly matters more than
-showing *accept*, so this document walks through one accept and two distinct declines.
+showing *accept*, so this document walks through one accept and three distinct declines.
 
 ## 1. One Pattern, Criteria Per Candidate Kernel
 
@@ -75,7 +75,10 @@ in §7.
 
 Every `$`-token below reaches a symbol §6's engine pattern bound: the four tensors `$q`, `$k`,
 `$v`, `$o`, the twenty-four optional operands the pattern declares with a `?`, and the `sdpa_fwd`
-node's scalar attributes; this descriptor carries the constraints over them.
+node's scalar attributes; this descriptor carries the constraints over them. That last group spans
+two schema tables — the op's `SdpaAttributes` and the `Node` table's own scalars, which is where
+`compute_data_type` lives — and a criterion reads both under the same `$sdpa_fwd.` root
+([RFC 0020 App. B.3](../0020_UniversalEngineDescriptor.md#b3-field-classification-normative)).
 
 ```jsonc
 {
@@ -92,7 +95,9 @@ node's scalar attributes; this descriptor carries the constraints over them.
     //     declined before any criterion runs
     //     ([RFC 0018 A.1](../0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)).
     //     No conjunct restates that: with the default in force, one could never change the
-    //     verdict. ---
+    //     verdict. `node_count` below is the opposite case — it is not a restatement of the
+    //     pattern but the only thing bounding the rest of the graph, since the pattern matches
+    //     the ops it names and does not by itself exclude others (RFC 0020 § 4.3.1). ---
     {"==": ["$graph.node_count", 1]},
     // --- 23 of the 24 optional tensors the engine's pattern binds are refused outright. The
     //     24th, the scale tensor, is served, and its gate is further down. ---
@@ -141,21 +146,55 @@ node's scalar attributes; this descriptor carries the constraints over them.
     {"divisible": ["$q.dims[1]", "$k.dims[1]"]},
 
     // --- layout. The kernel bakes packed BSHD strides at build time (stride_q_tok = Hq * D
-    //     is a Python int, never read from an argument), so exactly one stride_order is legal:
-    //     [3,1,2,0] — one entry per dim position above, giving that dim's stride rank, with 0
-    //     the fastest-varying. A family accepting either BHSD or BSHD would anchor
-    //     `{"in": [..., [[3,2,1,0],[3,1,2,0]]]}`; anchor to the literal set the kernel accepts,
-    //     whatever its size. ---
+    //     is a Python int, never read from an argument), so exactly one memory layout is legal.
+    //     The obvious spelling, `{"==": ["$q.stride_order", [3,1,2,0]]}` with the other three
+    //     compared against it, is WRONG here, and quietly so. `stride_order` is derived by
+    //     sorting strides, so a UNIT extent collapses the two candidate layouts onto one array:
+    //     at num_kv_heads == 1 a correct BSHD K encodes as [3,2,1,0], the same array BHSD gives,
+    //     which both false-declines that graph against $q's [3,1,2,0] and leaves the encoding
+    //     unable to tell correct from wrong. Multi-query graphs are not exotic — 12.4% of the
+    //     shipped gfx942 sibling catalog is num_kv_heads == 1. So the layout is stated per axis,
+    //     exempting unit extents, which is exactly what the kernel's own `hasBshdStrides` does
+    //     ([RFC 0018 §5](../0018_UniversalMatchDescriptor.md#5-layout-and-stride-order-criteria)).
+    //     For a tensor (B, H, S, D) the packed BSHD strides are [S*H*D, D, H*D, 1]. ---
     "$q.packed", "$k.packed", "$v.packed", "$o.packed",
-    {"==": ["$q.stride_order", [3, 1, 2, 0]]},
-    {"==": ["$k.stride_order", "$q.stride_order"]},
-    {"==": ["$v.stride_order", "$q.stride_order"]},
-    {"==": ["$o.stride_order", "$q.stride_order"]},
+    {"==": ["$q.strides[3]", 1]}, {"==": ["$k.strides[3]", 1]},
+    {"==": ["$v.strides[3]", 1]}, {"==": ["$o.strides[3]", 1]},
+    // head axis: stride is the head size, or the axis is a don't-care at extent 1
+    {"or": [{"==": ["$q.dims[1]", 1]}, {"==": ["$q.strides[1]", "$q.dims[3]"]}]},
+    {"or": [{"==": ["$k.dims[1]", 1]}, {"==": ["$k.strides[1]", "$k.dims[3]"]}]},
+    {"or": [{"==": ["$v.dims[1]", 1]}, {"==": ["$v.strides[1]", "$v.dims[3]"]}]},
+    {"or": [{"==": ["$o.dims[1]", 1]}, {"==": ["$o.strides[1]", "$o.dims[3]"]}]},
+    // token axis: stride is heads * head size, likewise exempt at extent 1
+    {"or": [{"==": ["$q.dims[2]", 1]},
+            {"==": ["$q.strides[2]", {"*": ["$q.dims[1]", "$q.dims[3]"]}]}]},
+    {"or": [{"==": ["$k.dims[2]", 1]},
+            {"==": ["$k.strides[2]", {"*": ["$k.dims[1]", "$k.dims[3]"]}]}]},
+    {"or": [{"==": ["$v.dims[2]", 1]},
+            {"==": ["$v.strides[2]", {"*": ["$v.dims[1]", "$v.dims[3]"]}]}]},
+    {"or": [{"==": ["$o.dims[2]", 1]},
+            {"==": ["$o.strides[2]", {"*": ["$o.dims[1]", "$o.dims[3]"]}]}]},
+    // batch axis: stride is the whole per-batch extent, exempt at batch 1
+    {"or": [{"==": ["$q.dims[0]", 1]},
+            {"==": ["$q.strides[0]", {"*": ["$q.dims[2]", "$q.dims[1]", "$q.dims[3]"]}]}]},
+    {"or": [{"==": ["$k.dims[0]", 1]},
+            {"==": ["$k.strides[0]", {"*": ["$k.dims[2]", "$k.dims[1]", "$k.dims[3]"]}]}]},
+    {"or": [{"==": ["$v.dims[0]", 1]},
+            {"==": ["$v.strides[0]", {"*": ["$v.dims[2]", "$v.dims[1]", "$v.dims[3]"]}]}]},
+    {"or": [{"==": ["$o.dims[0]", 1]},
+            {"==": ["$o.strides[0]", {"*": ["$o.dims[2]", "$o.dims[1]", "$o.dims[3]"]}]}]},
 
     // --- compute precision, mma_core_mode, implementation: no per-family policy exists to check
-    //     against, so these three are a proposed convention, not a verified constraint. ---
+    //     against, so these three are a proposed convention, not a verified constraint. Two of
+    //     them are traps worth reading before copying. `compute_data_type` lives on the `Node`
+    //     table rather than SdpaAttributes, so it binds only because RFC 0020 App. B.3 merges the
+    //     Node table's own scalars into every op's attribute namespace; without that rule this
+    //     conjunct fails reference validation at load. And `mma_core_mode` is written as an
+    //     ALLOW-LIST, not `== "UNSET"`: an f32 accumulator is what the builder emits
+    //     unconditionally, so UNSET and an explicit FLOAT are equally inert, and gating on UNSET
+    //     alone declines every graph that spells out the value it was going to get anyway. ---
     {"==": ["$sdpa_fwd.compute_data_type", "FLOAT"]},
-    {"==": ["$sdpa_fwd.mma_core_mode", "UNSET"]},
+    {"in": ["$sdpa_fwd.mma_core_mode", ["UNSET", "FLOAT"]]},
     {"in": ["$sdpa_fwd.implementation", ["AUTO", "UNIFIED"]]},
 
     // --- no ALiBi, no padding mask, no dropout. alibi_mask and padding_mask are plain bools
@@ -187,15 +226,25 @@ node's scalar attributes; this descriptor carries the constraints over them.
     //     contradiction check and the mode disjunction together, as one element of this outer
     //     `and`. Splicing only the inner `or` would make the contradiction check a sibling
     //     disjunct, letting a graph with both deprecated causal booleans set pass by satisfying
-    //     another arm. ---
+    //     another arm. Every arm restates the negation of the arms above it, because the C++ it
+    //     inverts is first-match-wins; §3 derives why, and what goes wrong without it. ---
     {"and": [
       {"!": [{"and": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]},
 
       {"or": [
+        // A REAL LEFT BOUND OUTRANKS THE DEPRECATED BOOLEANS. The booleans can only pick
+        // top-left from bottom-right; they cannot express a window, so a graph that sets one
+        // AND carries a left bound is asking for a band and resolves to sliding_window.
+        {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
+                 {"!=": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]}]},
+
         {"and": [{"==": ["$kernel.mask_mode", "causal_top_left"]},
+                 {"==": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]},
                  "$sdpa_fwd.causal_mask"]},
 
         {"and": [{"==": ["$kernel.mask_mode", "causal_bottom_right"]},
+                 {"==": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]},
+                 {"!": ["$sdpa_fwd.causal_mask"]},
                  "$sdpa_fwd.causal_mask_bottom_right"]},
 
         {"and": [{"==": ["$kernel.mask_mode", "none"]},
@@ -216,10 +265,9 @@ node's scalar attributes; this descriptor carries the constraints over them.
 
         {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
                  {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
-                 {"!": [{"and": [{"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-                                 {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]}]}]},
-                 {"!": [{"and": [{"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-                                 {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]}]}]}]}
+                 {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+                 {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
+                 {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]}]}
       ]}
     ]}
   ]}
@@ -241,23 +289,68 @@ A third real spec field, `sliding_window: int`, requires `causal=True` and
 `sliding_window` nonzero today, so this pack's kernel vector does not (yet) ship a sliding-window
 instance.
 
-The classifier this maps onto is a 5-input precedence machine (`causal_mask`,
+The classifier this maps onto is a 5-input **precedence machine** (`causal_mask`,
 `causal_mask_bottom_right`, `left_bound`, `right_bound`, `diagonal_alignment`; first match wins;
-both deprecated booleans set is a contradiction). Inverting it into a boolean `or` over
-`$kernel.mask_mode` is equivalent by exhaustive case analysis over the five inputs, and the
-inversion holds for any kernel family: the classifier reasons purely about the graph's mask
-attributes, not about which kernel serves the result. What changes per family is which modes its
-kernel vector covers: only `none` and `causal_top_left` have real, buildable `AttentionDenseSpec`
-instances today (`causal=False` and `causal=True` respectively). The classifier below keeps all
-four legal `mask_mode` values structurally, so the KMD field stays open for a future
-`causal_bottom_right` or `sliding_window` UKD with no matcher change, but this pack's own §6
-vector populates only one of them, `causal_top_left`; §4's Case C shows what happens to a graph
-that resolves to an unpopulated mode.
+both deprecated booleans set is a contradiction). Its canonical form is
+`asm_sdpa_engine/plans/SdpaPlanUtils.hpp::getMaskType`, reproduced in the gfx942
+`attention_dense` pack as `maskTypeFor`, and its order is:
+
+1. both deprecated booleans set — contradiction, decline.
+2. **`left_bound != -1` — sliding window, whatever the booleans say.**
+3. `causal_mask` — top-left causal.
+4. `causal_mask_bottom_right` — bottom-right causal.
+5. `right_bound == -1` — no mask.
+6. `right_bound == 0` — causal, bottom-right or top-left by `diagonal_alignment`.
+7. otherwise — sliding window.
+
+**Step 2 outranks the booleans, and that ordering is load-bearing rather than stylistic.** The
+deprecated pair can only pick top-left from bottom-right; neither can express a band. A graph
+setting `causal_mask = true` *and* `left_bound = 128` is asking for a windowed mask, and reporting
+it as plain causal discards the window: the kernel then attends the whole causal triangle instead
+of the band, in bounds, with no fault. This is not hypothetical. `maskTypeFor` records that the
+function returned on the boolean first, that five gpt_oss graphs in hipDNN's own corpus are
+exactly that shape, and that they were served wrongly until the order was fixed. Nothing
+downstream catches it, because `sliding_window` is declined while `causal_top_left` is served — so
+the defect converts a decline into a wrong answer.
+
+**Inverting a first-match-wins machine therefore requires each arm to negate its predecessors.**
+Transcribing the arms in source order, guarding each only by its own condition, does not encode
+the same function: it encodes whatever precedence the reader assumed. An earlier revision of this
+document did exactly that — its first arm was `mask_mode == causal_top_left AND causal_mask`, with
+no bound consulted — and reproduced the fixed defect verbatim, because the `sliding_window` arm
+that would have caught the graph was guarded by `{"!": ["$sdpa_fwd.causal_mask"]}` and unreachable
+for precisely those graphs. The arms below carry `left_bound == -1` down from step 2, and
+`{"!": ["$sdpa_fwd.causal_mask"]}` down from step 3, so each arm states its own condition *and*
+the failure of everything above it.
+
+With `L = value_or_default($sdpa_fwd.left_bound, -1)` and
+`R = value_or_default($sdpa_fwd.right_bound, -1)`, the seven steps become seven arms:
+
+| `$kernel.mask_mode` | Arm condition |
+|---|---|
+| `sliding_window` | `L != -1` |
+| `causal_top_left` | `L == -1` ∧ `causal_mask` |
+| `causal_bottom_right` | `L == -1` ∧ `¬causal_mask` ∧ `causal_mask_bottom_right` |
+| `none` | `L == -1` ∧ neither boolean ∧ `R == -1` |
+| `causal_bottom_right` | `L == -1` ∧ neither boolean ∧ `R == 0` ∧ `diagonal_alignment == BOTTOM_RIGHT` |
+| `causal_top_left` | `L == -1` ∧ neither boolean ∧ `R == 0` ∧ `diagonal_alignment != BOTTOM_RIGHT` |
+| `sliding_window` | `L == -1` ∧ neither boolean ∧ `R ∉ {-1, 0}` |
+
+The arms are mutually exclusive and total over the five inputs, which is what makes the `or` an
+inversion of the machine rather than a paraphrase of it. The inversion holds for any kernel
+family: the classifier reasons purely about the graph's mask attributes, not about which kernel
+serves the result. What changes per family is which modes its kernel vector covers: only `none`
+and `causal_top_left` have real, buildable `AttentionDenseSpec` instances today (`causal=False`
+and `causal=True` respectively). The classifier keeps all four legal `mask_mode` values
+structurally, so the KMD field stays open for a future `causal_bottom_right` or `sliding_window`
+UKD with no matcher change, but this pack's own §6 vector populates only one of them,
+`causal_top_left`; §4's Case C shows what happens to a graph that resolves to an unpopulated mode,
+and Case D what happens to one that resolves to `sliding_window`.
 
 `left_bound` and `right_bound` are optional (`long = null`), and the C++ they mirror treats an
 absent bound as unbounded, i.e. `-1`. Written out, each arm below would need
 `{"or": [{"not_present": ["$sdpa_fwd.left_bound"]}, {"==": ["$sdpa_fwd.left_bound", -1]}]}`
-wherever it means "left unbounded", correct but unreadable six times over. The arms below instead
+wherever it means "left unbounded", correct but unreadable seven times over. The arms below instead
 use `value_or_default` to normalize an absent bound to `-1` first and then compare. The two
 spellings are equivalent; this one is legible.
 
@@ -270,10 +363,17 @@ spellings are equivalent; this one is legible.
   {"!": [{"and": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]},
 
   {"or": [
+    // Step 2: a real left bound outranks the deprecated booleans.
+    {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
+             {"!=": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]}]},
+
     {"and": [{"==": ["$kernel.mask_mode", "causal_top_left"]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]},
              "$sdpa_fwd.causal_mask"]},
 
     {"and": [{"==": ["$kernel.mask_mode", "causal_bottom_right"]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]},
+             {"!": ["$sdpa_fwd.causal_mask"]},
              "$sdpa_fwd.causal_mask_bottom_right"]},
 
     {"and": [{"==": ["$kernel.mask_mode", "none"]},
@@ -294,10 +394,9 @@ spellings are equivalent; this one is legible.
 
     {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
              {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
-             {"!": [{"and": [{"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-                             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]}]}]},
-             {"!": [{"and": [{"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-                             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]}]}]}]}
+             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+             {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
+             {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]}]}
   ]}
 ]}
 ```
@@ -307,14 +406,15 @@ from copying the C++ shape, compute a mode then compare it, into a language that
 name the value: the kernel's own metadata supplies the right-hand side, so the comparison
 collapses into the predicate. That inversion is the general recipe for porting a classifier.
 
-## 4. One Accept, Two Declines
+## 4. One Accept, Three Declines
 
-All three cases share one graph: a single `sdpa_fwd` node, Q/K/V/O rank-4, bf16, packed BSHD. Q
+All four cases share one graph: a single `sdpa_fwd` node, Q/K/V/O rank-4, bf16, packed BSHD. Q
 and O carry dims `[1, 16, 2048, 128]`; K and V carry `[1, 2, 2048, 128]`. Read against the
 positions §2 pins, that is batch 1, 16 query heads over 2 KV heads (GQA ratio 8), query and key
 sequence length 2048 apiece, and head size 128. The node also has `compute_data_type=FLOAT`,
-`mma_core_mode=UNSET`, `implementation=AUTO`, no optional tensors, no alibi/padding/dropout,
-`attn_scale_value=0.08838834764831845` (`1/sqrt(128)`) and no scale tensor. The three cases differ
+`mma_core_mode=FLOAT` (the value real bundles carry, and the reason §2 gates that field as an
+allow-list rather than `== UNSET`), `implementation=AUTO`, no optional tensors, no alibi/padding/dropout,
+`attn_scale_value=0.08838834764831845` (`1/sqrt(128)`) and no scale tensor. The four cases differ
 only in the field named.
 
 **Case A: accept.** `causal_mask=true`. Every §2 gate passes. The four tensors are rank 4; batch
@@ -348,6 +448,15 @@ not applicable to it, per §1's criteria-plus-`$kernel.*` mechanism. The gap is 
 kernel builds a `causal=False` kernel today (`AttentionDenseSpec(causal=False, ...)` is a valid,
 buildable spec), so adding a `mask_mode="none"` UKD to this pack needs one more
 `kernelDescriptors` entry and no matcher change.
+
+**Case D: precedence decline.** Same graph as Case A, `causal_mask=true`, plus
+`left_bound=128` — a causal graph asking for a 128-wide band. Step 2 of §3's precedence outranks
+the boolean, so `mask_mode` resolves to `sliding_window`, no UKD in §6's vector declares it, and
+the graph declines at the catalog exactly as Case C does. This case is here because it is the one
+the arms get wrong when transcribed in source order: guard the `causal_top_left` arm by
+`causal_mask` alone and this graph is *served*, by a kernel that attends the whole triangle and
+silently ignores the window. Five graphs of this exact shape sit in hipDNN's own corpus, and the
+native gfx942 pack declines all five ([§3](#3-encoding-the-mask-classifier)).
 
 ## 5. Dispatch Geometry from `$kernel.*`
 
@@ -550,9 +659,13 @@ adapter invocation: the builder, plus the exact build values for that instance.
        },
        "results": {"o": "$o"}}
     ]
-    // A prebuilt kernel serves one fixed compile-time shape, so the pattern is the entire graph
-    // and matching it is all-or-nothing: a graph carrying any other node declines the engine
-    // outright, which is what §2's `node_count` conjunct restates on the criteria side.
+    // A prebuilt kernel serves one fixed compile-time shape, so this pack needs the whole graph
+    // to be this node. The pattern does not state that: match semantics are exact over the ops
+    // named, not subgraph-containment, so the pattern binds this node and says nothing about the
+    // rest of the graph (RFC 0020 § 4.3.1). Bounding the graph is §2's `node_count` conjunct,
+    // which ADDS that constraint rather than restating one. It lives on the criteria side
+    // because it is a per-pack constraint: another pack on this same engine could serve this
+    // node fused into a larger graph without touching the pattern both share.
   }
 }
 

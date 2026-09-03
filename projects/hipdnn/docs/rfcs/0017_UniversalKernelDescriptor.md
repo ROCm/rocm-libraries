@@ -1005,19 +1005,30 @@ graph fields (Tensor/Graph/Attributes/Device) runs once for the whole graph (*ru
 memoization*). On failure it disqualifies every pack that lists it (*fail-prune*), so evaluating the
 most-shared checks first (dtype, layout) prunes the candidate set fast. A matcher that also reads
 `$kernel.*` is the same matcher re-evaluated once per distinct value of the `$kernel.*` fields it
-reads, memoized on those, and disqualifies per kernel rather than per pack. The projection matters:
-a kernel's full metadata tuple is unique by construction, so memoizing on the whole tuple would save
-nothing, while a matcher that reads one field collapses an engine's whole catalog to that field's
-handful of distinct values. The loader already computes which `$kernel.*` fields each matcher reads,
-so the memoization key is available with no extra work. Kernel-level checks run only for kernels
-whose packs survived the graph-only pruning. Results are cached across queries, and a kernel whose
-matchers all pass goes to the heuristic to be ranked.
+reads, memoized on those, and disqualifies per kernel rather than per pack. The projection matters,
+and so does its cardinality: a kernel's full metadata tuple is unique by construction, so memoizing
+on the whole tuple would save nothing, while a matcher that reads one low-cardinality field
+collapses an engine's whole catalog to that field's handful of distinct values. A shape-specialized
+pack sits at the unhelpful end — pinning every baked quantity is exactly what this section requires
+of it, so its projection is nearly the full tuple — and there the win is the catalog index the
+projection keys rather than the cache hit
+([RFC 0018 §8](0018_UniversalMatchDescriptor.md#8-the-matcher-compilation-indexing-and-caching)
+sizes both on a shipped catalog). The loader already computes which `$kernel.*` fields each
+matcher reads, so the memoization key is available with no extra work; a matcher naming native C++
+has no expression to derive it from and declares the set instead
+([RFC 0018 §6](0018_UniversalMatchDescriptor.md#6-the-native-matcher-escape-hatch)). Kernel-level
+checks run only for kernels whose packs survived the graph-only pruning. Results are cached across
+queries, and a kernel whose matchers all pass goes to the heuristic to be ranked.
 
 **Arbitration is deterministic.** When several UKDs accept the same graph, the heuristic ranks them
 and the top-scored kernel wins. Ties break in a fixed order: explicit `priority`, then the
 descriptor's stable `id`, compared as raw bytes. That byte order carries no meaning; it is a
 tie-break chosen for being stable across runs, load orders, and machines, not because a lower id is
-better. When the decision falls to `id`, the provider logs the conflict to the warning log.
+better. When the decision falls to `id`, the provider logs the conflict to the warning log. A tie
+is only a last resort while the tiers above it discriminate: an engine whose heuristic scores on an
+axis its catalog holds constant sends nearly every graph to that byte order, which is a real
+performance hazard rather than a rare one
+([RFC 0018 §9](0018_UniversalMatchDescriptor.md#9-arbitration)).
 
 **Optional operands and optional fields.** The engine's pattern marks an operand optional with a `?`
 suffix, `"bias": "$bias?"`, binding it only when the graph supplies it. Whether something optional
@@ -1813,7 +1824,7 @@ Because that walkthrough runs to several hundred lines of descriptor data, it li
 document:
 **[RFC 0017 Worked Example: SDPA as a UKD](./examples/0017_UniversalKernelDescriptor_WorkedExample.md)**.
 It covers the engine's pattern and the complete criteria set,
-the mask-mode classifier encoded as criteria data, one accept and two declines traced end to end,
+the mask-mode classifier encoded as criteria data, one accept and three declines traced end to end,
 the dispatch geometry for both of the family's performance cohorts, and the engine, metadata
 schema, and two kernel packs that bind them. Three results from it are load-bearing for this RFC
 and are worth stating here:
@@ -1823,10 +1834,14 @@ and are worth stating here:
   native matcher. That is the half that matters for an allowlist: an under-specified decline
   accepts a graph the kernel cannot serve, which is a wrong answer rather than a missed
   optimization.
-- **A 5-input precedence classifier needs no escape hatch.** The mask-mode state machine inverts
-  into a boolean disjunction over `$kernel.mask_mode`, because the kernel's own metadata supplies
-  the value the C++ would have computed and compared. That inversion is the general recipe for
-  porting a classifier into criteria data.
+- **A 5-input precedence classifier needs no escape hatch, but does need its precedence.** The
+  mask-mode state machine inverts into a boolean disjunction over `$kernel.mask_mode`, because the
+  kernel's own metadata supplies the value the C++ would have computed and compared. That
+  inversion is the general recipe for porting a classifier into criteria data. It carries one
+  obligation the recipe must state: the machine is first-match-wins, so each arm has to negate the
+  arms above it. Transcribing the arms in source order encodes a different function, and in this
+  family it reproduces a defect that shipped — a windowed causal graph served as plain causal,
+  with the window silently discarded.
 - **Per-instance geometry rides on `$kernel.*`.** Measured cohorts that a formula over graph
   dimensions cannot derive become distinct UKDs with fixed metadata, and the shared dispatch
   descriptor's formulas read that metadata, so the cohort split costs kernel entries rather than
@@ -1909,7 +1924,7 @@ golden-reference tolerance chain ([RFC 0011](0011_GoldenReferenceValidation.md))
 descriptor-backed engine carries support claims ([RFC 0015](0015_EngineSupportClaims.md)) like any
 other. New tests go into those tiers.
 
-Three areas are new here:
+Four areas are new here:
 
 - **Fuzzing the descriptor pipeline.** The loader, matcher, and expression interpreter parse
   untrusted input on the drop-in path. This adds a seed corpus and a fuzzer over them, run under
@@ -1923,6 +1938,17 @@ Three areas are new here:
   [RFC 0013](0013_Autotune.md)) matures, this overhead is validated against the hand-written
   baseline. Loading is on demand and cached, so that cost is paid once, at first use, and only for
   descriptors a graph reaches.
+- **Worked examples are executed against the shipped corpus.** Every criteria set this series
+  publishes claims to encode a real kernel family's applicability, and
+  [Section 13](#13-worked-example-sdpa-as-a-ukd) rests that claim on the format's adequacy. So each
+  documented set is run against the integration bundles and the shipped descriptor catalog for the
+  family it describes, and must decide as that family's native code decides. The mechanism is
+  [RFC 0018 §13](0018_UniversalMatchDescriptor.md#13-testing-and-performance)'s match-equivalence
+  harness pointed at the documents. It is here because a document that claims to prove the format
+  sufficient is only evidence while something checks it: reviewing this series against a shipped
+  integration of the same family turned up a layout gate that false-declines a real graph, a
+  classifier whose arms encoded the wrong precedence, and two attribute references that do not
+  resolve — all of them mechanically detectable, none of them caught by reading.
 
 ### 14.2 Follow-up RFCs
 
