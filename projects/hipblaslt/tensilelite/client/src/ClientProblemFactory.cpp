@@ -60,6 +60,7 @@ namespace TensileLite
             , m_padMXScaleTensorFreeDim(false)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
+            , m_fusedGemmA2A(args["fused-gemm-a2a"].as<bool>())
             , m_metadataLayout(args["metadata-layout"].as<int>())
             , m_aOps(args["a-ops"].as<TensorOps>())
             , m_bOps(args["b-ops"].as<TensorOps>())
@@ -404,6 +405,7 @@ namespace TensileLite
                                 rv.back().setWorkspaceSize(m_maxWorkspaceSize);
                                 rv.back().setSwizzleTensorA(m_swizzleTensorA);
                                 rv.back().setSwizzleTensorB(m_swizzleTensorB);
+                                rv.back().setFusedGemmA2A(m_fusedGemmA2A);
                                 if(k < m_biasTypeArgs.size())
                                 {
                                     auto length

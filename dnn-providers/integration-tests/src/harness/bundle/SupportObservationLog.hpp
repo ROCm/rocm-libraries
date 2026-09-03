@@ -14,7 +14,11 @@ namespace hipdnn_integration_tests::bundle
 
 // One (graph, engine, arch, platform) cell of observed support, as seen on the
 // hardware the run happened on.
-struct SupportObservation
+//
+// Not SupportVerdict.hpp's SupportObservation, which is the enforcing side: what a
+// sidecar promised and whether we got to read it. This one is the authoring side --
+// what the engines actually took, with no sidecar involved.
+struct ObservedSupportCell
 {
     // Says which sidecar this cell belongs in and, for a sweep, which case
     // within it. Carried rather than re-derived: the writer must agree with the
@@ -45,13 +49,13 @@ public:
     SupportObservationLog(SupportObservationLog&&) = delete;
     SupportObservationLog& operator=(SupportObservationLog&&) = delete;
 
-    void record(SupportObservation observation)
+    void record(ObservedSupportCell observation)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         _observations.push_back(std::move(observation));
     }
 
-    std::vector<SupportObservation> all() const
+    std::vector<ObservedSupportCell> all() const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         return _observations;
@@ -73,7 +77,7 @@ private:
     SupportObservationLog() = default;
 
     mutable std::mutex _mutex;
-    std::vector<SupportObservation> _observations;
+    std::vector<ObservedSupportCell> _observations;
 };
 
 } // namespace hipdnn_integration_tests::bundle

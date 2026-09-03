@@ -45,8 +45,7 @@ InvokerFactory MakeImplGemmDataInvokerFactory(const ProblemDescription& problem)
                 // clang-format off
                 if((tensors.outDesc.GetType() == miopenHalf ||
                     tensors.outDesc.GetType() == miopenBFloat16) &&
-                   (kernel.GetName() == "gridwise_convolution_backward_data_implicit_gemm_v1r1_xdlops_nchw_kcyx_nkhw" ||
-                    kernel.GetName() == "gridwise_convolution_backward_data_implicit_gemm_v1r1_nchw_kcyx_nkhw" ||
+                   (kernel.GetName() == "gridwise_convolution_backward_data_implicit_gemm_v1r1_nchw_kcyx_nkhw" ||
                     kernel.GetName() == "gridwise_convolution_backward_data_implicit_gemm_v1r1_ncdhw_kczyx_nkdhw"))
                 // clang-format on
                 {
@@ -115,19 +114,6 @@ InvokerFactory MakeImplGemmDataInvokerFactory(const ProblemDescription& problem)
                     }
                 }
                 // clang-format off
-                else if(kernel.GetName() == "gridwise_convolution_backward_data_implicit_gemm_v1r1_xdlops_nchw_kcyx_nkhw")
-                // clang-format on
-                {
-                    float zero = 0.f;
-                    SetTensor(handle, tensors.outDesc, tensors.out, &zero);
-                    if(handle.IsProfilingEnabled())
-                        elapsed += handle.GetKernelTime();
-
-                    kernel(tensors.in, tensors.w, tensors.out);
-                    if(handle.IsProfilingEnabled())
-                        elapsed += handle.GetKernelTime();
-                }
-                // clang-format off
                 else if(
                     kernel.GetName() == "gridwise_convolution_backward_data_implicit_gemm_v1r1_nchw_kcyx_nkhw" ||
                     kernel.GetName() == "gridwise_convolution_backward_data_implicit_gemm_v1r1_ncdhw_kczyx_nkdhw")
@@ -162,10 +148,7 @@ InvokerFactory MakeImplGemmDataInvokerFactory(const ProblemDescription& problem)
                         elapsed += handle.GetKernelTime();
                 }
                 // clang-format off
-                else if(
-                    kernel.GetName() == "gridwise_convolution_backward_data_implicit_gemm_v4r1_nchw_kcyx_nkhw" ||
-                    kernel.GetName() == "gridwise_convolution_backward_data_implicit_gemm_v4r1_xdlops_nchw_kcyx_nkhw" ||
-                    kernel.GetName() == "gridwise_convolution_backward_data_implicit_gemm_v4r1_ncdhw_kczyx_nkdhw")
+                else if(kernel.GetName() == "gridwise_convolution_backward_data_implicit_gemm_v4r1_xdlops_nchw_kcyx_nkhw")
                 // clang-format on
                 {
                     bool every_pixel_is_written = true;

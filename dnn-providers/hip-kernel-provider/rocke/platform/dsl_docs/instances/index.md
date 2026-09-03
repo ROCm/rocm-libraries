@@ -88,6 +88,20 @@ Coverage: fp16 / bf16, head_size in `{64, 128, 256}`, block_size in `{16, 64}`, 
 
 FP8 K/V cache + output scale/clamp is wired through `UnifiedAttentionProblem.use_fp8` (the kernel takes per-tensor `k_scale` / `v_scale` and stores the cache as `fp8e4m3`); see attention parity README.
 
+## Linear Attention Family
+
+A gated delta-rule recurrence rather than softmax attention, so it shares no
+code with the family above.
+
+| File | Spec | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `gfx942/kda_chunkwise.py` | `KdaChunkFusedSpec`, `KdaChunkPrepSpec`, `KdaChunkScanSpec`, `KdaTileSpec` | `instances/kda.md` |
+
+Three kernels: a fused prefill, and a two-phase split path (per-chunk tile
+builder, then state scan). gfx942 / bf16 only; prefill only, no varlen.
+Dispatch is `library/dispatch/kda/` (`dispatch_kda`), which defaults to the
+fused kernel and keeps the split halves opt-in.
+
 ## Small Ops
 
 | File | Spec | Doc |
@@ -154,6 +168,7 @@ From `helpers/README.md`:
 | attention_unified | - | Q + output + paged-KV | - | - | - | yes | - | `OnlineSoftmaxState`, `PagedKvDescriptor` |
 | attention_tiled_2d | - | Q + output + paged-KV | - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
 | attention_tiled_3d | - | Q + workspace + paged-KV| - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
+| kda_chunkwise | - | - | - | - | yes (grouped cumsum) | yes | - | `MfmaAtom` (bf16 16x16x16 / 32x32x8), `SignatureBuilder` |
 
 ## Building Any Instance
 

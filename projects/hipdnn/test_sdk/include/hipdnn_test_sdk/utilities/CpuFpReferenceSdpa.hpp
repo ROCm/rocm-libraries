@@ -44,6 +44,16 @@ public:
     ///                         Stores maxVal + log(sumExp) for each query position.
     ///                         Used for memory-efficient backward pass recomputation.
     ///                         Pass nullptr (default) to disable LSE output.
+    /// @param descaleQ         Optional FP8 dequantization scale for Q. Either a per-tensor
+    ///                         scalar ([1]) or per-(batch, KV-head) tensor [B, H_kv]. When set,
+    ///                         Q is multiplied by this factor before the Q·K^T product.
+    /// @param descaleK         Optional FP8 dequantization scale for K (same shapes as descaleQ),
+    ///                         applied to the Q·K^T product.
+    /// @param descaleV         Optional FP8 dequantization scale for V (same shapes as descaleQ),
+    ///                         applied to the P·V product.
+    ///                         Descales mirror AITER's fp8 forward contract: a null pointer means
+    ///                         no dequantization (neutral factor 1). Softmax/output (de)quant
+    ///                         (descale_s / scale_o) are not modeled here.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -59,7 +69,10 @@ public:
                         int64_t leftBound = -1,
                         int64_t rightBound = -1,
                         bool topLeftAlignment = true,
-                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr)
+                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
     {
         if(q.dims().size() != 4)
         {
@@ -138,6 +151,13 @@ public:
             }
         }
 
+        // Validate FP8 descale tensor shapes on the calling thread so a bad shape
+        // surfaces as a catchable exception rather than terminating a worker thread
+        // inside the parallel region below.
+        validateDescaleShape(descaleQ, "descaleQ", batch, numHeadsK);
+        validateDescaleShape(descaleK, "descaleK", batch, numHeadsK);
+        validateDescaleShape(descaleV, "descaleV", batch, numHeadsV);
+
         const auto headsPerHeadK = numHeads / numHeadsK;
         const auto headsPerHeadV = numHeads / numHeadsV;
 
@@ -155,6 +175,15 @@ public:
             const auto kvHeadK = h / headsPerHeadK;
             const auto kvHeadV = h / headsPerHeadV;
 
+            // FP8 dequantization factors (1 when no descale is provided). Q and K
+            // descales fold into the pre-softmax scores; V descale scales the output.
+            // Q/K/V descales are indexed by KV head, mirroring AITER's [B, H_kv] shape.
+            const auto descaleQFactor = getDescaleFactor(descaleQ, b, kvHeadK);
+            const auto descaleKFactor = getDescaleFactor(descaleK, b, kvHeadK);
+            const auto descaleQK = static_cast<ComputeDataType>(descaleQFactor * descaleKFactor);
+            const auto descaleVFactor
+                = static_cast<ComputeDataType>(getDescaleFactor(descaleV, b, kvHeadV));
+
             // Step 1: Compute scaled dot-product scores S[skv]
             std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv));
             for(int64_t skv = 0; skv < seqKv; ++skv)
@@ -167,7 +196,7 @@ public:
                            * static_cast<ComputeDataType>(
                                k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
                 }
-                scores[static_cast<size_t>(skv)] = dot * scale;
+                scores[static_cast<size_t>(skv)] = dot * scale * descaleQK;
             }
 
             // Step 2: Add additive attention mask (if provided)
@@ -235,8 +264,9 @@ public:
                            * static_cast<ComputeDataType>(
                                v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv}));
                 }
-                o.setHostValue(hipdnn_test_sdk::detail::safeConvert<ODataType>(acc),
-                               std::vector<int64_t>{b, h, sq, dv});
+                o.setHostValue(
+                    hipdnn_test_sdk::detail::safeConvert<ODataType>(acc * descaleVFactor),
+                    std::vector<int64_t>{b, h, sq, dv});
             }
         };
 
@@ -270,6 +300,10 @@ public:
     ///                       Stores maxVal + log(sumExp) for each query position.
     ///                       Used for memory-efficient backward pass recomputation.
     ///                       Pass nullptr (default) to disable LSE output.
+    /// @param descaleQ       Optional FP8 dequantization scale for Q (see the primary
+    ///                       overload); forwarded through unchanged.
+    /// @param descaleK       Optional FP8 dequantization scale for K.
+    /// @param descaleV       Optional FP8 dequantization scale for V.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -282,13 +316,28 @@ public:
                         std::optional<float> attnScaleValue,
                         const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask,
                         bool causalMask,
-                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr)
+                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
     {
         const int64_t leftBound = -1;
         const int64_t rightBound = (causalMask) ? 0 : -1;
         const bool topLeftAlignment = true;
 
-        forward(q, k, v, o, attnScaleValue, attnMask, leftBound, rightBound, topLeftAlignment, lse);
+        forward(q,
+                k,
+                v,
+                o,
+                attnScaleValue,
+                attnMask,
+                leftBound,
+                rightBound,
+                topLeftAlignment,
+                lse,
+                descaleQ,
+                descaleK,
+                descaleV);
     }
 
     /// SDPA backward convenience overload: accepts a simple causalMask flag.
@@ -827,6 +876,71 @@ private:
             return true;
         }
         return false;
+    }
+
+    /// Returns true if a descale tensor is a per-tensor scalar (its shape collapses
+    /// to a single element, e.g. [1] or [1, 1]).
+    static bool isScalarDescale(const hipdnn_data_sdk::utilities::TensorBase<float>& descale)
+    {
+        int64_t numElements = 1;
+        for(const auto dim : descale.dims())
+        {
+            numElements *= dim;
+        }
+        return numElements == 1;
+    }
+
+    /// Validate an FP8 descale tensor's shape on the calling thread. A descale tensor is
+    /// either a per-tensor scalar ([1] or [1, 1, 1, 1]) or a per-(batch, KV-head) tensor.
+    /// AITER's fp8 forward contract uses a 2-D [B, H_kv] descale, but hipDNN follows an
+    /// equal-rank convention for per-channel/broadcast scale operands (e.g. batchnorm's
+    /// [1, C, 1, 1]), so the per-head descale is shaped [B, H_kv, 1, 1]. A null pointer is
+    /// a no-op. Throwing here (rather than inside the parallel region) keeps the error
+    /// catchable by the caller, and rejecting a mismatched shape prevents getDescaleFactor()
+    /// from silently reading the wrong (or out-of-bounds) element.
+    static void validateDescaleShape(const hipdnn_data_sdk::utilities::TensorBase<float>* descale,
+                                     const char* name,
+                                     int64_t batch,
+                                     int64_t numHeadsKv)
+    {
+        if(descale == nullptr)
+        {
+            return;
+        }
+        if(isScalarDescale(*descale))
+        {
+            return;
+        }
+        const auto& dims = descale->dims();
+        if(dims.size() != 4 || dims[0] != batch || dims[1] != numHeadsKv || dims[2] != 1
+           || dims[3] != 1)
+        {
+            throw std::invalid_argument(
+                std::string("CpuFpReferenceSdpa: ") + name
+                + " descale tensor must be a per-tensor scalar ([1]) or rank-4 [B, H_kv, 1, 1] = ["
+                + std::to_string(batch) + ", " + std::to_string(numHeadsKv) + ", 1, 1]");
+        }
+    }
+
+    /// Look up an FP8 descale factor for a given batch and KV head. Assumes the
+    /// tensor shape was already validated by validateDescaleShape(). A null pointer
+    /// yields a neutral factor of 1 (no dequantization), so the BF16/FP16 paths are
+    /// unaffected.
+    static float getDescaleFactor(const hipdnn_data_sdk::utilities::TensorBase<float>* descale,
+                                  int64_t batch,
+                                  int64_t kvHead)
+    {
+        if(descale == nullptr)
+        {
+            return 1.0f;
+        }
+        // Per-tensor scalar: shape collapses to a single element (e.g. [1] or [1,1]).
+        if(isScalarDescale(*descale))
+        {
+            return descale->getHostValue(std::vector<int64_t>(descale->dims().size(), 0));
+        }
+        // Per-(batch, KV-head): [B, H_kv, 1, 1].
+        return descale->getHostValue(std::vector<int64_t>{batch, kvHead, 0, 0});
     }
 
     /// Compute broadcastable mask indices by right-aligning mask dims to [b, h, sq, skv].

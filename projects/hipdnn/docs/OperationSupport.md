@@ -22,7 +22,7 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
 
 - **[hipBLASLt Provider Plugin](../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)** - Integration with AMD's hipBLASLt library that provides optimized GEMM operations.
   - Stand-alone Matmul (FP32/FP16/BF16 inputs and outputs, with optional fused bias and activation)
-  - MX BlockScaleDequantize + GEMM (FP8 OCP and OCP MX FP4 inputs, including mixed pairs; gfx950/gfx1250 only)
+  - MX BlockScaleDequantize + GEMM (FP8 OCP, OCP MX FP6, and OCP MX FP4 inputs, including mixed pairs; gfx950/gfx1250 only)
 
 ### Reference Implementation
 

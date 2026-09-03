@@ -48,14 +48,11 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     # test_drive<> framework disabled).  These did not actually launch CK kernels
     # during gfx942 testing but are kept skipped pending more extensive testing.
     list(APPEND SKIP_TESTS
-        conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp
         conv_hip_igemm_xdlops.cpp
         conv_igemm_mlir_xdlops_bwd_wrw.cpp
         conv_igemm_mlir_xdlops_fwd.cpp
         smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16.cpp
         smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16.cpp
-        smoke_solver_ConvCkIgemmFwdV6r1DlopsNchw.cpp
-        unit_conv_solver_ConvHipImplicitGemmBwdDataV1R1Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmBwdDataV4R1Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm.cpp
@@ -106,6 +103,11 @@ function(add_gtest TEST_NAME TEST_CPP)
     # _impl suffix and MIOPEN_LOG_FUNCTION runs inside the renamed definition,
     # so the logged name carries that suffix.
     target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    # src/private is deliberately not on the include path: wrapper_routing.cpp is
+    # the only test that needs the routing header and reaches it by relative
+    # path. Adding it would also expose miopen_private_rename.h, which rewrites
+    # the public miopenFoo names to their _impl form -- a name collision waiting
+    # to happen in tests that have no business seeing it.
   endif()
 
   add_dependencies(miopen-tests ${TEST_NAME})
@@ -318,6 +320,20 @@ endforeach()
 add_library(miopen_gtest_common STATIC ${SOURCES})
 target_include_directories(miopen_gtest_common PRIVATE ../ ../../src/kernels)
 target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOpen)
+
+# libMIOpen.so does not export the routing seam's symbols, so a test cannot link
+# against them. Compile the source in here instead.
+#
+# Each test executable therefore carries its own copy of the seam, with its own
+# GetForwardingMode() cache. These tests cover the seam's logic, not whether the
+# wrapper stubs actually consult it.
+#
+# No include directory is needed: routing.cpp includes its own header by relative
+# path, and adding src/private here would expose miopen_private_rename.h to every
+# test-common source.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+  target_sources(miopen_gtest_common PRIVATE ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
+endif()
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.
   target_compile_options(miopen_gtest_common PRIVATE $<BUILD_INTERFACE:$<$<CXX_COMPILER_ID:Clang>:-U__LP64__>>)
@@ -358,6 +374,13 @@ else()
     install(TARGETS miopen_gtest
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT clients)
+    # GPU-free dbsync (StaticFDBSync) rocjitsu runner. Ships in the MIOpen dist so TheRock's
+    # `miopen-dbsync` test component can invoke it from share/miopen/bin/ (pulled via the --miopen
+    # artifact) and run dbsync GPU-free on a CPU runner. See the script header for the mechanism.
+    install(FILES dbsync/run_dbsync_rocjitsu.py
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+        DESTINATION ${DATA_INSTALL_DIR}/bin
         COMPONENT clients)
   endif()
 endif()

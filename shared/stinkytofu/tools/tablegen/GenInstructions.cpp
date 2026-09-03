@@ -1968,7 +1968,9 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         << "        : ArchInfo(\"" << lowerName << "\" /* name */" << ", " << arch.major << ", "
         << arch.minor << ", " << arch.stepping << ", " << arch.wavefront << " /* waveFrontSize */"
         << ", " << arch.totalVgprPerSimd << " /* totalVgprPerSimd */" << ", "
-        << arch.vgprAllocGranule << " /* vgprAllocGranule */)\n"
+        << arch.vgprAllocGranule << " /* vgprAllocGranule */" << ", " << arch.maxVGPR
+        << " /* maxVGPR */" << ", " << arch.maxSGPR << " /* maxSGPR */" << ", " << arch.maxAGPR
+        << " /* maxAGPR */)\n"
         << "    {\n"
         << "    }\n\n"
         << "    IsaOpcode getIsaOpcode(UnifiedOpcode unifiedOpcode) const override\n"

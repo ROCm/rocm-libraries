@@ -43,22 +43,22 @@ inline std::string readFile(const std::filesystem::path& filePath)
 }
 
 /// One observed cell of a single-graph bundle, as the harness would record it.
-inline SupportObservation singleGraphObservation(const std::filesystem::path& bundleJsonPath,
-                                                 const std::string& engineName,
-                                                 const std::string& arch,
-                                                 const std::string& platform,
-                                                 bool engineIsSupported)
+inline ObservedSupportCell singleGraphObservation(const std::filesystem::path& bundleJsonPath,
+                                                  const std::string& engineName,
+                                                  const std::string& arch,
+                                                  const std::string& platform,
+                                                  bool engineIsSupported)
 {
     return {singleGraphClaimLocator(bundleJsonPath), engineName, arch, platform, engineIsSupported};
 }
 
 /// One observed cell of a single case of a template sweep.
-inline SupportObservation sweepCaseObservation(const std::filesystem::path& sweepJsonPath,
-                                               const std::string& caseId,
-                                               const std::string& engineName,
-                                               const std::string& arch,
-                                               const std::string& platform,
-                                               bool engineIsSupported)
+inline ObservedSupportCell sweepCaseObservation(const std::filesystem::path& sweepJsonPath,
+                                                const std::string& caseId,
+                                                const std::string& engineName,
+                                                const std::string& arch,
+                                                const std::string& platform,
+                                                bool engineIsSupported)
 {
     return {sweepCaseClaimLocator(sweepJsonPath, caseId),
             engineName,
