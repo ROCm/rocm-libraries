@@ -73,7 +73,8 @@ def get_available_algorithms() -> List[str]:
         "device_lower_bound",
         "device_upper_bound",
         "device_search_n",
-        "device_merge_sort_block_merge"
+        "device_merge_sort_block_merge",
+        "device_merge_sort_block_sort"
     ])
 
 
