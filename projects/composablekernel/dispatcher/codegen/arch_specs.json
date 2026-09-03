@@ -172,6 +172,31 @@
         "bf8_fp8_fp32": [[16, 16, 16]],
         "int8_int8_int32": [[16, 16, 16]]
       }
+    },
+    "gfx1250": {
+      "family": "rdna4",
+      "target_family": "gfx12",
+      "architecture": "rdna",
+      "description": "AMD Instinct MI400 series (gfx1250) -- wave32, RDNA-style WMMA. The 8-bit WMMA fragments are 16x16x64 and 16x16x128; there is no 32x32 WMMA instruction, so a 32x32xK warp tile compiles cleanly and then returns garbage. GPU-measured on gfx1250: in the grouped rowcolquant/tensorquant default_config sweep, 2908/2908 wrong-result rows were warp_tile 32x32x32 and 0/3760 16x16x64 rows were wrong.",
+      "warp_size": 32,
+      "lds_capacity_kb": 64,
+      "warp_configs": [
+        [2, 4, 1],
+        [1, 8, 1],
+        [8, 1, 1],
+        [4, 2, 1],
+        [2, 1, 1],
+        [1, 2, 2],
+        [4, 1, 1],
+        [1, 4, 1],
+        [2, 2, 1]
+      ],
+      "warp_tile_combos": {
+        "fp16_fp16_fp32": [[16, 16, 32]],
+        "bf16_bf16_fp32": [[16, 16, 32]],
+        "fp8_fp8_fp32": [[16, 16, 64], [16, 16, 128]],
+        "bf8_bf8_fp32": [[16, 16, 64], [16, 16, 128]]
+      }
     }
   },
   

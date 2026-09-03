@@ -33,6 +33,7 @@ import itertools
 import json
 import multiprocessing
 import subprocess
+import sys
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
@@ -2133,21 +2134,13 @@ def _is_power_of_two(x: int) -> bool:
     return x > 0 and (x & (x - 1)) == 0
 
 
-def _cshuffle_store_ok(
-    m_repeat: int, n_repeat: int, warp_tile_m: int, warp_tile_n: int
-) -> bool:
-    """Return False for the one CShuffle-store combination that is numerically
-    wrong (issue #9684): an ODD per-wave repeat (>1) paired with a 32-wide warp
-    tile in that dimension. GPU-verified on gfx942 -- e.g. tile_m=192 / wave_m=2
-    / warp_tile_m=32 (MRepeat=3) returns garbage, while every other non-power-of-
-    two repeat (incl. MRepeat=3 with warp_tile_m=16, and even repeats like 6/12)
-    is correct. Only relevant for the CShuffle epilogue; the default epilogue is
-    exempt."""
-
-    def _dim_bad(repeat: int, warp_tile: int) -> bool:
-        return repeat > 1 and repeat % 2 == 1 and warp_tile == 32
-
-    return not (_dim_bad(m_repeat, warp_tile_m) or _dim_bad(n_repeat, warp_tile_n))
+# NOTE (duplicate resolved): a second, byte-identical copy of _cshuffle_store_ok
+# used to live here, shadowing the canonical one in the "Bridge shared helpers"
+# block above. Python keeps the last definition, so THIS copy was the live one and
+# the block above was dead code -- the same shadowing hazard already flagged in
+# codegen_common.py. The two bodies were byte-identical, so removing this one is
+# behaviour-preserving; the shared-helpers copy (which the sibling bridges are
+# kept byte-identical to) is now the single definition.
 
 
 # --- Warp-configuration gate (parity with Old-TE) --------------------------
@@ -2182,6 +2175,23 @@ def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> 
     if not allowed:
         return True
     return [wave_m, wave_n, wave_k] in allowed
+
+
+# --- Central arch-validity filter -------------------------------------------
+# Everything arch-dependent that is NOT the Old-TE warp-map parity gate above
+# (warp-tile shapes, per-arch warps-per-block caps) is answered by the one
+# authoritative helper in codegen/codegen_common.py, so this bridge and the quant
+# / contraction expansions cannot drift. The warp-map gate deliberately stays on
+# _warp_supported_table(): its contract is byte-parity with Old-TE's own table,
+# which is a different source from arch_specs.json.
+try:
+    _codegen_dir = str(Path(__file__).resolve().parent.parent / "codegen")
+    if _codegen_dir not in sys.path:
+        sys.path.insert(0, _codegen_dir)
+    from codegen_common import arch_config_supported as _arch_config_supported
+except Exception:  # pragma: no cover - keep expand_sweep importable standalone
+    def _arch_config_supported(arch, **kw) -> bool:  # type: ignore[misc]
+        return True
 
 
 def expand_sweep(
@@ -2422,13 +2432,17 @@ def expand_sweep(
         # (WARP_SUPPORTED_COMBINATIONS[arch]); see _warp_config_supported.
         if not _warp_config_supported(wm, wn, wk, arch):
             continue
-        # gfx1250 correctness gate (ROCm/rocm-libraries#11161): the compv3
-        # intrawave pipeline is hand-scheduled for MFMA/CDNA (wave64) and
-        # miscompiles for 8-warp blocks (2x4x1 / 4x2x1) on gfx1250 (WMMA/wave32),
-        # producing wrong results (on-device max_rel 0.14-0.87 vs an fp32 CPU
-        # reference; <=4-warp compv3 and all compv4/mem/interwave kernels are
-        # bit-accurate). Gate it off until the pipeline is ported to wave32.
-        if arch == "gfx1250" and pipe == "compv3" and sched == "intrawave" and wm * wn == 8:
+        # Central arch gate: warp-tile shape must exist on the arch, and the
+        # per-arch warps-per-block cap (e.g. the gfx1250 compv3/intrawave 8-warp
+        # limitation, ROCm/rocm-libraries#11161) must hold. Both rules and their
+        # measurements live in codegen_common.arch_config_supported, not here.
+        if not _arch_config_supported(
+            arch,
+            dtype=dtype,
+            warp_tile_m=wtm, warp_tile_n=wtn, warp_tile_k=wtk,
+            pipeline=pipe, scheduler=sched,
+            warp_m=wm, warp_n=wn,
+        ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(
             tm // m_div, tn // n_div, wtm, wtn

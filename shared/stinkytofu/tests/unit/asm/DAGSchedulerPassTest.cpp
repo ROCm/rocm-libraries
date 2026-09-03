@@ -28,11 +28,13 @@
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/asm/Layer2BarrierOverlapAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 #include "transforms/asm/dag/RegionDAG.hpp"
 
 using namespace stinkytofu;
@@ -625,6 +627,125 @@ TEST_F(DAGSchedulerPassTest, ExecMaskGroup_InheritsSideEffectFromChildren) {
     group->addModifier<ExecGroupData>(ExecGroupData{{sideEffecting}});
 
     EXPECT_TRUE(hasSideEffect(*group));
+}
+
+TEST_F(DAGSchedulerPassTest, Layer2PublishesDirectionalBarrierOverlapPair) {
+    bb->addSuccessor(bb);
+
+    // One WMMA window makes the exclusive-after interval [0, 1] and the
+    // exclusive-before interval [0, 1), so Layer 2 must reconcile the groups.
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/204, /*ldsToken=*/1);
+
+    runPassWithUnrollGemm();
+
+    const auto* overlaps = am.getCachedResult<Layer2BarrierOverlapAnalysis>();
+    ASSERT_NE(overlaps, nullptr);
+    EXPECT_TRUE(overlaps->contains(afterSignal, beforeSignal));
+    EXPECT_TRUE(overlaps->contains(afterSignal, beforeWait));
+    EXPECT_TRUE(overlaps->contains(afterWait, beforeSignal));
+    EXPECT_TRUE(overlaps->contains(afterWait, beforeWait));
+    EXPECT_FALSE(overlaps->contains(beforeSignal, afterSignal));
+}
+
+TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWithoutBeforeGroup) {
+    bb->addSuccessor(bb);
+
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+    createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+
+    runPassWithUnrollGemm();
+
+    const auto* overlaps = am.getCachedResult<Layer2BarrierOverlapAnalysis>();
+    ASSERT_NE(overlaps, nullptr);
+    EXPECT_TRUE(overlaps->empty());
+}
+
+TEST_F(DAGSchedulerPassTest, Layer2RejectsPairWhenDescendantOrderingFormsCycle) {
+    bb->addSuccessor(bb);
+
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    afterWait->addDestReg(StinkyRegister("s", 300, 1));
+    beforeWait->addDestReg(StinkyRegister("s", 301, 1));
+
+    // This tensor load is a descendant of the after group, so Layer 2 requests
+    // tensorLoad -> beforeGroup. It also consumes the before group's LDS token,
+    // creating the existing reverse DAG path beforeGroup -> tensorLoad. The
+    // requested edge is therefore cycle-forming and final order cannot satisfy it.
+    StinkyInstruction* tensorLoad =
+        createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/2);
+    tensorLoad->addSrcReg(StinkyRegister("s", 300, 1));
+    tensorLoad->addSrcReg(StinkyRegister("s", 301, 1));
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/204, /*ldsToken=*/1);
+
+    runPassWithUnrollGemm();
+
+    const auto* overlaps = am.getCachedResult<Layer2BarrierOverlapAnalysis>();
+    ASSERT_NE(overlaps, nullptr);
+    EXPECT_FALSE(overlaps->contains(afterSignal, beforeSignal));
+    EXPECT_FALSE(overlaps->contains(afterSignal, beforeWait));
+    EXPECT_FALSE(overlaps->contains(afterWait, beforeSignal));
+    EXPECT_FALSE(overlaps->contains(afterWait, beforeWait));
+    EXPECT_LT(positionOf(*bb, beforeWait), positionOf(*bb, tensorLoad));
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.mergeBarrierThreshold = 100000;
+    ctx.setPassFeatureConfig(pfc);
+    createStinkyMergeBarrierPass()->run(*func, ctx, am);
+
+    int signals = 0;
+    int waits = 0;
+    for (const IRBase& ir : *bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        signals += isBarrierSignal(*inst);
+        waits += isBarrierWait(*inst);
+    }
+    EXPECT_EQ(signals, 2);
+    EXPECT_EQ(waits, 2);
+}
+
+TEST_F(DAGSchedulerPassTest, Layer2AnalysisDrivesMergeBarrierEndToEnd) {
+    bb->addSuccessor(bb);
+
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+    createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/204, /*ldsToken=*/1);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.mergeBarrierThreshold = 100000;
+    pm.setPassFeatureConfig(pfc);
+    pm.addPass(createStinkyDAGSchedulerPass());
+    pm.addPass(createStinkyMergeBarrierPass());
+    pm.run(*func);
+
+    int signals = 0;
+    int waits = 0;
+    for (const IRBase& ir : *bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        signals += isBarrierSignal(*inst);
+        waits += isBarrierWait(*inst);
+    }
+    EXPECT_EQ(signals, 1);
+    EXPECT_EQ(waits, 1);
 }
 
 // Empty block: pass should not crash
