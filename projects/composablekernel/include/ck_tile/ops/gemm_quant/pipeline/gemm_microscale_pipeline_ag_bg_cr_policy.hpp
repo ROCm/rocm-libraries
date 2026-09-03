@@ -131,17 +131,11 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
                 Problem::FixedVectorSize ? Problem::VectorSizeB : GetVectorSizeB<Problem>();
             constexpr index_t NumWaveGroups = Problem::NumWaveGroups;
 
-            // The encodings below restate the B DRAM tile distribution by hand, so they only
-            // hold for the cases enumerated here. tile_distribution_encoding_pattern_2d also
-            // defines block_raked, and a structurally different encoding for NumWaveGroups != 1;
-            // neither is mirrored below, and either would silently pair scales with the wrong B
-            // elements rather than fail to compile.
+            // Guard against a B tile access pattern these encodings never mirrored.
             static_assert(getBTileAccessPattern() == tile_distribution_pattern::warp_raked ||
                               getBTileAccessPattern() == tile_distribution_pattern::thread_raked,
                           "BQuant tile distribution only mirrors the warp_raked and thread_raked "
                           "B tile access patterns!");
-            static_assert(NumWaveGroups == 1,
-                          "BQuant tile distribution assumes a single wave group!");
 
             constexpr index_t warp_size  = get_warp_size();
             constexpr index_t num_warps  = BlockSize / get_warp_size();
@@ -161,11 +155,14 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
                     constexpr index_t K3 = KScale;
                     constexpr index_t K2 = 1;
 
-                    // B is ColumnMajor, so N is B's non-contiguous (Y) axis and has to be split
-                    // exactly the way the B tile distribution splits it. warp_raked orders that
-                    // axis as <warps, iterations, lanes>, thread_raked as <warps, lanes,
-                    // iterations>, so the lane and iteration components trade places.
-                    constexpr index_t NWarp = num_warps / NumWaveGroups;
+                    // B is ColumnMajor.
+                    // warp_raked defines as num_warps and thread_raked as num_warps /
+                    // NumWaveGroups. Asserting a single wave group pins the two to the same value,
+                    // and costs nothing today because TileGemmQuantTraits hardcodes NumWaveGroups
+                    // to 1.
+                    static_assert(NumWaveGroups == 1,
+                                  "BQuant tile distribution assumes a single wave group!");
+                    constexpr index_t NWarp = num_warps;
                     constexpr index_t NLane = warp_size / K0;
                     constexpr index_t NIter = NPerBlock / (NWarp * NLane);
 
@@ -239,11 +236,14 @@ struct GemmMicroscalePipelineAgBgCrPolicy : public UniversalGemmPipelineAgBgCrPo
                     constexpr index_t KRepeatInWave = Problem::BQuantGroupSize::kK / b_vec;
                     constexpr index_t K1            = KScale;
 
-                    // B is ColumnMajor, so N is B's non-contiguous (Y) axis and has to be split
-                    // exactly the way the B tile distribution splits it. warp_raked orders that
-                    // axis as <warps, iterations, lanes>, thread_raked as <warps, lanes,
-                    // iterations>, so the lane and iteration components trade places.
-                    constexpr index_t NWarp = num_warps / NumWaveGroups;
+                    // B is ColumnMajor.
+                    // warp_raked defines as num_warps and thread_raked as num_warps /
+                    // NumWaveGroups. Asserting a single wave group pins the two to the same value,
+                    // and costs nothing today because TileGemmQuantTraits hardcodes NumWaveGroups
+                    // to 1.
+                    static_assert(NumWaveGroups == 1,
+                                  "BQuant tile distribution assumes a single wave group!");
+                    constexpr index_t NWarp = num_warps;
                     constexpr index_t NLane = warp_size / (KRepeatInWave * K1);
                     constexpr index_t NIter = NPerBlock / (NWarp * NLane);
 
