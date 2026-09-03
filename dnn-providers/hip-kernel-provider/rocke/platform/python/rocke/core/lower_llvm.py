@@ -424,7 +424,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "rcp.f32": "declare float @llvm.amdgcn.rcp.f32(float)",
-    "tanh.f32": "declare float @llvm.tanh.f32(float)",
     "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
     "maxnum.f16": "declare half @llvm.maxnum.f16(half, half)",
     "maxnum.bf16": "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)",
@@ -2657,11 +2656,85 @@ class _Lowerer:
     def _op_math_tanh(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
-            raise NotImplementedError("math.tanh currently supports f32")
-        self._need("tanh.f32")
+            raise ValueError(f"math.tanh requires f32 operand, got {v.type.name}")
+
+        # Follow the ROCm device-library f32 structure: a minimax polynomial
+        # below 0.625 and an exponential form above it.  The polynomial avoids
+        # the cancellation that an exp-only formula suffers near zero.  Sign
+        # restoration through the f32 sign bit preserves negative zero and
+        # negative subnormals while leaving NaNs as NaNs.
+        self._need("exp2.f32")
+        self._need("rcp.f32")
+        self._need("fmuladd.f32")
+        x_bits = self._fresh("tanh.xbits")
+        sign = self._fresh("tanh.sign")
+        abs_bits = self._fresh("tanh.abits")
+        abs_x = self._fresh("tanh.abs")
+        y2 = self._fresh("tanh.y2")
+        p0 = self._fresh("tanh.p0")
+        p1 = self._fresh("tanh.p1")
+        p2 = self._fresh("tanh.p2")
+        p3 = self._fresh("tanh.p3")
+        yp = self._fresh("tanh.yp")
+        poly = self._fresh("tanh.poly")
+        exp_scaled = self._fresh("tanh.escaled")
+        exp = self._fresh("tanh.exp")
+        exp_den = self._fresh("tanh.eden")
+        exp_inv = self._fresh("tanh.einv")
+        exp_mag = self._fresh("tanh.emag")
+        use_poly = self._fresh("tanh.small")
+        mag = self._fresh("tanh.mag")
+        mag_bits = self._fresh("tanh.mbits")
+        signed_bits = self._fresh("tanh.sbits")
+        operand = self._operand(v)
+        one = _fp32_hex(1.0)
+        neg_two = _fp32_hex(-2.0)
+        two_log2e = _fp32_hex(2.0 * 1.4426950408889634)
+        cutoff = _fp32_hex(0.625)
+        c0 = _fp32_hex(float.fromhex("-0x1.758e7ap-8"))
+        c1 = _fp32_hex(float.fromhex("0x1.521192p-6"))
+        c2 = _fp32_hex(float.fromhex("-0x1.b8389cp-5"))
+        c3 = _fp32_hex(float.fromhex("0x1.110704p-3"))
+        c4 = _fp32_hex(float.fromhex("-0x1.555532p-2"))
+
+        self._current().emit(f"  {x_bits} = bitcast float {operand} to i32")
+        self._current().emit(f"  {sign} = and i32 {x_bits}, -2147483648")
+        self._current().emit(f"  {abs_bits} = and i32 {x_bits}, 2147483647")
+        self._current().emit(f"  {abs_x} = bitcast i32 {abs_bits} to float")
+        self._current().emit(f"  {y2} = fmul float {abs_x}, {abs_x}")
         self._current().emit(
-            f"  {op.result.name} = call float @llvm.tanh.f32(float {self._operand(v)})"
+            f"  {p0} = call float @llvm.fmuladd.f32(float {y2}, float {c0}, float {c1})"
         )
+        self._current().emit(
+            f"  {p1} = call float @llvm.fmuladd.f32(float {y2}, float {p0}, float {c2})"
+        )
+        self._current().emit(
+            f"  {p2} = call float @llvm.fmuladd.f32(float {y2}, float {p1}, float {c3})"
+        )
+        self._current().emit(
+            f"  {p3} = call float @llvm.fmuladd.f32(float {y2}, float {p2}, float {c4})"
+        )
+        self._current().emit(f"  {yp} = fmul float {abs_x}, {p3}")
+        self._current().emit(
+            f"  {poly} = call float @llvm.fmuladd.f32(float {y2}, float {yp}, float {abs_x})"
+        )
+        self._current().emit(f"  {exp_scaled} = fmul float {two_log2e}, {abs_x}")
+        self._current().emit(f"  {exp} = call float @llvm.exp2.f32(float {exp_scaled})")
+        self._current().emit(f"  {exp_den} = fadd float {exp}, {one}")
+        self._current().emit(
+            f"  {exp_inv} = call float @llvm.amdgcn.rcp.f32(float {exp_den})"
+        )
+        self._current().emit(
+            f"  {exp_mag} = call float @llvm.fmuladd.f32("
+            f"float {neg_two}, float {exp_inv}, float {one})"
+        )
+        self._current().emit(f"  {use_poly} = fcmp olt float {abs_x}, {cutoff}")
+        self._current().emit(
+            f"  {mag} = select i1 {use_poly}, float {poly}, float {exp_mag}"
+        )
+        self._current().emit(f"  {mag_bits} = bitcast float {mag} to i32")
+        self._current().emit(f"  {signed_bits} = or i32 {mag_bits}, {sign}")
+        self._current().emit(f"  {op.result.name} = bitcast i32 {signed_bits} to float")
 
     # gpu
 

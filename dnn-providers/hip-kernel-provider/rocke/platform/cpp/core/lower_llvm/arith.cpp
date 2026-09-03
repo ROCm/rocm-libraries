@@ -661,10 +661,93 @@ static void _op_math_rsqrt(rocke_lower_t* L, const rocke_op_t* op)
 {
     ll_math_f32_unary(L, op, "rsqrt", "rsqrt.f32", "amdgcn.rsq.f32");
 }
-/* Python _op_math_tanh -> llvm.tanh.f32. */
+/* Python _op_math_tanh -> device-library-style piecewise f32 approximation. */
 static void _op_math_tanh(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_math_f32_unary(L, op, "tanh", "tanh.f32", "tanh.f32");
+    const rocke_value_t* res = ll_result(op);
+    if(!rocke_ll_live(L) || !res)
+    {
+        return;
+    }
+    const rocke_value_t* v = op->operands[0];
+    if(!v->type || !v->type->name || strcmp(v->type->name, "f32") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "math.tanh requires f32 operand, got %s",
+                      (v->type && v->type->name) ? v->type->name : "(null)");
+        return;
+    }
+
+    rocke_ll_need(L, "exp2.f32");
+    rocke_ll_need(L, "rcp.f32");
+    rocke_ll_need(L, "fmuladd.f32");
+    const char* x_bits = rocke_ll_fresh(L, "tanh.xbits");
+    const char* sign = rocke_ll_fresh(L, "tanh.sign");
+    const char* abs_bits = rocke_ll_fresh(L, "tanh.abits");
+    const char* abs_x = rocke_ll_fresh(L, "tanh.abs");
+    const char* y2 = rocke_ll_fresh(L, "tanh.y2");
+    const char* p0 = rocke_ll_fresh(L, "tanh.p0");
+    const char* p1 = rocke_ll_fresh(L, "tanh.p1");
+    const char* p2 = rocke_ll_fresh(L, "tanh.p2");
+    const char* p3 = rocke_ll_fresh(L, "tanh.p3");
+    const char* yp = rocke_ll_fresh(L, "tanh.yp");
+    const char* poly = rocke_ll_fresh(L, "tanh.poly");
+    const char* exp_scaled = rocke_ll_fresh(L, "tanh.escaled");
+    const char* exp = rocke_ll_fresh(L, "tanh.exp");
+    const char* exp_den = rocke_ll_fresh(L, "tanh.eden");
+    const char* exp_inv = rocke_ll_fresh(L, "tanh.einv");
+    const char* exp_mag = rocke_ll_fresh(L, "tanh.emag");
+    const char* use_poly = rocke_ll_fresh(L, "tanh.small");
+    const char* mag = rocke_ll_fresh(L, "tanh.mag");
+    const char* mag_bits = rocke_ll_fresh(L, "tanh.mbits");
+    const char* signed_bits = rocke_ll_fresh(L, "tanh.sbits");
+    const char* operand = rocke_ll_operand(L, v);
+    const char* one = rocke_ll_fp32_hex(L, 1.0);
+    const char* neg_two = rocke_ll_fp32_hex(L, -2.0);
+    const char* two_log2e = rocke_ll_fp32_hex(L, 2.0 * 1.4426950408889634);
+    const char* cutoff = rocke_ll_fp32_hex(L, 0.625);
+    const char* c0 = rocke_ll_fp32_hex(L, -0x1.758e7ap-8);
+    const char* c1 = rocke_ll_fp32_hex(L, 0x1.521192p-6);
+    const char* c2 = rocke_ll_fp32_hex(L, -0x1.b8389cp-5);
+    const char* c3 = rocke_ll_fp32_hex(L, 0x1.110704p-3);
+    const char* c4 = rocke_ll_fp32_hex(L, -0x1.555532p-2);
+
+    rocke_ll_emitf(L, "  %s = bitcast float %s to i32", x_bits, operand);
+    rocke_ll_emitf(L, "  %s = and i32 %s, -2147483648", sign, x_bits);
+    rocke_ll_emitf(L, "  %s = and i32 %s, 2147483647", abs_bits, x_bits);
+    rocke_ll_emitf(L, "  %s = bitcast i32 %s to float", abs_x, abs_bits);
+    rocke_ll_emitf(L, "  %s = fmul float %s, %s", y2, abs_x, abs_x);
+    rocke_ll_emitf(
+        L, "  %s = call float @llvm.fmuladd.f32(float %s, float %s, float %s)", p0, y2, c0, c1);
+    rocke_ll_emitf(
+        L, "  %s = call float @llvm.fmuladd.f32(float %s, float %s, float %s)", p1, y2, p0, c2);
+    rocke_ll_emitf(
+        L, "  %s = call float @llvm.fmuladd.f32(float %s, float %s, float %s)", p2, y2, p1, c3);
+    rocke_ll_emitf(
+        L, "  %s = call float @llvm.fmuladd.f32(float %s, float %s, float %s)", p3, y2, p2, c4);
+    rocke_ll_emitf(L, "  %s = fmul float %s, %s", yp, abs_x, p3);
+    rocke_ll_emitf(L,
+                   "  %s = call float @llvm.fmuladd.f32(float %s, float %s, float %s)",
+                   poly,
+                   y2,
+                   yp,
+                   abs_x);
+    rocke_ll_emitf(L, "  %s = fmul float %s, %s", exp_scaled, two_log2e, abs_x);
+    rocke_ll_emitf(L, "  %s = call float @llvm.exp2.f32(float %s)", exp, exp_scaled);
+    rocke_ll_emitf(L, "  %s = fadd float %s, %s", exp_den, exp, one);
+    rocke_ll_emitf(L, "  %s = call float @llvm.amdgcn.rcp.f32(float %s)", exp_inv, exp_den);
+    rocke_ll_emitf(L,
+                   "  %s = call float @llvm.fmuladd.f32(float %s, float %s, float %s)",
+                   exp_mag,
+                   neg_two,
+                   exp_inv,
+                   one);
+    rocke_ll_emitf(L, "  %s = fcmp olt float %s, %s", use_poly, abs_x, cutoff);
+    rocke_ll_emitf(L, "  %s = select i1 %s, float %s, float %s", mag, use_poly, poly, exp_mag);
+    rocke_ll_emitf(L, "  %s = bitcast float %s to i32", mag_bits, mag);
+    rocke_ll_emitf(L, "  %s = or i32 %s, %s", signed_bits, mag_bits, sign);
+    rocke_ll_emitf(L, "  %s = bitcast i32 %s to float", res->name, signed_bits);
 }
 
 /* ------------------------------------------------------------------ gpu.* */
