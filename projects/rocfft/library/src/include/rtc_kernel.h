@@ -87,6 +87,10 @@ public:
     {
         append(&i, sizeof(unsigned int));
     }
+    void append_unsigned_long_long(unsigned long long i)
+    {
+        append(&i, sizeof(unsigned long long));
+    }
     void append_int(int i)
     {
         append(&i, sizeof(int));

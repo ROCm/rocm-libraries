@@ -51,6 +51,8 @@ static inline size_t rtc_kint_type_size(KIntType itype)
     throw std::runtime_error("Invalid kernel integer type");
 }
 
+#ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
+
 // runtime_compile dispatches to subclasses, those subclasses
 // return callables to do the code generation, so that the
 // compilation and caching can live in the cached_compile method.
@@ -93,5 +95,7 @@ private:
     generator_func f;
     std::string    kernel_src;
 };
+
+#endif
 
 #endif
