@@ -68,7 +68,6 @@ set( MIOpen_Source
     addlayernorm_api.cpp
     api/find2_0_commons.cpp
     api/tuning.cpp
-    base64.cpp
     batch_norm.cpp
     batch_norm_api.cpp
     batchnorm/problem_description.cpp
@@ -207,15 +206,12 @@ set( MIOpen_Source
     solver/conv/conv_asm_implicit_gemm_wrw_v4r1_dynamic.cpp
     solver/conv/conv_bin_wino3x3U.cpp
     solver/conv/conv_bin_winoRxS.cpp
-    solver/conv/conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp
     solver/conv/conv_direct_naive_conv.cpp
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
     solver/conv/conv_direct_naive_conv_wrw.cpp
 
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1.cpp
-    solver/conv/conv_hip_implicit_gemm_bwd_v1r1_xdlops.cpp
-    solver/conv/conv_hip_implicit_gemm_bwd_v4r1.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v4r1_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r1.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r4.cpp
@@ -488,6 +484,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/MIOpenReduceCalculation.hpp
         kernels/MIOpenReduceExtreme.hpp
         kernels/bfloat16_dev.hpp
+        kernels/fp8_dev.hpp
         kernels/block_reduce.hpp
         kernels/conv_common.inc
         kernels/conv_sizes.inc
@@ -596,6 +593,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
 
         kernels/MIOpenConvFFT.cpp
         kernels/MIOpenRNNHiddenStateUpdate.cpp
+        kernels/MIOpenRNNFusedInference.cpp
         kernels/bugzilla_34765_detect.s
         kernels/dummy_kernel.s
         kernels/conv3x3.s
@@ -608,7 +606,6 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/conv5x10u2v2b1.s
         kernels/conv7x7c3h224w224k64u2v2p3q3f1.s
         kernels/xform_out.s
-        kernels/gcnAsmBNBwdTrainSpatial.s
         kernels/MIOpenTensorKernelsHip.cpp
         kernels/MIOpenSubTensorOpWithScalarKernel.cpp
         kernels/MIOpenSubTensorOpWithSubTensorKernel.cpp
@@ -897,12 +894,15 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
 
     # Public wrapper library. src/private/wrapper.cpp defines extern "C"
     # pass-through stubs for every MIOPEN_EXPORT entry point in <miopen/miopen.h>,
-    # each forwarding to its renamed _impl symbol in MIOpen_private. PUBLIC
-    # linkage propagates the implementation's include directories and link
-    # interface to consumers of the wrapper, so existing consumers (driver,
-    # tests, CK plugins) that link MIOpen keep resolving MIOpen's internal C++
-    # symbols against libMIOpen_private.so.
-    add_library(MIOpen ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp)
+    # each routing through src/private/routing.cpp to either hipDNN or its
+    # renamed _impl symbol in MIOpen_private. PUBLIC linkage
+    # propagates the implementation's include directories and link interface to
+    # consumers of the wrapper, so existing consumers (driver, tests, CK plugins)
+    # that link MIOpen keep resolving MIOpen's internal C++ symbols against
+    # libMIOpen_private.so.
+    add_library(MIOpen
+        ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
 
     # Deliberately excludes src/include: the wrapper must see only the public
@@ -946,6 +946,16 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
 endif()
 
 # ---- implementation-target configuration ----
+
+# Leave AMDGPU device code uninstrumented under a host UBSan build (see the detection in the
+# top-level CMakeLists.txt). -Xarch_device scopes -fno-sanitize=undefined to the device
+# sub-compile only, so host code keeps UBSan. Applied as a target option on the MIOpen library
+# only, not a directory-wide add_compile_options, so it does not touch host tools, tests,
+# driver, or fin. SHELL: keeps the two tokens together and un-deduplicated.
+if(MIOPEN_DISABLE_DEVICE_UBSAN)
+    target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
+endif()
 
 # Add dependency on inlined rocrand header if it was created
 if(TARGET inline_rocrand_header)
