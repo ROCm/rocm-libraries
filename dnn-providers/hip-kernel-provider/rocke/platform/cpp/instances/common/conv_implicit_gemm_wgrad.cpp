@@ -1188,7 +1188,7 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
             rocke_value_t* n_const = rocke_b_const_i32(b, ni * spec->warp_tile_n);
             rocke_value_t* atom_n_off = rocke_b_add(b, n_inner, n_const);
 
-            for(int i = 0; i < op->c_frag_len; ++i)
+            for(int i = 0; i < op->dst.frag_len; ++i)
             {
                 rocke_value_t* row_off = NULL;
                 rocke_value_t* col_off = NULL;
@@ -1375,9 +1375,9 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
                   ? NULL
                   : rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     }
-    ctx->a_per_lane = ctx->op->a_frag_len;
-    ctx->b_per_lane = ctx->op->b_frag_len;
-    ctx->c_per_lane = ctx->op->c_frag_len;
+    ctx->a_per_lane = ctx->op->srcs[0].frag_len;
+    ctx->b_per_lane = ctx->op->srcs[1].frag_len;
+    ctx->c_per_lane = ctx->op->dst.frag_len;
 
     /* Block tile dims */
     ctx->block_m = spec->tile_m;

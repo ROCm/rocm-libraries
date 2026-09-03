@@ -968,7 +968,7 @@ rocke_value_t* rocke_b_vec_concat(rocke_ir_builder_t* b, rocke_value_t* a, rocke
 
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma; kept for parity
  * with the legacy Python helpers so emitters can call them by name). All take
- * (a, b, c) and return <c_frag_len x acc_elem>. The scaled MX atom takes the
+ * (a, b, c) and return <d_frag_len x acc_elem>. The scaled MX atom takes the
  * two extra E8M0 scale operands. */
 rocke_value_t* rocke_b_mfma_f32_16x16x16_f16(rocke_ir_builder_t* b,
                                              rocke_value_t* a,

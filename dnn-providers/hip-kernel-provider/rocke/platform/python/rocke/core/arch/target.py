@@ -130,6 +130,38 @@ class LayoutMap:
 
 
 @dataclass(frozen=True)
+class MmaScaleOperand:
+    """Optional machine operand that scales one matrix source."""
+
+    dtype: str
+
+
+@dataclass(frozen=True)
+class MmaOperand:
+    """Metadata shared by a matrix source or destination operand."""
+
+    dtype: str
+    frag_len: int = 0
+    layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
+
+    def require_layout(self, name: str, op: "MmaOp") -> LayoutMap:
+        if self.layout is None:
+            raise NotImplementedError(
+                f"no verified {name!r} layout map for MMA op_id {op.op_id!r} "
+                f"({op.m}x{op.n}x{op.k}); add one to "
+                f"_MMA_FRAGMENT_INFO before consuming it"
+            )
+        return self.layout
+
+
+@dataclass(frozen=True)
+class MmaSource(MmaOperand):
+    """A matrix source, optionally paired with a distinct scale operand."""
+
+    scale: Optional[MmaScaleOperand] = None
+
+
+@dataclass(frozen=True)
 class MmaOp:
     """A single supported matrix-multiply-accumulate atom on a target.
 
@@ -137,64 +169,96 @@ class MmaOp:
     ISA-named ``IRBuilder`` method (e.g. ``mfma_f32_16x16x16_f16``). It is **not**
     LLVM intrinsic text — the backend maps ``op_id`` to an intrinsic.
 
-    The ``*_frag_len`` fields and the layout-map accessors describe the
-    *physical* register fragmentation of the atom: how many values of each
-    operand a single lane holds, and where (in the logical M/N/K tile) each of
-    those values lives. They are the cross-arch data-layout contract that lets
-    one kernel body drive both MFMA (wave64) and WMMA (wave32). They are derived
-    from ``(op_id, family, shape)`` at load time via :data:`_MMA_FRAGMENT_INFO`;
-    op_ids without verified layout maps still carry frag lengths but raise from
-    the accessor until a map is added.
+    ``srcs`` contains the three matrix data sources in machine order: the two
+    multiplicands and the accumulator input. ``dst`` is the matrix result.
+    Optional scale operands belong to the source they scale; they are not extra
+    matrix fragments in ``srcs``.
     """
 
     family: str  # "mma" | "wmma"
-    a_dtype: str
-    b_dtype: str
-    c_dtype: str
+    srcs: Tuple[MmaSource, MmaSource, MmaSource]
+    dst: MmaOperand
     m: int
     n: int
     k: int
     op_id: str
-    a_frag_len: int = 0
-    b_frag_len: int = 0
-    c_frag_len: int = 0
     wave_size: int = 64
-    # Layout maps are kept off the public field list (repr=False, compare=False)
-    # so two MmaOps with the same shape still compare equal regardless of the
-    # closure identity of their maps.
-    _a_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
-    _b_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
-    _c_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if len(self.srcs) != 3:
+            raise ValueError(f"MMA op {self.op_id!r} requires exactly 3 matrix sources")
 
     @property
     def shape(self) -> Tuple[int, int, int]:
         return (self.m, self.n, self.k)
 
-    # --- physical-layout accessors ---------------------------------------
+    def src(self, index: int) -> MmaSource:
+        if not 0 <= index < len(self.srcs):
+            raise IndexError(
+                f"MMA source index {index} is outside [0, {len(self.srcs)})"
+            )
+        return self.srcs[index]
+
+    def src_layout(self, index: int) -> LayoutMap:
+        return self.src(index).require_layout(f"src{index}", self)
+
+    def dst_layout(self) -> LayoutMap:
+        return self.dst.require_layout("dst", self)
+
+    # Compatibility projections for operator-level callers. New platform
+    # metadata code should use srcs/dst so source 2 and destination stay distinct.
+    @property
+    def a_dtype(self) -> str:
+        return self.srcs[0].dtype
+
+    @property
+    def b_dtype(self) -> str:
+        return self.srcs[1].dtype
+
+    @property
+    def c_dtype(self) -> str:
+        return self.srcs[2].dtype
+
+    @property
+    def d_dtype(self) -> str:
+        return self.dst.dtype
+
+    @property
+    def a_frag_len(self) -> int:
+        return self.srcs[0].frag_len
+
+    @property
+    def b_frag_len(self) -> int:
+        return self.srcs[1].frag_len
+
+    @property
+    def c_frag_len(self) -> int:
+        return self.srcs[2].frag_len
+
+    @property
+    def d_frag_len(self) -> int:
+        return self.dst.frag_len
+
+    # --- physical-layout compatibility accessors -------------------------
     def a_layout(self) -> LayoutMap:
         """The A-operand ``(row, k)`` lane/slot -> coordinate map."""
-        return self._require_layout(self._a_layout, "a")
+        return self.src_layout(0)
 
     def b_layout(self) -> LayoutMap:
         """The B-operand ``(k, col)`` lane/slot -> coordinate map."""
-        return self._require_layout(self._b_layout, "b")
+        return self.src_layout(1)
 
     def c_layout(self) -> LayoutMap:
         """The accumulator (C/D) ``(row, col)`` lane/slot -> coordinate map."""
-        return self._require_layout(self._c_layout, "c")
+        return self.src_layout(2)
+
+    def d_layout(self) -> LayoutMap:
+        """The destination ``(row, col)`` lane/slot -> coordinate map."""
+        return self.dst_layout()
 
     # Convenience aliases for the accumulator (the most-used map).
     def acc_layout(self) -> LayoutMap:
-        return self.c_layout()
-
-    def _require_layout(self, layout: Optional[LayoutMap], role: str) -> LayoutMap:
-        if layout is None:
-            raise NotImplementedError(
-                f"no verified {role!r} layout map for MMA op_id {self.op_id!r} "
-                f"({self.m}x{self.n}x{self.k}); add one to "
-                f"_MMA_FRAGMENT_INFO before consuming it"
-            )
-        return layout
+        return self.dst_layout()
 
 
 # ---------------------------------------------------------------------------
@@ -801,22 +865,32 @@ class MmaCatalog:
         self,
         *,
         family: str = "mma",
-        a_dtype: str,
-        b_dtype: str,
-        c_dtype: str,
+        src_dtypes: Optional[Tuple[str, str, str]] = None,
+        dst_dtype: Optional[str] = None,
+        a_dtype: Optional[str] = None,
+        b_dtype: Optional[str] = None,
+        c_dtype: Optional[str] = None,
         m: Optional[int] = None,
         n: Optional[int] = None,
     ) -> List[MmaOp]:
-        a, b, c = (
-            normalize_dtype(a_dtype),
-            normalize_dtype(b_dtype),
-            normalize_dtype(c_dtype),
-        )
+        if src_dtypes is None:
+            if a_dtype is None or b_dtype is None or c_dtype is None:
+                raise TypeError("enumerate requires src_dtypes or a/b/c_dtype")
+            src_dtypes = (a_dtype, b_dtype, c_dtype)
+        if len(src_dtypes) != 3:
+            raise ValueError("src_dtypes must contain exactly 3 entries")
+        src_keys = tuple(normalize_dtype(dtype) for dtype in src_dtypes)
+        # Preserve the historical three-dtype query by defaulting destination
+        # to source 2. Indexed callers can state a distinct result.
+        dst_key = normalize_dtype(dst_dtype or src_dtypes[2])
         out = []
         for op in self._ops:
             if op.family != family:
                 continue
-            if (op.a_dtype, op.b_dtype, op.c_dtype) != (a, b, c):
+            if (
+                tuple(src.dtype for src in op.srcs) != src_keys
+                or op.dst.dtype != dst_key
+            ):
                 continue
             if m is not None and op.m != m:
                 continue
@@ -832,6 +906,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
+        dst_dtype: Optional[str] = None,
         m: int,
         n: int,
         k: int,
@@ -843,6 +918,7 @@ class MmaCatalog:
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
+                dst_dtype=dst_dtype,
                 m=m,
                 n=n,
             )
@@ -855,6 +931,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
+        dst_dtype: Optional[str] = None,
         m: int,
         n: int,
         k_max: Optional[int] = None,
@@ -866,6 +943,7 @@ class MmaCatalog:
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
+                dst_dtype=dst_dtype,
                 m=m,
                 n=n,
             )
@@ -889,6 +967,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
+        dst_dtype: Optional[str] = None,
         m: int,
         n: int,
         k: int,
@@ -898,6 +977,7 @@ class MmaCatalog:
             a_dtype=a_dtype,
             b_dtype=b_dtype,
             c_dtype=c_dtype,
+            dst_dtype=dst_dtype,
             m=m,
             n=n,
         ):
@@ -939,10 +1019,19 @@ class ArchTarget:
         return bytes_in_use <= self.lds_capacity_bytes
 
     def supports_dtype_combo(
-        self, a: str, b: str, c: str, *, family: str = "mma"
+        self, a: str, b: str, c: str, dst: Optional[str] = None, *, family: str = "mma"
     ) -> bool:
         return (
-            len(self.mma.enumerate(family=family, a_dtype=a, b_dtype=b, c_dtype=c)) > 0
+            len(
+                self.mma.enumerate(
+                    family=family,
+                    a_dtype=a,
+                    b_dtype=b,
+                    c_dtype=c,
+                    dst_dtype=dst,
+                )
+            )
+            > 0
         )
 
     def max_vector_load_dwords(self, dtype: str) -> int:
@@ -973,8 +1062,8 @@ def _load_specs() -> Dict[str, dict]:
 
 
 @lru_cache(maxsize=1)
-def _op_id_c_dtype() -> Dict[str, str]:
-    """``op_id -> normalized accumulator dtype``, aggregated across every arch
+def _op_id_dst_dtype() -> Dict[str, str]:
+    """``op_id -> normalized destination dtype``, aggregated across every arch
     row in the JSON catalog.
 
     An ``op_id`` names a specific atom, so its accumulator dtype is invariant
@@ -996,7 +1085,8 @@ def _op_id_c_dtype() -> Dict[str, str]:
     for row in _load_specs().values():
         for o in row["mma"]:
             op_id = o["op_id"]
-            c = normalize_dtype(o["c"])
+            dst_row = o["dst"] if "dst" in o else {"dtype": o["c"]}
+            c = normalize_dtype(dst_row["dtype"])
             prev = out.get(op_id)
             if prev is None:
                 out[op_id] = c  # first hit wins
@@ -1011,6 +1101,10 @@ def _op_id_c_dtype() -> Dict[str, str]:
     return out
 
 
+# Compatibility for callers that used C to mean the instruction result.
+_op_id_c_dtype = _op_id_dst_dtype
+
+
 def _build_mma_op(o: dict) -> MmaOp:
     """Construct an :class:`MmaOp` from one catalog JSON row, attaching the
     physical fragment lengths and layout maps registered for its op_id."""
@@ -1022,22 +1116,46 @@ def _build_mma_op(o: dict) -> MmaOp:
             return None
         return LayoutMap(role=role, frag_len=frag_len, wave_size=info.wave_size, fn=fn)
 
+    src_rows = o.get("srcs")
+    if src_rows is None:
+        src_rows = ({"dtype": o["a"]}, {"dtype": o["b"]}, {"dtype": o["c"]})
+    if len(src_rows) != 3:
+        raise ValueError(
+            f"MMA catalog op {op_id!r} must define exactly 3 matrix sources"
+        )
+
+    def _source(row: dict, role: str, frag_len: int, fn: _LaneCoordFn) -> MmaSource:
+        scale_row = row.get("scale")
+        scale = (
+            MmaScaleOperand(dtype=normalize_dtype(scale_row["dtype"]))
+            if scale_row is not None
+            else None
+        )
+        return MmaSource(
+            dtype=normalize_dtype(row["dtype"]),
+            frag_len=frag_len,
+            layout=_mk(role, frag_len, fn),
+            scale=scale,
+        )
+
+    dst_row = o["dst"] if "dst" in o else {"dtype": o["c"]}
     return MmaOp(
         family=o["family"],
-        a_dtype=normalize_dtype(o["a"]),
-        b_dtype=normalize_dtype(o["b"]),
-        c_dtype=normalize_dtype(o["c"]),
+        srcs=(
+            _source(src_rows[0], "src0", info.a_frag_len, info.a_fn),
+            _source(src_rows[1], "src1", info.b_frag_len, info.b_fn),
+            _source(src_rows[2], "src2", info.c_frag_len, info.c_fn),
+        ),
+        dst=MmaOperand(
+            dtype=normalize_dtype(dst_row["dtype"]),
+            frag_len=info.c_frag_len,
+            layout=_mk("dst", info.c_frag_len, info.c_fn),
+        ),
         m=o["m"],
         n=o["n"],
         k=o["k"],
         op_id=op_id,
-        a_frag_len=info.a_frag_len,
-        b_frag_len=info.b_frag_len,
-        c_frag_len=info.c_frag_len,
         wave_size=info.wave_size,
-        _a_layout=_mk("a", info.a_frag_len, info.a_fn),
-        _b_layout=_mk("b", info.b_frag_len, info.b_fn),
-        _c_layout=_mk("c", info.c_frag_len, info.c_fn),
     )
 
 

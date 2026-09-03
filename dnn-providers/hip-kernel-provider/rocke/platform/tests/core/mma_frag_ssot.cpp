@@ -4,8 +4,8 @@
  * tests/core/mma_frag_ssot.cpp -- host unit test for the IR-layer MMA
  * frag-length / accumulator-dtype tables consulted by rocke_b_mma.
  *
- * rocke_b_mma sizes its tile.mma result vector as <c_frag_len x acc_elem>,
- * where c_frag_len comes from the op_id frag-length table and acc_elem is i32
+ * rocke_b_mma sizes its tile.mma result vector as <dst_frag_len x acc_elem>,
+ * where dst_frag_len comes from the op_id frag-length table and acc_elem is i32
  * for integer WMMA atoms (else f32). This test pins that mapping for a
  * representative set of atoms and checks the unknown-op_id error path, so a
  * table edit that changes a result width/dtype is caught here.
@@ -15,8 +15,8 @@
  * into the provider test artifact and run under ctest by TheRock CI.
  */
 #include <cstdio>
-#include <cstring>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 
 static int g_failures = 0;
@@ -61,6 +61,47 @@ static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag
 
 int main(void)
 {
+    const char* cpu_targets[] = {"gfx950", "gfx1250"};
+    for(const char* gfx : cpu_targets)
+    {
+        const rocke_arch_target_t* target = rocke_arch_target_from_gfx(gfx);
+        CHECK(target != NULL, "CPU catalog target exists");
+        if(!target)
+        {
+            continue;
+        }
+        for(int i = 0; i < target->mma.num_ops; ++i)
+        {
+            const rocke_mma_op_t* op = &target->mma.ops[i];
+            const char* src_dtypes[3] = {op->srcs[0].dtype, op->srcs[1].dtype, op->srcs[2].dtype};
+            CHECK(rocke_mma_catalog_op_for_shape_indexed(
+                      &target->mma, op->family, src_dtypes, op->dst.dtype, op->m, op->n, op->k)
+                      != NULL,
+                  "indexed query resolves CPU catalog key");
+        }
+    }
+
+    {
+        rocke_mma_op_t distinct = {};
+        distinct.family = "mma";
+        distinct.srcs[0].dtype = "xf32";
+        distinct.srcs[1].dtype = "xf32";
+        distinct.srcs[2].dtype = "fp32";
+        distinct.dst.dtype = "i32";
+        distinct.m = 16;
+        distinct.n = 16;
+        distinct.k = 8;
+        distinct.op_id = "synthetic_distinct_dst";
+        const rocke_mma_catalog_t catalog = {&distinct, 1};
+        const char* src_dtypes[3] = {"xf32", "xf32", "fp32"};
+        CHECK(rocke_mma_catalog_op_for_shape_indexed(&catalog, "mma", src_dtypes, "i32", 16, 16, 8)
+                  == &distinct,
+              "indexed query distinguishes source 2 and destination");
+        CHECK(rocke_mma_catalog_op_for_shape(&catalog, "mma", "xf32", "xf32", "fp32", 16, 16, 8)
+                  == NULL,
+              "legacy query defaults destination to source 2");
+    }
+
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "rocke_mma_frag_ssot") != ROCKE_OK)
     {

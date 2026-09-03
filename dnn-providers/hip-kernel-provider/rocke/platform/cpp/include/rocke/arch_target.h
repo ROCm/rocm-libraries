@@ -17,7 +17,7 @@
  *     .fn closure                       rocke_lane_coord_fn (fn ptr + builder)
  *     .coord(builder, lane, slot)       rocke_layout_map_coord()
  *   class MmaOp (frozen)              rocke_mma_op_t
- *     .shape / .a_layout()/...          rocke_mma_op_shape() / *_layout() getters
+ *     .shape / .src_layout()/...        rocke_mma_op_shape() / *_layout() getters
  *   class MemoryCapabilities          rocke_memory_caps_t
  *   class ResourceLimits              rocke_resource_limits_t
  *   class MmaCatalog                  rocke_mma_catalog_t + rocke_mma_catalog_* ()
@@ -67,15 +67,20 @@ const char* rocke_normalize_dtype(const char* name, char* scratch, size_t scratc
 
 /* ============================== layout map ============================== */
 
-/* MMA fragment role. Mirrors LayoutMap.role ("acc"/"a"/"b"). The accumulator is
- * spelled "c" in the C op_id maps (MmaOp.c_layout) but role text is "acc"/"a"/
- * "b" exactly as Python LayoutMap.role. */
+/* Machine-level MMA operand position. Mathematical A/B/C/D names are aliases
+ * only; the stored contract is src0/src1/src2 -> dst. */
 typedef enum rocke_mma_role
 {
-    ROCKE_MMA_ROLE_ACC = 0, /* accumulator C/D: coords (row, col)  */
-    ROCKE_MMA_ROLE_A, /* A operand:       coords (row, k)    */
-    ROCKE_MMA_ROLE_B /* B operand:       coords (k, col)    */
+    ROCKE_MMA_ROLE_SRC0 = 0, /* A operand: coords (row, k) */
+    ROCKE_MMA_ROLE_SRC1, /* B operand: coords (k, col) */
+    ROCKE_MMA_ROLE_SRC2, /* accumulator input: coords (row, col) */
+    ROCKE_MMA_ROLE_DST /* result: coords (row, col) */
 } rocke_mma_role_t;
+
+#define ROCKE_MMA_ROLE_A ROCKE_MMA_ROLE_SRC0
+#define ROCKE_MMA_ROLE_B ROCKE_MMA_ROLE_SRC1
+#define ROCKE_MMA_ROLE_C ROCKE_MMA_ROLE_SRC2
+#define ROCKE_MMA_ROLE_D ROCKE_MMA_ROLE_DST
 
 /* The lane/slot -> tile-coordinate emitter. Given the builder, a runtime i32
  * lane Value and a compile-time slot index, it emits the index arithmetic for
@@ -112,43 +117,58 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
 
 /* ============================== MMA atom =============================== */
 
-/* A single supported matrix-multiply-accumulate atom on a target. Frozen; lives
- * in static storage. Mirrors MmaOp. `family` is "mma"|"wmma"; dtype fields hold
- * canonical (normalised) catalog keys; op_id is the opaque backend handle (the
- * ISA-named IRBuilder method, e.g. "mfma_f32_16x16x16_f16"). The *_layout
- * pointers are NULL when no verified lane map is registered for the op_id (the
- * Python `_*_layout is None` / NotImplementedError case). */
+/* Metadata shared by one matrix source or destination. */
+typedef struct rocke_mma_operand
+{
+    const char* dtype;
+    int frag_len;
+    const rocke_layout_map_t* layout; /* may be NULL */
+} rocke_mma_operand_t;
+
+/* A matrix source may have a distinct associated scale operand. NULL means
+ * that the source is unscaled. Scales are not matrix fragments and therefore
+ * are not flattened into the srcs[] array. */
+typedef struct rocke_mma_source
+{
+    const char* dtype;
+    int frag_len;
+    const rocke_layout_map_t* layout; /* may be NULL */
+    const char* scale_dtype; /* may be NULL */
+} rocke_mma_source_t;
+
 typedef struct rocke_mma_op
 {
     const char* family;
-    const char* a_dtype;
-    const char* b_dtype;
-    const char* c_dtype;
+    rocke_mma_source_t srcs[3];
+    rocke_mma_operand_t dst;
     int m;
     int n;
     int k;
     const char* op_id;
-    int a_frag_len;
-    int b_frag_len;
-    int c_frag_len;
     int wave_size;
-    const rocke_layout_map_t* a_layout; /* may be NULL */
-    const rocke_layout_map_t* b_layout; /* may be NULL */
-    const rocke_layout_map_t* c_layout; /* may be NULL */
 } rocke_mma_op_t;
 
 /* MmaOp.shape -> (m, n, k) via out params. */
 void rocke_mma_op_shape(const rocke_mma_op_t* op, int* m, int* n, int* k);
 
-/* Physical-layout accessors. Each returns the verified map for the role, or NULL
+/* Canonical physical-layout accessors. Each returns the verified map for the
+ * machine operand position, or NULL when none is registered. Source indices
+ * outside [0, 3) are rejected. */
+const rocke_layout_map_t*
+    rocke_mma_op_src_layout(const rocke_mma_op_t* op, int index, rocke_ir_builder_t* b);
+const rocke_layout_map_t* rocke_mma_op_dst_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
+
+/* Mathematical-role compatibility accessors. Each returns the verified map, or NULL
  * when none is registered. Unlike Python (which raises NotImplementedError), the
  * C getters return NULL and -- when `b` is non-NULL -- set the builder's sticky
  * error (ROCKE_ERR_NOTIMPL) with the same message text, so callers can either
  * check NULL or rely on the sticky-fail builder. Pass b=NULL for a pure lookup.
- * Mirrors MmaOp.a_layout / b_layout / c_layout / acc_layout. */
+ * These project A/B/C/D onto src0/src1/src2/dst; new instruction-level code
+ * should use the indexed accessors above. */
 const rocke_layout_map_t* rocke_mma_op_a_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_b_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_c_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
+const rocke_layout_map_t* rocke_mma_op_d_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_acc_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 
 /* ====================== memory caps / resource limits ================== */
@@ -181,11 +201,24 @@ typedef struct rocke_mma_catalog
 /* MmaCatalog.ops accessor (count + pointer). */
 const rocke_mma_op_t* rocke_mma_catalog_ops(const rocke_mma_catalog_t* cat, int* num_out);
 
-/* MmaCatalog.enumerate: filter atoms by family + (normalised) dtype combo and
+/* Indexed MmaCatalog.enumerate: filter atoms by family + the exact three source
+ * dtypes and destination dtype. `src_dtypes` must contain three entries.
+ * optional m/n. Writes up to `cap` matching op pointers into `out` and returns
+ * the total number of matches (which may exceed `cap`). */
+int rocke_mma_catalog_enumerate_indexed(const rocke_mma_catalog_t* cat,
+                                        const char* family,
+                                        const char* const src_dtypes[3],
+                                        const char* dst_dtype,
+                                        int m,
+                                        int n,
+                                        const rocke_mma_op_t** out,
+                                        int cap);
+
+/* Compatibility MmaCatalog.enumerate: filter atoms by family + A/B/C dtypes and
  * optional m/n. Writes up to `cap` matching op pointers into `out` and returns
  * the total number of matches (which may exceed `cap` -- the caller can size a
  * buffer with cap=0 to count first). Pass m<0 / n<0 to mean "any" (Python None).
- * `family` may be NULL => "mma". */
+ * `family` may be NULL => "mma". The destination dtype defaults to C. */
 int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 const char* family,
                                 const char* a_dtype,
@@ -196,7 +229,14 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 const rocke_mma_op_t** out,
                                 int cap);
 
-/* MmaCatalog.has_shape. family NULL => "mma". */
+/* Indexed and compatibility MmaCatalog.has_shape variants. */
+bool rocke_mma_catalog_has_shape_indexed(const rocke_mma_catalog_t* cat,
+                                         const char* family,
+                                         const char* const src_dtypes[3],
+                                         const char* dst_dtype,
+                                         int m,
+                                         int n,
+                                         int k);
 bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
                                  const char* family,
                                  const char* a_dtype,
@@ -206,8 +246,14 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
                                  int n,
                                  int k);
 
-/* MmaCatalog.select_largest_k: the matching atom with the largest k (k <= k_max
- * if k_max >= 0; pass k_max<0 for Python None). Returns NULL if none match. */
+/* Indexed and compatibility MmaCatalog.select_largest_k variants. */
+const rocke_mma_op_t* rocke_mma_catalog_select_largest_k_indexed(const rocke_mma_catalog_t* cat,
+                                                                 const char* family,
+                                                                 const char* const src_dtypes[3],
+                                                                 const char* dst_dtype,
+                                                                 int m,
+                                                                 int n,
+                                                                 int k_max);
 const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog_t* cat,
                                                          const char* family,
                                                          const char* a_dtype,
@@ -220,8 +266,14 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog
 /* MmaCatalog.by_op_id. Returns NULL if absent. */
 const rocke_mma_op_t* rocke_mma_catalog_by_op_id(const rocke_mma_catalog_t* cat, const char* op_id);
 
-/* MmaCatalog.op_for_shape: the atom with exactly (m, n, k). NULL if absent.
- * family NULL => "mma". */
+/* Indexed and compatibility MmaCatalog.op_for_shape variants. */
+const rocke_mma_op_t* rocke_mma_catalog_op_for_shape_indexed(const rocke_mma_catalog_t* cat,
+                                                             const char* family,
+                                                             const char* const src_dtypes[3],
+                                                             const char* dst_dtype,
+                                                             int m,
+                                                             int n,
+                                                             int k);
 const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* cat,
                                                      const char* family,
                                                      const char* a_dtype,
@@ -237,25 +289,24 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
  * any atom metadata. They mirror the target.py module-level helpers that
  * rocke.core.ir.IRBuilder.mma consults. */
 
-/* Accumulator fragment length for op_id -- the c_frag_len projection of
- * target.py::_MMA_FRAGMENT_INFO (rocke_arch_mma_c_frag_len(op_id) ==
- * target._frag_info(op_id).c_frag_len). Returns 0 for an unknown atom (the
+/* Destination fragment length for op_id -- the dst.frag_len projection of
+ * target.py::_MMA_FRAGMENT_INFO. Returns 0 for an unknown atom (the
  * zero-length _FragInfo fallback). */
-int rocke_arch_mma_c_frag_len(const char* op_id);
+int rocke_arch_mma_dst_frag_len(const char* op_id);
 
-/* Canonical (normalised) accumulator-dtype key, as produced by
+/* Canonical (normalised) result-dtype key, as produced by
  * rocke_normalize_dtype / the _DTYPE_ALIASES table. Compare an op_id's
- * accumulator dtype against this instead of a raw string literal so the spelling
+ * result dtype against this instead of a raw string literal so the spelling
  * has a single definition site shared by producer (the normalise table) and
  * consumers (e.g. the integer-accumulator predicate in ir_tile). */
 #define ROCKE_DTYPE_I32 "i32"
 
-/* Normalised accumulator dtype for op_id, aggregated across every arch's
- * catalog (mirrors target._op_id_c_dtype()[op_id]). The dtype is invariant
+/* Normalised result dtype for op_id, aggregated across every arch's
+ * catalog (mirrors target._op_id_dst_dtype()[op_id]). The dtype is invariant
  * across the arches that list an op_id, so the first catalog hit wins. Returns
  * NULL for an op_id absent from every catalog. The returned string is an
  * interned canonical key (e.g. ROCKE_DTYPE_I32 / "fp32"); do not free. */
-const char* rocke_arch_mma_op_id_c_dtype(const char* op_id);
+const char* rocke_arch_mma_op_id_dst_dtype(const char* op_id);
 
 /* ============================== arch target =========================== */
 
@@ -288,7 +339,11 @@ const char* rocke_arch_isa_triple(const rocke_arch_target_t* t, char* out, size_
 /* ArchTarget.fits_lds. */
 bool rocke_arch_fits_lds(const rocke_arch_target_t* t, long bytes_in_use);
 
-/* ArchTarget.supports_dtype_combo. family NULL => "mma". */
+/* Indexed and compatibility ArchTarget.supports_dtype_combo variants. */
+bool rocke_arch_supports_dtype_combo_indexed(const rocke_arch_target_t* t,
+                                             const char* const src_dtypes[3],
+                                             const char* dst_dtype,
+                                             const char* family);
 bool rocke_arch_supports_dtype_combo(
     const rocke_arch_target_t* t, const char* a, const char* b, const char* c, const char* family);
 

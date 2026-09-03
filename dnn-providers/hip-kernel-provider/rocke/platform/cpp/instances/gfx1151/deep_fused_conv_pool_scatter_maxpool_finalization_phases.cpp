@@ -54,7 +54,7 @@ void rocke_gfx1151_dfcp_scatter_codes_to_lds(rocke_gfx1151_dfcp_build_ctx_t* ctx
     const rocke_layout_map_t* c_map = rocke_mma_op_c_layout(op, b);
     rocke_value_t* warp_m_off = rocke_warp_grid_warp_m_off(b, grid);
     rocke_value_t* warp_n_off = rocke_warp_grid_warp_n_off(b, grid);
-    int frag_len = op->c_frag_len;
+    int frag_len = op->dst.frag_len;
     int flat = 0;
     int mi, ni, i;
     (void)num_accs;
@@ -105,7 +105,7 @@ void rocke_gfx1151_dfcp_scatter_codes_to_i8_lds(rocke_gfx1151_dfcp_build_ctx_t* 
     const rocke_layout_map_t* c_map = rocke_mma_op_c_layout(op, b);
     rocke_value_t* warp_m_off = rocke_warp_grid_warp_m_off(b, grid);
     rocke_value_t* warp_n_off = rocke_warp_grid_warp_n_off(b, grid);
-    int frag_len = op->c_frag_len;
+    int frag_len = op->dst.frag_len;
     int flat = 0;
     int mi, ni, i;
     (void)num_accs;
@@ -156,7 +156,7 @@ void rocke_gfx1151_dfcp_scatter_vec_codes_to_i8_lds(rocke_gfx1151_dfcp_build_ctx
     const rocke_layout_map_t* c_map = rocke_mma_op_c_layout(op, b);
     rocke_value_t* warp_m_off = rocke_warp_grid_warp_m_off(b, grid);
     rocke_value_t* warp_n_off = rocke_warp_grid_warp_n_off(b, grid);
-    int frag_len = op->c_frag_len;
+    int frag_len = op->dst.frag_len;
     int flat = 0;
     int mi, ni, i;
     (void)num_accs;
@@ -208,7 +208,7 @@ void rocke_gfx1151_dfcp_scatter_packed_i4_codes_to_lds(rocke_gfx1151_dfcp_build_
     const rocke_layout_map_t* c_map = rocke_mma_op_c_layout(op, b);
     rocke_value_t* warp_m_off = rocke_warp_grid_warp_m_off(b, grid);
     rocke_value_t* warp_n_off = rocke_warp_grid_warp_n_off(b, grid);
-    int frag_len = op->c_frag_len;
+    int frag_len = op->dst.frag_len;
     int flat = 0;
     int mi, ni, i;
     rocke_value_t* c0 = rocke_b_const_i32(b, 0);
