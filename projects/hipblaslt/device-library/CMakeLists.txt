@@ -3,22 +3,14 @@
 
 include(hipblaslt_codegen)
 
-set(TENSILELITE_BUILD_PARALLEL_LEVEL "" CACHE STRING
-    "Number of CPU cores to use for building device libraries (uses nproc if unset).")
-set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE BOOL
-    "Keep the temporary device-library build directory.")
-set(TENSILELITE_ASM_DEBUG OFF CACHE BOOL
-    "Keep debug information in generated device libraries.")
-set(TENSILELITE_LOGIC_FILTER "" CACHE STRING
-    "Glob used to select logic files; empty selects all logic files.")
-set(TENSILELITE_NO_COMPRESS OFF CACHE BOOL
-    "Do not compress device code object files.")
-set(TENSILELITE_EXPERIMENTAL OFF CACHE BOOL
-    "Process experimental logic files.")
-set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE BOOL
-    "Emit comments in generated assembly.")
-set(TENSILELITE_OFFLOADBUNDLER "" CACHE FILEPATH
-    "Path to clang-offload-bundler.")
+set(TENSILELITE_BUILD_PARALLEL_LEVEL "" CACHE STRING "Number of CPU cores to use for building device libraries (will use nproc if unset).")
+set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE STRING "Keep temporary build directory for device libraries (turning this ON  bloat the build size).")
+set(TENSILELITE_ASM_DEBUG "" CACHE STRING "Keep debug information for built code objects.")
+set(TENSILELITE_LOGIC_FILTER "" CACHE STRING "Cutomsized logic filter, default is *, i.e. all logics.")
+set(TENSILELITE_NO_COMPRESS "" CACHE STRING "Do not compress device code object files.")
+set(TENSILELITE_EXPERIMENTAL "" CACHE STRING "Process experimental logic files.")
+set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE STRING "Turn on asm comments when building gemm libraries.")
+set(TENSILELITE_OFFLOADBUNDLER "" CACHE STRING "Path to clang-offload-bundler.")
 mark_as_advanced(
     TENSILELITE_BUILD_PARALLEL_LEVEL
     TENSILELITE_KEEP_BUILD_TMP
