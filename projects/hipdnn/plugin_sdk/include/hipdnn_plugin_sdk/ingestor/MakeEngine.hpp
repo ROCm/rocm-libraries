@@ -46,7 +46,8 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
     {
         engineName = set.engine.name;
     }
-    auto heuristic = makeKernelHeuristic(set.heuristic, describedBy);
+    auto heuristic = makeKernelHeuristic(
+        set.heuristic, describedBy, set.engine.knobs, set.heuristicsByArch);
     return std::make_unique<KernelIngestorStateManager<THandle>>(
         std::move(set.schema),
         std::move(set.matchers),

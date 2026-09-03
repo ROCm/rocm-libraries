@@ -1,7 +1,17 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-add_subdirectory(corpus_gen)
+add_subdirectory(bench)
+
+# corpus_gen generates UHD training corpora, and three of its headers use the ingestor's
+# JsonLogic evaluator to read the constraint expressions in an .opmeta.json declaration. That
+# evaluator's header is empty unless HIPDNN_ENABLE_KERNEL_INGESTOR is set, and the option
+# defaults to OFF -- so building this tool unconditionally made the *default* configure fail to
+# compile. The tool is part of the feature, so it is gated with it rather than papered over with
+# a second gate inside the headers.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    add_subdirectory(corpus_gen)
+endif()
 
 add_executable(hipdnn_list_engines ListEngines.cpp)
 # hipdnn_data_sdk supplies the canonical engine-ID hex rendering (formatEngineIdHex). It is a
@@ -156,17 +166,4 @@ endif()
     endif()
 
     _apply_hipdnn_test_category_labels(hipdnn_list_engines_smoke)
-endif()
-
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # ValidateDescriptors.cpp transitively includes <hip/hip_runtime.h> through
-    # DescriptorLoader.hpp -> MakeEngine.hpp -> GenericEngine.hpp ->
-    # EnginePluginTypeTraits.hpp, so it needs the same HIP wiring every ingestor test
-    # target already carries (plugin_sdk/tests/CMakeLists.txt).
-    find_package(hip REQUIRED)
-
-    add_executable(hipdnn_validate_descriptors IngestorGenerator/ValidateDescriptors.cpp)
-    target_compile_definitions(hipdnn_validate_descriptors PRIVATE __HIP_PLATFORM_AMD__)
-    target_link_libraries(hipdnn_validate_descriptors PRIVATE hipdnn_plugin_sdk hip::host)
-    install(TARGETS hipdnn_validate_descriptors RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()

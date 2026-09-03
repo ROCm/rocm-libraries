@@ -26,12 +26,28 @@ namespace hipdnn_plugin_sdk::ingestor
 
 /// @param describedBy Engine named in the warning when @p descriptor is nullopt.
 /// @throws std::runtime_error if a NATIVE descriptor names an unregistered symbol.
+/// @param knobs The UED's declared knobs, checked against the model's `$kernel.*` axes
+///              (RFC 0019 §6.3 check 2).
 inline std::shared_ptr<IKernelHeuristic>
     makeKernelHeuristic(const std::optional<HeuristicDescriptor>& descriptor,
-                        const std::string& describedBy = {})
+                        const std::string& describedBy = {},
+                        const std::vector<std::string>& knobs = {},
+                        const std::map<std::string, HeuristicDescriptor>& byArch = {})
 {
     if(!descriptor.has_value())
     {
+        // No `default` model, but the UED may still name models per architecture. RFC 0019
+        // §8.3's first step is the exact gcnArchName, so those have to be reachable -- and they
+        // were not: this returned before ever looking at byArch, discarding the whole map and
+        // ranking by declared order even on the architectures the engine had a model for.
+        //
+        // The arch is unknown here, by construction (see DescriptorLoader), so this builds a
+        // resolver that consults the map at first rank(), when a device exists.
+        if(!byArch.empty())
+        {
+            return UhdKernelHeuristic::makeArchResolver(byArch, describedBy, knobs);
+        }
+
         // Warn, not fail: an engine with no model still selects deterministically. The
         // warning is the point -- it separates an engine that declares its order from
         // one still waiting on a UHD, which otherwise look identical from the outside.
@@ -64,7 +80,12 @@ inline std::shared_ptr<IKernelHeuristic>
         // a model built against a different schema, a features_hash disagreeing with the
         // signature. Those are recoverable in the only sense that matters at plan build,
         // so RFC 0019 §5 applies and the engine keeps selecting by declared order.
-        if(auto heuristic = UhdKernelHeuristic::tryCreate(*descriptor, named))
+        //
+        // `knobs` and `byArch` carry RFC 0019 §6.3 check 2 and §8.3 respectively: the
+        // first rejects a model whose axes are not the engine's exposed knobs, the second
+        // lets a UHD re-resolve against the running device when this descriptor does not
+        // describe it.
+        if(auto heuristic = UhdKernelHeuristic::tryCreate(*descriptor, named, knobs, byArch))
         {
             return heuristic;
         }

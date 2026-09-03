@@ -352,8 +352,11 @@ def canonicalize_signature(signature: list[str]) -> str:
     return json.dumps(parsed, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
 
 
-def compute_features_hash(signature: list[str]) -> str:
-    """Compute the SHA-256 fingerprint of a features_signature.
+def compute_features_hash(
+    signature: list[str],
+    categorical_encoding: dict[str, dict[str, int]] | None = None,
+) -> str:
+    """Compute the SHA-256 fingerprint of the resolved feature contract.
 
     Takes the signature itself, not the raw column names, so the value matches what
     the runtime computes from the descriptor it loads.
@@ -362,6 +365,22 @@ def compute_features_hash(signature: list[str]) -> str:
     exactly, so this must not sort the entries. A permuted signature is a real
     feature-contract break and has to hash differently. (``sort_keys`` inside
     canonicalize_signature sorts *object keys within* an entry, never the entries.)
+
+    RFC 0019 6.3 puts ``categorical_encoding`` inside the same fingerprint, because a
+    changed string-to-code map changes what the model reads while leaving the signature
+    text identical -- 6.5 says so outright: "features_hash does not catch it because the
+    signature text is unchanged."
+
+    The encoding is appended only when there is one, so a signature reading no string
+    field hashes exactly as it did before this argument existed. Every model shipped so
+    far is that case, and rehashing them would invalidate contracts that are intact.
     """
-    digest = hashlib.sha256(canonicalize_signature(signature).encode()).hexdigest()[:16]
+    serialized = canonicalize_signature(signature)
+    if categorical_encoding:
+        # sort_keys mirrors std::map on the C++ side, which is key-ordered; the separators
+        # match nlohmann's dump(). Both sides must render the same bytes.
+        serialized += "|" + json.dumps(
+            categorical_encoding, separators=(",", ":"), sort_keys=True, ensure_ascii=False
+        )
+    digest = hashlib.sha256(serialized.encode()).hexdigest()[:16]
     return f"sha256:{digest}"

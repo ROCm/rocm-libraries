@@ -199,7 +199,7 @@ inline std::optional<double> VariableContext::resolveDouble(const std::string& n
     }
 
     return std::visit(
-        [](const auto& v) -> double {
+        [&name](const auto& v) -> double {
             using T = std::decay_t<decltype(v)>;
             if constexpr(std::is_same_v<T, double>)
             {
@@ -215,7 +215,16 @@ inline std::optional<double> VariableContext::resolveDouble(const std::string& n
             }
             else
             {
-                return std::numeric_limits<double>::quiet_NaN();
+                // Fails closed, for the same reason JsonLogicEvaluator::toDouble does
+                // (RFC 0019 §7.2). A NaN here is not inert: it flows through `shape` or
+                // `rank` into the feature row, and a GBDT reads NaN as a *missing* value
+                // and takes default_left -- so a string bound where an extent belongs is
+                // scored as an ordinary absent feature and never surfaces. The two
+                // conversions must agree; one throwing and the other returning NaN is how
+                // the same error becomes visible on one path and silent on the other.
+                throw JsonLogicError("Type error: variable '" + name + "' is the string \""
+                                     + v + "\", which cannot be used where a number is "
+                                           "required");
             }
         },
         it->second);
