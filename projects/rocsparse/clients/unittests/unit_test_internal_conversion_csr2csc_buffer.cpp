@@ -88,9 +88,9 @@ namespace
             hcsr_row_ptr[i] = static_cast<I>(i * NNZ_PER_ROW);
             for(int64_t k = 0; k < NNZ_PER_ROW; ++k)
             {
-                const int64_t at  = i * NNZ_PER_ROW + k;
-                hcsr_col_ind[at]  = static_cast<J>(column_of(i, k));
-                hcsr_val[at]      = static_cast<T>(at % 1024);
+                const int64_t at = i * NNZ_PER_ROW + k;
+                hcsr_col_ind[at] = static_cast<J>(column_of(i, k));
+                hcsr_val[at]     = static_cast<T>(at % 1024);
             }
         }
         hcsr_row_ptr[M] = static_cast<I>(NNZ);
@@ -192,11 +192,10 @@ namespace
 
         const std::vector<uint8_t> guard
             = to_host<uint8_t>(compute_buffer.ptr + compute_size, GUARD_BYTES);
-        const size_t clobbered
-            = std::count_if(guard.begin(), guard.end(), [](uint8_t b) { return b != GUARD_FILLER; });
-        EXPECT_EQ(clobbered, 0u) << "csr2csc wrote " << clobbered
-                                 << " byte(s) past the end of the " << compute_size
-                                 << "-byte buffer it asked for";
+        const size_t clobbered = std::count_if(
+            guard.begin(), guard.end(), [](uint8_t b) { return b != GUARD_FILLER; });
+        EXPECT_EQ(clobbered, 0u) << "csr2csc wrote " << clobbered << " byte(s) past the end of the "
+                                 << compute_size << "-byte buffer it asked for";
 
         // The conversion itself must still be correct: column i holds one entry per
         // row whose non-zero pattern covers it.
