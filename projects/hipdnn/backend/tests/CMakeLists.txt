@@ -194,6 +194,7 @@ target_compile_definitions(
             TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME="${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}"
+            HIPDNN_TEST_PLUGIN_DIR="${HIPDNN_TEST_PLUGIN_DIR}"
             TEST_LYING_ENGINE_NAME_PLUGIN_NAME="${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}"
             TEST_MISMATCHED_NAME_PLUGIN_NAME="${TEST_MISMATCHED_NAME_PLUGIN_NAME}"
 )
@@ -266,6 +267,48 @@ set_target_properties(
 install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
+
+# libhipdnn_test_scorer_lib.so or hipdnn_test_scorer_lib.dll (used by TestCustomLibraryAdapter.cpp)
+# RFC 0019 UHD selection tests, gated with the sources they cover.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_sources(
+        hipdnn_backend_tests
+        PRIVATE
+        heuristics/TestJsonLogicEvaluator.cpp
+        heuristics/TestFeatureExtractor.cpp
+        heuristics/TestDerivedValues.cpp
+        heuristics/TestTreeDataAdapter.cpp
+        heuristics/TestNativeAdapter.cpp
+        heuristics/TestTableAdapter.cpp
+        heuristics/TestOnnxAdapter.cpp
+        heuristics/TestCustomLibraryAdapter.cpp
+        heuristics/TestUhdBuiltIn.cpp
+        heuristics/TestUhdSelectionFlow.cpp
+        heuristics/TestUhdTraceRetrieval.cpp
+        heuristics/uhd/TestEngineRegistryArchResolution.cpp
+    )
+endif()
+
+# Only TestCustomLibraryAdapter loads this, and that test is gated above.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+add_library(hipdnn_test_scorer_lib SHARED heuristics/test_scorer_lib.cpp)
+set_target_properties(hipdnn_test_scorer_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)
+target_compile_options(hipdnn_test_scorer_lib PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+add_dependencies(hipdnn_backend_tests hipdnn_test_scorer_lib)
+
+set_target_properties(
+    hipdnn_test_scorer_lib
+    PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        THEROCK_INSTALL_RPATH_ORIGIN "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}"
+)
+
+install(TARGETS hipdnn_test_scorer_lib LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+        RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+)
+endif()
 
 # A real, loadable engine plugin used by TestEnginePluginResourceManager.cpp, and
 # the only consumer of EnginePluginImpl.inl inside the main build; see

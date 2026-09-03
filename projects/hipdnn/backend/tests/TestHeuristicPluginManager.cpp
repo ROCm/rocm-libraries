@@ -24,6 +24,16 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
 
+/// Number of built-in heuristic policies every manager registers in its constructor.
+///
+/// Derived rather than hardcoded: these expectations previously pinned a literal 2 and
+/// went stale the moment a third built-in (UHD) was registered. Asking a fresh manager
+/// keeps them correct as built-ins are added or removed.
+static size_t builtInPolicyCount()
+{
+    return HeuristicPluginManager{}.getPlugins().size();
+}
+
 class TestHeuristicPluginManager : public ::testing::Test
 {
 protected:
@@ -135,8 +145,8 @@ TEST_F(TestHeuristicPluginManager, MultipleInstancesAreIndependent)
 
     // Only the always-registered Config + StaticOrdering built-ins remain; no
     // external plugin loaded from a non-existent path.
-    EXPECT_EQ(manager1.getPlugins().size(), 2u);
-    EXPECT_EQ(manager2.getPlugins().size(), 2u);
+    EXPECT_EQ(manager1.getPlugins().size(), builtInPolicyCount());
+    EXPECT_EQ(manager2.getPlugins().size(), builtInPolicyCount());
 }
 
 // ========== Edge Cases Tests ==========
@@ -254,7 +264,6 @@ TEST_F(TestHeuristicPluginManager, GetPluginsAfterEmptyLoadReturnsEmpty)
         std::filesystem::temp_directory_path() / uniqueName);
 
     manager.loadPlugins({emptyDir.path()}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
-    // Only the always-registered Config + StaticOrdering built-ins remain; the
-    // empty dir contributed nothing.
-    EXPECT_EQ(manager.getPlugins().size(), 2u);
+    // Only the always-registered built-ins remain; the empty dir contributed nothing.
+    EXPECT_EQ(manager.getPlugins().size(), builtInPolicyCount());
 }

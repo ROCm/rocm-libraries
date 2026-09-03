@@ -413,6 +413,15 @@ Disabling the cache is a diagnostic, not a fix: it makes every build pay full co
 cost. Relocating it is what you want. Note that a cache on local disk is also per-machine and
 per-container, so a fresh CI runner or a rebuilt container always starts cold.
 
+To see where packing time is actually going, set `HKP_PACK_TIMING=1` when building. The packer
+then reports its per-phase split — the parallel kernel compilation, the serial descriptor
+walk, and archive assembly — as `hkp_pack[timing]` lines, instead of leaving the whole pack as
+one opaque build step:
+
+```
+hkp_pack[timing] gfx942 TOTAL=41.33s prewarm=40.45s walk=0.47s assemble=0.41s other=0.00s serial=2%
+```
+
 Kernel compilation normally dominates, which is why the cache matters so much and why
 `HKP_PACK_JOBS` (worker count, defaulting to `min(32, ncpu)`) is the other lever worth
 touching.

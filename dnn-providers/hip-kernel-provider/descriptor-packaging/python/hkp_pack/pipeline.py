@@ -767,6 +767,18 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             generic.path.read_bytes(),
         )
 
+    # Sidecars ride with the generics they belong to, and like them are copied
+    # unpruned here: the intermediate tree is a pre-prune mirror of the authored
+    # input, which test_int3_pre_prune_completeness asserts. Pruning happens once,
+    # in pack_arch.
+    for sidecar in flat.sidecars_for(flat.generics()):
+        _write_bytes_at(
+            inter_arch_dir,
+            sidecar.rel_dir,
+            sidecar.name,
+            sidecar.source.read_bytes(),
+        )
+
     return IntermediateArch(
         arch=arch,
         directory=inter_arch_dir,

@@ -5,10 +5,12 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -44,6 +46,44 @@ bool matches(const MatchContext& context)
     return matchesGraph(CONV_FWD, context).has_value();
 }
 
+/// The bound value at @p token as a string, or nullopt when the token is absent or holds
+/// something else. The mirror of tryGetBoundInt, which the SDK ships but has no string
+/// twin.
+std::optional<std::string> boundString(const BoundTokens& bound, std::string_view token)
+{
+    const auto entry = bound.find(std::string(token));
+    if(entry == bound.end())
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<std::string>(&entry->second);
+    return value == nullptr ? std::nullopt : std::make_optional(*value);
+}
+
+using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
+
+/// x = NCHW 2x3x8x6, w = KCRS 5x3x3x2, y = NKPQ 2x5x6x5 (P = 8-3+1, Q = 6-2+1).
+///
+/// Every extent is distinct and the three operands have different element counts, so a
+/// binding that named the wrong axis, the wrong operand, or sized one tensor and scaled
+/// it cannot agree with the expected values by coincidence -- which the default 1x1x3x3
+/// graph, full of ones, would let it do.
+flatbuffers::FlatBufferBuilder
+    buildAsymmetricConvGraph(data_objects::DataType dataType = data_objects::DataType::FLOAT,
+                             std::optional<data_objects::DataType> wDataType = std::nullopt)
+{
+    return buildConvFwdGraph(dataType,
+                             data_objects::ConvMode::CROSS_CORRELATION,
+                             /*stride=*/{1, 1},
+                             /*dilation=*/{1, 1},
+                             /*prePadding=*/{0, 0},
+                             /*postPadding=*/{0, 0},
+                             /*xDims=*/{2, 3, 8, 6},
+                             /*wDims=*/std::vector<int64_t>{5, 3, 3, 2},
+                             /*yDims=*/std::nullopt,
+                             wDataType);
+}
+
 // ---------------------------------------------------------------------------
 // Graph-scoped matcher: the supported case
 // ---------------------------------------------------------------------------
@@ -75,6 +115,123 @@ TEST(TestConvFwdBinding, BindsAllThreeOperandUids)
               CONV_W_UID);
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, CONV_FWD.outputToken),
               CONV_Y_UID);
+}
+
+// ---------------------------------------------------------------------------
+// Problem binding: the dims, dtypes and cost fields a UHD ranks on
+// ---------------------------------------------------------------------------
+//
+// Token names are written out as literals rather than composed from the pack's
+// constants: the string IS the contract a UHD's features_signature references, so a
+// rename must fail here rather than quietly rename both sides at once.
+
+TEST(TestConvFwdBinding, BindsEveryOperandDimPositionally)
+{
+    const GraphFixture fixture(buildAsymmetricConvGraph());
+
+    const auto bound = matchesGraph(CONV_FWD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // x, NCHW 2x3x8x6.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.x.dims[0]"), 2);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.x.dims[1]"), 3);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.x.dims[2]"), 8);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.x.dims[3]"), 6);
+
+    // w, KCRS 5x3x3x2.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.w.dims[0]"), 5);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.w.dims[1]"), 3);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.w.dims[2]"), 3);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.w.dims[3]"), 2);
+
+    // y, NKPQ 2x5x6x5.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.y.dims[0]"), 2);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.y.dims[1]"), 5);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.y.dims[2]"), 6);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.y.dims[3]"), 5);
+
+    // Rank 4 exactly: a fifth axis would mean the matcher published a dim the tensor
+    // does not have.
+    EXPECT_FALSE(tryGetBoundInt(*bound, "conv_fwd.x.dims[4]").has_value());
+}
+
+TEST(TestConvFwdBinding, BindsDtypeAsTheRuntimeSpellingNotTheFlatbufferEnumName)
+{
+    const GraphFixture floatFixture(buildAsymmetricConvGraph());
+    const GraphFixture halfFixture(buildAsymmetricConvGraph(data_objects::DataType::HALF));
+
+    const auto floatBound = matchesGraph(CONV_FWD, floatFixture.context());
+    const auto halfBound = matchesGraph(CONV_FWD, halfFixture.context());
+    ASSERT_TRUE(floatBound.has_value());
+    ASSERT_TRUE(halfBound.has_value());
+
+    // to_string(DataType)'s spelling, which is the vocabulary CategoricalEncoding.hpp
+    // encodes. EnumNameDataType would answer "FLOAT"/"HALF" and `float32`/`float16` are
+    // the plausible near-misses; the encoder knows none of the three and throws on the
+    // last, so a wrong spelling here costs the feature rather than warning.
+    EXPECT_EQ(boundString(*floatBound, "conv_fwd.x.dtype"), "fp32");
+    EXPECT_EQ(boundString(*floatBound, "conv_fwd.w.dtype"), "fp32");
+    EXPECT_EQ(boundString(*floatBound, "conv_fwd.y.dtype"), "fp32");
+    EXPECT_EQ(boundString(*halfBound, "conv_fwd.x.dtype"), "fp16");
+
+    // A string, never a pre-encoded number: the integer code space belongs to the feature
+    // extractor, and freezing it inside the matcher would let the two drift apart.
+    EXPECT_FALSE(tryGetBoundInt(*floatBound, "conv_fwd.x.dtype").has_value());
+}
+
+TEST(TestConvFwdBinding, BindsFlopsAsTwoPerMultiplyAccumulate)
+{
+    const GraphFixture fixture(buildAsymmetricConvGraph());
+
+    const auto bound = matchesGraph(CONV_FWD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // Counted by hand from the graph above, not from the implementation: one output
+    // element costs C*R*S = 3*3*2 = 18 multiply-accumulates; there are N*K*P*Q =
+    // 2*5*6*5 = 300 output elements; a multiply-accumulate is 2 flops.
+    //   2 * 300 * 18 = 10800.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.flops"), 10800);
+}
+
+TEST(TestConvFwdBinding, BindsBytesAsThePerOperandSumOfElementsTimesItsOwnDtypeWidth)
+{
+    const GraphFixture fixture(buildAsymmetricConvGraph());
+
+    const auto bound = matchesGraph(CONV_FWD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // By hand: x = 2*3*8*6 = 288 elements, w = 5*3*3*2 = 90, y = 2*5*6*5 = 300, so 678
+    // elements at 4 bytes each = 2712. The three counts are deliberately unequal, so the
+    // shortcut of sizing one operand and tripling it (288*3*4 = 3456) cannot pass.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.bytes"), 2712);
+}
+
+TEST(TestConvFwdBinding, ByteCountFollowsTheOperandDtypeWidthAndFlopsDoesNot)
+{
+    const GraphFixture fixture(buildAsymmetricConvGraph(data_objects::DataType::HALF));
+
+    const auto bound = matchesGraph(CONV_FWD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // The same 678 elements at 2 bytes each = 1356, exactly half the fp32 count: the
+    // width is read off the tensor, not assumed to be 4.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.bytes"), 1356);
+    // flops is a pure shape count and must not move with precision.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.flops"), 10800);
+}
+
+/// RFC 0019 §13.6 requires `bytes` to sum each operand's OWN dtype width, and this pack
+/// cannot demonstrate the difference: its kernel is compiled for a single element type,
+/// so the matcher refuses any graph whose operands disagree and no mixed-dtype conv ever
+/// reaches the binding. The implementation reads each operand's dtype separately anyway,
+/// so a pack that later admits mixed precision inherits the right sum. This test pins the
+/// reason the stronger assertion is absent, so its absence is not read as an oversight.
+TEST(TestConvFwdBinding, AMixedPrecisionConvIsRefusedSoPerOperandWidthCannotBeObservedHere)
+{
+    const GraphFixture fixture(buildAsymmetricConvGraph(data_objects::DataType::FLOAT,
+                                                        data_objects::DataType::HALF));
+
+    EXPECT_FALSE(matchesGraph(CONV_FWD, fixture.context()).has_value());
 }
 
 // ---------------------------------------------------------------------------
