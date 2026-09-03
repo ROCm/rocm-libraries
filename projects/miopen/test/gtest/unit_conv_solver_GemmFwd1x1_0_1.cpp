@@ -69,17 +69,6 @@ const auto& GetTestParams()
     return params;
 }
 
-// rocBLAS does not support BF16->BF16 GEMM on gfx90a, so skip bf16 there.
-// TODO: Remove this exclusion once the rocBLAS bug is fixed.
-const auto& GetTestParamsNoGfx90A()
-{
-    static const auto params = [] {
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All & ~Gpu::gfx90A);
-        return p;
-    }();
-    return params;
-}
-
 } // namespace
 
 using GPU_UnitTestConvSolverGemmFwd1x1_0_1Fwd_FP16  = GPU_UnitTestConvSolverFwd_FP16;
@@ -137,7 +126,7 @@ INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
 
 INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
                          GPU_UnitTestConvSolverGemmFwd1x1_0_1Fwd_BFP16,
-                         testing::Combine(testing::Values(GetTestParamsNoGfx90A()),
+                         testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCasesNhwc(miopenBFloat16))));
 
