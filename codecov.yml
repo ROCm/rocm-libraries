@@ -107,6 +107,11 @@ flag_management:
       statuses:
       - type: project
         target: 80%
+    - name: GEKO
+      carryforward: true
+      statuses:
+      - type: project
+        target: 80%
 
 comment:
   layout: "diff, flags, files"

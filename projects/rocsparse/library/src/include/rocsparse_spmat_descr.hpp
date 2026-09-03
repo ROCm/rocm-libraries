@@ -31,8 +31,6 @@ struct _rocsparse_spmat_descr
 {
     bool init{};
 
-    mutable bool analysed{};
-
     // Cached structural summary of the matrix's line lengths (rows for CSR,
     // columns for CSC) - an objective property of the sparsity pattern with no
     // algorithm policy baked in, so it can be reused by any routine operating on
@@ -81,7 +79,6 @@ struct _rocsparse_spmat_descr
 
     _rocsparse_spmat_descr() = default;
     _rocsparse_spmat_descr(rocsparse_format     format,
-                           bool                 analysed,
                            int64_t              batch_count,
                            int64_t              m,
                            int64_t              n,
@@ -103,7 +100,6 @@ struct _rocsparse_spmat_descr
                            rocsparse_mat_info   info);
 
     _rocsparse_spmat_descr(rocsparse_format     format,
-                           bool                 analysed,
                            int64_t              batch_count,
                            int64_t              mb,
                            int64_t              nb,

@@ -64,6 +64,16 @@ flatbuffers::FlatBufferBuilder
     return builder;
 }
 
+flatbuffers::FlatBufferBuilder buildEngineDetailsWithName(int64_t engineId, const std::string& name)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto nameOffset = builder.CreateString(name);
+    auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        builder, engineId, 0, 0, nameOffset);
+    builder.Finish(details);
+    return builder;
+}
+
 } // namespace
 
 TEST(TestEngineDetailsWrapper, InvalidBufferIsNotValid)
@@ -173,4 +183,34 @@ TEST(TestEngineDetailsWrapper, BehaviorNotesPopulated)
     EXPECT_EQ(notes[0], 0);
     EXPECT_EQ(notes[1], 3);
     EXPECT_EQ(notes[2], 4);
+}
+
+TEST(TestEngineDetailsWrapper, NamePopulated)
+{
+    auto builder = buildEngineDetailsWithName(42, "EXAMPLE_PROVIDER_RELU_ENGINE");
+    const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(wrapper.isValid());
+    EXPECT_EQ(wrapper.name(), "EXAMPLE_PROVIDER_RELU_ENGINE");
+}
+
+TEST(TestEngineDetailsWrapper, NameMissingFieldIsEmpty)
+{
+    auto builder = buildValidEngineDetailsBuffer(42);
+    const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(wrapper.isValid());
+    EXPECT_TRUE(wrapper.name().empty());
+}
+
+TEST(TestEngineDetailsWrapper, NameEmptyStringIsEmpty)
+{
+    auto builder = buildEngineDetailsWithName(42, "");
+    const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(wrapper.isValid());
+    EXPECT_TRUE(wrapper.name().empty());
+}
+
+TEST(TestEngineDetailsWrapper, NameOnInvalidWrapperThrows)
+{
+    const EngineDetailsWrapper wrapper(nullptr, 0);
+    EXPECT_THROW(wrapper.name(), std::invalid_argument);
 }

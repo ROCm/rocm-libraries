@@ -55,6 +55,9 @@ add_executable(
     IntegrationMatmulDescriptorLifting.cpp
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationMoeGroupedMatmul.cpp
+    IntegrationMoeGroupedMatmulBwd.cpp
+    IntegrationMoeGroupedMatmulBwdDescriptorLifting.cpp
+    IntegrationMoeGroupedMatmulBwdDescriptorLowering.cpp
     IntegrationMoeGroupedMatmulDescriptorLifting.cpp
     IntegrationMoeGroupedMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
@@ -124,6 +127,7 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
                 TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
                 TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME="${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}"
                 TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME="${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}"
+                TEST_HASHED_NAME_PLUGIN_NAME="${TEST_HASHED_NAME_PLUGIN_NAME}"
                 TEST_OVERRIDE_IMPLEMENTING_PLUGIN_NAME="${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET}"
                 TEST_OVERRIDE_OMITTING_PLUGIN_NAME="${HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET}"
                 TEST_VERSION_LIAR_PLUGIN_NAME="${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET}"
@@ -147,6 +151,7 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
         ${TEST_DUPLICATE_ID_A_PLUGIN_NAME}
         ${TEST_DUPLICATE_ID_B_PLUGIN_NAME}
         ${TEST_INCOMPLETE_API_PLUGIN_NAME}
+        ${TEST_HASHED_NAME_PLUGIN_NAME}
         ${TEST_KNOBS_PLUGIN_NAME}
         ${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}
         # Override-execute fake plugins.

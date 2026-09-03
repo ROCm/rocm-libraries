@@ -30,6 +30,10 @@
 #include "rocsparse_csritilu0x_driver.hpp"
 #include <iomanip>
 
+// The sync_split_fusion algorithm is deprecated and no longer exercised by the
+// test suite; exclude its implementation from coverage reporting.
+// LCOV_EXCL_START
+
 namespace rocsparse
 {
     template <int BLOCKSIZE, int WFSIZE, typename T, typename I, typename J>
@@ -814,7 +818,7 @@ struct rocsparse::csritilu0x_driver_t<deprecated_rocsparse_itilu0_alg_sync_split
                                     const I* __restrict__ lptr_begin_,
                                     const I* __restrict__ lptr_end_,
                                     const J* __restrict__ lind_,
-                                    T* __restrict__ lval_,
+                                    T*                   lval_,
                                     rocsparse_index_base lbase_,
                                     rocsparse_diag_type  udiag_type_,
                                     rocsparse_direction  udir_,
@@ -823,10 +827,10 @@ struct rocsparse::csritilu0x_driver_t<deprecated_rocsparse_itilu0_alg_sync_split
                                     const I* __restrict__ uptr_end_,
                                     const J* __restrict__ uind_,
 
-                                    T* __restrict__ uval_,
+                                    T*                   uval_,
                                     rocsparse_index_base ubase_,
-                                    T* __restrict__ dval_,
-                                    size_t buffer_size_,
+                                    T*                   dval_,
+                                    size_t               buffer_size_,
                                     void* __restrict__ buffer_)
         {
             hipStream_t stream = handle_->stream;
@@ -1218,3 +1222,5 @@ INSTANTIATE(float, rocsparse_int);
 INSTANTIATE(double, rocsparse_int);
 
 #undef INSTANTIATE
+
+// LCOV_EXCL_STOP

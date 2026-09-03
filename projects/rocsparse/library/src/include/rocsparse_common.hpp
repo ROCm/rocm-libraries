@@ -60,6 +60,12 @@
 
 namespace rocsparse
 {
+    template <typename J>
+    static uint16_t get_batch_grid_size(J batch_count)
+    {
+        return (batch_count > 65535) ? 65535 : batch_count;
+    }
+
     // Compile-time log2 for power-of-2 (e.g. log2_pow2<32>::value == 5). Use for WF_SIZE, etc.
     template <uint32_t N>
     struct log2_pow2

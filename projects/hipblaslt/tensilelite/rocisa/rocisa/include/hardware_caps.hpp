@@ -24,6 +24,7 @@
 #include <array>
 #include <iostream>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,10 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
         std::cout << "return code: " << rcode << std::endl;
     }
 
+    // 127 means the assembler could not be executed at all (e.g. missing binary),
+    // which is not the same as the assembler rejecting this particular ISA/instruction.
+    if(rcode == 127)
+        throw std::runtime_error("Assembler not found or not executable: " + assemblerPath);
     if(rcode != 0)
         return false;
     return true;
@@ -603,6 +608,7 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // therefore reorder w.r.t. a subsequent volatile/atomic VMEM. An
     // `s_wait_xcnt 0` must precede the volatile/atomic VMEM op.
     rv["RequiresXCntForVolatileVMEM"]  = checkInList(isaVersion, {{12, 5, 0}});
+    rv["EnableXnackReplay"]            = checkInList(isaVersion, {{12, 5, 0}});
     rv["DefaultScopeIsCULocal"]        = checkInList(isaVersion, {{12, 5, 0}});
 
     // LDS bank geometry — used for swizzle/rotation in subtile-based tiling.

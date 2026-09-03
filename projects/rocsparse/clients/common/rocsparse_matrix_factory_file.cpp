@@ -171,84 +171,45 @@ struct spec
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-        factory.init_csr(
-            bsr_row_ptr, bsr_col_ind, bsr_val, Mb, Nb, nnzb, base, matrix_type, uplo, storage);
-
-        // Then temporarily skip the values.
-        size_t nvalues = size_t(nnzb) * row_block_dim * col_block_dim;
-        bsr_val.resize(nvalues);
-        for(I i = 0; i < nvalues; ++i)
-        {
-            bsr_val[i] = random_cached_generator<T>();
-        }
-    }
-};
-
-template <typename T>
-struct spec<T, rocsparse_int, rocsparse_int>
-{
-    template <rocsparse_matrix_init MATRIX_INIT>
-    static void init_gebsr_rocalution(
-        rocsparse_matrix_factory_file<MATRIX_INIT, T, rocsparse_int, rocsparse_int>& factory,
-        std::vector<rocsparse_int>&                                                  bsr_row_ptr,
-        std::vector<rocsparse_int>&                                                  bsr_col_ind,
-        std::vector<T>&                                                              bsr_val,
-        rocsparse_direction                                                          dirb,
-        rocsparse_int&                                                               Mb,
-        rocsparse_int&                                                               Nb,
-        rocsparse_int&                                                               nnzb,
-        rocsparse_int&                                                               row_block_dim,
-        rocsparse_int&                                                               col_block_dim,
-        rocsparse_index_base                                                         base,
-        rocsparse_matrix_type                                                        matrix_type,
-        rocsparse_fill_mode                                                          uplo,
-        rocsparse_storage_mode                                                       storage)
-    {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-
         //
-        // Initialize in case init_csr requires it as input.
+        // Read the CSR file with the requested index types, then convert it to a (GE)BSR
+        // matrix. rocsparse_matrix_utils::convert is index-type generic (it transparently
+        // falls back to rocsparse_int intermediates for non-rocsparse_int index types), so
+        // this single implementation is correct for every index type -- including an i32
+        // matrix while the library is built with --rocsparse_ILP64.
         //
-        rocsparse_int M = Mb * row_block_dim;
-        rocsparse_int N = Nb * col_block_dim;
+        const J M = Mb * row_block_dim;
+        const J N = Nb * col_block_dim;
 
-        host_csr_matrix<T, rocsparse_int, rocsparse_int> hA_uncompressed(M, N, 0, base);
-        factory.init_csr(hA_uncompressed.ptr,
-                         hA_uncompressed.ind,
-                         hA_uncompressed.val,
-                         hA_uncompressed.m,
-                         hA_uncompressed.n,
-                         hA_uncompressed.nnz,
-                         hA_uncompressed.base,
+        host_csr_matrix<T, I, J> hA(M, N, 0, base);
+        factory.init_csr(hA.ptr,
+                         hA.ind,
+                         hA.val,
+                         hA.m,
+                         hA.n,
+                         hA.nnz,
+                         hA.base,
                          matrix_type,
                          uplo,
                          rocsparse_storage_mode_sorted);
 
-        device_gebsr_matrix<T, rocsparse_int, rocsparse_int> that_on_device;
+        device_gebsr_matrix<T, I, J> that_on_device;
         {
-            device_csr_matrix<T, rocsparse_int, rocsparse_int> dA_uncompressed(hA_uncompressed);
-            rocsparse_matrix_utils::convert(dA_uncompressed,
+            device_csr_matrix<T, I, J> dA(hA);
+            rocsparse_matrix_utils::convert(dA,
                                             dirb,
-                                            row_block_dim,
-                                            col_block_dim,
+                                            static_cast<rocsparse_int>(row_block_dim),
+                                            static_cast<rocsparse_int>(col_block_dim),
                                             base,
                                             rocsparse_storage_mode_sorted,
                                             that_on_device);
 
-            switch(storage)
+            if(storage == rocsparse_storage_mode_unsorted)
             {
-            case rocsparse_storage_mode_unsorted:
-            {
-                host_gebsr_matrix<T, rocsparse_int, rocsparse_int> that(that_on_device);
+                host_gebsr_matrix<T, I, J> that(that_on_device);
                 rocsparse_matrix_utils::host_gebsrunsort<T>(
                     that.ptr.data(), that.ind.data(), that.mb, that.base);
                 that_on_device(that);
-                break;
-            }
-            case rocsparse_storage_mode_sorted:
-            {
-                break;
-            }
             }
         }
 

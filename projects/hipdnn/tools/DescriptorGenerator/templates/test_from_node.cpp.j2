@@ -440,18 +440,35 @@ TEST_F(Test{{ op.name }}OperationFromNode, SetsTensorReferencesWithFullValues)
 
 {% endfor %}
 }
-{% for tf in op.required_tensor_fields %}
 
-TEST_F(Test{{ op.name }}OperationFromNode, FailsWithMissing{{ tf.pascal_name }}Tensor)
+{% if op.required_tensor_fields %}
+// The parameter is the UID of the one required tensor to drop from the tensor map.
+class Test{{ op.name }}OperationFromNodeMissingTensor
+    : public Test{{ op.name }}OperationFromNode,
+      public ::testing::WithParamInterface<int64_t>
 {
-{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-    _tensorMap.erase({{ uid_const }});
+};
+
+TEST_P(Test{{ op.name }}OperationFromNodeMissingTensor, FailsWithMissingTensor)
+{
+    _tensorMap.erase(GetParam());
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS({{ op.class_name }}::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    RequiredTensors,
+    Test{{ op.name }}OperationFromNodeMissingTensor,
+    ::testing::Values(
+{% for tf in op.required_tensor_fields %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+        {{ uid_const }}{% if not loop.last %},{% endif %}
+
 {% endfor %}
+    ));
+{% endif %}
 {% if op.optional_tensor_fields %}
 
 TEST_F(Test{{ op.name }}OperationFromNode, SucceedsWithOnlyRequiredTensors)

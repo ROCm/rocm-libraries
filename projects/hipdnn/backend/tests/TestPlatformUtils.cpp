@@ -4,10 +4,12 @@
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <string>
+#include <unordered_set>
 
 #include "HipdnnException.hpp"
 #include "PlatformUtils.hpp"
 #include "TestPluginConstants.hpp"
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 
 TEST(TestPlatformUtils, GetSystemInfoReturnsNonEmpty)
 {
@@ -106,4 +108,32 @@ TEST(TestPlatformUtils, OpenLibraryThrowsHipdnnExceptionForMissingLibrary)
     EXPECT_THROW(hipdnn_backend::platform_utilities::openLibrary(
                      hipdnn_data_sdk::utilities::getLibraryName("hipdnn_missing_test_library")),
                  hipdnn_backend::HipdnnException);
+}
+
+TEST(TestPlatformUtils, GenerateUuidV4ProducesValidVersion4Uuid)
+{
+    const auto uuid = hipdnn_backend::platform_utilities::generateUuidV4();
+    EXPECT_TRUE(hipdnn_flatbuffers_sdk::utilities::isUuidV4(uuid));
+}
+
+TEST(TestPlatformUtils, GenerateUuidV4ProducesDistinctValues)
+{
+    const auto first = hipdnn_backend::platform_utilities::generateUuidV4();
+    const auto second = hipdnn_backend::platform_utilities::generateUuidV4();
+    EXPECT_NE(first, second);
+}
+
+TEST(TestPlatformUtils, GenerateUuidV4ProducesManyDistinctValues)
+{
+    // A broken RNG (fixed seed, zeroed buffer, stale entropy pool) would collapse
+    // this set well below 1000; a healthy one should never collide at this scale.
+    constexpr int UUID_COUNT = 1000;
+    std::unordered_set<std::string> seen;
+    for(int i = 0; i < UUID_COUNT; ++i)
+    {
+        const auto uuid = hipdnn_backend::platform_utilities::generateUuidV4();
+        EXPECT_TRUE(hipdnn_flatbuffers_sdk::utilities::isUuidV4(uuid));
+        seen.insert(hipdnn_flatbuffers_sdk::utilities::formatUuid(uuid));
+    }
+    EXPECT_EQ(seen.size(), static_cast<size_t>(UUID_COUNT));
 }

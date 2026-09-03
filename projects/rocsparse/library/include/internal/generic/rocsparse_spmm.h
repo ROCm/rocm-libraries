@@ -83,31 +83,31 @@ extern "C" {
 *
 *  <table>
 *  <caption id="spmm_csr_algorithms">CSR Algorithms</caption>
-*  <tr><th>CSR Algorithms                         <th>Deterministic  <th>Preprocessing  <th>Notes
-*  <tr><td>rocsparse_spmm_alg_csr</td>            <td>Yes</td>       <td>No</td>        <td>Default algorithm.</td>
-*  <tr><td>rocsparse_spmm_alg_csr_row_split</td>  <td>Yes</td>       <td>No</td>        <td>Assigns a fixed number of threads per row, regardless of the number of non-zeros in each row. This can perform well when each row in the matrix has roughly the same number of non-zeros.</td>
-*  <tr><td>rocsparse_spmm_alg_csr_nnz_split</td>  <td>No</td>        <td>Yes</td>       <td>Distributes work by having each thread block work on a fixed number of non-zeros, regardless of the number of rows that might be involved. This can perform well when the matrix has some rows with few non-zeros and some rows with many non-zeros.</td>
-*  <tr><td>rocsparse_spmm_alg_csr_merge_path</td> <td>No</td>        <td>Yes</td>       <td>Attempts to combine the approaches of row-split and non-zero split by having each block work on a fixed amount of work, which can be either non-zeros or rows.</td>
+*  <tr><th>CSR Algorithms                         <th>Deterministic  <th>Preprocessing  <th>Batched  <th>Notes
+*  <tr><td>rocsparse_spmm_alg_csr</td>            <td>Yes</td>       <td>No</td>        <td>Yes</td> <td>Default algorithm.</td>
+*  <tr><td>rocsparse_spmm_alg_csr_row_split</td>  <td>Yes</td>       <td>No</td>        <td>Yes</td> <td>Assigns a fixed number of threads per row, regardless of the number of non-zeros in each row. This can perform well when each row in the matrix has roughly the same number of non-zeros.</td>
+*  <tr><td>rocsparse_spmm_alg_csr_nnz_split</td>  <td>No</td>        <td>Yes</td>       <td>Yes</td> <td>Distributes work by having each thread block work on a fixed number of non-zeros, regardless of the number of rows that might be involved. This can perform well when the matrix has some rows with few non-zeros and some rows with many non-zeros.</td>
+*  <tr><td>rocsparse_spmm_alg_csr_merge_path</td> <td>No</td>        <td>Yes</td>       <td>Yes</td> <td>Attempts to combine the approaches of row-split and non-zero split by having each block work on a fixed amount of work, which can be either non-zeros or rows.</td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmm_coo_algorithms">COO Algorithms</caption>
-*  <tr><th>COO Algorithms                               <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmm_alg_coo_segmented</td>        <td>Yes</td>        <td>No</td>       <td>Generally not as fast as the atomic algorithm but is deterministic.</td>
-*  <tr><td>rocsparse_spmm_alg_coo_atomic</td>           <td>No</td>         <td>No</td>       <td>Generally the fastest COO algorithm. This is the default algorithm.</td>
-*  <tr><td>rocsparse_spmm_alg_coo_segmented_atomic</td> <td>No</td>         <td>No</td>       <td> </td>
+*  <tr><th>COO Algorithms                               <th>Deterministic   <th>Preprocessing <th>Batched  <th>Notes
+*  <tr><td>rocsparse_spmm_alg_coo_segmented</td>        <td>Yes</td>        <td>No</td>       <td>Yes</td> <td>Generally not as fast as the atomic algorithm but is deterministic.</td>
+*  <tr><td>rocsparse_spmm_alg_coo_atomic</td>           <td>No</td>         <td>No</td>       <td>Yes</td> <td>Generally the fastest COO algorithm. This is the default algorithm.</td>
+*  <tr><td>rocsparse_spmm_alg_coo_segmented_atomic</td> <td>No</td>         <td>No</td>       <td>Yes</td> <td> </td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmm_bell_algorithms">Blocked-ELL Algorithms</caption>
-*  <tr><th>Blocked ELL Algorithms       <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmm_alg_bell</td> <td>Yes</td>        <td>No</td>       <td></td>
+*  <tr><th>Blocked ELL Algorithms       <th>Deterministic   <th>Preprocessing <th>Batched <th>Notes
+*  <tr><td>rocsparse_spmm_alg_bell</td> <td>Yes</td>        <td>No</td>       <td>No</td> <td></td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmm_bsr_algorithms">BSR Algorithms</caption>
-*  <tr><th>BSR Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmm_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td></td>
+*  <tr><th>BSR Algorithms                <th>Deterministic   <th>Preprocessing <th>Batched <th>Notes
+*  <tr><td>rocsparse_spmm_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td>No</td> <td></td>
 *  </table>
 *
 *  It is also possible to pass \ref rocsparse_spmm_alg_default, which will automatically select from the algorithms listed above
@@ -149,7 +149,13 @@ extern "C" {
 *  \p rocsparse_spmm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions
 *  for storing the row pointer and column indices arrays of the sparse matrices.
 *
-*  \p rocsparse_spmm also supports batched computation for CSR and COO matrices. There are three supported batch modes:
+*  \p rocsparse_spmm also supports batched computation for CSR and COO matrices. For the CSR format, batched computation is
+*  supported by all of the available algorithms, namely \ref rocsparse_spmm_alg_csr, \ref rocsparse_spmm_alg_csr_row_split,
+*  \ref rocsparse_spmm_alg_csr_nnz_split, and \ref rocsparse_spmm_alg_csr_merge_path. For the COO format, batched computation is
+*  likewise supported by all of the available algorithms, namely \ref rocsparse_spmm_alg_coo_segmented,
+*  \ref rocsparse_spmm_alg_coo_atomic, and \ref rocsparse_spmm_alg_coo_segmented_atomic. Batched computation is not supported
+*  for the BSR and Blocked ELL formats.
+*  There are three supported batch modes:
 *  \f[
 *      C_i = A \times B_i \\
 *      C_i = A_i \times B \\

@@ -3,7 +3,7 @@
   "_comment": "ROCKE-owned architecture SSOT. Hardware facts only (no pipeline/scheduler vocabulary). MFMA atom sets are hardware-verified on real hardware (see dsl_docs/architecture/multi_arch_data_layout.md). Each MMA row: {family,a,b,c,m,n,k,op_id}; op_id is the opaque backend handle (matches IRBuilder.mfma_* today).",
   "arches": {
     "gfx90a": {
-      "_comment": "CDNA2 (MI200 / Aldebaran). Wave64, 64 KB LDS. No fp8/bf8 native MFMA (those arrived with gfx940/gfx942). No async_lds. bf16 32x32x8 is hardware-verified on MI200 series. Hardware-verified MMA set matches AMD ISA manual v3 (GFX9 MFMA section).",
+      "_comment": "CDNA2 (gfx90a). Wave64, 64 KB LDS. No fp8/bf8 native MFMA (those arrived with gfx940/gfx942). No async_lds. bf16 32x32x8 is hardware-verified on gfx90a series. Hardware-verified MMA set matches AMD ISA manual v3 (GFX9 MFMA section).",
       "family": "cdna",
       "target_family": "gfx9_mfma",
       "wave_size": 64,
@@ -94,7 +94,7 @@
       ]
     },
     "gfx1151": {
-      "_comment": "RDNA3.5 (Strix Halo APU). WAVE32, WMMA not MFMA. Datalayout/triple identical to CDNA on this ROCm (clang-verified on ctr-halo). WMMA f16/bf16 16x16x16 ABI hardware-verified: llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16(<16 x half>,<16 x half>,<8 x float>)->-<8 x float>; A frag lane l=row l%16 (K=0..15), B frag lane l=col l%16 (K=0..15), D lane l slot i=(row 2i+l/16, col l%16).",
+      "_comment": "RDNA3.5 (gfx1151). WAVE32, WMMA not MFMA. Datalayout/triple identical to CDNA on this ROCm. WMMA f16/bf16 16x16x16 ABI hardware-verified: llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16(<16 x half>,<16 x half>,<8 x float>)->-<8 x float>; A frag lane l=row l%16 (K=0..15), B frag lane l=col l%16 (K=0..15), D lane l slot i=(row 2i+l/16, col l%16).",
       "family": "rdna",
       "target_family": "gfx11_rdna",
       "wave_size": 32,
@@ -119,7 +119,7 @@
       ]
     },
     "gfx1201": {
-      "_comment": "RDNA4 (Navi 48). WAVE32, WMMA not MFMA. Datalayout/triple inherited from RDNA3 backend (RDNA buffer SRD word3 0x31014000 + contiguous gfx11 waitcnt). WMMA 16x16x16 ABI differs from gfx11: NO cross-half operand duplication, A/B are <8 x half> per lane (intrinsic v8f16/v8i16), builtin __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12; output column-distributed acc[j]=matrix[(lane/16)*8+j][lane%16]. Lane maps HYPOTHESIS — verify with examples/gfx1201/wmma_probe.py before trusting matmul_nbits.",
+      "_comment": "RDNA4 (gfx1201). WAVE32, WMMA not MFMA. Datalayout/triple inherited from RDNA3 backend (RDNA buffer SRD word3 0x31014000 + contiguous gfx11 waitcnt). WMMA 16x16x16 ABI differs from gfx11: NO cross-half operand duplication, A/B are <8 x half> per lane (intrinsic v8f16/v8i16), builtin __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12; output column-distributed acc[j]=matrix[(lane/16)*8+j][lane%16]. Lane maps HYPOTHESIS — verify with examples/gfx1201/wmma_probe.py before trusting matmul_nbits.",
       "family": "rdna",
       "target_family": "gfx12_rdna",
       "wave_size": 32,
@@ -180,7 +180,7 @@
       ]
     },
     "gfx11-generic": {
-      "_comment": "RDNA3 family generic target (amdgcn-amd-amdhsa--gfx11-generic). Code objects load on any gfx11xx/gfx115x device whose specific gfxNNNN is not in this ROCm. Same WMMA/wave32 ABI as gfx1151; used for boards whose driver reports a stepping the toolchain can't name (e.g. Strix Halo reporting gfx115E on Windows).",
+      "_comment": "RDNA3 family generic target (amdgcn-amd-amdhsa--gfx11-generic). Code objects load on any gfx11xx/gfx115x device whose specific gfxNNNN is not in this ROCm. Same WMMA/wave32 ABI as gfx1151; used for boards whose driver reports a stepping the toolchain can't name (e.g. gfx115E on Windows).",
       "family": "rdna",
       "target_family": "gfx11_rdna",
       "wave_size": 32,

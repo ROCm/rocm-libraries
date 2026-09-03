@@ -20,6 +20,18 @@ option(ROCISA_USE_STABLE_ABI
 
 option(ROCISA_ENABLE_COVERAGE "Enable code coverage instrumentation for rocisa" OFF)
 
+# Compiles StinkyTofu's example HelloWorldPass plugin directly into _rocisa (LLVM-style
+# static-plugin pattern: object code linked into the host, registered via an explicit
+# call rather than dlopen). This is independent of whether stinkytofu itself was built
+# shared or static, and of whether it was found via find_package or add_subdirectory —
+# see the rocisa.registerExamplePlugin() binding below. Used to exercise the compiled-in
+# plugin path from test_pass_plugin.py regardless of stinkytofu's own build config.
+# Named after the single plugin it embeds: it does not enable StinkyTofu's example
+# suite (that is stinkytofu's own STINKYTOFU_BUILD_EXAMPLES).
+option(ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN
+    "Compile StinkyTofu's example HelloWorldPass plugin directly into rocisa (for testing static stinkytofu builds)"
+    OFF)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -161,6 +173,18 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         endif()
     endif()
 
+    # A static stinkytofu is linked straight into _rocisa, so none of the runtime-loading
+    # machinery below applies to it: nothing to vendor into the wheel, no RPATH to point
+    # at it, no DLL to copy, and no dlopen'able example plugin. Read the target type
+    # rather than BUILD_SHARED_LIBS so this is also right for an imported (find_package)
+    # stinkytofu, whose type is independent of this build's BUILD_SHARED_LIBS.
+    get_target_property(_st_target_type stinkytofu::stinkytofu TYPE)
+    if(_st_target_type STREQUAL "SHARED_LIBRARY")
+        set(_stinkytofu_shared TRUE)
+    else()
+        set(_stinkytofu_shared FALSE)
+    endif()
+
     target_link_libraries(_rocisa PUBLIC roc::origami)
     target_link_libraries(_rocisa PRIVATE hip::host stinkytofu::stinkytofu)
 
@@ -174,6 +198,21 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         "${_stinkytofu_src_dir}/src/conversion/rocisa/AllHwMappings.cpp"
         "${_stinkytofu_src_dir}/src/conversion/rocisa/ToStinkyTofuUtils.cpp"
     )
+
+    # Compile StinkyTofu's example HelloWorldPass plugin straight into _rocisa, same
+    # rationale as the conversion glue above: this bypasses whatever CMake target
+    # topology stinkytofu itself used (static/shared, find_package/add_subdirectory),
+    # so rocisa.registerExamplePlugin() (bound in ToStinkyTofuUtils.cpp) is available
+    # uniformly. Separate from stinkytofu's own STINKYTOFU_BUILD_EXAMPLES option.
+    if(ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN)
+        target_sources(_rocisa PRIVATE
+            "${_stinkytofu_src_dir}/examples/plugins/HelloWorldPass.cpp"
+        )
+        target_include_directories(_rocisa PRIVATE
+            "${_stinkytofu_src_dir}/examples/plugins"
+        )
+        target_compile_definitions(_rocisa PRIVATE ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN)
+    endif()
 
     if(_stinkytofu_from_subdirectory)
         # Source-built stinkytofu via add_subdirectory: generated headers are in
@@ -196,7 +235,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa"
         BUILD_RPATH "${_st_lib_dir}"
     )
-    if(_stinkytofu_from_subdirectory)
+    if(_stinkytofu_from_subdirectory AND _stinkytofu_shared)
         # Source-built sibling: no installed libstinkytofu exists, so the wheel carries
         # its own copy next to _rocisa and loads it from there.
         set_target_properties(_rocisa PROPERTIES INSTALL_RPATH "$ORIGIN")
@@ -209,7 +248,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                     $<TARGET_FILE_DIR:_rocisa>
             )
         endif()
-    elseif(ROCISA_INCLUDE_BUILD_INFO)
+    elseif(_stinkytofu_shared AND ROCISA_INCLUDE_BUILD_INFO)
         # Dev/editable find_package build: libstinkytofu is installed to a temp
         # prefix off the loader's default search path, so bake its dir into the
         # install RPATH from the link line. Gated on the dev-build signal so
@@ -273,6 +312,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
             "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/__init__.py"
             COPYONLY
         )
+        # The staged _build_info.py drives the standalone _stinkytofu.so guard.
         configure_file(
             "${_stinkytofu_src_dir}/python_module/stinkytofu/_build_info.py.in"
             "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/_build_info.py"
@@ -303,8 +343,10 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         # scikit-build-core wheel install rules: place _rocisa and __init__.py into the
         # rocisa/ package directory in the wheel.
         install(TARGETS _rocisa DESTINATION rocisa)
-        if(_stinkytofu_from_subdirectory)
+        if(_stinkytofu_from_subdirectory AND _stinkytofu_shared)
             # Source-built: vendor libstinkytofu into the wheel — no installed copy exists.
+            # A static stinkytofu is already inside _rocisa, and TARGET_SONAME_FILE below
+            # is only valid for SHARED targets.
             install(FILES $<TARGET_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
             if(NOT WIN32)
                 install(FILES $<TARGET_SONAME_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
@@ -327,7 +369,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # No INSTALL_RPATH is needed: on Linux the plugin has no DT_NEEDED on libstinkytofu (it
     # is headers-only) and the host is already resident when loadPlugin() dlopens it.
     # Only installable for shared builds (MODULE target); static builds use OBJECT.
-    if(TARGET stinkytofu-plugin-helloworld AND BUILD_SHARED_LIBS AND _stinkytofu_from_subdirectory)
+    if(TARGET stinkytofu-plugin-helloworld AND _stinkytofu_shared AND _stinkytofu_from_subdirectory)
         set_target_properties(stinkytofu-plugin-helloworld PROPERTIES EXCLUDE_FROM_ALL FALSE)
         add_dependencies(_rocisa stinkytofu-plugin-helloworld)
         install(TARGETS stinkytofu-plugin-helloworld

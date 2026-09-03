@@ -3,13 +3,12 @@
 #pragma once
 
 #include <memory>
-#include <vector>
 
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
-class Function;
 class Pass;
+class ModulePass;
 
 /// Insert gfx1250 assembly hazards that cannot be left to hardware.
 ///
@@ -29,18 +28,17 @@ class Pass;
 /// An SMEM instruction that overwrites its own source register cannot be
 /// repaired by a drain; the pass reports it and asserts.
 ///
-/// Existing full s_wait_xcnt drains reset the pass's replay-group state. When
-/// \p functions is non-empty, the pass walks the whole kernel (entry plus
-/// callable functions); otherwise it processes the single Function given to
-/// the pipeline.
+/// Existing full s_wait_xcnt drains reset the pass's replay-group state.
 ///
-/// With \p enableXcntDrainProfile the pass emits an stderr summary of inserted
-/// drains by rule, and by whether each drain's block belongs to a loop and/or
-/// holds a matrix instruction. The summary covers every walked function, and
-/// when the kernel has callable functions it also reports the kernel body (the
-/// entry function) and the helper functions separately. Off by default: the
-/// summary costs a loop and matrix-instruction scan per function.
+/// Per-function pass; run over all functions via createGfx1250HazardModulePass.
+/// \p enableXcntDrainProfile emits a per-function stderr drain summary.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createGfx1250HazardPass(
-    std::vector<Function*> functions = {}, bool enableXcntDrainProfile = false);
+    bool enableXcntDrainProfile = false);
+
+/// Whole-kernel driver: runs the hazard transform across entry + every callable
+/// function with one shared profile. With \p enableXcntDrainProfile it emits an
+/// aggregated (kernel body vs helper functions) stderr drain report; off by default.
+STINKYTOFU_EXPORT std::unique_ptr<ModulePass> createGfx1250HazardModulePass(
+    bool enableXcntDrainProfile = false);
 
 }  // namespace stinkytofu

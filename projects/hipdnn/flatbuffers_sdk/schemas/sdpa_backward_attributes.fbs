@@ -3,35 +3,38 @@
 
 include "sdpa_attributes.fbs";
 
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 table SdpaBackwardAttributes {
     // Required input tensor UIDs
-    q_tensor_uid:              long;
-    k_tensor_uid:              long;
-    v_tensor_uid:              long;
-    o_tensor_uid:              long;
-    do_tensor_uid:             long;
-    stats_tensor_uid:          long;
+    q_tensor_uid:              long (cache_uid);
+    k_tensor_uid:              long (cache_uid);
+    v_tensor_uid:              long (cache_uid);
+    o_tensor_uid:              long (cache_uid);
+    do_tensor_uid:             long (cache_uid);
+    stats_tensor_uid:          long (cache_uid);
 
     // Required output tensor UIDs
-    dq_tensor_uid:             long;
-    dk_tensor_uid:             long;
-    dv_tensor_uid:             long;
+    dq_tensor_uid:             long (cache_uid);
+    dk_tensor_uid:             long (cache_uid);
+    dv_tensor_uid:             long (cache_uid);
 
     // Optional input tensor UIDs
-    scale_tensor_uid:          long = null;  // Attention scale tensor (Attn_scale)
-    attn_mask_tensor_uid:      long = null;  // Additive attention bias (Bias)
-    seq_len_q_tensor_uid:      long = null;
-    seq_len_kv_tensor_uid:     long = null;
-    seed_tensor_uid:           long = null;  // Dropout seed
-    offset_tensor_uid:         long = null;  // Dropout offset
-    dropout_mask_tensor_uid:   long = null;
-    dropout_scale_tensor_uid:  long = null;
-    dropout_scale_inv_tensor_uid: long = null;
+    scale_tensor_uid:          long = null (cache_uid);  // Attention scale tensor (Attn_scale)
+    attn_mask_tensor_uid:      long = null (cache_uid);  // Additive attention bias (Bias)
+    seq_len_q_tensor_uid:      long = null (cache_uid);
+    seq_len_kv_tensor_uid:     long = null (cache_uid);
+    seed_tensor_uid:           long = null (cache_uid);  // Dropout seed
+    offset_tensor_uid:         long = null (cache_uid);  // Dropout offset
+    dropout_mask_tensor_uid:   long = null (cache_uid);
+    dropout_scale_tensor_uid:  long = null (cache_uid);
+    dropout_scale_inv_tensor_uid: long = null (cache_uid);
 
     // Optional output tensor UIDs
-    dbias_tensor_uid:          long = null;  // Gradient of additive attention bias
+    dbias_tensor_uid:          long = null (cache_uid);  // Gradient of additive attention bias
 
     // Boolean flags
     alibi_mask:                bool = false;

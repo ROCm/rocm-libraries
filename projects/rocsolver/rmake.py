@@ -197,7 +197,7 @@ def config_cmd():
         os.environ['rocblas_DIR'] = cmake_path(args.rocblas_dir)
 
     if args.gpu_architecture is not None:
-        cmake_options.append( f"-DAMDGPU_TARGETS={args.gpu_architecture}" )
+        cmake_options.append( f"-DGPU_TARGETS={args.gpu_architecture}" )
 
     if args.cmake_dargs:
         for i in args.cmake_dargs:
@@ -259,4 +259,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

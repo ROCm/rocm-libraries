@@ -7,7 +7,9 @@
 /// This pass reads pluginDataStr("greeting") from StinkyAsmModule and
 /// writes it back to pluginDataStr("greeting_result") to prove execution.
 ///
-/// Build: compiled into a shared library (.so) with extern "C" registerPlugin().
+/// Build: compiled into a shared library (.so) with extern "C" registerPlugin()
+///        and extern "C" stinkytofuPluginVersion() (see PassBuilder::loadPlugin()
+///        for why the latter is required).
 /// Load:  rocisa.loadPlugin("path/to/libstinkytofu-plugin-helloworld.so")
 /// Use:   stModule.registerPassAtExtensionPoint(EP_AfterRegionPasses, "HelloWorldPass")
 

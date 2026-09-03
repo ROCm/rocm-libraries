@@ -22,6 +22,17 @@ process by passing distinct device IDs to
 :cpp:func:`rocfft_brick_create` to create bricks in the input and output
 fields.
 
+.. warning::
+
+   When built with ``ROCFFT_RCCL_ENABLE=ON``, rocfft plans may use the
+   ROCm Communication Collectives Library (RCCL) for inter-device
+   communication. For efficiency reasons, rocfft reuses the same RCCL
+   communicator across plans that share the same set of devices. RCCL
+   communicators are not safe for concurrent use, so any two such plans
+   must be executed serially: If you need to execute multiple plans
+   concurrently on the same device set, serialize the calls or use
+   distinct device subsets.
+
 Support for single-process multi-device transforms was introduced in
 ROCm 6.0 with rocFFT 1.0.25.
 

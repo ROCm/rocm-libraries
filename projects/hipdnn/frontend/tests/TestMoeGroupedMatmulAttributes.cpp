@@ -241,3 +241,83 @@ TEST(TestMoeGroupedMatmulAttributes, SetTensorsConstRef)
     EXPECT_NE(tokenKsTensor, nullptr);
     EXPECT_NE(outputTensor, nullptr);
 }
+
+TEST(TestMoeGroupedMatmulAttributes, LogicalAndStrictEquality)
+{
+    MoeGroupedMatmulAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_mode(MoeGroupedMatmulMode::SCATTER);
+    attr1.set_top_k(2);
+
+    auto token1 = std::make_shared<TensorAttributes>();
+    token1->set_uid(1).set_name("Token").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_token(token1);
+
+    auto weight1 = std::make_shared<TensorAttributes>();
+    weight1->set_uid(2).set_name("Weight").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_weight(weight1);
+
+    MoeGroupedMatmulAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_mode(MoeGroupedMatmulMode::SCATTER);
+    attr2.set_top_k(2);
+
+    auto token2 = std::make_shared<TensorAttributes>();
+    token2->set_uid(1).set_name("Token").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_token(token2);
+
+    auto weight2 = std::make_shared<TensorAttributes>();
+    weight2->set_uid(2).set_name("Weight").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_weight(weight2);
+
+    // Initial check: everything matches exactly
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Structural tensor mismatch: different UID/name/type entirely
+    auto structuralMismatchToken = std::make_shared<TensorAttributes>();
+    structuralMismatchToken->set_uid(99).set_name("MismatchedToken");
+    attr2.set_token(structuralMismatchToken);
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
+    attr2.set_token(token2); // Revert
+
+    // mode mismatch: semantic, must fail both checks
+    attr2.set_mode(MoeGroupedMatmulMode::GATHER);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_mode(MoeGroupedMatmulMode::SCATTER); // Revert
+
+    // top_k mismatch: semantic, must fail both checks
+    attr2.set_top_k(4);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_top_k(2); // Revert
+
+    // Unset-vs-unset optional fields: two default-constructed attrs with
+    // matching tensors should still compare equal
+    const MoeGroupedMatmulAttributes sparse1;
+    MoeGroupedMatmulAttributes sparse2;
+    EXPECT_TRUE(sparse1 == sparse2);
+    EXPECT_TRUE(sparse1.logicallyEquals(sparse2));
+
+    // Set-vs-unset top_k should differ
+    sparse2.set_top_k(1);
+    EXPECT_FALSE(sparse1 == sparse2);
+    EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
+
+    // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
+    auto logicalMatchToken = std::make_shared<TensorAttributes>();
+    logicalMatchToken
+        ->set_uid(555) // Diverges from attr1's token1 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's token1 ("Token")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
+    attr2.set_token(logicalMatchToken);
+
+    // Expecting: strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+}

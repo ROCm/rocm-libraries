@@ -40,6 +40,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1, 1,  1, 1 ]
@@ -89,6 +90,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1, 1,  1, 1 ]
@@ -138,6 +140,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 32, 1,  1,  1, 1,  1, 1 ]
@@ -187,6 +190,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 32, 1,  1,  1, 1,  1, 1 ]

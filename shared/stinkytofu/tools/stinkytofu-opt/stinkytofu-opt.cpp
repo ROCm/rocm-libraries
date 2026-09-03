@@ -173,16 +173,18 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
         if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3") continue;
         if (arg.substr(0, 2) == "--") {
             if (arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
-                arg == "--verify-each" || arg == "--preserve-symbolic-regs" ||
-                arg == "--preserve-comments" || arg.starts_with("--ds-read-order=") ||
-                arg.starts_with("--ds-read-queue-depth=") ||
+                arg == "--verify-each" || arg == "--dump-passes" ||
+                arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
+                arg.starts_with("--ds-read-order=") || arg.starts_with("--ds-read-queue-depth=") ||
                 arg.starts_with("--ds-read-drain-latency=") ||
                 arg.starts_with("--ds-read-throttle-latency=") ||
                 arg.starts_with("--ds-read-per-wmma=") ||
+                arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
-                arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
-                arg == "--to-label" || isKernelConfigArg(arg))
+                arg.starts_with("--merge-barrier-threshold=") ||
+                arg == "--enable-wmma-hide-budget-prescan" || arg.starts_with("--vgpr-msb-mode=") ||
+                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
@@ -301,6 +303,8 @@ static void printKernelConfigHelp(std::ostream& os) {
 
 int main(int argc, char** argv) {
     BackendRegistry::registerAllBackends();
+    AllocatorRegistry::registerAllAllocators();
+    AllocationRulesRegistry::registerAll();
 
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
@@ -311,6 +315,9 @@ int main(int argc, char** argv) {
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
+        std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
+        std::cerr << "                   after.txt in the working directory (implied by\n";
+        std::cerr << "                   --debug-pass)\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -369,6 +376,9 @@ int main(int argc, char** argv) {
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
+        std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
+        std::cerr << "                   after.txt in the working directory (implied by\n";
+        std::cerr << "                   --debug-pass)\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -402,6 +412,11 @@ int main(int argc, char** argv) {
 
     // Parse architecture option
     std::array<int, 3> arch = {12, 5, 0};  // default gfx1250
+    // Concrete stepping identity when the user named one (e.g. "gfx1250v0"). Steppings that share
+    // an ISA triple (gfx1250 v1 vs gfx1250v0 on {12,5,0}) are indistinguishable by triple, so the
+    // triple-based getGfxArchID() first-matches v1. When the user names a stepping, resolve the
+    // GfxArchID by identity instead. Empty => no name given, keep the legacy triple behavior.
+    std::string resolvedArchName;
     int irFileIdx = 1;
     int passStartIdx = 2;
 
@@ -415,7 +430,16 @@ int main(int argc, char** argv) {
         }
 
         std::string archStr = argv[2];
-        if (!BackendRegistry::parseArchKey(archStr, arch)) {
+        // Resolve by concrete identity name first so a stepping variant sharing a triple
+        // (e.g. gfx1250v0) is selectable at runtime. getArchInfo(name) returns nullptr on a name
+        // not registered as an identity in this build (no assert), so a plain triple spelling
+        // (e.g. gfx942 in a gfx1250 build) falls through to the triple parser, and a stepping name
+        // absent from this build fails cleanly at the getArchPipeline() check below.
+        if (const auto* namedInfo = ArchHelper::getInstance().getArchInfo(archStr)) {
+            arch = {static_cast<int>(namedInfo->major), static_cast<int>(namedInfo->minor),
+                    static_cast<int>(namedInfo->stepping)};
+            resolvedArchName = archStr;
+        } else if (!BackendRegistry::parseArchKey(archStr, arch)) {
             std::cerr << "Error: Invalid architecture format '" << archStr
                       << "'. Expected gfx<major><minor><stepping> (e.g. gfx1250)\n";
             return 1;
@@ -489,10 +513,16 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.dsReadThrottleLatency = std::stoi(a.substr(27));
         } else if (a.starts_with("--ds-read-per-wmma=")) {
             passFeatureConfig.dagFeatures.dsReadPerWmma = std::stoi(a.substr(19));
+        } else if (a.starts_with("--tensor-load-wmma-space=")) {
+            passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
+        } else if (a == "--enable-wmma-hide-budget-prescan") {
+            passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
+        } else if (a.starts_with("--merge-barrier-threshold=")) {
+            passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }
     }
 
@@ -535,6 +565,10 @@ int main(int argc, char** argv) {
     bool emitAsm = false;
     bool enableRemarks = false;
     bool verifyEach = false;
+    // Off by default: createDebugPrintInstrumentation() opens before.txt/after.txt
+    // eagerly, so installing it unconditionally littered the working directory of every
+    // run. Mirrors the needsFileOutput gate the pipeline path already has.
+    bool dumpPasses = false;
     bool preserveSymbolicRegs = false;
     bool preserveComments = false;
     std::string outputFile;
@@ -545,9 +579,12 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
         if (std::string(argv[i]) == "--remarks") enableRemarks = true;
         if (std::string(argv[i]) == "--verify-each") verifyEach = true;
+        if (std::string(argv[i]) == "--dump-passes") dumpPasses = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
         if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
+            // Naming a pass to debug is only meaningful with the dumps on.
+            dumpPasses = true;
             stinkytofu::PassManagerDebugConfig::addDebugOnly(argv[++i]);
         }
         if (std::string(argv[i]) == "-o" && i + 1 < argc) outputFile = argv[++i];
@@ -582,7 +619,11 @@ int main(int argc, char** argv) {
     fileBuffer << inputFile.rdbuf();
     std::string fileContent = fileBuffer.str();
 
-    GfxArchID archID = getGfxArchID(arch[0], arch[1], arch[2]);
+    // Prefer the named stepping's identity when the user gave one; the triple alone first-matches
+    // v1 for steppings that share it. resolvedArchName is only set after getArchInfo(name)
+    // confirmed the name is registered, so getGfxArchID(name) here never hits its assert path.
+    GfxArchID archID = resolvedArchName.empty() ? getGfxArchID(arch[0], arch[1], arch[2])
+                                                : getGfxArchID(resolvedArchName);
 
     stinkytofu::MultiParseResult parsed;
     std::shared_ptr<stinkytofu::SignatureBase> asmSignature;  // non-null for .s input with header
@@ -641,13 +682,13 @@ int main(int argc, char** argv) {
         std::string origFuncName = parsed.functions[0]->funcName;
         auto originalInsts = std::move(parsed.functions[0]->blocks[0]->instructions);
 
-        // Find from-label and to-label positions
+        // Find from-label and to-label positions (first occurrence, in case a
+        // label name repeats elsewhere in the file).
         int fromIdx = -1, toIdx = -1;
         for (int idx = 0; idx < (int)originalInsts.size(); ++idx) {
-            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == fromLabel)
-                fromIdx = idx;
-            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == toLabel)
-                toIdx = idx;
+            if (!originalInsts[idx]->isLabel) continue;
+            if (fromIdx < 0 && originalInsts[idx]->opcodeStr == fromLabel) fromIdx = idx;
+            if (toIdx < 0 && originalInsts[idx]->opcodeStr == toLabel) toIdx = idx;
         }
         if (fromIdx < 0) {
             std::cerr << "Error: --from-label '" << fromLabel << "' not found in assembly\n";
@@ -734,6 +775,10 @@ int main(int argc, char** argv) {
         emitVerbatim(preResult);
     }
 
+    // Set to true if any analysis/verification pass reports a failure; surfaced as a
+    // non-zero exit code after all functions and output have been processed.
+    bool analysisFailed = false;
+
     // Process each function independently
     for (auto& parsedFunc : parsed.functions) {
         if (optLevel >= 0) {
@@ -766,7 +811,7 @@ int main(int argc, char** argv) {
             stinkytofu::PassManager passManager;
             stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
-            passManager.addInstrumentation(createDebugPrintInstrumentation());
+            if (dumpPasses) passManager.addInstrumentation(createDebugPrintInstrumentation());
             if (verifyEach) {
                 passManager.addInstrumentation(
                     std::make_shared<stinkytofu::VerifyInstrumentation>());
@@ -778,6 +823,7 @@ int main(int argc, char** argv) {
             if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
             // Stand in for rocisa's archCaps, which only TensileLite can supply.
             caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
+            caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0};
             passManager.setAsmCapsConfig(caps);
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
@@ -802,6 +848,7 @@ int main(int argc, char** argv) {
             }
 
             passManager.run(func);
+            if (passManager.getPassContext().getAnalysisFailed()) analysisFailed = true;
 
             emitFunction(func);
         }
@@ -809,5 +856,5 @@ int main(int argc, char** argv) {
 
     emitVerbatim(postResult);
 
-    return 0;
+    return analysisFailed ? 1 : 0;
 }

@@ -58,6 +58,7 @@
 #include <iomanip>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <regex>
 #include <string>
 #include <type_traits>
@@ -619,6 +620,44 @@ namespace
         return inputs;
     }
 
+    inline rocblas_int map_index_rocblas_to_tensile(rocblas_int idx)
+    {
+        // need to ensure tensile indices not so large as to already be into sign bit
+
+        return -idx - c_rocblas_solutions_reserved - 1; // one based offset negative to zero based
+    }
+
+    inline rocblas_int map_index_tensile_to_rocblas(rocblas_int idx)
+    {
+        return -(idx + 1)
+               - c_rocblas_solutions_reserved; //  zero based to one based offset negative
+    }
+
+    inline rocblas_int map_index_rocblas_to_hipblaslt(rocblas_int idx)
+    {
+        return idx < 0 ? 0 : idx; // map -1 and all negatives to default
+    }
+
+    static std::optional<int> map_index_override_to_tensile(int idx)
+    {
+        // Override files hold either the rocblas indices reported by
+        // rocblas_gemm_ex_get_solutions, which are biased and negative for Tensile
+        // solutions, or raw one based Tensile indices as written by older tuning runs.
+        if(rocblas_tensile_index(idx))
+            return map_index_rocblas_to_tensile(idx);
+
+        if(idx > 0)
+            return idx - 1; // 1 based to 0 based
+
+        // The reserved indices name a rocBLAS kernel rather than a Tensile solution, so
+        // there is nothing to override. rocblas-gemm-tune does not emit them, but a
+        // hand written file may, and skipping one leaves the rest of the file in place.
+        rocblas_cerr << "\nrocBLAS warning: ignoring override file solution index " << idx
+                     << ". It names no Tensile solution." << std::endl;
+
+        return std::nullopt;
+    }
+
     /**************************************************
      * The TensileHost struct interfaces with Tensile *
      **************************************************/
@@ -962,7 +1001,9 @@ namespace
                         // Skip experimental libraries
                         if(codeObjectFile.find("Experimental") != std::string::npos)
                             continue;
-                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(codeObjectFile.c_str()));
+                        THROW_IF_HIP_ERROR_MESSAGE(
+                            adapter.loadCodeObjectFile(codeObjectFile.c_str()),
+                            "loading code object: " + codeObjectFile);
                     } while(FindNextFileA(hfine, &finddata));
                 }
                 else
@@ -982,7 +1023,8 @@ namespace
                             continue;
                         if(cofile.find("Experimental") != std::string::npos)
                             continue;
-                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(cofile));
+                        THROW_IF_HIP_ERROR_MESSAGE(adapter.loadCodeObjectFile(cofile),
+                                                   "loading code object: " + cofile);
                     }
                 }
                 else if(g == GLOB_NOMATCH)
@@ -1076,7 +1118,8 @@ namespace
                 auto                        archLib = m_libraryMap[processor];
                 if(archLib)
                 {
-                    bool success = archLib->setOverridesFromFile(*hardware, overridePath);
+                    bool success = archLib->setOverridesFromFile(
+                        *hardware, overridePath, map_index_override_to_tensile);
                     if(!success)
                     {
                         rocblas_cerr << "\nrocBLAS warning: One or more problem overrides failed "
@@ -1148,6 +1191,12 @@ namespace
                      << e.what() << std::endl;
         rocblas_abort();
     }
+    catch(const rocblas_status& status)
+    {
+        rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile host:\n"
+                     << rocblas_status_to_string(status) << std::endl;
+        rocblas_abort();
+    }
     catch(...)
     {
         rocblas_cerr
@@ -1169,24 +1218,6 @@ namespace
         {
             rocblas_cerr << std::endl << msg << std::endl;
         }
-    }
-
-    inline rocblas_int map_index_rocblas_to_tensile(rocblas_int idx)
-    {
-        // need to ensure tensile indices not so large as to already be into sign bit
-
-        return -idx - c_rocblas_solutions_reserved - 1; // one based offset negative to zero based
-    }
-
-    inline rocblas_int map_index_tensile_to_rocblas(rocblas_int idx)
-    {
-        return -(idx + 1)
-               - c_rocblas_solutions_reserved; //  zero based to one based offset negative
-    }
-
-    inline rocblas_int map_index_rocblas_to_hipblaslt(rocblas_int idx)
-    {
-        return idx < 0 ? 0 : idx; // map -1 and all negatives to default
     }
 
 } // namespace
@@ -1237,10 +1268,15 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 #ifdef BUILD_WITH_HIPBLASLT
     if constexpr(sizeof(Ti) >= 4)
     {
-        // TODO remove after tuning
-        if(rocblas_internal_get_arch(prob.handle) == 950 && !prob.handle->isHipBLASLtForcedOn())
+        if(!prob.handle->isHipBLASLtForcedOn())
         {
-            return false;
+            // gfx950: hipBLASLt is used for all types except complex.
+            // TODO remove after complex support is enabled
+            if constexpr(rocblas_is_complex<Ti>)
+            {
+                if(rocblas_internal_get_arch(prob.handle) == 950)
+                    return false; // complex won't default to hipBLASLt
+            }
         }
     }
 

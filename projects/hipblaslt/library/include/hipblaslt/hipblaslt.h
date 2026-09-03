@@ -253,6 +253,7 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,              /**<First extra argument for the activation function. Data type: ``float``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,              /**<Second extra argument for the activation function. Data type: ``float``. */
   HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT = 104,      /**<Select the hipBLASLt StreamK tile scheduling mode for StreamK=5 hybrid kernels (static SK3 vs dynamic SK4 work-queue sub-paths). Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtStreamKTileSchedulingMode_t``: ``0`` (``OFF``, default) uses the SK3 static sub-path; when ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` is set to a positive value the library heuristic still runs per launch to pick SK4 when appropriate; ``1`` (``ON``) always requests the SK4 dynamic work-queue sub-path when the selected kernel supports it; ``2`` (``AUTO``) always lets the library's heuristic pick between static and dynamic per launch. Values outside ``{0, 1, 2}`` are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
+  HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT = 105, /**<Request a uniform summation order across the M dimension. Provided as an ``_EXT`` attribute. When enabled, hipBLASLt guarantees that if every row of matrix A is the identical vector, every row of the output matrix D is bitwise identical. This is uniformity across the M dimension within a single run; it is **not** run-to-run determinism. ``0`` (default) inherits the handle-level request (``hipblasLtSetUniformSummationOrder``); ``1`` enables this GEMM. Other values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Enabling the mode restricts kernel selection and the launch configuration, so it can reduce performance, and hipblasLtMatmul() returns ``HIPBLAS_STATUS_INVALID_VALUE`` when no uniform-safe configuration exists for the resolved launch rather than silently producing a non-uniform result. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 
@@ -566,6 +567,47 @@ hipblasStatus_t hipblasLtSetSmCountTarget(hipblasLtHandle_t handle,
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle,
                                           int32_t*          smCountTarget);
+
+/*! \ingroup library_module
+ *  \brief Set the handle-level uniform-summation-order request.
+ *
+ *  \details
+ *  Enables or disables uniform summation order for subsequent GEMMs on
+ *  this handle. ``0`` off (default), ``1`` on. See
+ *  ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
+ *
+ *  @param[in]
+ *  handle                     hipBLASLt library context.
+ *  @param[in]
+ *  uniformSummationOrder      ``0`` (default, off) or ``1`` (on).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value stored.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p uniformSummationOrder is not ``0`` or ``1``.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetUniformSummationOrder(hipblasLtHandle_t handle,
+                                                  int32_t           uniformSummationOrder);
+
+/*! \ingroup library_module
+ *  \brief Return the handle-level uniform-summation-order request.
+ *
+ *  \details
+ *  Returns the value previously programmed via
+ *  ``hipblasLtSetUniformSummationOrder``. ``0`` if never set.
+ *
+ *  @param[in]
+ *  handle                     hipBLASLt library context.
+ *  @param[out]
+ *  uniformSummationOrder      receives the previously stored value (``0`` if never set).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value returned.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p uniformSummationOrder is null.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtGetUniformSummationOrder(hipblasLtHandle_t handle,
+                                                  int32_t*          uniformSummationOrder);
 
 /*! \ingroup library_module
  *  \brief Drain the post-GEMM check-numerics flag without destroying the handle.

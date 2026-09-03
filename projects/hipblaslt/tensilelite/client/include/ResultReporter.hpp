@@ -100,6 +100,7 @@ namespace TensileLite
             const std::string SpeedGFlopsPerCu = "gflops-per-cu";
             const std::string EnqueueTime      = "enqueue-time";
             const std::string FastestGFlops    = "fastest-gflops";
+            const std::string GbpsBW           = "gbps-bandwidth";
 
             // Performance estimation and granularity
             const std::string Tile0Granularity = "tile0-gran";

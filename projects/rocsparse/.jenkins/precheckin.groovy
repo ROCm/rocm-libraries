@@ -43,6 +43,9 @@ def runCI =
     {
         platform, project->
 
+        // Fast, CPU-only unit tests first as an early gate (no GPU required).
+        commonGroovy.runUnitTestCommand(platform, project)
+
         def gfilter = "*quick*:*pre_checkin*"
         commonGroovy.runTestCommand(platform, project, gfilter, true)
     }

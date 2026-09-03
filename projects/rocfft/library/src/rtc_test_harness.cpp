@@ -1,4 +1,4 @@
-// Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 #include "../../shared/environment.h"
 #include "device/generator/generator.h"
 #include "device/kernel-generator-embed.h"
+#include "rtc_kernel.h"
 
 #if __has_include(<filesystem>)
 #include <filesystem>
@@ -59,7 +60,7 @@ static bool is_cb_arg(const std::string& arg_name)
     return is_cb_ptr(arg_name) || is_cb_lds_bytes(arg_name);
 }
 
-// remove "const" qualifier, real_type_t from type
+// remove "const" qualifier, real_type_t, index_type from type
 std::string cleanup_type(std::string type, const std::string& function_name)
 {
     if(type.compare(0, 6, "const ") == 0)
@@ -72,6 +73,15 @@ std::string cleanup_type(std::string type, const std::string& function_name)
             type = "float";
         if(function_name.find("_half") != std::string::npos)
             type = "rocfft_fp16";
+    }
+    // "index_type" is a typedef in the kernel source, which the harness
+    // does not include.  The kernel name says how wide it is.
+    if(type == "index_type")
+    {
+        if(function_name.find(rtc_index_name(IndexType::U64)) != std::string::npos)
+            type = rtc_index_type(IndexType::U64);
+        else if(function_name.find(rtc_index_name(IndexType::U32)) != std::string::npos)
+            type = rtc_index_type(IndexType::U32);
     }
     return type;
 }
@@ -176,6 +186,8 @@ std::string test_harness_launch(const Function& f)
             launch.body += Call{"kargs.append_int", {arg.name}};
         else if(actual_type == "unsigned int")
             launch.body += Call{"kargs.append_unsigned_int", {arg.name}};
+        else if(actual_type == rtc_index_type(IndexType::U64))
+            launch.body += Call{"kargs.append_index", {arg.name, "IndexType::U64"}};
         else if(actual_type == "double")
             launch.body += Call{"kargs.append_double", {"1.0"}};
         else if(actual_type == "float")
@@ -328,6 +340,7 @@ void write_standalone_test_harness(const Function& f, const std::string& src)
     main_file << device_properties_h;
     main_file << gpubuf_h;
     main_file << hip_object_wrapper_h;
+    main_file << callback_h;
     main_file << rtc_kernel_h;
     main_file << rtc_kernel_cpp;
     main_file << rtc_test_harness_helper_cpp;

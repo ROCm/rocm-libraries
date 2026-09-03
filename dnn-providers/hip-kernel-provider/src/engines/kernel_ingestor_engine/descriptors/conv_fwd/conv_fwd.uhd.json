@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "e8066dca-b56e-4dfa-8755-a1e1bcadf09f",
+  "name": "conv_fwd selector",
+  "kind": "native",
+  "payload": "hipkernel.conv_fwd.score"
+}

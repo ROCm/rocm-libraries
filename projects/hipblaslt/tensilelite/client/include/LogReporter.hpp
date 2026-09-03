@@ -126,6 +126,7 @@ namespace TensileLite
                                                                      Validation,
                                                                      TimeUS,
                                                                      perfUnit,
+                                                                     GbpsBW,
                                                                      Empty,
                                                                      TotalGranularity,
                                                                      TilesPerCu,

@@ -24,6 +24,7 @@ No GPU required.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import re
 
@@ -102,6 +103,20 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _drain_call() -> str:
+    """The ``s_waitcnt(lgkmcnt=0)`` IR text -- LDS drained, VMEM left in flight.
+
+    That is the drain-on-reuse fence's exact shape: every other wait in the ring
+    schedule also constrains ``vmcnt``, so this immediate identifies it uniquely.
+    Derived from the ISA backend rather than written as a literal so the assertions
+    cannot silently drift if the gfx9 waitcnt encoding changes.
+    """
+    from rocke.core.isa.backend import backend_for
+
+    mask = backend_for("gfx942").encode_waitcnt(vmcnt=-1, expcnt=-1, lgkmcnt=0)
+    return f"call void @llvm.amdgcn.s.waitcnt(i32 {mask})"
+
+
 def _spec(dtype="fp16", d=128, **kw):
     """Build a spec directly, so depth and width are independent of what the
     production selector currently routes."""
@@ -135,11 +150,15 @@ def _ring_spec(dtype="fp16", d=128, ring_depth=3, k_slice_hd=32, t=64, nw=4):
     )
 
 
-def _capture_gate_kwargs(arch, dtype):
+def _capture_gate_kwargs(arch, dtype, d=128, bs=64):
     """Record the kwargs the shared feasibility caller passes to an arch's gate.
 
     The caller binds ``supports_tiled_2d`` as a local from ``_tiled_2d_impl(arch)``,
     so the seam to intercept is that lookup rather than a module attribute.
+
+    ``d``/``bs`` are parameters rather than pinned to D128 because the routed width
+    is head-size dependent: a gate that only ever sees D128 cannot show that the
+    estimate follows the selector onto the narrowed D64 lane.
     """
     captured = {}
 
@@ -153,7 +172,7 @@ def _capture_gate_kwargs(arch, dtype):
     au._RESOLVED_ATTENTION_ARCH = arch
     au._tiled_2d_impl = lambda _a: (spec_cls, build, _spy)
     try:
-        au.supports_native_unified_attention_tiled(_problem(dtype, d=128, bs=64))
+        au.supports_native_unified_attention_tiled(_problem(dtype, d=d, bs=bs))
     finally:
         au._RESOLVED_ATTENTION_ARCH = old_arch
         au._tiled_2d_impl = old_impl
@@ -176,18 +195,52 @@ def _nonring_spec(dtype="bf16", d=128, k_slice_hd=32, nw=2, t=64):
 
 
 # ---------------------------------------------------------------------------
-# Default is the shipped width -- nothing moves without a selector change
+# What the selector routes
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
-@pytest.mark.parametrize("d,bs", [(128, 64), (64, 16)])
-def test_selector_returns_the_shipped_width(gfx942, dtype, d, bs):
-    # Nothing narrows yet. This change only makes the width expressible; selecting
-    # a narrower one requires mirroring it into the C++ engine first.
+@pytest.mark.parametrize("d,bs,width", [(128, 64, 32), (64, 16, 16)])
+def test_selector_routes_the_width_by_head_size(gfx942, dtype, d, bs, width):
     p = _problem(dtype, d=d, bs=bs)
-    assert au._select_gfx942_flash_k_slice_hd(p) == 32
-    assert au._tiled_spec_from_problem(p).k_slice_hd == 32
+    assert au._select_gfx942_flash_k_slice_hd(p) == width
+    assert au._tiled_spec_from_problem(p).k_slice_hd == width
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+@pytest.mark.parametrize("d,bs", [(128, 64), (64, 16)])
+def test_routed_width_puts_both_head_sizes_on_four_slices(gfx942, dtype, d, bs):
+    """The reason the routing is head-size dependent, pinned as an assertion.
+
+    The narrower width halves the QK read's bank-conflict degree and doubles the
+    slice count, and it is the slice count the per-tile barrier and partial-wait
+    traffic follows. Routing D64 to 16 and D128 to 32 puts both on four slices --
+    the group count the shipped D128 ring already runs.
+    """
+    spec = au._tiled_spec_from_problem(_problem(dtype, d=d, bs=bs))
+    assert spec.head_size // spec.k_slice_hd == 4
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_routed_ring_never_reserves_a_slot_it_cannot_reach(gfx942, dtype):
+    """Every slot the ring allocates must be reachable by the slot map.
+
+    The map is ``kg % ring_depth``, so with fewer slices than slots the top slots
+    are never written while their LDS stays reserved -- the same shape of waste the
+    validator already rejects at one slice, one step further along.
+    """
+    spec = au._tiled_spec_from_problem(_problem(dtype, d=64, bs=16))
+    if not spec.use_k_sliced_ring:
+        pytest.skip("D64 is not routed onto the ring")
+    assert spec.head_size // spec.k_slice_hd >= spec.ring_depth
+
+
+def test_narrowed_d64_ring_is_a_distinct_kernel(gfx942):
+    # A narrowed ring is a different schedule and a different K_lds extent, so it
+    # must not collide with the width-32 kernel in the name or the HSACO cache.
+    spec = au._tiled_spec_from_problem(_problem("bf16", d=64, bs=16))
+    assert spec.use_k_sliced_ring, "D64 is expected to route onto the ring"
+    assert "ks16" in spec.kernel_name()
 
 
 @pytest.mark.parametrize("arch", ["gfx950", "gfx1250", "gfx1151", "gfx1201"])
@@ -215,17 +268,24 @@ def test_ring_params_are_not_passed_to_other_arch_gates(arch):
 
 
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
-def test_ring_params_are_passed_to_the_gfx942_gate(dtype):
+@pytest.mark.parametrize("d,bs", [(128, 64), (64, 16)])
+def test_ring_params_are_passed_to_the_gfx942_gate(gfx942, dtype, d, bs):
     """The counterpart: gfx942's gate must receive them on every route into it.
 
     Both dtypes, because the shared caller has two call sites -- the bf16-wide
     branch returns early -- and an estimate that omits them sizes a different kernel
     than the builder emits.
+
+    Asserted against the selectors rather than against literals, and over both head
+    sizes: the width is head-size dependent now, so a literal 32 keeps passing while
+    quietly proving nothing about the D64 lane -- which is precisely the lane where
+    the gate's estimate and the builder's emission newly have to agree on 16.
     """
-    captured = _capture_gate_kwargs("gfx942", dtype)
+    p = _problem(dtype, d=d, bs=bs)
+    captured = _capture_gate_kwargs("gfx942", dtype, d=d, bs=bs)
     assert captured, "the shared caller never reached supports_tiled_2d"
-    assert captured.get("ring_depth") in (2, 3)
-    assert captured.get("k_slice_hd") == 32
+    assert captured.get("ring_depth") == au._select_gfx942_flash_ring_depth(p)
+    assert captured.get("k_slice_hd") == au._select_gfx942_flash_k_slice_hd(p)
 
 
 def test_spec_field_defaults_to_32():
@@ -234,10 +294,23 @@ def test_spec_field_defaults_to_32():
     assert _spec().k_slice_hd == 32
 
 
-@pytest.mark.parametrize("width", [8, 16, 64])
-def test_env_override_selects_width(gfx942, monkeypatch, width):
+@pytest.mark.parametrize(
+    "d,bs,width",
+    [
+        (128, 64, 8),
+        (128, 64, 16),
+        (128, 64, 64),
+        # D64 too: the override is the only path that can move the width off what
+        # the selector routes, and at D64 "off the default" now means off 16. 64 is
+        # excluded here because it leaves a single slice at D64 and is rejected --
+        # that case belongs to the fallback test below.
+        (64, 16, 8),
+        (64, 16, 32),
+    ],
+)
+def test_env_override_selects_width(gfx942, monkeypatch, d, bs, width):
     monkeypatch.setenv(ENV, str(width))
-    p = _problem("fp16")
+    p = _problem("fp16", d=d, bs=bs)
     assert au._select_gfx942_flash_k_slice_hd(p) == width
     assert au._tiled_spec_from_problem(p).k_slice_hd == width
 
@@ -259,13 +332,21 @@ def test_env_override_selects_width(gfx942, monkeypatch, width):
         "\u2075",
     ],
 )
-def test_env_override_out_of_range_falls_back_to_32(gfx942, monkeypatch, bogus):
+@pytest.mark.parametrize("d,bs,expected", [(128, 64, 32), (64, 16, 16)])
+def test_env_override_out_of_range_falls_back_to_the_routed_default(
+    gfx942, monkeypatch, bogus, d, bs, expected
+):
     # A malformed or illegal override must not be able to turn a supported problem
     # into a spec the validator rejects, and must never raise.
+    #
+    # The fallback is the ROUTED default for the head size, not a fixed 32: the D64
+    # branch sits after the override block, so a rejected value at D64 lands on 16.
+    # Pinned over both head sizes because that is exactly the distinction a
+    # D128-only test cannot see.
     monkeypatch.setenv(ENV, bogus)
-    p = _problem("fp16")
-    assert au._select_gfx942_flash_k_slice_hd(p) == 32
-    assert au._tiled_spec_from_problem(p).k_slice_hd == 32
+    p = _problem("fp16", d=d, bs=bs)
+    assert au._select_gfx942_flash_k_slice_hd(p) == expected
+    assert au._tiled_spec_from_problem(p).k_slice_hd == expected
 
 
 # ---------------------------------------------------------------------------
@@ -443,3 +524,45 @@ def test_narrowing_lowers_lds(ring_depth):
     spec32 = _ring_spec(ring_depth=ring_depth, k_slice_hd=32)
     spec16 = _ring_spec(ring_depth=ring_depth, k_slice_hd=16)
     assert _lds_bytes(_lower(spec16, "llvm20")) < _lds_bytes(_lower(spec32, "llvm20"))
+
+
+# ---------------------------------------------------------------------------
+# The drain-on-reuse fence: the one schedule change the D64 routing makes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("flavor", ["llvm20", "llvm22"])
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_routed_d64_ring_emits_the_drain_on_reuse_fence(gfx942, flavor, dtype):
+    """The width is what puts the drain-on-reuse fence on the D64 lane.
+
+    Slot reuse and the fence are width-independent by derivation but NOT by
+    reachability. At width 32, D64 has ``k_groups=2 < ring_depth=3``, so the slot
+    map never wraps and the fence is never emitted at all. At width 16,
+    ``k_groups=4``, slice 3 reuses slot 0, and the reusing DMA has to wait for the
+    previous slice's LDS reads to retire or it clobbers operands mid-flight -- the
+    failure that was numerically wrong at magnitude on D128 (#9198).
+
+    Lowered from the spec the SELECTOR routes rather than a hand-built one, so this
+    fails if the routing and the schedule ever stop agreeing about D64.
+    """
+    call = _drain_call()
+    spec16 = au._tiled_spec_from_problem(_problem(dtype, d=64, bs=16))
+    assert spec16.use_k_sliced_ring, "D64 is expected to route onto the ring"
+    assert spec16.k_slice_hd == 16
+    spec32 = dataclasses.replace(spec16, k_slice_hd=32)
+    assert _lower(spec32, flavor).count(call) == 0
+    assert _lower(spec16, flavor).count(call) == 1
+
+
+@pytest.mark.parametrize("flavor", ["llvm20", "llvm22"])
+def test_drain_fence_matcher_is_not_vacuous(flavor):
+    """Guard on the test above, so its ``== 0`` cannot pass for the wrong reason.
+
+    A matcher that stopped matching -- a changed encoding, a renamed intrinsic --
+    would make the width-32 arm succeed while proving nothing. The shipped fp16
+    D128 ring is the known-positive control: depth 2 at ``k_groups=4`` has slices 2
+    and 3 both reuse, so the drain appears exactly twice.
+    """
+    spec = _ring_spec(d=128, ring_depth=2, k_slice_hd=32)
+    assert _lower(spec, flavor).count(_drain_call()) == 2

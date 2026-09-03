@@ -32,6 +32,7 @@
 
 #include "hipfft/hipfft.h"
 #include "hipfft/hipfftXt.h"
+#include <algorithm>
 #include <cuda_runtime_api.h>
 #include <iostream>
 
@@ -780,6 +781,27 @@ try
 {
     return cufftResultToHipResult(cufftXtSetCallbackSharedSize(
         plan, hipfftCallbackTypeToCufftCallbackType(cbtype), sharedSize));
+}
+catch(...)
+{
+    return handle_exception();
+}
+
+hipfftResult hipfftXtSetJITCallback(hipfftHandle         plan,
+                                    const char*          symbol_name,
+                                    const void*          bitcode_data,
+                                    size_t               bitcode_len_bytes,
+                                    hipfftXtCallbackType cbtype,
+                                    void**               cbdata)
+try
+{
+    return cufftResultToHipResult(
+        cufftXtSetJITCallback(plan,
+                              symbol_name,
+                              bitcode_data,
+                              bitcode_len_bytes,
+                              hipfftCallbackTypeToCufftCallbackType(cbtype),
+                              cbdata));
 }
 catch(...)
 {

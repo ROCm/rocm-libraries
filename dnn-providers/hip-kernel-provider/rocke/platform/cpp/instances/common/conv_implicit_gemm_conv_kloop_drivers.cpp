@@ -18,6 +18,7 @@
  * the internal header; this TU touches only ctx + the builder it carries.
  */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ----- shared small helper: copy a working acc array into ctx->final_accs ----
  * Python sets `final_accs = current_accs` (or `for_op.results`); in C the
@@ -386,4 +387,198 @@ void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx)
 
     /* return state */
     rocke_conv_set_final_accs(ctx, state, num_accs);
+}
+
+/* ===================================================================== *
+ * rocke_conv_emit_kloop_wavelet   (Python lines 1539-1797)
+ *
+ * Dedicated load-wave / math-wave split pipeline (CK Tile #8009).
+ *
+ * The workgroup is split into two roles identified by warp_id:
+ *   math waves  [0,         n_math_warps)  -- LDS reads + WMMA/MFMA + epilogue
+ *   load waves  [n_math_warps, total_warps) -- DRAM→register fetch + LDS write
+ *
+ * Two sub-paths:
+ *
+ *   WMMA path (ctx->is_wmma == true, e.g. gfx1250):
+ *     Uses scf_if_else (br i1) with a shared join block.  Both branches emit
+ *     s_barrier calls; the shared join prevents simplifycfg from removing them.
+ *
+ *   MFMA path (ctx->is_wmma == false, e.g. gfx942):
+ *     Uses exec-mask instructions (exec_and_saveexec / exec_xor /
+ *     exec_or_saveexec / exec_or) to flat-sequentially encode the split.
+ *     LLVM divergent branches would deadlock the barriers; exec-mask avoids
+ *     that by keeping all threads in one basic block while suppressing VGPR
+ *     writes for the inactive side.
+ *
+ * Barrier protocol (must be bit-identical in both branches):
+ *
+ *   MATH branch:
+ *     barrier_0
+ *     for i in 0..K_iters-2:
+ *       MFMA(LDS)
+ *       barrier_A   <- math done reading LDS
+ *       barrier_B   <- wait for load to write next tile
+ *     MFMA(LDS)     <- tail, no barriers
+ *     [epilogue -- emits epi_barriers barriers]
+ *
+ *   LOAD branch:
+ *     fetch tile 0 -> regs
+ *     store regs -> LDS
+ *     barrier_0
+ *     for i in 0..K_iters-2:
+ *       fetch tile i+1 -> regs    <- overlaps math MFMA
+ *       barrier_A                 <- wait for math to release LDS
+ *       store regs -> LDS
+ *       barrier_B                 <- signal LDS ready
+ *     [epilogue stub -- epi_barriers bare barriers, no stores]
+ * ===================================================================== */
+
+/* wavelet_fetch: issue buffer_load_vN for A and B into VGPR staging using
+ * load_tid (load-wave-relative thread index). Sets k_off_capture.
+ * Mirrors Python wavelet_fetch = a_wavelet_loader.fetch(b, k_off, load_tid). */
+static void wavelet_fetch(rocke_conv_build_ctx_t* ctx,
+                          rocke_value_t* k_off,
+                          rocke_ctl_staged_t* a_staged,
+                          rocke_ctl_staged_t* b_staged)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    ctx->k_off_capture = k_off;
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->a_wavelet_loader,
+                                            ctx->wavelet_load_tid,
+                                            rocke_conv_a_descriptor,
+                                            ctx,
+                                            ctx->a_rsrc,
+                                            NULL,
+                                            a_staged);
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->b_wavelet_loader,
+                                            ctx->wavelet_load_tid,
+                                            rocke_conv_b_descriptor,
+                                            ctx,
+                                            ctx->b_rsrc,
+                                            NULL,
+                                            b_staged);
+}
+
+/* wavelet_store: write staged VGPRs to LDS.
+ * Mirrors Python wavelet_store = a_wavelet_loader.store_fetched(b, a_regs, A_smem). */
+static void wavelet_store(rocke_conv_build_ctx_t* ctx,
+                          const rocke_ctl_staged_t* a_staged,
+                          const rocke_ctl_staged_t* b_staged,
+                          rocke_value_t* A_smem,
+                          rocke_value_t* B_smem)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->a_wavelet_loader, A_smem, a_staged);
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->b_wavelet_loader, B_smem, b_staged);
+}
+
+void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int K_iters = ctx->wavelet_K_iters;
+    const int num_accs = ctx->num_accs;
+    const int epi_barriers = ctx->wavelet_epi_barriers;
+    int it, i;
+
+    /* The wavelet driver emits the epilogue inline (inside the math branch).
+     * Signal the build driver to skip its epilogue call. */
+    ctx->epilogue_already_emitted = true;
+
+    rocke_value_t* A_smem = ctx->A_smem;
+    rocke_value_t* B_smem = ctx->B_smem;
+
+    rocke_ctl_staged_t a_staged;
+    rocke_ctl_staged_t b_staged;
+
+    if(ctx->is_wmma)
+    {
+        /* ----------------------------------------------------------------
+         * WMMA path: scf_if_else (gfx1250).
+         *
+         * gfx1250 has separate VMEM and WMMA issue slots, so load and math
+         * waves truly overlap without exec-mask interleaving. The LLVM br i1
+         * divergent branch is fine here — the hardware concurrency comes
+         * from the distinct issue queues, not from hardware scheduling at
+         * s_barrier.
+         * ---------------------------------------------------------------- */
+        rocke_if_else_t ife = rocke_b_scf_if_else(b, ctx->wavelet_is_math);
+
+        /* ---- MATH WAVE branch ---- */
+        rocke_value_t* current_accs[ROCKE_CONV_MAX_ACCS];
+        rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+        for(i = 0; i < num_accs; ++i)
+            current_accs[i] = ctx->acc_inits[i];
+
+        rocke_b_region_enter(b, ife.then_region);
+        {
+            rocke_b_sync(b); /* barrier_0 */
+
+            for(it = 0; it < K_iters - 1; ++it)
+            {
+                ctx->k_off_capture = rocke_b_const_i32(b, it * ctx->block_k);
+                rocke_conv_emit_mfma_phase(ctx, A_smem, B_smem, current_accs, num_accs, new_accs);
+                for(i = 0; i < num_accs; ++i)
+                    current_accs[i] = new_accs[i];
+                rocke_b_sync(b); /* barrier_A */
+                rocke_b_sync(b); /* barrier_B */
+            }
+
+            /* tail MFMA -- no barriers */
+            ctx->k_off_capture = rocke_b_const_i32(b, (K_iters - 1) * ctx->block_k);
+            rocke_conv_emit_mfma_phase(ctx, A_smem, B_smem, current_accs, num_accs, new_accs);
+            for(i = 0; i < num_accs; ++i)
+                current_accs[i] = new_accs[i];
+
+            rocke_conv_set_final_accs(ctx, current_accs, num_accs);
+            rocke_conv_emit_epilogue(ctx);
+        }
+        rocke_b_region_leave(b);
+
+        /* ---- LOAD WAVE branch ---- */
+        rocke_b_region_enter(b, ife.else_region);
+        {
+            /* fetch tile 0 -> regs, store -> LDS, barrier_0 */
+            wavelet_fetch(ctx, ctx->c0, &a_staged, &b_staged);
+            rocke_b_s_waitcnt(b, 0, -1, -1); /* vmcnt=0 */
+            wavelet_store(ctx, &a_staged, &b_staged, A_smem, B_smem);
+            rocke_b_s_waitcnt(b, -1, 0, -1); /* lgkmcnt=0 */
+            rocke_b_sync(b); /* barrier_0 */
+
+            for(it = 0; it < K_iters - 1; ++it)
+            {
+                wavelet_fetch(ctx,
+                              rocke_b_const_i32(b, (int64_t)(it + 1) * ctx->block_k),
+                              &a_staged,
+                              &b_staged);
+                rocke_b_sync(b); /* barrier_A */
+                rocke_b_s_waitcnt(b, 0, -1, -1); /* vmcnt=0 */
+                wavelet_store(ctx, &a_staged, &b_staged, A_smem, B_smem);
+                rocke_b_s_waitcnt(b, -1, 0, -1); /* lgkmcnt=0 */
+                rocke_b_sync(b); /* barrier_B */
+            }
+
+            /* epilogue stub: N_epi bare barriers matching the math branch */
+            for(i = 0; i < epi_barriers; ++i)
+                rocke_b_sync(b);
+        }
+        rocke_b_region_leave(b);
+    }
+    else
+    {
+        /* The exec-mask MFMA wavelet path has a data race: the math section reads
+         * a single-buffer LDS that the load section overwrites every K iteration.
+         * True concurrent execution (different SIMD units) is required, but this
+         * driver emits flat sequential code with no cross-section barriers, so
+         * math reads garbage after iteration 0.
+         * is_valid_spec blocks wavelet on MFMA targets, so this branch is
+         * unreachable in normal use. Emit an error and bail. */
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "pipeline='wavelet' is not supported for MFMA/CDNA targets: "
+                        "the exec-mask split path has a data race (single LDS buffer "
+                        "overwritten each K iteration with no cross-section barriers).");
+    }
 }

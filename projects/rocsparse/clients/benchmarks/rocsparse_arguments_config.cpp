@@ -335,7 +335,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      "SPARSE function to test. Options:\n"
      "  Level1: axpyi, doti, dotci, gthr, gthrz, roti, sctr\n"
      "  Level2: bsrmv, bsrxmv, bsrsv, coomv, coomv_aos, csrmv, csrmv_managed, csritsv, csrsv, cscsv, coosv, ellmv, hybmv, gebsrmv, gemvi, sellmv\n"
-     "  Level3: bsrmm, bsrsm, gebsrmm, csrmm, csrmm_batched, coomm, coomm_batched, cscmm, cscmm_batched, csrsm, cscsm, coosm, gemmi, sddmm\n"
+     "  Level3: bsrmm, bsrsm, gebsrmm, csrmm, csrmm_batched, coomm, coomm_batched, cscmm, cscmm_batched, csrsm, cscsm, coosm, gemmi, sddmm, sddmm_batched_csr, sddmm_batched_csc, sddmm_batched_coo, sddmm_batched_coo_aos, sddmm_batched_ell, \n"
      "  Extra: bsrgeam, bsrgemm, csrgeam, csrgemm, csrgemm_reuse\n"
      "  Preconditioner: bsric0, bsrilu0, csric0, csrilu0, csritilu0, gtsv, gtsv_no_pivot, gtsv_no_pivot_strided_batch, gtsv_interleaved_batch, gpsv_interleaved_batch\n"
      "  Conversion: csr2coo, csr2csc, gebsr2gebsc, csr2ell, csr2hyb, csr2bsr, csr2gebsr\n"

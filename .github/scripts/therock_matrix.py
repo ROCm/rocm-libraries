@@ -4,6 +4,7 @@ This dictionary is used to map specific file directory changes to the correspond
 
 import copy
 import os
+from typing import Optional
 
 subtree_to_project_map = {
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
@@ -33,6 +34,7 @@ subtree_to_project_map = {
     "projects/rocalution": "rocalution",
     "projects/rocwmma": "rocwmma",
     "projects/hipthreads": "hipthreads",
+    "projects/rpp": "rpp",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "rocroller",
@@ -88,6 +90,18 @@ project_map = {
     "hipthreads": {
         "cmake_options": ["-DTHEROCK_ENABLE_HIPTHREADS=ON"],
         "projects_to_test": ["hipthreads"],
+    },
+    # RPP is the computer vision umbrella. Its artifact only depends on core
+    # (core-runtime, core-hip, base, sysdeps), so no math umbrella is needed.
+    # Windows support is experimental and off by default in TheRock, and
+    # TheRock's rpp test job is Linux-only, so this row is restricted to Linux.
+    "rpp": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_RPP=ON",
+            "-DTHEROCK_DIST_AMDGPU_FAMILIES=gfx94X-dcgpu;gfx950-dcgpu;gfx125X-dcgpu",
+        ],
+        "projects_to_test": ["rpp"],
+        "platforms": ["linux"],
     },
 }
 
@@ -199,14 +213,19 @@ ROCJITSU_RACE_CHECK_SUBTREES = {
 }
 
 
-def collect_projects_to_run(subtrees):
+def collect_projects_to_run(
+    subtrees, *, run_rocjitsu_race_check: Optional[bool] = None
+):
     subtrees = list(subtrees)
     platform = os.getenv("PLATFORM")
     projects = set()
-    # Record why the BLAS row was selected before dependency folding loses the
-    # original subtree identity. Workflows consume this marker after the matrix
-    # is assembled to attach instrumentation to the final merged product row.
-    run_rocjitsu_race_check = bool(ROCJITSU_RACE_CHECK_SUBTREES.intersection(subtrees))
+    if run_rocjitsu_race_check is None:
+        # Direct callers can infer the marker from their unexpanded subtree
+        # list. The CI configuration path passes its preserved selection reason
+        # explicitly because workflow changes expand that list to every project.
+        run_rocjitsu_race_check = bool(
+            ROCJITSU_RACE_CHECK_SUBTREES.intersection(subtrees)
+        )
     # Work on per-call deep copies so module-level state stays immutable across calls.
     local_project_map = copy.deepcopy(project_map)
     local_additional_options = copy.deepcopy(additional_options)
@@ -270,6 +289,13 @@ def collect_projects_to_run(subtrees):
     for project in projects:
         if project in local_project_map:
             project_map_data = local_project_map.get(project)
+
+            # A project restricted to certain platforms is dropped from the
+            # other platform's matrix entirely, rather than built there and
+            # skipped at test time. Absent key means every platform.
+            supported_platforms = project_map_data.pop("platforms", None)
+            if supported_platforms is not None and platform not in supported_platforms:
+                continue
 
             # Check if platform-based additional flags are needed
             if (

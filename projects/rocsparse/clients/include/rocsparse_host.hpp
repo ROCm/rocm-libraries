@@ -326,6 +326,22 @@ void host_csrsv(rocsparse_operation  trans,
                 J*                   struct_pivot,
                 J*                   numeric_pivot);
 
+template <typename I, typename T>
+void host_ellsv(I                    M,
+                I                    N,
+                T                    alpha,
+                const I*             ell_col_ind,
+                const T*             ell_val,
+                I                    ell_width,
+                const T*             x,
+                int64_t              x_inc,
+                T*                   y,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                I*                   struct_pivot,
+                I*                   numeric_pivot);
+
 template <typename I, typename J, typename T>
 void host_cscsv(rocsparse_operation  trans,
                 J                    M,
@@ -681,6 +697,40 @@ void host_cscsm(J                    M,
                 J*                   struct_pivot,
                 J*                   numeric_pivot);
 
+template <typename I, typename J, typename T>
+void host_diagonal_solve_csr(rocsparse_operation  trans,
+                             J                    M,
+                             J                    nrhs,
+                             T                    alpha,
+                             const I*             csr_row_ptr,
+                             const J*             csr_col_ind,
+                             const T*             csr_val,
+                             const T*             B,
+                             T*                   C,
+                             int64_t              ld,
+                             rocsparse_order      order,
+                             rocsparse_index_base base,
+                             int32_t              modifier,
+                             J*                   struct_pivot,
+                             J*                   numeric_pivot);
+
+template <typename I, typename J, typename T>
+void host_diagonal_solve_csc(rocsparse_operation  trans,
+                             J                    M,
+                             J                    nrhs,
+                             T                    alpha,
+                             const I*             csc_col_ptr,
+                             const J*             csc_row_ind,
+                             const T*             csc_val,
+                             const T*             B,
+                             T*                   C,
+                             int64_t              ld,
+                             rocsparse_order      order,
+                             rocsparse_index_base base,
+                             int32_t              modifier,
+                             J*                   struct_pivot,
+                             J*                   numeric_pivot);
+
 template <typename I, typename T>
 void host_coosm(I                    M,
                 I                    nrhs,
@@ -1010,8 +1060,8 @@ rocsparse_status host_nnz(rocsparse_direction dirA,
                           rocsparse_int*      nnz_total_dev_host_ptr);
 
 template <typename T>
-void host_prune_dense2csr(rocsparse_int               m,
-                          rocsparse_int               n,
+void host_prune_dense2csr(int64_t                     m,
+                          int64_t                     n,
                           const std::vector<T>&       A,
                           int64_t                     lda,
                           rocsparse_index_base        base,
@@ -1022,8 +1072,8 @@ void host_prune_dense2csr(rocsparse_int               m,
                           std::vector<rocsparse_int>& csr_col_ind);
 
 template <typename T>
-void host_prune_dense2csr_by_percentage(rocsparse_int               m,
-                                        rocsparse_int               n,
+void host_prune_dense2csr_by_percentage(int64_t                     m,
+                                        int64_t                     n,
                                         const std::vector<T>&       A,
                                         int64_t                     lda,
                                         rocsparse_index_base        base,

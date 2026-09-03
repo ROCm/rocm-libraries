@@ -31,12 +31,6 @@
 
 namespace rocsparse
 {
-    template <typename J>
-    static uint16_t get_batch_grid_size(J batch_count)
-    {
-        return (batch_count > 65535) ? 65535 : batch_count;
-    }
-
 #define LAUNCH_COOMMNN_ATOMIC_MAIN_KERNEL(COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB)    \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
         (rocsparse::coommnn_atomic_main<COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB, T>), \

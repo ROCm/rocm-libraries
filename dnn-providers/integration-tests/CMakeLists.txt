@@ -58,6 +58,15 @@ endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 
+set(RANDOMIZATION_LIBRARY "rocrand"  CACHE STRING "Name of the randomization library")
+
+# Derive USE_ROCRAND as a boolean based on the RANDOMIZATION_LIBRARY value
+if(RANDOMIZATION_LIBRARY STREQUAL "rocrand")
+    set(USE_ROCRAND TRUE)
+else()
+    set(USE_ROCRAND FALSE)
+endif()
+
 include(GNUInstallDirs)
 include(ClangTidy)
 include(ClangCheck)
@@ -106,6 +115,12 @@ endif()
 
 find_package(Threads REQUIRED)
 
+find_package(rocrand QUIET)
+if(USE_ROCRAND AND NOT TARGET roc::rocrand)
+    message(WARNING "rocRAND not found, falling back to CPU random number generation")
+    set(USE_ROCRAND OFF)
+endif()
+
 include(Dependencies)
 fetch_gtest_dependency()
 
@@ -117,13 +132,16 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # under integration-test-bundles/, re-run cmake to pick up the changes.
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration-test-bundles/"
      DESTINATION "${CMAKE_BINARY_DIR}/lib/integration-test-bundles")
+
 if(Python3_FOUND)
     add_test(
         NAME hipdnn_bundle_verifier_python_tests
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_verify_golden_bundles.py
     )
-    set_tests_properties(hipdnn_bundle_verifier_python_tests PROPERTIES LABELS "unit_test;quick")
+    # Labels are applied via the shared YAML category path below (test_categories_external.yaml)
+    # so this pre-registered test gets the tier labels.
+    set(HIPDNN_IT_BUNDLE_VERIFIER_TEST hipdnn_bundle_verifier_python_tests)
 endif()
 
 # Install integration test bundles so installed tests can find them at
@@ -136,9 +154,72 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
+    src/harness/ReferenceExecutorPool.cpp
+    src/harness/bundle/BundleReferenceValidationHarness.cpp
+    src/harness/bundle/FrontendGraphEngineRunner.cpp
+    src/harness/bundle/GraphSession.cpp
+    src/harness/bundle/HarnessDependencies.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    src/harness/bundle/OutputComparison.cpp
+    src/harness/bundle/ProductionPolicy.cpp
+    src/harness/bundle/ReferenceOpCoverage.cpp
+    src/harness/bundle/SupportClaimReport.cpp
+    src/harness/bundle/SupportClaims.cpp
+    src/harness/bundle/SupportVerdict.cpp
+    src/harness/bundle/VariantPackBuilder.cpp
     src/harness/input-init/FillInputs.cpp
 )
+
+# Golden-data validation: validates our checked-in .bin data against our own
+# reference executors. Deliberately a separate binary rather than a mode of
+# hipdnn_integration_tests -- it loads no plugin, creates no handle, and builds no
+# engine table, so "this run cannot reach an engine" is a property of the link
+# rather than of a flag. FrontendGraphEngineRunner.cpp and HarnessDependencies.cpp
+# are absent for exactly that reason.
+#
+# It is also NOT registered through add_external_integration_test_target(): that
+# parameterizes a binary over a provider's plugin and engine, and no engine is
+# involved here. Registering it once, below, is what stops the same golden data
+# being revalidated once per provider.
+set(GOLDEN_DATA_TESTS_EXE hipdnn_golden_data_tests)
+
+add_executable(${GOLDEN_DATA_TESTS_EXE}
+    src/golden_data_main.cpp
+    src/harness/ReferenceExecutorPool.cpp
+    src/harness/bundle/BundleReferenceValidationHarness.cpp
+    src/harness/bundle/GraphSession.cpp
+    src/harness/bundle/OutputComparison.cpp
+    src/harness/bundle/ReferenceOpCoverage.cpp
+    src/harness/bundle/SupportClaimReport.cpp
+    src/harness/bundle/SupportClaims.cpp
+    src/harness/bundle/SupportVerdict.cpp
+    src/harness/bundle/VariantPackBuilder.cpp
+    src/harness/input-init/FillInputs.cpp
+)
+
+target_include_directories(${GOLDEN_DATA_TESTS_EXE} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(${GOLDEN_DATA_TESTS_EXE} SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/third-party/argparse
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/third-party/tomlplusplus
+)
+
+target_link_libraries(${GOLDEN_DATA_TESTS_EXE}
+    PRIVATE
+        hip::host
+        hipdnn_gpu_ref
+        hipdnn_test_sdk
+        hipdnn_plugin_sdk
+        GTest::gtest
+        Threads::Threads
+        $<$<PLATFORM_ID:Windows>:shlwapi>
+)
+
+target_compile_options(${GOLDEN_DATA_TESTS_EXE}
+    PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
+
+clang_tidy_check(${GOLDEN_DATA_TESTS_EXE})
+
+add_integration_test_target(${GOLDEN_DATA_TESTS_EXE} ${CMAKE_CURRENT_BINARY_DIR})
 
 add_subdirectory(src/integration-tests)
 
@@ -170,13 +251,20 @@ clang_tidy_check(${INTEGRATION_TESTS_EXE})
 # engine and selects tests via that provider's test_categories_integration.yaml.
 
 set(HIPDNN_IT_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+set(HIPDNN_IT_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
 set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED FALSE)
 if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
    AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
     include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
     set(DNN_PROVIDER_TEST_CATEGORY_YAMLS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
+    set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPDNN_IT_CTEST_CATEGORIES_YAML}")
     set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED TRUE)
     message(STATUS "hipdnn-integration-tests: YAML-based CTest categorization enabled")
+    # Label the pre-registered bundle-verifier ctest test via the shared YAML path
+    # (it is registered directly above, not by _create_test_name_validation_target_internal).
+    if(HIPDNN_IT_BUNDLE_VERIFIER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_VERIFIER_TEST})
+    endif()
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")
 endif()
@@ -202,12 +290,13 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
     # doesn't fail validation before anything has been built.
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}")
 
-    # No FIXTURES_REQUIRED/hipdnn_clear_miopen_test_cache here: neither
-    # hipdnn_integration_tests_unit_tests nor hipdnn_gpu_ref_tests link against or
-    # invoke MIOpen (they exercise the hipDNN backend and the from-scratch GPU
-    # reference implementation directly), so the ASAN-only MIOpen-cache-clear
-    # fixture miopen-provider/hipblaslt-provider wire up does not apply here.
-    foreach(_it_target hipdnn_integration_tests_unit_tests hipdnn_gpu_ref_tests)
+    # No FIXTURES_REQUIRED/hipdnn_clear_miopen_test_cache here: none of these
+    # targets link against or invoke MIOpen (they exercise the hipDNN backend, the
+    # from-scratch GPU reference implementation, and our own golden data directly),
+    # so the ASAN-only MIOpen-cache-clear fixture miopen-provider/hipblaslt-provider
+    # wire up does not apply here.
+    foreach(_it_target hipdnn_integration_tests_unit_tests hipdnn_gpu_ref_tests
+                       hipdnn_golden_data_tests)
         apply_test_category_labels(
             ${_it_target}
             "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
@@ -218,18 +307,13 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
         )
     endforeach()
 
-    # Standalone: install the generated (category-labeled) CTestTestfile so
+    # Install the generated (category-labeled) CTestTestfile so
     # `ctest -L quick|standard|...` works from the installed tree.
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        install(FILES "${HIPDNN_IT_CTEST_INSTALL_FILE}"
-                DESTINATION "${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests_ctest"
-                RENAME "CTestTestfile.cmake")
-    endif()
+    install(FILES "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests_ctest"
+            RENAME "CTestTestfile.cmake")
 else()
-    # For standalone builds we need to install the ctest files
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        install_provider_ctest_files("hipdnn_integration_tests_ctest")
-    endif()
+    install_provider_ctest_files("hipdnn_integration_tests_ctest")
 endif()
 
 include(CMakePackageConfigHelpers)

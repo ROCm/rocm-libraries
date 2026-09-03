@@ -11,6 +11,7 @@
 - [Build Configurations](#build-configurations)
   - [Address Sanitizer Build](#address-sanitizer-build)
   - [Disabling JSON Support](#disabling-json-support)
+  - [Kernel packing (rocm_kpack)](#kernel-packing-rocm_kpack)
   - [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix)
   - [Clang Tools](#clang-tools)
 - [Build Targets](#build-targets)
@@ -305,6 +306,70 @@ cmake --preset release -DHIPDNN_FRONTEND_SKIP_JSON_LIB=ON
 ```
 This disables JSON-based graph serialization and deserialization. Binary serialization remains available.
 
+### Kernel packing (rocm_kpack)
+
+The hip-kernel-provider packs GPU kernels into `.kpack` archives at build time using the `rocm_kpack`
+Python tooling. Resolution never reaches the network unless you opt in with
+`HIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON`; otherwise the build uses an existing copy or skips packing.
+
+> [!NOTE]
+> kpack is a **superbuild** concern; these flags apply only to builds that include
+> `dnn-providers`. Use a preset that builds the provider, such as `hip-kernel-provider`,
+> `hipdnn-providers-all`, or `hipdnn-dev-all`, from the repository root.
+
+**In the hipDNN dev container this is already handled** — the `devshell` and `hipdnn` images ship
+`rocm_kpack` and its `msgpack`/`zstandard` dependencies at `/opt/rocm-kpack/python`, which the build
+finds on its own. No flags, no network, nothing to install.
+
+Resolution order:
+
+| Source | Notes |
+|--------|-------|
+| `-DHIPKERNELPROVIDER_KPACK_PYTHON_DIR=<dir>` | Highest precedence. Fatal if the path has no `rocm_kpack/`. |
+| `-DROCKE_KPACK_PYTHON_DIR=<dir>` | **Deprecated** alias for the above; seeds it and warns. Kept until TheRock migrates; do not use in new builds. |
+| `-DHIPKERNELPROVIDER_KPACK_DEFAULT_DIRS=<dir>[;<dir>...]` | Defaults to `/opt/rocm-kpack/python`, what the container ships. Skipped silently when absent. |
+| `-DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON` | Off by default. Checks out `shared/kpack` from the pinned `rocm-systems` commit — the only path that reaches the network. |
+
+`<dir>` is whichever directory *contains* `rocm_kpack/`: a rocm-systems checkout's
+`shared/kpack/python`, or a virtual environment's `site-packages`.
+
+If nothing resolves, the ASM SDPA engine logs `skipping .kpack packing` and the build proceeds;
+the runtime loads loose `.co` files, so this is not fatal. Descriptor packaging
+(`HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, off by default) hard-fails instead — both when kpack is
+missing entirely and when a resolved tree exists but `Python3_EXECUTABLE` cannot import it.
+
+#### Building without the dev container
+
+`rocm_kpack` needs `msgpack` and `zstandard` importable by **the same interpreter CMake uses**
+(`Python3_EXECUTABLE`). Install it into a virtual environment and point the build at that
+environment's `site-packages`:
+
+```bash
+# A venv is required on distros that mark the system Python externally managed
+# (Ubuntu 24.04 and similar) -- a bare `pip install` there is refused by PEP 668.
+python3 -m venv .venv && source .venv/bin/activate
+
+# From a rocm-systems checkout (the source of truth for kpack):
+pip install /path/to/rocm-systems/shared/kpack
+
+cmake --preset hip-kernel-provider \
+    -DPython3_EXECUTABLE="$(which python)" \
+    -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+```
+
+Alternatively, point `-DHIPKERNELPROVIDER_KPACK_PYTHON_DIR` straight at a rocm-systems checkout's
+`shared/kpack/python` and install `msgpack` and `zstandard` for the interpreter CMake uses.
+
+Configure prints `kpack: using rocm_kpack from <dir>` on success. Two failures read differently:
+
+- **`no rocm_kpack source found`** — nothing resolved. Pass
+  `-DHIPKERNELPROVIDER_KPACK_PYTHON_DIR`, or set `-DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON` to
+  fetch the pinned commit.
+- **`cannot import`** — a path resolved, but `Python3_EXECUTABLE` cannot import it; typically a
+  tree staged for a different Python, or one whose `msgpack`/`zstandard` are missing. Install the
+  dependencies for this interpreter, or point `-DPython3_EXECUTABLE` at the one they were built
+  for.
+
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 
 If the ROCm bin folder is included in your system path then the AMD toolchain should be detected automatically. If not, the following CMake variables can be used to assist CMake in the tool discovery.
@@ -426,7 +491,8 @@ hipDNN-relevant configure presets:
 | `hipdnn-providers` | hipDNN core + integration-tests + MIOpen + hipBLASLt providers |
 | `hipdnn-providers-all` | `hipdnn-providers` + HIP-kernel provider |
 | `hipdnn-samples` | `hipdnn-providers` (hipDNN core + integration-tests + MIOpen + hipBLASLt providers) + samples |
-| `hipdnn-dev-all` | everything (all providers + integration-tests + samples) |
+| `hipdnn-dev-all` | everything (all providers + integration-tests + samples + Python bindings) |
+| `hipdnn-python` | hipDNN core + Python frontend bindings |
 
 > [!TIP]
 > The superbuild presets bake in the superbuild toolchain (`cmake/toolchains/rocm-clang.cmake`), which defaults to `/opt/rocm` on Linux and requires `-DROCM_PATH=<rocm-root>` on Windows. hipDNN developers may prefer to override it with the hipDNN toolchain by adding `-DCMAKE_TOOLCHAIN_FILE=projects/hipdnn/cmake/ClangToolChain.cmake` to the configure step. Benefits:
@@ -477,6 +543,7 @@ endif()
 | hipblaslt-provider | `dnn-providers/hipblaslt-provider/` | `hipblaslt_plugin` | hipBLASLt |
 | hip-kernel-provider | `dnn-providers/hip-kernel-provider/` | `hip_kernel_provider` | HIP, HIP-RTC |
 | hipdnn-samples | `projects/hipdnn/samples/` | `hipdnn_samples` | ROCm/HIP; provider plugins at runtime |
+| hipdnn-python | `projects/hipdnn/python/frontend_bindings/` | `hipdnn_frontend_bindings` | Python 3.12+, nanobind |
 
 The configure presets above select the components for you. To choose components directly instead, set `ROCM_LIBS_ENABLE_COMPONENTS`:
 
@@ -738,7 +805,7 @@ From here, follow the instructions in the [Quick Start Guide](#quick-start-guide
 * When generating the project, CMake will warn about a clang-format or clang-tidy mismatch. That's okay for now but it can be resolved by installing the missing version of the toolchain to a parallel directory and setting the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) variable accordingly.
 * Generating the project files may take longer than on Linux, but should complete within a few minutes.
 * You may want to limit the number of threads used by Ninja when building hipDNN so that your computer is not bogged-down by the build. You can use the `ninja -j` option to set the number of threads to something smaller than the number of threads available on your CPU.
-* To reduce build time, the `-DENABLE_CLANG_TIDY=OFF` option can be used to disable clang-tidy check during development. Similarly the `-DENABLE_CLANG_FORMAT=OFF` option can be used to disable clang-format.
+* clang-tidy is **off by default on Windows** because it roughly doubles build time. Pass `-DENABLE_CLANG_TIDY=ON` to run it before pushing a branch; it is expected to be clean. Two checks are dropped on Windows only (`bugprone-exception-escape` and `performance-noexcept-move-constructor`) because the Microsoft STL makes them fire on code that is clean against libstdc++ — see the WIN32 block in `cmake/ClangTidy.cmake`. On Linux clang-tidy is on by default and `-DENABLE_CLANG_TIDY=OFF` reduces build time during development. `-DENABLE_CLANG_FORMAT=OFF` does the same for clang-format on both platforms.
 
 ## Troubleshooting
 

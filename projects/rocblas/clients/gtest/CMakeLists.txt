@@ -102,6 +102,7 @@ set(rocblas_no_tensile_test_source
     blas3/trtri_gtest.cpp
     blas3/trmm_gtest.cpp
     blas3/syrk_gtest.cpp
+    blas3/syrk_herk_workspace_gtest.cpp
     blas3/syrkx_gtest.cpp
     blas3/syr2k_gtest.cpp
     blas3/herk_gtest.cpp
@@ -145,6 +146,7 @@ target_compile_definitions( rocblas-test PRIVATE ROCM_USE_FLOAT16 ROCBLAS_INTERN
 
 if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
   # HIP and tooling (OpenBLAS DLLs come from the same install CMake linked when using ILP64).
+  # hipblaslt still requires PATH to be set
   file( GLOB third_party_dlls
     LIST_DIRECTORIES OFF
     CONFIGURE_DEPENDS

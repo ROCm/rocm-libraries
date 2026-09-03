@@ -63,6 +63,7 @@ precision = 2
 show_missing = true
 skip_empty = true
 sort = "Cover"
+fail_under = 80
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
@@ -74,6 +75,16 @@ exclude_lines = [
     "@abstract",
     "@abstractmethod",
 ]
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "GEKO Code Coverage Report"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.coverage.json]
+output = "coverage.json"
 
 [tool.black]
 line-length = 100

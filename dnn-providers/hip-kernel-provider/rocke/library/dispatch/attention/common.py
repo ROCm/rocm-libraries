@@ -81,16 +81,18 @@ class AttentionRequest(OperatorRequest):
     use_sinks: bool = False
     sliding_window: int = 0
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
-    num_sms: int = (
+    num_cus: int = (
         0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_cus)
     )
     target_ctas: int = (
-        0  # 0 => auto: num_sms*4. >0 pins the routing/segmentation target directly.
+        0  # 0 => auto: num_cus*4. >0 pins the routing/segmentation target directly.
     )
     op: str = "attention"
     dtype: str = "fp16"
     algorithm: str = "auto"
     spec_id: str = "auto"
+    use_fp8: bool = False
+    fp8_fnuz: bool = False
     # --- gfx950 attention_dense knobs (only consumed by the opt-in
     #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
     #     Defaults deliver the persistent ~970-TFLOPS prefill path for large Sq:
@@ -126,6 +128,8 @@ class AttentionRequest(OperatorRequest):
             active.add("sliding_window")
         if bool(self.use_sinks):
             active.add("sinks")
+        if bool(self.use_fp8):
+            active.add("fp8")
         return frozenset(active)
 
 
@@ -140,7 +144,7 @@ ATTENTION_DIM_VOCABULARY = (
     "kv_block_size",
 )
 
-ATTENTION_FEATURES = frozenset({"causal", "sliding_window", "sinks"})
+ATTENTION_FEATURES = frozenset({"causal", "sliding_window", "sinks", "fp8"})
 
 
 def _request_errors(req: OperatorRequest) -> list[str]:
@@ -169,7 +173,7 @@ def _device_num_cus() -> "int | None":
     Torch-free: delegates to the ctypes ``libamdhip64`` wrapper
     (``rocke.runtime.hip_module``) so the library layer stays off torch. NOTE:
     this resolver -- and the ``target_ctas`` routing/segmentation override -- cover
-    the Python dispatch path only. The C++ C-ABI engine keeps its own num_sms
+    the Python dispatch path only. The C++ C-ABI engine keeps its own num_cus
     default (attention_unified_entry.cpp) with no target_ctas field, so both need
     the mirror resolver + target_ctas there for production (companion change).
     """
@@ -182,9 +186,9 @@ def _device_num_cus() -> "int | None":
 
 
 def _resolve_num_cus(req: AttentionRequest) -> int:
-    """Resolve the split-KV device-subscription target (``num_sms``).
+    """Resolve the split-KV device-subscription target (``num_cus``).
 
-    ``num_sms`` is the dispatcher's "how many CUs does this device have" knob; it
+    ``num_cus`` is the dispatcher's "how many CUs does this device have" knob; it
     drives 2D<->3D routing (``select_path``) and the 3D segment count. Resolution:
       1. an explicit caller value (benchmarks pass a real count),
       2. **verified on-box gfx942 only** -- the live device CU count, used ONLY
@@ -195,10 +199,10 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     An explicit ``target_ctas`` on the spec supersedes all of the above. Because
     the resolved value feeds the 3D ``num_segments`` (a compiled-kernel constant),
     the on-box value is device-dependent within gfx942 (varies across parts);
-    for a reproducible or cross-compile target pass an explicit ``num_sms`` or the
+    for a reproducible or cross-compile target pass an explicit ``num_cus`` or the
     ``target_ctas`` spec override rather than relying on the live query.
     """
-    n = int(req.num_sms)
+    n = int(req.num_cus)
     if n > 0:
         return n
     if req.arch.lower() == "gfx942":
@@ -228,7 +232,9 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         dtype=req.dtype.lower(),
         sliding_window=int(req.sliding_window),
         use_sinks=bool(req.use_sinks),
-        num_sms=_resolve_num_cus(req),
+        use_fp8=bool(req.use_fp8),
+        fp8_fnuz=bool(req.fp8_fnuz),
+        num_cus=_resolve_num_cus(req),
         target_ctas=int(req.target_ctas),
     )
 
@@ -255,6 +261,12 @@ class AttentionSpec:
     dtype: str
     num_query_heads: int
     num_kv_heads: int
+    # fp8 KV-cache decode is a distinct kernel from the same-shape bf16 decode
+    # (per-element dequant in the inner loop), so it must not collapse onto the
+    # bf16 spec_hash/kernel_name -- consumers key their compile cache on
+    # kernel_name(), and the sweep space dedupes on asdict(spec).
+    use_fp8: bool = False
+    fp8_fnuz: bool = False
     name: str = "rocke_attention_unified"
     # When set, this verbatim kernel_name is returned by :meth:`kernel_name`
     # instead of the composed unified name. Used by the dense candidate to
@@ -271,11 +283,14 @@ class AttentionSpec:
             return self.kernel_name_override
         from rocke.helpers.spec import kernel_name_join
 
-        return kernel_name_join(
+        parts = [
             self.name,
             self.path,
             self.dtype,
             f"hd{self.head_size}",
             f"bs{self.block_size}",
             f"gqa{self.num_query_heads}x{self.num_kv_heads}",
-        )
+        ]
+        if self.use_fp8:
+            parts.append("fp8fnuz" if self.fp8_fnuz else "fp8")
+        return kernel_name_join(*parts)

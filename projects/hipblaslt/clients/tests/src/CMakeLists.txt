@@ -7,12 +7,15 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/caching_library_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/secure_env_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/arch_revision_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/streamk_multistream_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/row_uniformity_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
 )
 

@@ -43,6 +43,8 @@ def _dense_spec(req: OperatorRequest):
 
     assert isinstance(req, AttentionRequest)
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    sw = int(req.sliding_window)
+    use_sinks = bool(req.use_sinks)
     bn = _DENSE_BLOCK_N
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
@@ -75,6 +77,8 @@ def _dense_spec(req: OperatorRequest):
         num_persistent=np,
         persist_decode=req.dense_persist_decode.strip().lower(),
         ragged=ragged,
+        sliding_window=sw,
+        use_sinks=use_sinks,
     )
 
 
@@ -151,9 +155,8 @@ def _make_gfx950_attention_dense_candidate() -> KernelCandidate:
         capability=Capability(
             arches=("gfx950",),
             dtypes=("bf16", "fp16"),
-            # Dense: no sliding-window, no sinks. Causal is a mask, not a
-            # feature this path turns down.
-            supports_features=frozenset({"causal"}),
+            # Dense: Causal is a mask, not a feature this path turns down.
+            supports_features=frozenset({"causal", "sliding_window", "sinks"}),
         ),
         _supports=support,
         select_spec=select,
@@ -193,7 +196,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem)
+        ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
         if problem.select_path() != "2d":

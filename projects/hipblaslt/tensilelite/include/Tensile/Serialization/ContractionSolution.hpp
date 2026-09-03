@@ -68,6 +68,8 @@ namespace TensileLite
                 iot::mapOptional(io, "linearModel", s.linearModel);
 
                 iot::mapRequired(io, "sizeMapping", s.sizeMapping);
+                if(!iot::outputting(io) && s.customKernel.name.empty())
+                    s.customKernel.name = s.sizeMapping.customKernelName;
                 iot::mapRequired(io, "internalArgsSupport", s.internalArgsSupport);
                 iot::mapRequired(io, "problemType", s.problemType);
             }
@@ -167,6 +169,9 @@ namespace TensileLite
                 iot::mapRequired(io, "gsu", s.gsu);
                 iot::mapRequired(io, "wgm", s.wgm);
                 iot::mapRequired(io, "staggerU", s.staggerU);
+                // Optional so older logic files that omit the field deserialize
+                // as false (no per-tile extra-iters capability).
+                iot::mapOptional(io, "perTileExtraIters", s.perTileExtraIters);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
                 iot::mapRequired(io, "useSFC", s.useSFC);
             }
@@ -222,6 +227,7 @@ namespace TensileLite
                 iot::mapOptional(io, "mxTypeB", s.mxTypeB);
                 iot::mapOptional(io, "swizzleTensorA", s.swizzleTensorA);
                 iot::mapOptional(io, "swizzleTensorB", s.swizzleTensorB);
+                iot::mapOptional(io, "fusedGemmA2A", s.fusedGemmA2A);
                 iot::mapOptional(io, "metadataLayout", s.metadataLayout);
                 // mxScaleFormat is mapped as optional so logic files that omit it
                 // (e.g. non-MX problems) deserialize cleanly with the default 0 = NoSwizzle.

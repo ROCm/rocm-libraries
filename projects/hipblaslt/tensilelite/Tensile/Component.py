@@ -319,6 +319,11 @@ class GL2Prefetch(Component):
     GL2 Prefetch
     """
 
+class ClusterLoad(Component):
+    """
+    Cluster (multicast) TDM load: multicast-mask compute + descriptor attach.
+    """
+
 # Importing here allows auto-registry of components in the Components directory.
 # Each file must be listed in __all__ in Components/__init__.py
 # "noqa" prevents linter from complaining here.

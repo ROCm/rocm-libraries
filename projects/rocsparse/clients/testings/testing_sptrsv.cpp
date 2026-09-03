@@ -268,8 +268,9 @@ void cpu_csrsv(rocsparse_operation  trans,
 
     if(trans == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_lsolve(M,
                             alpha,
                             csr_row_ptr,
@@ -282,9 +283,8 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_usolve(M,
                             alpha,
                             csr_row_ptr,
@@ -297,6 +297,7 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(trans == rocsparse_operation_transpose
@@ -327,8 +328,9 @@ void cpu_csrsv(rocsparse_operation  trans,
             }
         }
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_usolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -341,9 +343,8 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_lsolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -356,6 +357,7 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
 
@@ -490,6 +492,36 @@ namespace rocsparse_clients
                                        p_error);
         }
 
+        void set_solve_mode(rocsparse_solve_mode solve_mode)
+        {
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+            rocsparse_error p_error[1] = {nullptr};
+            rocsparse_sptrsv_set_input(this->m_handle,
+                                       this->m_descr,
+                                       rocsparse_sptrsv_input_solve_mode,
+                                       &solve_mode,
+                                       sizeof(solve_mode),
+                                       p_error);
+#else
+            (void)solve_mode;
+#endif
+        }
+
+        void set_diagonal_modifier(rocsparse_diagonal_modifier diagonal_modifier)
+        {
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+            rocsparse_error p_error[1] = {nullptr};
+            rocsparse_sptrsv_set_input(this->m_handle,
+                                       this->m_descr,
+                                       rocsparse_sptrsv_input_diagonal_modifier,
+                                       &diagonal_modifier,
+                                       sizeof(diagonal_modifier),
+                                       p_error);
+#else
+            (void)diagonal_modifier;
+#endif
+        }
+
         sptrsv_descr(rocsparse_handle                handle,
                      int64_t                         batch_count,
                      const rocsparse_operation       operation,
@@ -539,6 +571,8 @@ namespace rocsparse_clients
                      rocsparse_clients::dnvec_descr<T>&       y,
                      const rocsparse_diag_type                diag,
                      const rocsparse_fill_mode                uplo,
+                     rocsparse_solve_mode                     solve_mode,
+                     rocsparse_diagonal_modifier              diagonal_modifier,
                      int64_t*                                 symbolic,
                      int64_t*                                 exact)
     {
@@ -580,21 +614,45 @@ namespace rocsparse_clients
                 const T* p    = host.val.data() + i * A.get_stride();
                 const T* p_hx = x.host().data() + i * x.get_stride();
                 T*       p_hy = y.host().data() + i * y.get_stride();
-                cpu_csrsv<I, J, T>(operation,
-                                   host.m,
-                                   host.nnz,
-                                   *halpha,
-                                   host.ptr,
-                                   host.ind,
-                                   p,
-                                   p_hx,
-                                   (int64_t)1,
-                                   p_hy,
-                                   diag,
-                                   uplo,
-                                   host.base,
-                                   symbolic + i,
-                                   exact + i);
+                if(solve_mode != rocsparse_solve_mode_triangular)
+                {
+                    J sp = -1, np = -1;
+                    host_diagonal_solve_csr<I, J, T>(operation,
+                                                     host.m,
+                                                     1,
+                                                     *halpha,
+                                                     host.ptr,
+                                                     host.ind,
+                                                     p,
+                                                     p_hx,
+                                                     p_hy,
+                                                     host.m,
+                                                     rocsparse_order_column,
+                                                     host.base,
+                                                     diagonal_modifier,
+                                                     &sp,
+                                                     &np);
+                    symbolic[i] = sp;
+                    exact[i]    = np;
+                }
+                else
+                {
+                    cpu_csrsv<I, J, T>(operation,
+                                       host.m,
+                                       host.nnz,
+                                       *halpha,
+                                       host.ptr,
+                                       host.ind,
+                                       p,
+                                       p_hx,
+                                       (int64_t)1,
+                                       p_hy,
+                                       diag,
+                                       uplo,
+                                       host.base,
+                                       symbolic + i,
+                                       exact + i);
+                }
             }
 
             break;
@@ -616,26 +674,50 @@ namespace rocsparse_clients
                 const T* p_hx = x.host().data() + i * x.get_stride();
                 T*       p_hy = y.host().data() + i * y.get_stride();
 
-                J analysis_pivot = -1;
-                J solve_pivot    = -1;
-                host_cscsv<I, J, T>(operation,
-                                    host.m,
-                                    host.nnz,
-                                    *halpha,
-                                    host.ptr,
-                                    host.ind,
-                                    p,
-                                    p_hx,
-                                    (int64_t)1,
-                                    p_hy,
-                                    diag,
-                                    uplo,
-                                    host.base,
-                                    &analysis_pivot,
-                                    &solve_pivot);
+                if(solve_mode != rocsparse_solve_mode_triangular)
+                {
+                    J sp = -1, np = -1;
+                    host_diagonal_solve_csc<I, J, T>(operation,
+                                                     host.n,
+                                                     1,
+                                                     *halpha,
+                                                     host.ptr,
+                                                     host.ind,
+                                                     p,
+                                                     p_hx,
+                                                     p_hy,
+                                                     host.n,
+                                                     rocsparse_order_column,
+                                                     host.base,
+                                                     diagonal_modifier,
+                                                     &sp,
+                                                     &np);
+                    symbolic[i] = sp;
+                    exact[i]    = np;
+                }
+                else
+                {
+                    J analysis_pivot = -1;
+                    J solve_pivot    = -1;
+                    host_cscsv<I, J, T>(operation,
+                                        host.m,
+                                        host.nnz,
+                                        *halpha,
+                                        host.ptr,
+                                        host.ind,
+                                        p,
+                                        p_hx,
+                                        (int64_t)1,
+                                        p_hy,
+                                        diag,
+                                        uplo,
+                                        host.base,
+                                        &analysis_pivot,
+                                        &solve_pivot);
 
-                symbolic[i] = analysis_pivot;
-                exact[i]    = solve_pivot;
+                    symbolic[i] = analysis_pivot;
+                    exact[i]    = solve_pivot;
+                }
             }
 #endif
             break;
@@ -673,6 +755,13 @@ void testing_sptrsv(const Arguments& arg)
     // CSC triangular solve support can be disabled at build time
     // (BUILD_WITH_CSC_TRSV=OFF); skip the CSC cases in that configuration.
     if(arg.formatA == rocsparse_format_csc)
+    {
+        return;
+    }
+#endif
+
+#ifndef ROCSPARSE_WITH_DIAGONAL_SOLVE
+    if(arg.solve_mode != rocsparse_solve_mode_triangular)
     {
         return;
     }
@@ -720,6 +809,9 @@ void testing_sptrsv(const Arguments& arg)
     rocsparse_clients::sptrsv_descr sptrsv_descr(
         handle, batch_count, operation, alg, ttype, ttype, apol);
 
+    sptrsv_descr.set_solve_mode(arg.solve_mode);
+    sptrsv_descr.set_diagonal_modifier(arg.diagonal_modifier);
+
     rocsparse_clients::sptrsv_analysis(handle, sptrsv_descr, A, x, y, p_error);
 
     host_dense_vector<int64_t> host_symbolic_position(batch_count);
@@ -759,6 +851,8 @@ void testing_sptrsv(const Arguments& arg)
                                                 y,
                                                 diag,
                                                 uplo,
+                                                arg.solve_mode,
+                                                arg.diagonal_modifier,
                                                 cpu_symbolic_position,
                                                 cpu_numeric_position);
 

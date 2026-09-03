@@ -78,6 +78,10 @@ std::string hipfftw_token_for_functional_test;
 // Transform parameters for manual test:
 hipfft_params manual_params;
 
+// (Maximum) number of hip devices to use in tests (per process).
+size_t           gpus_per_rank             = 0;
+constexpr size_t upper_bound_gpus_per_rank = 16;
+
 // Allow skipping tests if there is a runtime error
 bool skip_runtime_fails;
 
@@ -93,6 +97,12 @@ double max_linf_eps_single = 0.0;
 double max_l2_eps_single   = 0.0;
 double max_linf_eps_half   = 0.0;
 double max_l2_eps_half     = 0.0;
+
+// Minimum number of random probes per device in hipfftXt data distribution verification
+size_t min_probes_per_dev_for_xt;
+
+// Token string for manual hipfftXt test
+std::string hipfftxt_test_token;
 
 // Control whether we use FFTW's wisdom (which we use to imply FFTW_MEASURE).
 bool use_fftw_wisdom = false;
@@ -248,6 +258,12 @@ void precompile_test_kernels(const std::string& precompile_file)
                         {
                             hipfft_params params;
                             params.from_token(token);
+
+                            // JIT callbacks would require JIT state to be
+                            // specified which we're not doing here
+                            if(params.run_callbacks == fft_callback_type_jit)
+                                continue;
+
                             params.validate();
                             params.create_plan();
                             if(params.is_forward())
@@ -341,6 +357,17 @@ int main(int argc, char* argv[])
     app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
         ->default_val(DivRoundingUp(
             device_memory_accountant::singleton().get_max_total_mem_on_devices(), ONE_GiB));
+    const auto opt_ngpus
+        = app.add_option("--ngpus",
+                         gpus_per_rank,
+                         "Maximum number of GPUs per process to be considered (cannot exceed 1 if "
+                         "mp_lib == mpi). An upper bound of "
+                             + std::to_string(upper_bound_gpus_per_rank)
+                             + " is enforced. The number of GPUs must not exceed the available "
+                               "device count.")
+              ->option_text("Default value is 1 if mp_lib == mpi; all visible "
+                            "devices are considered if mp_lib == none")
+              ->check(CLI::PositiveNumber);
     app.add_option("--emulation_prob,--simulation_prob",
                    emulation_prob,
                    "Probability of running individual emulation/simulation tests (disabled by "
@@ -366,7 +393,7 @@ int main(int argc, char* argv[])
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.0)
+        ->default_val(0.1)
         ->check(CLI::NonNegativeNumber);
     constexpr auto emulation_quick      = "quick";
     constexpr auto emulation_smoke      = "smoke";
@@ -456,11 +483,15 @@ int main(int argc, char* argv[])
 
     app.add_option("--fftw_compare", fftw_compare, "Compare to FFTW in accuracy tests")
         ->default_val(true);
-    app.add_option("--mp_lib", mp_lib, "Multi-process library type: none (default), mpi")
+    app.add_option("--mp_lib", mp_lib, "Multi-process library type: none, mpi.")
+        ->check(CLI::IsMember({"none", "mpi"}))
         ->default_val("none");
-    app.add_option("--mp_ranks", mp_ranks, "Number of multi-process ranks to launch")
+    app.add_option("--mp_ranks",
+                   mp_ranks,
+                   "Number of multi-process ranks to launch (can exceed 1 only if mp_lib == mpi)")
         ->default_val(1)
-        ->check(CLI::NonNegativeNumber);
+        ->check(CLI::PositiveNumber)
+        ->needs("--mp_lib");
     app.add_option("--mp_launch",
                    mp_launch,
                    "Command line prefix to launch multi-process transforms, e.g. \n"
@@ -469,16 +500,36 @@ int main(int argc, char* argv[])
                    "space character(s). For instance,\n"
                    "\"mpirun --np 4 \\\"/path with spaces/to/hipfft_mpi_worker\\\"\"")
         ->default_val("")
-        ->each([&](const std::string&) {
-            if(mp_lib == fft_params::fft_mp_lib_none)
-            {
-                throw CLI::ValidationError(
-                    "--mp_launch requires an mp library (see mp_lib in --help)");
-            }
-        })
         ->needs("--mp_lib");
     app.add_option("--seed", random_seed, "Random seed; if unset, use an actual random seed")
         ->default_val(default_seed_dev());
+    app.callback([&]() {
+        if(mp_lib == fft_params::fft_mp_lib_mpi)
+        {
+            if(!*opt_ngpus)
+                gpus_per_rank = 1;
+            else if(gpus_per_rank > 1)
+                throw std::invalid_argument("--ngpus must be 1 if mp_lib == mpi (see --help)");
+            if(mp_launch.empty())
+                throw std::invalid_argument(
+                    "--mp_launch must be specified if mp_lib == mpi (see --help)");
+        }
+        else
+        {
+            assert(mp_lib == fft_params::fft_mp_lib_none);
+            if(!*opt_ngpus)
+                gpus_per_rank = rocfft_scoped_device::device_count();
+            gpus_per_rank = std::min(gpus_per_rank, upper_bound_gpus_per_rank);
+            if(mp_ranks > 1)
+                throw std::invalid_argument("--mp_ranks must be 1 if mp_lib == none (see --help)");
+            if(!mp_launch.empty())
+                throw std::invalid_argument(
+                    "--mp_launch must be empty if mp_lib == none (see --help)");
+            if(gpus_per_rank > static_cast<size_t>(rocfft_scoped_device::device_count()))
+                throw CLI::ValidationError(
+                    "ngpus", "ngpus must not exceed the number of visible devices (see --help)");
+        }
+    });
     app.add_flag("--smoketest", "Run a short (approx 5 minute) randomized selection of tests")
         ->each([&](const std::string&) {
             // The objective is to have an test that takes about 5 minutes, so just set the
@@ -563,6 +614,16 @@ int main(int argc, char* argv[])
                    skip_runtime_fails,
                    "Skip the test if there is a runtime failure")
         ->default_val(true);
+    app.add_option("--min_probes_per_dev_for_xt",
+                   min_probes_per_dev_for_xt,
+                   "Minimum number of random probes per device in hipfftXt data distribution "
+                   "verification")
+        ->default_val(10)
+        ->check(CLI::PositiveNumber);
+    app.add_option("--hipfftxt_test_token",
+                   hipfftxt_test_token,
+                   "Token string for manual hipfftXt single-process, multi-GPU tests")
+        ->default_val("");
     app.add_option("-w, --wise", use_fftw_wisdom, "Use FFTW wisdom");
     // Filename for fftw and fftwf wisdom.
     std::string fftw_wisdom_filename;

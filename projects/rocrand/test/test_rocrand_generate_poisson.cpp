@@ -60,14 +60,14 @@ void test_generate_host()
     rocrand_generator generator;
     ROCRAND_CHECK(rocrand_create_generator_host_blocking(&generator, rng_type));
 
-    const size_t   size   = 12563;
-    double         lambda = 100.0;
-    T * data = new T[size];
+    const size_t size   = 12563;
+    double       lambda = 100.0;
+    T*           data   = new T[size];
 
     ROCRAND_CHECK(rocrand_generate_poisson(generator, data, size, lambda));
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
 
-    delete [] data;
+    delete[] data;
 }
 
 template<typename T, typename GenerateFunc>
@@ -199,4 +199,5 @@ TEST_P(rocrand_generate_poisson_tests, multiple_lambdas_non_blocking_stream)
 
 INSTANTIATE_TEST_SUITE_P(rocrand_generate_poisson_tests,
                          rocrand_generate_poisson_tests,
-                         ::testing::ValuesIn(rng_types));
+                         ::testing::ValuesIn(rng_types),
+                         rocrand_rng_type_test_name);
