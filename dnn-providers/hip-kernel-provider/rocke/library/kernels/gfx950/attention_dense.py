@@ -39,9 +39,10 @@ config (grid / decode / V-pad / lazy):
 
 Clock-invariant deltas (the load-bearing part): hkv/qb ~1.04x, V-pad 0->32 ~+5%,
 lazy ~+2%. Shape (batch/seqlen/heads/head_dim) is baked at build time (dense,
-compile-time-sized ABI); the KV tile, occupancy hint, and persistent knobs are the
-tunable parameters. Lazy online-softmax rescale (skip the O/l rescale when every
-lane's tile-max is within 8 log2 of the running max) is ALWAYS-ON by default
+compile-time-sized ABI); query/KV tile geometry, LDS V-row padding, occupancy hint,
+and persistent knobs live on ``AttentionDenseSpec``. Lazy online-softmax rescale
+(skip the O/l rescale when every lane's tile-max is within 8 log2 of the running max)
+is ALWAYS-ON by default
 (``lazy_rescale=True``): parity-identical (1.46e-3) and ~+2%.
 
 Head-size / seqlen coverage:
@@ -72,6 +73,7 @@ the experiment's ``plan.md`` for their measured results.
 
 from contextlib import nullcontext as _nullcontext
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Optional, Tuple
 
 from rocke.core.ir import IRBuilder, KernelDef, PtrType, BF16, F16, F32, I32, I64
@@ -83,26 +85,32 @@ from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_c
 LOG2E = 1.4426950408889634
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
 
+# Named tile-geometry presets. Every IR-live geometry value is copied onto the
+# immutable AttentionDenseSpec; the dictionaries are host-side construction
+# conveniences only and are never consulted while emitting a kernel.
+DENSE_TILE_GEOMETRIES = MappingProxyType(
+    {
+        "default": MappingProxyType(
+            {"block_m": 256, "block_n": 64, "lds_v_row_pad": 32}
+        ),
+        "bm128": MappingProxyType(
+            {"block_m": 128, "block_n": 64, "lds_v_row_pad": 32}
+        ),
+    }
+)
+_DEFAULT_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
+
 # Baked pipeline constants (NOT tunable knobs — these are load-bearing):
-#   _BLOCK_M: query rows per CTA. The causal mask + P relayout assume 256; the
-#             kernel FAULTS at other values until those hardcodes are lifted.
-#   num_waves = _BLOCK_M // 32 = 8 (block = 512 threads).
 #   _NBUF=2 double-buffer (NBUF=3 is a measured dead end: 256 VGPR + 58 spills).
 #   _LDS_PAD=8 bf16 elements of K-row padding (the +80% bank-conflict fix).
-_BLOCK_M = 256
 _NBUF = 2
 _LDS_PAD = 8
-# _LDS_PAD_V: bf16 elements of V-row padding for the transposed PV read
+# lds_v_row_pad: bf16 elements of V-row padding for the transposed PV read
 #   (ds_read_b64_tr_b16). The transpose read has a stricter bank pattern than
 #   K's ds_read_b128, so it needs a LARGER pad than _LDS_PAD (8): a measured
 #   sweep @ GQA-8 S=8192 gives conflicts {VPAD0: 30, VPAD8: 29, VPAD16: 11,
 #   VPAD32: 0} and TFLOPS {906, 901, 944, 953} -- i.e. +8 is useless here and
 #   only +32 fully clears the V-read conflicts (matches flyDSL's SMEM_V_PAD).
-#   Overridable via ROCKE_DENSE_VPAD for re-sweeps.
-import os as _os  # noqa: E402
-
-_BLOCK_M = int(_os.environ.get("ROCKE_DENSE_BLOCK_M", str(_BLOCK_M)))
-_LDS_PAD_V = int(_os.environ.get("ROCKE_DENSE_VPAD", "32"))
 # Lazy-rescale re-anchor threshold in the log2 domain: skip the O/l rescale when
 # every lane's (tile_max - running_max) <= this. exp2(8)=256 bounds P safely.
 _LAZY_RESCALE_THRESHOLD = 8.0
@@ -112,10 +120,10 @@ _LAZY_RESCALE_THRESHOLD = 8.0
 class AttentionDenseSpec:
     """Compile-time spec for the dense flash-attention prefill kernel.
 
-    Functional fields (batch / seqlen / heads / head_size / causal / dtype) are baked
-    into the kernel as constants — this is a dense, statically-sized ABI. ``block_n``
-    and ``waves_per_eu`` are the only performance knobs; every algorithmic lever is
-    always-on (see the module docstring).
+    Functional fields (batch / seqlen / heads / head_size / causal / dtype) and tile
+    geometry are baked into the kernel as constants — this is a dense,
+    statically-sized ABI. Every IR-live geometry choice belongs to this immutable
+    spec so codegen does not depend on process-global environment state.
     """
 
     # --- functional (compile-time shape) ---
@@ -154,10 +162,19 @@ class AttentionDenseSpec:
     #   supported with persistent. 0-cost when False (dense uniform path).
     varlen: bool = False
 
-    # --- validated performance knobs ---
+    # --- validated tile geometry / performance knobs ---
+    # block_m: query rows per CTA. 256 is the shipped 8-wave geometry; 128 is
+    #   retained as an explicit 4-wave experiment geometry. Keeping it on the
+    #   spec makes grid sizing, work-item decode, codegen, and kernel identity
+    #   agree without process-global environment state.
+    block_m: int = _DEFAULT_TILE_GEOMETRY["block_m"]
     # block_n: KV tile length. 64 (66 KB LDS, WPE-tunable) and 128 (135 KB LDS, pins
     #   the 256-VGPR cap) both match ~peak; 64 is strictly more resource-efficient.
-    block_n: int = 64
+    block_n: int = _DEFAULT_TILE_GEOMETRY["block_n"]
+    # lds_v_row_pad: V-row padding in bf16 elements on the D128 path. It is
+    #   IR-live and therefore part of both the spec and non-default kernel name.
+    #   D64 packs two rows per DMA instruction and ignores this per-row pad.
+    lds_v_row_pad: int = _DEFAULT_TILE_GEOMETRY["lds_v_row_pad"]
     # waves_per_eu: occupancy hint. 2 is a free win (tighter allocation, still 2
     #   waves/SIMD); 3 is a measured trap (VGPR<=170 forces spills -> -20%).
     waves_per_eu: int = 2
@@ -251,6 +268,13 @@ class AttentionDenseSpec:
             raise ValueError(
                 f"dtype must be one of {sorted(_DTYPE_IR)}, got {self.dtype}"
             )
+        if self.block_m <= 0:
+            raise ValueError(f"block_m must be positive, got {self.block_m}")
+        if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
+            raise ValueError(
+                "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
+                f"elements (16 bytes), got {self.lds_v_row_pad}"
+            )
         # head_size must be 64 or 128: the QK/PV MFMA tiling needs a multiple of
         # 32, and the async K/V DMA (64 lanes x 2 bf16 = 128 elems/instr) needs
         # 128 % head_size == 0 so it packs a whole number of rows per instr.
@@ -282,9 +306,10 @@ class AttentionDenseSpec:
             if self.sliding_window > 0:
                 raise ValueError("ragged is not supported with sliding_window")
         else:
-            if self.seqlen_q % _BLOCK_M != 0:
+            if self.seqlen_q % self.block_m != 0:
                 raise ValueError(
-                    f"seqlen_q must be a multiple of {_BLOCK_M}, got {self.seqlen_q}"
+                    f"seqlen_q must be a multiple of block_m={self.block_m}, "
+                    f"got {self.seqlen_q}"
                 )
             if self.seqlen_kv % self.block_n != 0:
                 raise ValueError(
@@ -414,13 +439,16 @@ class AttentionDenseSpec:
                 raise ValueError(
                     "wide_lds_dma is validated only for aligned contiguous K/V"
                 )
-            if self.lds_k_group_pad != 8 or _LDS_PAD_V != 32:
+            if (
+                self.lds_k_group_pad != 8
+                or self.lds_v_row_pad != _DEFAULT_TILE_GEOMETRY["lds_v_row_pad"]
+            ):
                 raise ValueError(
                     "wide_lds_dma requires K/V slab padding of 8/32 elements"
                 )
         if self.persist_decode == "gqa_pair":
             gqa = self.num_query_heads // self.num_kv_heads
-            nqb = (self.seqlen_q + _BLOCK_M - 1) // _BLOCK_M
+            nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
             expected_np = nqb * self.num_kv_heads * self.batch
             if not self.persistent or not self.causal:
                 raise ValueError("gqa_pair requires persistent causal attention")
@@ -437,7 +465,7 @@ class AttentionDenseSpec:
                 )
         if self.persist_decode == "gqa_pair_2phase":
             gqa = self.num_query_heads // self.num_kv_heads
-            nqb = (self.seqlen_q + _BLOCK_M - 1) // _BLOCK_M
+            nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
             expected_np = nqb * self.num_kv_heads * self.batch * gqa // 2
             if not self.persistent or not self.causal:
                 raise ValueError(
@@ -459,7 +487,7 @@ class AttentionDenseSpec:
 
     @property
     def num_waves(self) -> int:
-        return _BLOCK_M // 32
+        return self.block_m // 32
 
     @property
     def dtype_ir(self):
@@ -475,25 +503,28 @@ class AttentionDenseSpec:
         if self.persist_decode != "auto":
             return self.persist_decode
         gqa = self.num_query_heads // self.num_kv_heads
-        nqb = (self.seqlen_q + _BLOCK_M - 1) // _BLOCK_M  # ceil (ragged partial)
-        # Narrow production gate for the measured Llama-3-8B target. The
-        # explicit gqa_pair mode remains available for controlled expansion.
-        if (
+        nqb = (
+            self.seqlen_q + self.block_m - 1
+        ) // self.block_m  # ceil (ragged partial)
+        aligned_causal = (
             self.persistent
-            and self.batch == 1
-            and self.seqlen_q == 8192
-            and self.seqlen_kv == 8192
-            and self.num_query_heads == 32
-            and self.num_kv_heads == 8
-            and self.head_size == 128
-            and self.dtype == "fp16"
             and self.causal
             and not self.ragged
+            and not self.varlen
+            and not self.paged
             and self.sliding_window == 0
-            and self.block_n == 64
-            and self.num_persistent == 256
-        ):
-            return "gqa_pair"
+        )
+        # Pair mappings are selected by their load-balance equations rather
+        # than a model-name/shape allowlist. Prefer the one-phase mapping when
+        # both equations hold (GQA=2); it has the shorter work-item lifetime.
+        if aligned_causal and nqb % 2 == 0 and gqa % 2 == 0:
+            pair_np = nqb * self.num_kv_heads * self.batch
+            if self.num_persistent == pair_np:
+                return "gqa_pair"
+        if aligned_causal and nqb % 2 == 0 and gqa >= 2:
+            two_phase_np = nqb * self.num_kv_heads * self.batch * gqa // 2
+            if self.num_persistent == two_phase_np:
+                return "gqa_pair_2phase"
         per_hkv = gqa * nqb * self.batch
         if gqa > 1 and per_hkv >= 2 * self.num_persistent:
             return "hkv_major"
@@ -508,14 +539,16 @@ class AttentionDenseSpec:
             f"bn{self.block_n}",
             self.dtype,
         ]
-        if _BLOCK_M != 256:
-            parts.append(f"bm{_BLOCK_M}")
+        if self.block_m != _DEFAULT_TILE_GEOMETRY["block_m"]:
+            parts.append(f"bm{self.block_m}")
         # The K group pad changes the emitted layout, so it has to be part of the
         # kernel identity or two kernels that differ only in pad share a symbol
         # name (and a launcher-cache entry). Only live on the packed path, so the
         # head_size=128 name is unchanged.
         if 128 // self.head_size > 1:
             parts.append(f"kpad{self.lds_k_group_pad}")
+        elif self.lds_v_row_pad != _DEFAULT_TILE_GEOMETRY["lds_v_row_pad"]:
+            parts.append(f"vpad{self.lds_v_row_pad}")
         parts += [
             f"sq{self.seqlen_q}",
             f"sk{self.seqlen_kv}",
@@ -561,6 +594,24 @@ def supports_attention_dense(
         AttentionDenseSpec(**{f.name: getattr(spec, f.name) for f in spec.__dataclass_fields__.values()})  # type: ignore[attr-defined]
     except ValueError as e:
         return False, str(e)
+    supported_block_m = {
+        int(geometry["block_m"]) for geometry in DENSE_TILE_GEOMETRIES.values()
+    }
+    if spec.block_m not in supported_block_m:
+        return False, (
+            f"gfx950 block_m must be one of {sorted(supported_block_m)}, "
+            f"got {spec.block_m}"
+        )
+    if spec.block_m % spec.block_n != 0:
+        return False, (
+            f"block_n={spec.block_n} must divide block_m={spec.block_m} "
+            "for the causal KV partition"
+        )
+    if spec.block_n % spec.num_waves != 0:
+        return False, (
+            f"block_n={spec.block_n} must be divisible by num_waves="
+            f"{spec.num_waves} so K/V DMA rows distribute evenly"
+        )
     return True, ""
 
 
@@ -570,6 +621,9 @@ def build_attention_dense(
     """Emit the dense flash-attention prefill kernel described by ``spec``."""
     if arch != "gfx950":
         raise NotImplementedError(f"attention_dense is gfx950-only (got {arch})")
+    ok, reason = supports_attention_dense(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"unsupported gfx950 attention_dense spec: {reason}")
 
     if spec.persistent:
         return _build_attention_dense_persistent(spec)
@@ -583,7 +637,7 @@ def build_attention_dense(
     causal = spec.causal
     dtype = spec.dtype_ir
 
-    BLOCK_M = _BLOCK_M
+    BLOCK_M = spec.block_m
     WAVES = spec.num_waves
     BN = spec.block_n
     NBUF = _NBUF
@@ -713,7 +767,7 @@ def build_attention_dense(
         K_GROUP = ROWS_PER_INSTR
         K_ROWS_LDS = BN // K_GROUP
         LDROW = K_GROUP * D + spec.lds_k_group_pad
-    VROW = D + _LDS_PAD_V if ROWS_PER_INSTR == 1 else D
+    VROW = D + spec.lds_v_row_pad if ROWS_PER_INSTR == 1 else D
     K_lds = b.smem_alloc(dtype, [NBUF, K_ROWS_LDS, LDROW], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
     # Packed-K read decode, hoisted out of the KV loop: krow = nsub*32 + lane_m
@@ -1312,7 +1366,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     causal = spec.causal
     dtype = spec.dtype_ir
 
-    BLOCK_M = _BLOCK_M
+    BLOCK_M = spec.block_m
     WAVES = spec.num_waves
     BN = spec.block_n
     NBUF = _NBUF
@@ -1389,7 +1443,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         K_LINE_STRIDE = 64 * 8 + PAD  # 520 half elements
         V_D_RPT = D // 64
         V_N_RPT = BN // 8
-        V_LINE_STRIDE = 64 * 8 + _LDS_PAD_V  # 544 half elements
+        V_LINE_STRIDE = 64 * 8 + spec.lds_v_row_pad
         WIDE_LINE_PASSES = 8 // WAVES
         assert 8 % WAVES == 0
         K_lds = b.smem_alloc(
@@ -1423,7 +1477,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             k_lane_grp = None
             k_sub_col = None
     if not WIDE_DMA:
-        VROW = (D + _LDS_PAD_V) if ROWS_PER_INSTR == 1 else D
+        VROW = (D + spec.lds_v_row_pad) if ROWS_PER_INSTR == 1 else D
         V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
 
     if WIDE_DMA:
@@ -2260,7 +2314,9 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
     default = one CTA per (query-block, query-head, batch)."""
     if spec.persistent:
         return (spec.num_persistent, 1, 1)
-    nqb = (spec.seqlen_q + _BLOCK_M - 1) // _BLOCK_M  # ceil: ragged partial block
+    nqb = (
+        spec.seqlen_q + spec.block_m - 1
+    ) // spec.block_m  # ceil: ragged partial block
     return (nqb, spec.num_query_heads, spec.batch)
 
 

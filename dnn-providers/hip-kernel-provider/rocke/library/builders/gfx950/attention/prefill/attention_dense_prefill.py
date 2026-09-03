@@ -5,9 +5,9 @@
 Owns the host path: spec construction, kernel-spec generation, compilation, ABI
 signature, and runtime launch — plus a torch/SDPA parity check and a benchmark. The
 kernel bakes in the winning levers (CK-1 transposed PV, LDS K-padding, exp2_fast,
-sched template, diagonal masking, depth-1 cluster, vectorized store); only the KV tile
-(`block_n`), occupancy hint (`waves_per_eu`), persistent decode, and qualified
-gfx950 wide-LDS-DMA path are tunable.
+sched template, diagonal masking, depth-1 cluster, vectorized store). Tile geometry
+(`block_m`, `block_n`, `lds_v_row_pad`), occupancy, persistent decode, and the
+gfx950 wide-LDS-DMA path are captured explicitly by ``AttentionDenseSpec``.
 
 Usage:
     python attention_dense_prefill.py                 # parity + bench, default shapes
@@ -33,6 +33,7 @@ import torch  # noqa: E402
 
 from kernels.gfx950.attention_dense import (  # noqa: E402
     AttentionDenseSpec,
+    DENSE_TILE_GEOMETRIES,
     attention_dense_block,
     attention_dense_grid,
     build_attention_dense,
@@ -100,6 +101,14 @@ def _causal_flops(spec: AttentionDenseSpec) -> int:
 
 def make_spec_from_shape(shape: dict[str, Any]) -> AttentionDenseSpec:
     """Build a validated ``AttentionDenseSpec`` from a benchmark shape mapping."""
+    defaults = DENSE_TILE_GEOMETRIES["default"]
+    geometry = {
+        "block_m": int(shape.get("block_m", defaults["block_m"])),
+        "block_n": int(shape.get("block_n", defaults["block_n"])),
+        "lds_v_row_pad": int(
+            shape.get("lds_v_row_pad", defaults["lds_v_row_pad"])
+        ),
+    }
     return AttentionDenseSpec(
         batch=int(shape.get("batch", 1)),
         seqlen_q=int(shape["seqlen_q"]),
@@ -109,7 +118,7 @@ def make_spec_from_shape(shape: dict[str, Any]) -> AttentionDenseSpec:
         head_size=int(shape["head_size"]),
         causal=bool(shape.get("causal", True)),
         dtype=str(shape.get("dtype", "fp16")),
-        block_n=int(shape.get("block_n", 64)),
+        **geometry,
         waves_per_eu=int(shape.get("waves_per_eu", 2)),
         persistent=bool(shape.get("persistent", False)),
         num_persistent=int(shape.get("num_persistent", 256)),
@@ -256,7 +265,29 @@ def run(
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bn", type=int, default=64, help="block_n (KV tile)")
+    defaults = DENSE_TILE_GEOMETRIES["default"]
+    ap.add_argument(
+        "--block-m",
+        "--bm",
+        dest="block_m",
+        type=int,
+        default=defaults["block_m"],
+        help="block_m (query rows per CTA)",
+    )
+    ap.add_argument(
+        "--bn",
+        type=int,
+        default=defaults["block_n"],
+        help="block_n (KV tile)",
+    )
+    ap.add_argument(
+        "--lds-v-row-pad",
+        "--vpad",
+        dest="lds_v_row_pad",
+        type=int,
+        default=defaults["lds_v_row_pad"],
+        help="D128 V-row LDS padding in bf16 elements",
+    )
     ap.add_argument("--wpe", type=int, default=2, help="waves_per_eu")
     ap.add_argument("--dtype", default="bf16", choices=["bf16", "fp16"])
     ap.add_argument("--hq", type=int, default=128)
@@ -315,7 +346,9 @@ def main():
             "head_size": args.d,
             "causal": bool(args.causal),
             "dtype": args.dtype,
+            "block_m": args.block_m,
             "block_n": args.bn,
+            "lds_v_row_pad": args.lds_v_row_pad,
             "waves_per_eu": args.wpe,
             "persistent": args.persistent,
             "num_persistent": args.np,
@@ -348,7 +381,9 @@ def main():
             head_size=args.d,
             causal=bool(args.causal),
             dtype=args.dtype,
+            block_m=args.block_m,
             block_n=args.bn,
+            lds_v_row_pad=args.lds_v_row_pad,
             waves_per_eu=args.wpe,
             persistent=args.persistent,
             num_persistent=args.np,

@@ -158,8 +158,8 @@ def _dense_spec(req: OperatorRequest):
     and which the gfx942 builder reads directly. Restating it would reintroduce the
     per-arch duplicate that collapsing the two fields removed.
 
-    Nothing here sets a gfx942-PRIVATE field: every such codegen knob (block_m, the
-    two LDS pads, cfvst / exp2_fast forcing, iglp) stays at its shipped default, so
+    Nothing here sets a gfx942-PRIVATE field: every such codegen knob (the two LDS
+    pads, cfvst / exp2_fast forcing, iglp) stays at its shipped default, so
     those knobs are sweep-visible and dispatch-invisible. Wiring one of them into this
     factory would make it a production path and would need its own measured verdict
     first. That is why this factory builds the SHARED ``AttentionDenseSpec`` and lets
@@ -170,17 +170,21 @@ def _dense_spec(req: OperatorRequest):
     body reuses it); it is arch-neutral, only its tuned values differ.
     """
     from kernels.gfx942.attention_dense import _tuned_waves_per_eu
-    from kernels.gfx950.attention_dense import AttentionDenseSpec, _BLOCK_M
+    from kernels.gfx950.attention_dense import (
+        AttentionDenseSpec,
+        DENSE_TILE_GEOMETRIES,
+    )
 
     assert isinstance(req, AttentionRequest)
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
     bn = _DENSE_BLOCK_N
     head_size = int(req.hdim_q)
     dtype = req.dtype.lower()
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
-    ragged = (sq == sk) and ((sq % _BLOCK_M != 0) or (sk % bn != 0))
-    nqb = (sq + _BLOCK_M - 1) // _BLOCK_M
+    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
+    nqb = (sq + bm - 1) // bm
     work = nqb * int(req.nhead_q) * int(req.batch)
     np = int(req.dense_num_persistent)
     if np == _SHARED_NUM_PERSISTENT_DEFAULT:
@@ -205,6 +209,7 @@ def _dense_spec(req: OperatorRequest):
         head_size=head_size,
         causal=(int(req.mask_type) != 0),
         dtype=dtype,
+        block_m=bm,
         block_n=bn,
         persistent=persistent,
         num_persistent=np,

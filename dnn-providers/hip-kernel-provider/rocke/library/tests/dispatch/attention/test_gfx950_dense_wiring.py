@@ -13,12 +13,19 @@ Covers:
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from dispatch.attention import (
     AttentionRequest,
     attention_candidates,
 )
 from dispatch.attention.gfx950 import dense_spec_for_request
+from kernels.gfx950.attention_dense import (
+    AttentionDenseSpec,
+    DENSE_TILE_GEOMETRIES,
+    attention_dense_grid,
+    supports_attention_dense,
+)
 
 
 def _gfx950_dense_req(**kw) -> AttentionRequest:
@@ -41,7 +48,7 @@ def _gfx950_dense_req(**kw) -> AttentionRequest:
 
 
 class TestDenseGqaPairWiring(unittest.TestCase):
-    """The measured Llama-3-8B target selects the balanced GQA-local decode."""
+    """Invariant-compatible shapes select a balanced GQA-local decode."""
 
     def test_exact_llama3_8b_prefill_auto_selects_gqa_pair(self):
         req = _gfx950_dense_req(
@@ -87,7 +94,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dense_persist_decode"):
             dense_spec_for_request(req)
 
-    def test_nearby_shape_stays_on_existing_auto_policy(self):
+    def test_s4096_shape_selects_two_phase_pair_and_wide_dma(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=32,
@@ -101,9 +108,62 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             dense_persist_decode="auto",
         )
         spec = dense_spec_for_request(req)
-        self.assertEqual(spec.resolved_persist_decode, "qb_major")
-        self.assertFalse(spec.wide_lds_dma)
-        self.assertNotIn("gqapair", spec.kernel_name())
+        self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
+        self.assertTrue(spec.wide_lds_dma)
+        self.assertIn("gqapair2", spec.kernel_name())
+        self.assertIn("wdma", spec.kernel_name())
+
+    def test_bf16_shape_uses_invariant_compatible_fast_path(self):
+        req = _gfx950_dense_req(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="bf16",
+            dense_persistent="on",
+            dense_persist_decode="auto",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        self.assertTrue(spec.wide_lds_dma)
+
+    def test_s2048_h64_selects_two_phase_pair(self):
+        req = _gfx950_dense_req(
+            batch=1,
+            nhead_q=64,
+            nhead_k=8,
+            seqlen_q=2048,
+            seqlen_k=2048,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="on",
+            dense_persist_decode="auto",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
+        self.assertTrue(spec.wide_lds_dma)
+
+    def test_explicit_two_phase_pair_passes_through_dispatcher(self):
+        req = _gfx950_dense_req(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=4096,
+            seqlen_k=4096,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="on",
+            dense_persist_decode="gqa_pair_2phase",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.persist_decode, "gqa_pair_2phase")
+        self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
+        self.assertTrue(spec.wide_lds_dma)
 
     def test_exact_shape_with_sinks_keeps_gqa_pair(self):
         req = _gfx950_dense_req(
@@ -154,8 +214,75 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         )
         spec = dense_spec_for_request(req)
         self.assertEqual(spec.resolved_persist_decode, "qb_major")
-        self.assertFalse(spec.wide_lds_dma)
+        self.assertTrue(spec.wide_lds_dma)
         self.assertNotIn("gqapair", spec.kernel_name())
+
+
+class TestDenseGeometrySpec(unittest.TestCase):
+    """Tile geometry is explicit, validated, and kernel-identity-safe."""
+
+    @staticmethod
+    def _spec(**kw) -> AttentionDenseSpec:
+        base = dict(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+        )
+        base.update(kw)
+        return AttentionDenseSpec(**base)
+
+    def test_dispatch_captures_named_default_geometry(self):
+        spec = dense_spec_for_request(
+            _gfx950_dense_req(
+                batch=1,
+                nhead_q=32,
+                nhead_k=8,
+                hdim_q=128,
+                hdim_v=128,
+                dtype="fp16",
+            )
+        )
+        defaults = DENSE_TILE_GEOMETRIES["default"]
+        self.assertEqual(spec.block_m, defaults["block_m"])
+        self.assertEqual(spec.block_n, defaults["block_n"])
+        self.assertEqual(spec.lds_v_row_pad, defaults["lds_v_row_pad"])
+
+    def test_block_m_controls_grid_and_kernel_identity(self):
+        default = self._spec()
+        bm128 = replace(default, block_m=128)
+        self.assertEqual(attention_dense_grid(default), (2, 32, 1))
+        self.assertEqual(attention_dense_grid(bm128), (4, 32, 1))
+        self.assertNotEqual(default.kernel_name(), bm128.kernel_name())
+        self.assertIn("bm128", bm128.kernel_name())
+        ok, why = supports_attention_dense(bm128)
+        self.assertTrue(ok, why)
+
+    def test_v_row_pad_controls_kernel_identity(self):
+        default = self._spec()
+        vpad16 = replace(default, lds_v_row_pad=16)
+        self.assertNotEqual(default.kernel_name(), vpad16.kernel_name())
+        self.assertIn("vpad16", vpad16.kernel_name())
+
+    def test_unknown_block_m_is_rejected_by_gfx950_support(self):
+        spec = self._spec(seqlen_q=384, block_m=192)
+        ok, why = supports_attention_dense(spec)
+        self.assertFalse(ok)
+        self.assertIn("block_m", why)
+
+    def test_wide_dma_requires_default_v_row_pad(self):
+        with self.assertRaisesRegex(ValueError, "K/V slab padding"):
+            self._spec(
+                persistent=True,
+                num_persistent=16,
+                persist_decode="gqa_pair",
+                wide_lds_dma=True,
+                lds_v_row_pad=16,
+            )
 
 
 class TestDenseSlidingWindowWiring(unittest.TestCase):
@@ -211,8 +338,8 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         validator raise at dispatch time.' This test verifies _dense_spec()
         itself catches the constraint and raises a clear error.
         """
-        # Create a ragged-shaped request: seqlen_q=seqlen_k, not a multiple of block sizes
-        # _BLOCK_M=256, _DENSE_BLOCK_N=64, so 500 triggers ragged
+        # Create a ragged-shaped request: seqlen_q=seqlen_k, not a multiple
+        # of the default block_m=256 / block_n=64 geometry.
         req = _gfx950_dense_req(
             seqlen_q=500,
             seqlen_k=500,
@@ -229,7 +356,7 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
 
     def test_sliding_window_without_ragged_accepted(self):
         """Sliding window works fine on non-ragged shapes (block-aligned seqlens)."""
-        # Non-ragged shape: seqlen_q is a multiple of _BLOCK_M=256
+        # Non-ragged shape: seqlen_q is a multiple of default block_m=256.
         req = _gfx950_dense_req(
             seqlen_q=2048,  # 2048 % 256 == 0, no ragged
             seqlen_k=2048,

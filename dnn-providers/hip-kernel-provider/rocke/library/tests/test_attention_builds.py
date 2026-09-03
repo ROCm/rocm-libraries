@@ -1110,10 +1110,10 @@ class TestAttentionHelpers(unittest.TestCase):
         prefill kernel (``build_attention_dense``, its own builder / ABI -- NOT
         routed through the unified 2D-tiled path the matrix above covers).
 
-        Dense bakes shape in at build time and is LDS-heavy (tunable V pad via
-        ``ROCKE_DENSE_VPAD``), so it is a live over-budget risk on its own. Covers
-        both the default and persistent (grid-stride) variants. gfx950-only,
-        torch-free -- comgr targets gfx950 via its triple.
+        Dense bakes shape and ``AttentionDenseSpec.lds_v_row_pad`` in at build
+        time and is LDS-heavy, so it is a live over-budget risk on its own.
+        Covers both the default and persistent (grid-stride) variants.
+        gfx950-only, torch-free -- comgr targets gfx950 via its triple.
         """
         from dataclasses import replace
 
