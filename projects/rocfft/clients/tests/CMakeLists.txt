@@ -415,6 +415,13 @@ if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_F
   target_link_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
 endif()
 
+if(BUILD_CODE_COVERAGE)
+  # Match the offload driver used by librocfft to avoid kernel image incompatibility
+  target_link_options(rocfft-test PRIVATE --offload-new-driver)
+  # Coverage with new offload driver requires dynamic loading symbols
+  target_link_libraries(rocfft-test PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
 rocm_install(TARGETS rocfft-test COMPONENT tests)
 
 #Ctest based Test Filter Standardization using test_categories.yaml
