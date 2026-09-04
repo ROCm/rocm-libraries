@@ -42,7 +42,7 @@ All version tokens normalised to ``<VERSION>``.
 
 import pytest
 
-from tensilelite import __version__
+from tensilelite import GENERATOR_VERSION as __version__
 import tensilelite.LibraryIO as L
 
 pytestmark = pytest.mark.unit
