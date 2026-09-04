@@ -148,7 +148,7 @@ void rocsolver_syevdx_heevdx_getMemorySize(const rocblas_evect evect,
     *size_D = sizeof(S) * n * batch_count;
     *size_E = sizeof(S) * n * batch_count;
 
-    if(evect != rocblas_evect_original || n < SYEVDX_MIN_DC_SIZE)
+    if(n < SYEVDX_MIN_DC_SIZE)
     {
         // extra requirements for computing the eigenvalues (stebz)
         rocsolver_stebz_getMemorySize<T>(n, batch_count, &a3, &b3, &c3, size_work4, size_work5,
@@ -171,7 +171,7 @@ void rocsolver_syevdx_heevdx_getMemorySize(const rocblas_evect evect,
     else
     {
         // extra requirements for computing eigenvalues and vectors (stedcx)
-        rocsolver_stedcx_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count,
+        rocsolver_stedcx_getMemorySize<BATCHED, T, S>(evect, n, batch_count,
                                                       size_tmpT, &b3, &c3, size_work4, size_work5,
                                                       size_work6_ifail, &unused);
     }
@@ -250,7 +250,7 @@ rocblas_status rocsolver_syevdx_heevdx_template(rocblas_handle handle,
                                                stride, tau, stride, batch_count, scalars, (T*)work1,
                                                (T*)work2, (T*)work3, (T**)nsplit_workArr, false);
 
-    if(evect != rocblas_evect_original || n < SYEVDX_MIN_DC_SIZE)
+    if(n < SYEVDX_MIN_DC_SIZE)
     {
         // **** do not use D&C approach ****
 
@@ -294,15 +294,18 @@ rocblas_status rocsolver_syevdx_heevdx_template(rocblas_handle handle,
         // **** Use D&C approach ****
 
         rocsolver_stedcx_template<BATCHED, STRIDED, T>(
-            handle, rocblas_evect_tridiagonal, erange, n, vl, vu, il, iu, D, stride, E, stride, nev,
+            handle, evect, erange, n, vl, vu, il, iu, D, stride, E, stride, nev,
             W, strideW, Z, shiftZ, ldz, strideZ, info, batch_count, tmpT, (S*)work2, (S*)work3,
             (S*)work4, (S*)work5, work6_ifail, (S**)nsplit_workArr);
 
-        rocblas_int h_nev = (erange == rocblas_erange_index ? iu - il + 1 : n);
-        rocsolver_ormtr_unmtr_template<BATCHED, STRIDED>(
-            handle, rocblas_side_left, uplo, rocblas_operation_none, n, h_nev, A, shiftA, lda,
-            strideA, tau, n, Z, shiftZ, ldz, strideZ, batch_count, scalars, (T*)work1, (T*)work2,
-            (T*)work3, (T**)nsplit_workArr);
+        if(evect == rocblas_evect_original)
+        {
+            rocblas_int h_nev = (erange == rocblas_erange_index ? iu - il + 1 : n);
+            rocsolver_ormtr_unmtr_template<BATCHED, STRIDED>(
+                handle, rocblas_side_left, uplo, rocblas_operation_none, n, h_nev, A, shiftA, lda,
+                strideA, tau, n, Z, shiftZ, ldz, strideZ, batch_count, scalars, (T*)work1, (T*)work2,
+                (T*)work3, (T**)nsplit_workArr);
+        }
     }
 
     return rocblas_status_success;

@@ -75,7 +75,8 @@ ROCSOLVER_KERNEL void stedcx_case1_kernel(const rocblas_erange range,
 //--------------------------------------------------------------------------------------//
 /** STEDCX_SELECT_KERNEL selects the results of the partial decomposition **/
 template <typename T, typename S, typename U>
-ROCSOLVER_KERNEL void stedcx_select_kernel(const rocblas_erange range,
+ROCSOLVER_KERNEL void stedcx_select_kernel(const rocblas_evect evect,
+                                               const rocblas_erange range,
                                                const rocblas_int n,
                                                const S vl,
                                                const S vu,
@@ -112,13 +113,16 @@ ROCSOLVER_KERNEL void stedcx_select_kernel(const rocblas_erange range,
     // batch instance
     S* D = DD + bid * strideD;
     S* W = WW + bid * strideW;
-    T* C = load_ptr_batch<T>(CC, bid, shiftC, strideC);
     T* V = VV + bid * strideV;
     rocblas_int* nev = nevA + bid;
+    T* C;
+    if(CC)
+        C = load_ptr_batch<T>(CC, bid, shiftC, strideC);
 
     // all values in positions 'in' till 'out' will be selected
     bool value = (range == rocblas_erange_value);
     bool all = (range == rocblas_erange_all);
+    bool vectors = (evect != rocblas_evect_none);
     rocblas_int in = il - 1;
     rocblas_int out = iu;
     if(all)
@@ -138,8 +142,11 @@ ROCSOLVER_KERNEL void stedcx_select_kernel(const rocblas_erange range,
         if(myrow == 0)
             W[j - in] = D[j];
 
-        for(auto i = myrow; i < n; i += step_row)
-            C[i + (j - in) * ldc] = V[i + j * ldv];
+        if(vectors)
+        {
+            for(auto i = myrow; i < n; i += step_row)
+                C[i + (j - in) * ldc] = V[i + j * ldv];
+        }       
     }  
         
     // final number of selected values
@@ -177,7 +184,7 @@ void rocsolver_stedcx_getMemorySize(const rocblas_evect evect,
         return;
     
     // requirements for D&C solver 
-    rocsolver_stedc_getMemorySize<BATCHED, T, S>(evect, n, batch_count, size_work_stack,
+    rocsolver_stedc_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count, size_work_stack,
                     size_tempvect, size_tempgemm, size_tmpz, size_splits, size_workArr);
 
     // extra requirements for partial decomposition
@@ -267,11 +274,11 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
                                          rocblas_int* splits,
                                          S** workArr)
 {
-    ROCSOLVER_ENTER("stedcx", "erange:", erange, "n:", n, "vl:", vl, "vu:", vu, "il:", il,
+    ROCSOLVER_ENTER("stedcx", "evect:", evect, "erange:", erange, "n:", n, "vl:", vl, "vu:", vu, "il:", il,
                     "iu:", iu, "shiftC:", shiftC, "ldc:", ldc, "bc:", batch_count);
 
-    // NOTE: case evect = N is not implemented for now. This routine always compute vectors
-    // as it is only for internal use by syevdx.
+    // NOTE: only case evect = N and evect = I are implemented as this routine 
+    // is only for internal use by syevdx.
 
     // quick return
     if(batch_count == 0)
@@ -330,7 +337,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
     // Discard values and vectors out of range
     rocblas_int nblocks = ceildiv(n, BS2); 
     ROCSOLVER_LAUNCH_KERNEL((stedcx_select_kernel<T>), dim3(nblocks, nblocks, batch_count), dim3(BS2, BS2), 0,
-                            stream, erange, n, vl, vu, il, iu, D, strideD, nev, W, strideW, 
+                            stream, evect, erange, n, vl, vu, il, iu, D, strideD, nev, W, strideW, 
                             C, shiftC, ldc, strideC, tmpT, ldt, strideT, batch_count);
 
 //printf("\n-----------AFTER SYNTHESIS--------------\n");
