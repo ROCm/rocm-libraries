@@ -149,6 +149,37 @@ TEST_P(CPU_UnitTestConvSolverGemmFwdRestDevApplicabilityFwd_NONE, GemmFwdRest)
     this->RunTest(miopen::solver::conv::GemmFwdRest{});
 };
 
+TEST(CPU_UnitTestConvSolverGemmFwdRestFwd_NONE, RejectsUnsupportedInt8Output)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    const auto test_case = TestCase{
+        {1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, miopenInt8, miopenInt8, miopenHalf};
+    const auto problem = test_case.GetProblemDescription(miopen::conv::Direction::Forward);
+    auto context       = miopen::ExecutionContext{&get_handle()};
+    problem.SetupFloats(context);
+    problem.SetupComputeType(context);
+
+    EXPECT_FALSE(miopen::solver::conv::GemmFwdRest{}.IsApplicable(context, problem));
+}
+
+TEST(CPU_UnitTestConvSolverGemmFwdRestFwd_NONE, RejectsNonInt8WeightsForInt8Input)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    const auto test_case = TestCase{
+        {1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, miopenInt8, miopenFloat, miopenFloat};
+    const auto y_desc  = miopen::TensorDescriptor(miopenFloat, {1, 8, 6, 6});
+    const auto problem = miopen::conv::ProblemDescription(test_case.GetXTensorDescriptor(),
+                                                          test_case.GetWTensorDescriptor(),
+                                                          y_desc,
+                                                          test_case.GetConv(),
+                                                          miopen::conv::Direction::Forward);
+    auto context       = miopen::ExecutionContext{&get_handle()};
+
+    EXPECT_FALSE(miopen::solver::conv::GemmFwdRest{}.IsApplicable(context, problem));
+}
+
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverGemmFwdRestFwd_FP16,

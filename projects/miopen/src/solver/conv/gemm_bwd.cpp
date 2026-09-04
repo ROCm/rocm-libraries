@@ -71,7 +71,8 @@ bool GemmBwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(problem.HasNonPackedTensors())
         return false;
 
-    return problem.IsDirectionBackwardData() && problem.IsLayoutDefault() &&
+    return problem.IsDirectionBackwardData() &&
+           (problem.IsLayoutDefault() || problem.IsLayoutNHWC()) &&
            !(gemm::IsAnyBufferBf16(dxDesc, dyDesc, wDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(dxDesc, dyDesc, wDesc) && !gemm::IsFp16Supported);
 #else
@@ -227,6 +228,9 @@ bool GemmBwd1x1_stride2::IsApplicable(const ExecutionContext& context,
 {
 #if MIOPEN_USE_GEMM
     if(!GemmBwdBase::IsApplicable(context, problem))
+        return false;
+
+    if(!problem.IsLayoutDefault())
         return false;
 
     const auto& conv  = problem.GetConv();
@@ -464,6 +468,9 @@ bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
     if(!GemmBwdBase::IsApplicable(context, problem))
         return false;
 
+    if(!problem.IsLayoutDefault())
+        return false;
+
     const auto& conv  = problem.GetConv();
     const auto& wDesc = problem.GetWeights();
 
@@ -507,7 +514,7 @@ ConvSolution GemmBwd1x1_stride1::GetSolution(const ExecutionContext&,
             const auto tmp_gemm_desc = [&]() {
                 auto tmp =
                     group_count > 1
-                        ? CreateGemmDescriptorGroupConvBwdData(wDesc, dyDesc, dxDesc, group_count)
+                        ? CreateGemmDescriptorGroupConvBwdData(problem)
                         : CreateGemmStridedBatchedDescriptorConv1x1BwdData(wDesc, dyDesc, dxDesc);
                 tmp.deterministic = problem.GetConv().attribute.deterministic;
                 if(problem.IsTensorsCasted())
@@ -775,9 +782,8 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
 
     // dx = transpose(w) * dy
     const auto tmp_gemm_desc = [&]() {
-        auto tmp          = group_count > 1
-                                ? CreateGemmDescriptorGroupConvBwdData(wDesc, dyDesc, dxDesc, group_count)
-                                : CreateGemmDescriptorConvBwdData(wDesc, dyDesc, dxDesc);
+        auto tmp          = group_count > 1 ? CreateGemmDescriptorGroupConvBwdData(problem)
+                                            : CreateGemmDescriptorConvBwdData(problem);
         tmp.deterministic = problem.GetConv().attribute.deterministic;
         if(problem.IsTensorsCasted())
         {
@@ -857,6 +863,7 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
                     miopen::conv::IsBwdDataPointOutputDirectWritable(problem);
 
                 auto single_gemm_desc        = gemm_desc;
+                single_gemm_desc.isColMajor  = false;
                 single_gemm_desc.batch_count = 1;
                 single_gemm_desc.strideA     = 0;
                 single_gemm_desc.strideB     = 0;
@@ -983,7 +990,9 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
                                        in_spatial,
                                        dx,
                                        in_offset,
-                                       dyDesc_.GetType());
+                                       dyDesc_.GetType(),
+                                       problem.IsLayoutNHWC(),
+                                       problem.GetGroupCount());
             }
 
             if(handle.IsProfilingEnabled())
