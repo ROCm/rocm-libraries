@@ -320,6 +320,7 @@ template<> struct Dispatcher<int8_t, int8_t, int32_t, 16, 16, 32, false> { using
 template<> struct Dispatcher<int8_t, int8_t, int32_t, 16, 16, 32,  true> { using Type = WarpGemmMfma_i32_16x16x32_i8_i8_CTransposed; };
 // WMMA cases
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<int8_t, int8_t, int32_t, 16, 16, 16, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type = WarpGemmWmma_i32_16x16x16_i8_i8<TransposeC>; };
+template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<pk_int4_t, pk_int4_t, int32_t, 16, 16, 16, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type = WarpGemmWmma_i32_16x16x16_i4_i4<TransposeC>; };
 #if defined(__gfx125__)
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<int8_t, int8_t, int32_t, 16, 16, 64, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type = WarpGemmWmma_i32_16x16x64_i8_i8<TransposeC>; };
 #else

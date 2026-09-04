@@ -496,10 +496,15 @@ CK_TILE_HOST void reference_gemm(const HostTensor<ADataType>& a_m_k,
             else if constexpr(std::is_same_v<ADataType, pk_int4_t>)
             {
                 const pk_int4_t pk_val  = a_m_k(m, k);
-                const fp32x2_t fp32_val = pk_int4_t_to_fp32x2_t(pk_val);
-                std::size_t flat_off    = a_m_k.mDesc.GetOffsetFromMultiIndex(m, k);
-                const float unpacked    = (flat_off % 2 == 1) ? fp32_val.hi : fp32_val.lo;
-                v_a = ck_tile::type_convert<AccDataType>(a_element_op(unpacked));
+                const fp32x2_t fp32_val = [&]() {
+                    if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+                        return pk_int4_t_to_fp32x2_t_signed_conversion(pk_val);
+                    else
+                        return pk_int4_t_to_fp32x2_t(pk_val);
+                }();
+                std::size_t flat_off = a_m_k.mDesc.GetOffsetFromMultiIndex(m, k);
+                const float unpacked = (flat_off % 2 == 1) ? fp32_val.hi : fp32_val.lo;
+                v_a                  = ck_tile::type_convert<AccDataType>(a_element_op(unpacked));
             }
             else if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
             {
@@ -525,10 +530,15 @@ CK_TILE_HOST void reference_gemm(const HostTensor<ADataType>& a_m_k,
             else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
             {
                 const pk_int4_t pk_val  = b_k_n(k, n);
-                const fp32x2_t fp32_val = pk_int4_t_to_fp32x2_t(pk_val);
-                std::size_t flat_off    = b_k_n.mDesc.GetOffsetFromMultiIndex(k, n);
-                const float unpacked    = (flat_off % 2 == 1) ? fp32_val.hi : fp32_val.lo;
-                v_b = ck_tile::type_convert<AccDataType>(b_element_op(unpacked));
+                const fp32x2_t fp32_val = [&]() {
+                    if constexpr(std::is_same_v<ADataType, pk_int4_t>)
+                        return pk_int4_t_to_fp32x2_t_signed_conversion(pk_val);
+                    else
+                        return pk_int4_t_to_fp32x2_t(pk_val);
+                }();
+                std::size_t flat_off = b_k_n.mDesc.GetOffsetFromMultiIndex(k, n);
+                const float unpacked = (flat_off % 2 == 1) ? fp32_val.hi : fp32_val.lo;
+                v_b                  = ck_tile::type_convert<AccDataType>(b_element_op(unpacked));
             }
             else if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
             {
@@ -854,7 +864,12 @@ __global__ void naive_gemm_kernel(ADataType* A,
             AccDataType v_b;
             if constexpr(std::is_same_v<ADataType, pk_int4_t>)
             {
-                const fp32x2_t fp32_val = pk_int4_t_to_fp32x2_t(A[a_index / packed_size_a]);
+                const fp32x2_t fp32_val = [&]() {
+                    if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+                        return pk_int4_t_to_fp32x2_t_signed_conversion(A[a_index / packed_size_a]);
+                    else
+                        return pk_int4_t_to_fp32x2_t(A[a_index / packed_size_a]);
+                }();
                 if(k % 2 == 1)
                     v_a = fp32_val.hi;
                 else
@@ -874,7 +889,12 @@ __global__ void naive_gemm_kernel(ADataType* A,
             }
             if constexpr(std::is_same_v<BDataType, pk_int4_t>)
             {
-                const fp32x2_t fp32_val = pk_int4_t_to_fp32x2_t(B[b_index / packed_size_b]);
+                const fp32x2_t fp32_val = [&]() {
+                    if constexpr(std::is_same_v<ADataType, pk_int4_t>)
+                        return pk_int4_t_to_fp32x2_t_signed_conversion(B[b_index / packed_size_b]);
+                    else
+                        return pk_int4_t_to_fp32x2_t(B[b_index / packed_size_b]);
+                }();
                 if(k % 2 == 1)
                     v_b = fp32_val.hi;
                 else

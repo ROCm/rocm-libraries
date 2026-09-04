@@ -117,6 +117,14 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
         target_compile_options(test_ck_tile_gemm_pipeline_compv4_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS})
         target_compile_options(test_ck_tile_gemm_pipeline_persistent_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
 
+        if(GPU_TARGETS MATCHES "gfx11")
+            add_gtest_executable(test_ck_tile_gemm_basic_v1_wmma_i4
+                test_gemm_basic_v1_wmma_i4.cpp)
+            target_compile_options(test_ck_tile_gemm_basic_v1_wmma_i4
+                PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+            list(APPEND CK_TILE_GEMM_TEST_TARGETS test_ck_tile_gemm_basic_v1_wmma_i4)
+        endif()
+
         list(APPEND CK_TILE_GEMM_TEST_TARGETS
             test_ck_tile_gemm_pipeline_mem_wmma
             test_ck_tile_gemm_pipeline_compv3_wmma

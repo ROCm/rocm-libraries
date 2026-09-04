@@ -33,6 +33,9 @@ struct GemmConfigBase
     static constexpr bool Preshuffle                = false;
     static constexpr bool TiledMMAPermuteN          = false;
 
+    static constexpr bool FixedVectorSizeC        = false;
+    static constexpr ck_tile::index_t VectorSizeC = 1;
+
     static constexpr ck_tile::index_t kClusterSizeM       = 1;
     static constexpr ck_tile::index_t kClusterSizeN       = 1;
     static constexpr ck_tile::index_t BlockedXDLN_PerWarp = 1;
@@ -41,6 +44,41 @@ struct GemmConfigBase
     static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchB =
         ck_tile::DataCachePrefetchKind::None;
     static constexpr bool Async = false;
+};
+
+struct GemmConfigI4 : public GemmConfigBase
+{
+    static constexpr bool kPadM = true;
+    static constexpr bool kPadN = true;
+    static constexpr bool kPadK = true;
+
+    static constexpr ck_tile::index_t M_Tile = 16;
+    static constexpr ck_tile::index_t N_Tile = 128;
+    static constexpr ck_tile::index_t K_Tile = 128;
+
+    static constexpr ck_tile::index_t M_Warp = 1;
+    static constexpr ck_tile::index_t N_Warp = 8;
+    static constexpr ck_tile::index_t K_Warp = 1;
+
+    static constexpr ck_tile::index_t VectorSizeC = 16 / sizeof(int32_t);
+};
+
+struct GemmConfigI4SmallM : public GemmConfigI4
+{
+    static constexpr ck_tile::index_t N_Tile = 32;
+    static constexpr ck_tile::index_t N_Warp = 2;
+};
+
+struct GemmConfigI4Tail : public GemmConfigI4
+{
+    static constexpr bool FixedVectorSizeC        = true;
+    static constexpr ck_tile::index_t VectorSizeC = 1;
+};
+
+struct GemmConfigI4SmallMTail : public GemmConfigI4SmallM
+{
+    static constexpr bool FixedVectorSizeC        = true;
+    static constexpr ck_tile::index_t VectorSizeC = 1;
 };
 
 template <typename PrecType>
@@ -467,6 +505,15 @@ struct GemmTypeConfig<ck_tile::half_t, ck_tile::pk_int4_t, ck_tile::half_t>
 };
 
 template <>
+struct GemmTypeConfig<ck_tile::pk_int4_t, ck_tile::pk_int4_t, int32_t>
+{
+    using ADataType   = ck_tile::pk_int4_t;
+    using BDataType   = ck_tile::pk_int4_t;
+    using AccDataType = int32_t;
+    using CDataType   = int32_t;
+};
+
+template <>
 struct GemmTypeConfig<ck_tile::int8_t, ck_tile::int8_t, int32_t>
 {
     using ADataType   = ck_tile::int8_t;
@@ -641,7 +688,9 @@ inline auto create_args()
         .insert("stride_b", "0", "Tensor B stride")
         .insert("stride_c", "0", "Tensor C stride")
         .insert("v", "2", "0. No validation, 1. Validation on CPU, 2. Validation on GPU")
-        .insert("prec", "fp16", "data type. fp16/bf16/fp8/bf8/pk_int4_t/tf32 (tf32 only on gfx950)")
+        .insert("prec",
+                "fp16",
+                "data type. fp16/bf16/fp8/bf8/i8/i4/pk_int4_t/tf32 (tf32 only on gfx950)")
         .insert("warmup", "50", "number of iterations before benchmark the kernel")
         .insert("repeat", "100", "number of iterations to benchmark the kernel")
         .insert("timer", "gpu", "gpu:gpu timer, cpu:cpu timer")

@@ -21,6 +21,7 @@
 enum struct GemmPipelineType
 {
     Mem,
+    BasicV1,
     CompV3,
     CompV4,
     CompV6,
@@ -117,6 +118,15 @@ struct GemmPipelineTypeSelector<GemmPipelineType::Mem, Problem>
     using pipeline      = ck_tile::GemmPipelineAgBgCrMem<Problem>;
 
     static constexpr auto GetName() { return "GemmPipelineAgBgCrMem"; }
+};
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::BasicV1, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAGmemBGmemCRegV1<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAGmemBGmemCRegV1<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAGmemBGmemCRegV1"; }
 };
 
 template <typename Problem>
@@ -267,14 +277,29 @@ class TestCkTileGemmPipeline : public ::testing::Test
     static constexpr bool ClusterLaunch =
         ck_tile::tuple_element_or_default_t<Tuple, 15, std::false_type>::value;
 
+    using DefaultMWarpCount =
+        std::conditional_t<PipelineType == GemmPipelineType::CompAsyncEightWaves,
+                           ck_tile::number<4>,
+                           ck_tile::number<2>>;
+    static constexpr ck_tile::index_t M_Warp_Count =
+        ck_tile::tuple_element_or_default_t<Tuple, 16, DefaultMWarpCount>::value;
+    static constexpr ck_tile::index_t N_Warp_Count =
+        ck_tile::tuple_element_or_default_t<Tuple, 17, ck_tile::number<2>>::value;
+    static constexpr ck_tile::index_t K_Warp_Count =
+        ck_tile::tuple_element_or_default_t<Tuple, 18, ck_tile::number<1>>::value;
+
+    static constexpr bool FixedVectorSizeC =
+        ck_tile::tuple_element_or_default_t<Tuple, 19, std::false_type>::value;
+    static constexpr ck_tile::index_t VectorSizeC =
+        ck_tile::tuple_element_or_default_t<Tuple, 20, ck_tile::number<1>>::value;
+
     protected:
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
     void invoke_gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
     {
-        constexpr ck_tile::index_t M_Warp =
-            PipelineType == GemmPipelineType::CompAsyncEightWaves ? 4 : 2;
-        constexpr ck_tile::index_t N_Warp = 2;
-        constexpr ck_tile::index_t K_Warp = 1;
+        constexpr ck_tile::index_t M_Warp = M_Warp_Count;
+        constexpr ck_tile::index_t N_Warp = N_Warp_Count;
+        constexpr ck_tile::index_t K_Warp = K_Warp_Count;
 
         // if cluster launch is enabled, set cluster dim to 2x2x1
         constexpr ck_tile::index_t kClusterSizeM =
@@ -386,8 +411,8 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                              K_Warp_Tile,
                                              UniversalGemmProblem::TransposeC,
                                              1,                /*kNumWaveGroups_*/
-                                             false,            /*FixedVectorSize_*/
-                                             1,                /*VectorSizeC_*/
+                                             FixedVectorSizeC, /*FixedVectorSize_*/
+                                             VectorSizeC,      /*VectorSizeC_*/
                                              1,                /*BlockedXDLN_PerWarp_*/
                                              DoubleSmemBuffer, /*DoubleSmemBuffer*/
                                              AComputeDataType, /*AComputeDataType_*/
@@ -529,14 +554,34 @@ class TestCkTileGemmPipeline : public ::testing::Test
         ck_tile::HostTensor<CDataType> c_m_n_dev_result(
             ck_tile::host_tensor_descriptor(M, N, stride_C, is_row_major(CLayout{})));
 
-        ck_tile::FillUniformDistributionIntegerValue<ADataType>{-5, 5, 11939}(a_m_k);
-        ck_tile::FillUniformDistributionIntegerValue<BDataType>{-5, 5, 11940}(b_k_n);
+        if constexpr(std::is_same_v<ADataType, ck_tile::pk_int4_t> &&
+                     std::is_same_v<BDataType, ck_tile::pk_int4_t>)
+        {
+            for(std::size_t i = 0; i < a_m_k.mData.size(); ++i)
+            {
+                const auto lo       = static_cast<uint8_t>((5 * i + 1) & 0xf);
+                const auto hi       = static_cast<uint8_t>((7 * i + 8) & 0xf);
+                a_m_k.mData[i].data = ck_tile::bit_cast<int8_t>(static_cast<uint8_t>(lo | hi << 4));
+            }
+            for(std::size_t i = 0; i < b_k_n.mData.size(); ++i)
+            {
+                const auto lo       = static_cast<uint8_t>((3 * i + 2) & 0xf);
+                const auto hi       = static_cast<uint8_t>((11 * i + 9) & 0xf);
+                b_k_n.mData[i].data = ck_tile::bit_cast<int8_t>(static_cast<uint8_t>(lo | hi << 4));
+            }
+        }
+        else
+        {
+            ck_tile::FillUniformDistributionIntegerValue<ADataType>{-5, 5, 11939}(a_m_k);
+            ck_tile::FillUniformDistributionIntegerValue<BDataType>{-5, 5, 11940}(b_k_n);
+        }
 
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size_in_bytes());
         ck_tile::DeviceMem c_m_n_dev_buf(c_m_n_dev_result.get_element_space_size_in_bytes());
 
-        if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
+        if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t> &&
+                     !std::is_same_v<ADataType, ck_tile::pk_int4_t>)
         {
             ck_tile::HostTensor<BDataType> b_k_n_dev = b_k_n;
             permute_vectors_i4x4_b(b_k_n_dev);
@@ -574,15 +619,27 @@ class TestCkTileGemmPipeline : public ::testing::Test
         ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(
             a_m_k, b_k_n, c_m_n_host_ref);
 
-        const float max_accumulated_value =
-            *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
-        const auto rtol_atol = calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
-            K, kbatch, max_accumulated_value);
-        pass = ck_tile::check_err(c_m_n_dev_result,
-                                  c_m_n_host_ref,
-                                  "Error: Incorrect results!",
-                                  rtol_atol.at(ck_tile::number<0>{}),
-                                  rtol_atol.at(ck_tile::number<1>{}));
+        if constexpr(std::is_same_v<ADataType, ck_tile::pk_int4_t> &&
+                     std::is_same_v<BDataType, ck_tile::pk_int4_t> &&
+                     std::is_same_v<AccDataType, ck_tile::int32_t> &&
+                     std::is_same_v<CDataType, ck_tile::int32_t>)
+        {
+            pass = ck_tile::check_err(
+                c_m_n_dev_result, c_m_n_host_ref, "Error: Incorrect results!", 0, 0);
+        }
+        else
+        {
+            const float max_accumulated_value =
+                *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
+            const auto rtol_atol =
+                calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
+                    K, kbatch, max_accumulated_value);
+            pass = ck_tile::check_err(c_m_n_dev_result,
+                                      c_m_n_host_ref,
+                                      "Error: Incorrect results!",
+                                      rtol_atol.at(ck_tile::number<0>{}),
+                                      rtol_atol.at(ck_tile::number<1>{}));
+        }
         EXPECT_TRUE(pass);
     }
 };

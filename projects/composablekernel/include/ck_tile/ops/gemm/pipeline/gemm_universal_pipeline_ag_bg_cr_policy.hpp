@@ -948,6 +948,8 @@ struct UniversalGemmBasePolicy
 
         using ALayout = remove_cvref_t<
             std::tuple_element_t<number<0>{}, remove_cvref_t<typename Problem::AsLayoutTuple>>>;
+        constexpr bool IsPackedA =
+            numeric_traits<remove_cvref_t<typename Problem::ADataType>>::PackedSize > 1;
         // Tile: MPerBlock X KPerBlock
         if constexpr(std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>)
         {
@@ -958,7 +960,15 @@ struct UniversalGemmBasePolicy
                                                       VecLoadSize,
                                                       getATileAccessPattern(),
                                                       NumWaveGroups>;
-            return TileEncodingPattern::make_2d_static_tile_distribution();
+            if constexpr(IsPackedA &&
+                         getATileAccessPattern() == tile_distribution_pattern::thread_raked)
+            {
+                return TileEncodingPattern::template make_2d_static_tile_distribution<true>();
+            }
+            else
+            {
+                return TileEncodingPattern::make_2d_static_tile_distribution();
+            }
         }
         // Tile: KPerBlock X MPerBlock
         else
@@ -970,7 +980,15 @@ struct UniversalGemmBasePolicy
                                                       VecLoadSize,
                                                       getATileAccessPattern(),
                                                       NumWaveGroups>;
-            return TileEncodingPattern::make_2d_static_tile_distribution();
+            if constexpr(IsPackedA &&
+                         getATileAccessPattern() == tile_distribution_pattern::thread_raked)
+            {
+                return TileEncodingPattern::template make_2d_static_tile_distribution<true>();
+            }
+            else
+            {
+                return TileEncodingPattern::make_2d_static_tile_distribution();
+            }
         }
     }
 
@@ -990,8 +1008,10 @@ struct UniversalGemmBasePolicy
                 : (problem_fixed_vector_size_v<Problem> ? Problem::VectorSizeB
                                                         : GetVectorSizeB<Problem>());
         constexpr index_t NumWaveGroups = Problem::NumWaveGroups;
-        using BLayout                   = remove_cvref_t<
-                              std::tuple_element_t<number<0>{}, remove_cvref_t<typename Problem::BsLayoutTuple>>>;
+        constexpr bool IsPackedB =
+            numeric_traits<remove_cvref_t<typename Problem::BDataType>>::PackedSize > 1;
+        using BLayout = remove_cvref_t<
+            std::tuple_element_t<number<0>{}, remove_cvref_t<typename Problem::BsLayoutTuple>>>;
         // Tile: KPerBlock X NPerBlock
         if constexpr(std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>)
         {
@@ -1002,7 +1022,15 @@ struct UniversalGemmBasePolicy
                                                       VecLoadSize,
                                                       getBTileAccessPattern(),
                                                       NumWaveGroups>;
-            return TileEncodingPattern::make_2d_static_tile_distribution();
+            if constexpr(IsPackedB &&
+                         getBTileAccessPattern() == tile_distribution_pattern::thread_raked)
+            {
+                return TileEncodingPattern::template make_2d_static_tile_distribution<true>();
+            }
+            else
+            {
+                return TileEncodingPattern::make_2d_static_tile_distribution();
+            }
         }
         // Tile: NPerBlock X KPerBlock
         else
@@ -1014,7 +1042,15 @@ struct UniversalGemmBasePolicy
                                                       VecLoadSize,
                                                       getBTileAccessPattern(),
                                                       NumWaveGroups>;
-            return TileEncodingPattern::make_2d_static_tile_distribution();
+            if constexpr(IsPackedB &&
+                         getBTileAccessPattern() == tile_distribution_pattern::thread_raked)
+            {
+                return TileEncodingPattern::template make_2d_static_tile_distribution<true>();
+            }
+            else
+            {
+                return TileEncodingPattern::make_2d_static_tile_distribution();
+            }
         }
     }
 

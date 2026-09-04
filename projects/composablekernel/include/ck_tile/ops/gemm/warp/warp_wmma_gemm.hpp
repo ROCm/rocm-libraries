@@ -50,6 +50,13 @@ using WarpGemmWmma_i32_16x16x16_i8_i8 =
                                        AttrNumAccess>>;
 
 template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+using WarpGemmWmma_i32_16x16x16_i4_i4 =
+    WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_i32_16x16x16_i4_i4,
+                                       kTransC,
+                                       AttrNumAccess,
+                                       AttrNumAccess>>;
+
+template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
 using WarpGemmWmma_f32_16x16x16_f8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x16_f8_f8,
                                        kTransC,

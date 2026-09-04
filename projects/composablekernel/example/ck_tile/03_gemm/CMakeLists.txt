@@ -36,3 +36,8 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx125")
     target_compile_definitions(tile_example_gemm_universal_cluster_launch PRIVATE CLUSTER_LAUNCH_ENABLED=1)
   endif()
 endif()
+
+if(GPU_TARGETS MATCHES "gfx11")
+  add_executable(tile_example_gemm_gfx11_i4 gemm_basic.cpp)
+  target_compile_options(tile_example_gemm_gfx11_i4 PRIVATE -mllvm -enable-noalias-to-md-conversion=0)
+endif()
