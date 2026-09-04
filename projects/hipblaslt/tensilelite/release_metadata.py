@@ -19,7 +19,7 @@ def canonical_rocm_version(value: str) -> str:
     value = re.sub(r"[-_+]+", ".", value.strip().lower()).strip(".")
     if not _ROCM_RELEASE_RE.fullmatch(value):
         raise RuntimeError(
-            "ROCm Python package builds require a release such as '7.2.4'; "
+            "ROCm Python package builds require an identity such as '7.2.4' or '10.1.0a20260813'; "
             f"got {value!r}"
         )
     return value
@@ -35,8 +35,14 @@ def component_version() -> str:
 
 
 def distribution_version(rocm_version: str) -> str:
-    """Compose the distribution version from the selected base ROCm version."""
-    return f"{component_version()}+rocm{canonical_rocm_version(rocm_version)}"
+    """Compose the distribution version from the selected ROCm identity."""
+    rocm_version = canonical_rocm_version(rocm_version)
+    if ".dev" in rocm_version:
+        # A wheel has only one local-version separator. Preserve the complete
+        # TheRock development identity after a distinct local tag instead of
+        # embedding its internal '+' verbatim.
+        return f"{component_version()}+devrocm{rocm_version}"
+    return f"{component_version()}+rocm{rocm_version}"
 
 
 if __name__ == "__main__":
