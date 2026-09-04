@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 
 namespace hipdnn_integration_tests::bundle
@@ -31,9 +32,12 @@ std::optional<TensorMismatch>
                   const std::string& contextLine)
 {
     const auto dataType = attrs.data_type();
+    const bool useRms = tolerance.kind == ValidatorKind::RMS;
 
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        dataType, tolerance.atol, tolerance.rtol);
+    auto validator
+        = useRms ? hipdnn_test_sdk::utilities::createRmsValidator(dataType, tolerance.rmsThreshold)
+                 : hipdnn_test_sdk::utilities::createAllCloseValidator(
+                       dataType, tolerance.atol, tolerance.rtol);
     if(validator->allClose(expected, actual))
     {
         return std::nullopt;
@@ -47,23 +51,38 @@ std::optional<TensorMismatch>
     ctx.dtypeName = hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
     ctx.atol = tolerance.atol;
     ctx.rtol = tolerance.rtol;
+    if(useRms)
+    {
+        // atol/rtol did not decide this failure, so do not print them as if they had.
+        std::ostringstream summary;
+        summary << "relative RMS <= " << tolerance.rmsThreshold
+                << "  (aggregate check — the element counts below are elements that "
+                   "differ at all, not elements that failed)";
+        ctx.toleranceSummary = summary.str();
+    }
 
     std::ostringstream report;
     report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, expected);
-    hipdnn_test_sdk::utilities::appendComparisonDiffByDataType(
-        report, dataType, label, expected, actual, tolerance.atol, tolerance.rtol);
+    // Zero tolerances under RMS: the per-element budget is not what was checked, and a
+    // full drift profile (max/mean abs diff, worst elements) is the useful diagnostic.
+    hipdnn_test_sdk::utilities::appendComparisonDiffByDataType(report,
+                                                               dataType,
+                                                               label,
+                                                               expected,
+                                                               actual,
+                                                               useRms ? 0.0f : tolerance.atol,
+                                                               useRms ? 0.0f : tolerance.rtol);
 
     return TensorMismatch{uid, label, report.str()};
 }
 
-std::vector<TensorMismatch> compareOutputs(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-    const std::vector<int64_t>& outputUids,
-    OutputTensors& actual,
-    const ExpectedTensorLookup& expectedFor,
-    const std::function<ComparisonTolerance(hipdnn_flatbuffers_sdk::data_objects::DataType)>&
-        toleranceFor,
-    const std::string& contextLine)
+std::vector<TensorMismatch>
+    compareOutputs(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+                   const std::vector<int64_t>& outputUids,
+                   OutputTensors& actual,
+                   const ExpectedTensorLookup& expectedFor,
+                   const ToleranceLookup& toleranceFor,
+                   const std::string& contextLine)
 {
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
@@ -71,12 +90,13 @@ std::vector<TensorMismatch> compareOutputs(
     for(const int64_t uid : outputUids)
     {
         const auto* attrs = tensorAttrMap.at(uid);
-        auto mismatch = compareTensor(uid,
-                                      *attrs,
-                                      expectedFor(uid),
-                                      *actual.at(uid),
-                                      toleranceFor(attrs->data_type()),
-                                      contextLine);
+        auto mismatch
+            = compareTensor(uid,
+                            *attrs,
+                            expectedFor(uid),
+                            *actual.at(uid),
+                            toleranceFor(uid, tensorLabel(uid, *attrs), attrs->data_type()),
+                            contextLine);
         if(mismatch.has_value())
         {
             mismatches.push_back(*std::move(mismatch));

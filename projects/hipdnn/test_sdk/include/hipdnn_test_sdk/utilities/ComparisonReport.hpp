@@ -22,6 +22,9 @@ struct ComparisonContext
     std::string dtypeName;
     float atol = 0.0f;
     float rtol = 0.0f;
+    /// Replaces the "atol=… rtol=…" line when set, for checks that atol/rtol do not
+    /// describe (e.g. an aggregate relative-RMS comparison).
+    std::string toleranceSummary;
 };
 
 inline std::string formatComparisonHeader(const ComparisonContext& ctx,
@@ -31,8 +34,15 @@ inline std::string formatComparisonHeader(const ComparisonContext& ctx,
     os << "\nComparison FAILED\n"
        << "  " << ctx.contextLine << "\n"
        << "  Tensor: " << ctx.tensorLabel << "\n"
-       << "  Shape:  " << StreamVec(tensor.dims()) << "  " << ctx.dtypeName << "\n"
-       << "  Tolerance: atol=" << ctx.atol << " rtol=" << ctx.rtol << "\n";
+       << "  Shape:  " << StreamVec(tensor.dims()) << "  " << ctx.dtypeName << "\n";
+    if(ctx.toleranceSummary.empty())
+    {
+        os << "  Tolerance: atol=" << ctx.atol << " rtol=" << ctx.rtol << "\n";
+    }
+    else
+    {
+        os << "  Tolerance: " << ctx.toleranceSummary << "\n";
+    }
     return os.str();
 }
 

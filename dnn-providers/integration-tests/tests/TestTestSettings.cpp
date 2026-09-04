@@ -296,6 +296,176 @@ rtol = 5e-2
 }
 
 // ---------------------------------------------------------------------------
+// [[validator_overrides]]
+//
+// allclose is the default everywhere and this section is the only thing that can
+// change it, so the parser is strict: an entry that does not say exactly what it
+// means is a load error, not a silent fall-back to allclose. ALMIOPEN-2561.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+const char* const K_RMS_CONFIG = R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE", "*::DBIAS"]
+validator = "rms"
+rms_threshold = 1e-4
+)";
+
+} // namespace
+
+TEST(TestSettingsValidatorOverrides, NoOverridesMeansNoOverride)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+)");
+
+    const TestSettings settings(file.path());
+    EXPECT_EQ(settings.validatorOverrideCount(), 0U);
+    EXPECT_FALSE(settings.findValidatorOverride("AnyTest", "AnyTensor").has_value());
+}
+
+TEST(TestSettingsValidatorOverrides, MatchesOnBothTestNameAndTensorLabel)
+{
+    const TempTomlFile file(K_RMS_CONFIG);
+    const TestSettings settings(file.path());
+
+    ASSERT_EQ(settings.validatorOverrideCount(), 1U);
+
+    const auto hit = settings.findValidatorOverride(
+        "Smoke/IntegrationGpuLayernormBackwardPure5DFp32.Correctness/9",
+        "LayernormBackward_0::DSCALE");
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit->kind, hipdnn_integration_tests::ValidatorOverrideKind::RMS);
+    EXPECT_FLOAT_EQ(hit->rmsThreshold, 1e-4F);
+}
+
+// The tensor glob is what keeps dx on allclose while dscale moves to RMS. Matching
+// on the test name alone would take the whole graph with it.
+TEST(TestSettingsValidatorOverrides, OtherTensorsInTheSameTestAreUnaffected)
+{
+    const TempTomlFile file(K_RMS_CONFIG);
+    const TestSettings settings(file.path());
+
+    EXPECT_FALSE(
+        settings
+            .findValidatorOverride("Smoke/IntegrationGpuLayernormBackwardPure5DFp32.Correctness/9",
+                                   "LayernormBackward_0::DX")
+            .has_value());
+}
+
+TEST(TestSettingsValidatorOverrides, OtherTestsWithTheSameTensorNameAreUnaffected)
+{
+    const TempTomlFile file(K_RMS_CONFIG);
+    const TestSettings settings(file.path());
+
+    EXPECT_FALSE(
+        settings
+            .findValidatorOverride("Smoke/IntegrationGpuRMSNormBackwardPureFp32.Correctness/0",
+                                   "RMSNormBackward_0::DSCALE")
+            .has_value());
+}
+
+TEST(TestSettingsValidatorOverrides, LaterEntriesTakePrecedence)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE"]
+validator = "rms"
+rms_threshold = 1e-4
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*Bfp16*"]
+tensors = ["*::DSCALE"]
+validator = "allclose"
+)");
+
+    const TestSettings settings(file.path());
+
+    const auto fp32
+        = settings.findValidatorOverride("Smoke/LayernormBackwardFp32.C/0", "x::DSCALE");
+    ASSERT_TRUE(fp32.has_value());
+    EXPECT_EQ(fp32->kind, hipdnn_integration_tests::ValidatorOverrideKind::RMS);
+
+    const auto bf16
+        = settings.findValidatorOverride("Smoke/LayernormBackwardBfp16.C/0", "x::DSCALE");
+    ASSERT_TRUE(bf16.has_value());
+    EXPECT_EQ(bf16->kind, hipdnn_integration_tests::ValidatorOverrideKind::ALLCLOSE);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnMissingTensors)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+validator = "rms"
+rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnUnknownValidatorKind)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE"]
+validator = "relative-rms"
+rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnRmsWithoutThreshold)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE"]
+validator = "rms"
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnNonPositiveRmsThreshold)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE"]
+validator = "rms"
+rms_threshold = 0.0
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+// ---------------------------------------------------------------------------
 // [[test_skips]] parsing
 // ---------------------------------------------------------------------------
 

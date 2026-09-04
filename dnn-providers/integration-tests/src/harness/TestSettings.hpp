@@ -38,6 +38,22 @@ struct ToleranceOverride
     float rtol;
 };
 
+// Which comparison an output tensor is graded by. Mirrors
+// bundle::ValidatorKind, kept separate so TestSettings stays free of the
+// comparison headers.
+enum class ValidatorOverrideKind
+{
+    ALLCLOSE,
+    RMS,
+};
+
+struct ValidatorOverride
+{
+    ValidatorOverrideKind kind;
+    // Relative-RMS threshold. Meaningful only when kind == RMS.
+    float rmsThreshold;
+};
+
 // Loads a per-engine TOML settings file for integration tests.
 // Currently supports tolerance overrides and arch-scoped test skips;
 // additional settings (knobs, support matrix, etc.) will be added in
@@ -51,6 +67,12 @@ struct ToleranceOverride
 //   filters = ["*convolution*fp16*"]
 //   atol = 1e-3
 //   rtol = 1e-2
+//
+//   [[validator_overrides]]
+//   filters       = ["*LayernormBackward*"]
+//   tensors       = ["*::DSCALE", "*::DBIAS"]
+//   validator     = "rms"
+//   rms_threshold = 1e-4
 //
 //   [[test_skips]]
 //   archs     = ["gfx1100", "gfx1101"]
@@ -66,6 +88,11 @@ struct ToleranceOverride
 // Filters use GTest-style globs (globMatch with * wildcards).
 // For tolerance_overrides, later entries take precedence over earlier
 // ones when multiple filters match.
+// For validator_overrides, an entry applies when a 'filters' glob matches the
+// gtest-formatted test name AND a 'tensors' glob matches the output tensor's
+// label (its name, or "uid=N" when the graph did not name it). Later entries
+// take precedence. Absent any match, allclose is used — allclose is the default
+// and nothing else can select a validator. See ALMIOPEN-2561.
 // For test_skips, an entry matches when ALL of:
 //   - 'archs' is omitted/empty (any arch), OR any 'archs' value is a
 //     substring of the device's raw gcnArchName.
@@ -87,6 +114,14 @@ public:
             for(const auto& node : *arr)
             {
                 _overrides.push_back(parseToleranceOverride(node));
+            }
+        }
+
+        if(auto* arr = table["validator_overrides"].as_array())
+        {
+            for(const auto& node : *arr)
+            {
+                _validatorOverrides.push_back(parseValidatorOverride(node));
             }
         }
 
@@ -125,6 +160,44 @@ public:
     size_t toleranceOverrideCount() const
     {
         return _overrides.size();
+    }
+
+    // Find a validator override for one output tensor of one test.
+    // Returns the last matching entry (later entries take precedence), or
+    // std::nullopt when nothing matches — which means allclose.
+    std::optional<ValidatorOverride> findValidatorOverride(std::string_view testName,
+                                                           std::string_view tensorLabel) const
+    {
+        std::optional<ValidatorOverride> result;
+        const std::string testNameStr(testName);
+        const std::string tensorLabelStr(tensorLabel);
+
+        for(const auto& entry : _validatorOverrides)
+        {
+            const bool testMatches
+                = std::any_of(entry.filters.begin(), entry.filters.end(), [&](const auto& f) {
+                      return globMatch(f, testNameStr);
+                  });
+            if(!testMatches)
+            {
+                continue;
+            }
+            const bool tensorMatches
+                = std::any_of(entry.tensors.begin(), entry.tensors.end(), [&](const auto& t) {
+                      return globMatch(t, tensorLabelStr);
+                  });
+            if(tensorMatches)
+            {
+                result = ValidatorOverride{entry.kind, entry.rmsThreshold};
+            }
+        }
+
+        return result;
+    }
+
+    size_t validatorOverrideCount() const
+    {
+        return _validatorOverrides.size();
     }
 
     // Find a skip rule matching the given test name, device, and platform.
@@ -199,6 +272,14 @@ private:
         std::vector<std::string> filters;
         float atol;
         float rtol;
+    };
+
+    struct ValidatorEntry
+    {
+        std::vector<std::string> filters;
+        std::vector<std::string> tensors;
+        ValidatorOverrideKind kind;
+        float rmsThreshold;
     };
 
     struct SkipEntry
@@ -285,6 +366,67 @@ private:
         return parsed;
     }
 
+    static ValidatorEntry parseValidatorOverride(const toml::node& node)
+    {
+        static constexpr const char* K_SECTION = "TestSettings: [[validator_overrides]]";
+
+        const auto* table = node.as_table();
+        if(table == nullptr)
+        {
+            throw std::runtime_error(std::string(K_SECTION) + " entry is not a table");
+        }
+
+        ValidatorEntry parsed;
+        parsed.filters = parseStringArray(*table, "filters", K_SECTION);
+        if(parsed.filters.empty())
+        {
+            throw std::runtime_error(std::string(K_SECTION) + " entry missing 'filters' array");
+        }
+
+        parsed.tensors = parseStringArray(*table, "tensors", K_SECTION);
+        if(parsed.tensors.empty())
+        {
+            throw std::runtime_error(std::string(K_SECTION)
+                                     + " entry missing 'tensors' array — a validator override "
+                                       "names the tensors it applies to, never a whole test");
+        }
+
+        auto validator = (*table)["validator"].value<std::string>();
+        if(!validator.has_value())
+        {
+            throw std::runtime_error(std::string(K_SECTION) + " entry missing 'validator'");
+        }
+
+        if(*validator == "allclose")
+        {
+            parsed.kind = ValidatorOverrideKind::ALLCLOSE;
+            parsed.rmsThreshold = 0.0f;
+            return parsed;
+        }
+        if(*validator != "rms")
+        {
+            throw std::runtime_error(std::string(K_SECTION) + " entry has unknown validator '"
+                                     + *validator + R"~(' (expected "allclose" or "rms"))~");
+        }
+
+        parsed.kind = ValidatorOverrideKind::RMS;
+        auto threshold = (*table)["rms_threshold"].value<double>();
+        if(!threshold.has_value())
+        {
+            throw std::runtime_error(
+                std::string(K_SECTION)
+                + R"~( entry with validator = "rms" missing 'rms_threshold')~");
+        }
+        if(!(*threshold > 0.0))
+        {
+            throw std::runtime_error(std::string(K_SECTION) + " entry has non-positive "
+                                     + "'rms_threshold'");
+        }
+        parsed.rmsThreshold = static_cast<float>(*threshold);
+
+        return parsed;
+    }
+
     static SkipEntry parseTestSkip(const toml::node& node)
     {
         static constexpr const char* K_SECTION = "TestSettings: [[test_skips]]";
@@ -316,6 +458,7 @@ private:
     }
 
     std::vector<OverrideEntry> _overrides;
+    std::vector<ValidatorEntry> _validatorOverrides;
     std::vector<SkipEntry> _skips;
 };
 

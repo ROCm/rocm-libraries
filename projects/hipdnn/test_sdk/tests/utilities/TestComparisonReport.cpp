@@ -19,7 +19,7 @@ using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
 TEST(TestFormatComparisonHeader, ContainsAllFields)
 {
     const ComparisonContext ctx{
-        "Bundle: /path/to/bundle", "output_tensor (UID 42, output)", "FLOAT", 1e-5f, 1e-4f};
+        "Bundle: /path/to/bundle", "output_tensor (UID 42, output)", "FLOAT", 1e-5f, 1e-4f, ""};
 
     const Tensor<float> tensor({2, 3, 4});
     const std::string header = formatComparisonHeader(ctx, tensor);
@@ -34,13 +34,28 @@ TEST(TestFormatComparisonHeader, ContainsAllFields)
 
 TEST(TestFormatComparisonHeader, IncludesShape)
 {
-    const ComparisonContext ctx{"Test: MyTest.Case", "x", "HALF", 0.0f, 0.0f};
+    const ComparisonContext ctx{"Test: MyTest.Case", "x", "HALF", 0.0f, 0.0f, ""};
 
     const Tensor<float> tensor({8, 16});
     const std::string header = formatComparisonHeader(ctx, tensor);
 
     EXPECT_NE(header.find("Shape:"), std::string::npos);
     EXPECT_NE(header.find("8, 16"), std::string::npos);
+}
+
+// A check that atol/rtol do not describe says so, instead of printing two numbers that
+// had nothing to do with the verdict.
+TEST(TestFormatComparisonHeader, ToleranceSummaryReplacesAtolRtol)
+{
+    const ComparisonContext ctx{
+        "Test: MyTest.Case", "dscale", "FLOAT", 1e-5f, 1e-4f, "relative RMS <= 0.0001"};
+
+    const Tensor<float> tensor({8, 16});
+    const std::string header = formatComparisonHeader(ctx, tensor);
+
+    EXPECT_NE(header.find("relative RMS <= 0.0001"), std::string::npos);
+    EXPECT_EQ(header.find("atol="), std::string::npos);
+    EXPECT_EQ(header.find("rtol="), std::string::npos);
 }
 
 // =================================================================================================

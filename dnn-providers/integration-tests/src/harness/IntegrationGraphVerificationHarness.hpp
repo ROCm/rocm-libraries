@@ -265,6 +265,10 @@ protected:
         registerValidator(attr, tolerance, tolerance);
     }
 
+    // Registers the comparison for one output tensor. allclose at the resolved
+    // tolerance, unless the engine's TOML config names this tensor in a
+    // [[validator_overrides]] entry — the only thing that can select a different
+    // validator. See ALMIOPEN-2561.
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
                            float absoluteTolerance,
                            float relativeTolerance)
@@ -273,40 +277,33 @@ protected:
         float finalRtol = relativeTolerance;
         applyTomlToleranceOverride(currentTestName(), finalAtol, finalRtol);
 
-        _deferredValidators.emplace_back([this, attr, finalAtol, finalRtol]() {
+        const auto testName = currentTestName();
+        _deferredValidators.emplace_back([this, attr, testName, finalAtol, finalRtol]() {
             auto sdkDataType
                 = hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type());
-            auto [it, inserted] = _tensorValidationMap.insert(
-                {attr->get_uid(),
-                 TensorValidationEntry{hipdnn_test_sdk::utilities::createAllCloseValidator(
-                                           sdkDataType, finalAtol, finalRtol),
-                                       attr->get_name(),
-                                       finalAtol,
-                                       finalRtol,
-                                       sdkDataType}});
-            if(!inserted)
-            {
-                ADD_FAILURE() << "Duplicate validator for tensor " << attr->get_uid() << " ("
-                              << attr->get_name() << "); keeping first registration";
-            }
-            _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
-        });
-    }
 
-    void registerRmsValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
-                              float rmsThreshold)
-    {
-        _deferredValidators.emplace_back([this, attr, rmsThreshold]() {
-            auto sdkDataType
-                = hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type());
+            auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
+                sdkDataType, finalAtol, finalRtol);
+            float entryAtol = finalAtol;
+            float entryRtol = finalRtol;
+
+            const auto validatorOverride
+                = TestConfig::get().findValidatorOverride(testName, attr->get_name());
+            if(validatorOverride && validatorOverride->kind == ValidatorOverrideKind::RMS)
+            {
+                HIPDNN_PLUGIN_LOG_INFO("Validator override applied for "
+                                       << testName << " tensor " << attr->get_name()
+                                       << ": rms, threshold=" << validatorOverride->rmsThreshold);
+                validator = hipdnn_test_sdk::utilities::createRmsValidator(
+                    sdkDataType, validatorOverride->rmsThreshold);
+                entryAtol = 0.0f;
+                entryRtol = 0.0f;
+            }
+
             auto [it, inserted] = _tensorValidationMap.insert(
                 {attr->get_uid(),
                  TensorValidationEntry{
-                     hipdnn_test_sdk::utilities::createRmsValidator(sdkDataType, rmsThreshold),
-                     attr->get_name(),
-                     0.0f,
-                     0.0f,
-                     sdkDataType}});
+                     std::move(validator), attr->get_name(), entryAtol, entryRtol, sdkDataType}});
             if(!inserted)
             {
                 ADD_FAILURE() << "Duplicate validator for tensor " << attr->get_uid() << " ("
@@ -434,8 +431,12 @@ protected:
                           ? EnumNameDataType(entry.dataType)
                           : "unknown";
 
-                hipdnn_test_sdk::utilities::ComparisonContext ctx{
-                    "Test: " + currentTestName(), tensorLabel, dtypeName, entry.atol, entry.rtol};
+                hipdnn_test_sdk::utilities::ComparisonContext ctx;
+                ctx.contextLine = "Test: " + currentTestName();
+                ctx.tensorLabel = tensorLabel;
+                ctx.dtypeName = dtypeName;
+                ctx.atol = entry.atol;
+                ctx.rtol = entry.rtol;
 
                 std::ostringstream report;
                 report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, *refTensor);
