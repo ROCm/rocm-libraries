@@ -93,7 +93,7 @@ from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprLi
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
   FusedA2AWgRemap
 
-from Tensile.KernelWriter import KernelWriter, ABMatrixInfo
+from Tensile.KernelWriter import KernelWriter, ABMatrixInfo, staggerPrefetchFactor
 from Tensile.SolutionStructs.Naming import getKernelFileBase
 from Tensile.Toolchain.Component import Assembler
 
@@ -903,14 +903,18 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("DummySgpr%d"%i, 1))
 
     if kernel["PrefetchGL2"]:
-      module.add(self.defineSgpr("GL2PrefetchIncA", self.states.rpgo))
-      module.add(self.defineSgpr("GL2PrefetchIncB", self.states.rpgo))
+      gl2Tcs = ["A", "B"]
       if kernel["ProblemType"]["MXBlockA"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMXSA", self.states.rpgo))
+        gl2Tcs.append("MXSA")
       if kernel["ProblemType"]["MXBlockB"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMXSB", self.states.rpgo))
+        gl2Tcs.append("MXSB")
       if kernel["enableTDMMetadata"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMetadata", self.states.rpgo))
+        gl2Tcs.append("Metadata")
+      for tc in gl2Tcs:
+        module.add(self.defineSgpr("GL2PrefetchInc%s"%tc, self.states.rpgo))
+      # The StaggerU roll-over distance needs no GL2 counterpart: WrapU%s above
+      # covers the same span of K with the same increment, and is defined for
+      # exactly this tensor set.
 
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of defined SGPRS (%d) overflowed max SGPRS (%d)." \
@@ -6488,9 +6492,8 @@ class KernelWriterAssembly(KernelWriter):
                 src1=(1), \
                 comment="Subtract (PGR-1); StaggerUIter now contains target iteration to wrap"))
       # Convert passed in S' to S for easy loop comparison.  S=S-(PGR-1)'
-      pf = 2 if kernel["PrefetchGlobalRead"] else 1
+      pf = staggerPrefetchFactor(kernel)
       if kernel["PrefetchGlobalRead"] >= 3:
-        pf = kernel["PrefetchGlobalRead"]
         imod.add(SAddU32(dst=sgpr(staggerTmp), src0=sgpr("StaggerUIter"), \
                 src1=(pf), \
                 comment="Subtract (PGR-1); StaggerUIter now contains target iteration to wrap"))
@@ -20653,9 +20656,8 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["enableTDMMetadata"]:
       comp.init(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
   
-  def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
-    mod = Module("GL2 Prefetch Addresses Calculation")
-    comp = GL2PrefetchLoad.find(self)
+  def gl2PrefetchTensors(self, kernel, tPA, tPB) -> list:
+    """Tensors the GL2 prefetch streams, in the order every gl2Prefetch* step walks them."""
     tpList = [tPA, tPB]
     if kernel["ProblemType"]["MXBlockA"]:
       tpList.append(tPA["MX"])
@@ -20663,38 +20665,72 @@ class KernelWriterAssembly(KernelWriter):
       tpList.append(tPB["MX"])
     if kernel["enableTDMMetadata"]:
       tpList.append(tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
+    return tpList
 
-    for tp in tpList:
-      mod.add(comp.setIncrement(self, kernel, tp))
-      mod.add(comp.calculateStartAddr(self, kernel, tp))
+  def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
+    mod = Module("GL2 Prefetch Addresses Calculation")
+    comp = GL2PrefetchLoad.find(self)
+    tpList = self.gl2PrefetchTensors(kernel, tPA, tPB)
+
+    if not comp.isGSUEnabled(kernel):
+      for tp in tpList:
+        mod.add(comp.setIncrement(self, kernel, tp))
+        mod.add(comp.calculateStartAddr(self, kernel, tp))
+      return mod
+
+    # The GSU chunk starts at the same unroll iteration for every tensor, so derive
+    # it once here and let each tensor scale it by its own per-iteration increment.
+    with self.allocTmpSgpr(3, tag="gl2PrefetchCalcAddr_gsu") as tmpSgprRes:
+      gsuIterSgpr = tmpSgprRes.idx
+      offsetTmp = ContinuousRegister(idx=tmpSgprRes.idx + 1, size=2)
+      mod.add(comp.calculateGSUIterOffset(self, kernel, gsuIterSgpr, offsetTmp))
+      for tp in tpList:
+        mod.add(comp.setIncrement(self, kernel, tp))
+        mod.add(comp.calculateStartAddr(self, kernel, tp, gsuIterSgpr))
     return mod
   
+  def gl2PrefetchApplyStagger(self, kernel, tPA, tPB) -> Module:
+    """Rotate the GL2 prefetch stream onto the StaggerU-shifted K start.
+
+    Split out from gl2PrefetchCalcAddr because StaggerUIter and the unroll
+    iteration count only exist later: calcAddr has to run in setupNewTile, ahead
+    of removeGRSrdVariableSgprsFromPool releasing the Address/Stride SGPRs it
+    reads, while declareStaggerParms runs after calculateLoopNumIter. Emit this
+    between declareStaggerParms and calculateStagger, where StaggerUIter still
+    holds the plain rotation amount rather than the wrap-target the latter
+    rewrites it into.
+
+    Only the start shift lands here. The roll-over reads WrapU{tc}, which
+    calculateStagger has not written yet at this point but has by the time the
+    prologue and loop-body increments run.
+    """
+    mod = Module("GL2 Prefetch StaggerU")
+    mod.addComment("GL2 Prefetch StaggerU rotation")
+    comp = GL2PrefetchLoad.find(self)
+    tpList = self.gl2PrefetchTensors(kernel, tPA, tPB)
+    # The rotation moves every tensor by the same number of unroll iterations,
+    # so derive it once and let each scale it by its own increment.
+    with self.allocTmpSgpr(4, 2, tag="gl2PrefetchApplyStagger") as tmpSgprRes:
+      deltaSgpr = tmpSgprRes.idx
+      mod.add(comp.staggerStartIterDelta(self, kernel, deltaSgpr, tmpSgprRes.idx + 1))
+      for tp in tpList:
+        mod.add(comp.applyStaggerStart(self, kernel, tp, deltaSgpr, tmpSgprRes.idx + 2))
+    return mod
+
   def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Issue Load")
     mod.addComment("GL2 Prefetch Issue Load")
     comp = GL2PrefetchLoad.find(self)
-    mod.add(comp.issueLoad(self, kernel, tPA))
-    mod.add(comp.issueLoad(self, kernel, tPB))
-    if kernel["ProblemType"]["MXBlockA"]:
-      mod.add(comp.issueLoad(self, kernel, tPA["MX"]))
-    if kernel["ProblemType"]["MXBlockB"]:
-      mod.add(comp.issueLoad(self, kernel, tPB["MX"]))
-    if kernel["enableTDMMetadata"]:
-      mod.add(comp.issueLoad(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    for tp in self.gl2PrefetchTensors(kernel, tPA, tPB):
+      mod.add(comp.issueLoad(self, kernel, tp))
     return mod
-  
-  def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
+
+  def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB, staggerWrapOffset=None, freezeIter=None) -> Module:
     mod = Module("GL2 Prefetch Increment Address")
     mod.addComment("GL2 Prefetch Increment Address")
     comp = GL2PrefetchLoad.find(self)
-    mod.add(comp.incrementAddr(self, kernel, tPA))
-    mod.add(comp.incrementAddr(self, kernel, tPB))
-    if kernel["ProblemType"]["MXBlockA"]:
-      mod.add(comp.incrementAddr(self, kernel, tPA["MX"]))
-    if kernel["ProblemType"]["MXBlockB"]:
-      mod.add(comp.incrementAddr(self, kernel, tPB["MX"]))
-    if kernel["enableTDMMetadata"]:
-      mod.add(comp.incrementAddr(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    tpList = self.gl2PrefetchTensors(kernel, tPA, tPB)
+    mod.add(comp.incrementAddr(self, kernel, tpList, staggerWrapOffset, freezeIter))
     return mod
 
   def getHalfPLRGroups(self, kernel, lc, u):

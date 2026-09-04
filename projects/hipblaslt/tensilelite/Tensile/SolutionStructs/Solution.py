@@ -5903,14 +5903,11 @@ class Solution(collections.abc.Mapping):
       if not isaInfoMap[isa].asmCaps["HasGlobalPrefetch"]:
         reject(state, printRejectionReason, "ISA %s does not support global prefetch" % isa)
         return
-      # TODO: support staggerU if needed
-      _disableRuntimeStaggerU(state)
-      # TODO: support GSU if needed
-      state["InternalSupportParams"]["SupportUserGSU"] = False
-      if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
-        reject(state, printRejectionReason, "Currently PrefetchGL2 does not support GSU")
+      # 256 bytes is not multiple of 6 bits, causing math calculations errors
+      if state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat():
+        reject(state, printRejectionReason, "PrefetchGL2 does not support 6-bit float")
         return
-      if state["StreamK"] != 0 and state["StreamK"] != 3:
+      if state["StreamK"] not in [0, 3]:
         reject(state, printRejectionReason, "PrefetchGL2 only supports DP-first (StreamK==3) Stream-K")
         return
       if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
