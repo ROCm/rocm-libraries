@@ -596,7 +596,8 @@ class _RawTokenAddr:
     """Token-major [B,T,H,D] / [B,T,H] addressing for one chunk tile."""
 
     def __init__(
-        self, b: IRBuilder, *, heads, tseq, nc, chunk, dk, a_log=None, dt_bias=None
+        self, b: IRBuilder, *, heads, tseq, nc, chunk, dk, a_log=None, dt_bias=None,
+        kv_group=1,
     ):
         self.b = b
         self.H = heads
@@ -606,7 +607,11 @@ class _RawTokenAddr:
         self.DK = dk
         self.a_log = a_log
         self.dt_bias = dt_bias
-        self.stride_token_qk = b.mul(heads, b.const_i32(dk))
+        self.KVG = kv_group
+        # GQA: q/k have Hk = heads // kv_group key-heads. kv_group==1 -> Hk == heads,
+        # so the stride is the same IR value and KDA addressing is unchanged.
+        hk = heads if kv_group == 1 else b.div(heads, b.const_i32(kv_group))
+        self.stride_token_qk = b.mul(hk, b.const_i32(dk))
         self.stride_batch_qk = b.mul(tseq, self.stride_token_qk)
         self.stride_token_beta = heads
         self.stride_batch_beta = b.mul(tseq, heads)
@@ -623,12 +628,13 @@ class _RawTokenAddr:
     def qk_off(self, tile, row, col):
         b = self.b
         batch, head, token = self._parts(tile, row)
+        khead = head if self.KVG == 1 else b.div(head, b.const_i32(self.KVG))
         return b.add(
             b.add(
                 b.mul(batch, self.stride_batch_qk),
                 b.mul(token, self.stride_token_qk),
             ),
-            b.add(b.mul(head, b.const_i32(self.DK)), col),
+            b.add(b.mul(khead, b.const_i32(self.DK)), col),
         )
 
     def beta_off(self, tile, row):
@@ -1712,6 +1718,7 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
             dk=spec.head_k,
             a_log=a_log_ptr,
             dt_bias=dt_bias_ptr,
+            kv_group=spec.kv_group,
         )
 
     ctx = _ChunkCtx(b, spec, (q_ptr, k_ptr, g_ptr, beta_ptr, scale, raw))
