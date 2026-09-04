@@ -115,7 +115,7 @@ def launch_gdn(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0=None):
     return o, ht.view(B, Hv, DV, DK).transpose(-1, -2)
 
 
-def check_gdn(B, Hv, Hk, T, DK, DV, gate_low=-0.5, with_h0=False, seed=0):
+def check_gdn(B, Hv, Hk, T, DK, DV, gate_low=-0.5, with_h0=False, seed=0, specs=None):
     kv_group = Hv // Hk
     q, k, v, a, beta, a_log, dt_bias = make_gdn_inputs(
         B, Hv, Hk, T, DK, DV, gate_low=gate_low, seed=seed
@@ -124,7 +124,7 @@ def check_gdn(B, Hv, Hk, T, DK, DV, gate_low=-0.5, with_h0=False, seed=0):
     if with_h0:
         gen = torch.Generator(device="cuda").manual_seed(7)
         h0 = (torch.randn(B, Hv, DK, DV, device="cuda", generator=gen) * 0.1).float()
-    scan, prep = gdn_specs(DK, DV, kv_group, with_h0)
+    scan, prep = gdn_specs(DK, DV, kv_group, with_h0) if specs is None else specs
     o, ht = launch_gdn(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0=h0)
     torch.cuda.synchronize()
     o_ref, s_ref = ref_gdn_raw(q, k, v, a, beta, a_log, dt_bias, DK**-0.5, kv_group, h0=h0)
