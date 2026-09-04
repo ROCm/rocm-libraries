@@ -39,8 +39,6 @@ set_target_properties( hipfft-bench PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQU
 target_include_directories( hipfft-bench
   PRIVATE
   $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocFFT/library/include>
   )
   
 if((NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$") OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
