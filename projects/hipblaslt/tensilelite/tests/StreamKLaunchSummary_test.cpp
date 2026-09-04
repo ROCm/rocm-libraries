@@ -80,6 +80,7 @@ namespace
         solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
         solution.sizeMapping.depthU                = 64;
         solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
+        solution.sizeMapping.workGroupSize     = TensileLite::dim3(256, 1, 1);
         solution.sizeMapping.CUOccupancy           = 1;
         solution.sizeMapping.workspaceSizePerElemC = 4;
     }
