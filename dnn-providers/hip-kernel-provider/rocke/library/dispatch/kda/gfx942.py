@@ -90,7 +90,7 @@ _STATE_FEATURES = frozenset({"initial_state", "final_state"})
 
 
 def _tile(req: KdaRequest) -> KdaTileSpec:
-    return KdaTileSpec(chunk=int(req.chunk_size))
+    return KdaTileSpec(chunk=req.effective_chunk_size)
 
 
 def _fused_spec(req: OperatorRequest) -> KdaChunkFusedSpec:
