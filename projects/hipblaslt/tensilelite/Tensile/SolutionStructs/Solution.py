@@ -4008,6 +4008,30 @@ class Solution(collections.abc.Mapping):
       else:
         calLRVW()
 
+      # WMMA takes the A and B local reads as one operand pair, so both have to
+      # walk the unroll dimension in the same order. A lane reads K row
+      #   kId * lrvw + lrvw * (rIdx // lrvw) + rIdx * numElementPerRead
+      # (LraTileAssignment.strideK plus calcGfx1250LdsOffset), counted in K rows
+      # rather than bytes. Operands sharing an element size also share
+      # numElementPerRead, so lrvw alone picks the order and the two widths have
+      # to be equal as element counts. The comparison is on element size rather
+      # than datatype identity because that is what numElementPerRead keys off, so
+      # f8 against bf8 still counts as one size; genuinely mixed sizes read with
+      # per-operand geometry and are left alone. This sits after calLRVW so it
+      # sees the derived widths too, not just the ones spelled out in the config.
+      # Gated on the arch as well as the cap, the way TileSpan is, since the
+      # ordering argument is specific to gfx1250's WMMA.
+      isGfx1250 = state["ISA"] == IsaVersion(12, 5, 0)
+      if isGfx1250 and isaInfoMap[isa].asmCaps["HasWMMA_V3"] \
+         and state["ProblemType"]["MacDataTypeA"].numBytes() \
+             == state["ProblemType"]["MacDataTypeB"].numBytes() \
+         and state["LocalReadVectorWidthA"] != state["LocalReadVectorWidthB"]:
+        reject(state, printRejectionReason,
+               "gfx1250 requires LocalReadVectorWidthA == LocalReadVectorWidthB for equally "
+               "sized operands, got %u and %u" \
+               % (state["LocalReadVectorWidthA"], state["LocalReadVectorWidthB"]))
+        return
+
       def calcOptGRVW(lrvw: int, unrollMajorLDS: bool, datatype: DataType) -> int:
         # with UnrollMajorLDS, GRVW need to less or equal than LRVW to have conflict free LDS read with padding.
         optGRVW = lrvw if unrollMajorLDS else 4 / datatype.numRegisters()
