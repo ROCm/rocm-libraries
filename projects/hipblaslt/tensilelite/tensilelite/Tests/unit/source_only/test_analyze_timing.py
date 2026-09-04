@@ -16,7 +16,7 @@ from pathlib import Path
 from io import StringIO
 
 # Add scripts directory to path for importing analyze_timing
-scripts_dir = Path(__file__).resolve().parents[3] / "scripts"
+scripts_dir = Path(__file__).resolve().parents[4] / "scripts"
 sys.path.insert(0, str(scripts_dir))
 
 from analyze_timing import (

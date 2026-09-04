@@ -17,11 +17,11 @@ from unittest.mock import patch
 import pytest
 
 # specs.py lives outside the TensileLite package, under the hipBLASLt client scripts.
-# parents[4] == projects/hipblaslt (unit -> Tests -> tensilelite -> tensilelite -> hipblaslt)
+# parents[5] == projects/hipblaslt (source_only -> unit -> Tests -> tensilelite -> tensilelite -> hipblaslt)
 # In an installed/packaged test tree (e.g. CI's build/share/hipblaslt/...), the
 # client scripts are not shipped next to the TensileLite package, so specs.py is not
 # importable there. Skip gracefully in that case rather than erroring at collection.
-specs_dir = Path(__file__).resolve().parents[4] / "clients" / "scripts" / "performance"
+specs_dir = Path(__file__).resolve().parents[5] / "clients" / "scripts" / "performance"
 if str(specs_dir) not in sys.path:
     sys.path.insert(0, str(specs_dir))
 

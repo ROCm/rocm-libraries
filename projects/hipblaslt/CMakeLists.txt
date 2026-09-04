@@ -678,80 +678,174 @@ if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
     )
 endif()
 
-# Install TensileLite Python packages and test tools for artifact-based testing.
-# Produces:
-#   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
-#   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
-#   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
+# Build hermetic release-wheel artifacts for downstream installation tests.
+if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
+        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+    set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+    set(_tensilelite_release_wheel_dir
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-release-wheels")
+    set(_tensilelite_canonical_wheel
+        "${_tensilelite_release_wheel_dir}/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl")
+    set(_tensilelite_compatibility_wheel
+        "${_tensilelite_release_wheel_dir}/tensilelite_tensile_compat-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl")
+    file(GLOB_RECURSE _tensilelite_wheel_sources CONFIGURE_DEPENDS
+        "${_tensilelite_src}/tensilelite/*.py"
+        "${_tensilelite_src}/tensilelite/CustomKernels/*.s"
+        "${_tensilelite_src}/tensilelite/Source/*.h"
+        "${_tensilelite_src}/tensilelite/tensilelite_logic/*.yaml"
+        "${_tensilelite_src}/tensilelite/ductile/config/*.yaml"
+        "${_tensilelite_src}/compat/tensilelite_tensile_compat/*.py"
+    )
+
+    set(_tensilelite_canonical_stage "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel-canonical")
+    set(_tensilelite_canonical_stamp "${_tensilelite_canonical_stage}/.published")
+    add_custom_command(
+        OUTPUT "${_tensilelite_canonical_stamp}"
+        BYPRODUCTS "${_tensilelite_canonical_wheel}"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_tensilelite_canonical_stage}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_canonical_stage}"
+        COMMAND ${CMAKE_COMMAND} -E env
+            "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
+            -- "${Python3_EXECUTABLE}" -m pip wheel
+            --disable-pip-version-check --no-build-isolation --no-deps
+            --wheel-dir "${_tensilelite_canonical_stage}"
+            "${_tensilelite_src}"
+        COMMAND "${Python3_EXECUTABLE}"
+            "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
+            --mode canonical
+            --wheel "${_tensilelite_canonical_stage}/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
+            --expected-version "${TENSILELITE_DISTRIBUTION_VERSION}"
+            --source-root "${_tensilelite_src}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_release_wheel_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_tensilelite_canonical_stage}/tensilelite-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
+            "${_tensilelite_canonical_wheel}"
+        COMMAND ${CMAKE_COMMAND} -E touch "${_tensilelite_canonical_stamp}"
+        DEPENDS
+            ${_tensilelite_wheel_sources}
+            "${_tensilelite_src}/VERSION"
+            "${_tensilelite_src}/pyproject.toml"
+            "${_tensilelite_src}/setup.py"
+            "${_tensilelite_src}/MANIFEST.in"
+            "${_tensilelite_src}/release_metadata.py"
+            "${_tensilelite_src}/requirements.txt"
+            "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
+            "${HIPBLASLT_BUILD_ROCM_ROOT}/.info/version"
+        COMMENT "Building the canonical TensileLite release wheel"
+        VERBATIM
+        USES_TERMINAL
+    )
+    add_custom_target(tensilelite-canonical-release-wheel
+        DEPENDS "${_tensilelite_canonical_stamp}")
+
+    set(_tensilelite_compatibility_stage
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel-compatibility")
+    set(_tensilelite_compatibility_stamp "${_tensilelite_compatibility_stage}/.published")
+    add_custom_command(
+        OUTPUT "${_tensilelite_compatibility_stamp}"
+        BYPRODUCTS "${_tensilelite_compatibility_wheel}"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_tensilelite_compatibility_stage}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_compatibility_stage}"
+        COMMAND ${CMAKE_COMMAND} -E env
+            "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
+            -- "${Python3_EXECUTABLE}" -m pip wheel
+            --disable-pip-version-check --no-build-isolation --no-deps
+            --wheel-dir "${_tensilelite_compatibility_stage}"
+            "${_tensilelite_src}/compat"
+        COMMAND "${Python3_EXECUTABLE}"
+            "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
+            --mode compatibility
+            --wheel "${_tensilelite_compatibility_stage}/tensilelite_tensile_compat-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
+            --expected-version "${TENSILELITE_DISTRIBUTION_VERSION}"
+            --source-root "${_tensilelite_src}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_release_wheel_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_tensilelite_compatibility_stage}/tensilelite_tensile_compat-${TENSILELITE_DISTRIBUTION_VERSION}-py3-none-any.whl"
+            "${_tensilelite_compatibility_wheel}"
+        COMMAND ${CMAKE_COMMAND} -E touch "${_tensilelite_compatibility_stamp}"
+        DEPENDS
+            ${_tensilelite_wheel_sources}
+            "${_tensilelite_src}/VERSION"
+            "${_tensilelite_src}/release_metadata.py"
+            "${_tensilelite_src}/compat/pyproject.toml"
+            "${_tensilelite_src}/compat/setup.py"
+            "${_tensilelite_src}/compat/MANIFEST.in"
+            "${_tensilelite_src}/compat/README.md"
+            "${_tensilelite_src}/scripts/check_release_wheel_contents.py"
+            "${HIPBLASLT_BUILD_ROCM_ROOT}/.info/version"
+        COMMENT "Building the Tensile compatibility release wheel"
+        VERBATIM
+        USES_TERMINAL
+    )
+    add_custom_target(tensilelite-compatibility-release-wheel
+        DEPENDS "${_tensilelite_compatibility_stamp}")
+    add_custom_target(tensilelite-build-release-wheels
+        DEPENDS tensilelite-canonical-release-wheel tensilelite-compatibility-release-wheel)
+    if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+        add_custom_target(tensilelite-release-wheels-all ALL
+            DEPENDS tensilelite-build-release-wheels)
+    endif()
+endif()
+
+# Install ROCm-versioned wheels and installed tests for artifact-based testing.
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
-    set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
-
-    # TensileLite Python package
     install(
-        DIRECTORY "${_tensilelite_src}/tensilelite/"
-        DESTINATION "${_tensilelite_install_dest}/tensilelite"
+        FILES "${_tensilelite_canonical_wheel}" "${_tensilelite_compatibility_wheel}"
+        DESTINATION "${_tensilelite_install_dest}/wheels"
+        COMPONENT tests
+    )
+
+    install(
+        DIRECTORY "${_tensilelite_src}/tensilelite/Tests/"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite/Tests"
         COMPONENT tests
         PATTERN "__pycache__" EXCLUDE
         PATTERN ".pytest_cache" EXCLUDE
+        PATTERN ".codex" EXCLUDE
+        PATTERN ".agents" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+        PATTERN "build_tmp" EXCLUDE
+        PATTERN "build" EXCLUDE
+        PATTERN "tmp" EXCLUDE
+        PATTERN "a.out" EXCLUDE
+        PATTERN "*.o" EXCLUDE
+        PATTERN "CMakeFiles" EXCLUDE
+        PATTERN "CMakeCache.txt" EXCLUDE
+        PATTERN "source_only" EXCLUDE
+    )
+
+    install(
+        DIRECTORY "${_tensilelite_src}/compat/tests/"
+        DESTINATION "${_tensilelite_install_dest}/compat/tests"
+        COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
     )
 
-    # Scripts used by unit tests
-    install(
-        FILES
-            "${_tensilelite_src}/scripts/analyze_timing.py"
-            "${_tensilelite_src}/scripts/precommit_affected_tests.py"
-        DESTINATION "${_tensilelite_install_dest}/scripts"
-        COMPONENT tests
-    )
-
-    # Imported directly by unit tests (test_amax_true16_activation.py), so it must
-    # ship at the tensilelite root, not under scripts/.
-    install(
-        FILES
-            "${_tensilelite_src}/tensilelite/_extops/AMaxGenerator.py"
-        DESTINATION "${_tensilelite_install_dest}"
-        COMPONENT tests
-    )
-    # Preserve executable permissions on entry points
-    install(
-        PROGRAMS
-            "${_tensilelite_src}/tensilelite/bin/Tensile"
-            "${_tensilelite_src}/tensilelite/bin/TensileCreateLibrary"
-        DESTINATION "${_tensilelite_install_dest}/tensilelite/bin"
-        COMPONENT tests
-    )
-
-    # rocisa Python package — normalize rocisa/rocisa/ to top-level rocisa/
+    if(NOT TARGET _rocisa)
+        message(FATAL_ERROR
+            "HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS requires the in-tree _rocisa target")
+    endif()
     install(
         DIRECTORY "${_tensilelite_src}/rocisa/rocisa/"
         DESTINATION "${_tensilelite_install_dest}/rocisa"
         COMPONENT tests
+        FILES_MATCHING PATTERN "*.py"
         PATTERN "__pycache__" EXCLUDE
-        PATTERN "*.pyc" EXCLUDE
     )
-    # rocisa native extension
-    if(TARGET _rocisa)
-        install(
-            TARGETS _rocisa
+    install(TARGETS _rocisa
+        LIBRARY DESTINATION "${_tensilelite_install_dest}/rocisa" COMPONENT tests
+        RUNTIME DESTINATION "${_tensilelite_install_dest}/rocisa" COMPONENT tests
+    )
+    if(TARGET stinkytofu::stinkytofu AND NOT WIN32)
+        install(FILES
+            "$<TARGET_FILE:stinkytofu::stinkytofu>"
+            "$<TARGET_SONAME_FILE:stinkytofu::stinkytofu>"
             DESTINATION "${_tensilelite_install_dest}/rocisa"
             COMPONENT tests
         )
     endif()
-    # Co-install stinkytofu shared library next to _rocisa
-    if(TARGET stinkytofu AND NOT WIN32)
-        install(FILES $<TARGET_FILE:stinkytofu>
-            DESTINATION "${_tensilelite_install_dest}/rocisa"
-            COMPONENT tests
-        )
-        install(FILES $<TARGET_SONAME_FILE:stinkytofu>
-            DESTINATION "${_tensilelite_install_dest}/rocisa"
-            COMPONENT tests
-        )
-    endif()
-
-    # rocisa tests
     install(
         DIRECTORY "${_tensilelite_src}/rocisa/test/"
         DESTINATION "${_tensilelite_install_dest}/rocisa_tests"
@@ -760,7 +854,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "*.pyc" EXCLUDE
     )
 
-    # pytest config (marker registration, xfail_strict)
     install(
         FILES "${_tensilelite_src}/pytest.ini"
         DESTINATION "${_tensilelite_install_dest}"
@@ -768,8 +861,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         OPTIONAL
     )
 
-    # Test filter standardization config consumed by TheRock's pytest_runner.py
-    # to drive quick/standard/comprehensive/full categories from the installed tree.
     install(
         FILES "${_tensilelite_src}/test_categories.yaml"
         DESTINATION "${_tensilelite_install_dest}"
