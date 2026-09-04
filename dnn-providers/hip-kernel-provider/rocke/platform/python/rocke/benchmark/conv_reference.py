@@ -121,7 +121,13 @@ def conv_reference(
     """
     if not p.is_3d:
         A_t = A.float().cuda().permute(0, 3, 1, 2)  # NHWC -> NCHW
-        B_t = B.float().cuda().permute(0, 3, 1, 2)  # KHWC -> KCHW
+        # B layout is KYXC with C = C_total. PyTorch F.conv2d expects weights
+        # shaped [K, C/groups, Y, X]. Each filter stores cpg channels contiguously
+        # at the start of its C dimension; slice to cpg then permute.
+        Cg = p.C // p.groups
+        B_t = (
+            B.float().cuda()[:, :, :, :Cg].permute(0, 3, 1, 2)
+        )  # [K,Y,X,Cg]->[K,Cg,Y,X]
         result = (
             F.conv2d(
                 A_t,
@@ -136,7 +142,10 @@ def conv_reference(
         )
     else:
         A_t = A.float().cuda().permute(0, 4, 1, 2, 3)  # NDHWC -> NCDHW
-        B_t = B.float().cuda().permute(0, 4, 1, 2, 3)  # KDHWC -> KCDHW
+        Cg = p.C // p.groups
+        B_t = (
+            B.float().cuda()[:, :, :, :, :Cg].permute(0, 4, 1, 2, 3)
+        )  # [K,Z,Y,X,Cg]->[K,Cg,Z,Y,X]
         result = (
             F.conv3d(
                 A_t,
