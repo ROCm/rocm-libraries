@@ -1842,7 +1842,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
             static_for<0, NumDTensor, 1>{}([&](auto j) {
                 using DDataType = remove_cvref_t<tuple_element_t<j.value, DsDataType>>;
                 const long_index_t d_element_space_size =
-                    arg.ds_grid_desc_m_n_container_[i](j).GetElementSpaceSize();
+                    arg.ds_grid_desc_m_n_container_[i][j].GetElementSpaceSize();
                 if(d_element_space_size * sizeof(DDataType) > TwoGB ||
                    d_element_space_size >= TwoGB)
                 {
