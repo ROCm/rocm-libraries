@@ -61,6 +61,18 @@ typedef hipFloatComplex rocblas_float_complex;
 /*! \brief hip type to represent a complex number with double precision real and imaginary parts. */
 typedef hipDoubleComplex rocblas_double_complex;
 
+/*! \brief Struct to represent a complex number with half-precision real and imaginary parts. */
+typedef struct
+{
+    rocblas_half x, y;
+} rocblas_half_complex;
+
+/*! \brief Struct to represent a complex number with bfloat16 real and imaginary parts. */
+typedef struct
+{
+    rocblas_bfloat16 x, y;
+} rocblas_bfloat16_complex;
+
 #if __cplusplus >= 201402L
 
 // Test for compatibility with hipComplex API option when using C++14 or later
@@ -89,6 +101,18 @@ typedef struct
 {
     double x, y;
 } rocblas_double_complex;
+
+/*! \brief Struct to represent a complex number with half-precision real and imaginary parts. */
+typedef struct
+{
+    rocblas_half x, y;
+} rocblas_half_complex;
+
+/*! \brief Struct to represent a complex number with bfloat16 real and imaginary parts. */
+typedef struct
+{
+    rocblas_bfloat16 x, y;
+} rocblas_bfloat16_complex;
 
 #else // __cplusplus < 201402L || (!defined(__HCC__) && !defined(__HIPCC__))
 
@@ -129,6 +153,39 @@ class ROCBLAS_EXPORT rocblas_complex_num
         return ::sqrt(x);
     }
 
+#ifdef ROCM_USE_FLOAT16
+    static __forceinline__ __device__ __host__ rocblas_half sqrt(rocblas_half x)
+    {
+        return static_cast<rocblas_half>(::sqrtf(float(x)));
+    }
+#endif
+
+    static __forceinline__ __device__ __host__ rocblas_bfloat16 sqrt(rocblas_bfloat16 x)
+    {
+        return rocblas_bfloat16{::sqrtf(float(x))};
+    }
+
+    // Tag dispatch: prefer direct T(value) when T is constructible from U
+    template <typename U>
+    static __forceinline__ __device__ __host__ T
+        convert_low_precision_input_impl(const U& value, std::true_type)
+    {
+        return T(value);
+    }
+
+    template <typename U>
+    static __forceinline__ __device__ __host__ T
+        convert_low_precision_input_impl(const U& value, std::false_type)
+    {
+        return T(float(value));
+    }
+
+    template <typename U>
+    static __forceinline__ __device__ __host__ T convert_low_precision_input(const U& value)
+    {
+        return convert_low_precision_input_impl(value, std::is_constructible<T, U>{});
+    }
+
 public:
     // We do not initialize the members x or y by default, to ensure that it can
     // be used in __shared__ and that it is a trivial class compatible with C.
@@ -147,10 +204,37 @@ public:
     {
     }
 
+    template <typename U,
+              typename V,
+              std::enable_if_t<(std::is_same<T, rocblas_half>::value
+                                || std::is_same<T, rocblas_bfloat16>::value)
+                                   && std::is_constructible<float, U>::value
+                                   && std::is_constructible<float, V>::value
+                                   && (!std::is_same<std::decay_t<U>, T>::value
+                                       || !std::is_same<std::decay_t<V>, T>::value),
+                               int> = 0>
+    __device__ __host__ rocblas_complex_num(U r, V i)
+        : x{convert_low_precision_input(r)}
+        , y{convert_low_precision_input(i)}
+    {
+    }
+
     // Conversion from real
     // TODO: Make constexpr after HSA_STATUS_ERROR_INVALID_ISA bug goes away
     __device__ __host__ rocblas_complex_num(T r)
         : x{r}
+        , y{0}
+    {
+    }
+
+    template <typename U,
+              std::enable_if_t<(std::is_same<T, rocblas_half>::value
+                                || std::is_same<T, rocblas_bfloat16>::value)
+                                   && std::is_constructible<float, U>::value
+                                   && !std::is_same<std::decay_t<U>, T>::value,
+                               int> = 0>
+    __device__ __host__ rocblas_complex_num(U r)
+        : x{convert_low_precision_input(r)}
         , y{0}
     {
     }
@@ -248,37 +332,37 @@ public:
     }
 
     // complex-real operations
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     __device__ __host__ auto& operator+=(const U& rhs)
     {
         return (x += T(rhs)), *this;
     }
 
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     __device__ __host__ auto& operator-=(const U& rhs)
     {
         return (x -= T(rhs)), *this;
     }
 
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     __device__ __host__ auto& operator*=(const U& rhs)
     {
-        return (x *= rhs), (y *= T(rhs)), *this;
+        return (x *= T(rhs)), (y *= T(rhs)), *this;
     }
 
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     __device__ __host__ auto& operator/=(const U& rhs)
     {
         return (x /= T(rhs)), (y /= T(rhs)), *this;
     }
 
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     __device__ __host__ constexpr bool operator==(const U& rhs) const
     {
-        return x == T(rhs) && y == 0;
+        return x == T(rhs) && y == T{};
     }
 
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     __device__ __host__ constexpr bool operator!=(const U& rhs) const
     {
         return !(*this == rhs);
@@ -347,13 +431,13 @@ public:
         if(abs(rhs.x) > abs(rhs.y))
         {
             T ratio = rhs.y / rhs.x;
-            T scale = 1 / (rhs.x + rhs.y * ratio);
+            T scale = T{1} / (rhs.x + rhs.y * ratio);
             *this   = {(x + y * ratio) * scale, (y - x * ratio) * scale};
         }
         else
         {
             T ratio = rhs.x / rhs.y;
-            T scale = 1 / (rhs.x * ratio + rhs.y);
+            T scale = T{1} / (rhs.x * ratio + rhs.y);
             *this   = {(y + x * ratio) * scale, (y * ratio - x) * scale};
         }
         return *this;
@@ -395,28 +479,28 @@ public:
     }
 
     // real-complex operations (complex-real is handled above)
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     friend __device__ __host__ rocblas_complex_num operator+(const U&                   lhs,
                                                              const rocblas_complex_num& rhs)
     {
         return {T(lhs) + rhs.x, rhs.y};
     }
 
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     friend __device__ __host__ rocblas_complex_num operator-(const U&                   lhs,
                                                              const rocblas_complex_num& rhs)
     {
         return {T(lhs) - rhs.x, -rhs.y};
     }
 
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     friend __device__ __host__ rocblas_complex_num operator*(const U&                   lhs,
                                                              const rocblas_complex_num& rhs)
     {
         return {T(lhs) * rhs.x, T(lhs) * rhs.y};
     }
 
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     friend __device__ __host__ rocblas_complex_num operator/(const U&                   lhs,
                                                              const rocblas_complex_num& rhs)
     {
@@ -435,14 +519,14 @@ public:
         }
     }
 
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     friend __device__ __host__ constexpr bool operator==(const U&                   lhs,
                                                          const rocblas_complex_num& rhs)
     {
-        return T(lhs) == rhs.x && 0 == rhs.y;
+        return T(lhs) == rhs.x && T{} == rhs.y;
     }
 
-    template <typename U, std::enable_if_t<std::is_convertible<U, T>{}, int> = 0>
+    template <typename U, std::enable_if_t<std::is_constructible<T, U>{}, int> = 0>
     friend __device__ __host__ constexpr bool operator!=(const U&                   lhs,
                                                          const rocblas_complex_num& rhs)
     {
@@ -482,8 +566,8 @@ namespace std
     {
         T tr = rocblas_complex_num<T>::abs(z.x), ti = rocblas_complex_num<T>::abs(z.y);
         // clang-format off
-        return tr > ti ? (ti /= tr, tr * rocblas_complex_num<T>::sqrt(ti * ti + 1))
-                       : ti ? (tr /= ti, ti * rocblas_complex_num<T>::sqrt(tr * tr + 1)) : 0;
+        return tr > ti ? (ti /= tr, tr * rocblas_complex_num<T>::sqrt(ti * ti + T{1}))
+                       : ti ? (tr /= ti, ti * rocblas_complex_num<T>::sqrt(tr * tr + T{1})) : T{};
         // clang-format on
     }
 }
@@ -506,10 +590,14 @@ class rocblas_complex_num_check
 
 template class rocblas_complex_num_check<float>;
 template class rocblas_complex_num_check<double>;
+template class rocblas_complex_num_check<rocblas_half>;
+template class rocblas_complex_num_check<rocblas_bfloat16>;
 
 // rocBLAS complex data types
 using rocblas_float_complex  = rocblas_complex_num<float>;
 using rocblas_double_complex = rocblas_complex_num<double>;
+using rocblas_half_complex   = rocblas_complex_num<rocblas_half>;
+using rocblas_bfloat16_complex = rocblas_complex_num<rocblas_bfloat16>;
 
 /*! \brief rocblas_is_complex<T> returns true iff T is complex */
 template <typename T>
@@ -520,6 +608,12 @@ inline constexpr bool rocblas_is_complex<rocblas_float_complex> = true;
 
 template <>
 inline constexpr bool rocblas_is_complex<rocblas_double_complex> = true;
+
+template <>
+inline constexpr bool rocblas_is_complex<rocblas_half_complex> = true;
+
+template <>
+inline constexpr bool rocblas_is_complex<rocblas_bfloat16_complex> = true;
 
 //!
 //! @brief Struct to define pair of value and index.
