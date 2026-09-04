@@ -40,8 +40,6 @@
  */
 
 #pragma once
-#ifndef _HIPBLASLT_H_
-#define _HIPBLASLT_H_
 
 #include "hipblaslt/hipblaslt-export.h"
 #include "hipblaslt/hipblaslt-version.h"
@@ -461,7 +459,6 @@ typedef struct _hipblasLtMatmulHeuristicResult_t{
   float wavesCount = 1.0;                          /**<Waves count is a device utilization metric. A wavesCount value of 1.0f suggests that when the kernel is launched it will fully occupy the GPU.*/
   int reserved[4];                                 /**<Reserved.*/
 } hipblasLtMatmulHeuristicResult_t;
-#elif defined(__HIP_PLATFORM_NVIDIA__)
 #endif
 // clang-format on
 
@@ -1184,5 +1181,3 @@ hipblasStatus_t hipblasLtMatrixTransform(hipblasLtHandle_t              lightHan
 #ifdef __cplusplus
 }
 #endif
-
-#endif // _HIPBLASLT_H_

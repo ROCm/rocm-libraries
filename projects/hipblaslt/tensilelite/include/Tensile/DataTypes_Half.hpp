@@ -53,4 +53,3 @@ namespace std
         return std::to_string(static_cast<float>(val));
     }
 } // namespace std
-

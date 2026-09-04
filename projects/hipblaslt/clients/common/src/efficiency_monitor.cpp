@@ -454,7 +454,6 @@ private:
         std::string deviceFullString(props.gcnArchName);
         m_deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
 
-#if HIP_VERSION >= 50220730
         int hip_version;
         HIP_CHECK_EXC(hipRuntimeGetVersion(&hip_version));
         if(hip_version >= 50220730)
@@ -463,7 +462,6 @@ private:
                                                 hipDeviceAttributePhysicalMultiProcessorCount,
                                                 hipDeviceIndex));
         }
-#endif
 
         uint64_t hipPCIID = 0;
 

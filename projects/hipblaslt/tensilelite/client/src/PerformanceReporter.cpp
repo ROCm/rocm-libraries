@@ -58,7 +58,6 @@ namespace TensileLite
                                                  double readEff)
         {
             HIP_CHECK_EXC(hipGetDeviceProperties(&m_props, deviceIndex));
-#if HIP_VERSION >= 50220730
             int hip_version;
             HIP_CHECK_EXC(hipRuntimeGetVersion(&hip_version));
             if(hip_version >= 50220730)
@@ -67,7 +66,6 @@ namespace TensileLite
                                                     hipDeviceAttributePhysicalMultiProcessorCount,
                                                     deviceIndex));
             }
-#endif
             setNumCUs();
             setMemoryBusWidth();
             setPerfModel(l2ReadHits, l2WriteHits, l2ReadBwMultiplier, readEff);
