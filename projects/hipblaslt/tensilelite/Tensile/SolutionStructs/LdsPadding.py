@@ -47,6 +47,15 @@ Public API (see each `def` for the full signature):
 from functools import lru_cache
 from typing import Dict
 
+# Most bytes per lane a SINGLE local read moves: ds_load_b128 / ds_read_b128,
+# and on the transposed path ds_load_tr16_b128. Nothing in
+# memoryInstructions["LocalRead"] is wider -- b192 is there, but it is a macro
+# that rocisa expands to ds_load_b128 + ds_load_b64 at offset+16, which is why
+# codegen weights it 2 (countWeightedLocalRead) and carries `blockWidth == 6`
+# readFactor cases. Raise this only together with the pad rule if a genuinely
+# wider local read appears (b256 already exists on the LocalWrite side).
+MAX_LOCAL_READ_BYTES = 16
+
 # TDM hardware encoding caps for LdsBlockSizePerPad / LdsPad:
 #   pad_interval = log2(LdsBlockSizePerPad // 4) - 1, must fit in 3 bits => <=7
 #   pad_amount   = LdsPad // 4 - 1,                  must fit in 7 bits => <=127

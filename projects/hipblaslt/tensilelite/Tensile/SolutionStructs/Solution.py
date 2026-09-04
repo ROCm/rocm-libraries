@@ -42,7 +42,9 @@ from Tensile.Common.DataType import DataType
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.CustomKernels import supportsUserSgprKernargPreload
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
-                                               get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config
+                                               get_fp16_mt_config, get_fp32_mt_config, \
+                                               get_metadata_mt_config, \
+                                               MAX_LOCAL_READ_BYTES
 from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
 from Tensile.Common.ValidParameters import validParameters, \
@@ -3385,8 +3387,25 @@ class Solution(collections.abc.Mapping):
         ldsPadA = state["LdsPadA"]
         ldsPadB = state["LdsPadB"]
         ldsPadM = state["LdsPadMetadata"]
-        optPadA = lrvwA
-        optPadB = lrvwB
+        # optPad is a pad of one local-read width. The bank-conflict rule is in
+        # units of ONE local-read instruction, and those coincide only while
+        # lrvw*bpe fits a single instruction. On gfx10/gfx11 WMMA
+        # MIInputPerThread is overridden to MatrixInstK (see
+        # MatrixInstruction.py, gated to isa[0] in {10, 11}), so a 16x16x16
+        # 16-bit MI forces LocalReadVectorWidth 16 = 32 B/lane, which is
+        # issued as two ds_read_b128 -- an unclamped optPad is two instruction
+        # widths -- an even multiple, and an even multiple cannot change the
+        # parity of the row stride, i.e. it cannot fix a conflict at all.
+        #
+        # Clamping here, before the MI16x16 doubling below, keeps that rule
+        # acting on real instruction widths. It is a no-op wherever a row is a
+        # single instruction, which is every case MFMA/CDNA can reach (the b192
+        # reject below caps non-WMMA at 6 registers), so CDNA layouts do not
+        # move. gfx12 also keeps readRegs at 4: it takes the general
+        # MIInputPerThread = M*K*B/wavefrontSize (8 for that MI), not the
+        # gfx10/11 override, so the clamp is a no-op there too.
+        optPadA = min(lrvwA, int(MAX_LOCAL_READ_BYTES // numBytesA))
+        optPadB = min(lrvwB, int(MAX_LOCAL_READ_BYTES // numBytesB))
         readRegsA = int(lrvwA * state["ProblemType"]["MacDataTypeA"].numBytes() // 4)
         readRegsB = int(lrvwB * state["ProblemType"]["MacDataTypeB"].numBytes() // 4)
         if state["ProblemType"]["Sparse"]:
