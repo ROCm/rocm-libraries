@@ -10,4 +10,8 @@ table MatmulAttributes {
     a_tensor_uid: long (cache_uid);
     b_tensor_uid: long (cache_uid);
     c_tensor_uid: long (cache_uid);
+
+    // RFC 0019 §8: FLOP and byte count for arithmetic intensity (optional)
+    umd_flops: string;  // JsonLogic expression over tensor dims → total FLOPs
+    umd_bytes: string;  // JsonLogic expression over tensor dims → total bytes moved
 }

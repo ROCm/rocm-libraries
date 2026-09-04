@@ -194,6 +194,7 @@ target_compile_definitions(
             TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME="${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}"
+            HIPDNN_TEST_PLUGIN_DIR="${HIPDNN_TEST_PLUGIN_DIR}"
             TEST_LYING_ENGINE_NAME_PLUGIN_NAME="${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}"
             TEST_MISMATCHED_NAME_PLUGIN_NAME="${TEST_MISMATCHED_NAME_PLUGIN_NAME}"
 )
@@ -266,6 +267,13 @@ set_target_properties(
 install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
+
+# The RFC 0019 UHD tests used to be listed here. They moved to plugin_sdk/tests/ingestor/uhd
+# with the code they cover -- every one of them included only plugin SDK headers, so a plugin
+# SDK change was breaking a backend test target and the plugin SDK's own suite looked as though
+# it did not test its own UHD modules. hipdnn_test_scorer_lib moved with TestCustomLibraryAdapter,
+# which is its only consumer.
+
 
 # A real, loadable engine plugin used by TestEnginePluginResourceManager.cpp, and
 # the only consumer of EnginePluginImpl.inl inside the main build; see

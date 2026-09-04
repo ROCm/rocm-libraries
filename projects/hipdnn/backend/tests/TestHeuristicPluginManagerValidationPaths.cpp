@@ -31,6 +31,16 @@ constexpr const char* DUPLICATE_POLICY_ID_B_PLUGIN = "test_duplicate_policy_id_b
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
+
+/// Number of built-in heuristic policies every manager registers in its constructor.
+///
+/// Derived rather than hardcoded: these expectations previously pinned a literal 2 and
+/// went stale the moment a third built-in (UHD) was registered. Asking a fresh manager
+/// keeps them correct as built-ins are added or removed.
+static size_t builtInPolicyCount()
+{
+    return HeuristicPluginManager{}.getPlugins().size();
+}
 using namespace hipdnn_backend::plugin_constants;
 
 class TestHeuristicPluginManagerValidationPaths : public ::testing::Test
@@ -270,7 +280,7 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, ConstructorSetsUpValidationInf
 
     // A freshly-constructed manager always contains the Config + StaticOrdering
     // built-ins (registered in HeuristicPluginManager's constructor); nothing else yet.
-    EXPECT_EQ(manager.getPlugins().size(), 2u);
+    EXPECT_EQ(manager.getPlugins().size(), builtInPolicyCount());
 }
 
 // ========== Destructor Path Coverage ==========
@@ -397,7 +407,8 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, BadApiVersionPluginRejected)
     _manager->loadPlugins({badPlugin}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     // Built-in Config + StaticOrdering are always present; no external plugin should have loaded.
-    EXPECT_EQ(_manager->getPlugins().size(), 2u) << "Bad API version plugin should be rejected";
+    EXPECT_EQ(_manager->getPlugins().size(), builtInPolicyCount())
+        << "Bad API version plugin should be rejected";
 }
 
 TEST_F(TestHeuristicPluginManagerValidationPaths, EmptyNamePluginRejected)
@@ -411,7 +422,8 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, EmptyNamePluginRejected)
     _manager->loadPlugins({emptyNamePlugin}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     // Built-in Config + StaticOrdering are always present; no external plugin should have loaded.
-    EXPECT_EQ(_manager->getPlugins().size(), 2u) << "Empty policy name plugin should be rejected";
+    EXPECT_EQ(_manager->getPlugins().size(), builtInPolicyCount())
+        << "Empty policy name plugin should be rejected";
 }
 
 TEST_F(TestHeuristicPluginManagerValidationPaths, DuplicatePolicyIdPluginsRejected)
@@ -428,10 +440,11 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, DuplicatePolicyIdPluginsReject
 
     _manager->loadPlugins({pluginA, pluginB}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    // Built-in Config + StaticOrdering are always present, plus the first of the
-    // duplicate pair (pluginA). The second (pluginB) is rejected for duplicate policy ID.
+    // The built-ins are always present, plus the first of the duplicate pair
+    // (pluginA). The second (pluginB) is rejected for duplicate policy ID.
     const auto& plugins = _manager->getPlugins();
-    ASSERT_EQ(plugins.size(), 3u) << "Built-ins + first duplicate plugin should be present";
+    ASSERT_EQ(plugins.size(), builtInPolicyCount() + 1u)
+        << "Built-ins + first duplicate plugin should be present";
 
     // The survivor must be pluginA (first offered). Probe pluginA on its own to
     // capture its policy IDs, then verify those IDs appear in the loaded set —
@@ -439,7 +452,7 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, DuplicatePolicyIdPluginsReject
     // an unrelated reason and pluginB loaded.
     HeuristicPluginManager probeA;
     probeA.loadPlugins({pluginA}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
-    ASSERT_EQ(probeA.getPlugins().size(), 3u)
+    ASSERT_EQ(probeA.getPlugins().size(), builtInPolicyCount() + 1u)
         << "pluginA should load successfully alongside the built-ins to be a valid baseline";
 
     // Find the non-built-in plugin in the probe to get pluginA's policy IDs.
@@ -531,5 +544,5 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, EmptyDirectorySkipsValidation)
     _manager->loadPlugins({emptyDir.path()}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     // Built-in Config + StaticOrdering are always present; the empty directory contributed nothing.
-    EXPECT_EQ(_manager->getPlugins().size(), 2u);
+    EXPECT_EQ(_manager->getPlugins().size(), builtInPolicyCount());
 }
