@@ -187,6 +187,7 @@ enum class target_arch : unsigned int
     gfx1153 = 1153,
     gfx1200 = 1200,
     gfx1201 = 1201,
+    gfx1250 = 1250,
     unknown = std::numeric_limits<unsigned int>::max(),
 };
 #endif // DOXYGEN_SHOULD_SKIP_THIS
@@ -206,10 +207,11 @@ enum class gen
     cdna2,
     cdna3,
     cdna4,
+    cdna5,
     rdna1,
     rdna2,
     rdna3,
-    rdna4,
+    rdna4
 };
 
 enum class gpu
@@ -227,7 +229,8 @@ enum class gpu
     mi300a,
     mi308x,
     mi325x,
-    mi350x
+    mi350x,
+    mi455x
 };
 
 constexpr gen gen_from_target_arch(target_arch i)
@@ -255,12 +258,14 @@ constexpr gen gen_from_target_arch(target_arch i)
         case target_arch::gfx1153: return gen::rdna3;
         case target_arch::gfx1200:
         case target_arch::gfx1201: return gen::rdna4;
+        case target_arch::gfx1250: return gen::cdna5;
         case target_arch::unknown:
         case target_arch::invalid: return gen::unknown;
     }
 }
 
 constexpr std::tuple<std::string_view, gpu> target_gpu_names[] = {
+    std::make_tuple<std::string_view, gpu>("MI455X", gpu::mi455x),
     std::make_tuple<std::string_view, gpu>("MI350X", gpu::mi350x),
     std::make_tuple<std::string_view, gpu>("MI325X", gpu::mi325x),
     std::make_tuple<std::string_view, gpu>("MI308X", gpu::mi308x),
@@ -328,6 +333,7 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
     ROCPRIM_RETURN_IF_ARCH(gfx1153);
     ROCPRIM_RETURN_IF_ARCH(gfx1200);
     ROCPRIM_RETURN_IF_ARCH(gfx1201);
+    ROCPRIM_RETURN_IF_ARCH(gfx1250);
 
     return target_arch::unknown;
 }
@@ -591,7 +597,8 @@ constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknow
         case gen::cdna1:
         case gen::cdna2:
         case gen::cdna3:
-        case gen::cdna4: return arch::wavefront::target::size64;
+        case gen::cdna4: 
+        case gen::cdna5: return arch::wavefront::target::size64;
         case gen::rdna1:
         case gen::rdna2:
         case gen::rdna3:
