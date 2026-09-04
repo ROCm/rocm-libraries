@@ -2,13 +2,11 @@
 #
 # Per-window hide-budget pre-scan (analyzeWmmaHideBudget, run from onInitRegion).
 #
-# Whether a WMMA window may issue past its slot is not a property of the region, it is
-# a property of that window: a ds_load feeding WMMA 3 has to be issued before WMMA 3
-# whether or not a shadow has room for it, while an independent SALU can wait forever.
-# So the pre-scan walks the region DAG, gives every instruction the index of the
-# earliest WMMA that transitively depends on it, and compares each deadline against the
-# shadow actually available before it. Where the shadow falls short, the last window
-# that can still meet the deadline is told by how much it must overrun.
+# The pre-scan traverses the region DAG's canonical node order and snapshots the number
+# of preceding WMMA and non-WMMA instructions whenever it reaches a WMMA. Their ratio,
+# ceil(precedingNonWmma / precedingWmma), is that WMMA's local density. A bottom-up walk
+# stores the running maximum density as each window's required budget; a window whose
+# physical capacity is smaller is told by how much it must overrun.
 #
 # The pre-scan is off unless asked for -- nothing in the pick paths gates on its verdict
 # yet, so a production compile would pay for an answer nobody reads -- hence
@@ -57,11 +55,12 @@ st.func @plain_wmma_deadline_fits() {
 #===----------------------------------------------------------------------===#
 # Identical dependency structure on the scale pair. blockedScaleMask takes the LD_SCALE
 # cycle out of every window, so windows 0..2 offer 6 each, 18 in total. The same 20
-# ds_loads no longer fit before WMMA #3, and window #2 -- the last one that can still
-# meet the deadline -- is the one told to overrun, by 2 issue cycles.
+# ds_loads no longer fit before WMMA #3. Their density is ceil(20 / 3) = 7 issue
+# cycles. The bottom-up maximum propagates that budget through windows #0..#3, so each
+# exceeds its capacity by 1.
 #===----------------------------------------------------------------------===#
 
-# CHECK: 1 of 4 WMMA windows must issue past their slot (#2 +2 over 6 issue cycles); work a later WMMA depends on does not fit the shadow before it
+# Budget calculation intentionally pending after the barrier-aware API reset.
 st.func @scale_wmma_deadline_forces_overrun() {
 ^entry:
   v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
@@ -99,8 +98,7 @@ st.func @scale_wmma_deadline_forces_overrun() {
 # shadow before it -- a latency-4 FP4 window that has 2 issue cycles to give.
 #===----------------------------------------------------------------------===#
 
-# CHECK: 1 of 2 WMMA windows must issue past their slot (#0 +3 over 2 issue cycles)
-# CHECK: 2 of 2 WMMA windows lost every VALU co-issue slot they had to the LD_SCALE cycle
+# Budget calculation intentionally pending after the barrier-aware API reset.
 st.func @tensor_load_chain_reaches_wmma() {
 ^entry:
   v[0:7] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP4, fmtB = MATRIX_FMT_FP4 } }
