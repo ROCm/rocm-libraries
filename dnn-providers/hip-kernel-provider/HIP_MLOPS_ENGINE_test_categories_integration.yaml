@@ -35,7 +35,23 @@ test_categories:
     test_patterns:
       - "quick_*"
       - "Smoke/*"
-    exclude: *common_excludes
+      # Layernorm backward's "4D" shape family (Smoke and Full instantiations
+      # alike) is cheap regardless of tier -- 18.0 s measured on gfx1151 for
+      # all 14 suites combined (Smoke ~12.6 s + Full ~5.5 s) -- so it is
+      # pulled into quick explicitly. "Full/*" isn't otherwise part of quick;
+      # this pattern is scoped to layernorm backward's own suite names so it
+      # can't pick up another op's Full suite.
+      - "Full/*IntegrationGpuLayernormBackward*4D*"
+    exclude:
+      - "*DISABLED*"
+      # Layernorm backward's "5D" shape family is not cheap: 276.7 s measured
+      # on gfx1151 across the 7 Smoke/*5D* suites alone (see standard/
+      # comprehensive below for where it lands instead). The blanket
+      # "Smoke/*" pattern above would otherwise pull all of it into quick;
+      # carve it back out here. Full/*5D* and Full/*LargeBatch* never enter
+      # quick's positive patterns in the first place (quick has no bare
+      # "Full/*"), so they need no exclude.
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*"
     labels:
       - "quick"
       - "pre-commit"
@@ -47,7 +63,20 @@ test_categories:
       - "quick_*"
       - "standard_*"
       - "Smoke/*"
-    exclude: *common_excludes
+      - "Full/*IntegrationGpuLayernormBackward*4D*"
+    exclude:
+      - "*DISABLED*"
+      # Standard adds the 5D family back (25.0 s measured for 7 suites x 26
+      # cases minus the four indices below), keeping quick's content plus
+      # this at 43.0 s total -- comfortably under the 2-minute standard
+      # budget. The four excluded indices are the same production shape
+      # (see comprehensive's comment below) repeated per dtype fixture: ~8.2-
+      # 10.0 s each, ~251.7 s combined across all 7 5D suites, which alone
+      # would blow the standard budget, so they wait for comprehensive.
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/10"
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/12"
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/23"
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/25"
     labels:
       - "standard"
       - "pr"
@@ -58,34 +87,26 @@ test_categories:
     test_patterns:
       - "*"
     # Layernorm backward is always built (HIPDNN_IT_ALWAYS_BUILT_SOURCES), so
-    # unlike the other C++ graph suites it runs in CI. At 2741 s on gfx1151 it
-    # timed this job out: ROCm/rocm-libraries#11529. Cost is host-side
-    # verification, ~450 ns per tensor element regardless of dtype, so a few big
-    # shapes repeated over 7 dtype fixtures x 2 layouts dominate. Excluding them
-    # brings it to 42 s measured; the "full" tier still runs everything.
+    # unlike the other C++ graph suites it runs in CI. Full/*5D* and
+    # Full/*LargeBatch* are still excluded here -- 1364.2 s and 1240.1 s
+    # measured on gfx1151 respectively, each alone blowing the 5-minute
+    # comprehensive budget by itself (ROCm/rocm-libraries#11529 is the
+    # original full-suite timeout this was cut from). Everything else layernorm
+    # backward now runs in comprehensive: with quick+standard's 43.0 s plus the
+    # four production-shape indices standard held back (251.7 s), the total is
+    # 294.7 s -- just inside 5 minutes. Those four indices are one shape,
+    # {32,32,14,25,59} (21.1M el), repeated per dtype fixture; identified by
+    # index rather than name because the shape isn't in the test name:
+    # Combine(2 layouts, getLayernorm5DTestCases()) gives index = layout * 13 +
+    # case, and this shape is cases 10 and 12 in common/LayernormCommon.hpp.
+    # Re-derive if that list changes -- the indices shift silently.
     #
     # Explicit list because YAML cannot concatenate an aliased sequence, hence
     # the repeated "*DISABLED*" instead of *common_excludes.
     exclude:
       - "*DISABLED*"
-      # 1162 s: batch-256/512 volumetric shapes, ~5-29 s a case. The engine's
-      # test-config TOML aims to skip these but its pattern is the forward
-      # suite's "Full5dLargeBatch/" prefix, which the always-built backward
-      # suites do not use, so they ran anyway.
       - "Full/*IntegrationGpuLayernormBackwardLargeBatch*"
-      # 1274 s: 19 production shapes x 2 bias x 2 layouts x 7 fixtures. No dtype
-      # subset fits -- each fixture alone is ~180 s.
       - "Full/*IntegrationGpuLayernormBackward*5D*"
-      # One shape, {32,32,14,25,59} (21.1M el), is 263 s of Smoke 5D's 288 s; the
-      # other 22 cases cost 24 s, so only these four go.
-      # Index rather than name because the shape is not in the test name:
-      # Combine(2 layouts, getLayernorm5DTestCases()) gives index = layout * 13 +
-      # case, and this shape is cases 10 and 12 in common/LayernormCommon.hpp.
-      # Re-derive if that list changes -- the indices shift silently.
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/10"
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/12"
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/23"
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/25"
     labels:
       - "comprehensive"
       - "nightly"
@@ -105,7 +126,11 @@ test_categories:
     test_patterns:
       - "quick_*"
       - "Smoke/*"
-    exclude: *common_excludes
+      - "Full/*IntegrationGpuLayernormBackward*4D*"
+    exclude:
+      - "*DISABLED*"
+      # Mirrors the quick tier's carve-out above -- see quick's exclude comment.
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*"
     labels:
       - "ffm-quick"
       - "ffm-full"
