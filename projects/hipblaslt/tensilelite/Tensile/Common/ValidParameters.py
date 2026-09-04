@@ -1186,6 +1186,9 @@ validParameters = { # we need to make sure this matches develop
     # each covering half the macro-tile in the M/N dimension. MX scale tensors (MXSA/MXSB)
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
+    # Also supported for Sparse (2:4 structured sparsity): the sparse-tracked operand's
+    # LDS footprint holds the compressed (K/2) data, which the split boundary accounts for;
+    # the metadata tensor itself is never split.
     "TDMSplit": [False, True],
     # Insert a barrier between an urgent and a deferrable tensor_load_to_lds group
     # (different TDM wait groups) so every wave finishes the urgent group before any
