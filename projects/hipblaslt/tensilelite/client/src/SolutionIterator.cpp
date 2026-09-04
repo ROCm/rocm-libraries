@@ -101,6 +101,7 @@ namespace TensileLite
                         m_reporter->log(LogLevel::Verbose, msg.str());
                 }
 
+                recordNonFatalError();
                 return false;
             }
 
@@ -122,6 +123,7 @@ namespace TensileLite
                         m_reporter->log(LogLevel::Verbose, msg.str());
                 }
 
+                recordNonFatalError();
                 return false;
             }
 
