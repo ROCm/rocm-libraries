@@ -84,3 +84,4 @@ add_community_sample(simple_gemm_swiglu ${CMAKE_CURRENT_SOURCE_DIR}/simple_gemm_
 add_community_sample(simple_fusion_gemm ${CMAKE_CURRENT_SOURCE_DIR}/simple_fusion_gemm.cpp)
 add_community_sample(simple_gemm_act ${CMAKE_CURRENT_SOURCE_DIR}/simple_gemm_act.cpp)
 add_community_sample(simple_lora_adapter_fusion ${CMAKE_CURRENT_SOURCE_DIR}/simple_lora_adapter_fusion.cpp)
+add_community_sample(simple_flash_attn_v2 ${CMAKE_CURRENT_SOURCE_DIR}/simple_flash_attn_v2.cpp)
