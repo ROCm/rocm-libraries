@@ -241,6 +241,12 @@ protected:
         }
 
         // Compute the index tensor using the forward CPU reference implementation
+        // verifyGraph() from IntegrationGraphVerificationHarness fills input tensors
+        // using a fill recipe. For Resample Bwd, the default recipe generates uniform
+        // random values in [-1.0, 1.0], which is invalid for the index tensor since
+        // indices must be non-negative and within the bounds of the input tensor.
+        // Therefore, we compute the index tensor using the forward pass to generate
+        // valid and non-trivial indices for the backward pass.
         if(resampleMode == ResampleMode::MAXPOOL && indexTensorAttr != nullptr)
         {
             const auto& dyDims = indexTensorAttr->get_dim();

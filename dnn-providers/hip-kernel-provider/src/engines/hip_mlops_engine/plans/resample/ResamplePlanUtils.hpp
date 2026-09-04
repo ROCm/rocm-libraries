@@ -167,7 +167,8 @@ inline void validateResampleBwdOutputShape(const std::vector<int64_t>& dyDims,
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "ResampleBwd dy spatial dimensions must match the resample parameters.");
+                "ResampleBwd dx and dy spatial dimensions must be compatible with the resample "
+                "parameters.");
         }
     }
 }

@@ -357,7 +357,7 @@ TEST(TestResampleValidator, BwdAveragePoolValidWithoutIndex)
     EXPECT_NO_THROW(validateResampleBwdGraph(builder));
 }
 
-TEST(TestResampleValidator, BwdMaxpoolInValidWithoutIndex)
+TEST(TestResampleValidator, BwdMaxpoolInvalidWithoutIndex)
 {
     auto builder
         = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(false, ResampleMode::MAXPOOL);

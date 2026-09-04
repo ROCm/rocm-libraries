@@ -169,13 +169,13 @@ void ResampleValidator::checkTensorConfigSupported(
 void ResampleValidator::checkBwdTensorConfigSupported(
     const data_objects::ResampleBwdAttributes& resampleBwdAttr)
 {
-    const auto mode = resampleBwdAttr.resample_mode();
-    if(mode != data_objects::ResampleMode::MAXPOOL
-       && mode != data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING
-       && mode != data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING)
+    const auto resampleMode = resampleBwdAttr.resample_mode();
+    if(resampleMode != data_objects::ResampleMode::MAXPOOL
+       && resampleMode != data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING
+       && resampleMode != data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "ResampleBwd mode is unsupported.");
+                                                       "ResampleBwd resample mode is unsupported.");
     }
 
     if(resampleBwdAttr.padding_mode() == data_objects::PaddingMode::PADDING_NOT_SET)
