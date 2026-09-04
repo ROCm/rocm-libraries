@@ -88,6 +88,7 @@ enum class Processor : int
     gfx1010 = 1010,
     gfx1011 = 1011,
     gfx1012 = 1012,
+    gfx1013 = 1013,
     gfx1030 = 1030,
     gfx1031 = 1031,
     gfx1032 = 1032,

@@ -66,6 +66,7 @@ namespace Tensile
             gfx1010 = 1010,
             gfx1011 = 1011,
             gfx1012 = 1012,
+            gfx1013 = 1013,
             gfx1030 = 1030,
             gfx1031 = 1031,
             gfx1032 = 1032,
@@ -112,6 +113,8 @@ namespace Tensile
                 return "gfx1011";
             case AMDGPU::Processor::gfx1012:
                 return "gfx1012";
+            case AMDGPU::Processor::gfx1013:
+                return "gfx1013";
             case AMDGPU::Processor::gfx1030:
                 return "gfx1030";
             case AMDGPU::Processor::gfx1031:
@@ -197,6 +200,10 @@ namespace Tensile
             else if(deviceString.find("gfx1012") != std::string::npos)
             {
                 return AMDGPU::Processor::gfx1012;
+            }
+            else if(deviceString.find("gfx1013") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1013;
             }
             else if(deviceString.find("gfx1030") != std::string::npos)
             {
