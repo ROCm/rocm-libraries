@@ -563,6 +563,7 @@ def test_example_tree_is_self_consistent():
         "hip/pointwise_add",
         "rocKE/gfx942_tiled_attention",
         "rocKE/gfx942_attention_dense",
+        "rocKE/gfx950_attention_dense",
     }
 
 
