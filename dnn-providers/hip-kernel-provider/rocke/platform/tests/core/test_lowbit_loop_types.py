@@ -58,9 +58,7 @@ def _build_loop(carry_types=_LOWBIT_TYPES):
 class TestLowbitLoopTypes(unittest.TestCase):
     def test_phi_latch_and_exit_use_complete_lowbit_types(self):
         kernel, loop_op = _build_loop()
-        llvm = _lower_kernel_to_llvm_python(
-            kernel, arch="gfx950", llvm_flavor="llvm20"
-        )
+        llvm = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor="llvm20")
 
         for (name, _, llvm_type), result in zip(_LOWBIT_TYPES, loop_op.results):
             with self.subTest(carry=name):
@@ -150,9 +148,7 @@ class TestLowbitLoopTypes(unittest.TestCase):
         with self.assertRaisesRegex(
             ValueError, "metadata type 'vec<i8x>' does not match init type 'i8'"
         ):
-            _lower_kernel_to_llvm_python(
-                kernel, arch="gfx950", llvm_flavor="llvm20"
-            )
+            _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor="llvm20")
 
     def test_cpp_rejects_illegal_type_and_malformed_metadata_clearly(self):
         try:
