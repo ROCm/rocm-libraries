@@ -1115,12 +1115,11 @@ def run():
     arguments = parseArguments()
     setVerbosity(arguments["PrintLevel"])
     outputPath = Path(ensurePath(os.path.abspath(arguments["OutputPath"])))
-    cxxCompiler, _, offloadBundler, _, _ = validateToolchain(
+    cxxCompiler, _, offloadBundler, _ = validateToolchain(
         arguments["CxxCompiler"],
         arguments["CCompiler"],
         arguments["OffloadBundler"],
         arguments["Assembler"],
-        ToolchainDefaults.HIP_CONFIG,
     )
 
     if ";" in arguments["Architecture"]:

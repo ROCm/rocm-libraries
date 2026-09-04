@@ -79,44 +79,38 @@ def test_get_version_no_match_raises(monkeypatch):
         C._getVersion("amdclang++", "--version", r"version\s+([\d.]+)")
 
 
-def test_get_rocm_version_uses_hipconfig(monkeypatch):
-    seen = {}
-
-    def _fake(exe, flag, regex):
-        seen["exe"], seen["flag"] = exe, flag
-        return SemanticVersion(6, 4, 0)
-
-    monkeypatch.setattr(C, "_getVersion", _fake)
+def test_get_rocm_version_uses_rocm_version_env(monkeypatch, tmp_path):
+    """ROCM_VERSION env var takes priority over all other sources."""
+    monkeypatch.setenv("ROCM_VERSION", "6.4.0")
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
     assert C.get_rocm_version() == SemanticVersion(6, 4, 0)
-    assert seen["flag"] == "--version"
-    assert seen["exe"] == C.ToolchainDefaults.HIP_CONFIG
 
 
 @pytest.mark.parametrize(
-    "hipconfig_output, expected_version",
+    "version_str, expected_version",
     [
         pytest.param(
-            b"7.1.25424-4179531dcd",
-            SemanticVersion(7, 1, 25424),
-            id="rocm_7_1_build_suffix",
+            "7.1.0",
+            SemanticVersion(7, 1, 0),
+            id="simple_version",
         ),
         pytest.param(
-            b"7.2.26015-fc0010cf6a",
-            SemanticVersion(7, 2, 26015),
-            id="rocm_7_2_build_suffix",
+            "7.1.25424-4179531dcd",
+            SemanticVersion(7, 1, 25424),
+            id="build_suffix",
         ),
     ],
 )
-def test_get_rocm_version_parses_hipconfig_build_suffix(
-    monkeypatch, hipconfig_output, expected_version
+def test_get_rocm_version_reads_info_version_file(
+    monkeypatch, tmp_path, version_str, expected_version
 ):
-    monkeypatch.setattr(C, "validateToolchain", lambda x: x)
-
-    class _R:
-        stdout = hipconfig_output
-
-    monkeypatch.setattr(C, "run", lambda *a, **k: _R())
-
+    """get_rocm_version reads .info/version when ROCM_VERSION is not set."""
+    info_dir = tmp_path / ".info"
+    info_dir.mkdir()
+    (info_dir / "version").write_text(version_str)
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
     assert C.get_rocm_version() == expected_version
 
 

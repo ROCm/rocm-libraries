@@ -25,7 +25,7 @@
 from os import name as os_name
 from os import environ
 from pathlib import Path
-from re import search, IGNORECASE
+from re import match, search, IGNORECASE
 from shlex import split
 from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
@@ -79,15 +79,38 @@ def _getVersion(executable: str, versionFlag: str, regex: str) -> str:
         raise RuntimeError(f"Failed to get version when calling {args}: {e}")
 
 
-def get_rocm_version() -> str:
-    """Compute the ROCm version string using hipconfig.
+def get_rocm_version() -> SemanticVersion:
+    """Compute the ROCm version string.
+
+    Reads ROCM_VERSION env var (set by CMake from hip_VERSION) if available,
+    otherwise falls back to reading .info/version from ROCM_PATH, HIP_PATH,
+    or /opt/rocm.
+
+    Note: Python ROCm SDK (pip) version detection is intentionally omitted here;
+    it will be handled by PR #11023 with proper feature-gating once the
+    infrastructure is in place.
 
     Raises:
-        RuntimeError: If hipconfig fails to execute.
+        RuntimeError: If the version cannot be determined.
     Return:
-        ROCm version string
+        ROCm SemanticVersion
     """
-    return _getVersion(ToolchainDefaults.HIP_CONFIG, "--version", r'(.+)')
+    version_str = environ.get("ROCM_VERSION")
+    if not version_str:
+        for root in [environ.get("ROCM_PATH"), environ.get("HIP_PATH"), "/opt/rocm"]:
+            if root:
+                try:
+                    version_str = (Path(root) / ".info" / "version").read_text().strip()
+                    break
+                except OSError:
+                    continue
+    if not version_str:
+        raise RuntimeError("Failed to get ROCm version: ROCM_VERSION not set and "
+                           ".info/version not found in ROCM_PATH, HIP_PATH, or /opt/rocm")
+    # Strip pre-release suffixes before parsing (e.g. "0a20260813" -> "0", "1rc2" -> "1")
+    # so that nightly/alpha version strings like "10.1.0a20260813" parse correctly.
+    return SemanticVersion(*[int(match(r'\d+', c.split("-")[0]).group())
+                             for c in version_str.split(".")[:3]])
 
 
 class Component:

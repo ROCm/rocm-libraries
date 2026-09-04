@@ -32,7 +32,7 @@ if( NOT CREATE_TEST_APP_LOCAL_DEPLOY )
   option( CREATE_TEST_APP_LOCAL_DEPLOY "Create test sandbox for app local deployment" OFF )
 endif( )
 
-if( HIP_PLATFORM STREQUAL nvidia )
+if( USE_CUDA )
   option( LINK_BLIS "Link AOCL Blis reference library" OFF )
 else()
   option( LINK_BLIS "Link AOCL Blis reference library" ON )

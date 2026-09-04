@@ -81,7 +81,7 @@ if (NOT WIN32)
     target_link_libraries( hipblas-bench PRIVATE stdc++fs )
 endif()
 
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   target_link_libraries( hipblas-bench PRIVATE hip::host )
 
   if( CUSTOM_TARGET )
@@ -89,12 +89,7 @@ if(HIP_PLATFORM STREQUAL amd)
   endif()
 
 else( )
-  target_include_directories( hipblas-bench
-    PRIVATE
-      $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-  )
-
-  target_link_libraries( hipblas-bench PRIVATE ${CUDA_LIBRARIES} )
+  target_link_libraries( hipblas-bench PRIVATE CUDA::cublas )
 endif( )
 
 set_target_properties( hipblas-bench PROPERTIES

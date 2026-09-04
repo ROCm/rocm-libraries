@@ -1204,7 +1204,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     monkeypatch.setattr(
         RunModule,
         "validateToolchain",
-        lambda *a: ("/fake/hipcc", None, "/fake/bundler", None, None),
+        lambda *a: ("/fake/hipcc", None, "/fake/bundler", None),
     )
     monkeypatch.setattr(RunModule, "makeIsaInfoMap", lambda _isas, _cxx: _stub_iim())
     monkeypatch.setattr(RunModule, "assignGlobalParameters", _capture_gp)
@@ -1826,7 +1826,7 @@ def _run_createlibrary_to_writes(
     monkeypatch.setattr(
         RunModule,
         "validateToolchain",
-        lambda *a: ("/fake/hipcc", None, "/fake/bundler", None, None),
+        lambda *a: ("/fake/hipcc", None, "/fake/bundler", None),
     )
     monkeypatch.setattr(RunModule, "makeIsaInfoMap", _iim)
     monkeypatch.setattr(RunModule, "assignGlobalParameters", lambda *a, **kw: None)

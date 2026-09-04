@@ -42,7 +42,7 @@ if(NOT WIN32)
   set( sample_list_fortran hipblas-example-sscal-fortran hipblas-example-gemmEx-fortran )
 endif()
 
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   add_executable(hipblas-example-bfdot-hip-bfloat16 example_bfdot_hip_bfloat16.cpp ${hipblas_samples_common})
   endif()
 
@@ -66,7 +66,7 @@ list (APPEND hipblas-example-executables hipblas-example-sscal hipblas-example-s
 if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*/amdclang\\+\\+$")
   list (APPEND hipblas-example-executables hipblas-example-hgemm)
 endif( )
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   list (APPEND hipblas-example-executables hipblas-example-bfdot-hip-bfloat16)
   target_compile_options(hipblas-example-bfdot-hip-bfloat16 PRIVATE -DHIPBLAS_USE_HIP_BFLOAT16)
 endif()
@@ -99,7 +99,7 @@ foreach( exe IN LISTS hipblas-example-executables)
 
   target_link_libraries( ${exe} PRIVATE roc::hipblas )
 
-  if(HIP_PLATFORM STREQUAL amd)
+  if(NOT USE_CUDA)
     target_link_libraries( ${exe} PRIVATE hip::host )
 
     if( CUSTOM_TARGET )
@@ -107,14 +107,9 @@ foreach( exe IN LISTS hipblas-example-executables)
     endif( )
 
   else( )
-    target_compile_definitions( ${exe} PRIVATE ${HIPBLAS_HIP_PLATFORM_COMPILER_DEFINES} )
+    target_compile_definitions( ${exe} PRIVATE ${HIPBLAS_CUDA_COMPILER_DEFINES} )
 
-    target_include_directories( ${exe}
-      PRIVATE
-        $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-    )
-
-    target_link_libraries( ${exe} PRIVATE ${CUDA_LIBRARIES} )
+    target_link_libraries( ${exe} PRIVATE CUDA::cublas )
   endif( )
 
   set_target_properties( ${exe} PROPERTIES
