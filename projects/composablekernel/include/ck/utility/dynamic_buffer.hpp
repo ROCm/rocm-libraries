@@ -55,6 +55,11 @@ struct DynamicBuffer
                                                 ElementSpaceSize element_space_size)
         : p_data_{p_data}, element_space_size_{element_space_size}
     {
+        // if constexpr(GetAddressSpace() == AddressSpaceEnum::Global)
+        // {
+        //     if(threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0)
+        //         printf("%u: value %ld\n", threadIdx.x, element_space_size_);
+        // }
     }
 
     __host__ __device__ constexpr DynamicBuffer(T* p_data,
@@ -64,6 +69,11 @@ struct DynamicBuffer
           element_space_size_{element_space_size},
           invalid_element_value_{invalid_element_value}
     {
+        // if constexpr(GetAddressSpace() == AddressSpaceEnum::Global)
+        // {
+        //     if(threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0)
+        //         printf("%u: value %ld\n", threadIdx.x, element_space_size_);
+        // }
     }
 
     __host__ __device__ static constexpr AddressSpaceEnum GetAddressSpace()
@@ -131,27 +141,42 @@ struct DynamicBuffer
         }
         else
         {
-            if(is_valid_element)
+            // if constexpr(GetAddressSpace() == AddressSpaceEnum::Global)
+            // {
+            //     if(is_valid_element && (i < 0  || i >= element_space_size_ / PackedSize))
+            //     {
+            //         printf("%u: value %ld\n", threadIdx.x, i);
+            //     }
+            // }
+            if constexpr(GetAddressSpace() == AddressSpaceEnum::Global)
             {
-#if CK_EXPERIMENTAL_USE_MEMCPY_FOR_VECTOR_ACCESS
-                X tmp;
-
-                __builtin_memcpy(&tmp, &(p_data_[i]), sizeof(X));
-
-                return tmp;
-#else
-                return *c_style_pointer_cast<const X*>(&p_data_[i]);
-#endif
+                const IndexType idx = is_valid_element ? i : 0;
+                return *c_style_pointer_cast<const X*>(&p_data_[idx]);
             }
             else
             {
-                if constexpr(InvalidElementUseNumericalZeroValue)
+                if(is_valid_element)
                 {
-                    return X{0};
+#if CK_EXPERIMENTAL_USE_MEMCPY_FOR_VECTOR_ACCESS
+                    X tmp;
+
+                    __builtin_memcpy(&tmp, &(p_data_[i]), sizeof(X));
+
+                    return tmp;
+#else
+                    return *c_style_pointer_cast<const X*>(&p_data_[i]);
+#endif
                 }
                 else
                 {
-                    return X{invalid_element_value_};
+                    if constexpr(InvalidElementUseNumericalZeroValue)
+                    {
+                        return X{0};
+                    }
+                    else
+                    {
+                        return X{invalid_element_value_};
+                    }
                 }
             }
         }
@@ -436,6 +461,14 @@ struct DynamicBuffer
                       "wrong! X should contain multiple T");
 
         static_assert(GetAddressSpace() == AddressSpaceEnum::Global, "only support global mem");
+
+        // if constexpr(GetAddressSpace() == AddressSpaceEnum::Global)
+        // {
+        //     if(is_valid_element && (i < 0  || i >= element_space_size_ / PackedSize))
+        //     {
+        //         printf("%u: value %ld\n", threadIdx.x, i);
+        //     }
+        // }
 
 #if CK_USE_AMD_BUFFER_ATOMIC_ADD_INTEGER && CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT
         bool constexpr use_amd_buffer_addressing =

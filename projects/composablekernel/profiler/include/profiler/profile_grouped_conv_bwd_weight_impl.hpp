@@ -155,6 +155,10 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
     const auto weight_element_space_size = wei_g_k_c_xs_desc.GetElementSpaceSize();
     const auto output_element_space_size = out_g_n_k_wos_desc.GetElementSpaceSize();
 
+    std::cout << "input_element_space_size: " << input_element_space_size << std::endl;
+    std::cout << "weight_element_space_size: " << weight_element_space_size << std::endl;
+    std::cout << "output_element_space_size: " << output_element_space_size << std::endl;
+
     // Allocate GPU buffers
     DeviceMem in_device_buf(sizeof(InDataType) * input_element_space_size);
     DeviceMem wei_device_buf(sizeof(WeiDataType) * weight_element_space_size);
@@ -191,14 +195,14 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
     else
     {
         // CPU-side initialization for do_verification=0,1
-        switch(init_method)
+        // switch(init_method)
         {
-        case 0: break; // Tensors are already zero-initialized by default
-        case 1:
-            input.GenerateTensorValue(GeneratorTensor_2<InDataType>{-5, 5});
-            output.GenerateTensorValue(GeneratorTensor_2<OutDataType>{-5, 5});
-            break;
-        default:
+            // case 0: break; // Tensors are already zero-initialized by default
+            // case 1:
+            //     input.GenerateTensorValue(GeneratorTensor_2<InDataType>{-5, 5});
+            //     output.GenerateTensorValue(GeneratorTensor_2<OutDataType>{-5, 5});
+            //     break;
+            // default:
             input.GenerateTensorValue(GeneratorTensor_3<InDataType>{0.0, 1.0});
             output.GenerateTensorValue(GeneratorTensor_3<OutDataType>{-0.5, 0.5});
         }
@@ -339,8 +343,13 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
             continue;
         }
         auto& op_ptr = op_ptrs[i];
+        if(op_ptr->GetTypeString().find("Large_Tensor") == std::string::npos)
+        {
+            continue;
+        }
         for(std::size_t split_k_id = 0; split_k_id < split_k_list.size(); split_k_id++)
         {
+            std::cout << "  SplitK: " << split_k_list[split_k_id] << std::endl;
             auto argument_ptr = op_ptr->MakeArgumentPointer(
                 static_cast<InDataType*>(in_device_buf.GetDeviceBuffer()),
                 static_cast<WeiDataType*>(wei_device_buf.GetDeviceBuffer()),
@@ -359,6 +368,8 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
                 wei_element_op,
                 out_element_op,
                 split_k_list[split_k_id]);
+
+            std::cout << "argument pointer created\n";
 
             auto split_k_value     = split_k_list[split_k_id];
             auto split_k_param_str = std::to_string(split_k_value);
@@ -388,13 +399,14 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
                 split_k_value = 1;
             }
 
-            const std::size_t workspace_sz = op_ptr->GetWorkSpaceSize(argument_ptr.get());
-            DeviceMem workspace_dev(0);
-            if(workspace_sz)
-            {
-                workspace_dev.Realloc(workspace_sz);
-                op_ptr->SetWorkSpacePointer(argument_ptr.get(), workspace_dev.GetDeviceBuffer());
-            }
+            // const std::size_t workspace_sz = op_ptr->GetWorkSpaceSize(argument_ptr.get());
+            // DeviceMem workspace_dev(0);
+            // if(workspace_sz)
+            // {
+            //     std::cout << "workspace size: " << workspace_sz << " bytes" << std::endl;
+            //     workspace_dev.Realloc(workspace_sz);
+            //     op_ptr->SetWorkSpacePointer(argument_ptr.get(), workspace_dev.GetDeviceBuffer());
+            // }
 
             if(op_ptr->IsSupportedArgument(argument_ptr.get()))
             {
@@ -418,6 +430,9 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
                 valid_instances++;
 
                 std::string op_name = op_ptr->GetTypeString();
+
+                std::cout << "Running " << op_name << " (SplitK=" << split_k_param_str
+                          << ") ... \n";
 
                 auto invoker_ptr = op_ptr->MakeInvokerPointer();
 
@@ -462,7 +477,7 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
                 }
 
                 // Synchronize before verification to ensure kernel has completed
-                if(do_verification > 0 && !time_kernel)
+                // if(do_verification > 0 && !time_kernel)
                 {
                     hip_check_error(hipStreamSynchronize(nullptr));
                 }

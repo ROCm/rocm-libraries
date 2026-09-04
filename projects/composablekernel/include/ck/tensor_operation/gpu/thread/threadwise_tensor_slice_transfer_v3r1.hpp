@@ -160,13 +160,13 @@ struct ThreadwiseTensorSliceTransfer_v3r1
             auto op_r = src_thread_scratch_tuple_(thread_scratch_id)
                             .template GetAsType<vector_t>(src_data_idx_seq);
 
-            if constexpr(std::is_same_v<IndexType, long_index_t>)
-            {
-                // Is source valid has been verified during load
-                src_thread_scratch_tuple_(thread_scratch_id)
-                    .template SetAsType<vector_t>(src_data_idx_seq, op_r);
-            }
-            else
+            // if constexpr(std::is_same_v<IndexType, long_index_t>)
+            // {
+            //     // Is source valid has been verified during load
+            //     src_thread_scratch_tuple_(thread_scratch_id)
+            //         .template SetAsType<vector_t>(src_data_idx_seq, op_r);
+            // }
+            // else
             {
                 const bool is_src_valid = src_oob_thread_scratch_tuple_(thread_scratch_id)
                                               .template GetAsType<bool>(src_data_idx_seq);
