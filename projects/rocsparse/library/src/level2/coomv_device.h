@@ -54,7 +54,7 @@ namespace rocsparse
         __shared__ T shared_val[BLOCKSIZE];
 
         // Current threads index into COO structure
-        int64_t idx = hipBlockIdx_x * nloops * BLOCKSIZE + tid;
+        int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * nloops * BLOCKSIZE + tid;
 
         I row;
         T val;
@@ -266,7 +266,7 @@ namespace rocsparse
         __shared__ T shared_val[BLOCKSIZE];
 
         // Current threads index into COO structure
-        int64_t idx = hipBlockIdx_x * nloops * BLOCKSIZE + tid;
+        int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * nloops * BLOCKSIZE + tid;
 
         I row;
         T val;
@@ -416,7 +416,7 @@ namespace rocsparse
         T val;
 
         // Current threads index into COO structure
-        int64_t idx = hipBlockIdx_x * LOOPS * BLOCKSIZE + tid;
+        int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * LOOPS * BLOCKSIZE + tid;
 
         if(idx < nnz)
         {
@@ -561,7 +561,7 @@ namespace rocsparse
         T val;
 
         // Current threads index into COO structure
-        int64_t idx = hipBlockIdx_x * LOOPS * BLOCKSIZE + tid;
+        int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * LOOPS * BLOCKSIZE + tid;
 
         if(idx < nnz)
         {
@@ -689,7 +689,7 @@ namespace rocsparse
                                             Y*                   y,
                                             rocsparse_index_base idx_base)
     {
-        const int64_t gid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * hipBlockDim_x + hipThreadIdx_x;
 
         if(gid >= nnz)
         {
@@ -716,7 +716,7 @@ namespace rocsparse
                                                 Y*                   y,
                                                 rocsparse_index_base idx_base)
     {
-        const int64_t gid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * hipBlockDim_x + hipThreadIdx_x;
 
         if(gid >= nnz)
         {

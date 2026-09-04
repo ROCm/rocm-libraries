@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -92,4 +92,130 @@ INSTANTIATE_MIXED(int64_t,
                   rocsparse_double_complex,
                   rocsparse_double_complex);
 
-void testing_spmv_coo_extra(const Arguments& arg) {}
+void testing_spmv_coo_extra(const Arguments& arg)
+{
+    // Regression test for AISPARSE-660.
+    //
+    // The COO atomic SpMV kernels computed the global element id as a product
+    // of hipBlockIdx_x and a uint32_t BLOCKSIZE, so the id wrapped at 2^32
+    // regardless of how wide the index type I was. For a COO matrix declared
+    // with a 64-bit index type and nnz beyond 2^32, non-zeros past the wrap
+    // point were never accumulated into y. The fix casts the block index to
+    // int64_t before the multiply.
+    //
+    // This drives the 64-bit-index atomic path of rocsparse_spmv (COO) with
+    // nnz just past the 2^32 boundary and checks that a non-zero beyond that
+    // boundary is actually accumulated into y. Everything is initialized on the
+    // device and a single element is probed to stay within the (large) device
+    // allocation.
+    using I = int64_t;
+    using T = float;
+
+    static constexpr int64_t two_pow_32 = static_cast<int64_t>(1) << 32;
+
+    // nnz just beyond 2^32 so at least one block has a block index whose
+    // (blockIdx * BLOCKSIZE) product overflows 32-bit arithmetic.
+    const I nnz = two_pow_32 + 512;
+    const I m   = 2;
+    const I n   = 2;
+
+    const rocsparse_index_base base  = rocsparse_index_base_zero;
+    const rocsparse_datatype   ttype = get_datatype<T>();
+
+    rocsparse_local_handle handle(arg);
+
+    device_vector<I> drow_ind(nnz);
+    device_vector<I> dcol_ind(nnz);
+    device_vector<T> dval(nnz);
+    device_vector<T> dx(n);
+    device_vector<T> dy(m);
+
+    // Filler non-zeros all sit at (row 0, col 0) with value 0, so they add
+    // nothing to y regardless of ordering under the atomic accumulation.
+    CHECK_HIP_ERROR(hipMemset(drow_ind, 0, sizeof(I) * nnz));
+    CHECK_HIP_ERROR(hipMemset(dcol_ind, 0, sizeof(I) * nnz));
+    CHECK_HIP_ERROR(hipMemset(dval, 0, sizeof(T) * nnz));
+    CHECK_HIP_ERROR(hipMemset(dy, 0, sizeof(T) * m));
+
+    // x = [0, 1] so only column 1 contributes.
+    const T hx[2] = {static_cast<T>(0), static_cast<T>(1)};
+    CHECK_HIP_ERROR(hipMemcpy(dx, hx, sizeof(T) * n, hipMemcpyHostToDevice));
+
+    // The probe lives past the 2^32 boundary. It is the only non-zero that
+    // targets row 1 / column 1, so its contribution to y[1] is isolated from
+    // the filler accumulations to y[0].
+    const I probe_idx = two_pow_32 + 5;
+    const I probe_row = 1;
+    const I probe_col = 1;
+    const T probe_val = static_cast<T>(1);
+    CHECK_HIP_ERROR(hipMemcpy(
+        static_cast<I*>(drow_ind) + probe_idx, &probe_row, sizeof(I), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(
+        static_cast<I*>(dcol_ind) + probe_idx, &probe_col, sizeof(I), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(static_cast<T*>(dval) + probe_idx, &probe_val, sizeof(T), hipMemcpyHostToDevice));
+
+    rocsparse_local_spmat mat(m, n, nnz, drow_ind, dcol_ind, dval, get_indextype<I>(), base, ttype);
+    rocsparse_local_dnvec x(n, dx, ttype);
+    rocsparse_local_dnvec y(m, dy, ttype);
+
+    const rocsparse_operation trans = rocsparse_operation_none;
+    const rocsparse_spmv_alg  alg   = rocsparse_spmv_alg_coo_atomic;
+
+    // beta == 0 clears y; alpha scales the accumulated products.
+    const T halpha = static_cast<T>(1);
+    const T hbeta  = static_cast<T>(0);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+
+    void*  dbuffer     = nullptr;
+    size_t buffer_size = 0;
+    CHECK_ROCSPARSE_ERROR(rocsparse_spmv(handle,
+                                         trans,
+                                         &halpha,
+                                         mat,
+                                         x,
+                                         &hbeta,
+                                         y,
+                                         ttype,
+                                         alg,
+                                         rocsparse_spmv_stage_buffer_size,
+                                         &buffer_size,
+                                         dbuffer));
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_spmv(handle,
+                                         trans,
+                                         &halpha,
+                                         mat,
+                                         x,
+                                         &hbeta,
+                                         y,
+                                         ttype,
+                                         alg,
+                                         rocsparse_spmv_stage_preprocess,
+                                         &buffer_size,
+                                         dbuffer));
+
+    CHECK_ROCSPARSE_ERROR(testing::rocsparse_spmv(handle,
+                                                  trans,
+                                                  &halpha,
+                                                  mat,
+                                                  x,
+                                                  &hbeta,
+                                                  y,
+                                                  ttype,
+                                                  alg,
+                                                  rocsparse_spmv_stage_compute,
+                                                  &buffer_size,
+                                                  dbuffer));
+
+    // y[1] = alpha * probe_val * x[1] = 1. Before the fix the wrapped element
+    // id leaves the probe non-zero unprocessed, so y[1] stays 0.
+    T y_out = static_cast<T>(0);
+    CHECK_HIP_ERROR(hipMemcpy(&y_out, static_cast<T*>(dy) + 1, sizeof(T), hipMemcpyDeviceToHost));
+
+    CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+
+    unit_check_scalar<T>(static_cast<T>(1), y_out);
+}
