@@ -49,7 +49,12 @@
 
 #if PRIMBENCH_HAS_MONITORING
     #ifdef __HIP__
-        #include <amd_smi/amdsmi.h>
+        #if __has_include(<amd_smi/amdsmi.h>)
+            #include <amd_smi/amdsmi.h>
+        #else
+            #undef PRIMBENCH_HAS_MONITORING
+            #define PRIMBENCH_HAS_MONITORING 0
+        #endif
     #elif defined(__CUDACC__)
         #include <nvml.h>
     #endif
