@@ -114,7 +114,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"sqrt.f32", "declare float @llvm.sqrt.f32(float)"},
     {"rsqrt.f32", "declare float @llvm.amdgcn.rsq.f32(float)"},
     {"rcp.f32", "declare float @llvm.amdgcn.rcp.f32(float)"},
-    {"tanh.f32", "declare float @llvm.tanh.f32(float)"},
     {"maxnum.f32", "declare float @llvm.maxnum.f32(float, float)"},
     {"maxnum.f16", "declare half @llvm.maxnum.f16(half, half)"},
     {"maxnum.bf16", "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)"},

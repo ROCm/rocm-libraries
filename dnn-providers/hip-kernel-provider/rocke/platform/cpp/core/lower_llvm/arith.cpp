@@ -58,6 +58,75 @@ static const char* ll_fp_llvm_ty(const char* ty_name)
     return NULL;
 }
 
+/* Lower a synthetic primitive while expanding a higher-level operation. The
+ * temporary op is never inserted into the public rocKE IR; dispatching it
+ * through the normal handler keeps composite lowerings out of the business of
+ * spelling LLVM instructions, tracking intrinsic declarations, or duplicating
+ * primitive type handling. */
+static void ll_lower_composed_op(rocke_lower_t* L,
+                                 rocke_opcode_t opcode,
+                                 rocke_value_t** operands,
+                                 int num_operands,
+                                 rocke_value_t* result,
+                                 const rocke_attr_map_t* attrs)
+{
+    rocke_value_t* results[] = {result};
+    rocke_op_t expanded = {};
+    expanded.opcode = opcode;
+    expanded.name = rocke_opcode_name(opcode);
+    expanded.operands = operands;
+    expanded.num_operands = num_operands;
+    expanded.results = results;
+    expanded.num_results = 1;
+    if(attrs)
+    {
+        expanded.attrs = *attrs;
+    }
+    else
+    {
+        rocke_attr_map_init(&expanded.attrs);
+    }
+    rocke_ll_lower_op(L, &expanded);
+}
+
+static void ll_lower_composed_unary(rocke_lower_t* L,
+                                    rocke_opcode_t opcode,
+                                    rocke_value_t* operand,
+                                    rocke_value_t* result)
+{
+    rocke_value_t* operands[] = {operand};
+    ll_lower_composed_op(L, opcode, operands, 1, result, NULL);
+}
+
+static void ll_lower_composed_binary(rocke_lower_t* L,
+                                     rocke_opcode_t opcode,
+                                     rocke_value_t* lhs,
+                                     rocke_value_t* rhs,
+                                     rocke_value_t* result)
+{
+    rocke_value_t* operands[] = {lhs, rhs};
+    ll_lower_composed_op(L, opcode, operands, 2, result, NULL);
+}
+
+static void ll_lower_composed_ternary(rocke_lower_t* L,
+                                      rocke_opcode_t opcode,
+                                      rocke_value_t* a,
+                                      rocke_value_t* b,
+                                      rocke_value_t* c,
+                                      rocke_value_t* result)
+{
+    rocke_value_t* operands[] = {a, b, c};
+    ll_lower_composed_op(L, opcode, operands, 3, result, NULL);
+}
+
+static rocke_value_t ll_composed_value(const char* name, const rocke_type_t* type)
+{
+    rocke_value_t value = {};
+    value.name = name;
+    value.type = type;
+    return value;
+}
+
 /* ------------------------------------------------------------------ arith */
 
 /* Python _op_arith_constant: constants are emitted lazily at point of use. */
@@ -661,10 +730,93 @@ static void _op_math_rsqrt(rocke_lower_t* L, const rocke_op_t* op)
 {
     ll_math_f32_unary(L, op, "rsqrt", "rsqrt.f32", "amdgcn.rsq.f32");
 }
-/* Python _op_math_tanh -> llvm.tanh.f32. */
+/* Python _op_math_tanh -> composition of lowerable scalar primitives. */
 static void _op_math_tanh(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_math_f32_unary(L, op, "tanh", "tanh.f32", "tanh.f32");
+    rocke_value_t* res = (op && op->num_results > 0) ? op->results[0] : NULL;
+    if(!rocke_ll_live(L) || !res)
+    {
+        return;
+    }
+    rocke_value_t* v = op->operands[0];
+    if(!v->type || !v->type->name || strcmp(v->type->name, "f32") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "math.tanh requires f32 operand, got %s",
+                      (v->type && v->type->name) ? v->type->name : "(null)");
+        return;
+    }
+
+    /* OCML f32 tanh small-argument minimax polynomial for |x| < 0.625.
+     * Coefficients are in Horner power-basis order, not Taylor coefficients.
+     * Source: amd/device-libs/ocml/src/tanhF.cl. */
+    rocke_value_t one = ll_composed_value(rocke_ll_fp32_hex(L, 1.0), rocke_f32());
+    rocke_value_t neg_two = ll_composed_value(rocke_ll_fp32_hex(L, -2.0), rocke_f32());
+    rocke_value_t two_log2e
+        = ll_composed_value(rocke_ll_fp32_hex(L, 2.0 * 1.4426950408889634), rocke_f32());
+    rocke_value_t cutoff = ll_composed_value(rocke_ll_fp32_hex(L, 0.625), rocke_f32());
+    rocke_value_t c0 = ll_composed_value(rocke_ll_fp32_hex(L, -0x1.758e7ap-8), rocke_f32());
+    rocke_value_t c1 = ll_composed_value(rocke_ll_fp32_hex(L, 0x1.521192p-6), rocke_f32());
+    rocke_value_t c2 = ll_composed_value(rocke_ll_fp32_hex(L, -0x1.b8389cp-5), rocke_f32());
+    rocke_value_t c3 = ll_composed_value(rocke_ll_fp32_hex(L, 0x1.110704p-3), rocke_f32());
+    rocke_value_t c4 = ll_composed_value(rocke_ll_fp32_hex(L, -0x1.555532p-2), rocke_f32());
+    rocke_value_t sign_mask = ll_composed_value("-2147483648", rocke_i32());
+    rocke_value_t abs_mask = ll_composed_value("2147483647", rocke_i32());
+
+    rocke_value_t x_bits = ll_composed_value(rocke_ll_fresh(L, "tanh.xbits"), rocke_i32());
+    rocke_value_t sign = ll_composed_value(rocke_ll_fresh(L, "tanh.sign"), rocke_i32());
+    rocke_value_t abs_bits = ll_composed_value(rocke_ll_fresh(L, "tanh.abits"), rocke_i32());
+    rocke_value_t abs_x = ll_composed_value(rocke_ll_fresh(L, "tanh.abs"), rocke_f32());
+    rocke_value_t y2 = ll_composed_value(rocke_ll_fresh(L, "tanh.y2"), rocke_f32());
+    rocke_value_t p0 = ll_composed_value(rocke_ll_fresh(L, "tanh.p0"), rocke_f32());
+    rocke_value_t p1 = ll_composed_value(rocke_ll_fresh(L, "tanh.p1"), rocke_f32());
+    rocke_value_t p2 = ll_composed_value(rocke_ll_fresh(L, "tanh.p2"), rocke_f32());
+    rocke_value_t p3 = ll_composed_value(rocke_ll_fresh(L, "tanh.p3"), rocke_f32());
+    rocke_value_t yp = ll_composed_value(rocke_ll_fresh(L, "tanh.yp"), rocke_f32());
+    rocke_value_t poly = ll_composed_value(rocke_ll_fresh(L, "tanh.poly"), rocke_f32());
+    rocke_value_t exp_scaled = ll_composed_value(rocke_ll_fresh(L, "tanh.escaled"), rocke_f32());
+    rocke_value_t exp = ll_composed_value(rocke_ll_fresh(L, "tanh.exp"), rocke_f32());
+    rocke_value_t exp_den = ll_composed_value(rocke_ll_fresh(L, "tanh.eden"), rocke_f32());
+    rocke_value_t exp_inv = ll_composed_value(rocke_ll_fresh(L, "tanh.einv"), rocke_f32());
+    rocke_value_t exp_mag = ll_composed_value(rocke_ll_fresh(L, "tanh.emag"), rocke_f32());
+    rocke_value_t use_poly = ll_composed_value(rocke_ll_fresh(L, "tanh.small"), rocke_i1());
+    rocke_value_t mag = ll_composed_value(rocke_ll_fresh(L, "tanh.mag"), rocke_f32());
+    rocke_value_t mag_bits = ll_composed_value(rocke_ll_fresh(L, "tanh.mbits"), rocke_i32());
+    rocke_value_t signed_bits = ll_composed_value(rocke_ll_fresh(L, "tanh.sbits"), rocke_i32());
+
+    ll_lower_composed_unary(L, ROCKE_OP_ARITH_BITCAST, v, &x_bits);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_AND, &x_bits, &sign_mask, &sign);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_AND, &x_bits, &abs_mask, &abs_bits);
+    ll_lower_composed_unary(L, ROCKE_OP_ARITH_BITCAST, &abs_bits, &abs_x);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_FMUL, &abs_x, &abs_x, &y2);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &y2, &c0, &c1, &p0);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &y2, &p0, &c2, &p1);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &y2, &p1, &c3, &p2);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &y2, &p2, &c4, &p3);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_FMUL, &abs_x, &p3, &yp);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &y2, &yp, &abs_x, &poly);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_FMUL, &two_log2e, &abs_x, &exp_scaled);
+    ll_lower_composed_unary(L, ROCKE_OP_MATH_EXP2, &exp_scaled, &exp);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_FADD, &exp, &one, &exp_den);
+    ll_lower_composed_unary(L, ROCKE_OP_MATH_RCP_FAST, &exp_den, &exp_inv);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &neg_two, &exp_inv, &one, &exp_mag);
+
+    rocke_attr_entry_t pred_entry = {};
+    pred_entry.key = "pred";
+    pred_entry.value.kind = ROCKE_ATTR_STR;
+    pred_entry.value.u.s = "olt";
+    rocke_attr_map_t pred_attrs = {};
+    pred_attrs.entries = &pred_entry;
+    pred_attrs.count = 1;
+    pred_attrs.cap = 1;
+    rocke_value_t* fcmp_operands[] = {&abs_x, &cutoff};
+    ll_lower_composed_op(L, ROCKE_OP_ARITH_FCMP, fcmp_operands, 2, &use_poly, &pred_attrs);
+
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_SELECT, &use_poly, &poly, &exp_mag, &mag);
+    ll_lower_composed_unary(L, ROCKE_OP_ARITH_BITCAST, &mag, &mag_bits);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_OR, &mag_bits, &sign, &signed_bits);
+    ll_lower_composed_unary(L, ROCKE_OP_ARITH_BITCAST, &signed_bits, res);
 }
 
 /* ------------------------------------------------------------------ gpu.* */
