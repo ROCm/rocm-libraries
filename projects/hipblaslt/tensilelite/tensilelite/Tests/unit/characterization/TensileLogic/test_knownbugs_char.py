@@ -39,7 +39,7 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.TensileLogic.KnownBugs import (
+from tensilelite.tensilelite_logic.known_bugs import (
     is_known_bug,
     load_known_bugs,
     normalize_logic_relative_path,

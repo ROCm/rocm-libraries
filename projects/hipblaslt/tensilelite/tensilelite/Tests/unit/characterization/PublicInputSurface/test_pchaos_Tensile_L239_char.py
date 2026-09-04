@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurface characterization: ``if args.platform:`` in
-``tensilelite/Tensile.py`` at line 239, inside ``argUpdatedGlobalParameters``.
+``tensilelite/tensilelite.py`` at line 239, inside ``argUpdatedGlobalParameters``.
 
 Branch 765305e2fbcf1ee08927bffdac198278bded30ee.
 
@@ -79,7 +79,7 @@ def test_platform_predicate_false_none():
 
 def test_platform_true_branch_sets_rv_key(capsys):
     """TRUE branch (platform=1): rv contains 'Platform' == 1."""
-    from tensilelite.Tensile import argUpdatedGlobalParameters
+    from tensilelite.tensilelite import argUpdatedGlobalParameters
 
     args = _make_args(platform=1)
     rv = argUpdatedGlobalParameters(args)
@@ -89,7 +89,7 @@ def test_platform_true_branch_sets_rv_key(capsys):
 
 def test_platform_false_branch_zero_no_rv_key():
     """FALSE branch (platform=0): rv does NOT contain 'Platform'."""
-    from tensilelite.Tensile import argUpdatedGlobalParameters
+    from tensilelite.tensilelite import argUpdatedGlobalParameters
 
     args = _make_args(platform=0)
     rv = argUpdatedGlobalParameters(args)
@@ -100,7 +100,7 @@ def test_platform_false_branch_zero_no_rv_key():
 
 def test_platform_false_branch_none_no_rv_key():
     """FALSE branch (platform=None, omitted): rv does NOT contain 'Platform'."""
-    from tensilelite.Tensile import argUpdatedGlobalParameters
+    from tensilelite.tensilelite import argUpdatedGlobalParameters
 
     args = _make_args(platform=None)
     rv = argUpdatedGlobalParameters(args)

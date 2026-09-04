@@ -392,7 +392,7 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
     try:
         from tensilelite import LibraryIO
         from tensilelite.CustomYamlLoader import load_yaml_stream
-        from tensilelite.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
+        from tensilelite.merge_library import convertToDict, normalizeDictLibraryLayout
     except ImportError as e:
         raise ImportError(f"Failed to import tensilelite. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
     

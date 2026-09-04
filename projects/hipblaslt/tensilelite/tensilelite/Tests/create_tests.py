@@ -37,7 +37,7 @@ targetDir  = sys.argv[1] if len(sys.argv) > 1 else "."
 targetFile = "%s/test_%s.py"%(targetDir,os.path.basename(targetDir))
 print("info: writing test script to %s" % targetFile)
 outfile = open(targetFile, "w" )
-outfile.write("import tensilelite.Tensile as Tensile\n\n")
+outfile.write("import tensilelite.tensilelite as Tensile\n\n")
 for f in glob.glob("%s/*aml"%targetDir):
     baseName = os.path.basename(f)
     testName = os.path.splitext(baseName)[0]
@@ -46,5 +46,4 @@ for f in glob.glob("%s/*aml"%targetDir):
         testName = "test_" + testName
 
     outfile.write ("def %s(tmpdir):\n" % (testName))
-    outfile.write (' tensilelite.Tensile([tensilelite.TensileTestPath("%s"), tmpdir.strpath])\n\n' % (f))
-
+    outfile.write (' Tensile.tensilelite([Tensile.TensileTestPath("%s"), tmpdir.strpath])\n\n' % (f))

@@ -46,8 +46,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import tensilelite.TensileLogic.Run as Run
-from tensilelite.TensileLogic.KnownBugs import normalize_logic_relative_path
+import tensilelite.tensilelite_logic.run as Run
+from tensilelite.tensilelite_logic.known_bugs import normalize_logic_relative_path
 
 pytestmark = pytest.mark.unit
 
