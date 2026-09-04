@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "93f240db-19f2-48bb-bcf5-e78fcfb2ccbc",
+  "id": "5153162e-f6f0-4b4e-b4f5-11c8b8d6c3a2",
   "name": "Gfx950AttentionDense dispatch",
   "dispatch_symbol": "hipkernel.gfx950_attention_dense.dispatch"
 }

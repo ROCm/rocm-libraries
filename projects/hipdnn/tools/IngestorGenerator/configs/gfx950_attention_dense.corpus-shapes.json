@@ -24186,5 +24186,43 @@
    "graph": "bundle_b1_hq32_kv8_sq4096_sk4096_d64_fp16_m1",
    "why": "quick-tier bundle shape; ships so the suite exercises this engine rather than skipping. Not a workload shape."
   }
+ },
+ {
+  "batch": 1,
+  "nhead_q": 32,
+  "nhead_k": 8,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "integration_test_bundles",
+   "suite": "quick_bshd_coverage",
+   "graph": "bundle_fp16cov_d128_sq2048_nomask",
+   "why": "quick-tier bundle fp16cov_d128_sq2048_nomask is GQA-4 (hq32/kv8) at nomask; the corpus carries only MHA (hq48/hq8) at that shape, so the bundle skipped. Test shape, not a workload shape."
+  }
+ },
+ {
+  "batch": 1,
+  "nhead_q": 32,
+  "nhead_k": 8,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "integration_test_bundles",
+   "suite": "quick_bshd_coverage",
+   "graph": "bundle_fp16cov_d64_sq2048_nomask",
+   "why": "quick-tier bundle fp16cov_d64_sq2048_nomask is GQA-4 (hq32/kv8) at nomask; the corpus carries only MHA (hq48/hq8) at that shape, so the bundle skipped. Test shape, not a workload shape."
+  }
  }
 ]
