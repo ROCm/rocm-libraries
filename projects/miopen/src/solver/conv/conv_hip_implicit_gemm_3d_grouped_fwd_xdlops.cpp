@@ -206,7 +206,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         MIOPEN_LOG_I2("Step 1: Index override not set, proceeding to next step");
     }
 
-    // 2. Hard-coded heuristics for BF16/FP16 on gfx942 and gfx950 only
+    // 2. Hard-coded heuristics for BF16/FP16 on gfx942 and gfx950 only.
     if((problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf) &&
        (ctx.GetStream().GetDeviceName() == "gfx942" || ctx.GetStream().GetDeviceName() == "gfx950"))
     {
@@ -233,7 +233,9 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         std::optional<std::size_t> found_index;
         if(ctx.GetStream().GetDeviceName() == "gfx942")
         {
-            if(index == 0 && problem.GetGroupCount() == 1 && problem.GetAlphaBetaCase() == DEFAULT)
+            if(index == 0 && problem.GetGroupCount() == 1 &&
+               problem.GetAlphaBetaCase() == DEFAULT && problem.GetInDepth() <= 4 &&
+               problem.GetInWidth() >= 256)
             {
                 int K = problem.GetOutChannels();
 
