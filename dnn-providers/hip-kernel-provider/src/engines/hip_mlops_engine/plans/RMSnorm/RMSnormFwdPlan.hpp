@@ -17,6 +17,8 @@
 
 namespace hip_kernel_provider
 {
+
+using namespace core::utils;
 using namespace compilation;
 
 namespace rmsnorm
@@ -27,6 +29,13 @@ class RMSnormFwdParams
 public:
     RMSnormFwdParams(
         const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMap);
+
+    RMSnormFwdParams(
+        const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& attributes,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
         const std::unordered_map<int64_t,
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
@@ -45,6 +54,9 @@ public:
     double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                         uint32_t numDeviceBuffers) const;
 
+    const std::optional<ActivationParams>& optActivation() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
+
 private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _scale;
@@ -52,6 +64,9 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invRMS;
     hipdnn_plugin_sdk::ScalarOperand _epsilon;
+
+    std::optional<ActivationParams> _optActivation;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
 class RMSnormFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
@@ -80,7 +95,11 @@ private:
     // Populated by compile()
     std::unique_ptr<ICompiledProgram> _compiledProgram;
     std::unique_ptr<IRunnableKernel> _runnableKernel;
+
+    float _activationAlpha = 0.0f;
+    float _activationBeta = 0.0f;
 };
 
-}
-}
+} // namespace rmsnorm
+
+} // namespace hip_kernel_provider
