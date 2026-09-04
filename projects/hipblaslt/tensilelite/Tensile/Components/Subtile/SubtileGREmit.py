@@ -1151,8 +1151,9 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
     else:
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe),
               "woffset = wId * (mt // numWaves * du * bpe)"))
-    mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
-            f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
+    if ldsConstOffset:
+      mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
+              f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
     mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
     # Save LDS offset to tracking SGPR for runtime double-buffer swap
     ldsTrackSgpr = f"tdmLdsAddr{tc}"

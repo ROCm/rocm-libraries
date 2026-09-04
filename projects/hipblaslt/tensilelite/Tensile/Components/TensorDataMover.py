@@ -290,11 +290,9 @@ class TensorDataMoverLoad(TensorDataMover):
 
     def initOperands(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str]) -> Module:
         mod = Module("tdmInit")
-        for i in range(self.GROUP0_NUM_SGPR):
-            val = 1 if i == 0 else 0
-            mod.add(SMovB32(sgpr(f"{group0}+{i}"), val))
-
-        mod.add(SOrB32(sgpr(f"{group0}+3"), sgpr(f"{group0}+3"), hex(2 << 30), "set type field to 2(image)"))
+        # Only Group0+0 needs explicit init; +1 is overwritten by setLdsAddr,
+        # +2:+3 by setGlobalAddr (which also re-sets the type field).
+        mod.add(SMovB32(sgpr(f"{group0}+0"), 1))
 
         for i in range(self.GROUP1_NUM_SGPR):
             mod.add(SMovB32(sgpr(f"{group1}+{i}"), 0))
@@ -572,8 +570,11 @@ class TensorDataMoverLoad(TensorDataMover):
 
     def setIterations(self, group2: int | str, sgprNumIters: int | str) -> Module:
         mod = Module()
-        mod.add(SMovB32(sgpr(f"{group2}+3"), sgpr(sgprNumIters)))
-        mod.add(SLShiftLeftB32(sgpr(f"{group2}+3"), hex(16), sgpr(f"{group2}+3")))
+        if isinstance(sgprNumIters, int):
+            mod.add(SMovB32(sgpr(f"{group2}+3"), hex(sgprNumIters << 16), f"iter_count={sgprNumIters} (pre-shifted)"))
+        else:
+            mod.add(SMovB32(sgpr(f"{group2}+3"), sgpr(sgprNumIters)))
+            mod.add(SLShiftLeftB32(sgpr(f"{group2}+3"), hex(16), sgpr(f"{group2}+3")))
         return mod
 
     @staticmethod
