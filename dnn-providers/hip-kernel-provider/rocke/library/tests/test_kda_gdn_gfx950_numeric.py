@@ -33,7 +33,7 @@ requires_gfx950_gpu = pytest.mark.skipif(
 
 @pytest.mark.gpu
 @requires_gfx950_gpu
-@pytest.mark.parametrize("Hv,Hk", [(4, 4), (8, 4)])
+@pytest.mark.parametrize("Hv,Hk", [(4, 4), (8, 4), (32, 8)])
 @pytest.mark.parametrize("gate_low", [-0.5, -5.0])
 @pytest.mark.parametrize("with_h0", [False, True])
 def test_gdn_split_parity(Hv, Hk, gate_low, with_h0):
