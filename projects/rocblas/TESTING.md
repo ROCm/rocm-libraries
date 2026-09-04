@@ -130,8 +130,20 @@ Each operation suite follows a consistent pattern:
 
 - **`rocblas_*_testing` functor** — partial specializations on supported type combinations; invalid combos derive from `rocblas_test_invalid`.
 - **`type_dispatch.hpp`** — maps runtime `Arguments` types to template instantiations.
-- **`RocBLAS_Test<>` (CRTP)** — provides `type_filter`, `function_filter`, and `name_suffix` for parameterized test names.
+- **`RocBLAS_Test<>` (CRTP)** — provides `type_filter_functor`, `function_filter`, and `name_suffix` for parameterized test names.
 - **`TEST_P` + `INSTANTIATE_TEST_CATEGORIES`** — registers tests across YAML categories.
+
+**YAML global filters (`gpu_arch`, `os_flags`).** Optional per-test fields in `*_gtest.yaml` restrict which GPU architectures and host OSes instantiate a case. They are **not** interpreted by `rocblas_gentest.py`; they are applied at gtest instantiation through `rocblas_client_global_filters()` in `rocblas_test.cpp`.
+
+For these fields to take effect, the suite must follow the standard `RocBLAS_Test<>` pattern:
+
+1. Derive the test struct from `RocBLAS_Test<YourSuite, YourFilterTemplate>`.
+2. Define a `YourFilterTemplate` with `rocblas_test_invalid` as the default and `rocblas_test_valid` only for supported type combinations (see `atomics_mode_gtest.cpp`, `logging_mode_gtest.cpp`, or `syrk_herk_workspace_gtest.cpp`).
+3. Implement `type_filter()` by calling `rocblas_simple_dispatch<type_filter_functor>(arg)` (or the appropriate `rocblas_*_dispatch` helper), **not** by returning a constant or calling the harness directly.
+
+`type_filter_functor` (defined on `RocBLAS_Test<>`) runs `rocblas_client_global_filters()` first, then checks whether the FILTER template is valid for `arg.a_type` (and related types). If `type_filter()` bypasses that path — for example `return true` — YAML `gpu_arch` / `os_flags` are stored in `Arguments` but never consulted; the case still appears in the gtest list (and may `GTEST_SKIP()` later for other reasons).
+
+`gpu_arch` values are suffix patterns matched against `rocblas_internal_get_arch_name()` (for example `gfx942` matches pattern `942`; `gfx1201` does not match `90a` or `942`). An empty `gpu_arch` default means all architectures. A non-empty value is an **allowlist**, not a denylist.
 
 Test names encode category, function, precision, and parameters so `--gtest_filter` can target subsets (for example `*quick*gemm*f32_r*`).
 
@@ -229,7 +241,7 @@ ctest -L quick -N
 ctest -L quick
 ```
 
-**GPU exclusion variants.** The `exclude_gpu` system from `shared/ctest` is not used by rocBLAS.  The rocBLAS YAML test data defines what gpu are valid to test on.
+**GPU exclusion variants.** The `exclude_gpu` system from `shared/ctest` is not used by rocBLAS. Per-case GPU and OS scoping is defined in YAML via `gpu_arch` and `os_flags`, but only when the gtest suite wires `type_filter()` through `RocBLAS_Test<>::type_filter_functor` (see [Google Test glue](#google-test-glue-_gtestcpp)).
 
 Full framework documentation: [`shared/ctest/README.md`](../../shared/ctest/README.md).
 
@@ -299,7 +311,7 @@ Performance YAML lives under `scripts/performance/`. HPA and mixed-precision GEM
 ## Adding tests (summary)
 
 1. Add `clients/include/.../testing_<fn>.hpp` harness.
-2. Add `clients/gtest/<fn>_gtest.cpp` with dispatch and `INSTANTIATE_TEST_CATEGORIES`.
+2. Add `clients/gtest/<fn>_gtest.cpp` with `RocBLAS_Test<>` dispatch, `type_filter()` via `type_filter_functor`, and `INSTANTIATE_TEST_CATEGORIES`.
 3. Add `clients/gtest/<fn>_gtest.yaml` parameter matrix.
 4. Include YAML in `rocblas_gtest.yaml` and list it in `clients/gtest/CMakeLists.txt` dependencies for `rocblas_gtest.data`.
 5. Add the `.cpp` to the `rocblas-test` source list in CMake.
@@ -494,7 +506,7 @@ Before release sign-off, expect at minimum:
 | --- | --- | --- | --- |
 | Linux + AMD GPU | Full client suite | PR / nightly | Primary development platform |
 | Windows | Client build + tests | PR / release | Sparse checkout needs `shared/ctest` for CTest labels |
-| Specific GFX | Partial on PR | PR subset; broader nightly | YAML test files encode gfx applicability |
+| Specific GFX | Partial on PR | PR subset; broader nightly | YAML `gpu_arch` allowlists; requires `type_filter_functor` wiring in `*_gtest.cpp` |
 
 Document unsupported combinations explicitly during release planning rather than assuming CI covered them.
 
