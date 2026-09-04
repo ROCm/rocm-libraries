@@ -132,9 +132,9 @@ const char* hipDataType_to_bench_string(hipDataType type)
     case HIP_R_32I:
         return "i32_r";
     case HIP_R_8F_E4M3_FNUZ:
-        return "f8_r";
+        return "f8_fnuz_r";
     case HIP_R_8F_E5M2_FNUZ:
-        return "bf8_r";
+        return "bf8_fnuz_r";
     case HIP_R_8F_E4M3:
         return "f8_r";
     case HIP_R_8F_E5M2:
