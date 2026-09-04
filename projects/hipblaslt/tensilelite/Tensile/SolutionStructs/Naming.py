@@ -42,6 +42,7 @@ _INTERNAL_ARGS = (
     "GlobalSplitUCoalesced",
     "GlobalSplitUWorkGroupMappingRoundRobin",
     "SFCWGM",
+    "HintFrequency",
 )
 
 def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
@@ -185,6 +186,9 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
                                                            "StaggerUMapping",
                                                            "GlobalSplitUCoalesced",
                                                            "GlobalSplitUWorkGroupMappingRoundRobin"])
+
+    if state.get("HintFrequency", -1) != -1:
+      requiredParametersTemp.add("HintFrequency")
   pt = state["ProblemType"]
   if isinstance(pt, ProblemType):
     components = [str(pt)]

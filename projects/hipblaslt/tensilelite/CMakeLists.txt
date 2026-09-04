@@ -112,6 +112,22 @@ if(TENSILELITE_ENABLE_HOST)
         target_compile_definitions(tensilelite-host PRIVATE HIP_HAS_CLUSTER_LAUNCH)
     endif()
 
+    check_cxx_source_compiles("
+        #include <hip/hip_runtime.h>
+        #include <hip/hip_frequency_control.h>
+        int main() {
+            hipLaunchAttributeID id
+                = static_cast<hipLaunchAttributeID>(hipLaunchAttributeExtFrequencyControlHint);
+            hip_amd_frequency_control_hint_t hint = HIP_AMD_FREQUENCY_CONTROL_HINT_OFF;
+            (void)id;
+            (void)hint;
+            return 0;
+        }
+    " HIP_HAS_FREQUENCY_CONTROL_HINT)
+    if(HIP_HAS_FREQUENCY_CONTROL_HINT)
+        target_compile_definitions(tensilelite-host PRIVATE HIP_HAS_FREQUENCY_CONTROL_HINT)
+    endif()
+
     if(TENSILELITE_ENABLE_COVERAGE)
         message(STATUS "Enabling C++ code coverage instrumentation for tensilelite-host")
         target_compile_options(tensilelite-host PRIVATE -fprofile-instr-generate -fcoverage-mapping)

@@ -134,6 +134,8 @@ namespace TensileLite
         size_t sharedMemBytes = 0;
 
         KernelArguments args;
+
+        int HintFrequency = -1;
     };
 
     /**

@@ -194,6 +194,7 @@ namespace TensileLite
         bool globalSplitUWorkGroupMappingRoundRobin = false;
 
         int CUOccupancy            = 0;
+        int HintFrequency          = -1;
         int PrefetchGlobalRead     = 2;
         int MathClocksUnrolledLoop = 0;
 

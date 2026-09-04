@@ -834,6 +834,9 @@ validParameters = { # we need to make sure this matches develop
     # loop (2x FMA issue rate). Source (non-MFMA) f32 kernels on gfx11/gfx12 only; auto-
     # disabled elsewhere (see SolutionStructs.Solution.assignProblemIndependentDerivedParameters).
     "UseDualFMAC": [False, True],
+    # HintFrequency: hints to the power-management firmware what steady state frequency the kernel
+    # is expected to reach. Helps reduce PCC events and hit a smooth VF curve.
+    "HintFrequency": [0,1,2,3,4,5,6,7],
     # Following parameters are designed for store scheduling.
     # (store stands for load from C (with beta) and store to C/D)
     #
