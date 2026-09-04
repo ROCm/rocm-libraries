@@ -347,31 +347,117 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     c_m_n_dev_buf.SetZero();
     c_m_n_dev_result.SetZero();
 
-    float ave_time = invoke_gemm<GemmConfig,
-                                 Invoker,
-                                 ADataTypeBuf,
-                                 BDataTypeBuf,
-                                 ck_tile::tuple<>,
-                                 AccDataType,
-                                 CDataType,
-                                 ALayout,
-                                 BLayout,
-                                 ck_tile::tuple<>,
-                                 CLayout>(a_m_k_dev_buf,
-                                          b_k_n_dev_buf,
-                                          c_m_n_dev_buf,
-                                          M,
-                                          N,
-                                          K,
-                                          stride_A,
-                                          stride_B,
-                                          stride_C,
-                                          kbatch,
-                                          n_warmup,
-                                          n_repeat,
-                                          persistent,
-                                          flush_cache,
-                                          rotating_count);
+#ifdef CK_USE_GFX1250
+    // Enable fallback: gfx1250, RCR, PackedSize=1
+    constexpr bool k_pad_fallback_eligible =
+        GemmConfig::EnableKPadFallback && !GemmConfig::FixedVectorSize &&
+        std::is_same_v<ADataTypeBuf, BDataTypeBuf> &&
+        std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor> &&
+        std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::ColumnMajor> &&
+        std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> &&
+        ck_tile::numeric_traits<ADataTypeBuf>::PackedSize == 1 &&
+        ck_tile::numeric_traits<BDataTypeBuf>::PackedSize == 1;
+#else
+    constexpr bool k_pad_fallback_eligible = false;
+#endif
+
+    float ave_time;
+    if constexpr(k_pad_fallback_eligible)
+    {
+        using KPadConfig =
+            GemmConfigFixedVectorSize<GemmConfig,
+                                      1,
+                                      1,
+                                      static_cast<ck_tile::index_t>(16 / sizeof(CDataType))>;
+
+        if(K % (16 / static_cast<int>(sizeof(ADataTypeBuf))) != 0)
+        {
+            // Unaligned K
+            ave_time = invoke_gemm<KPadConfig,
+                                   Invoker,
+                                   ADataTypeBuf,
+                                   BDataTypeBuf,
+                                   ck_tile::tuple<>,
+                                   AccDataType,
+                                   CDataType,
+                                   ALayout,
+                                   BLayout,
+                                   ck_tile::tuple<>,
+                                   CLayout>(a_m_k_dev_buf,
+                                            b_k_n_dev_buf,
+                                            c_m_n_dev_buf,
+                                            M,
+                                            N,
+                                            K,
+                                            stride_A,
+                                            stride_B,
+                                            stride_C,
+                                            kbatch,
+                                            n_warmup,
+                                            n_repeat,
+                                            persistent,
+                                            flush_cache,
+                                            rotating_count);
+        }
+        else
+        {
+            // Aligned K
+            ave_time = invoke_gemm<GemmConfig,
+                                   Invoker,
+                                   ADataTypeBuf,
+                                   BDataTypeBuf,
+                                   ck_tile::tuple<>,
+                                   AccDataType,
+                                   CDataType,
+                                   ALayout,
+                                   BLayout,
+                                   ck_tile::tuple<>,
+                                   CLayout>(a_m_k_dev_buf,
+                                            b_k_n_dev_buf,
+                                            c_m_n_dev_buf,
+                                            M,
+                                            N,
+                                            K,
+                                            stride_A,
+                                            stride_B,
+                                            stride_C,
+                                            kbatch,
+                                            n_warmup,
+                                            n_repeat,
+                                            persistent,
+                                            flush_cache,
+                                            rotating_count);
+        }
+    }
+    else
+    {
+        // Do not use KPad Fallback
+        ave_time = invoke_gemm<GemmConfig,
+                               Invoker,
+                               ADataTypeBuf,
+                               BDataTypeBuf,
+                               ck_tile::tuple<>,
+                               AccDataType,
+                               CDataType,
+                               ALayout,
+                               BLayout,
+                               ck_tile::tuple<>,
+                               CLayout>(a_m_k_dev_buf,
+                                        b_k_n_dev_buf,
+                                        c_m_n_dev_buf,
+                                        M,
+                                        N,
+                                        K,
+                                        stride_A,
+                                        stride_B,
+                                        stride_C,
+                                        kbatch,
+                                        n_warmup,
+                                        n_repeat,
+                                        persistent,
+                                        flush_cache,
+                                        rotating_count);
+    }
 
     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
 
