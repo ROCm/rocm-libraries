@@ -62,11 +62,10 @@ const std::array<DispatchCase, 21> K_MEASURED_CASES{{
     {1, 32, 3072, 128, true, "w8q3k2", 1},
     {2, 8, 8192, 128, true, "w8q3k2", 1},
     {16, 32, 256, 128, true, "w8q2k4", 1},
-    // Starved grid. The measured-best pairing is w8q2k4 WITH splitK=4 (191
-    // vs 78 TFLOPS single-pass), but execute() does not run the split yet, so
-    // the rule must not credit it: 64 CTAs stay 64 and that is a tiny grid.
-    // When K_FLASH2_SPLITK_EXECUTES flips to true this becomes w8q2k4 again.
-    {1, 8, 2048, 128, false, "w4q1k4", 4},
+    // Starved grid: 64 CTAs single-pass, 256 at splitK=4. execute() runs the
+    // split, so the effective grid is what selection judges -- and 256 CTAs
+    // want the 8-wave variant. Measured 191 vs 78 TFLOPS for this pairing.
+    {1, 8, 2048, 128, false, "w8q2k4", 4},
     {2, 32, 2048, 128, true, "w8q3k2", 1},
     {1, 40, 1024, 128, false, "w8q2k4", 1},
     {4, 16, 4096, 64, true, "w8q3k4", 1},
@@ -169,9 +168,10 @@ TEST(TestFlash2Dispatch, SplitKDoesNotSuppressTinyGridVariant)
 // direction.
 TEST(TestFlash2Dispatch, SplitKCreditMatchesExecutionReality)
 {
-    EXPECT_FALSE(K_FLASH2_SPLITK_EXECUTES)
-        << "execute() still forces splitK=1; if that changed, update this test "
-           "and the tiny-grid expectations above together";
+    EXPECT_TRUE(K_FLASH2_SPLITK_EXECUTES)
+        << "execute() launches the split and merge passes; if that is ever "
+           "reverted, clear this flag in the same change or selection will "
+           "credit a split that does not run";
 }
 
 TEST(TestFlash2Dispatch, SplitKOnlyForLongD128Sequences)
