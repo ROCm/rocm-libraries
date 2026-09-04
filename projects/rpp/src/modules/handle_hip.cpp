@@ -32,6 +32,14 @@ SOFTWARE.
 #include "errors.hpp"
 #include "handle.hpp"
 
+#ifdef AUDIO_SUPPORT
+#ifdef RPP_USE_ROCFFT
+#include <rocfft/rocfft.h>
+
+#include <map>
+#endif
+#endif
+
 namespace rpp {
 
 // Get current context
@@ -94,6 +102,13 @@ struct HandleImpl {
     Rpp32u numThreads = 0;
     RppBackend backend = RppBackend::RPP_HIP_BACKEND;
     InitHandle* initHandle = nullptr;
+
+#ifdef AUDIO_SUPPORT
+#ifdef RPP_USE_ROCFFT
+    // rocFFT plan cache: key = (nfft << 32 | batchCount), value = (plan, description)
+    std::map<int64_t, std::pair<rocfft_plan, rocfft_plan_description>> rocfft_plan_cache;
+#endif
+#endif
 
     HandleImpl() : ctx(get_ctx()) {}
 
@@ -177,6 +192,13 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
 
     this->SetAllocator(nullptr, nullptr, nullptr);
     impl->PreInitializeBuffer();
+
+#ifdef AUDIO_SUPPORT
+#ifdef RPP_USE_ROCFFT
+    // Initialize rocFFT library once per handle
+    if (rocfft_setup() != rocfft_status_success) RPP_THROW("rocFFT library initialization failed");
+#endif
+#endif
 }
 
 Handle::Handle(size_t batchSize, Rpp32u numThreads) : impl(new HandleImpl()) {
@@ -197,6 +219,20 @@ void Handle::SetStream(rppAcceleratorQueue_t streamID) const {
 
 void Handle::rpp_destroy_object_gpu() {
     this->rpp_destroy_object_host();
+
+#ifdef AUDIO_SUPPORT
+#ifdef RPP_USE_ROCFFT
+    // Destroy all cached rocFFT plans
+    for (auto& cache_entry : this->impl->rocfft_plan_cache) {
+        rocfft_plan_destroy(cache_entry.second.first);
+        rocfft_plan_description_destroy(cache_entry.second.second);
+    }
+    this->impl->rocfft_plan_cache.clear();
+
+    // Cleanup rocFFT library once per handle
+    if (rocfft_cleanup() != rocfft_status_success) RPP_THROW("rocFFT library cleanup failed");
+#endif
+#endif
 
     auto status = hipFree(this->GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
     if (status != hipSuccess) RPP_THROW_HIP_STATUS(status, "hipFree failed for scratchBufferHip");
@@ -289,5 +325,61 @@ std::size_t Handle::GetMaxComputeUnits() {
 
     return result;
 }
+
+#ifdef AUDIO_SUPPORT
+#ifdef RPP_USE_ROCFFT
+// Get or create a cached rocFFT plan for the given nfft size and batch count
+// Cache key combines nfft and batchCount to handle different workload sizes
+RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan* plan,
+                          rocfft_plan_description* desc) {
+    auto& cache = handle.impl->rocfft_plan_cache;
+
+    // Create composite key: upper 32 bits = nfft, lower 32 bits = batchCount
+    int64_t cacheKey = (static_cast<int64_t>(nfft) << 32) | static_cast<int64_t>(batchCount);
+
+    // Check if plan already exists in cache
+    auto it = cache.find(cacheKey);
+    if (it != cache.end()) {
+        *plan = it->second.first;
+        *desc = it->second.second;
+        return RPP_SUCCESS;
+    }
+
+    // Create new plan
+    rocfft_plan_description new_desc = nullptr;
+    if (rocfft_plan_description_create(&new_desc) != rocfft_status_success)
+        return RPP_ERROR_NOT_ENOUGH_MEMORY;
+
+    size_t lengths[1] = {static_cast<size_t>(nfft)};
+    size_t inStride[1] = {1};
+    size_t outStride[1] = {1};
+    int numBins = (nfft / 2 + 1);
+
+    if (rocfft_plan_description_set_data_layout(
+            new_desc, rocfft_array_type_real, rocfft_array_type_hermitian_interleaved, nullptr,
+            nullptr, 1, inStride, static_cast<size_t>(nfft), 1, outStride,
+            static_cast<size_t>(numBins)) != rocfft_status_success) {
+        rocfft_plan_description_destroy(new_desc);
+        return RPP_ERROR_INVALID_ARGUMENTS;
+    }
+
+    rocfft_plan new_plan = nullptr;
+    // Create plan with the actual batch count for efficient batch FFT execution
+    if (rocfft_plan_create(&new_plan, rocfft_placement_notinplace,
+                           rocfft_transform_type_real_forward, rocfft_precision_single, 1, lengths,
+                           static_cast<size_t>(batchCount), new_desc) != rocfft_status_success) {
+        rocfft_plan_description_destroy(new_desc);
+        return RPP_ERROR_NOT_ENOUGH_MEMORY;
+    }
+
+    // Cache the plan
+    cache[cacheKey] = std::make_pair(new_plan, new_desc);
+    *plan = new_plan;
+    *desc = new_desc;
+
+    return RPP_SUCCESS;
+}
+#endif
+#endif
 
 }  // namespace rpp

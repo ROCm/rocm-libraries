@@ -24,6 +24,10 @@ SOFTWARE.
 
 #include "hip_tensor_executors.hpp"
 
+#ifdef RPP_USE_ROCFFT
+#include <rocfft/rocfft.h>
+#endif
+
 /* Spectrogram kernel working overview
 1D Input -> 2D Output
 Output can be in 2 layouts
@@ -91,6 +95,63 @@ inline RPP_HOST_DEVICE Rpp32s get_idx_reflect(Rpp32s loc, Rpp32s minLoc, Rpp32s 
 }
 
 // -------------------- Set 0 -  spectrogram hip kernels --------------------
+
+#ifdef RPP_USE_ROCFFT
+// compute magnitude from rocFFT complex output with shared memory transpose for vertical layout
+__global__ void compute_magnitude_from_complex_hip_tensor(float2* srcPtr, uint srcStride,
+                                                          float* dstPtr, uint2 dstStrideNH,
+                                                          int* numWindowsTensor, int2 params_i2,
+                                                          bool vertical) {
+    int id_x = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+    int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
+    int numWindows = numWindowsTensor[id_z];
+    int numBins = params_i2.x;
+    int power = params_i2.y;
+
+    if (!vertical) {
+        // Non-vertical path: direct coalesced write (TF layout: [numWindows, numBins])
+        if ((id_y >= numWindows) || (id_x >= numBins)) return;
+
+        int srcIdx = id_z * srcStride + id_y * numBins + id_x;
+        float2 complexVal = srcPtr[srcIdx];
+        float magnitudeSquare = (complexVal.x * complexVal.x) + (complexVal.y * complexVal.y);
+
+        int dstIdx = id_z * dstStrideNH.x + id_y * dstStrideNH.y + id_x;
+        dstPtr[dstIdx] = (power == 2) ? magnitudeSquare : sqrtf(magnitudeSquare);
+    } else {
+        // Vertical path: use shared memory transpose for coalesced writes (FT layout: [numBins,
+        // numWindows])
+        __shared__ float magnitude_smem[16][16];  // 16x16 tile in shared memory
+
+        // Load and compute magnitude in coalesced fashion
+        // Read: srcPtr[batch][window][bin] - threads read consecutive bins (coalesced)
+        if ((id_y < numWindows) && (id_x < numBins)) {
+            int srcIdx = id_z * srcStride + id_y * numBins + id_x;
+            float2 complexVal = srcPtr[srcIdx];
+            float magnitudeSquare = (complexVal.x * complexVal.x) + (complexVal.y * complexVal.y);
+            magnitude_smem[hipThreadIdx_y][hipThreadIdx_x] =
+                (power == 2) ? magnitudeSquare : sqrtf(magnitudeSquare);
+        } else {
+            magnitude_smem[hipThreadIdx_y][hipThreadIdx_x] = 0.0f;
+        }
+        __syncthreads();
+
+        // Transpose indices for output
+        // Original position: (id_y, id_x) = (window, bin)
+        // Transposed position: (id_x, id_y) = (bin, window)
+        int out_row = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_y;  // bin dimension
+        int out_col = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_x;  // window dimension
+
+        // Write transposed data in coalesced fashion
+        // Write: dstPtr[batch][bin][window] - threads write consecutive windows (coalesced)
+        if ((out_row < numBins) && (out_col < numWindows)) {
+            int dstIdx = id_z * dstStrideNH.x + out_row * dstStrideNH.y + out_col;
+            dstPtr[dstIdx] = magnitude_smem[hipThreadIdx_x][hipThreadIdx_y];
+        }
+    }
+}
+#endif
 
 // compute window output by applying hanning window
 __global__ void window_output_hip_tensor(float* srcPtr, uint srcStride, float* dstPtr,
@@ -223,6 +284,127 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     bool vertical = (dstDescPtr->layout == RpptLayout::NFT);
     Rpp32s numBins = (nfft / 2 + 1);
 
+#ifdef RPP_USE_ROCFFT
+    // rocFFT-based implementation path
+    {
+        // Find the maximum windows required across all inputs in batch
+        Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
+
+        // Generate hanning window
+        Rpp32f* windowFn;
+        if (windowFunction == NULL) {
+            windowFn = handle.GetInitHandle()->mem.mcpu.scratchBufferHost;
+            hann_window(windowFn, windowLength);
+        } else {
+            windowFn = windowFunction;
+        }
+
+        // Copy the hanning window values to HIP memory
+        Rpp32f* d_windowFn = handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem;
+        RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(d_windowFn, windowFn, windowLength * sizeof(Rpp32f),
+                                               hipMemcpyHostToDevice, handle.GetStream()));
+
+        // Compute the number of windows required for each input in the batch
+        Rpp32s* numWindowsTensor = reinterpret_cast<Rpp32s*>(
+            handle.GetInitHandle()->mem.mgpu.scratchBufferPinned.floatmem);
+        for (Rpp32u i = 0; i < dstDescPtr->n; i++)
+            numWindowsTensor[i] =
+                get_num_windows(srcLengthTensor[i], windowLength, windowStep, centerWindows);
+
+        Rpp32s windowCenterOffset = (centerWindows) ? (windowLength / 2) : 0;
+        if (!nfft) nfft = windowLength;
+        Rpp32u windowOutputStride = maxNumWindows * nfft;
+
+        // Allocate window output buffer (after d_windowFn)
+        Rpp32f* windowOutput = d_windowFn + windowLength;
+        RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(windowOutput, 0,
+                                               windowOutputStride * dstDescPtr->n * sizeof(Rpp32f),
+                                               handle.GetStream()));
+
+        // Compute the windowOutput for all samples in a batch. Each sample will be of shape
+        // (numWindows, nfft)
+        Rpp32s globalThreads_x = windowLength;
+        Rpp32s globalThreads_y = maxNumWindows;
+        Rpp32s globalThreads_z = dstDescPtr->n;
+        hipLaunchKernelGGL(window_output_hip_tensor,
+                           dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                                ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                                ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                           dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                           handle.GetStream(), srcPtr, srcDescPtr->strides.nStride, windowOutput,
+                           windowOutputStride, d_windowFn, srcLengthTensor, numWindowsTensor,
+                           make_int4(nfft, windowLength, windowStep, windowCenterOffset),
+                           reflectPadding);
+        HIP_CHECK_LAUNCH_RETURN();
+
+        // Allocate complex output buffer for rocFFT (after windowOutput)
+        float2* fftOutput =
+            reinterpret_cast<float2*>(windowOutput + dstDescPtr->n * windowOutputStride);
+        Rpp32u fftOutputStride = maxNumWindows * numBins;
+
+        // Get or create cached rocFFT plan for this (nfft, totalWindows) combination
+        int totalWindows = maxNumWindows * dstDescPtr->n;
+        rocfft_plan plan = nullptr;
+        rocfft_plan_description desc = nullptr;
+        RppStatus status = get_rocfft_plan(handle, nfft, totalWindows, &plan, &desc);
+        if (status != RPP_SUCCESS) return status;
+
+        // Get work buffer size
+        size_t workBufferSize = 0;
+        if (rocfft_plan_get_work_buffer_size(plan, &workBufferSize) != rocfft_status_success)
+            return RPP_ERROR;
+
+        // Allocate work buffer if needed
+        void* workBuffer = nullptr;
+        rocfft_execution_info execInfo = nullptr;
+        if (workBufferSize > 0) {
+            if (rocfft_execution_info_create(&execInfo) != rocfft_status_success ||
+                hipMalloc(&workBuffer, workBufferSize) != hipSuccess ||
+                rocfft_execution_info_set_work_buffer(execInfo, workBuffer, workBufferSize) !=
+                    rocfft_status_success) {
+                if (workBuffer) (void)hipFree(workBuffer);
+                if (execInfo) rocfft_execution_info_destroy(execInfo);
+                return RPP_ERROR_NOT_ENOUGH_MEMORY;  // rocFFT work buffer allocation failed
+            }
+            if (rocfft_execution_info_set_stream(execInfo, handle.GetStream()) !=
+                rocfft_status_success) {
+                if (workBuffer) (void)hipFree(workBuffer);
+                rocfft_execution_info_destroy(execInfo);
+                return RPP_ERROR_HIP_RUNTIME;  // rocFFT stream configuration failed
+            }
+        }
+
+        // Execute rocFFT for the entire batch (plan includes correct batch count)
+        void* inBuffers[1] = {windowOutput};
+        void* outBuffers[1] = {fftOutput};
+        if (rocfft_execute(plan, inBuffers, outBuffers, execInfo) != rocfft_status_success) {
+            if (workBuffer) (void)hipFree(workBuffer);
+            if (execInfo) rocfft_execution_info_destroy(execInfo);
+            return RPP_ERROR_HIP_RUNTIME;  // rocFFT execution failed
+        }
+
+        // Compute magnitude from complex FFT output
+        globalThreads_x = numBins;
+        hipLaunchKernelGGL(compute_magnitude_from_complex_hip_tensor,
+                           dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                                ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                                ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                           dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                           handle.GetStream(), fftOutput, fftOutputStride, dstPtr,
+                           make_uint2(dstDescPtr->strides.nStride, maxNumWindows), numWindowsTensor,
+                           make_int2(numBins, power), vertical);
+        HIP_CHECK_LAUNCH_RETURN();
+
+        // Clean up temporary rocFFT resources (plan is cached and reused)
+        if (workBuffer) (void)hipFree(workBuffer);
+        if (execInfo) rocfft_execution_info_destroy(execInfo);
+
+        RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
+        return RPP_SUCCESS;
+    }
+#else
+    // Manual DFT fallback implementation (existing code)
+
     // find the maximum windows required across all inputs in batch and stride required for window
     // output
     Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
@@ -305,4 +487,5 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
 
     return RPP_SUCCESS;
+#endif  // RPP_USE_ROCFFT
 }

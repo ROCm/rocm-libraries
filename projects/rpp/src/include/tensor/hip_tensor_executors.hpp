@@ -131,6 +131,16 @@ RppStatus hip_exec_resample_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32
 
 // -------------------- spectrogram --------------------
 
+#ifdef RPP_USE_ROCFFT
+#include <rocfft/rocfft.h>
+namespace rpp {
+// Helper function to get or create cached rocFFT plan (keyed by nfft + batchCount)
+RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan* plan,
+                          rocfft_plan_description* desc);
+}  // namespace rpp
+using rpp::get_rocfft_plan;
+#endif
+
 RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
                                       RpptDescPtr dstDescPtr, Rpp32s* srcLengthTensor,
                                       bool centerWindows, bool reflectPadding,
