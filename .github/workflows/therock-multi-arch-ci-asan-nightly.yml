@@ -32,6 +32,10 @@ jobs:
     with:
       build_variant: "asan"
       linux_amdgpu_families: "gfx94X,gfx950,gfx125X"
+      # Python/PyTorch/JAX builds are not supported with ASAN yet
+      build_python_packages: false
+      build_pytorch: false
+      build_jax: false
       repository: ROCm/TheRock
       ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
