@@ -722,10 +722,10 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         return rocke_ir_builder_status(b);
     }
 
-    const rocke_layout_map_t* a_map = op->a_layout;
-    const rocke_layout_map_t* c_map = op->c_layout;
-    int a_frag = op->a_frag_len;
-    int c_frag = op->c_frag_len;
+    const rocke_layout_map_t* src0_map = op->srcs[0].layout;
+    const rocke_layout_map_t* dst_map = op->dst.layout;
+    int src0_frag = op->srcs[0].frag_len;
+    int dst_frag = op->dst.frag_len;
     int n_dk = head_size / 16;
 
     /* Python evaluates b.mod(b.thread_id_x(), b.const_i32(wave)) left-to-right:
@@ -738,22 +738,22 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
 
     rocke_value_t* a_row = NULL;
     rocke_value_t* dummy = NULL;
-    rocke_layout_map_coord(a_map, b, lane, 0, &a_row, &dummy);
+    rocke_layout_map_coord(src0_map, b, lane, 0, &a_row, &dummy);
     /* gfx12 (RDNA4) split-K: the 16 K-elements of one WMMA step are split across
-     * the two lane-halves, so each lane loads a_frag (=8) elements from K base
-     * (lane // 16) * a_frag. gfx11 (RDNA3/3.5) duplicates the full K row in every
-     * lane (a_frag=16, base 0). k_half_off==NULL keeps the gfx11 emission
+     * the two lane-halves, so each lane loads src0_frag (=8) elements from K base
+     * (lane // 16) * src0_frag. gfx11 (RDNA3/3.5) duplicates the full K row in every
+     * lane (src0_frag=16, base 0). k_half_off==NULL keeps the gfx11 emission
      * byte-identical (no half-offset add); mirrors Python's split_k handling. */
-    bool split_k = (a_frag * 2 == 16);
+    bool split_k = (src0_frag * 2 == 16);
     rocke_value_t* k_half_off = NULL;
     if(split_k)
     {
-        /* Python: b.mul(b.div(lane, c16), b.const_i32(a_frag)) -- div created
+        /* Python: b.mul(b.div(lane, c16), b.const_i32(src0_frag)) -- div created
          * before the const (left-to-right). Hoist so the C arg-eval order (gcc is
          * right-to-left) matches the Python value-creation order. */
         rocke_value_t* half = rocke_b_div(b, lane, c16);
-        rocke_value_t* c_frag_off = rocke_b_const_i32(b, a_frag);
-        k_half_off = rocke_b_mul(b, half, c_frag_off);
+        rocke_value_t* src0_frag_off = rocke_b_const_i32(b, src0_frag);
+        k_half_off = rocke_b_mul(b, half, src0_frag_off);
     }
     rocke_value_t* col = rocke_b_mod(b, lane, c16);
 
@@ -779,7 +779,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         {
             q_addr = rocke_b_add(b, q_addr, k_half_off);
         }
-        q_frags[d] = rocke_b_global_load_vN(b, p->Q, q_addr, dtype_ir, a_frag, a_frag * 2);
+        q_frags[d] = rocke_b_global_load_vN(b, p->Q, q_addr, dtype_ir, src0_frag, src0_frag * 2);
     }
 
     /* ---- LDS staging tiles ---- */
@@ -796,7 +796,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     rocke_iter_arg_t iter_args[ROCKE_ATTN_MAX_ITER_ARGS];
     char name_buf[ROCKE_ATTN_MAX_ITER_ARGS][16];
     int n_ia = 0;
-    for(int r = 0; r < c_frag; ++r)
+    for(int r = 0; r < dst_frag; ++r)
     {
         snprintf(name_buf[n_ia], sizeof(name_buf[0]), "m%d", r);
         iter_args[n_ia].name = name_buf[n_ia];
@@ -811,7 +811,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     {
         snprintf(name_buf[n_ia], sizeof(name_buf[0]), "acc%d", d);
         iter_args[n_ia].name = name_buf[n_ia];
-        iter_args[n_ia].init = rocke_b_zero_vec_f32(b, c_frag);
+        iter_args[n_ia].init = rocke_b_zero_vec_f32(b, dst_frag);
         ++n_ia;
     }
 
@@ -829,14 +829,14 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         rocke_value_t* ms[ROCKE_ATTN_MAX_LANE];
         rocke_value_t* ls[ROCKE_ATTN_MAX_LANE];
         rocke_value_t* accs[ROCKE_ATTN_MAX_ATOMS];
-        for(int r = 0; r < c_frag; ++r)
+        for(int r = 0; r < dst_frag; ++r)
         {
             ms[r] = kloop.iter_vars[2 * r];
             ls[r] = kloop.iter_vars[2 * r + 1];
         }
         for(int d = 0; d < n_dk; ++d)
         {
-            accs[d] = kloop.iter_vars[2 * c_frag + d];
+            accs[d] = kloop.iter_vars[2 * dst_frag + d];
         }
 
         rocke_value_t* effective_kt
@@ -870,7 +870,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         }
 
         /* ---- QK^T WMMA chain ---- */
-        rocke_value_t* score = rocke_b_zero_vec_f32(b, c_frag);
+        rocke_value_t* score = rocke_b_zero_vec_f32(b, dst_frag);
         for(int d = 0; d < n_dk; ++d)
         {
             rocke_value_t* k_addr = rocke_b_add(b, k_addr_row_base, rocke_b_const_i32(b, d * 16));
@@ -879,7 +879,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
                 k_addr = rocke_b_add(b, k_addr, k_half_off);
             }
             rocke_value_t* k_frag
-                = rocke_b_global_load_vN(b, p->K, k_addr, dtype_ir, a_frag, a_frag * 2);
+                = rocke_b_global_load_vN(b, p->K, k_addr, dtype_ir, src0_frag, src0_frag * 2);
             score = rocke_b_mma(b, op->op_id, q_frags[d], k_frag, score, NULL, 0);
         }
 
@@ -893,11 +893,11 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             new_accs[d] = accs[d];
         }
         rocke_value_t* q_pos_for_mask = (p->q_pos_base != NULL) ? p->q_pos_base : p->q_tile_base;
-        for(int r = 0; r < c_frag; ++r)
+        for(int r = 0; r < dst_frag; ++r)
         {
             rocke_value_t* row_rel = NULL;
             rocke_value_t* col_k = NULL;
-            rocke_layout_map_coord(c_map, b, lane, r, &row_rel, &col_k);
+            rocke_layout_map_coord(dst_map, b, lane, r, &row_rel, &col_k);
             rocke_value_t* s_r = rocke_b_fmul(b, rocke_b_vec_extract(b, score, r), p->scale_log2);
             rocke_value_t* row_q_pos = rocke_b_add(b, q_pos_for_mask, row_rel);
             rocke_value_t* k_col_pos = rocke_b_add(b, k_tile_base, col_k);
@@ -964,23 +964,23 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         }
 
         /* ---- P staging through LDS ---- */
-        for(int r = 0; r < c_frag; ++r)
+        for(int r = 0; r < dst_frag; ++r)
         {
             rocke_value_t* row_rel = NULL;
             rocke_value_t* col_k = NULL;
-            rocke_layout_map_coord(c_map, b, lane, r, &row_rel, &col_k);
+            rocke_layout_map_coord(dst_map, b, lane, r, &row_rel, &col_k);
             rocke_value_t* idx[2] = {row_rel, col_k};
             rocke_b_smem_store_vN(b, P_lds, idx, 2, rocke_b_cast_f32_to(b, ps_arr[r], dtype_ir), 1);
         }
         rocke_b_sync(b);
 
         /* ---- V load + PV WMMA chain ---- */
-        rocke_value_t* p_a = rocke_b_zero_vec(b, dtype_ir, a_frag);
-        for(int j = 0; j < a_frag; ++j)
+        rocke_value_t* p_a = rocke_b_zero_vec(b, dtype_ir, src0_frag);
+        for(int j = 0; j < src0_frag; ++j)
         {
             rocke_value_t* a_k = NULL;
             rocke_value_t* a_dummy = NULL;
-            rocke_layout_map_coord(a_map, b, lane, j, &a_dummy, &a_k);
+            rocke_layout_map_coord(src0_map, b, lane, j, &a_dummy, &a_k);
             rocke_value_t* idx[2] = {a_row, a_k};
             rocke_value_t* p_v
                 = rocke_b_vec_extract(b, rocke_b_smem_load_vN(b, P_lds, idx, 2, dtype_ir, 1), 0);
@@ -990,12 +990,12 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         for(int d = 0; d < n_dk; ++d)
         {
             rocke_value_t* d_col = rocke_b_add(b, rocke_b_const_i32(b, d * 16), col);
-            rocke_value_t* v_b = rocke_b_zero_vec(b, dtype_ir, a_frag);
-            for(int j = 0; j < a_frag; ++j)
+            rocke_value_t* v_b = rocke_b_zero_vec(b, dtype_ir, src0_frag);
+            for(int j = 0; j < src0_frag; ++j)
             {
                 /* B-operand K row this lane's slot j feeds: j on gfx11 (full K
                  * per lane, byte-identical to the historical literal), or
-                 * (lane // 16) * a_frag + j on gfx12 (split-K halves). Python:
+                 * (lane // 16) * src0_frag + j on gfx12 (split-K halves). Python:
                  * b.add(k_half_off, b.const_i32(j)) -- k_half_off created before
                  * the const, so it is the first add operand. */
                 rocke_value_t* b_k = (k_half_off != NULL)
@@ -1033,7 +1033,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
 
         rocke_value_t* yields[ROCKE_ATTN_MAX_ITER_ARGS];
         int ny = 0;
-        for(int r = 0; r < c_frag; ++r)
+        for(int r = 0; r < dst_frag; ++r)
         {
             yields[ny++] = new_ms[r];
             yields[ny++] = new_ls[r];
@@ -1048,23 +1048,23 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
 
     rocke_value_t* ls_final[ROCKE_ATTN_MAX_LANE];
     rocke_value_t* accs_final[ROCKE_ATTN_MAX_ATOMS];
-    for(int r = 0; r < c_frag; ++r)
+    for(int r = 0; r < dst_frag; ++r)
     {
         ls_final[r] = (kloop.op != NULL) ? kloop.op->results[2 * r + 1] : NULL;
     }
     for(int d = 0; d < n_dk; ++d)
     {
-        accs_final[d] = (kloop.op != NULL) ? kloop.op->results[2 * c_frag + d] : NULL;
+        accs_final[d] = (kloop.op != NULL) ? kloop.op->results[2 * dst_frag + d] : NULL;
     }
 
     /* ---- Epilogue ---- */
     for(int d = 0; d < n_dk; ++d)
     {
-        for(int r = 0; r < c_frag; ++r)
+        for(int r = 0; r < dst_frag; ++r)
         {
             rocke_value_t* row_rel = NULL;
             rocke_value_t* col_n = NULL;
-            rocke_layout_map_coord(c_map, b, lane, r, &row_rel, &col_n);
+            rocke_layout_map_coord(dst_map, b, lane, r, &row_rel, &col_n);
             rocke_value_t* l_safe = ls_final[r];
             rocke_value_t* zero_mask = rocke_b_fcmp(b, "oeq", l_safe, zero_f);
             rocke_value_t* inv_l = rocke_b_select(b, zero_mask, zero_f, rocke_b_rcp(b, l_safe));

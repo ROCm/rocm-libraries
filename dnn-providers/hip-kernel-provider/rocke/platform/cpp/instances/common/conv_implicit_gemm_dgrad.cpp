@@ -918,7 +918,7 @@ static void _emit_dgrad_direct_epilogue_wmma(rocke_ir_builder_t* b,
                 = rocke_b_add(b, _bwn, rocke_b_const_i32(b, ni * spec->warp_tile_n));
 
             const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
-            for(int i = 0; i < op->c_frag_len; i++)
+            for(int i = 0; i < op->dst.frag_len; i++)
             {
                 rocke_value_t* row_off;
                 rocke_value_t* col_off;
@@ -1354,7 +1354,7 @@ static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                                     rocke_b_add(b, block_n_off, warp_n_off),
                                                     rocke_b_const_i32(b, ni * spec->warp_tile_n));
 
-            for(int i = 0; i < op->c_frag_len; i++)
+            for(int i = 0; i < op->dst.frag_len; i++)
             {
                 rocke_value_t* row_off;
                 rocke_value_t* col_off;
@@ -1660,9 +1660,9 @@ static rocke_kernel_def_t*
         = is_wmma ? NULL
                   : rocke_mfma_atom(
                         spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
-    int a_per_lane = op->a_frag_len;
-    int b_per_lane = op->b_frag_len;
-    int c_per_lane = op->c_frag_len;
+    int a_per_lane = op->srcs[0].frag_len;
+    int b_per_lane = op->srcs[1].frag_len;
+    int c_per_lane = op->dst.frag_len;
 
     // ---- 1D grid: block_id_x covers all sub-GEMMs' tiles ----
     rocke_value_t* flat_block_id = rocke_b_block_id_x(b);

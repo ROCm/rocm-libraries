@@ -103,8 +103,8 @@ def _check_u16(op: str, field: str, value: int) -> int:
     return v
 
 
-def _mma_c_frag_len(op_id: str) -> int:
-    """Accumulator fragment length for ``op_id`` from the arch SSOT.
+def _mma_dst_frag_len(op_id: str) -> int:
+    """``dst`` fragment length for ``op_id`` from the arch SSOT.
 
     Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
     ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
@@ -112,7 +112,7 @@ def _mma_c_frag_len(op_id: str) -> int:
     """
     from rocke.core.arch import target as _arch
 
-    frag_len = _arch._frag_info(op_id).c_frag_len
+    frag_len = _arch._frag_info(op_id).dst.frag_len
     if frag_len <= 0:
         raise ValueError(
             f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of "
@@ -121,16 +121,21 @@ def _mma_c_frag_len(op_id: str) -> int:
     return frag_len
 
 
-def _mma_c_is_int(op_id: str) -> bool:
-    """True when ``op_id`` accumulates in i32 (integer WMMA).
+def _mma_dst_is_int(op_id: str) -> bool:
+    """True when ``op_id`` produces i32 (integer WMMA).
 
-    Sourced from the arch catalog's accumulator dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``), imported
-    lazily. Op_ids absent from the catalog default to the f32 accumulator.
+    Sourced from the arch catalog's ``dst`` dtype
+    (``core/arch/data/arch_specs.json`` via ``target._op_id_dst_dtype``), imported
+    lazily. Op_ids absent from the catalog default to an f32 ``dst``.
     """
     from rocke.core.arch import target as _arch
 
-    return _arch._op_id_c_dtype().get(op_id) == "i32"
+    return _arch._op_id_dst_dtype().get(op_id) == "i32"
+
+
+# Compatibility aliases for code that historically used C as the result role.
+_mma_c_frag_len = _mma_dst_frag_len
+_mma_c_is_int = _mma_dst_is_int
 
 
 @dataclass(frozen=True)
@@ -1799,15 +1804,15 @@ class IRBuilder:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
         ``op`` is either an :class:`~rocke.core.arch.MmaOp` (preferred — its
-        ``op_id`` and ``c_frag_len`` drive the lowering) or a raw ``op_id``
+        ``op_id`` and ``dst`` fragment metadata drive the lowering) or a raw ``op_id``
         string. This emits a single ``tile.mma`` op carrying the ``op_id`` as an
         attribute; the LLVM lowering dispatches that ``op_id`` through the ISA
         backend (:meth:`rocke.core.isa.ISABackend.emit_mma`), which emits the
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<c_frag_len x float>`` (the per-lane
-        accumulator length the atom produces). When ``op`` is an ``op_id``
+        The result vector type is ``<dst.frag_len x float>`` (the per-lane
+        result length the atom produces). When ``op`` is an ``op_id``
         string the frag length is resolved from the static MMA fragment table.
 
         The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
@@ -1819,22 +1824,24 @@ class IRBuilder:
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
         """
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
-        c_frag_len = (
-            op.c_frag_len
-            if hasattr(op, "c_frag_len") and op.c_frag_len
-            else _mma_c_frag_len(op_id)
+        dst_frag_len = (
+            op.dst.frag_len
+            if hasattr(op, "dst") and op.dst.frag_len
+            else _mma_dst_frag_len(op_id)
         )
         # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
-        # i32; everything else in f32. Prefer the atom's own c_dtype when ``op``
+        # i32; everything else in f32. Prefer the atom's own dst dtype when ``op``
         # is an MmaOp, else resolve from the arch SSOT via op_id.
-        c_dtype = getattr(op, "c_dtype", None)
-        is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
+        dst_dtype = op.dst.dtype if hasattr(op, "dst") else None
+        is_int_acc = (
+            dst_dtype == "i32" if dst_dtype is not None else _mma_dst_is_int(op_id)
+        )
         c_elem = I32 if is_int_acc else F32
         hint = _MMA_RESULT_HINT.get(op_id, "acc")
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(c_elem, c_frag_len)],
+            [VectorType(c_elem, dst_frag_len)],
             attrs={"op_id": op_id},
             result_name_hint=hint,
         ).result
