@@ -8,10 +8,10 @@ Documentation for rocFFT is available at
 ### Added
 
 * Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
-
-* Implemented `rocfft_plan_description_set_load_callback` and `rocfft_plan_description_set_store_callback` APIs, to 
-  allow for user-defined device functions to be called when loading input or storing output of a transform.  These 
-  callback functions are specified during plan creation and allow rocFFT to Just-In-Time (JIT) compile the code into 
+* Remove gfx90c compilation target.
+* Implemented `rocfft_plan_description_set_load_callback` and `rocfft_plan_description_set_store_callback` APIs, to
+  allow for user-defined device functions to be called when loading input or storing output of a transform.  These
+  callback functions are specified during plan creation and allow rocFFT to Just-In-Time (JIT) compile the code into
   rocFFT's own kernels.
 
   Also implemented `rocfft_execution_info_set_load_callback_data` and

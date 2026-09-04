@@ -8,6 +8,7 @@ Documentation for hipFFT is available at
 ### Added
 
 * Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+* Remove gfx90c compilation target.
 * `hipfftXtSetWorkArea` API for setting work areas on single-process, multi-device plans.
 
 * Implemented `hipfftXtSetJITCallback` API, to allow for user-defined device functions to be called when loading
