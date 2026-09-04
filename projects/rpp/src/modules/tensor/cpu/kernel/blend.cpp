@@ -854,15 +854,15 @@ static inline RppStatus blend_i8_i8_host_impl(Rpp8s* srcPtr1Image, Rpp8s* srcPtr
                 dstPtrTempB += 16;
             }
             for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                *dstPtrTempR++ = (Rpp8s)RPPPIXELCHECKI8(
+                *dstPtrTempR++ = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                     (((Rpp32f)(srcPtr1Temp[0]) - (Rpp32f)(srcPtr2Temp[0])) * alpha) +
-                    (Rpp32f)(srcPtr2Temp[0]));
-                *dstPtrTempG++ = (Rpp8s)RPPPIXELCHECKI8(
+                    (Rpp32f)(srcPtr2Temp[0])));
+                *dstPtrTempG++ = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                     (((Rpp32f)(srcPtr1Temp[1]) - (Rpp32f)(srcPtr2Temp[1])) * alpha) +
-                    (Rpp32f)(srcPtr2Temp[1]));
-                *dstPtrTempB++ = (Rpp8s)RPPPIXELCHECKI8(
+                    (Rpp32f)(srcPtr2Temp[1])));
+                *dstPtrTempB++ = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                     (((Rpp32f)(srcPtr1Temp[2]) - (Rpp32f)(srcPtr2Temp[2])) * alpha) +
-                    (Rpp32f)(srcPtr2Temp[2]));
+                    (Rpp32f)(srcPtr2Temp[2])));
                 srcPtr1Temp += 3;
                 srcPtr2Temp += 3;
             }
@@ -945,14 +945,14 @@ static inline RppStatus blend_i8_i8_host_impl(Rpp8s* srcPtr1Image, Rpp8s* srcPtr
             }
             for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                 *dstPtrTemp++ = (Rpp8s)RPPPIXELCHECKI8(
-                    (((Rpp32f)(*srcPtr1TempR) - (Rpp32f)(*srcPtr2TempR)) * alpha) +
-                    (Rpp32f)(*srcPtr2TempR));
+                    std::nearbyintf((((Rpp32f)(*srcPtr1TempR) - (Rpp32f)(*srcPtr2TempR)) * alpha) +
+                                    (Rpp32f)(*srcPtr2TempR)));
                 *dstPtrTemp++ = (Rpp8s)RPPPIXELCHECKI8(
-                    (((Rpp32f)(*srcPtr1TempG) - (Rpp32f)(*srcPtr2TempG)) * alpha) +
-                    (Rpp32f)(*srcPtr2TempG));
+                    std::nearbyintf((((Rpp32f)(*srcPtr1TempG) - (Rpp32f)(*srcPtr2TempG)) * alpha) +
+                                    (Rpp32f)(*srcPtr2TempG)));
                 *dstPtrTemp++ = (Rpp8s)RPPPIXELCHECKI8(
-                    (((Rpp32f)(*srcPtr1TempB) - (Rpp32f)(*srcPtr2TempB)) * alpha) +
-                    (Rpp32f)(*srcPtr2TempB));
+                    std::nearbyintf((((Rpp32f)(*srcPtr1TempB) - (Rpp32f)(*srcPtr2TempB)) * alpha) +
+                                    (Rpp32f)(*srcPtr2TempB)));
                 srcPtr1TempR++;
                 srcPtr2TempR++;
                 srcPtr1TempG++;
@@ -1008,9 +1008,9 @@ static inline RppStatus blend_i8_i8_host_impl(Rpp8s* srcPtr1Image, Rpp8s* srcPtr
                     dstPtrTemp += 16;
                 }
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
+                    *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)(*srcPtr1Temp) - (Rpp32f)(*srcPtr2Temp)) * alpha) +
-                        (Rpp32f)(*srcPtr2Temp));
+                        (Rpp32f)(*srcPtr2Temp)));
 
                     srcPtr1Temp++;
                     srcPtr2Temp++;
