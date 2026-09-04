@@ -20,6 +20,7 @@ from rocke.dispatch.core import (
     KernelId,
     OperatorRequest,
     Ranker,
+    make_kernel_id,
     stable_json_hash,
 )
 
@@ -62,17 +63,7 @@ def gdn_candidates() -> Tuple[KernelCandidate, ...]:
 def _kernel_id(
     req: GdnDecodeRequest, candidate: KernelCandidate, spec: Any
 ) -> KernelId:
-    return KernelId(
-        op="gdn_decode",
-        family=FAMILY,
-        candidate=candidate.name,
-        algorithm=candidate.algorithm,
-        spec_id=candidate.spec_id,
-        arch=req.arch,
-        abi_version=candidate.abi_version,
-        request_hash=stable_json_hash(req.normalized(), n=16),
-        spec_hash=stable_json_hash(asdict(spec), n=16),
-    )
+    return make_kernel_id(req, candidate, spec, op="gdn_decode")
 
 
 def gdn_sweep_space(req: OperatorRequest) -> Sequence[Any]:
@@ -127,17 +118,7 @@ def gdn_prefill_candidates() -> Tuple[KernelCandidate, ...]:
 def _prefill_kernel_id(
     req: GdnPrefillRequest, candidate: KernelCandidate, spec: Any
 ) -> KernelId:
-    return KernelId(
-        op="gdn_prefill",
-        family=FAMILY_PREFILL,
-        candidate=candidate.name,
-        algorithm=candidate.algorithm,
-        spec_id=candidate.spec_id,
-        arch=req.arch,
-        abi_version=candidate.abi_version,
-        request_hash=stable_json_hash(req.normalized(), n=16),
-        spec_hash=stable_json_hash(asdict(spec), n=16),
-    )
+    return make_kernel_id(req, candidate, spec, op="gdn_prefill")
 
 
 def dispatch_gdn_prefill(

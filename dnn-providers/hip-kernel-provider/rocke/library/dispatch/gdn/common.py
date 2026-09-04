@@ -15,7 +15,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Tuple
 
-from rocke.dispatch.core import KernelCandidate, OperatorRequest
+from rocke.dispatch.core import (
+    KernelCandidate,
+    OperatorRequest,
+    selector_matches as _shared_selector_matches,
+)
 
 FAMILY = "gdn_decode"
 
@@ -112,14 +116,5 @@ def request_errors(req: OperatorRequest) -> list:
     return errors
 
 
-def selector_matches(
-    req: GdnDecodeRequest, candidate: KernelCandidate
-) -> Tuple[bool, str]:
-    """Honour an explicit ``algorithm`` / ``spec_id`` pin on the request."""
-    algorithm = req.algorithm.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    spec_id = req.spec_id.strip().lower()
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
+# Shared pin-selector, re-exported under this family's name (see dispatch core).
+selector_matches = _shared_selector_matches

@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Tuple
 
-from rocke.dispatch.core import KernelCandidate, OperatorRequest
+from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_matches
 
 from .common import normalize_dtype
 
@@ -173,14 +173,5 @@ def prefill_request_errors(req: OperatorRequest) -> list:
     return errors
 
 
-def prefill_selector_matches(
-    req: GdnPrefillRequest, candidate: KernelCandidate
-) -> Tuple[bool, str]:
-    """Honour an explicit ``algorithm`` / ``spec_id`` pin on the request."""
-    algorithm = req.algorithm.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    spec_id = req.spec_id.strip().lower()
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
+# Shared pin-selector, re-exported under this family's name (see dispatch core).
+prefill_selector_matches = selector_matches
