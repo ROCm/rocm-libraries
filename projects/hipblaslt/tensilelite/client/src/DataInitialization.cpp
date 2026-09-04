@@ -3301,21 +3301,27 @@ namespace TensileLite
                 // <= 0 means don't rotating
                 rotatingNum = std::max(0, rotatingNum);
 
-                int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
                           << ". Rotating num: " << rotatingNum
                           << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
-                    auto rotatingAllocatedSize
+                    size_t rotatingAllocatedSize
                         = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
-                    if(totalRotatingSizeNeeded > rotatingAllocatedSize)
+                    // Clamp the requested rotating count to what actually fits
+                    // rather than aborting: the count derived from
+                    // m_rotatingBuffer can over-provision relative to the real
+                    // allocation, and rotatingNum * rotatingSize overflows int32
+                    // once the rotating buffer is >= ~2 GiB (see clampRotatingNum).
+                    int32_t clampedNum
+                        = clampRotatingNum(rotatingNum, rotatingSize, rotatingAllocatedSize);
+                    if(clampedNum != rotatingNum)
                     {
-                        std::cout << "Rotating buffer size: " << rotatingAllocatedSize
-                                  << " is not enough for rotating buffer size: " << rotatingSize
-                                  << " * " << rotatingNum << " = " << totalRotatingSizeNeeded
-                                  << std::endl;
-                        throw std::runtime_error("Insufficient rotating buffer size.");
+                        std::cout << "Rotating buffer size: " << rotatingAllocatedSize << " fits "
+                                  << clampedNum << " rotating buffers of " << rotatingSize
+                                  << " bytes; clamping rotating num from " << rotatingNum << " to "
+                                  << clampedNum << "." << std::endl;
+                        rotatingNum = clampedNum;
                     }
                     uint8_t* ptr = (uint8_t*)m_rm->getData().get() + m_rm->getDataLargestUnitSize();
                     int64_t  offset = 0;
@@ -3364,21 +3370,27 @@ namespace TensileLite
                 // <= 0 means don't rotating
                 rotatingNum = std::max(0, rotatingNum);
 
-                int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
                           << ". Rotating num: " << rotatingNum
                           << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
-                    auto rotatingAllocatedSize
+                    size_t rotatingAllocatedSize
                         = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
-                    if(totalRotatingSizeNeeded > rotatingAllocatedSize)
+                    // Clamp the requested rotating count to what actually fits
+                    // rather than aborting: the count derived from
+                    // m_rotatingBuffer can over-provision relative to the real
+                    // allocation, and rotatingNum * rotatingSize overflows int32
+                    // once the rotating buffer is >= ~2 GiB (see clampRotatingNum).
+                    int32_t clampedNum
+                        = clampRotatingNum(rotatingNum, rotatingSize, rotatingAllocatedSize);
+                    if(clampedNum != rotatingNum)
                     {
-                        std::cout << "Rotating buffer size: " << rotatingAllocatedSize
-                                  << " is not enough for rotating buffer size: " << rotatingSize
-                                  << " * " << rotatingNum << " = " << totalRotatingSizeNeeded
-                                  << std::endl;
-                        throw std::runtime_error("Insufficient rotating buffer size.");
+                        std::cout << "Rotating buffer size: " << rotatingAllocatedSize << " fits "
+                                  << clampedNum << " rotating buffers of " << rotatingSize
+                                  << " bytes; clamping rotating num from " << rotatingNum << " to "
+                                  << clampedNum << "." << std::endl;
+                        rotatingNum = clampedNum;
                     }
                     uint8_t* ptr = (uint8_t*)m_rm->getData().get() + m_rm->getDataLargestUnitSize();
                     int64_t  offset = 0;
