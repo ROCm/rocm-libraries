@@ -100,6 +100,10 @@ namespace TensileLite
             if(auto groupedProblem = dynamic_cast<const ContractionProblemGroupedGemm*>(problem))
             {
                 writeReport(groupedProblem->gemms[0]);
+                double totalFlops = 0.0;
+                for(auto& it : groupedProblem->gemms)
+                    totalFlops += it.flopCount();
+                m_reporter->report(ResultKey::TotalFlops, totalFlops);
                 std::vector<std::vector<size_t>> sizes;
                 for(auto& it : groupedProblem->gemms)
                     sizes.push_back(it.problemSizes());
