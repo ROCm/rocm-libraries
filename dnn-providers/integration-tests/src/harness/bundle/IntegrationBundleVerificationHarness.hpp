@@ -31,6 +31,7 @@
 #include "harness/bundle/OutputComparison.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
@@ -121,7 +122,7 @@ public:
 
         if(TestConfig::get().writeSupportClaims())
         {
-            observeSupportOnly(session);
+            observeAndRecordSupport(session);
             GTEST_SKIP() << "support-claim authoring run (--write-support-claims)";
             return;
         }
@@ -175,7 +176,13 @@ public:
         return _inputFillRecipes;
     }
 
-    void observeSupportOnly();
+    /// Mode B/C support observation: which engines take this graph?
+    ///
+    /// Returns observations rather than recording them to a singleton, so a test
+    /// can call it with a canned engine list and inspect the result. Mode C
+    /// (--test-engine) narrows to _engineUnderTest automatically.
+    std::vector<ObservedGraphSupport> observeSupportOnly(const GraphSession& session,
+                                                         const std::vector<LoadedEngine>& engines);
 
 private:
     // The one place a graph is built and the ranked list is asked for.
@@ -184,6 +191,8 @@ private:
     void applyMetadataGuards() const;
 
     SupportObservation checkSupportClaims(const GraphSession& session);
+
+    void observeAndRecordSupport(const GraphSession& session);
 
     // Applies the coverage rules to the run counters, and fails this test if a
     // sidecar exists that the query somehow did not reach.

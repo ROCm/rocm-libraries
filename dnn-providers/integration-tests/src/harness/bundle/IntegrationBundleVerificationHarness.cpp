@@ -205,48 +205,45 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
 }
 
-// Records raw ObservedGraphSupport facts (does this engine take the graph, yes or no)
-// rather than the SupportResults the claim path produces, so it reads the session's
-// ranked list itself instead of going through the claim observer.
-//
-// Mode B authors claims for every loaded engine off a single run, so this walks the
-// engine table rather than the one engine under test.
-void IntegrationBundleVerificationHarness::observeSupportOnly(const GraphSession& session)
+std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeSupportOnly(
+    const GraphSession& session, const std::vector<LoadedEngine>& engines)
 {
     if(!session.buildError.empty())
     {
         HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: from_binary failed for " << _bundlePath << ": "
                                                                              << session.buildError);
-        return;
+        return {};
     }
 
     if(!isResolved(session.engines.status.get_code()))
     {
         HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: unresolved query for "
                                << _bundlePath << ": " << session.engines.status.get_message());
-        return;
-    }
-
-    auto engines = LoadedEngineTable::get().all();
-    if(TestConfig::get().hasEngineName())
-    {
-        const std::string targetName(TestConfig::get().getEngineName());
-        engines.erase(std::remove_if(engines.begin(),
-                                     engines.end(),
-                                     [&](const LoadedEngine& e) { return e.name != targetName; }),
-                      engines.end());
+        return {};
     }
 
     const std::string arch = baseArchToken(_deps.policy.arch);
     const auto& rankedIds = session.engines.rankedIds;
 
-    for(const auto& engine : engines)
+    std::vector<ObservedGraphSupport> observations;
+
+    for(const auto& engine :
+        _engineUnderTest ? std::vector<LoadedEngine>{*_engineUnderTest} : engines)
     {
         const bool engineIsSupported
             = std::find(rankedIds.begin(), rankedIds.end(), engine.id) != rankedIds.end();
-
-        SupportObservationLog::get().record(
+        observations.push_back(
             {_claimLocator, engine.name, arch, _deps.policy.platform, engineIsSupported});
+    }
+
+    return observations;
+}
+
+void IntegrationBundleVerificationHarness::observeAndRecordSupport(const GraphSession& session)
+{
+    for(auto& obs : observeSupportOnly(session, LoadedEngineTable::get().all()))
+    {
+        SupportObservationLog::get().record(std::move(obs));
     }
 }
 

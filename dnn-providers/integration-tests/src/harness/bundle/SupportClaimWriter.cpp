@@ -243,13 +243,11 @@ enum class WriteOutcome
     WriteFailed,
 };
 
-// Byte-compares before writing so that "no support change" leaves no mtime bump
-// and no git diff -- the property that lets CI run the tool and check `git diff`.
 WriteOutcome writeIfChanged(const std::filesystem::path& filePath, const std::string& newContent)
 {
     if(std::filesystem::exists(filePath))
     {
-        std::ifstream existingFile(filePath);
+        std::ifstream existingFile(filePath, std::ios::binary);
         if(existingFile)
         {
             const std::string existingContent((std::istreambuf_iterator<char>(existingFile)),
@@ -261,7 +259,7 @@ WriteOutcome writeIfChanged(const std::filesystem::path& filePath, const std::st
         }
     }
 
-    std::ofstream outputFile(filePath);
+    std::ofstream outputFile(filePath, std::ios::binary);
     if(!outputFile)
     {
         return WriteOutcome::OpenFailed;
@@ -328,6 +326,7 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
         {
             applyObservation(claims, observation);
         }
+        summary.observationsApplied += sidecarObservations.size();
 
         // Every engine declined and there is no file to correct: writing one
         // would check in a sidecar that claims nothing.

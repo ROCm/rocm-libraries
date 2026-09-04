@@ -280,6 +280,13 @@ def is_sweep_sidecar(path: Path) -> bool:
     return path.name == "support.json"
 
 
+def check_canonical_form(support_path: Path, data: object, errors: List[str]) -> None:
+    canonical = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    raw = support_path.read_text(encoding="utf-8")
+    if raw != canonical:
+        _error(support_path, "not in canonical form (re-run the writer)", errors)
+
+
 def verify_all(bundle_root: Path) -> List[str]:
     errors: List[str] = []
     if not bundle_root.is_dir():
@@ -295,6 +302,7 @@ def verify_all(bundle_root: Path) -> List[str]:
         except OSError as exc:
             _error(support_path, f"cannot read: {exc}", errors)
             continue
+        check_canonical_form(support_path, data, errors)
         validate_single_graph_schema(data, support_path, errors)
         check_orphaned_single_graph(support_path, errors)
         if _has_non_empty_claims(data):
@@ -310,6 +318,7 @@ def verify_all(bundle_root: Path) -> List[str]:
         except OSError as exc:
             _error(support_path, f"cannot read: {exc}", errors)
             continue
+        check_canonical_form(support_path, data, errors)
         validate_sweep_schema(data, support_path, errors)
         check_orphaned_sweep(support_path, errors)
         if _has_non_empty_claims(data):
