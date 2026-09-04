@@ -233,6 +233,30 @@ else()
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
 endif()
 
+if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
+        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+    set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+    hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}"
+            "${_tensilelite_source_root}/release_metadata.py"
+            "${HIPBLASLT_BUILD_ROCM_ROOT}"
+        OUTPUT_VARIABLE TENSILELITE_DISTRIBUTION_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        COMMAND_ERROR_IS_FATAL ANY
+    )
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${_tensilelite_source_root}/VERSION"
+        "${_tensilelite_source_root}/release_metadata.py"
+        "${HIPBLASLT_BUILD_ROCM_ROOT}/.info/version"
+    )
+    configure_file(
+        "${_tensilelite_source_root}/client/TensileLiteClientVersion.hpp.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated/TensileLiteClientVersion.hpp"
+        @ONLY
+    )
+endif()
+
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBS_SUPERBUILD)
         if(HIPBLASLT_ENABLE_THEROCK)
