@@ -4,39 +4,33 @@
 """Shared pieces of the KDA family: the request and the gates every candidate
 re-uses.
 
-Arch-neutral by construction even though the only arch today is gfx942: the
-arch module imports this one and nothing here imports it, which keeps the
+Arch-neutral by construction: each arch module imports this one and nothing
+here imports an arch module, which keeps the
 registry assembly in ``__init__`` free of import-order dependence.
 
 SCOPE -- what this dispatcher decides
 -------------------------------------
 Which of the two chunkwise prefill paths runs: the **fused** kernel (one
-workgroup per (batch, head, V partition) walks that head's chunks, keeping the
-six per-chunk tiles in LDS), or the **split** path (a tile-builder kernel that
-is one workgroup per chunk, then a state-scan kernel over the materialized
-tiles). Both compute the same recurrence; they trade HBM traffic against
-parallelism. See :mod:`kernels.gfx942.kda_chunkwise`.
+workgroup per recurrence stream walks that stream's chunks, keeping the six
+per-chunk tiles in LDS), or the **split** path (a tile-builder kernel that is
+one workgroup per chunk, then a state-scan kernel over the materialized tiles).
+Both compute the same recurrence and trade HBM traffic against parallelism.
 
-The request carries the *logical* value width ``head_v`` (128 for a Kimi Delta
-Attention head). The partition into ``KDA_PARTITION_HEAD_V``-channel workgroups
-is an implementation fact of gfx942's LDS budget, so the candidates apply it
-when they build the spec and when they report their grid -- exactly as
-``builders/gfx942/kda`` does on the host.
+The request carries the *logical* value width ``head_v``. gfx942 partitions a
+logical head into ``KDA_PARTITION_HEAD_V``-channel workgroups to fit its LDS
+budget; gfx950 keeps the whole value width in one recurrence stream and may
+apply the scan spec's own ``value_splits`` in its grid helper.
 
 DEFERRED -- the fused/split crossover
 -------------------------------------
-The kernel docstrings state the trade in the right direction (split wins once
-there is enough batch/head parallelism to fill the device, fused wins for
-prefill at batch scale) but there is no measured crossover, so there is no
-honest threshold to encode. The split candidates are therefore **opt-in** and
-fused is the default, rather than a heuristic that would look measured and is
-not. Naming ``algorithm="chunk_prep"`` / ``"chunk_scan"`` selects the split
-halves.
+The available measurements do not establish a stable cross-architecture
+threshold, so the split candidates are **opt-in** and fused is the default.
+Naming ``algorithm="chunk_prep"`` / ``"chunk_scan"`` selects the split halves.
 
-Also deferred: ``bind``. The launch-side pack for these kernels lives in
-``builders/gfx942/kda/hostpack.py`` and is already reachable through the
-manifest runner, which is a different seam; wiring it as a ``ProblemBinding``
-is a separate change, so the registry does not set ``require_binding``.
+Also deferred: ``bind``. gfx942 launches through its manifest host pack while
+gfx950 launches through ``KernelLauncher`` with torch tensors. The split path
+also needs two launches and a tile workspace, which is not represented by one
+:class:`~rocke.dispatch.core.ProblemBinding`.
 """
 
 from __future__ import annotations
@@ -65,8 +59,10 @@ class KdaRequest(OperatorRequest):
     """Normalized chunkwise Kimi Delta Attention prefill request.
 
     ``head_v`` is the logical value width of one attention head, not the
-    per-workgroup partition. ``seqlen`` is the padded per-sequence length; this
-    family has no varlen path, so a ragged batch must be padded by the caller.
+    per-workgroup partition used on gfx942. ``seqlen`` is the padded
+    per-sequence length; this family has no varlen path, so a ragged batch must
+    be padded by the caller. An omitted ``chunk_size`` selects the tuned
+    architecture default: 16 on gfx942 and 32 on gfx950.
     """
 
     batch: int
@@ -75,7 +71,7 @@ class KdaRequest(OperatorRequest):
     arch: str
     head_k: int = 128
     head_v: int = 128
-    chunk_size: int = 16
+    chunk_size: int | None = None
     op: str = "kda"
     dtype: str = "bf16"
     algorithm: str = "auto"
@@ -86,6 +82,7 @@ class KdaRequest(OperatorRequest):
     def normalized(self) -> dict:
         d = asdict(self)
         d["dtype"] = self.dtype.lower()
+        d["chunk_size"] = self.effective_chunk_size
         return d
 
     def dims(self) -> dict[str, int]:
@@ -95,7 +92,7 @@ class KdaRequest(OperatorRequest):
             "seqlen": int(self.seqlen),
             "head_k": int(self.head_k),
             "head_v": int(self.head_v),
-            "chunk_size": int(self.chunk_size),
+            "chunk_size": self.effective_chunk_size,
             "num_chunks": self.num_chunks,
         }
 
@@ -108,21 +105,30 @@ class KdaRequest(OperatorRequest):
         return frozenset(active)
 
     @property
+    def effective_chunk_size(self) -> int:
+        """Requested chunk, or the architecture's tuned default."""
+        if self.chunk_size is not None:
+            return int(self.chunk_size)
+        return 16 if self.arch == "gfx942" else 32
+
+    @property
     def num_chunks(self) -> int:
         """Chunks per sequence. Zero when ``seqlen`` does not tile exactly."""
-        chunk = int(self.chunk_size)
+        chunk = self.effective_chunk_size
         if chunk <= 0 or int(self.seqlen) % chunk:
             return 0
         return int(self.seqlen) // chunk
 
     @property
     def v_partitions(self) -> int:
-        """Workgroups per logical head, from gfx942's value-channel partition."""
-        return int(self.head_v) // KDA_PARTITION_HEAD_V
+        """Workgroups per logical head before any spec-local value splits."""
+        if self.arch == "gfx942":
+            return int(self.head_v) // KDA_PARTITION_HEAD_V
+        return 1
 
     @property
     def workgroups(self) -> int:
-        """Independent (batch, head, V partition) scan streams."""
+        """Independent recurrence streams for the selected architecture."""
         return int(self.batch) * int(self.num_heads) * self.v_partitions
 
 
@@ -145,9 +151,11 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     errors: list[str] = []
     if req.op != "kda":
         errors.append(f"unsupported op {req.op!r}")
-    for field in ("batch", "num_heads", "seqlen", "head_k", "head_v", "chunk_size"):
+    for field in ("batch", "num_heads", "seqlen", "head_k", "head_v"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
+    if req.effective_chunk_size <= 0:
+        errors.append("chunk_size must be positive")
     try:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:
