@@ -351,3 +351,29 @@ class TestSpecNaming:
             "wpe2",
         ):
             assert needle in fused_h0.kernel_name()
+
+
+class TestGdnFlags:
+    def test_default_prep_kernel_name_unchanged(self):
+        # Byte-identity name guard: the default (KDA) spec name must not shift.
+        assert (
+            KdaChunkPrepSpec().kernel_name()
+            == "rocke_kda_chunk_prep_dk128_dv128_bf16_c32_b256_sb8"
+        )
+
+    def test_default_flags_are_kda_mha(self):
+        s = KdaChunkPrepSpec()
+        assert s.gate_kind == "kda" and s.kv_group == 1
+
+    def test_gdn_prep_kernel_name_has_suffix(self):
+        spec = KdaChunkPrepSpec(
+            raw_inputs=True,
+            fuse_gate=True,
+            fuse_qk_l2norm=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+            gate_kind="gdn",
+            kv_group=2,
+        )
+        name = spec.kernel_name()
+        assert "gdn" in name and "g2" in name

@@ -333,6 +333,13 @@ class KdaChunkPrepSpec:
     fuse_beta_sigmoid: bool = False
     has_dt_bias: bool = False
     lower_bound: float = -5.0
+    # GDN mode (default-off, split/raw-prep path only). "kda" = existing
+    # per-channel sigmoid gate; "gdn" = scalar per-(token,head) softplus gate
+    # -exp(A_log)*softplus(a+dt_bias), broadcast across DK.
+    gate_kind: str = "kda"
+    # GQA group size: value-heads per key-head. 1 = MHA (KDA). >1 gathers q/k
+    # from key-head (head // kv_group); only valid with gate_kind="gdn".
+    kv_group: int = 1
 
     @property
     def atom(self) -> MfmaAtom:
@@ -388,6 +395,10 @@ class KdaChunkPrepSpec:
                 parts.append("db")
             if self.lower_bound != -5.0:
                 parts.append(f"lb{self.lower_bound:g}")
+        if self.gate_kind != "kda":
+            parts.append(self.gate_kind)
+        if self.kv_group != 1:
+            parts.append(f"g{self.kv_group}")
         return kernel_name_join(*parts)
 
 
