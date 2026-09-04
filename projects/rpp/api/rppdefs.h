@@ -52,6 +52,7 @@ typedef halfhpp Rpp16f;
 #include <smmintrin.h>
 #include <x86intrin.h>
 #endif
+#include <unordered_map>
 #include <vector>
 
 /*! \brief 8 bit unsigned char minimum \ingroup group_rppdefs \page subpage_rpp */
@@ -224,6 +225,54 @@ typedef enum {
     /*! \brief Internal HIP/GPU runtime error \ingroup group_rppdefs */
     RPP_ERROR_HIP_RUNTIME = -29,
 } RppStatus;
+
+/*! \brief Get the string representation of a RPP status code.
+ * \details Function to convert a <tt> \ref RppStatus</tt> value returned by any RPP tensor API
+ * function into its enumerator name, for logging and error reporting.
+ * \param [in] status A <tt> \ref RppStatus</tt> enumeration.
+ * \ingroup group_rppdefs
+ * \return A null-terminated string with static storage duration holding the enumerator name (for
+ * example "RPP_ERROR_INVALID_SRC_LAYOUT"), or "RPP_STATUS_UNKNOWN" if the value does not name an
+ * enumerator. The caller must not free the returned pointer.
+ */
+inline const char* rppGetStatusString(RppStatus status) {
+    // Scoped to this function so the table stays an implementation detail.
+    static const std::unordered_map<RppStatus, const char*> statusStrings = {
+        {RPP_SUCCESS, "RPP_SUCCESS"},
+        {RPP_ERROR, "RPP_ERROR"},
+        {RPP_ERROR_INVALID_ARGUMENTS, "RPP_ERROR_INVALID_ARGUMENTS"},
+        {RPP_ERROR_LOW_OFFSET, "RPP_ERROR_LOW_OFFSET"},
+        {RPP_ERROR_ZERO_DIVISION, "RPP_ERROR_ZERO_DIVISION"},
+        {RPP_ERROR_HIGH_SRC_DIMENSION, "RPP_ERROR_HIGH_SRC_DIMENSION"},
+        {RPP_ERROR_NOT_IMPLEMENTED, "RPP_ERROR_NOT_IMPLEMENTED"},
+        {RPP_ERROR_INVALID_SRC_CHANNELS, "RPP_ERROR_INVALID_SRC_CHANNELS"},
+        {RPP_ERROR_INVALID_DST_CHANNELS, "RPP_ERROR_INVALID_DST_CHANNELS"},
+        {RPP_ERROR_INVALID_SRC_LAYOUT, "RPP_ERROR_INVALID_SRC_LAYOUT"},
+        {RPP_ERROR_INVALID_DST_LAYOUT, "RPP_ERROR_INVALID_DST_LAYOUT"},
+        {RPP_ERROR_INVALID_SRC_DATATYPE, "RPP_ERROR_INVALID_SRC_DATATYPE"},
+        {RPP_ERROR_INVALID_DST_DATATYPE, "RPP_ERROR_INVALID_DST_DATATYPE"},
+        {RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE, "RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE"},
+        {RPP_ERROR_INSUFFICIENT_DST_BUFFER_LENGTH, "RPP_ERROR_INSUFFICIENT_DST_BUFFER_LENGTH"},
+        {RPP_ERROR_INVALID_PARAMETER_DATATYPE, "RPP_ERROR_INVALID_PARAMETER_DATATYPE"},
+        {RPP_ERROR_NOT_ENOUGH_MEMORY, "RPP_ERROR_NOT_ENOUGH_MEMORY"},
+        {RPP_ERROR_OUT_OF_BOUND_SRC_ROI, "RPP_ERROR_OUT_OF_BOUND_SRC_ROI"},
+        {RPP_ERROR_LAYOUT_MISMATCH, "RPP_ERROR_LAYOUT_MISMATCH"},
+        {RPP_ERROR_INVALID_CHANNELS, "RPP_ERROR_INVALID_CHANNELS"},
+        {RPP_ERROR_INVALID_OUTPUT_TILE_LENGTH, "RPP_ERROR_INVALID_OUTPUT_TILE_LENGTH"},
+        {RPP_ERROR_OUT_OF_BOUND_SHARED_MEMORY_SIZE, "RPP_ERROR_OUT_OF_BOUND_SHARED_MEMORY_SIZE"},
+        {RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE, "RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE"},
+        {RPP_ERROR_INVALID_SRC_DIMS, "RPP_ERROR_INVALID_SRC_DIMS"},
+        {RPP_ERROR_INVALID_DST_DIMS, "RPP_ERROR_INVALID_DST_DIMS"},
+        {RPP_ERROR_INVALID_DIM_LENGTHS, "RPP_ERROR_INVALID_DIM_LENGTHS"},
+        {RPP_ERROR_INVALID_AXIS, "RPP_ERROR_INVALID_AXIS"},
+        {RPP_ERROR_INCOMPATIBLE_BACKEND, "RPP_ERROR_INCOMPATIBLE_BACKEND"},
+        {RPP_ERROR_HIP_LAUNCH, "RPP_ERROR_HIP_LAUNCH"},
+        {RPP_ERROR_HIP_RUNTIME, "RPP_ERROR_HIP_RUNTIME"},
+    };
+
+    auto statusString = statusStrings.find(status);
+    return (statusString != statusStrings.end()) ? statusString->second : "RPP_STATUS_UNKNOWN";
+}
 
 /*! \brief RPP RppBackend type enums
  * \ingroup group_rppdefs

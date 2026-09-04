@@ -10,6 +10,7 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 - Runtime backend selection parameter (`RppBackend executionBackend`) for all RPP tensor API functions
 - Backend tracking in `rppHandle_t` to store backend type (HOST or HIP)
 - `RPP_ERROR_HIP_LAUNCH` error type for reporting HIP kernel launch errors
+- `rppGetStatusString()` to convert an `RppStatus` value into its enumerator name
 - `rpp_BACKEND_TYPE` and `rpp_AUDIO_AUGMENTATIONS_SUPPORT` variables to RPP CMake package config
 
 ### Changed
