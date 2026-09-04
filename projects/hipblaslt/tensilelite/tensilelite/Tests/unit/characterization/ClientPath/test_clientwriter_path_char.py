@@ -46,6 +46,7 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 
 import tensilelite.ClientWriter as CW
+from tensilelite import _runtime
 from tensilelite.Common.GlobalParameters import globalParameters
 
 pytestmark = pytest.mark.unit
@@ -627,10 +628,10 @@ class TestGetClientExecutablePath:
     """getClientExecutablePath exercises lines 804-814."""
 
     def test_raises_when_file_not_found(self, monkeypatch):
-        """Lines 807-813: raises FileNotFoundError when PrebuiltClient doesn't exist."""
+        """Legacy PrebuiltClient does not override an unbound runtime client."""
         monkeypatch.setitem(globalParameters, "PrebuiltClient", "/nonexistent/fake_client")
 
-        with pytest.raises(FileNotFoundError, match="TensileLite client executable not found"):
+        with pytest.raises(_runtime.TensileLiteRuntimeError, match="tensilelite-client was not found"):
             CW.getClientExecutablePath()
 
     def test_returns_path_when_file_exists(self, tmp_path, monkeypatch):
@@ -641,3 +642,14 @@ class TestGetClientExecutablePath:
 
         result = CW.getClientExecutablePath()
         assert result == str(fake_exe)
+
+    def test_global_parameter_cannot_override_binding(self, monkeypatch, tmp_path):
+        monkeypatch.setitem(globalParameters, "ClientExecutable", "/nonexistent/fake_client")
+        bound_client = tmp_path / "tensilelite-client"
+        bound_client.touch()
+        monkeypatch.setattr(_runtime, "_client", bound_client)
+
+        result = CW.getClientExecutablePath()
+
+        assert result != "/nonexistent/fake_client"
+        assert result == str(bound_client)
