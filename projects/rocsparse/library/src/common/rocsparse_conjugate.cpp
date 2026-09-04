@@ -43,10 +43,16 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, typename T, typename U>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void conjugate_kernel(int64_t length, U array, int64_t array_dist)
+    void conjugate_kernel(int64_t length, int64_t batch_count, U array, int64_t array_dist)
     {
-        auto p = batched_pointer(hipBlockIdx_y, array, array_dist);
-        rocsparse::conjugate_device<BLOCKSIZE>(length, p);
+        // Grid-stride over the batch dimension so batch counts above the grid-y
+        // limit (65535) are handled correctly.
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            auto p = batched_pointer(batch_index, array, array_dist);
+            rocsparse::conjugate_device<BLOCKSIZE>(length, p);
+        }
     }
 
     template <typename T>
@@ -56,14 +62,16 @@ namespace rocsparse
                                                                     void*            array,
                                                                     int64_t          array_stride)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::conjugate_kernel<256, T, T*>),
-                                           dim3((length - 1) / 256 + 1, batch_count),
-                                           dim3(256),
-                                           0,
-                                           handle->stream,
-                                           length,
-                                           reinterpret_cast<T*>(array),
-                                           array_stride);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::conjugate_kernel<256, T, T*>),
+            dim3((length - 1) / 256 + 1, rocsparse::get_batch_grid_size(batch_count)),
+            dim3(256),
+            0,
+            handle->stream,
+            length,
+            batch_count,
+            reinterpret_cast<T*>(array),
+            array_stride);
         return rocsparse_status_success;
     }
 
