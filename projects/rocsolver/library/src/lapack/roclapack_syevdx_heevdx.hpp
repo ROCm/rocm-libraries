@@ -172,7 +172,7 @@ void rocsolver_syevdx_heevdx_getMemorySize(const rocblas_evect evect,
     {
         // extra requirements for computing eigenvalues and vectors (stedcx)
         rocsolver_stedcx_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count,
-                                                      size_tmpT, &a3, &b3, &c3, size_work4, size_work5,
+                                                      size_tmpT, &b3, &c3, size_work4, size_work5,
                                                       size_work6_ifail, &unused);
     }
 
@@ -295,7 +295,7 @@ rocblas_status rocsolver_syevdx_heevdx_template(rocblas_handle handle,
 
         rocsolver_stedcx_template<BATCHED, STRIDED, T>(
             handle, rocblas_evect_tridiagonal, erange, n, vl, vu, il, iu, D, stride, E, stride, nev,
-            W, strideW, Z, shiftZ, ldz, strideZ, info, batch_count, tmpT, (S*)work1, (S*)work2, (S*)work3,
+            W, strideW, Z, shiftZ, ldz, strideZ, info, batch_count, tmpT, (S*)work2, (S*)work3,
             (S*)work4, (S*)work5, work6_ifail, (S**)nsplit_workArr);
 
         rocblas_int h_nev = (erange == rocblas_erange_index ? iu - il + 1 : n);
