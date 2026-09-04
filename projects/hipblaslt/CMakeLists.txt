@@ -28,6 +28,7 @@ include(GenerateExportHeader)
 include(CMakeDependentOption)
 
 include(fetch_rocm_cmake)
+include(hipblaslt_materialize_monorepo_paths)
 include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
@@ -80,7 +81,6 @@ if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
     # amd-smi is not presently available on Windows so we do not require it.
     cmake_dependent_option(HIPBLASLT_ENABLE_AMD_SMI "Require amd_smi." ON "NOT WIN32" OFF)
-    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
@@ -97,10 +97,6 @@ if(HIPBLASLT_ENABLE_HOST)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
 endif()
-
-# mxDataGenerator is used by hipblaslt clients and tensilelite client; default OFF on Windows
-cmake_dependent_option(HIPBLASLT_ENABLE_MXDATAGENERATOR "Use mxDataGenerator for MX format data generation (clients/tests)." ON "NOT WIN32" OFF)
-message(STATUS "Enable mxDataGenerator for MX format data generation: ${HIPBLASLT_ENABLE_MXDATAGENERATOR}")
 
 set(CMAKE_SKIP_BUILD_RPATH FALSE CACHE BOOL "Skip build RPATH")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE CACHE BOOL "Build with install RPATH")
@@ -149,22 +145,6 @@ if(HIPBLASLT_ENABLE_AMD_SMI)
     find_package(amd_smi REQUIRED)
 else()
     find_package(amd_smi)
-endif()
-
-if(HIPBLASLT_ENABLE_CLIENT)
-    # NOTE: CMake should automatically detect the Fortran compiler via standard CMake search paths.
-    # Unfortunately, TheRock for Windows will not compile without an explicit set here.
-    if (NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
-        set(CMAKE_Fortran_COMPILER  "gfortran")
-    endif()
-    enable_language(Fortran)
-
-    if(HIPBLASLT_ENABLE_BLIS)
-        find_package(BLIS REQUIRED)
-    endif()
-
-    # There is an implicit find_package(BLAS) when finding lapack
-    find_package(LAPACK REQUIRED)
 endif()
 
 if(HIPBLASLT_ENABLE_OPENMP)
@@ -285,6 +265,124 @@ if(NOT ROCM_LIBS_SUPERBUILD)
     endif()
 endif()
 
+set(_hipblaslt_host_numerics_enabled FALSE)
+if(HIPBLASLT_ENABLE_CLIENT
+        OR TENSILELITE_ENABLE_CLIENT
+        OR TENSILELITE_BUILD_TESTING)
+    set(_hipblaslt_host_numerics_enabled TRUE)
+endif()
+
+if(_hipblaslt_host_numerics_enabled
+        AND NOT TARGET roc::host-numerics)
+    set(_hipblaslt_host_numerics_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-numerics"
+    )
+    if(NOT EXISTS "${_hipblaslt_host_numerics_source}/CMakeLists.txt")
+        set(_hipblaslt_host_numerics_components Operations)
+        if(HIPBLASLT_ENABLE_CLIENT)
+            list(APPEND _hipblaslt_host_numerics_components BLAS)
+        endif()
+        list(APPEND _hipblaslt_host_numerics_components AMDGPULayout)
+        find_package(
+            ROCHostNumerics
+            CONFIG
+            QUIET
+            COMPONENTS ${_hipblaslt_host_numerics_components}
+        )
+    endif()
+    if(NOT TARGET roc::host-numerics
+            AND NOT EXISTS
+                "${_hipblaslt_host_numerics_source}/CMakeLists.txt")
+        hipblaslt_materialize_monorepo_paths(
+            _hipblaslt_materialized_root
+            shared/host-numerics
+        )
+        if(_hipblaslt_materialized_root)
+            set(_hipblaslt_host_numerics_source
+                "${_hipblaslt_materialized_root}/shared/host-numerics"
+            )
+        endif()
+    endif()
+    if(NOT TARGET roc::host-numerics
+            AND EXISTS "${_hipblaslt_host_numerics_source}/CMakeLists.txt")
+        block(SCOPE_FOR VARIABLES)
+            set(HOST_NUMERICS_BUILD_TESTING OFF)
+            set(HOST_NUMERICS_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
+            add_subdirectory(
+                "${_hipblaslt_host_numerics_source}"
+                "${CMAKE_CURRENT_BINARY_DIR}/host-numerics"
+                EXCLUDE_FROM_ALL
+            )
+        endblock()
+    endif()
+    if(NOT TARGET roc::host-numerics)
+        message(FATAL_ERROR
+            "hipBLASLt requires the standalone ROCHostNumerics component. "
+            "Include shared/host-numerics in a monorepo sparse checkout, "
+            "configure from a Git checkout that can materialize that path, or "
+            "install the ROCHostNumerics package and add it to CMAKE_PREFIX_PATH."
+        )
+    endif()
+endif()
+if(_hipblaslt_host_numerics_enabled
+        AND HIPBLASLT_ENABLE_CLIENT
+        AND TARGET roc::host-numerics
+        AND NOT TARGET roc::host-numerics-blas
+        AND COMMAND roc_host_numerics_enable_blas_backend)
+    roc_host_numerics_enable_blas_backend()
+endif()
+if(_hipblaslt_host_numerics_enabled
+        AND NOT TARGET roc::host-numerics-amd-gpu-layout)
+    message(FATAL_ERROR
+        "hipBLASLt MX clients require the "
+        "roc::host-numerics-amd-gpu-layout target."
+    )
+endif()
+if(_hipblaslt_host_numerics_enabled
+        AND HIPBLASLT_ENABLE_CLIENT
+        AND NOT TARGET roc::host-numerics-blas)
+    message(FATAL_ERROR
+        "hipBLASLt clients require the roc::host-numerics-blas target."
+    )
+endif()
+
+if(_hipblaslt_host_numerics_enabled)
+    foreach(_host_numerics_target
+            host-numerics
+            host-numerics-blas
+            host-numerics-amd-gpu-layout)
+        if(NOT TARGET ${_host_numerics_target})
+            continue()
+        endif()
+
+        if(HIPBLASLT_ENABLE_ASAN OR HIPBLASLT_ENABLE_TSAN)
+            hipblaslt_target_configure_sanitizers(${_host_numerics_target} PRIVATE)
+        elseif(TENSILELITE_ENABLE_HOST_ASAN)
+            target_compile_options(${_host_numerics_target}
+                PRIVATE
+                    -fsanitize=address
+                    -fno-omit-frame-pointer
+            )
+        elseif(TENSILELITE_ENABLE_HOST_TSAN)
+            target_compile_options(${_host_numerics_target}
+                PRIVATE
+                    -fsanitize=thread
+            )
+        endif()
+
+        if(HIPBLASLT_ENABLE_COVERAGE OR TENSILELITE_ENABLE_COVERAGE)
+            target_compile_options(${_host_numerics_target}
+                PRIVATE
+                    -g
+                    -O0
+                    -fprofile-instr-generate
+                    -fcoverage-mapping
+            )
+        endif()
+    endforeach()
+    unset(_host_numerics_target)
+endif()
+
 add_library(hipblaslt-headers INTERFACE)
 add_library(hipblaslt::headers ALIAS hipblaslt-headers)
 target_include_directories(hipblaslt-headers
@@ -333,22 +431,6 @@ elseif(WIN32)
         "libhipblaslt.dll will be built WITHOUT VERSIONINFO metadata. Install the "
         "Windows SDK or make llvm-rc available (e.g. on PATH or in the ROCm "
         "llvm/bin directory) to embed version info.")
-endif()
-
-# `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
-# only built when at least one consumer needs it. tensilelite/client and
-# tensilelite/tests reach for it on the same condition, so we drive the
-# subdir from here to keep the dependency wiring close to the gate that
-# decides whether to build it at all.
-set(_hipblaslt_mxdatagen_enabled FALSE)
-if(HIPBLASLT_ENABLE_MXDATAGENERATOR
-        AND (HIPBLASLT_ENABLE_CLIENT
-             OR TENSILELITE_ENABLE_CLIENT
-             OR TENSILELITE_BUILD_TESTING))
-    set(_hipblaslt_mxdatagen_enabled TRUE)
-endif()
-if(_hipblaslt_mxdatagen_enabled)
-    add_subdirectory(clients/common)
 endif()
 
 add_subdirectory(tensilelite)
@@ -684,11 +766,12 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
     )
 
-    # Imported directly by unit tests (test_amax_true16_activation.py), so it must
-    # ship at the tensilelite root, not under scripts/.
+    # Imported directly by generator unit tests, so these must ship at the
+    # tensilelite root, not under scripts/.
     install(
         FILES
             "${_tensilelite_src}/AMaxGenerator.py"
+            "${_tensilelite_src}/LayerNormGenerator.py"
         DESTINATION "${_tensilelite_install_dest}"
         COMPONENT tests
     )
@@ -765,49 +848,56 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
+    set(_hipblaslt_sample_targets
+        sample_hipblaslt_gemm
+        sample_hipblaslt_gemm_ext
+        sample_hipblaslt_gemm_batched
+        sample_hipblaslt_gemm_batched_ext
+        sample_hipblaslt_gemm_tuning_splitk_ext
+        sample_hipblaslt_gemm_bias
+        sample_hipblaslt_gemm_bias_ext
+        sample_hipblaslt_gemm_get_all_algos
+        sample_hipblaslt_gemm_get_all_algos_ext
+        sample_hipblaslt_gemm_get_algo_by_index_ext
+        sample_hipblaslt_gemm_alphavec_ext
+        sample_hipblaslt_gemm_gelu_aux_bias
+        sample_hipblaslt_gemm_gelu_aux_bias_ext
+        sample_hipblaslt_gemm_amax
+        sample_hipblaslt_gemm_amax_ext
+        sample_hipblaslt_gemm_amax_with_scale
+        sample_hipblaslt_gemm_amax_with_scale_ext
+        sample_hipblaslt_gemm_bgradb
+        sample_hipblaslt_gemm_ext_bgradb
+        sample_hipblaslt_gemm_dgelu_bgrad
+        sample_hipblaslt_gemm_dgelu_bgrad_ext
+        sample_hipblaslt_gemm_drelu_bgrad
+        sample_hipblaslt_gemm_drelu_bgrad_ext
+        sample_hipblaslt_gemm_is_tuned_ext
+        sample_hipblaslt_gemm_tuning_wgm_ext
+        sample_hipblaslt_gemm_with_scale_a_b
+        sample_hipblaslt_gemm_with_scale_a_b_ext
+        sample_hipblaslt_groupedgemm_ext
+        sample_hipblaslt_groupedgemm_fixed_mk_ext
+        sample_hipblaslt_groupedgemm_get_all_algos_ext
+        sample_hipblaslt_gemm_mix_precision
+        sample_hipblaslt_gemm_mix_precision_ext
+        sample_hipblaslt_gemm_mix_precision_with_amax_ext
+        sample_hipblaslt_gemm_attr_tciA_tciB
+        sample_hipblaslt_ext_op_layernorm
+        sample_hipblaslt_ext_op_amax
+        sample_hipblaslt_gemm_with_TF32
+        sample_hipblaslt_gemm_swizzle_a
+        sample_hipblaslt_gemm_bias_swizzle_a_ext
+        sample_hipblaslt_weight_swizzle_padding
+        sample_hipblaslt_gemm_swish_bias
+    )
+    # Samples install one directory deeper than targets covered by the global RPATH.
+    set_target_properties(${_hipblaslt_sample_targets}
+        PROPERTIES
+            INSTALL_RPATH "$ORIGIN/../../lib:$ORIGIN/../../llvm/lib"
+    )
     install(
-        TARGETS
-            sample_hipblaslt_gemm
-            sample_hipblaslt_gemm_ext
-            sample_hipblaslt_gemm_batched
-            sample_hipblaslt_gemm_batched_ext
-            sample_hipblaslt_gemm_tuning_splitk_ext
-            sample_hipblaslt_gemm_bias
-            sample_hipblaslt_gemm_bias_ext
-            sample_hipblaslt_gemm_get_all_algos
-            sample_hipblaslt_gemm_get_all_algos_ext
-            sample_hipblaslt_gemm_get_algo_by_index_ext
-            sample_hipblaslt_gemm_alphavec_ext
-            sample_hipblaslt_gemm_gelu_aux_bias
-            sample_hipblaslt_gemm_gelu_aux_bias_ext
-            sample_hipblaslt_gemm_amax
-            sample_hipblaslt_gemm_amax_ext
-            sample_hipblaslt_gemm_amax_with_scale
-            sample_hipblaslt_gemm_amax_with_scale_ext
-            sample_hipblaslt_gemm_bgradb
-            sample_hipblaslt_gemm_ext_bgradb
-            sample_hipblaslt_gemm_dgelu_bgrad
-            sample_hipblaslt_gemm_dgelu_bgrad_ext
-            sample_hipblaslt_gemm_drelu_bgrad
-            sample_hipblaslt_gemm_drelu_bgrad_ext
-            sample_hipblaslt_gemm_is_tuned_ext
-            sample_hipblaslt_gemm_tuning_wgm_ext
-            sample_hipblaslt_gemm_with_scale_a_b
-            sample_hipblaslt_gemm_with_scale_a_b_ext
-            sample_hipblaslt_groupedgemm_ext
-            sample_hipblaslt_groupedgemm_fixed_mk_ext
-            sample_hipblaslt_groupedgemm_get_all_algos_ext
-            sample_hipblaslt_gemm_mix_precision
-            sample_hipblaslt_gemm_mix_precision_ext
-            sample_hipblaslt_gemm_mix_precision_with_amax_ext
-            sample_hipblaslt_gemm_attr_tciA_tciB
-            sample_hipblaslt_ext_op_layernorm
-            sample_hipblaslt_ext_op_amax
-            sample_hipblaslt_gemm_with_TF32
-            sample_hipblaslt_gemm_swizzle_a
-            sample_hipblaslt_gemm_bias_swizzle_a_ext
-            sample_hipblaslt_weight_swizzle_padding
-            sample_hipblaslt_gemm_swish_bias
+        TARGETS ${_hipblaslt_sample_targets}
         RUNTIME
         COMPONENT samples
         DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt-samples"
@@ -847,6 +937,10 @@ if(HIPBLASLT_ENABLE_COVERAGE)
     target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+    set(
+        _hipblaslt_coverage_ignore_regex
+        ".*Tensile.*|.*origami.*|.*/clients/tests/.*"
+    )
     # Allow GTEST_FILTER to be set via environment variable to filter tests during coverage runs.
     # Usage: GTEST_FILTER="*quick*" make coverage
     # Default: Run all tests if GTEST_FILTER is not set
@@ -877,9 +971,9 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         coverage
         DEPENDS code_cov_tests
         COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/hipblaslt-coverage_*.profraw" -o "${coverage_dir}/hipblaslt.profdata"
-        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*"
-        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=html -output-dir="${coverage_dir}"
-        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex="${_hipblaslt_coverage_ignore_regex}"
+        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex="${_hipblaslt_coverage_ignore_regex}" -format=html -output-dir="${coverage_dir}"
+        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex="${_hipblaslt_coverage_ignore_regex}" -format=lcov > "${coverage_dir}/coverage.info"
         COMMENT "Generating code coverage report"
       )
 endif()

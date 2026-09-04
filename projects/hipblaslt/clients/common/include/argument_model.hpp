@@ -112,9 +112,9 @@ public:
             {
                 if(gflops != ArgumentLogging::NA_value)
                 {
-                    double cblas_gflops = gflops * batch_count / cpu_us * 1e6;
+                    double cpu_reference_gflops = gflops * batch_count / cpu_us * 1e6;
                     name_line << ",CPU-Gflops";
-                    val_line << "," << cblas_gflops;
+                    val_line << "," << cpu_reference_gflops;
                 }
 
                 name_line << ",CPU-us";

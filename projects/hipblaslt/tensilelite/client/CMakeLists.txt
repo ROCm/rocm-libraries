@@ -1,17 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Shared core for tensilelite-client and cpu-gemm-driver.
-#
-# Both executables consume nearly the same sources, link line, include
-# directories, compile definitions, C++ standard, and sanitizer flags. Owning
-# them on a single STATIC helper target removes a `foreach(target ...)` loop
-# that applied identical properties to two targets, a `COMMON_CLIENT_SOURCES`
-# variable that hid the source list from `target_sources` (and from IDE
-# navigation), and three duplicated `target_include_directories` calls.
-#
-# Each executable is now a thin wrapper that adds only its `main` translation
-# unit and links to this helper.
+# Shared core for the TensileLite client and its tests.
 add_library(tensilelite-client-common STATIC)
 add_library(tensilelite::client-common ALIAS tensilelite-client-common)
 
@@ -70,6 +60,8 @@ target_link_libraries(tensilelite-client-common
     PUBLIC
         hip::device
         hip::host
+        roc::host-numerics
+        roc::host-numerics-amd-gpu-layout
         roc::tensilelite-host
         rocisa::rocisa-cpp
         OpenMP::OpenMP_CXX
@@ -88,15 +80,6 @@ if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
     # the fused run fails fast instead of handing the kernel a null queue array.
     target_compile_definitions(tensilelite-client-common
         PRIVATE TENSILELITE_ENABLE_SDMA)
-endif()
-
-# When mxDataGenerator is enabled, hipblaslt::mxdatagen propagates the
-# HIPBLASLT_ENABLE_MXDATAGENERATOR macro, the C++20 floor, the include path
-# for `<mxDataGen.hpp>`, hipblaslt::headers (so `<hipblaslt/...>` API headers
-# resolve), and the link to roc::mxDataGenerator. PUBLIC so the executables
-# below pick the macro up too.
-if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
-    target_link_libraries(tensilelite-client-common PUBLIC hipblaslt::mxdatagen)
 endif()
 
 target_include_directories(tensilelite-client-common
@@ -131,6 +114,61 @@ if(HIPBLASLT_CXX_HAS_MF16C)
     target_compile_options(tensilelite-client-common PRIVATE -mf16c)
 endif()
 
+add_library(tensilelite-host-numerics-adapter STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/host_numerics/DataInitialization.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/host_numerics/GemmInvocationAdapter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/host_numerics/Reference.cpp"
+)
+add_library(tensilelite::host-numerics-adapter ALIAS tensilelite-host-numerics-adapter)
+
+target_sources(tensilelite-host-numerics-adapter
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/HostNumerics/DataInitializationHelpers.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/HostNumerics/GemmInvocationAdapter.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/HostNumerics/HostNumericsBridge.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/HostNumerics/Reference.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/HostNumerics/TensileDataGeneration.hpp"
+)
+
+target_include_directories(tensilelite-host-numerics-adapter
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_link_libraries(tensilelite-host-numerics-adapter
+    PUBLIC
+        roc::host-numerics
+    PRIVATE
+        hip::device
+        hip::host
+        roc::tensilelite-host
+        rocisa::rocisa-cpp
+        OpenMP::OpenMP_CXX
+)
+set_target_properties(tensilelite-host-numerics-adapter
+    PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+)
+if(HIPBLASLT_CXX_HAS_MF16C)
+    target_compile_options(tensilelite-host-numerics-adapter PRIVATE -mf16c)
+endif()
+if(HIPBLASLT_ENABLE_ASAN)
+    hipblaslt_target_configure_sanitizers(tensilelite-host-numerics-adapter PUBLIC)
+endif()
+if(TENSILELITE_ENABLE_COVERAGE)
+    target_compile_options(
+        tensilelite-host-numerics-adapter PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(
+        tensilelite-host-numerics-adapter PUBLIC -fprofile-instr-generate -fcoverage-mapping)
+endif()
+
+target_link_libraries(tensilelite-client-common
+    PUBLIC
+        tensilelite::host-numerics-adapter
+)
+
 option(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK "Enable in-process ROCprofiler-SDK counters" OFF)
 target_compile_definitions(tensilelite-client-common
     PUBLIC
@@ -145,9 +183,6 @@ endif()
 
 add_executable(tensilelite-client "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
 target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
-
-add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
-target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
 
 # rocprofiler-sdk is only used by tensilelite-client (in-process counters).
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)

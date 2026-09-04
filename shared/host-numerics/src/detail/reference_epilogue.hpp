@@ -1,0 +1,378 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <array>
+#include <cmath>
+#include <complex>
+#include <cstdint>
+#include <optional>
+#include <roc/host_numerics/epilogue.hpp>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+
+#include "reference_common.hpp"
+
+namespace roc::host_numerics {
+namespace detail {
+template <typename Accumulator>
+Accumulator activationGradientFactor(Activation activation, Accumulator value,
+                                     Accumulator parameter0, Accumulator parameter1) {
+    using Transcendental = std::conditional_t<std::is_same_v<Accumulator, double>, double, float>;
+    switch (activation) {
+        case Activation::None:
+            return Accumulator(1);
+        case Activation::Absolute:
+            if (value > Accumulator(0)) return Accumulator(1);
+            if (value < Accumulator(0)) return Accumulator(-1);
+            return Accumulator(0);
+        case Activation::ClippedRelu:
+            return value > parameter0 && value < parameter1 ? Accumulator(1) : Accumulator(0);
+        case Activation::Relu:
+            return value > Accumulator(0) ? Accumulator(1) : Accumulator(0);
+        case Activation::Gelu:
+            return applyActivation(Activation::GeluDerivative, value, parameter0, parameter1);
+        case Activation::GeluScaling:
+            return applyActivation(Activation::GeluDerivative, value, parameter0, parameter1) *
+                   parameter0;
+        case Activation::LeakyRelu:
+            return value > Accumulator(0) ? Accumulator(1) : parameter0;
+        case Activation::Sigmoid: {
+            const Accumulator sigmoid =
+                applyActivation(Activation::Sigmoid, value, parameter0, parameter1);
+            return sigmoid * (Accumulator(1) - sigmoid);
+        }
+        case Activation::Tanh: {
+            const Transcendental hyperbolicTangent = std::tanh(
+                static_cast<Transcendental>(value) * static_cast<Transcendental>(parameter0));
+            return static_cast<Accumulator>(
+                static_cast<Transcendental>(parameter0) * static_cast<Transcendental>(parameter1) *
+                (Transcendental(1) - hyperbolicTangent * hyperbolicTangent));
+        }
+        case Activation::Silu: {
+            const Accumulator sigmoid =
+                applyActivation(Activation::Sigmoid, value, parameter0, parameter1);
+            return sigmoid + value * sigmoid * (Accumulator(1) - sigmoid);
+        }
+        case Activation::Swish: {
+            const Transcendental beta = static_cast<Transcendental>(parameter0);
+            const Transcendental x = static_cast<Transcendental>(value);
+            const Transcendental sigmoid =
+                Transcendental(1) / (Transcendental(1) + std::exp(-beta * x));
+            return static_cast<Accumulator>(sigmoid +
+                                            beta * x * sigmoid * (Transcendental(1) - sigmoid));
+        }
+        case Activation::Clamp:
+            return value > parameter0 && value < parameter1 ? Accumulator(1) : Accumulator(0);
+        case Activation::GeluDerivative:
+        case Activation::ReluDerivative:
+            throw std::invalid_argument(
+                "Gradient application does not accept an explicit derivative activation.");
+    }
+    throw std::invalid_argument("Unsupported epilogue activation.");
+}
+
+struct EpiloguePlan {
+    size_t selectedElements = 0;
+};
+
+struct EpilogueInvocation : EpilogueOptions {
+    EpilogueInvocation(Tensor inputTensor, EpilogueOutputs outputTensors,
+                       const EpilogueOptions& options)
+        : EpilogueOptions(options),
+          input(std::move(inputTensor)),
+          output(std::move(outputTensors.output)),
+          rawOutput(std::move(outputTensors.rawOutput)),
+          auxiliaryOutput(std::move(outputTensors.auxiliaryOutput)),
+          amax(std::move(outputTensors.amax)),
+          outputType(output.type()),
+          rawOutputType(rawOutput ? std::optional(rawOutput->type()) : std::nullopt),
+          auxiliaryOutputType(auxiliaryOutput ? std::optional(auxiliaryOutput->type())
+                                              : std::nullopt),
+          amaxType(amax ? std::optional(amax->type()) : std::nullopt) {}
+
+    Tensor input;
+    Tensor output;
+    std::optional<Tensor> rawOutput;
+    std::optional<Tensor> auxiliaryOutput;
+    std::optional<Tensor> amax;
+    ScalarType outputType;
+    std::optional<ScalarType> rawOutputType;
+    std::optional<ScalarType> auxiliaryOutputType;
+    std::optional<ScalarType> amaxType;
+};
+
+inline void validateEpilogueValueType(ScalarType type, const char* name) {
+    if (!isConcreteScalarType(type))
+        throw std::invalid_argument(std::string("Reference epilogue ") + name +
+                                    " type is invalid.");
+    const ScalarCategory category = scalarTypeInfo(type).category;
+    if (category == ScalarCategory::Complex || category == ScalarCategory::Scale)
+        throw std::invalid_argument(std::string("Reference epilogue ") + name +
+                                    " must use a real arithmetic scalar type.");
+}
+
+inline void validateEpilogueActivation(const EpilogueOptions& problem) {
+    switch (problem.activationApplication) {
+        case ActivationApplication::Forward:
+        case ActivationApplication::Gradient:
+            break;
+        default:
+            throw std::invalid_argument("Reference epilogue activation application is invalid.");
+    }
+    switch (problem.activation) {
+        case Activation::None:
+        case Activation::Absolute:
+        case Activation::ClippedRelu:
+        case Activation::Relu:
+        case Activation::Gelu:
+        case Activation::GeluDerivative:
+        case Activation::GeluScaling:
+        case Activation::LeakyRelu:
+        case Activation::ReluDerivative:
+        case Activation::Sigmoid:
+        case Activation::Tanh:
+        case Activation::Silu:
+        case Activation::Swish:
+        case Activation::Clamp:
+            break;
+        default:
+            throw std::invalid_argument("Reference epilogue activation is invalid.");
+    }
+    if (problem.activationApplication == ActivationApplication::Gradient &&
+        (problem.activation == Activation::GeluDerivative ||
+         problem.activation == Activation::ReluDerivative))
+        throw std::invalid_argument(
+            "Gradient application does not accept an explicit derivative activation.");
+}
+
+template <typename Accumulator>
+inline void validateEpilogueScalars(const EpilogueOptions& problem) {
+    (void)runtimeScalar<Accumulator>(problem.outputScale, "output scale");
+    (void)runtimeScalar<Accumulator>(problem.auxiliaryScale, "auxiliary scale");
+    (void)runtimeScalar<Accumulator>(problem.activationParameter0, "activation parameter 0");
+    (void)runtimeScalar<Accumulator>(problem.activationParameter1, "activation parameter 1");
+}
+
+inline EpiloguePlan validateEpilogueInvocation(const EpilogueInvocation& problem) {
+    requireRank(problem.input.shape(), 2, "Reference epilogue", "input");
+    validateEpilogueValueType(problem.input.type(), "input");
+    validateEpilogueValueType(problem.outputType, "output");
+    if (problem.rawOutputType) validateEpilogueValueType(*problem.rawOutputType, "raw output");
+    if (problem.auxiliaryOutputType)
+        validateEpilogueValueType(*problem.auxiliaryOutputType, "auxiliary output");
+    if (problem.amaxType) validateEpilogueValueType(*problem.amaxType, "AMax output");
+
+    if (problem.computeType != ScalarType::Float32 && problem.computeType != ScalarType::Float64 &&
+        problem.computeType != ScalarType::Int32)
+        throw std::invalid_argument("Reference epilogue supports F32, F64, and I32 compute types.");
+    validateEpilogueActivation(problem);
+    switch (problem.outputConversion) {
+        case OutputConversion::Default:
+            break;
+        case OutputConversion::SaturatingInt8:
+            if (problem.outputType != ScalarType::Int8)
+                throw std::invalid_argument(
+                    "Saturating output conversion requires an Int8 output tensor.");
+            break;
+        default:
+            throw std::invalid_argument("Reference epilogue output conversion is invalid.");
+    }
+
+    if (problem.computeType == ScalarType::Int32) {
+        switch (problem.activation) {
+            case Activation::None:
+            case Activation::Absolute:
+            case Activation::ClippedRelu:
+            case Activation::Relu:
+            case Activation::LeakyRelu:
+            case Activation::ReluDerivative:
+            case Activation::Clamp:
+                break;
+            default:
+                throw std::invalid_argument(
+                    "Int32 reference epilogue does not support floating-point activation.");
+        }
+        if (problem.amaxType)
+            throw std::invalid_argument("Int32 reference epilogue does not support AMax.");
+        validateEpilogueScalars<int32_t>(problem);
+    } else if (problem.computeType == ScalarType::Float32) {
+        validateEpilogueScalars<float>(problem);
+    } else {
+        validateEpilogueScalars<double>(problem);
+    }
+
+    auto validateMatrix = [&](const auto& view, const char* name) {
+        requireRank(view.shape(), 2, "Reference epilogue", name);
+        if (view.shape() != problem.input.shape())
+            throw std::invalid_argument(std::string("Reference epilogue ") + name +
+                                        " shape mismatch.");
+        validateEpilogueValueType(view.type(), name);
+    };
+    if (problem.auxiliaryInput) validateMatrix(*problem.auxiliaryInput, "auxiliary input");
+    if (problem.gateResidual) validateMatrix(*problem.gateResidual, "gate residual");
+    if (problem.activationApplication == ActivationApplication::Gradient && !problem.auxiliaryInput)
+        throw std::invalid_argument("Gradient epilogue requires an auxiliary input tensor.");
+    if (problem.bias) {
+        try {
+            (void)problem.bias->broadcastTo(problem.input.shape());
+        } catch (const std::invalid_argument&) {
+            throw std::invalid_argument(
+                "Reference epilogue bias is not broadcast-compatible with the input.");
+        }
+        validateEpilogueValueType(problem.bias->type(), "bias");
+    }
+    return {
+        .selectedElements =
+            problem.outputSelection.selectedCount(problem.input.shape().elementCount()),
+    };
+}
+
+inline void validateEpilogueInvocationStorage(const EpilogueInvocation& request);
+
+inline EpiloguePlan validateEpilogue(const EpilogueInvocation& request) {
+    EpiloguePlan plan = validateEpilogueInvocation(request);
+    requireRank(request.output.shape(), 2, "Reference epilogue", "output");
+    if (request.output.shape() != request.input.shape())
+        throw std::invalid_argument("Reference epilogue input/output shape mismatch.");
+
+    auto validateOutputMatrix = [&](const std::optional<Tensor>& tensor, const char* name) {
+        if (!tensor) return;
+        requireRank(tensor->shape(), 2, "Reference epilogue", name);
+        if (tensor->shape() != request.input.shape())
+            throw std::invalid_argument(std::string("Reference epilogue ") + name +
+                                        " shape mismatch.");
+    };
+    validateOutputMatrix(request.rawOutput, "raw output");
+    validateOutputMatrix(request.auxiliaryOutput, "auxiliary output");
+    if (request.amax) {
+        if (request.amax->shape().elementCount() != 1)
+            throw std::invalid_argument("Reference epilogue AMax output must contain one element.");
+    } else if (request.accumulateAmax) {
+        throw std::invalid_argument("Reference epilogue cannot accumulate an absent AMax output.");
+    }
+    validateEpilogueInvocationStorage(request);
+    return plan;
+}
+
+inline void validateEpilogueInvocationStorage(const EpilogueInvocation& request) {
+    const std::array<const Tensor*, 4> outputs{
+        &request.output,
+        request.rawOutput ? &*request.rawOutput : nullptr,
+        request.auxiliaryOutput ? &*request.auxiliaryOutput : nullptr,
+        request.amax ? &*request.amax : nullptr,
+    };
+    const std::array<const Tensor*, 4> inputs{
+        &request.input,
+        request.auxiliaryInput ? &*request.auxiliaryInput : nullptr,
+        request.gateResidual ? &*request.gateResidual : nullptr,
+        request.bias ? &*request.bias : nullptr,
+    };
+    for (const Tensor* output : outputs) {
+        if (!output) continue;
+        requireProvablyDistinctDestinationElementOffsets(*output, "Reference epilogue", "output");
+        for (const Tensor* input : inputs) {
+            if (!input) continue;
+            const bool allowIdenticalInputOutput =
+                output == &request.output && input == &request.input;
+            if (allowIdenticalInputOutput)
+                rejectOverlappingTensorStorageUnlessIdenticallyMapped(
+                    *output, *input,
+                    "Reference epilogue output overlaps an input with an unsafe storage mapping.");
+            else
+                rejectOverlappingTensorStorage(
+                    *output, *input,
+                    "Reference epilogue output overlaps an input with an unsafe storage mapping.");
+        }
+    }
+    for (size_t left = 0; left < outputs.size(); ++left) {
+        if (!outputs[left]) continue;
+        for (size_t right = left + 1; right < outputs.size(); ++right) {
+            if (outputs[right])
+                rejectOverlappingTensorStorage(*outputs[left], *outputs[right],
+                                               "Reference epilogue result tensors overlap.");
+        }
+    }
+}
+
+inline void initializeOwnedEpilogueTensor(Tensor tensor) {
+    forEachIndex(tensor.shape(),
+                 [&](std::span<const size_t> indices, size_t) { tensor.storeFrom(indices, 0.0); });
+}
+
+template <typename Accumulator>
+void referenceEpilogueTyped(const EpilogueInvocation& problem) {
+    const RuntimeMatrixReader<Accumulator> input(problem.input);
+    const RuntimeMatrixOutputWriter<Accumulator> output(problem.output, problem.outputConversion);
+    std::optional<RuntimeMatrixWriter<Accumulator>> rawOutput;
+    std::optional<RuntimeMatrixWriter<Accumulator>> auxiliaryOutput;
+    std::optional<RuntimeMatrixReader<Accumulator>> auxiliaryInput;
+    std::optional<RuntimeMatrixReader<Accumulator>> gateResidual;
+    std::optional<RuntimeMatrixReader<Accumulator>> bias;
+    if (problem.rawOutput) rawOutput.emplace(*problem.rawOutput);
+    if (problem.auxiliaryOutput) auxiliaryOutput.emplace(*problem.auxiliaryOutput);
+    if (problem.auxiliaryInput) auxiliaryInput.emplace(*problem.auxiliaryInput);
+    if (problem.gateResidual) gateResidual.emplace(*problem.gateResidual);
+    if (problem.bias) bias.emplace(problem.bias->broadcastTo(problem.input.shape()));
+
+    const Accumulator outputScale = runtimeScalar<Accumulator>(problem.outputScale, "output scale");
+    const Accumulator auxiliaryScale =
+        runtimeScalar<Accumulator>(problem.auxiliaryScale, "auxiliary scale");
+    const Accumulator parameter0 =
+        runtimeScalar<Accumulator>(problem.activationParameter0, "activation parameter 0");
+    const Accumulator parameter1 =
+        runtimeScalar<Accumulator>(problem.activationParameter1, "activation parameter 1");
+    Accumulator maximum = Accumulator(0);
+    if (problem.amax && problem.accumulateAmax) maximum = problem.amax->loadAs<Accumulator>({0});
+
+    const size_t rows = problem.output.shape()[0];
+    const size_t columns = problem.output.shape()[1];
+    auto computeOutput = [&](size_t row, size_t column) {
+        Accumulator value = input(row, column);
+        if (bias) value = wrappingAdd(value, (*bias)(row, column));
+
+        if (auxiliaryOutput)
+            auxiliaryOutput->store(row, column, wrappingMultiply(value, auxiliaryScale));
+
+        if (problem.activationApplication == ActivationApplication::Gradient) {
+            const Accumulator factor = activationGradientFactor(
+                problem.activation, (*auxiliaryInput)(row, column), parameter0, parameter1);
+            value = wrappingMultiply(value, factor);
+        } else {
+            value = applyActivation(problem.activation, value, parameter0, parameter1);
+        }
+
+        if (problem.amax) maximum = std::max(maximum, static_cast<Accumulator>(std::abs(value)));
+
+        value = wrappingMultiply(value, outputScale);
+        if (rawOutput) rawOutput->store(row, column, value);
+        if (gateResidual) {
+            const Accumulator gate = (*gateResidual)(row, column);
+            value = wrappingAdd(wrappingMultiply(gate, value), gate);
+        }
+        output.store(row, column, value);
+    };
+
+    const size_t logicalElements = problem.output.shape().elementCount();
+    if (problem.outputSelection.selectsAll()) {
+        for (size_t row = 0; row < rows; ++row) {
+            for (size_t column = 0; column < columns; ++column) computeOutput(row, column);
+        }
+    } else {
+        const auto selected = problem.outputSelection.indices(logicalElements);
+        for (const size_t logicalIndex : selected) {
+            const auto coordinates = problem.output.shape().coordinates(
+                logicalIndex, problem.outputSelection.indexOrder());
+            computeOutput(coordinates[0], coordinates[1]);
+        }
+    }
+
+    if (problem.amax) {
+        const std::vector<size_t> indices(problem.amax->shape().rank(), 0);
+        problem.amax->storeFrom(std::span<const size_t>(indices), maximum);
+    }
+}
+}  // namespace detail
+}  // namespace roc::host_numerics

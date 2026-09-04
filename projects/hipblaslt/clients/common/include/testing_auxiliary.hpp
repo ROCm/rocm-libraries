@@ -32,10 +32,9 @@
 #include "hipblaslt_test.hpp"
 #include "flops.hpp"
 #include "hipblaslt_datatype2string.hpp"
-#include "hipblaslt_init.hpp"
+#include <hipblaslt/host_numerics/hipblaslt_init.hpp>
 #include "hipblaslt_math.hpp"
-#include "hipblaslt_random.hpp"
-#include "hipblaslt_vector.hpp"
+#include <hipblaslt/host_numerics/hipblaslt_vector.hpp>
 #ifdef CODE_COVERAGE
 #include "check_numerics_matrix.hpp"
 #include "hipblaslt_internal.hpp"
@@ -45,7 +44,6 @@
 #include "tensile_host.hpp"
 #include "utility.hpp"
 #endif
-#include "unit.hpp"
 #include "utility.hpp"
 #include <limits>
 

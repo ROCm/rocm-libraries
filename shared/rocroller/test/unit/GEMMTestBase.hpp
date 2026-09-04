@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
+#include <rocRoller/HostNumerics/HostReference.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -11,8 +13,7 @@
 #include "GPUContextFixture.hpp"
 
 #include <common/GEMMProblem.hpp>
-#include <common/mxDataGen.hpp>
-#include <mxDataGenerator/PreSwizzle.hpp>
+#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
 
 namespace GEMMTests
 {
@@ -23,8 +24,8 @@ namespace GEMMTests
     concept isF8 = std::is_same_v<T, rocRoller::FP8> || std::is_same_v<T, rocRoller::BF8>;
 
     template <typename T>
-    concept isF6F4 = std::is_same_v<T, rocRoller::FP6> || std::is_same_v<T, rocRoller::BF6> || std::
-        is_same_v<T, rocRoller::FP4>;
+    concept isF6F4 = std::is_same_v<T, rocRoller::FP6> || std::is_same_v<T, rocRoller::BF6>
+                     || std::is_same_v<T, rocRoller::FP4>;
 
     template <typename... Ts>
     class BaseGEMMContextFixture
@@ -79,7 +80,7 @@ namespace GEMMTests
                                         GPUCapability::HasWMMA_f8f6f4);
             }
 
-            if((isF8<TA> || isF8<TB>)&&(gemm.waveK >= 64))
+            if((isF8<TA> || isF8<TB>) && (gemm.waveK >= 64))
             {
                 REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4,
                                         GPUCapability::HasWMMA_f8f6f4,
@@ -235,17 +236,21 @@ namespace GEMMTests
 
             TensorDescriptor descA(dataTypeA, {size_t(M), size_t(K)}, gemm.transA);
             TensorDescriptor descB(dataTypeB, {size_t(K), size_t(N)}, gemm.transB);
-            TensorDescriptor descC(dataTypeD, {size_t(M), size_t(N)}, "N");
+            TensorDescriptor descC(dataTypeC, {size_t(M), size_t(N)}, "N");
             TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
-            auto seed = 31415u;
+            auto const seed           = 31415u;
+            auto const bounded        = HostNumerics::DataInitialization{};
+            auto       scaleTypeA     = DataType::None;
+            auto       scaleTypeB     = DataType::None;
+            size_t     scaleBlockSize = 1;
             if(gemm.scaleAMode == Operations::ScaleMode::Separate
                || gemm.scaleBMode == Operations::ScaleMode::Separate)
             {
                 auto const& arch = m_context->targetArchitecture();
 
-                auto scaleBlockSize = gemm.scaleBlockSize;
-                AssertFatal(scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
+                AssertFatal(gemm.scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
+                scaleBlockSize = static_cast<size_t>(gemm.scaleBlockSize);
                 AssertFatal(
                     arch.isSupportedScaleBlockSize(scaleBlockSize),
                     fmt::format("Architecture {} does not support block scaling (size: {}).",
@@ -255,25 +260,31 @@ namespace GEMMTests
                             fmt::format("K: {} must be a multiple of the scale block size: {}",
                                         gemm.k,
                                         scaleBlockSize));
-                DGenInput(seed,
-                          hostA,
-                          descA,
-                          hostB,
-                          descB,
-                          hostC,
-                          descC,
-                          hostScaleA,
-                          hostScaleB,
-                          gemm.scaleTypeA,
-                          gemm.scaleTypeB,
-                          -1.f,
-                          1.f,
-                          static_cast<uint>(scaleBlockSize));
+                if(gemm.scaleAMode == Operations::ScaleMode::Separate)
+                    scaleTypeA = gemm.scaleTypeA;
+                if(gemm.scaleBMode == Operations::ScaleMode::Separate)
+                    scaleTypeB = gemm.scaleTypeB;
             }
-            else
-            {
-                DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
-            }
+
+            auto generatedInputs = HostNumerics::generateGEMMInputs(descA,
+                                                                    descB,
+                                                                    descC,
+                                                                    bounded,
+                                                                    bounded,
+                                                                    bounded,
+                                                                    scaleTypeA,
+                                                                    scaleTypeB,
+                                                                    scaleBlockSize,
+                                                                    -1.0f,
+                                                                    1.0f,
+                                                                    seed);
+            hostA                = HostNumerics::copyTensorStorage<PackedTypeA>(generatedInputs.a);
+            hostB                = HostNumerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
+            hostC                = HostNumerics::copyTensorStorage<TC>(generatedInputs.c);
+            if(generatedInputs.scaleA)
+                hostScaleA = HostNumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
+            if(generatedInputs.scaleB)
+                hostScaleB = HostNumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
 
             if(setIdentity)
             {
@@ -318,7 +329,8 @@ namespace GEMMTests
                 // The preSwizzle helper assumes column-major; so we swap sizes here.
                 std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
                 std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-                hostAForKernel = DGen::preSwizzle(hostA, swappedSizes, {}, swappedPreTileSize);
+                hostAForKernel = roc::host_numerics::amd_gpu_layout::preSwizzle(
+                    hostA, swappedSizes, {}, swappedPreTileSize);
             }
 
             // Pre-tile B on the host when pretileB is set (kernel expects pre-tiled layout)
@@ -349,7 +361,8 @@ namespace GEMMTests
                     sizes[0] /= packing;
                     preTileSize[0] /= packing;
                 }
-                hostBForKernel = DGen::preSwizzle(hostB, sizes, {}, preTileSize);
+                hostBForKernel
+                    = roc::host_numerics::amd_gpu_layout::preSwizzle(hostB, sizes, {}, preTileSize);
             }
 
             auto deviceA = make_shared_device<TA>(hostAForKernel);
@@ -384,7 +397,7 @@ namespace GEMMTests
                                     "Can only pre-tile scale A if A is TransposeType::T");
                         preTileSize = {gemm.scalePretileA[1], gemm.scalePretileA[0]};
                     }
-                    auto tmpScaleA = DGen::preSwizzle(
+                    auto tmpScaleA = roc::host_numerics::amd_gpu_layout::preSwizzle(
                         hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
                     deviceScaleA = make_shared_device(tmpScaleA);
                 }
@@ -417,7 +430,7 @@ namespace GEMMTests
                                     "Can only pre-tile scale B if B is TransposeType::N");
                         preTileSize = {gemm.scalePretileB[0], gemm.scalePretileB[1]};
                     }
-                    auto tmpScaleB = DGen::preSwizzle(
+                    auto tmpScaleB = roc::host_numerics::amd_gpu_layout::preSwizzle(
                         hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
                     deviceScaleB = make_shared_device(tmpScaleB);
                 }
@@ -619,7 +632,7 @@ namespace GEMMTests
                 auto tagCvt
                     = srCvtSeed.has_value()
                           ? cvtOp.addXOp(rocRoller::Operations::E_StochasticRoundingCvt(
-                              tagStoreD, tagLoadSeed, dataTypeD))
+                                tagStoreD, tagLoadSeed, dataTypeD))
                           : cvtOp.addXOp(rocRoller::Operations::E_Cvt(tagStoreD, dataTypeD));
                 tagStoreD = command->addOperation(std::move(cvtOp));
                 command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
@@ -923,56 +936,49 @@ namespace GEMMTests
             }
 
             // Host result
-            std::vector<TD> h_result(M * N, TD{});
-            if(gemm.scaleAMode != Operations::ScaleMode::None
-               || gemm.scaleBMode != Operations::ScaleMode::None)
+            auto const referenceScaleBlockSize = gemm.scaleBlockSize > 0
+                                                     ? static_cast<size_t>(gemm.scaleBlockSize)
+                                                     : static_cast<size_t>(K);
+            std::optional<roc::host_numerics::Tensor> referenceScaleA;
+            std::optional<roc::host_numerics::Tensor> referenceScaleB;
+            if(gemm.scaleAMode != Operations::ScaleMode::None)
             {
-                rocRoller::ScaledCPUMM(h_result,
-                                       hostC,
-                                       hostA,
-                                       hostB,
-                                       hostScaleA,
-                                       hostScaleB,
-                                       M,
-                                       N,
-                                       K,
-                                       alpha,
-                                       beta,
-                                       gemm.transA == "T",
-                                       gemm.transB == "T",
-                                       gemm.scaleBlockSize,
-                                       gemm.scaleTypeA,
-                                       gemm.scaleTypeB);
+                referenceScaleA = HostNumerics::hostScaleTensor(
+                    gemm.scaleTypeA, hostScaleA, descA, 1, referenceScaleBlockSize);
             }
-            else if constexpr(std::is_same_v<TC, TD>)
+            if(gemm.scaleBMode != Operations::ScaleMode::None)
             {
-                rocRoller::CPUMM(h_result,
-                                 hostC,
-                                 hostA,
-                                 hostB,
-                                 M,
-                                 N,
-                                 K,
-                                 alpha,
-                                 beta,
-                                 gemm.transA == "T",
-                                 gemm.transB == "T");
+                referenceScaleB = HostNumerics::hostScaleTensor(
+                    gemm.scaleTypeB, hostScaleB, descB, 0, referenceScaleBlockSize);
+            }
+            auto floatReference = HostNumerics::computeHostReference(
+                HostNumerics::hostTensor(descA,
+                                         hostA,
+                                         gemm.scaleAMode == Operations::ScaleMode::Separate
+                                             ? HostNumerics::DataTypeInterpretation::BlockScaled
+                                             : HostNumerics::DataTypeInterpretation::Unscaled),
+                HostNumerics::hostTensor(descB,
+                                         hostB,
+                                         gemm.scaleBMode == Operations::ScaleMode::Separate
+                                             ? HostNumerics::DataTypeInterpretation::BlockScaled
+                                             : HostNumerics::DataTypeInterpretation::Unscaled),
+                HostNumerics::hostTensor(descC, hostC),
+                std::move(referenceScaleA),
+                std::move(referenceScaleB),
+                referenceScaleBlockSize,
+                alpha,
+                beta);
+
+            std::vector<TD> h_result;
+            if constexpr(std::is_same_v<TC, TD>)
+            {
+                h_result = HostNumerics::convertHostReference<TD>(floatReference);
             }
             else
             {
-                std::vector<TC> hostD(M * N, TC{});
-                rocRoller::CPUMM(hostD,
-                                 hostC,
-                                 hostA,
-                                 hostB,
-                                 M,
-                                 N,
-                                 K,
-                                 alpha,
-                                 beta,
-                                 gemm.transA == "T",
-                                 gemm.transB == "T");
-                ASSERT_EQ(hostD.size(), h_result.size());
+                auto hostD = HostNumerics::convertHostReference<TC>(floatReference);
+                ASSERT_EQ(hostD.size(), static_cast<size_t>(M) * static_cast<size_t>(N));
+                h_result.resize(hostD.size());
                 bool const isSRConversion = srCvtSeed.has_value();
                 for(size_t i = 0; i < hostD.size(); i++)
                 {
@@ -1048,11 +1054,11 @@ namespace GEMMTests
                         d_result.data(), deviceD.get(), M * N * sizeof(TD), hipMemcpyDeviceToHost),
                     HasHipSuccess(0));
 
-                auto tol = gemmAcceptableError<TA, TB, TD>(
-                    M, N, K, m_context->targetArchitecture().target());
+                auto tol
+                    = gemmAcceptableError<TA, TB, TD>(K, m_context->targetArchitecture().target());
                 auto res = compare(d_result, h_result, tol);
                 Log::info("RNorm is {} (acceptable {}, iteration {})",
-                          res.relativeNormL2,
+                          res.statistics.relativeFrobeniusError,
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
@@ -1086,7 +1092,7 @@ namespace GEMMTests
                         << scratchSpaceRequired[zeroedIdx] << " bytes)";
                 }
 
-                if(debuggable && !res.ok)
+                if(debuggable && !res.ok())
                 {
                     for(size_t i = 0; i < M; i++)
                     {
@@ -1106,7 +1112,7 @@ namespace GEMMTests
                         }
                     }
                 }
-                EXPECT_TRUE(res.ok) << res.message();
+                EXPECT_TRUE(res.ok()) << res.message();
             }
         }
 

@@ -153,9 +153,6 @@ if(TENSILELITE_ENABLE_HOST)
     endif()
 
     if(TENSILELITE_ENABLE_CLIENT)
-        # mxDataGenerator bootstrap and `hipblaslt::mxdatagen` helper target
-        # live in projects/hipblaslt/CMakeLists.txt and are guaranteed to be
-        # available before this subdirectory is processed.
         add_subdirectory(client)
     endif()
 

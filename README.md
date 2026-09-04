@@ -38,7 +38,7 @@ This table provides the current status of the migration of specific components a
 | `hipsparse`         | Completed   |   [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/hipsparse/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/hipsparse/job/develop/lastBuild/) |
 | `hipsparselt`       | Completed | [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/hipsparselt/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/hipsparselt/job/develop/lastBuild/) |
 | `miopen`            | Completed |  [![MICI](https://pcue-math-rocm-ci-apim.azure-api.net/micibuildstatus?job=/rocm-libraries-folder/MIOpen/develop&subject=MICI)](http://micimaster.amd.com/job/rocm-libraries-folder/job/MIOpen/job/develop/lastBuild/) |
-| `mxdatagenerator`   | Completed |  [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/mxdatagenerator/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/mxdatagenerator/job/develop/lastBuild/) |
+| `host-numerics` | Monorepo-only | |
 | `origami`         | Completed     |[![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/origami/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/origami/job/develop/lastBuild/) |
 | `rocblas`           | Completed |  [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/rocblas/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/rocblas/job/develop/lastBuild/) |
 | `rocfft`            | Completed |  [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/rocfft/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/rocfft/job/develop/lastBuild/) |
@@ -84,14 +84,16 @@ projects/
   rocthrust/
   rocwmma/
 shared/
+  host-numerics/
   rocroller/
   tensile/
-  mxdatagenerator/
   origami/
 ```
 
 - Each folder under `projects/` corresponds to a ROCm library that was previously maintained in a standalone GitHub repository and released as distinct packages.
-- Each folder under `shared/` contains code that existed in its own repository and is used as a dependency by multiple libraries, but does not produce its own distinct packages in previous ROCm releases.
+- Each folder under `shared/` contains reusable code used by multiple libraries. Some
+  shared components were migrated from standalone repositories; others are
+  monorepo-owned implementation components.
 
 ## Getting Started
 

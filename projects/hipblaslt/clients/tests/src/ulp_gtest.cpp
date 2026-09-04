@@ -5,19 +5,110 @@
  *
  *******************************************************************************/
 
-// Host-only unit tests for the ULP (units-in-the-last-place) error helpers
-// declared in clients/common/include/ulp.hpp. These exercise the pure math /
-// dispatch logic and do not require a GPU.
+// Host-only unit tests for component-owned ULP (units-in-the-last-place)
+// arithmetic and the product-private type/layout adapter. These do not require
+// a GPU.
 
 #include <gtest/gtest.h>
 
-#include "ulp.hpp"
+#include <hipblaslt/host_numerics/HostComparison.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <span>
 #include <vector>
 
 namespace
 {
+    inline int ulp_mantissa_bits(hipDataType type)
+    {
+        return roc::host_numerics::ulpMantissaBits(
+            hipblaslt::host_numerics::scalarType(type));
+    }
+
+    template <typename T>
+    inline double ulp_as_double(T value)
+    {
+        return static_cast<double>(value);
+    }
+
+    inline double ulp_distance(double exact, double approximation, int mantissaBits)
+    {
+        return roc::host_numerics::ulpDistance(exact, approximation, mantissaBits);
+    }
+
+    template <typename T>
+    inline void ulp_accumulate_general(int64_t M,
+                                       int64_t N,
+                                       int64_t lda,
+                                       int64_t stride,
+                                       T*      hCPU,
+                                       T*      hGPU,
+                                       int64_t batchCount,
+                                       int,
+                                       double& maxUlp,
+                                       double& sumUlp,
+                                       size_t& count)
+    {
+        if(M == 0 || N == 0 || batchCount == 0)
+            return;
+
+        using namespace roc::host_numerics;
+        using namespace hipblaslt::host_numerics;
+
+        const Layout layout
+            = hipblaslt::host_numerics::detail::comparisonLayout(M, N, lda, stride, batchCount);
+        const size_t storageElements = storageBytesForLayout(scalarType<T>(), layout) / sizeof(T);
+        ComparisonOptions options;
+        options.allClose                     = false;
+        options.computeElementwiseStatistics = false;
+        options.computeFrobenius           = false;
+        options.computeUlp                 = true;
+        options.ulpType                    = scalarType<T>();
+        options.maxReportedMismatches      = 0;
+        options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
+
+        const ComparisonReport report
+            = compare(copyTensorFromEncodedStorage(hGPU, storageElements, layout),
+                      copyTensorFromEncodedStorage(hCPU, storageElements, layout),
+                      options);
+        maxUlp = std::max(maxUlp, report.maximumUlp);
+        sumUlp += report.sumUlp;
+        count += report.ulpCompared;
+    }
+
+    inline void ulp_check_general(int64_t     M,
+                                  int64_t     N,
+                                  int64_t     lda,
+                                  int64_t     stride,
+                                  void*       hCPU,
+                                  void*       hGPU,
+                                  int64_t     batchCount,
+                                  double&     maxUlp,
+                                  double&     sumUlp,
+                                  size_t&     count,
+                                  hipDataType type)
+    {
+        using namespace hipblaslt::host_numerics;
+
+        HostComparisonRequest request;
+        request.rows                    = M;
+        request.columns                 = N;
+        request.leadingDimension        = lda;
+        request.batchStride             = stride;
+        request.batchCount              = batchCount;
+        request.expected                = hCPU;
+        request.observed                = hGPU;
+        request.type                    = type;
+        request.computeUnitsInLastPlace = true;
+        const auto report               = compareHost(request).unitsInLastPlaceComparison;
+        maxUlp                          = std::max(maxUlp, report.maximumUlp);
+        sumUlp += report.sumUlp;
+        count += report.ulpCompared;
+    }
+
     // 2^exp as a double, for building exact ULP steps.
     inline double p2(int exp)
     {
@@ -145,8 +236,17 @@ namespace
         double max_ulp = 0.0, sum_ulp = 0.0;
         size_t count = 0;
         ulp_accumulate_general<float>(
-            /*M*/ 2, /*N*/ 2, /*lda*/ 2, /*stride*/ 0, cpu.data(), gpu.data(),
-            /*batch*/ 1, /*mant_bits*/ 23, max_ulp, sum_ulp, count);
+            /*M*/ 2,
+            /*N*/ 2,
+            /*lda*/ 2,
+            /*stride*/ 0,
+            cpu.data(),
+            gpu.data(),
+            /*batch*/ 1,
+            /*mant_bits*/ 23,
+            max_ulp,
+            sum_ulp,
+            count);
 
         EXPECT_DOUBLE_EQ(max_ulp, 0.0);
         EXPECT_DOUBLE_EQ(sum_ulp, 0.0);
@@ -161,8 +261,17 @@ namespace
         double max_ulp = 0.0, sum_ulp = 0.0;
         size_t count = 0;
         ulp_accumulate_general<float>(
-            /*M*/ 0, /*N*/ 4, /*lda*/ 1, /*stride*/ 0, cpu.data(), gpu.data(),
-            /*batch*/ 1, /*mant_bits*/ 23, max_ulp, sum_ulp, count);
+            /*M*/ 0,
+            /*N*/ 4,
+            /*lda*/ 1,
+            /*stride*/ 0,
+            cpu.data(),
+            gpu.data(),
+            /*batch*/ 1,
+            /*mant_bits*/ 23,
+            max_ulp,
+            sum_ulp,
+            count);
 
         EXPECT_EQ(count, 0u);
         EXPECT_DOUBLE_EQ(max_ulp, 0.0);
@@ -172,7 +281,7 @@ namespace
     {
         // Column-major 2x2 with lda=3: row index 2 in each column is padding
         // and must not be compared. Fill padding with a huge mismatch.
-        const int64_t M = 2, N = 2, lda = 3;
+        const int64_t      M = 2, N = 2, lda = 3;
         std::vector<float> cpu(lda * N, 1.0f);
         std::vector<float> gpu(lda * N, 1.0f);
 
@@ -180,24 +289,34 @@ namespace
         gpu[3] = 1.0f + static_cast<float>(p2(-23));
 
         // Padding rows (idx 2 and 5) get a large mismatch that should be ignored.
-        cpu[2] = 5.0f;   gpu[2] = 999.0f;
-        cpu[5] = 5.0f;   gpu[5] = -999.0f;
+        cpu[2] = 5.0f;
+        gpu[2] = 999.0f;
+        cpu[5] = 5.0f;
+        gpu[5] = -999.0f;
 
         double max_ulp = 0.0, sum_ulp = 0.0;
         size_t count = 0;
-        ulp_accumulate_general<float>(
-            M, N, lda, /*stride*/ 0, cpu.data(), gpu.data(),
-            /*batch*/ 1, /*mant_bits*/ 23, max_ulp, sum_ulp, count);
+        ulp_accumulate_general<float>(M,
+                                      N,
+                                      lda,
+                                      /*stride*/ 0,
+                                      cpu.data(),
+                                      gpu.data(),
+                                      /*batch*/ 1,
+                                      /*mant_bits*/ 23,
+                                      max_ulp,
+                                      sum_ulp,
+                                      count);
 
-        EXPECT_EQ(count, 4u);                 // only M*N real elements
-        EXPECT_DOUBLE_EQ(max_ulp, 1.0);       // the single 1-ULP error
-        EXPECT_DOUBLE_EQ(sum_ulp, 1.0);       // everything else identical
+        EXPECT_EQ(count, 4u); // only M*N real elements
+        EXPECT_DOUBLE_EQ(max_ulp, 1.0); // the single 1-ULP error
+        EXPECT_DOUBLE_EQ(sum_ulp, 1.0); // everything else identical
     }
 
     TEST(UlpAccumulate, walks_all_batches_with_stride)
     {
         // 2 batches of a 1x2 matrix (lda=1), stride = lda*N = 2.
-        const int64_t M = 1, N = 2, lda = 1, stride = 2, batch = 2;
+        const int64_t      M = 1, N = 2, lda = 1, stride = 2, batch = 2;
         std::vector<float> cpu(stride * batch, 1.0f);
         std::vector<float> gpu = cpu;
 
@@ -206,11 +325,19 @@ namespace
 
         double max_ulp = 0.0, sum_ulp = 0.0;
         size_t count = 0;
-        ulp_accumulate_general<float>(
-            M, N, lda, stride, cpu.data(), gpu.data(),
-            batch, /*mant_bits*/ 23, max_ulp, sum_ulp, count);
+        ulp_accumulate_general<float>(M,
+                                      N,
+                                      lda,
+                                      stride,
+                                      cpu.data(),
+                                      gpu.data(),
+                                      batch,
+                                      /*mant_bits*/ 23,
+                                      max_ulp,
+                                      sum_ulp,
+                                      count);
 
-        EXPECT_EQ(count, 4u);           // M*N*batch
+        EXPECT_EQ(count, 4u); // M*N*batch
         EXPECT_DOUBLE_EQ(max_ulp, 2.0);
         EXPECT_DOUBLE_EQ(sum_ulp, 2.0);
     }
@@ -305,17 +432,15 @@ namespace
         EXPECT_EQ(r.count, 4u);
     }
 
-    TEST(UlpCheckGeneral, unsupported_type_leaves_counters_untouched)
+    TEST(UlpCheckGeneral, complex_float_dispatch)
     {
-        // HIP_C_32F is not handled by the switch; it hits the default branch,
-        // logs an error, and must not touch the running counters.
-        std::vector<float> cpu = {1.0f, 2.0f};
-        std::vector<float> gpu = {9.0f, 9.0f};
-        CheckResult        r   = run_check(cpu, gpu, 1, 2, HIP_C_32F);
+        std::vector<std::complex<float>> cpu = {{1.0f, 2.0f}, {3.0f, 4.0f}};
+        std::vector<std::complex<float>> gpu = cpu;
+        CheckResult                      r   = run_check(cpu, gpu, 1, 2, HIP_C_32F);
 
         EXPECT_DOUBLE_EQ(r.max_ulp, 0.0);
         EXPECT_DOUBLE_EQ(r.sum_ulp, 0.0);
-        EXPECT_EQ(r.count, 0u);
+        EXPECT_EQ(r.count, 4u);
     }
 
 } // namespace

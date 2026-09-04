@@ -1,8 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-find_package(BLAS REQUIRED)
-
 find_package(CLI11 QUIET)
 if(NOT CLI11_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
@@ -39,9 +37,9 @@ target_sources(rocroller-gemm
 target_link_libraries(rocroller-gemm
     PRIVATE
         roc::rocroller-interface
-        rocroller::common-test-utilities
+        rocroller::host-numerics
+        roc::host-numerics-amd-gpu-layout
         CLI11::CLI11
-        ${BLAS_LIBRARIES}
 )
 target_include_directories(rocroller-gemm PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
@@ -55,14 +53,12 @@ endif()
 
 add_executable(rocroller-codegen-stress "${CMAKE_CURRENT_SOURCE_DIR}/src/codegen_stress_test.cpp")
 target_link_libraries(rocroller-codegen-stress
-    PUBLIC
+    PRIVATE
         roc::rocroller-interface
-        rocroller::common-test-utilities
         CLI11::CLI11
-        ${BLAS_LIBRARIES}
 )
 if(ROCROLLER_BUILD_SHARED_LIBS) # why are we using this logic
-    target_link_libraries(rocroller-codegen-stress PUBLIC ${llvm_yaml_libs})
+    target_link_libraries(rocroller-codegen-stress PRIVATE ${llvm_yaml_libs})
 endif()
 
 if(ROCROLLER_ENABLE_ASAN)

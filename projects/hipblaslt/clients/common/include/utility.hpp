@@ -26,13 +26,14 @@
 
 #pragma once
 
-#include "hipblaslt_vector.hpp"
+#include <hipblaslt/host_numerics/hipblaslt_vector.hpp>
 #include <cstdio>
 #include <hipblaslt/hipblaslt.h>
 #include <iomanip>
 #include <iostream>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 /*!\file
@@ -165,9 +166,17 @@ public:
 /*! \brief  local matrix descriptor which is automatically created and destroyed  */
 class hipblaslt_local_matrix_layout
 {
-    hipblasLtMatrixLayout_t m_descr;
+    hipblasLtMatrixLayout_t m_descr   = nullptr;
     hipblasStatus_t         m_status  = HIPBLAS_STATUS_NOT_INITIALIZED;
     static constexpr int    alignment = 16;
+
+    void reset() noexcept
+    {
+        if(m_status == HIPBLAS_STATUS_SUCCESS)
+            (void)hipblasLtMatrixLayoutDestroy(m_descr);
+        m_descr  = nullptr;
+        m_status = HIPBLAS_STATUS_NOT_INITIALIZED;
+    }
 
 public:
     hipblaslt_local_matrix_layout(int64_t row, int64_t col, int64_t ld, hipDataType type)
@@ -177,14 +186,28 @@ public:
 
     ~hipblaslt_local_matrix_layout()
     {
-        if(this->m_status == HIPBLAS_STATUS_SUCCESS)
-            hipblasLtMatrixLayoutDestroy(this->m_descr);
+        reset();
     }
 
     hipblaslt_local_matrix_layout(const hipblaslt_local_matrix_layout&)            = delete;
-    hipblaslt_local_matrix_layout(hipblaslt_local_matrix_layout&&)                 = delete;
     hipblaslt_local_matrix_layout& operator=(const hipblaslt_local_matrix_layout&) = delete;
-    hipblaslt_local_matrix_layout& operator=(hipblaslt_local_matrix_layout&&)      = delete;
+
+    hipblaslt_local_matrix_layout(hipblaslt_local_matrix_layout&& other) noexcept
+        : m_descr(std::exchange(other.m_descr, nullptr))
+        , m_status(std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED))
+    {
+    }
+
+    hipblaslt_local_matrix_layout& operator=(hipblaslt_local_matrix_layout&& other) noexcept
+    {
+        if(this != &other)
+        {
+            reset();
+            m_descr  = std::exchange(other.m_descr, nullptr);
+            m_status = std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED);
+        }
+        return *this;
+    }
 
     hipblasStatus_t status()
     {
@@ -214,19 +237,31 @@ public:
 /*! \brief  local matrix multiplication descriptor which is automatically created and destroyed  */
 class hipblaslt_local_matmul_descr
 {
-    hipblasLtMatmulDesc_t m_descr;
+    hipblasLtMatmulDesc_t m_descr  = nullptr;
     hipblasStatus_t       m_status = HIPBLAS_STATUS_NOT_INITIALIZED;
 
+    void reset() noexcept
+    {
+        if(m_status == HIPBLAS_STATUS_SUCCESS)
+            (void)hipblasLtMatmulDescDestroy(m_descr);
+        m_descr  = nullptr;
+        m_status = HIPBLAS_STATUS_NOT_INITIALIZED;
+    }
+
 public:
+    hipblaslt_local_matmul_descr(hipblasComputeType_t compute_type, hipDataType scale_type)
+    {
+        this->m_status = hipblasLtMatmulDescCreate(&this->m_descr, compute_type, scale_type);
+    }
+
     hipblaslt_local_matmul_descr(hipblasOperation_t   opA,
                                  hipblasOperation_t   opB,
                                  hipblasComputeType_t compute_type,
                                  hipDataType          scale_type,
                                  hipDataType compute_input_typeA = HIPBLASLT_DATATYPE_INVALID,
                                  hipDataType compute_input_typeB = HIPBLASLT_DATATYPE_INVALID)
+        : hipblaslt_local_matmul_descr(compute_type, scale_type)
     {
-        this->m_status = hipblasLtMatmulDescCreate(&this->m_descr, compute_type, scale_type);
-
         hipblasLtMatmulDescSetAttribute(
             this->m_descr, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(int32_t));
         hipblasLtMatmulDescSetAttribute(
@@ -244,14 +279,28 @@ public:
 
     ~hipblaslt_local_matmul_descr()
     {
-        if(this->m_status == HIPBLAS_STATUS_SUCCESS)
-            hipblasLtMatmulDescDestroy(this->m_descr);
+        reset();
     }
 
     hipblaslt_local_matmul_descr(const hipblaslt_local_matmul_descr&)            = delete;
-    hipblaslt_local_matmul_descr(hipblaslt_local_matmul_descr&&)                 = delete;
     hipblaslt_local_matmul_descr& operator=(const hipblaslt_local_matmul_descr&) = delete;
-    hipblaslt_local_matmul_descr& operator=(hipblaslt_local_matmul_descr&&)      = delete;
+
+    hipblaslt_local_matmul_descr(hipblaslt_local_matmul_descr&& other) noexcept
+        : m_descr(std::exchange(other.m_descr, nullptr))
+        , m_status(std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED))
+    {
+    }
+
+    hipblaslt_local_matmul_descr& operator=(hipblaslt_local_matmul_descr&& other) noexcept
+    {
+        if(this != &other)
+        {
+            reset();
+            m_descr  = std::exchange(other.m_descr, nullptr);
+            m_status = std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED);
+        }
+        return *this;
+    }
 
     hipblasStatus_t status()
     {
@@ -494,42 +543,6 @@ void print_strided_batched(
             hipblaslt_cout << "\n";
     }
     hipblaslt_cout << std::flush;
-}
-
-/* ===================================================================== */
-/*! \brief For special numerical types, to convert a value to such type. */
-template <typename T, typename Accumulator>
-typename std::enable_if<std::is_same<int8_t, T>::value, T>::type saturate_cast(Accumulator val)
-{
-    if constexpr(std::is_same<Accumulator, hipblasLtHalf>::value
-                 || std::is_same<Accumulator, hip_bfloat16>::value)
-    {
-        float tmp = std::nearbyint((float)val); //round to even
-        if(tmp > static_cast<float>(127))
-            tmp = static_cast<float>(127);
-        else if(tmp < static_cast<float>(-128))
-            tmp = static_cast<float>(-128);
-        return static_cast<T>(tmp);
-    }
-    else
-    {
-        if constexpr(std::is_same<Accumulator, float>::value
-                     || std::is_same<Accumulator, double>::value)
-            val = std::nearbyint(val); //round to even
-        if(val > static_cast<Accumulator>(127))
-            val = static_cast<Accumulator>(127);
-        else if(val < static_cast<Accumulator>(-128))
-            val = static_cast<Accumulator>(-128);
-        return static_cast<T>(val);
-    }
-}
-
-/* ==================================================================== */
-/*! \brief For common numerical types, to convert a value to such type. */
-template <typename T, typename Accumulator>
-typename std::enable_if<!std::is_same<int8_t, T>::value, T>::type saturate_cast(Accumulator val)
-{
-    return static_cast<T>(val);
 }
 
 std::vector<void*> benchmark_allocation();

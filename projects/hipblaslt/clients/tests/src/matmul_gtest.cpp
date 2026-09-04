@@ -30,9 +30,325 @@
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
 #include <cstring>
+#include <hipblaslt/host_numerics/Types.hpp>
+#include <limits>
+#include <stdexcept>
 #include <type_traits>
 
 #include <gtest/gtest-spi.h>
+
+TEST(HostNumericsTypeBridge, ConvergesOnScalarType)
+{
+    using namespace hipblaslt::host_numerics;
+    using roc::host_numerics::ScalarType;
+
+    EXPECT_EQ(scalarType<float>(), scalarType(HIP_R_32F));
+    EXPECT_EQ(scalarType(static_cast<hipDataType>(HIP_R_8F_E5M3_EXT)), ScalarType::E5M3);
+    EXPECT_FALSE(tryScalarType(static_cast<hipDataType>(-1)));
+}
+
+TEST(HostNumericsTypeBridge, ValidatesComputeInputTypeBWhenAIsUnset)
+{
+    Arguments arguments{};
+    arguments.init();
+    arguments.compute_input_typeA = HIPBLASLT_DATATYPE_INVALID;
+    arguments.compute_input_typeB = HIP_R_64F;
+
+    EXPECT_THROW(hipblaslt::client::resolveMatmulDataTypes(arguments), std::invalid_argument);
+}
+
+TEST(MatmulOrchestration, MapsScaleModes)
+{
+    const std::array mappings{
+        std::pair{hipblaslt_scaling_format::none,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F},
+        std::pair{hipblaslt_scaling_format::Scalar,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F},
+        std::pair{hipblaslt_scaling_format::Vector,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F},
+        std::pair{hipblaslt_scaling_format::Block_32_UE8M0,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0},
+        std::pair{hipblaslt_scaling_format::Block_16_UE8M0,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT},
+        std::pair{hipblaslt_scaling_format::Block_32_UE4M3,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT},
+        std::pair{hipblaslt_scaling_format::Block_16_UE4M3,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3},
+        std::pair{hipblaslt_scaling_format::Block_32_UE5M3,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT},
+        std::pair{hipblaslt_scaling_format::Block_16_UE5M3,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT},
+        std::pair{hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT,
+                  HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT},
+    };
+
+    for(const auto& [format, expected] : mappings)
+        EXPECT_EQ(hipblaslt::client::matmulScaleMode(format), expected);
+}
+
+TEST(MatmulOrchestration, MapsSwizzledMatrixLayouts)
+{
+    EXPECT_TRUE(hipblaslt::client::supportsMatmulSwizzle(HIP_R_16F));
+    EXPECT_TRUE(hipblaslt::client::supportsMatmulSwizzle(HIP_R_16BF));
+    EXPECT_FALSE(hipblaslt::client::supportsMatmulSwizzle(HIP_R_32F));
+
+    EXPECT_EQ(hipblaslt::client::matmulOrderForDataType(HIP_R_16F),
+              HIPBLASLT_ORDER_COL16_4R8);
+    EXPECT_EQ(hipblaslt::client::matmulOrderForDataType(HIP_R_8F_E4M3_FNUZ),
+              HIPBLASLT_ORDER_COL16_4R16);
+    EXPECT_EQ(hipblaslt::client::matmulOrderForDataType(HIP_R_4F_E2M1),
+              HIPBLASLT_ORDER_COL16_4R32);
+    EXPECT_THROW(hipblaslt::client::matmulOrderForDataType(HIP_R_32F), std::runtime_error);
+}
+
+TEST(MatmulOrchestration, MapsEpiloguePolicy)
+{
+    Arguments arguments;
+    arguments.activation_type = hipblaslt_activation_type::none;
+    arguments.bias_vector     = false;
+    arguments.use_e           = false;
+    arguments.gradient        = false;
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_DEFAULT);
+
+    arguments.activation_type = hipblaslt_activation_type::relu;
+    arguments.bias_vector     = true;
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_RELU_BIAS);
+
+    arguments.use_e = true;
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_RELU_AUX_BIAS);
+
+    arguments.activation_type = hipblaslt_activation_type::gelu;
+    arguments.gradient        = true;
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_DGELU_BGRAD);
+
+    arguments.activation_type = hipblaslt_activation_type::none;
+    arguments.use_e           = false;
+    arguments.bias_source     = hipblaslt_bias_source::a;
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_BGRADA);
+    arguments.bias_source = hipblaslt_bias_source::b;
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_BGRADB);
+
+    arguments                  = Arguments{};
+    arguments.activation_type  = hipblaslt_activation_type::none;
+    arguments.bias_vector      = false;
+    arguments.use_e            = true;
+    arguments.gradient         = false;
+    EXPECT_THROW(hipblaslt::client::matmulEpilogue(arguments), std::invalid_argument);
+}
+
+TEST(MatmulBatchOffsetPlan, ValidatesOffsetArithmetic)
+{
+    const auto negative = offsetMatrixPlan(4, -3);
+    EXPECT_EQ(negative.padding, 3);
+    EXPECT_EQ(negative.allocationElements, 7);
+    EXPECT_EQ(negative.logicalStart(), 0);
+
+    const auto positive = offsetMatrixPlan(4, 3);
+    EXPECT_EQ(positive.padding, 0);
+    EXPECT_EQ(positive.allocationElements, 7);
+    EXPECT_EQ(positive.logicalStart(), 3);
+
+    EXPECT_THROW(offsetMatrixPlan(1, std::numeric_limits<int64_t>::min()), std::overflow_error);
+    EXPECT_THROW(offsetMatrixPlan(size_t(std::numeric_limits<ptrdiff_t>::max()), 1),
+                 std::overflow_error);
+}
+
+TEST(HostNumericsTensorManipulation, SwizzlePreservesPaddedMatrixEncoding)
+{
+    constexpr size_t rows             = 18;
+    constexpr size_t columns          = 17;
+    constexpr size_t leadingDimension = 20;
+    constexpr size_t tileRows         = 16;
+    constexpr size_t tileColumns      = 16;
+    constexpr size_t paddedRows       = 32;
+    constexpr size_t paddedColumns    = 32;
+    constexpr size_t columnGroups     = 4;
+    constexpr size_t valuesPerGroup   = 4;
+
+    std::vector<float> source(rows * leadingDimension, -1.0f);
+    for(size_t row = 0; row < rows; ++row)
+        for(size_t column = 0; column < columns; ++column)
+            source[row * leadingDimension + column]
+                = static_cast<float>(1000 * row + column);
+
+    std::vector<float> observed(paddedRows * paddedColumns, -1.0f);
+    Arguments          arguments;
+    arguments.compute_type = HIPBLAS_COMPUTE_32F;
+    swizzle_tensor(observed.data(),
+                   source.data(),
+                   HIP_R_32F,
+                   arguments,
+                   1,
+                   rows,
+                   columns,
+                   leadingDimension,
+                   false);
+
+    std::vector<float> expected(paddedRows * paddedColumns, 0.0f);
+    const size_t       rowTileCount    = paddedRows / tileRows;
+    const size_t       columnTileCount = paddedColumns / tileColumns;
+    for(size_t row = 0; row < rows; ++row)
+        for(size_t column = 0; column < columns; ++column)
+        {
+            const size_t rowTile     = row / tileRows;
+            const size_t rowInTile   = row % tileRows;
+            const size_t columnTile  = column / tileColumns;
+            const size_t columnGroup = (column % tileColumns) / valuesPerGroup;
+            const size_t valueInGroup = column % valuesPerGroup;
+            const size_t destination
+                = (((rowTile * columnTileCount + columnTile) * columnGroups + columnGroup)
+                       * tileRows
+                   + rowInTile)
+                      * valuesPerGroup
+                  + valueInGroup;
+            ASSERT_LT(rowTile, rowTileCount);
+            expected[destination] = source[row * leadingDimension + column];
+        }
+
+    EXPECT_EQ(observed, expected);
+}
+
+TEST(HostNumericsEpilogueBridge, DelegatesToProductIndependentComponent)
+{
+    std::array<float, 4> input{-2, 1, 3, -4};
+    std::array<float, 4> output{};
+    std::array<float, 4> rawOutput{};
+    std::array<float, 4> auxiliary{};
+    std::array<float, 2> bias{1, 2};
+    float                amax   = 5;
+    float                scaleD = 2;
+    float                scaleE = 3;
+
+    hipblaslt::host_numerics::EpilogueArguments arguments;
+    arguments.rows             = 2;
+    arguments.columns          = 2;
+    arguments.leadingDimension = 2;
+    arguments.input            = input.data();
+    arguments.output           = output.data();
+    arguments.rawOutput        = rawOutput.data();
+    arguments.amax             = &amax;
+    arguments.auxiliary        = auxiliary.data();
+    arguments.auxiliaryType    = HIP_R_32F;
+    arguments.outputScale      = &scaleD;
+    arguments.auxiliaryScale   = &scaleE;
+    arguments.bias             = bias.data();
+    arguments.biasType         = HIP_R_32F;
+    arguments.activation       = roc::host_numerics::Activation::Relu;
+    arguments.outputType       = HIP_R_32F;
+    arguments.computeType      = HIP_R_32F;
+    hipblaslt::host_numerics::referenceEpilogue(arguments);
+
+    EXPECT_EQ(output, (std::array<float, 4>{0, 6, 8, 0}));
+    EXPECT_EQ(rawOutput, output);
+    EXPECT_EQ(auxiliary, (std::array<float, 4>{-3, 9, 12, -6}));
+    EXPECT_EQ(amax, 5);
+}
+
+TEST(HostNumericsEpilogueBridge, RoutesGradientAuxiliaryInput)
+{
+    std::array<float, 4> gradient{10, 20, 30, 40};
+    std::array<float, 4> activationInput{-1, 1, 2, -2};
+    std::array<float, 4> output{};
+    float                one = 1;
+
+    hipblaslt::host_numerics::EpilogueArguments arguments;
+    arguments.rows                  = 2;
+    arguments.columns               = 2;
+    arguments.leadingDimension      = 2;
+    arguments.input                 = gradient.data();
+    arguments.output                = output.data();
+    arguments.auxiliary             = activationInput.data();
+    arguments.auxiliaryType         = HIP_R_32F;
+    arguments.outputScale           = &one;
+    arguments.auxiliaryScale        = &one;
+    arguments.activation            = roc::host_numerics::Activation::Relu;
+    arguments.activationApplication = roc::host_numerics::ActivationApplication::Gradient;
+    arguments.outputType            = HIP_R_32F;
+    arguments.computeType           = HIP_R_32F;
+    hipblaslt::host_numerics::referenceEpilogue(arguments);
+
+    EXPECT_EQ(output, (std::array<float, 4>{0, 20, 30, 0}));
+    EXPECT_EQ(activationInput, (std::array<float, 4>{-1, 1, 2, -2}));
+}
+
+TEST(HostNumericsEpilogueBridge, SaturatesInt8Output)
+{
+    std::array<float, 4>  input{-200.0f, -128.5f, 126.5f, 300.0f};
+    std::array<int8_t, 4> output{};
+    float                 one = 1;
+
+    hipblaslt::host_numerics::EpilogueArguments arguments;
+    arguments.rows             = 2;
+    arguments.columns          = 2;
+    arguments.leadingDimension = 2;
+    arguments.input            = input.data();
+    arguments.output           = output.data();
+    arguments.outputScale      = &one;
+    arguments.auxiliaryScale   = &one;
+    arguments.outputType       = HIP_R_8I;
+    arguments.computeType      = HIP_R_32F;
+    hipblaslt::host_numerics::referenceEpilogue(arguments);
+
+    EXPECT_EQ(output, (std::array<int8_t, 4>{-128, -128, 126, 127}));
+}
+
+TEST(HostNumericsEpilogueBridge, UsesIdentityForNullScaleDefaults)
+{
+    std::array<float, 4> input{-2, 1, 3, -4};
+    std::array<float, 4> output{};
+    std::array<float, 4> auxiliary{};
+
+    hipblaslt::host_numerics::EpilogueArguments arguments;
+    arguments.rows             = 2;
+    arguments.columns          = 2;
+    arguments.leadingDimension = 2;
+    arguments.input            = input.data();
+    arguments.output           = output.data();
+    arguments.auxiliary        = auxiliary.data();
+    arguments.outputType       = HIP_R_32F;
+    arguments.computeType      = HIP_R_32F;
+    hipblaslt::host_numerics::referenceEpilogue(arguments);
+
+    EXPECT_EQ(output, input);
+    EXPECT_EQ(auxiliary, input);
+}
+
+TEST(HostNumericsEpilogueBridge, RejectsOverflowingLeadingDimensionLayout)
+{
+    float input  = 0;
+    float output = 0;
+
+    hipblaslt::host_numerics::EpilogueArguments arguments;
+    arguments.rows             = 1;
+    arguments.columns          = 3;
+    arguments.leadingDimension = std::numeric_limits<decltype(arguments.leadingDimension)>::max();
+    arguments.input            = &input;
+    arguments.output           = &output;
+    arguments.outputType       = HIP_R_32F;
+    arguments.computeType      = HIP_R_32F;
+
+    EXPECT_THROW(hipblaslt::host_numerics::referenceEpilogue(arguments), std::overflow_error);
+}
+
+TEST(HostNumericsReductionBridge, DelegatesStridedBiasSum)
+{
+    const std::array<float, 8> input{1, 2, -99, 3, 4, -99, 5, 6};
+    std::array<float, 2>       output{};
+
+    hipblaslt::host_numerics::ReductionArguments arguments;
+    arguments.rows            = 2;
+    arguments.columns         = 3;
+    arguments.rowStride       = 1;
+    arguments.columnStride    = 3;
+    arguments.input           = input.data();
+    arguments.inputType       = HIP_R_32F;
+    arguments.output          = output.data();
+    arguments.outputType      = HIP_R_32F;
+    arguments.accumulatorType = HIP_R_32F;
+    hipblaslt::host_numerics::referenceSum(arguments);
+
+    EXPECT_EQ(output, (std::array<float, 2>{9, 12}));
+}
 
 namespace
 {

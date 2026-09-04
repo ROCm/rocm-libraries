@@ -13,6 +13,7 @@
 "project: hipblaslt":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
+  - any-glob-to-any-file: 'shared/host-numerics/**/*'
   - any-glob-to-any-file: 'shared/origami/**/*'
   - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
@@ -126,10 +127,6 @@
 "project: rpp":
 - changed-files:
   - any-glob-to-any-file: 'projects/rpp/**/*'
-
-"shared: mxdatagenerator":
-- changed-files:
-  - any-glob-to-any-file: 'shared/mxdatagenerator/**/*'
 
 "shared: origami":
 - changed-files:

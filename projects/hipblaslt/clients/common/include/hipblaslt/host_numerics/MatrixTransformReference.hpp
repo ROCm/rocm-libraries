@@ -1,0 +1,155 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+// Product-private hipBLASLt adapter.
+
+#include <complex>
+#include <cstddef>
+#include <hip/library_types.h>
+#include <hipblaslt/host_numerics/Types.hpp>
+#include <optional>
+#include <ostream>
+#include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/linear_combination.hpp>
+#include <stdexcept>
+#include <utility>
+
+namespace hipblaslt::host_numerics
+{
+    using ::roc::host_numerics::compare;
+    using ::roc::host_numerics::ComparisonOptions;
+    using ::roc::host_numerics::ComparisonReport;
+    using ::roc::host_numerics::Layout;
+    using ::roc::host_numerics::linearCombinationInto;
+    using ::roc::host_numerics::LinearCombinationOptions;
+    using ::roc::host_numerics::ScalarType;
+    using ::roc::host_numerics::scalarTypeInfo;
+    using ::roc::host_numerics::Shape;
+    using ::roc::host_numerics::Tensor;
+
+    struct MatrixTransformReferenceArguments
+    {
+        const void*          observed               = nullptr;
+        size_t               observedStorageBytes   = 0;
+        const void*          a                      = nullptr;
+        size_t               aStorageBytes          = 0;
+        const void*          b                      = nullptr;
+        size_t               bStorageBytes          = 0;
+        hipDataType          type                   = HIP_R_32F;
+        size_t               rows                   = 0;
+        size_t               columns                = 0;
+        size_t               batchCount             = 1;
+        ptrdiff_t            leadingDimensionA      = 0;
+        ptrdiff_t            leadingDimensionB      = 0;
+        ptrdiff_t            leadingDimensionOutput = 0;
+        ptrdiff_t            batchStride            = 0;
+        bool                 rowMajorA              = false;
+        bool                 rowMajorB              = false;
+        bool                 rowMajorOutput         = false;
+        bool                 transposeA             = false;
+        bool                 transposeB             = false;
+        std::complex<double> alpha{1.0, 0.0};
+        std::complex<double> beta{1.0, 0.0};
+        ComparisonOptions    comparison;
+    };
+
+    inline void reportMatrixTransformMismatches(std::ostream&           output,
+                                                const ComparisonReport& comparison)
+    {
+        output << "MatrixTransform validation found " << comparison.mismatches
+               << " mismatches among " << comparison.compared << " compared elements";
+
+        for(const auto& mismatch : comparison.reportedMismatches)
+        {
+            output << "\n  index " << mismatch.index;
+            if(!mismatch.coordinates.empty())
+            {
+                output << " coordinates [";
+                for(size_t i = 0; i < mismatch.coordinates.size(); ++i)
+                {
+                    if(i != 0)
+                        output << ", ";
+                    output << mismatch.coordinates[i];
+                }
+                output << "]";
+            }
+            output << ": expected " << mismatch.expected << ", observed " << mismatch.observed
+                   << ", absolute difference " << mismatch.absoluteDifference << ", tolerance "
+                   << mismatch.tolerance;
+        }
+
+        if(comparison.mismatches > comparison.reportedMismatches.size())
+            output << "\n  " << comparison.mismatches - comparison.reportedMismatches.size()
+                   << " additional mismatches not shown";
+    }
+
+    inline Layout matrixTransformLayout(size_t    rows,
+                                        size_t    columns,
+                                        size_t    batchCount,
+                                        ptrdiff_t leadingDimension,
+                                        ptrdiff_t batchStride,
+                                        bool      rowMajor,
+                                        bool      transpose)
+    {
+        const ptrdiff_t physicalRowStride    = rowMajor ? leadingDimension : 1;
+        const ptrdiff_t physicalColumnStride = rowMajor ? 1 : leadingDimension;
+        return Layout(Shape{rows, columns, batchCount},
+                      {transpose ? physicalColumnStride : physicalRowStride,
+                       transpose ? physicalRowStride : physicalColumnStride,
+                       batchStride});
+    }
+
+    inline ComparisonReport
+        referenceMatrixTransform(const MatrixTransformReferenceArguments& arguments)
+    {
+        const ScalarType type = scalarType(arguments.type);
+        if(!arguments.observed)
+            throw std::invalid_argument("MatrixTransform reference requires observed output.");
+        if(scalarTypeInfo(type).isPacked())
+            throw std::invalid_argument(
+                "MatrixTransform reference does not support packed scalar storage.");
+
+        const Layout aLayout      = matrixTransformLayout(arguments.rows,
+                                                          arguments.columns,
+                                                          arguments.batchCount,
+                                                          arguments.leadingDimensionA,
+                                                          arguments.batchStride,
+                                                          arguments.rowMajorA,
+                                                          arguments.transposeA);
+        const Layout bLayout      = matrixTransformLayout(arguments.rows,
+                                                          arguments.columns,
+                                                          arguments.batchCount,
+                                                          arguments.leadingDimensionB,
+                                                          arguments.batchStride,
+                                                          arguments.rowMajorB,
+                                                          arguments.transposeB);
+        const Layout outputLayout = matrixTransformLayout(arguments.rows,
+                                                          arguments.columns,
+                                                          arguments.batchCount,
+                                                          arguments.leadingDimensionOutput,
+                                                          arguments.batchStride,
+                                                          arguments.rowMajorOutput,
+                                                          false);
+
+        std::optional<Tensor> a;
+        std::optional<Tensor> b;
+        if(arguments.a)
+            a = copyTensorFromEncodedStorage(arguments.a, arguments.aStorageBytes, type, aLayout);
+        if(arguments.b)
+            b = copyTensorFromEncodedStorage(arguments.b, arguments.bStorageBytes, type, bLayout);
+
+        Tensor       expected(ScalarType::Float32, outputLayout);
+        LinearCombinationOptions options(ScalarType::Float32);
+        options.alpha = arguments.alpha;
+        options.beta  = arguments.beta;
+        linearCombinationInto(std::move(a), std::move(b), expected, options);
+
+        Tensor observed
+            = copyTensorFromEncodedStorage(
+                  arguments.observed, arguments.observedStorageBytes, type, outputLayout)
+                  .copyConvertedTo(ScalarType::Float32);
+        return compare(observed, expected, arguments.comparison);
+    }
+} // namespace hipblaslt::host_numerics

@@ -18,6 +18,7 @@ include(CMakeDependentOption)
 include(rocroller_target_configure_sanitizers)
 
 include(fetch_rocm_cmake)
+include(rocroller_materialize_monorepo_paths)
 
 option(ROCROLLER_ENABLE_CLIENT "Build the rocRoller client." ON)
 option(ROCROLLER_ENABLE_YAML_CPP "Enable yaml-cpp backend." ON)
@@ -274,6 +275,82 @@ add_subdirectory(GPUArchitectureGenerator)
 if(ROCROLLER_EMBED_ARCH_DEF)
     target_link_libraries(rocroller PUBLIC $<BUILD_INTERFACE:rocroller::GPUArchitecture_def>)
     target_compile_definitions(rocroller PRIVATE ROCROLLER_EMBED_ARCH_DEF)
+endif()
+
+set(_rocroller_needs_host_numerics OFF)
+if(ROCROLLER_ENABLE_CLIENT OR ROCROLLER_BUILD_TESTING)
+    set(_rocroller_needs_host_numerics ON)
+endif()
+
+if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-numerics)
+    set(_rocroller_host_numerics_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../host-numerics"
+    )
+    if(NOT EXISTS "${_rocroller_host_numerics_source}/CMakeLists.txt")
+        find_package(
+            ROCHostNumerics
+            CONFIG
+            QUIET
+            COMPONENTS Operations BLAS AMDGPULayout
+        )
+    endif()
+    if(NOT TARGET roc::host-numerics
+       AND NOT EXISTS "${_rocroller_host_numerics_source}/CMakeLists.txt")
+        rocroller_materialize_monorepo_paths(
+            _rocroller_materialized_root
+            shared/host-numerics
+        )
+        if(_rocroller_materialized_root)
+            set(_rocroller_host_numerics_source
+                "${_rocroller_materialized_root}/shared/host-numerics"
+            )
+        endif()
+    endif()
+    if(NOT TARGET roc::host-numerics
+       AND EXISTS "${_rocroller_host_numerics_source}/CMakeLists.txt")
+        block(SCOPE_FOR VARIABLES)
+            set(HOST_NUMERICS_BUILD_TESTING OFF)
+            set(HOST_NUMERICS_BUILD_BLAS_BACKEND ON)
+            add_subdirectory(
+                "${_rocroller_host_numerics_source}"
+                "${CMAKE_CURRENT_BINARY_DIR}/host-numerics"
+                EXCLUDE_FROM_ALL
+            )
+        endblock()
+    endif()
+    if(NOT TARGET roc::host-numerics)
+        message(FATAL_ERROR
+            "rocRoller host numerics require the ROCHostNumerics component. "
+            "Include shared/host-numerics in a monorepo sparse checkout, "
+            "configure from a Git checkout that can materialize that path, or "
+            "install the ROCHostNumerics package and add it to CMAKE_PREFIX_PATH."
+        )
+    endif()
+endif()
+
+if(_rocroller_needs_host_numerics
+   AND TARGET roc::host-numerics
+   AND NOT TARGET roc::host-numerics-blas
+   AND COMMAND roc_host_numerics_enable_blas_backend)
+    roc_host_numerics_enable_blas_backend()
+endif()
+
+if(_rocroller_needs_host_numerics
+   AND NOT TARGET roc::host-numerics-amd-gpu-layout)
+    message(FATAL_ERROR
+        "rocRoller clients require the roc::host-numerics-amd-gpu-layout target."
+    )
+endif()
+
+if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-numerics-blas)
+    message(FATAL_ERROR
+        "rocRoller host numerics require the roc::host-numerics-blas target. "
+        "Install ROCHostNumerics with its BLAS component or include shared/host-numerics."
+    )
+endif()
+
+if(_rocroller_needs_host_numerics)
+    add_subdirectory(host)
 endif()
 
 if(ROCROLLER_BUILD_TESTING)

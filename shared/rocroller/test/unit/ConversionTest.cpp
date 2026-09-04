@@ -7,6 +7,7 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context.hpp>
+#include <rocRoller/HostNumerics/HostReference.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
@@ -209,8 +210,15 @@ namespace rocRollerTest
         ASSERT_THAT(hipMemcpy(gpu_D.data(), d_D.get(), M * N * sizeof(TypeD), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        std::vector<float> tmp_D(M * N, 0.f);
-        CPUMM(tmp_D, C, A, B, M, N, K, 1.0, 1.0, false, false);
+        auto tmp_D = HostNumerics::convertHostReference<float>(
+            HostNumerics::computeHostReference(HostNumerics::hostTensor(descA, A),
+                                               HostNumerics::hostTensor(descB, B),
+                                               HostNumerics::hostTensor(descC, C),
+                                               std::nullopt,
+                                               std::nullopt,
+                                               0,
+                                               1.0f,
+                                               1.0f));
 
         std::vector<TypeD> cpu_D;
         cpu_D.reserve(M * N);
@@ -218,11 +226,12 @@ namespace rocRollerTest
             cpu_D.emplace_back(TypeD(tmp_D[i]));
 
         auto tol = gemmAcceptableError<TypeAB, TypeAB, TypeD>(
-            M, N, K, m_context->targetArchitecture().target());
+            K, m_context->targetArchitecture().target());
         auto res = compare(gpu_D, cpu_D, tol);
 
-        Log::info("MatrixMultiplyABC and Conversion RNorm is {}", res.relativeNormL2);
-        ASSERT_TRUE(res.ok) << res.message();
+        Log::info("MatrixMultiplyABC and Conversion RNorm is {}",
+                  res.statistics.relativeFrobeniusError);
+        ASSERT_TRUE(res.ok()) << res.message();
     }
 
     template <typename TypeAB, typename TypeD>
@@ -322,8 +331,17 @@ namespace rocRollerTest
         ASSERT_THAT(hipMemcpy(gpu_D.data(), d_D.get(), M * N * sizeof(TypeD), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        std::vector<TypeAB> tmp_D(M * N, 0.f);
-        CPUMM(tmp_D, tmp_D, A, B, M, N, K, 1.0, 1.0, false, false);
+        std::vector<TypeAB> zeroC(M * N, 0.f);
+        TensorDescriptor    referenceDescC(dataTypeAB, {size_t(M), size_t(N)}, "N");
+        auto                tmp_D = HostNumerics::convertHostReference<TypeAB>(
+            HostNumerics::computeHostReference(HostNumerics::hostTensor(descA, A),
+                                               HostNumerics::hostTensor(descB, B),
+                                               HostNumerics::hostTensor(referenceDescC, zeroC),
+                                               std::nullopt,
+                                               std::nullopt,
+                                               0,
+                                               1.0f,
+                                               1.0f));
 
         std::vector<TypeD> cpu_D;
         cpu_D.reserve(M * N);
@@ -331,11 +349,11 @@ namespace rocRollerTest
             cpu_D.emplace_back(TypeD(tmp_D[i]));
 
         auto tol = gemmAcceptableError<TypeAB, TypeAB, TypeD>(
-            M, N, K, m_context->targetArchitecture().target());
+            K, m_context->targetArchitecture().target());
         auto res = compare(gpu_D, cpu_D, tol);
 
-        Log::info("D = Convert(A * B) RNorm is {}", res.relativeNormL2);
-        ASSERT_TRUE(res.ok) << res.message();
+        Log::info("D = Convert(A * B) RNorm is {}", res.statistics.relativeFrobeniusError);
+        ASSERT_TRUE(res.ok()) << res.message();
     }
 
     template <typename DestType, typename SrcType>
@@ -429,8 +447,8 @@ namespace rocRollerTest
 
         auto tol = AcceptableError{epsilon<double>(), "Should be exact."};
         auto res = compare(gpuResult, cpuResult, tol);
-        EXPECT_TRUE(res.ok) << res.message();
-        Log::info("C = Convert(A) + Convert(B) RNorm is {}", res.relativeNormL2);
+        EXPECT_TRUE(res.ok()) << res.message();
+        Log::info("C = Convert(A) + Convert(B) RNorm is {}", res.statistics.relativeFrobeniusError);
     }
 
     template <typename DestType, typename SrcType>
@@ -470,7 +488,7 @@ namespace rocRollerTest
         // Convert A to destination type
         auto tagCvtA = seed.has_value()
                            ? execute.addXOp(rocRoller::Operations::E_StochasticRoundingCvt(
-                               tagLoadA, tagLoadSeed, destDataType))
+                                 tagLoadA, tagLoadSeed, destDataType))
                            : execute.addXOp(rocRoller::Operations::E_Cvt(tagLoadA, destDataType));
         command->addOperation(std::move(execute));
 
@@ -575,8 +593,8 @@ namespace rocRollerTest
 
         auto tol = AcceptableError{epsilon<double>(), "Should be exact."};
         auto res = compare(gpuResult, cpuResult, tol);
-        EXPECT_TRUE(res.ok) << res.message();
-        Log::info("C = Convert(A) RNorm is {}", res.relativeNormL2);
+        EXPECT_TRUE(res.ok()) << res.message();
+        Log::info("C = Convert(A) RNorm is {}", res.statistics.relativeFrobeniusError);
     }
 
     TEST_F(ConversionTest, GPU_FloatToFP8_VGPR)

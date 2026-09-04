@@ -28,9 +28,8 @@
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt_datatype2string.hpp>
-#include <hipblaslt_init.hpp>
 #include <iostream>
-#include <numeric>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
 #include <vector>
 
 void printUsage(char* programName)
@@ -97,37 +96,7 @@ int parseArgs(int argc, char** argv, size_t* m, size_t* n, hipblaslt_initializat
 template <typename DType>
 void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
 {
-    switch(initMethod)
-    {
-    case hipblaslt_initialization::rand_int:
-        hipblaslt_init<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::trig_float:
-        hipblaslt_init_cos<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::hpl:
-        hipblaslt_init_hpl<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::uniform_low_precision:
-        hipblaslt_init_low_precision<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::special:
-        hipblaslt_init_alt_impl_big<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::zero:
-        hipblaslt_init_zero<DType>(data, numElements, 1, 1);
-        break;
-    // Matmul-oriented inits need proper M×K / K×N (GEMM ABC) layout; ext-op benches only flatten — zero-fill instead
-    // of silently skipping (buffers would stay default-constructed).
-    case hipblaslt_initialization::integer_exact:
-    case hipblaslt_initialization::norm_dist:
-    case hipblaslt_initialization::uniform_01:
-    case hipblaslt_initialization::fp16_accumulator_probe:
-        hipblaslt_init_zero<DType>(data, numElements, 1, 1);
-        break;
-    default:
-        break;
-    }
+    hipblaslt::host_numerics::initialize(data, numElements, initMethod);
 }
 
 int main(int argc, char** argv)
@@ -149,8 +118,7 @@ int main(int argc, char** argv)
     auto        hipErr = hipMalloc(&input, numElements * elementNumBytes);
     hipErr             = hipMalloc(&output, numElements * elementNumBytes);
     std::vector<float> data(numElements, 0.f);
-    // std::iota(begin(data), end(data), 0.f);
-    initData(input, numElements, init);
+    initData(data.data(), numElements, init);
     hipErr = hipMemcpyHtoD(input, data.data(), numElements * elementNumBytes);
     hipStream_t stream{};
     hipErr = hipStreamCreate(&stream);

@@ -26,7 +26,9 @@
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <iostream>
+#include <roc/host_numerics/validation.hpp>
 
 #include "helper.h"
 
@@ -50,61 +52,70 @@ void simpleGemmMixPrecisionExt(hipblasLtHandle_t  handle,
 template <typename TypeA, typename TypeB, typename TypeCD, typename AlphaType, typename BetaType>
 int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
 {
-    std::vector<float> ref(runner.m * runner.n * runner.batch_count, 0);
-    float              scaleA{2.f};
+    std::vector<TypeCD> reference(runner.m * runner.n * runner.batch_count);
+    constexpr float     scaleA{2.f};
+
+    const auto batchStrideA = runner.m * runner.k;
+    const auto batchStrideB = runner.k * runner.n;
+    const auto batchStrideC = runner.m * runner.n;
+    const auto batchStrideD = runner.m * runner.n;
+    const TypeA* aPtr       = reinterpret_cast<const TypeA*>(runner.a);
+    const TypeB* bPtr       = reinterpret_cast<const TypeB*>(runner.b);
+    const TypeCD* cPtr      = reinterpret_cast<const TypeCD*>(runner.c);
 
     for(int64_t b = 0; b < runner.batch_count; ++b)
     {
-        const auto    batchStrideA = runner.m * runner.k;
-        const auto    batchStrideB = runner.k * runner.n;
-        const auto    batchStrideC = runner.m * runner.n;
-        const auto    batchStrideD = runner.m * runner.n;
-        const TypeA*  aPtr         = reinterpret_cast<const TypeA*>(runner.a);
-        const TypeB*  bPtr         = reinterpret_cast<const TypeB*>(runner.b);
-        const TypeCD* cPtr         = reinterpret_cast<const TypeCD*>(runner.c);
-        for(int64_t i = 0; i < runner.m; ++i)
-        {
-            for(int64_t j = 0; j < runner.n; ++j)
-            {
-                for(int64_t k = 0; k < runner.k; ++k)
-                {
-                    ref[batchStrideD * b + j * runner.m + i]
-                        += scaleA * float(aPtr[batchStrideA * b + runner.m * k + i])
-                           * float(bPtr[batchStrideB * b + runner.k * j + k]);
-                }
+        using namespace roc::host_numerics;
+        using namespace hipblaslt::host_numerics;
 
-                ref[batchStrideD * b + j * runner.m + i] *= runner.alpha;
-                ref[batchStrideD * b + j * runner.m + i]
-                    += runner.beta * cPtr[batchStrideC * b + j * runner.m + i];
-            }
-        }
+        auto referenceTensor
+            = copyTensorFromEncodedStorage(reference.data() + batchStrideD * b,
+                                           batchStrideD,
+                                           Layout(Shape{size_t(runner.m), size_t(runner.n)},
+                                                  {1, static_cast<ptrdiff_t>(runner.m)}));
+        Tensor a = copyTensorFromEncodedStorage(aPtr + batchStrideA * b,
+                                                batchStrideA,
+                                                Layout(Shape{size_t(runner.m), size_t(runner.k)},
+                                                       {1, static_cast<ptrdiff_t>(runner.m)}));
+        Tensor bTensor
+            = copyTensorFromEncodedStorage(bPtr + batchStrideB * b,
+                                           batchStrideB,
+                                           Layout(Shape{size_t(runner.k), size_t(runner.n)},
+                                                  {1, static_cast<ptrdiff_t>(runner.k)}));
+        Tensor c = copyTensorFromEncodedStorage(cPtr + batchStrideC * b,
+                                                batchStrideC,
+                                                Layout(Shape{size_t(runner.m), size_t(runner.n)},
+                                                       {1, static_cast<ptrdiff_t>(runner.m)}));
+        GemmOptions options;
+        options.alpha = static_cast<double>(runner.alpha) * scaleA;
+        options.beta  = static_cast<double>(runner.beta);
+        referenceGemmInto(std::move(a), std::move(bTensor), std::move(c), referenceTensor, options);
+        copyTensorEncodedBackingStorageToBuffer(
+            reference.data() + batchStrideD * b, batchStrideD, referenceTensor);
     }
 
     std::vector<TypeCD> gpuResult(runner.m * runner.n * runner.batch_count);
     CHECK_HIP_ERROR(hipMemcpyDtoH(
         gpuResult.data(), runner.d_d, runner.batch_count * runner.m * runner.n * sizeof(TypeCD)));
 
-    for(int64_t b = 0; b < runner.batch_count; ++b)
+    const auto comparison = roc::host_numerics::compare(
+        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            gpuResult.data(),
+            gpuResult.size(),
+            roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                roc::host_numerics::Shape{gpuResult.size()})),
+        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            reference.data(),
+            reference.size(),
+            roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                roc::host_numerics::Shape{reference.size()})),
+        {.absoluteTolerance = 1e-5, .maxReportedMismatches = 10});
+    for(const auto& mismatch : comparison.reportedMismatches)
     {
-        const auto batchStrideD = runner.m * runner.n;
-        for(int64_t i = 0; i < runner.m; ++i)
-        {
-            for(int64_t j = 0; j < runner.n; ++j)
-            {
-                const auto lhs = float(TypeCD(ref[batchStrideD * b + j * runner.m + i]));
-                const auto rhs = float(gpuResult[batchStrideD * b + j * runner.m + i]);
-
-                if(std::abs(lhs - rhs) > 1e-5)
-                {
-                    std::cout << lhs << " vs " << rhs << '\n';
-                    // assert(ref[batchStrideD * b + j * runner.m + i] == float(gpuResult[batchStrideD * b + j * runner.m + i]));
-                    return -1;
-                }
-            }
-        }
+        std::cout << mismatch.expected << " vs " << mismatch.observed << '\n';
     }
 
-    return 0;
+    return comparison.passed() ? 0 : -1;
 }
 
 int main()

@@ -28,11 +28,15 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <hipblaslt_datatype2string.hpp>
-#include <hipblaslt_init.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/validation.hpp>
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -47,30 +51,6 @@ void printUsage(char* programName)
               << "\t-n, --n\t\t\t\tSize of dim 1, default is 64\n"
               << "\t--initialization \t\tInitialize matrix data. Options: rand_int, trig_float, "
                  "hpl(floating), special, zero. (default is hpl)\n";
-}
-
-template <typename T>
-T abs(T a)
-{
-    return (a > 0) ? a : -a;
-}
-
-template <typename T>
-T max(T a, T b)
-{
-    return (a > b) ? a : b;
-}
-
-template <typename Ti, typename To>
-void cpuAMax(To* out, Ti* in, std::uint32_t length)
-{
-    // calculate amax
-    Ti m = 0;
-    for(int j = 0; j < length; j++)
-    {
-        m = max(m, abs(in[j]));
-    }
-    out[0] = To(m);
 }
 
 int parseArgs(int                       argc,
@@ -151,56 +131,30 @@ void dumpBuffer(const char* title, Dtype* data, int N)
 template <typename T>
 void compare(const char* title, const std::vector<T>& cpuOutput, const std::vector<T>& refOutput)
 {
-    T maxErr = 0.0;
-    for(int i = 0; i < cpuOutput.size(); i++)
-    {
-        T err  = abs(refOutput[i] - cpuOutput[i]);
-        maxErr = max(maxErr, err);
-    }
-
-    std::cout << "max error : " << float(maxErr) << std::endl;
+    const auto report = roc::host_numerics::compare(
+        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            cpuOutput.data(),
+            cpuOutput.size(),
+            roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                roc::host_numerics::Shape{cpuOutput.size()})),
+        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            refOutput.data(),
+            refOutput.size(),
+            roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                roc::host_numerics::Shape{refOutput.size()})));
+    std::cout << title << " max error : " << report.maxAbsoluteDifference << std::endl;
 }
 
 template <typename DType>
 void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
 {
-    switch(initMethod)
-    {
-    case hipblaslt_initialization::rand_int:
-        hipblaslt_init<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::trig_float:
-        hipblaslt_init_cos<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::hpl:
-        hipblaslt_init_hpl<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::uniform_low_precision:
-        hipblaslt_init_low_precision<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::special:
-        hipblaslt_init_alt_impl_big<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::zero:
-        hipblaslt_init_zero<DType>(data, numElements, 1, 1);
-        break;
-    // Matmul-oriented inits need proper M×K / K×N (GEMM ABC) layout; ext-op benches only flatten — zero-fill instead
-    // of silently skipping (buffers would stay default-constructed).
-    case hipblaslt_initialization::integer_exact:
-    case hipblaslt_initialization::norm_dist:
-    case hipblaslt_initialization::uniform_01:
-    case hipblaslt_initialization::fp16_accumulator_probe:
-        hipblaslt_init_zero<DType>(data, numElements, 1, 1);
-        break;
-    default:
-        break;
-    }
+    hipblaslt::host_numerics::initialize(data, numElements, initMethod);
 }
 
 template <typename Ti, typename To>
 int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initialization& init)
 {
-    int         numElements = m * n;
+    std::size_t numElements = static_cast<std::size_t>(m) * static_cast<std::size_t>(n);
     std::size_t tiNumBytes  = sizeof(Ti);
     std::size_t toNumBytes  = sizeof(To);
 
@@ -225,7 +179,17 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
 
     hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, toNumBytes);
 
-    cpuAMax(refOutput.data(), cpuInput.data(), m * n);
+    using namespace roc::host_numerics;
+    Tensor referenceOutput = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+        refOutput.data(), refOutput.size(), Layout::contiguousLastDimensionFastest(Shape{}));
+    referenceMaximumAbsoluteInto(hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+                                     cpuInput.data(),
+                                     cpuInput.size(),
+                                     Layout::contiguousLastDimensionFastest(Shape{numElements})),
+                                 referenceOutput,
+                                 ScalarType::Float32);
+    hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
+        refOutput.data(), refOutput.size(), referenceOutput);
 
     // dumpBuffer("Input", cpuInput.data(), m * n);
     // dumpBuffer("GPU", cpuOutput.data(), 1);
