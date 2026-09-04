@@ -217,3 +217,74 @@ def test_gfx942_params_branches(monkeypatch) -> None:
     assert "DepthU" in params_ga
     assert "GlobalReadVectorWidthA" in params_ga
     assert len(groups_ga) >= 1
+
+
+# ---------------------------------------------------------------------------
+# MX (Microscaling) config_sections_generator tests
+# ---------------------------------------------------------------------------
+
+def _section_cfg_mx(dtype="F4", mx=True, epilogues=True):
+    dest = "S" if dtype not in ("D",) else "D"
+    gt = GemmType.from_tensile("T", "N", dtype, dest, "S")
+    return {
+        "GemmProblem": type("GP", (), {"gemm_type": gt})(),
+        "ARCH": "gfx950",
+        "CUs": 256,
+        "XCC": 8,
+        "EPILOGUES": epilogues,
+        "MX": mx,
+        "backend": "ductile",
+        "search_space": "generic",
+        "SIZE_OPTION": 0,
+    }
+
+
+def test_mx_problem_type_emits_mxblock():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F4", mx=True))
+    pt = gen._problem_type
+    assert pt.get("MXBlockA") == 32
+    assert pt.get("MXBlockB") == 32
+
+
+def test_mx_problem_type_no_mxblock_when_disabled():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=False))
+    pt = gen._problem_type
+    assert "MXBlockA" not in pt
+    assert "MXBlockB" not in pt
+
+
+def test_mx_global_params_emit_scale_init():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=True))
+    gp = gen._global_params_base
+    assert gp["DataInitTypeMXSA"] == 3
+    assert gp["DataInitTypeMXSB"] == 3
+    assert gp["MXScaleFormat"] == 1
+
+
+def test_non_mx_global_params_no_scale_init():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=False))
+    gp = gen._global_params_base
+    assert "DataInitTypeMXSA" not in gp
+    assert "MXScaleFormat" not in gp
+
+
+def test_mx_bias_type_forced_to_s():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=True, epilogues=True))
+    bias = gen._resolve_bias_type()
+    assert bias == "[S]"
+
+
+def test_mx_f8_problem_type_skips_use_scale_ab():
+    """MX F8 should emit BiasDataTypeList instead of UseScaleAB."""
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=True))
+    pt = gen._problem_type
+    assert "BiasDataTypeList" in pt
+    assert "UseScaleAB" not in pt
+
+
+def test_non_mx_f8_problem_type_has_use_scale_ab():
+    """Non-MX F8 should emit UseScaleAB: Scalar."""
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=False))
+    pt = gen._problem_type
+    assert "UseScaleAB" in pt or any("UseScaleAB" in k for k in pt)
+    assert "BiasDataTypeList" not in pt

@@ -114,10 +114,10 @@ def test_gemmtype_validation_errors() -> None:
 
 
 def test_tensile_mapper_error_paths() -> None:
-    with pytest.raises(ValueError, match="Unknown Tensile DataType letter"):
+    with pytest.raises(ValueError, match="Cannot resolve Tensile DataType"):
         GemmType._tensile_triple_to_hipblaslt("Q", "B", "S")
 
-    with pytest.raises(ValueError, match="must be 1 or 2 letters"):
+    with pytest.raises(ValueError, match="Cannot resolve Tensile DataType"):
         GemmType._tensile_triple_to_hipblaslt("ABC", "B", "S")
 
     with pytest.raises(ValueError, match="Unknown Tensile DestDataType letter"):

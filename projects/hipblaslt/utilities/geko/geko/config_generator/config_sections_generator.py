@@ -44,6 +44,10 @@ class ConfigSectionGenerator:
         """Estimate iteration count for benchmarking based on problem size."""
         return max(round((-(m + n + k) * 0.015 + 431) / b), 5)
 
+    def _is_mx(self) -> bool:
+        """Whether Microscaling (MX) mode is enabled for this config."""
+        return self.config.get("MX", False)
+
     def _use_epilogues(self) -> bool:
         """Whether to emit epilogue fields for this GEMM type."""
         gt = self._gt
@@ -80,8 +84,7 @@ class ConfigSectionGenerator:
         pt['DestDataType'] = self._convert_type(self._gt.dest_data_type)
         pt['ComputeDataType'] = self._convert_type(self._gt.compute_data_type)
         pt['HighPrecisionAccumulate'] = val_HighPrecisionAccumulate
-        # fp4 inputs use MX block scaling (block size 32 on A and B).
-        if self._gt.data_type == "F4":
+        if self._is_mx():
             pt['MXBlockA'] = 32
             pt['MXBlockB'] = 32
         pt['TransposeA'] = val_transA
@@ -97,8 +100,11 @@ class ConfigSectionGenerator:
         pt[f'{epi_tag}ActivationType'] = "hipblaslt_all"
         pt[f'{epi_tag}UseScaleAlphaVec'] = "1"
         pt[f'{epi_tag}UseBias'] = "1"
-        if "8" in pt["DataType"] or "8" in pt["DestDataType"]:
-            pt[f'{epi_tag}UseScaleAB'] = "Scalar"
+        if self._is_mx():
+            pt[f'{epi_tag}BiasDataTypeList'] = "[s]"
+        else:
+            if "8" in pt["DataType"] or "8" in pt["DestDataType"]:
+                pt[f'{epi_tag}UseScaleAB'] = "Scalar"
 
         pt['Batched'] = "True"
 
@@ -119,7 +125,6 @@ class ConfigSectionGenerator:
         so emitted YAML keeps stable key ordering before per-size overrides.
         """
         is_i8 = self._gt.data_type == 'I8'
-        is_fp4 = self._gt.data_type == 'F4'
         params = {
             'MinimumRequiredVersion': '5.0.0',
             'SleepPercent': 0,
@@ -144,7 +149,7 @@ class ConfigSectionGenerator:
             'RotatingBufferSize': 1024,
             'UseEffLike': False,
         }
-        if is_fp4:
+        if self._is_mx():
             params['DataInitTypeMXSA'] = 3
             params['DataInitTypeMXSB'] = 3
             params['MXScaleFormat'] = 1
@@ -163,9 +168,8 @@ class ConfigSectionGenerator:
             bias_type = "S"
         if self._gt.data_type == "X1":
             bias_type = "S"
-        if self._gt.data_type == "F4":
-            # fp4 cannot be used as bias type.
-            bias_type = self._convert_type(self._gt.dest_data_type)
+        if self._is_mx():
+            bias_type = "S"
         return f"[{bias_type}]"
 
     # ------------------------------------------------------------------
@@ -367,11 +371,9 @@ class ConfigSectionGenerator:
         global_params = dict(self._global_params_base)
         self._apply_enqueue_and_warmup_params(global_params, sizes, backend)
 
-        # K is rounded up to a multiple of 32 only for MXFP4 (F4).
         problem_sizes = []
-        is_mxfp4 = self._gt.data_type == "F4"
         for M, N, batch, K in sizes:
-            if is_mxfp4:
+            if self._is_mx():
                 K = ((K + 31) // 32) * 32
             problem_sizes.append({"Exact": f'[ {M}, {N}, {batch}, {K} ]'})
 

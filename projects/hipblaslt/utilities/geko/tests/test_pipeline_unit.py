@@ -490,3 +490,54 @@ def test_run_optimize_skips_cleanup_when_not_needed(monkeypatch: pytest.MonkeyPa
     pipeline.run_optimize(str(hip), workdir=str(workdir), devices=[0], retry=False)
     assert (workdir / "build" / "keep.txt").is_file()
     assert (workdir / "benchmarks" / "keep.txt").is_file()
+
+
+def test_detect_mx_from_log_with_block_scaling(tmp_path: Path) -> None:
+    """_detect_mx_from_log returns True when scaleA >= 3 (Block_32_UE8M0)."""
+    import yaml
+
+    rows = [
+        {
+            "function": "matmul", "a_type": "f8_r", "b_type": "f8_r",
+            "c_type": "f32_r", "d_type": "f32_r", "compute_type": "c_f32_r",
+            "transA": "T", "transB": "N", "M": 256, "N": 256, "K": 256,
+            "batch_count": 1, "scaleA": 3, "scaleB": 3,
+        }
+    ]
+    wf = tmp_path / "mx_workload.yaml"
+    wf.write_text(yaml.dump(rows))
+    assert pipeline._detect_mx_from_log(wf) is True
+
+
+def test_detect_mx_from_log_scalar_scaling(tmp_path: Path) -> None:
+    """_detect_mx_from_log returns False for scalar scaling (scaleA=1)."""
+    import yaml
+
+    rows = [
+        {
+            "function": "matmul", "a_type": "f8_r", "b_type": "f8_r",
+            "c_type": "f32_r", "d_type": "f32_r", "compute_type": "c_f32_r",
+            "transA": "T", "transB": "N", "M": 256, "N": 256, "K": 256,
+            "batch_count": 1, "scaleA": 1, "scaleB": 1,
+        }
+    ]
+    wf = tmp_path / "scalar_workload.yaml"
+    wf.write_text(yaml.dump(rows))
+    assert pipeline._detect_mx_from_log(wf) is False
+
+
+def test_detect_mx_from_log_no_scale_columns(tmp_path: Path) -> None:
+    """_detect_mx_from_log returns False when no scaleA/scaleB columns."""
+    import yaml
+
+    rows = [
+        {
+            "function": "matmul", "a_type": "bf16_r", "b_type": "bf16_r",
+            "c_type": "bf16_r", "d_type": "bf16_r", "compute_type": "c_f32_r",
+            "transA": "N", "transB": "N", "M": 256, "N": 256, "K": 256,
+            "batch_count": 1,
+        }
+    ]
+    wf = tmp_path / "no_scale_workload.yaml"
+    wf.write_text(yaml.dump(rows))
+    assert pipeline._detect_mx_from_log(wf) is False

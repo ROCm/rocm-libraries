@@ -83,6 +83,7 @@ If the YAML omits them, these are filled from `HARDWARE_MAP[ARCH]` in [`load_inp
 
 | Key | Role |
 |-----|------|
+| `MX` | `True` = Microscaling mode (block-scaled MX FP4/FP8, block size 32, E8M0 scales). Auto-forced for `DataType: F4`; auto-detected from workload logs (`scaleA/scaleB >= 3`). Defaults to `False`. |
 | `StreamK` | `True` = StreamK, `False` = DataParallel |
 | `backend` | `"ductile"` or `"tensile"` (default: `"ductile"`; CLI `--backend` overrides). |
 | `search_space` | `"heuristic"`, `"generic"`, or `"subtile"` (default: auto from `backend` — `generic` for ductile, `heuristic` for tensile). For full fork ranges with `backend: tensile`, set `search_space: generic`. |
