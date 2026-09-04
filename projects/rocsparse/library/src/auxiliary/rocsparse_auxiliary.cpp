@@ -4618,6 +4618,7 @@ try
                        rocsparse_status_invalid_value);
 
     descr->batch_count                 = batch_count;
+    descr->batch_stride                = rows_values_batch_stride;
     descr->offsets_batch_stride        = offsets_batch_stride;
     descr->columns_values_batch_stride = rows_values_batch_stride;
     return rocsparse_status_success;
