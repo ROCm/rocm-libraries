@@ -1,0 +1,336 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Code Coverage Test: Subtile with MX types
+# Covers: Subtile modules (WaitAluInsertion.py, SubtileScaleEmit.py, SubtileGREmit.py, SubtileLREmit.py)
+# Target: Subtile + MX scale emission, global/local read paths, hazard insertion
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # MX FP4 with Subtile (SubtileScaleEmit.py coverage)
+  # Note: UseSubtileImpl is auto-enabled on gfx1250, but we can test with ClusterDim for non-A0
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - LDSTrInst: [True]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [1]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]  # Required for MX
+        - LDSSegmentInterleave: [0]  # Changed from [1] - requires wave-separated mode
+        - ClusterDim: [[1, 1]]  # A0 compatible
+        # Subtile global/local read parameters
+        - GlobalReadVectorWidthA: [16, 2]
+        - GlobalReadVectorWidthB: [-1, 2]
+        - LocalReadVectorWidth: [-1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 64]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
+
+  # MX FP8 with Subtile and transpose
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - LDSSegmentInterleave: [1]
+        - ClusterDim: [[1, 1]]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 64]
+          - Exact: [128, 128, 1, 128]
+
+  # MX FP4 with small problem sizes (SubtileGeometry.py edge cases)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - LDSTrInst: [True]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [1]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [16]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - LDSSegmentInterleave: [0]
+        - ClusterDim: [[1, 1]]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 64]    # Small
+          - Exact: [48, 48, 1, 64]    # Non-power-of-2
+          - Exact: [63, 65, 1, 64]    # Odd dimensions
+
+  # MX FP4 with various vector widths (SubtileGREmit.py, SubtileLREmit.py)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - LDSTrInst: [True]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [1]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - LDSSegmentInterleave: [0]
+        - ClusterDim: [[1, 1]]
+        - GlobalReadVectorWidthA: [1, 2, 4]
+        - GlobalReadVectorWidthB: [1, 2, 4]
+        - LocalReadVectorWidth: [1, 2]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+
+  # MX FP8 with batching (combined subtile + batch-offset)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - LDSSegmentInterleave: [1]
+        - ClusterDim: [[1, 1]]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 2, 128]  # batch=2
+          - Exact: [128, 128, 4, 128]  # batch=4
+          - Exact: [64, 64, 8, 64]     # batch=8
+
+  # MX FP4 with different DepthU (WaitAluInsertion.py hazard paths)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - LDSTrInst: [True]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [1]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [32, 64, 128]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [16]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - LDSSegmentInterleave: [0]
+        - ClusterDim: [[1, 1]]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [64, 64, 1, 128]
+
+  # MX FP4 with all four transposes (Subtile/Kernel.py coverage)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - LDSTrInst: [True]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [1]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [16]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - LDSSegmentInterleave: [0]
+        - ClusterDim: [[1, 1]]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 64]   # NT
+          - Exact: [128, 128, 1, 128]
+
+  -
+    - # ProblemType (TN)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - LDSTrInst: [True]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [1]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [16]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - LDSSegmentInterleave: [0]
+        - ClusterDim: [[1, 1]]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 64]
+
+  -
+    - # ProblemType (TT)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - LDSTrInst: [True]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [1]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [16]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - LDSSegmentInterleave: [0]
+        - ClusterDim: [[1, 1]]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 64]

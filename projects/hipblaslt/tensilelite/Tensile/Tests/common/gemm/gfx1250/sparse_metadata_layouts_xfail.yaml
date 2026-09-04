@@ -1,0 +1,149 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Code Coverage Test: Sparse WMMA with TransposeLDSMetadata variations
+# Covers: KernelWriterAssembly.py lines 1485, 6817, 9124-9290, 10983
+# Target: HasSWMMAC_gfx1250 sparse logic and metadata handling
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # Sparse A with TransposeLDSMetadata variations (targets line 1485, 6817)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDSMetadata: [-1, 0, 1]  # Auto, False, True
+        - LdsPadMetadata: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 128]
+          - Exact: [128, 128, 1, 256]
+
+  # Sparse B with metadata variations (targets lines 9124-9290: kIncA/kIncB for sparse gfx1250)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Sparse: 2
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 64, 1, 1, 1, 1, 2, 2]  # Different tile configs
+        - DepthU: [64, 128]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDSMetadata: [-1, 0]
+        - LdsPadMetadata: [0, -1]
+        - SourceSwap: [true]  # Sparse B
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 128]
+          - Exact: [128, 128, 1, 256]
+
+  # Sparse with FP8 (targets line 10983: metadata handling in local read)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDSMetadata: [0]
+        - LdsPadMetadata: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 64]
+          - Exact: [128, 128, 1, 128]
+
+  # Sparse with different DepthU values (blocksPerTGroupSMFMA = 2 path)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [32, 64, 128, 256]  # Various DepthU to stress kInc logic
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDSMetadata: [0]
+        - LdsPadMetadata: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 256]

@@ -1,0 +1,105 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# A0-compatible test: FP8 data types with edge cases
+# Small problem sizes and boundary conditions
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # FP8 (E4M3 -> FP32)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [3]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [16, 16, 1, 64]     # Minimal with K=DepthU
+          - Exact: [32, 32, 1, 64]     # Small square
+          - Exact: [64, 64, 1, 64]     # Medium square
+          - Exact: [128, 128, 1, 128]  # Larger
+          - Exact: [256, 256, 1, 256]  # Large
+          - Exact: [63, 65, 1, 64]     # Just under/over 64
+          - Exact: [64, 64, 1, 128]    # K=2*DepthU
+          - Exact: [128, 128, 2, 128]  # Batched
+          - Exact: [17, 19, 1, 65]     # Odd dimensions
+          - Exact: [97, 101, 1, 103]   # Prime dimensions
+          - Exact: [64, 256, 1, 128]   # Non-square
+          - Exact: [64, 64, 7, 64]     # Prime batch
+          # === RANGE SIZES ===
+          - Range: [ [32, 32, 128], [32, 32, 128], [1], [64] ]
+          - Range: [ [63, 1, 65], [63, 1, 65], [1], [64] ]
+
+  # Mixed FP8/BF8 (F8B8: E4M3 A, E5M2 B -> FP32)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8B8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True  # Use True with batch=1 to avoid non-batched bug
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [64, 64, 1, 64]     # Small
+          - Exact: [128, 128, 1, 128]  # Medium
+          - Exact: [256, 256, 1, 256]  # Large
+          - Exact: [63, 127, 1, 65]    # Odd sizes
+          - Exact: [97, 97, 1, 97]     # Prime
+          - Exact: [128, 64, 1, 128]   # Non-square
+          - Exact: [64, 64, 5, 64]     # Batched
+          # === RANGE SIZES ===
+          - Range: [ [64, 64, 256], [64, 64, 256], [1], [64] ]
