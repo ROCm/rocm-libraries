@@ -150,8 +150,10 @@ target_include_directories(tensilelite-client PRIVATE
 target_sources(tensilelite-client PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}/../../tensilelite-client-generated/TensileLiteClientVersion.hpp")
 
-add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
-target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
+if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
+    add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
+    target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
+endif()
 
 # rocprofiler-sdk is only used by tensilelite-client (in-process counters).
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)

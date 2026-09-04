@@ -162,15 +162,13 @@ TENSILE_NUM_PYTEST_WORKERS=1 tox -e py3 -- tensilelite/Tests -m common
 ```
 
 `invoke build-client` follows the existing `tensilelite` CMake preset by default.
-In this repo, that means `/opt/rocm` compiler settings come from the preset, and
-`CMAKE_EXPORT_COMPILE_COMMANDS` and `HIPBLASLT_BUNDLE_PYTHON_DEPS` are already enabled
-by default.
+In this repo, `/opt/rocm` compiler settings come from the preset and
+`CMAKE_EXPORT_COMPILE_COMMANDS` is enabled by default.
 
 Use these flags when you want to override or make that behavior explicit:
 
 * `--rocm-path <path>`: Override the compiler toolchain to use `<path>/bin/amdclang` and `<path>/bin/amdclang++`
 * `--export-compile-commands`: Explicitly force `CMAKE_EXPORT_COMPILE_COMMANDS=ON`
-* `--bundle-python-deps`: Explicitly force `HIPBLASLT_BUNDLE_PYTHON_DEPS=ON`
 * `--enable-rocprof`: Sets `TENSILELITE_CLIENT_ENABLE_ROCPROFSDK=ON`
 
 ### Speeding Up Builds with ccache

@@ -43,6 +43,7 @@
         "TENSILELITE_ENABLE_CLIENT": "OFF",
         "TENSILELITE_ENABLE_HOST": "OFF",
         "TENSILELITE_BUILD_TESTING": "OFF",
+        "ROCISA_BUILD_PYTHON": "ON",
         "HIPBLASLT_ENABLE_ROCROLLER": "OFF",
         "HIPBLASLT_ENABLE_YAML": "ON"
       }
@@ -61,14 +62,15 @@
     {
       "name": "gemm-libs",
       "displayName": "Build gemm libraries",
-      "description": "Configures just tensilelite host and client",
+      "description": "Configures just device-library generation",
       "inherits": "default:release",
       "cacheVariables": {
         "HIPBLASLT_ENABLE_HOST": "OFF",
         "HIPBLASLT_ENABLE_DEVICE": "ON",
         "HIPBLASLT_ENABLE_CLIENT": "OFF",
         "TENSILELITE_ENABLE_HOST": "OFF",
-        "TENSILELITE_ENABLE_CLIENT": "OFF"
+        "TENSILELITE_ENABLE_CLIENT": "OFF",
+        "ROCISA_BUILD_PYTHON": "OFF"
       }
     },
     {

@@ -119,7 +119,7 @@ Use the `users/<github-username>/<branch-name>` branch convention and base PRs o
 ## Gotchas specific to this top-level
 
 - Configure/run `invoke build` from `projects/hipblaslt`, not the repo root, unless you actually need the superbuild.
-- The TensileCreateLibrary CMake step uses whatever Python CMake found — if it's missing PyYAML/msgpack, the device-library build fails silently mid-way. `invoke build` handles this; if you bypass it with raw cmake, point `Python_EXECUTABLE` at the venv (`build/venv/bin/python`).
+- Device generation builds and force-installs the canonical TensileLite wheel into the selected Python with `--no-deps` and exposes only its in-tree raw rocisa target through command-scoped `PYTHONPATH`. It does not require or configure `tensilelite-client`; that executable is a separate benchmark/validation test capability. Host-only builds do not require this Python environment.
 - Building only the host library (`-DHIPBLASLT_ENABLE_DEVICE=OFF` or preset `hipblaslt`, or `invoke build -t`) is fast and fine for compile checks, but the resulting library cannot run matmul without a separately built/installed device library.
 - After editing YAML under `clients/tests/data/`, you must rebuild the `hipblaslt-test` (or `hipblaslt-test-data`) target to regenerate `hipblaslt_gtest.data`.
 - A full device-lib build is slow. Use `invoke build -f 'gfx942/Equality/*'` (or similar `--logic-filter`) to scope it to a single arch/family while iterating.
