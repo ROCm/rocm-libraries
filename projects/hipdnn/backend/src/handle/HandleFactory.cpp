@@ -6,6 +6,8 @@
 #include "handle/Handle.hpp"
 #include "logging/Logging.hpp"
 
+#include <memory>
+
 namespace hipdnn_backend
 {
 
@@ -22,7 +24,7 @@ void HandleFactory::destroyHandle(hipdnnHandle_t handle)
 {
     THROW_IF_NULL(handle, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "handle is null.");
 
-    delete handle;
+    auto owned = std::unique_ptr<hipdnnHandle>(handle);
 
     HIPDNN_BACKEND_LOG_INFO("Destroyed handle: {:p}", static_cast<void*>(handle));
 }
