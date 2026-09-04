@@ -82,7 +82,7 @@ TEST(TestGpuLayernormFwdSignatureKey, CreateFromNodeAndTensorMap)
 
     const std::vector<int64_t> ioDims = {2, 3, 4, 5};
     const TensorLayout layout = TensorLayout::NCHW;
-    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
+    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
     const int64_t normalizedDimCount = 2;
 
     auto graphBuilder = createLayernormFwdGraph(X_UID,

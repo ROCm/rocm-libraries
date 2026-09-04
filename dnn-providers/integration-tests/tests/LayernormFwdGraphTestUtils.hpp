@@ -36,7 +36,7 @@ inline flatbuffers::FlatBufferBuilder
                             const std::vector<int64_t>& biasStrides,
                             const std::optional<std::vector<int64_t>>& meanStrides,
                             const std::optional<std::vector<int64_t>>& invVarianceStrides,
-                            const double epsilon,
+                            const float epsilon,
                             const int64_t normalizedDimCount,
                             const DataType xDataType,
                             const DataType yDataType,
@@ -60,12 +60,12 @@ inline flatbuffers::FlatBufferBuilder
         CreateTensorAttributesDirect(builder,
                                      epsilonUid,
                                      "epsilon",
-                                     DataType::DOUBLE,
+                                     DataType::FLOAT,
                                      &epsilonDimsStrides,
                                      &epsilonDimsStrides,
                                      false,
-                                     TensorValue::Float64Value,
-                                     builder.CreateStruct(Float64Value(epsilon)).Union()));
+                                     TensorValue::Float32Value,
+                                     builder.CreateStruct(Float32Value(epsilon)).Union()));
     if(meanUid.has_value() && meanDims.has_value() && meanStrides.has_value()
        && meanInvVarianceDataType.has_value())
     {
@@ -129,7 +129,7 @@ inline flatbuffers::FlatBufferBuilder
                             const std::optional<int64_t> invVarianceUid,
                             const std::vector<int64_t>& ioDims,
                             const TensorLayout& layout,
-                            const double epsilon,
+                            const float epsilon,
                             const int64_t normalizedDimCount,
                             const DataType xDataType,
                             const DataType yDataType,

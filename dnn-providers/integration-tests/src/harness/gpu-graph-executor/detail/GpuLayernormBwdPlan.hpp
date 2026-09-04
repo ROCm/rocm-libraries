@@ -134,8 +134,9 @@ public:
         double epsilon = hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON;
         if(_params.epsilonTensor.has_value())
         {
-            epsilon = hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack(
-                _params.epsilonTensor.value(), variantPack, "Epsilon");
+            epsilon = static_cast<double>(
+                hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<ComputeDataType>(
+                    _params.epsilonTensor.value(), variantPack, "Epsilon"));
         }
 
         hipdnn_gpu_ref::GpuFpReferenceLayernorm::bprop<DyDataType,
@@ -190,6 +191,13 @@ public:
             return false;
         }
 
+        std::vector<int64_t> operandUids = {nodeAttributes->dy_tensor_uid(),
+                                            nodeAttributes->x_tensor_uid(),
+                                            nodeAttributes->scale_tensor_uid(),
+                                            nodeAttributes->dx_tensor_uid(),
+                                            nodeAttributes->dscale_tensor_uid(),
+                                            nodeAttributes->dbias_tensor_uid()};
+
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dy_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid());
@@ -198,15 +206,18 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dbias_tensor_uid());
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid());
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid().value());
+            operandUids.push_back(nodeAttributes->mean_tensor_uid().value());
         }
         if(nodeAttributes->inv_variance_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid());
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid().value());
+            operandUids.push_back(nodeAttributes->inv_variance_tensor_uid().value());
         }
         if(nodeAttributes->epsilon_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->epsilon_tensor_uid());
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->epsilon_tensor_uid().value());
+            operandUids.push_back(nodeAttributes->epsilon_tensor_uid().value());
         }
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), DyDataTypeEnum);
@@ -217,22 +228,22 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dbias_tensor_uid(), ScaleBiasDataTypeEnum);
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_TYPE(
-                tensorMap, nodeAttributes->mean_tensor_uid(), MeanInvVarianceDataTypeEnum);
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanInvVarianceDataTypeEnum);
         }
         if(nodeAttributes->inv_variance_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_TYPE(
-                tensorMap, nodeAttributes->inv_variance_tensor_uid(), MeanInvVarianceDataTypeEnum);
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->inv_variance_tensor_uid().value(),
+                              MeanInvVarianceDataTypeEnum);
         }
         if(nodeAttributes->epsilon_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_TYPE(tensorMap,
-                                       nodeAttributes->epsilon_tensor_uid(),
-                                       hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE);
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->epsilon_tensor_uid().value(), ComputeDataTypeEnum);
         }
 
-        return true;
+        return !anyOperandIsRuntimePassByValue(tensorMap, operandUids);
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>

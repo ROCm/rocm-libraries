@@ -4,8 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <functional>
-#include <numeric>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <stdexcept>
 #include <unordered_map>
 
 #include <hip/hip_runtime.h>
@@ -41,7 +41,7 @@ TEST(TestGpuLayernormFwdPlanBuilder, PlanConstruction)
 
     const std::vector<int64_t> ioDims = {2, 3, 4, 5};
     const TensorLayout layout = TensorLayout::NCHW;
-    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
+    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
     const int64_t normalizedDimCount = 2;
 
     auto graphBuilder = createLayernormFwdGraph(X_UID,
@@ -77,6 +77,15 @@ TEST(TestGpuLayernormFwdPlanBuilder, PlanConstruction)
         = dynamic_cast<GpuLayernormFwdPlan<float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
     EXPECT_TRUE(result);
+
+    // Layernorm fwd builder should not be able to build a batchnorm fwd graph
+    auto batchnormGraphBuilder = createValidBatchnormFwdTrainingGraph();
+
+    auto batchnormGraphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        batchnormGraphBuilder.GetBufferPointer(), batchnormGraphBuilder.GetSize());
+
+    EXPECT_THROW(planBuilder.buildNodePlan(batchnormGraphWrapper, batchnormGraphWrapper.getNode(0)),
+                 std::runtime_error);
 }
 
 TEST(TestGpuLayernormFwdPlanBuilder, IsApplicable)
@@ -91,7 +100,7 @@ TEST(TestGpuLayernormFwdPlanBuilder, IsApplicable)
 
     const std::vector<int64_t> ioDims = {2, 3, 4, 5};
     const TensorLayout layout = TensorLayout::NCHW;
-    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
+    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
     const int64_t normalizedDimCount = 2;
 
     auto graphBuilder = createLayernormFwdGraph(X_UID,
@@ -135,10 +144,30 @@ TEST(TestGpuLayernormFwdPlanBuilder, IsApplicable)
     EXPECT_FALSE(
         halfPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
+    // Half epsilon should not be applicable for a graph with a float epsilon
+    const GpuLayernormFwdPlanBuilder<DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::HALF>
+        halfEpsilonPlanBuilder;
+
+    EXPECT_FALSE(
+        halfEpsilonPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+
     // Missing tensor should return false
     auto tensorMapCopy = graphWrapper.getTensorMap();
     tensorMapCopy.erase(X_UID);
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrapper.getNode(0), tensorMapCopy));
+
+    // Layernorm fwd builder should not be applicable for a batchnorm fwd graph
+    auto batchnormGraphBuilder = createValidBatchnormFwdTrainingGraph();
+
+    auto batchnormGraphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        batchnormGraphBuilder.GetBufferPointer(), batchnormGraphBuilder.GetSize());
+
+    EXPECT_FALSE(floatPlanBuilder.isApplicable(batchnormGraphWrapper.getNode(0),
+                                               batchnormGraphWrapper.getTensorMap()));
 }
 
 // ====================================================
@@ -147,11 +176,6 @@ TEST(TestGpuLayernormFwdPlanBuilder, IsApplicable)
 
 namespace
 {
-
-inline size_t elementCount(const std::vector<int64_t>& dims)
-{
-    return std::accumulate(dims.begin(), dims.end(), size_t{1}, std::multiplies<>());
-}
 
 template <typename XType,
           typename ScaleBiasType,
@@ -197,7 +221,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     auto meanInvVarianceDataType = nativeTypeToDataType<MeanInvVarianceType>();
     auto computeDataType = nativeTypeToDataType<ComputeType>();
 
-    const auto epsilon = LAYERNORM_DEFAULT_EPSILON;
+    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
     auto graphBuilder = createLayernormFwdGraph(X_UID,
                                                 Y_UID,
                                                 SCALE_UID,
@@ -237,85 +261,77 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     GpuLayernormFwdPlan<XType, ScaleBiasType, MeanInvVarianceType, YType, ComputeType> gpuPlan(
         std::move(params));
 
-    auto ioCount = elementCount(ioDims);
-    auto normCount = elementCount(normDims);
-    auto batchCount = elementCount(batchDims);
-
-    Tensor<XType> cpuX(ioDims, ioStrides);
+    Tensor<XType> xTensor(ioDims, ioStrides);
+    Tensor<ScaleBiasType> scaleTensor(normDims, normStrides);
+    Tensor<ScaleBiasType> biasTensor(normDims, normStrides);
+    Tensor<ComputeType> epsilonTensor(std::vector<int64_t>{1}, std::vector<int64_t>{1});
     Tensor<YType> cpuY(ioDims, ioStrides);
-    Tensor<ScaleBiasType> cpuScale(normDims, normStrides);
-    Tensor<ScaleBiasType> cpuBias(normDims, normStrides);
-    Tensor<ComputeType> cpuEpsilon(std::vector<int64_t>{1}, std::vector<int64_t>{1});
     Tensor<MeanInvVarianceType> cpuMean(batchDims, batchStrides);
     Tensor<MeanInvVarianceType> cpuRstd(batchDims, batchStrides);
 
     constexpr unsigned int SEED = 42;
-    cpuX.fillWithRandomValues(static_cast<XType>(-1.0), static_cast<XType>(1.0), SEED);
-    cpuScale.fillWithRandomValues(
+    xTensor.fillWithRandomValues(static_cast<XType>(-1.0), static_cast<XType>(1.0), SEED);
+    scaleTensor.fillWithRandomValues(
         static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 1);
-    cpuBias.fillWithRandomValues(
+    biasTensor.fillWithRandomValues(
         static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 2);
-    cpuEpsilon.fillWithValue(static_cast<ComputeType>(LAYERNORM_DEFAULT_EPSILON));
+    epsilonTensor.fillWithValue(static_cast<ComputeType>(LAYERNORM_DEFAULT_EPSILON));
 
-    const Workspace gpuX(ioCount * sizeof(XType));
-    const Workspace gpuY(ioCount * sizeof(YType));
-    const Workspace gpuScale(normCount * sizeof(ScaleBiasType));
-    const Workspace gpuBias(normCount * sizeof(ScaleBiasType));
-    const Workspace gpuEpsilon(sizeof(ComputeType));
-    const Workspace gpuMean(batchCount * sizeof(MeanInvVarianceType));
-    const Workspace gpuRstd(batchCount * sizeof(MeanInvVarianceType));
-
-    ASSERT_EQ(
-        hipMemcpy(gpuX.get(), cpuX.rawHostData(), ioCount * sizeof(XType), hipMemcpyHostToDevice),
-        hipSuccess);
-    ASSERT_EQ(hipMemcpy(gpuScale.get(),
-                        cpuScale.rawHostData(),
-                        normCount * sizeof(ScaleBiasType),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(gpuBias.get(),
-                        cpuBias.rawHostData(),
-                        normCount * sizeof(ScaleBiasType),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(
-        hipMemcpy(
-            gpuEpsilon.get(), cpuEpsilon.rawHostData(), sizeof(ComputeType), hipMemcpyHostToDevice),
-        hipSuccess);
+    Tensor<YType> gpuY(ioDims, ioStrides);
+    Tensor<MeanInvVarianceType> gpuMean(batchDims, batchStrides);
+    Tensor<MeanInvVarianceType> gpuRstd(batchDims, batchStrides);
 
     std::unordered_map<int64_t, void*> gpuVariantPack;
-    gpuVariantPack[X_UID] = gpuX.get();
-    gpuVariantPack[Y_UID] = gpuY.get();
-    gpuVariantPack[SCALE_UID] = gpuScale.get();
-    gpuVariantPack[BIAS_UID] = gpuBias.get();
-    gpuVariantPack[EPSILON_UID] = gpuEpsilon.get();
-    gpuVariantPack[MEAN_UID] = gpuMean.get();
-    gpuVariantPack[INV_VARIANCE_UID] = gpuRstd.get();
+    gpuVariantPack[X_UID] = xTensor.rawDeviceData();
+    gpuVariantPack[Y_UID] = gpuY.rawDeviceData();
+    gpuVariantPack[SCALE_UID] = scaleTensor.rawDeviceData();
+    gpuVariantPack[BIAS_UID] = biasTensor.rawDeviceData();
+    gpuVariantPack[EPSILON_UID] = epsilonTensor.rawDeviceData();
+    gpuVariantPack[MEAN_UID] = gpuMean.rawDeviceData();
+    gpuVariantPack[INV_VARIANCE_UID] = gpuRstd.rawDeviceData();
 
     gpuPlan.execute(gpuVariantPack);
-
-    std::vector<YType> gpuYData(ioCount);
-    ASSERT_EQ(
-        hipMemcpy(gpuYData.data(), gpuY.get(), ioCount * sizeof(YType), hipMemcpyDeviceToHost),
-        hipSuccess);
+    gpuY.markDeviceModified();
+    gpuMean.markDeviceModified();
+    gpuRstd.markDeviceModified();
 
     std::unordered_map<int64_t, void*> cpuVariantPack;
-    cpuVariantPack[X_UID] = cpuX.rawHostData();
+    cpuVariantPack[X_UID] = xTensor.rawHostData();
     cpuVariantPack[Y_UID] = cpuY.rawHostData();
-    cpuVariantPack[SCALE_UID] = cpuScale.rawHostData();
-    cpuVariantPack[BIAS_UID] = cpuBias.rawHostData();
-    cpuVariantPack[EPSILON_UID] = cpuEpsilon.rawHostData();
+    cpuVariantPack[SCALE_UID] = scaleTensor.rawHostData();
+    cpuVariantPack[BIAS_UID] = biasTensor.rawHostData();
+    cpuVariantPack[EPSILON_UID] = epsilonTensor.rawHostData();
     cpuVariantPack[MEAN_UID] = cpuMean.rawHostData();
     cpuVariantPack[INV_VARIANCE_UID] = cpuRstd.rawHostData();
 
     CpuReferenceGraphExecutor cpuExecutor;
     cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
+    cpuY.markHostModified();
+    cpuMean.markHostModified();
+    cpuRstd.markHostModified();
 
     const auto* cpuYData = static_cast<const YType*>(cpuY.rawHostData());
-    for(size_t i = 0; i < ioCount; ++i)
+    const auto* gpuYData = static_cast<const YType*>(gpuY.rawHostData());
+    for(size_t i = 0; i < cpuY.elementCount(); ++i)
     {
         EXPECT_NEAR(static_cast<float>(gpuYData[i]), static_cast<float>(cpuYData[i]), tolerance)
             << "Mismatch in y at index " << i;
+    }
+    const auto* cpuMeanData = static_cast<const MeanInvVarianceType*>(cpuMean.rawHostData());
+    const auto* gpuMeanData = static_cast<const MeanInvVarianceType*>(gpuMean.rawHostData());
+    for(size_t i = 0; i < cpuMean.elementCount(); ++i)
+    {
+        EXPECT_NEAR(
+            static_cast<float>(gpuMeanData[i]), static_cast<float>(cpuMeanData[i]), tolerance)
+            << "Mismatch in mean at index " << i;
+    }
+    const auto* cpuRstdData = static_cast<const MeanInvVarianceType*>(cpuRstd.rawHostData());
+    const auto* gpuRstdData = static_cast<const MeanInvVarianceType*>(gpuRstd.rawHostData());
+    for(size_t i = 0; i < cpuRstd.elementCount(); ++i)
+    {
+        EXPECT_NEAR(
+            static_cast<float>(gpuRstdData[i]), static_cast<float>(cpuRstdData[i]), tolerance)
+            << "Mismatch in rstd at index " << i;
     }
 }
 

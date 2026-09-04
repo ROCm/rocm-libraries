@@ -92,9 +92,9 @@ public:
             variantPack.at(_params.biasTensor.uid),
             _params.biasTensor.dims,
             _params.biasTensor.strides);
-        const double epsilon
-            = hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack(
-                _params.epsilonTensor, variantPack, "Epsilon");
+        const auto epsilon = static_cast<double>(
+            hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<ComputeDataType>(
+                _params.epsilonTensor, variantPack, "Epsilon"));
         std::unique_ptr<hipdnn_gpu_ref::ShallowGpuTensor<MeanInvVarianceDataType>> meanTensor;
         hipdnn_gpu_ref::ShallowGpuTensor<MeanInvVarianceDataType>* meanTensorPtr = nullptr;
         if(_params.meanTensor.has_value())
@@ -169,6 +169,12 @@ public:
             return false;
         }
 
+        std::vector<int64_t> operandUids = {nodeAttributes->x_tensor_uid(),
+                                            nodeAttributes->scale_tensor_uid(),
+                                            nodeAttributes->bias_tensor_uid(),
+                                            nodeAttributes->y_tensor_uid(),
+                                            nodeAttributes->epsilon_tensor_uid()};
+
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->bias_tensor_uid());
@@ -176,32 +182,32 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->epsilon_tensor_uid());
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid());
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid().value());
+            operandUids.push_back(nodeAttributes->mean_tensor_uid().value());
         }
         if(nodeAttributes->inv_variance_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid());
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid().value());
         }
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->bias_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), YDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap,
-                          nodeAttributes->epsilon_tensor_uid(),
-                          hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->epsilon_tensor_uid(), ComputeDataTypeEnum);
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_TYPE(
-                tensorMap, nodeAttributes->mean_tensor_uid(), MeanInvVarianceDataTypeEnum);
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanInvVarianceDataTypeEnum);
         }
         if(nodeAttributes->inv_variance_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_TYPE(
-                tensorMap, nodeAttributes->inv_variance_tensor_uid(), MeanInvVarianceDataTypeEnum);
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->inv_variance_tensor_uid().value(),
+                              MeanInvVarianceDataTypeEnum);
         }
 
-        return true;
+        return !anyOperandIsRuntimePassByValue(tensorMap, operandUids);
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>

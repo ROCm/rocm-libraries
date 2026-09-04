@@ -58,13 +58,12 @@ struct GpuLayernormFwdSignatureKey
 
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
         auto yTensorAttr = tensorMap.at(nodeAttributes->y_tensor_uid());
-        if(xTensorAttr == nullptr || yTensorAttr == nullptr)
+        auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
+        if(xTensorAttr == nullptr || scaleTensorAttr == nullptr || yTensorAttr == nullptr)
         {
             throw std::runtime_error("One or more tensor attributes could not be found in the map, "
                                      "failed to construct key");
         }
-
-        auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
 
         xDataType = xTensorAttr->data_type();
         scaleBiasDataType = scaleTensorAttr->data_type();
