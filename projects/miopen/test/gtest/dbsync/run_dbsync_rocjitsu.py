@@ -82,15 +82,22 @@ def cu_correct_config(in_path: Path, cu_count: int, out_path: Path):
 
 
 def ensure_build_tools():
-    """Install cmake/build-essential/libdrm-dev/git if missing (needs root; container runs --user 0)."""
+    """Install cmake/build-essential/libdrm-dev/git if missing.
+
+    Uses sudo rather than assuming the container runs as root: TheRock's
+    no_rocm_image_ubuntu24_04 (and its variants) run as an unprivileged
+    `tester` user with passwordless sudo configured, and some CI runner
+    pools don't honor a container's --user 0:0 override.
+    """
     if (
         all(shutil.which(t) for t in ("cmake", "c++", "git"))
         and Path("/usr/include/libdrm").exists()
     ):
         return
-    run(["apt-get", "update"])
+    run(["sudo", "apt-get", "update"])
     run(
         [
+            "sudo",
             "apt-get",
             "install",
             "-y",
