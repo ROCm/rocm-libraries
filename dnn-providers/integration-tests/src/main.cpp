@@ -157,9 +157,10 @@ int main(int argc, char** argv) noexcept
             .default_value(false)
             .implicit_value(true)
             .help("Observe live engine support and write .support.json sidecars. "
-                  "Requires --test-article (mode B: all engines, or mode C with "
-                  "--test-engine). Implies --allow-bundles, since bundles are what "
-                  "carry the claims. Idempotent: no support change = zero git diff.");
+                  "Requires --test-article and --golden-data-dir (mode B: all "
+                  "engines, or mode C with --test-engine). Implies --allow-bundles, "
+                  "since bundles are what carry the claims. Idempotent: no support "
+                  "change = zero git diff.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -321,6 +322,13 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        if(opts.writeSupportClaims && !opts.goldenDataDir.has_value())
+        {
+            std::cerr << "--write-support-claims requires --golden-data-dir so that "
+                      << "sidecars land in the source tree, not in a build artifact.\n";
+            return 1;
+        }
+
         if(opts.writeSupportClaims && opts.enforceSupportClaims)
         {
             std::cerr << "--write-support-claims and --enforce-support-claims are "
@@ -459,6 +467,7 @@ int main(int argc, char** argv) noexcept
                     = hipdnn_integration_tests::bundle::writeObservedSupportClaims(
                         hipdnn_integration_tests::bundle::SupportObservationLog::get().all());
                 std::cerr << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
+                          << "  observations: " << writeSummary.observationsApplied
                           << "  written: " << writeSummary.filesWritten
                           << "  unchanged: " << writeSummary.filesUnchanged
                           << "  skipped: " << writeSummary.filesSkipped
