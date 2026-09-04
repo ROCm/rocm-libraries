@@ -17,7 +17,7 @@ using namespace gpu_batchnorm_fwd_ref_test;
 
 // --- Validation configurations ---
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnInputRankTooSmall)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnInputRankTooSmall)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -28,11 +28,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnInputRankTooSmall)
     Tensor<float> estMean({1, 8});
     Tensor<float> invVar({1, 8});
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnInputRankTooLarge)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnInputRankTooLarge)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -43,11 +44,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnInputRankTooLarge)
     Tensor<float> estMean({1, 8, 1, 1, 1, 1});
     Tensor<float> invVar({1, 8, 1, 1, 1, 1});
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnOutputRankMismatch)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnOutputRankMismatch)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> x({4, 8, 2, 2});
@@ -57,11 +59,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnOutputRankMismatch)
     Tensor<float> estMean({1, 8, 1, 1});
     Tensor<float> invVar({1, 8, 1, 1});
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnAffineRankMismatch)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnAffineRankMismatch)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> x({4, 8, 2, 2});
@@ -71,11 +74,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnAffineRankMismatch)
     Tensor<float> estMean({1, 8, 1, 1});
     Tensor<float> invVar({1, 8, 1, 1});
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnAffineNotChannelOnly)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnAffineNotChannelOnly)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> x({4, 8, 2, 2});
@@ -85,11 +89,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnAffineNotChannelOnly)
     Tensor<float> estMean({1, 8, 1, 1});
     Tensor<float> invVar({1, 8, 1, 1});
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnAffineWrongChannel)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnAffineWrongChannel)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> x({4, 8, 2, 2});
@@ -99,11 +104,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnAffineWrongChannel)
     Tensor<float> estMean({1, 4, 1, 1});
     Tensor<float> invVar({1, 8, 1, 1});
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, AcceptsAffineBroadcast)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, AcceptsAffineBroadcast)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> x({4, 8, 2, 2});
@@ -113,10 +119,11 @@ TEST(TestGpuBatchnormFwdInfRefValidation, AcceptsAffineBroadcast)
     Tensor<float> estMean({1, 8, 1});
     Tensor<float> invVar({1, 8});
 
-    EXPECT_NO_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y));
+    EXPECT_NO_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y));
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnInconsistentLayout)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnInconsistentLayout)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> x({4, 8, 2, 2}, TensorLayout::NHWC);
@@ -126,11 +133,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnInconsistentLayout)
     Tensor<float> estMean({1, 8}, TensorLayout::NHWC);
     Tensor<float> invVar({1, 8}, TensorLayout::NHWC);
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnInvalidLayout)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnInvalidLayout)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> x({4, 8, 2, 2}, TensorLayout::BSHD);
@@ -140,11 +148,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnInvalidLayout)
     Tensor<float> estMean({1, 8}, TensorLayout::BSHD);
     Tensor<float> invVar({1, 8}, TensorLayout::BSHD);
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnNonPackedIOLayout)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnNonPackedIOLayout)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> x({4, 2, 1, 1}, {16, 4, 1, 1});
@@ -154,11 +163,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnNonPackedIOLayout)
     Tensor<float> estMean({1, 2}, {2, 1});
     Tensor<float> invVar({1, 2}, {2, 1});
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnNonPackedAffineLayout)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnNonPackedAffineLayout)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> x({4, 2, 1, 1});
@@ -168,11 +178,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnNonPackedAffineLayout)
     Tensor<float> estMean({1, 2}, {4, 2});
     Tensor<float> invVar({1, 2}, {4, 2});
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnZeroChannelDim)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnZeroChannelDim)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -190,11 +201,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnZeroChannelDim)
     ShallowTensor<float> estMean(backing.data(), affineDims, affineStrides);
     ShallowTensor<float> invVar(backing.data(), affineDims, affineStrides);
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnZeroBatchDim)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnZeroBatchDim)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -212,11 +224,12 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnZeroBatchDim)
     ShallowTensor<float> estMean(backing.data(), affineDims, affineStrides);
     ShallowTensor<float> invVar(backing.data(), affineDims, affineStrides);
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnZeroSpatialDim)
+TEST(TestGpuBatchnormFwdInfVarRefValidation, ThrowsOnZeroSpatialDim)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -234,13 +247,14 @@ TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnZeroSpatialDim)
     ShallowTensor<float> estMean(backing.data(), affineDims, affineStrides);
     ShallowTensor<float> invVar(backing.data(), affineDims, affineStrides);
 
-    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, invVar, y),
+        std::invalid_argument);
 }
 
 // --- Test 3D/4D/5D shapes ---
 
-TEST(TestGpuBatchnormFwdInf3DShapes, Broadcast2D)
+TEST(TestGpuBatchnormFwdInfVar3DShapes, Broadcast2D)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -248,7 +262,7 @@ TEST(TestGpuBatchnormFwdInf3DShapes, Broadcast2D)
     Tensor<float> scale({1, 2});
     Tensor<float> bias({1, 2});
     Tensor<float> estMean({1, 2});
-    Tensor<float> invVar({1, 2});
+    Tensor<float> variance({1, 2});
     Tensor<float> yCpu({3, 2, 4});
     Tensor<float> yGpu({3, 2, 4});
 
@@ -258,15 +272,44 @@ TEST(TestGpuBatchnormFwdInf3DShapes, Broadcast2D)
     scale.fillWithRandomValues(-fillRange, fillRange, seed++);
     bias.fillWithRandomValues(-fillRange, fillRange, seed++);
     estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    variance.fillWithRandomValues(0.1f, 1.f, seed++);
 
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
+    GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<float>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<float>());
 }
 
-TEST(TestGpuBatchnormFwdInf4DShapes, Broadcast2D)
+TEST(TestGpuBatchnormFwdInfVar3DShapes, MaterialEpsilon)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> x({3, 2, 4});
+    Tensor<float> scale({1, 2, 1});
+    Tensor<float> bias({1, 2, 1});
+    Tensor<float> estMean({1, 2, 1});
+    Tensor<float> variance({1, 2, 1});
+    Tensor<float> yCpu({3, 2, 4});
+    Tensor<float> yGpu({3, 2, 4});
+
+    unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    x.fillWithRandomValues(-fillRange, fillRange, seed++);
+    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
+    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
+    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
+    variance.fillWithRandomValues(0.1f, 1.f, seed++);
+
+    const double epsilon = 0.1;
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+        x, scale, bias, estMean, variance, yCpu, epsilon);
+    GpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+        x, scale, bias, estMean, variance, yGpu, epsilon);
+
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<float>());
+}
+
+TEST(TestGpuBatchnormFwdInfVar4DShapes, Broadcast2D)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -274,7 +317,7 @@ TEST(TestGpuBatchnormFwdInf4DShapes, Broadcast2D)
     Tensor<float> scale({1, 2});
     Tensor<float> bias({1, 2});
     Tensor<float> estMean({1, 2});
-    Tensor<float> invVar({1, 2});
+    Tensor<float> variance({1, 2});
     Tensor<float> yCpu({3, 2, 4, 4});
     Tensor<float> yGpu({3, 2, 4, 4});
 
@@ -284,15 +327,15 @@ TEST(TestGpuBatchnormFwdInf4DShapes, Broadcast2D)
     scale.fillWithRandomValues(-fillRange, fillRange, seed++);
     bias.fillWithRandomValues(-fillRange, fillRange, seed++);
     estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
 
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
+    GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<float>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<float>());
 }
 
-TEST(TestGpuBatchnormFwdInf4DShapes, Broadcast3D)
+TEST(TestGpuBatchnormFwdInfVar4DShapes, Broadcast3D)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -300,7 +343,7 @@ TEST(TestGpuBatchnormFwdInf4DShapes, Broadcast3D)
     Tensor<float> scale({1, 2, 1});
     Tensor<float> bias({1, 2, 1});
     Tensor<float> estMean({1, 2, 1});
-    Tensor<float> invVar({1, 2, 1});
+    Tensor<float> variance({1, 2, 1});
     Tensor<float> yCpu({3, 2, 4, 4});
     Tensor<float> yGpu({3, 2, 4, 4});
 
@@ -310,15 +353,44 @@ TEST(TestGpuBatchnormFwdInf4DShapes, Broadcast3D)
     scale.fillWithRandomValues(-fillRange, fillRange, seed++);
     bias.fillWithRandomValues(-fillRange, fillRange, seed++);
     estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
 
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
+    GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<float>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<float>());
 }
 
-TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast2D)
+TEST(TestGpuBatchnormFwdInfVar4DShapes, MaterialEpsilon)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> x({3, 2, 4, 4});
+    Tensor<float> scale({1, 2, 1, 1});
+    Tensor<float> bias({1, 2, 1, 1});
+    Tensor<float> estMean({1, 2, 1, 1});
+    Tensor<float> variance({1, 2, 1, 1});
+    Tensor<float> yCpu({3, 2, 4, 4});
+    Tensor<float> yGpu({3, 2, 4, 4});
+
+    unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    x.fillWithRandomValues(-fillRange, fillRange, seed++);
+    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
+    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
+    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
+    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
+
+    const double epsilon = 0.1;
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+        x, scale, bias, estMean, variance, yCpu, epsilon);
+    GpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+        x, scale, bias, estMean, variance, yGpu, epsilon);
+
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<float>());
+}
+
+TEST(TestGpuBatchnormFwdInfVar5DShapes, Broadcast2D)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -326,7 +398,7 @@ TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast2D)
     Tensor<float> scale({1, 2});
     Tensor<float> bias({1, 2});
     Tensor<float> estMean({1, 2});
-    Tensor<float> invVar({1, 2});
+    Tensor<float> variance({1, 2});
     Tensor<float> yCpu({3, 2, 4, 4, 2});
     Tensor<float> yGpu({3, 2, 4, 4, 2});
 
@@ -336,15 +408,15 @@ TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast2D)
     scale.fillWithRandomValues(-fillRange, fillRange, seed++);
     bias.fillWithRandomValues(-fillRange, fillRange, seed++);
     estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
 
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
+    GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<float>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<float>());
 }
 
-TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast3D)
+TEST(TestGpuBatchnormFwdInfVar5DShapes, Broadcast3D)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -352,7 +424,7 @@ TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast3D)
     Tensor<float> scale({1, 2, 1});
     Tensor<float> bias({1, 2, 1});
     Tensor<float> estMean({1, 2, 1});
-    Tensor<float> invVar({1, 2, 1});
+    Tensor<float> variance({1, 2, 1});
     Tensor<float> yCpu({3, 2, 4, 4, 2});
     Tensor<float> yGpu({3, 2, 4, 4, 2});
 
@@ -362,15 +434,15 @@ TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast3D)
     scale.fillWithRandomValues(-fillRange, fillRange, seed++);
     bias.fillWithRandomValues(-fillRange, fillRange, seed++);
     estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
 
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
+    GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<float>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<float>());
 }
 
-TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast4D)
+TEST(TestGpuBatchnormFwdInfVar5DShapes, Broadcast4D)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -378,7 +450,7 @@ TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast4D)
     Tensor<float> scale({1, 2, 1, 1});
     Tensor<float> bias({1, 2, 1, 1});
     Tensor<float> estMean({1, 2, 1, 1});
-    Tensor<float> invVar({1, 2, 1, 1});
+    Tensor<float> variance({1, 2, 1, 1});
     Tensor<float> yCpu({3, 2, 4, 4, 2});
     Tensor<float> yGpu({3, 2, 4, 4, 2});
 
@@ -388,18 +460,47 @@ TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast4D)
     scale.fillWithRandomValues(-fillRange, fillRange, seed++);
     bias.fillWithRandomValues(-fillRange, fillRange, seed++);
     estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
 
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
+    GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<float>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<float>());
+}
+
+TEST(TestGpuBatchnormFwdInfVar5DShapes, MaterialEpsilon)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> x({3, 2, 4, 4, 2});
+    Tensor<float> scale({1, 2, 1, 1, 1});
+    Tensor<float> bias({1, 2, 1, 1, 1});
+    Tensor<float> estMean({1, 2, 1, 1, 1});
+    Tensor<float> variance({1, 2, 1, 1, 1});
+    Tensor<float> yCpu({3, 2, 4, 4, 2});
+    Tensor<float> yGpu({3, 2, 4, 4, 2});
+
+    unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    x.fillWithRandomValues(-fillRange, fillRange, seed++);
+    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
+    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
+    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
+    variance.fillWithRandomValues(0.1f, 1.0f, seed++);
+
+    const double epsilon = 0.1;
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+        x, scale, bias, estMean, variance, yCpu, epsilon);
+    GpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+        x, scale, bias, estMean, variance, yGpu, epsilon);
+
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<float>());
 }
 
 // Edge case tests with DISABLED_ prefix to avoid running in CI.
 // Run the tests manually with --gtest_also_run_disabled_tests
 // --gtest_filter=*ExceedsUInt32MaxElements* flags.
-TEST(TestGpuBatchnormFwdInf5DShapes, DISABLED_ExceedsUInt32MaxElements)
+TEST(TestGpuBatchnormFwdInfVar5DShapes, DISABLED_ExceedsUInt32MaxElements)
 {
     SKIP_IF_NO_DEVICES();
     // Test with 4,974,412,500 elements, which is greater than 4,294,967,295 UINT32_MAX
@@ -407,7 +508,7 @@ TEST(TestGpuBatchnormFwdInf5DShapes, DISABLED_ExceedsUInt32MaxElements)
     Tensor<half> scale({1, 255, 1, 1, 1});
     Tensor<half> bias({1, 255, 1, 1, 1});
     Tensor<half> estMean({1, 255, 1, 1, 1});
-    Tensor<half> invVar({1, 255, 1, 1, 1});
+    Tensor<half> variance({1, 255, 1, 1, 1});
     Tensor<half> yCpu({255, 255, 255, 50, 6});
     Tensor<half> yGpu({255, 255, 255, 50, 6});
 
@@ -417,17 +518,17 @@ TEST(TestGpuBatchnormFwdInf5DShapes, DISABLED_ExceedsUInt32MaxElements)
     scale.fillWithRandomValues(-fillRange, fillRange, seed++);
     bias.fillWithRandomValues(-fillRange, fillRange, seed++);
     estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    variance.fillWithRandomValues(half(0.1f), half(1.0f), seed++);
 
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yCpu);
+    GpuFpReferenceBatchnorm::fwdInferenceWithVariance(x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<half>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<half>());
 }
 
 // --- Test mixed precision ---
 
-TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastX)
+TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastX)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -441,7 +542,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastX)
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
     Tensor<ScaleBiasType> bias({1, 2, 1, 1});
     Tensor<MeanVarType> estMean({1, 2, 1, 1});
-    Tensor<MeanVarType> invVar({1, 2, 1, 1});
+    Tensor<MeanVarType> variance({1, 2, 1, 1});
     Tensor<YDataType> yCpu({1, 2, 2, 2});
     Tensor<YDataType> yGpu({1, 2, 2, 2});
 
@@ -455,20 +556,20 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastX)
         static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
     estMean.fillWithRandomValues(
         static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    variance.fillWithRandomValues(
+        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yCpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yGpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<YDataType>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<YDataType>());
 }
 
-TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastX)
+TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastX)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -482,7 +583,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastX)
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
     Tensor<ScaleBiasType> bias({1, 2, 1, 1});
     Tensor<MeanVarType> estMean({1, 2, 1, 1});
-    Tensor<MeanVarType> invVar({1, 2, 1, 1});
+    Tensor<MeanVarType> variance({1, 2, 1, 1});
     Tensor<YDataType> yCpu({1, 2, 2, 2});
     Tensor<YDataType> yGpu({1, 2, 2, 2});
 
@@ -496,20 +597,20 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastX)
         static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
     estMean.fillWithRandomValues(
         static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    variance.fillWithRandomValues(
+        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yCpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yGpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<YDataType>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<YDataType>());
 }
 
-TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastY)
+TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastY)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -523,7 +624,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastY)
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
     Tensor<ScaleBiasType> bias({1, 2, 1, 1});
     Tensor<MeanVarType> estMean({1, 2, 1, 1});
-    Tensor<MeanVarType> invVar({1, 2, 1, 1});
+    Tensor<MeanVarType> variance({1, 2, 1, 1});
     Tensor<YDataType> yCpu({1, 2, 2, 2});
     Tensor<YDataType> yGpu({1, 2, 2, 2});
 
@@ -537,20 +638,20 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastY)
         static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
     estMean.fillWithRandomValues(
         static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    variance.fillWithRandomValues(
+        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yCpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yGpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<YDataType>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<YDataType>());
 }
 
-TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastY)
+TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastY)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -564,7 +665,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastY)
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
     Tensor<ScaleBiasType> bias({1, 2, 1, 1});
     Tensor<MeanVarType> estMean({1, 2, 1, 1});
-    Tensor<MeanVarType> invVar({1, 2, 1, 1});
+    Tensor<MeanVarType> variance({1, 2, 1, 1});
     Tensor<YDataType> yCpu({1, 2, 2, 2});
     Tensor<YDataType> yGpu({1, 2, 2, 2});
 
@@ -578,20 +679,20 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastY)
         static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
     estMean.fillWithRandomValues(
         static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    variance.fillWithRandomValues(
+        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yCpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yGpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<YDataType>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<YDataType>());
 }
 
-TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastAffine)
+TEST(TestGpuBatchnormFwdInfVarMixedPrecision, UpcastAffine)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -605,7 +706,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastAffine)
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
     Tensor<ScaleBiasType> bias({1, 2, 1, 1});
     Tensor<MeanVarType> estMean({1, 2, 1, 1});
-    Tensor<MeanVarType> invVar({1, 2, 1, 1});
+    Tensor<MeanVarType> variance({1, 2, 1, 1});
     Tensor<YDataType> yCpu({1, 2, 2, 2});
     Tensor<YDataType> yGpu({1, 2, 2, 2});
 
@@ -619,20 +720,20 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastAffine)
         static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
     estMean.fillWithRandomValues(
         static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    variance.fillWithRandomValues(
+        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yCpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yGpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<YDataType>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<YDataType>());
 }
 
-TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastAffine)
+TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastAffine)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -646,7 +747,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastAffine)
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
     Tensor<ScaleBiasType> bias({1, 2, 1, 1});
     Tensor<MeanVarType> estMean({1, 2, 1, 1});
-    Tensor<MeanVarType> invVar({1, 2, 1, 1});
+    Tensor<MeanVarType> variance({1, 2, 1, 1});
     Tensor<YDataType> yCpu({1, 2, 2, 2});
     Tensor<YDataType> yGpu({1, 2, 2, 2});
 
@@ -660,20 +761,20 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastAffine)
         static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
     estMean.fillWithRandomValues(
         static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    variance.fillWithRandomValues(
+        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yCpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yCpu);
     GpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yGpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<YDataType>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<YDataType>());
 }
 
-TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeHalf)
+TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastComputeHalf)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -687,7 +788,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeHalf)
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
     Tensor<ScaleBiasType> bias({1, 2, 1, 1});
     Tensor<MeanVarType> estMean({1, 2, 1, 1});
-    Tensor<MeanVarType> invVar({1, 2, 1, 1});
+    Tensor<MeanVarType> variance({1, 2, 1, 1});
     Tensor<YDataType> yCpu({1, 2, 2, 2});
     Tensor<YDataType> yGpu({1, 2, 2, 2});
 
@@ -701,23 +802,24 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeHalf)
         static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
     estMean.fillWithRandomValues(
         static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    variance.fillWithRandomValues(
+        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yCpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yCpu);
+
     GpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yGpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yGpu);
 
     // Use compute type tolerance since half operations may not have same implementation between host CPU
     // reference and device GPU reference, e.g scale * inhat + bias may get contracted into a more precise
     // fma on device but not host
-    assertAllClose(yCpu, yGpu, getToleranceInference<ComputeDataType>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<ComputeDataType>());
 }
 
-TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeBfloat)
+TEST(TestGpuBatchnormFwdInfVarMixedPrecision, DowncastComputeBfloat)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -731,7 +833,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeBfloat)
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
     Tensor<ScaleBiasType> bias({1, 2, 1, 1});
     Tensor<MeanVarType> estMean({1, 2, 1, 1});
-    Tensor<MeanVarType> invVar({1, 2, 1, 1});
+    Tensor<MeanVarType> variance({1, 2, 1, 1});
     Tensor<YDataType> yCpu({1, 2, 2, 2});
     Tensor<YDataType> yGpu({1, 2, 2, 2});
 
@@ -745,69 +847,70 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeBfloat)
         static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
     estMean.fillWithRandomValues(
         static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    variance.fillWithRandomValues(
+        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.0f), seed++);
 
     CpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yCpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yCpu);
+
     GpuFpReferenceBatchnorm::
-        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
-            x, scale, bias, estMean, invVar, yGpu);
+        fwdInferenceWithVariance<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, variance, yGpu);
 
     // Use compute type tolerance since half operations may not have same implementation between host CPU
     // reference and device GPU reference, e.g scale * inhat + bias may get contracted into a more precise
     // fma on device but not host
-    assertAllClose(yCpu, yGpu, getToleranceInference<ComputeDataType>());
+    assertAllClose(yCpu, yGpu, getToleranceInferenceWithVariance<ComputeDataType>());
 }
 
 // --- Test suite instantiations ---
 
-using TestGpuBatchnormFwdInfRef3DFp32 = BatchnormFwdInfTestSuite<float>;
-using TestGpuBatchnormFwdInfRef3DFp16 = BatchnormFwdInfTestSuite<half>;
-using TestGpuBatchnormFwdInfRef3DBfp16 = BatchnormFwdInfTestSuite<bfloat16>;
-using TestGpuBatchnormFwdInfRef4DFp32 = BatchnormFwdInfTestSuite<float>;
-using TestGpuBatchnormFwdInfRef4DFp16 = BatchnormFwdInfTestSuite<half>;
-using TestGpuBatchnormFwdInfRef4DBfp16 = BatchnormFwdInfTestSuite<bfloat16>;
-using TestGpuBatchnormFwdInfRef5DFp32 = BatchnormFwdInfTestSuite<float>;
-using TestGpuBatchnormFwdInfRef5DFp16 = BatchnormFwdInfTestSuite<half>;
-using TestGpuBatchnormFwdInfRef5DBfp16 = BatchnormFwdInfTestSuite<bfloat16>;
+using TestGpuBatchnormFwdInfVarRef3DFp32 = BatchnormFwdInfVarTestSuite<float>;
+using TestGpuBatchnormFwdInfVarRef3DFp16 = BatchnormFwdInfVarTestSuite<half>;
+using TestGpuBatchnormFwdInfVarRef3DBfp16 = BatchnormFwdInfVarTestSuite<bfloat16>;
+using TestGpuBatchnormFwdInfVarRef4DFp32 = BatchnormFwdInfVarTestSuite<float>;
+using TestGpuBatchnormFwdInfVarRef4DFp16 = BatchnormFwdInfVarTestSuite<half>;
+using TestGpuBatchnormFwdInfVarRef4DBfp16 = BatchnormFwdInfVarTestSuite<bfloat16>;
+using TestGpuBatchnormFwdInfVarRef5DFp32 = BatchnormFwdInfVarTestSuite<float>;
+using TestGpuBatchnormFwdInfVarRef5DFp16 = BatchnormFwdInfVarTestSuite<half>;
+using TestGpuBatchnormFwdInfVarRef5DBfp16 = BatchnormFwdInfVarTestSuite<bfloat16>;
 
-TEST_P(TestGpuBatchnormFwdInfRef3DFp32, MatchesCpuRef)
+TEST_P(TestGpuBatchnormFwdInfVarRef3DFp32, MatchesCpuRef)
 {
-    this->runBatchnormFwdInfTest();
+    this->runBatchnormFwdInfWithVarianceTest();
 }
-TEST_P(TestGpuBatchnormFwdInfRef3DFp16, MatchesCpuRef)
+TEST_P(TestGpuBatchnormFwdInfVarRef3DFp16, MatchesCpuRef)
 {
-    this->runBatchnormFwdInfTest();
+    this->runBatchnormFwdInfWithVarianceTest();
 }
-TEST_P(TestGpuBatchnormFwdInfRef3DBfp16, MatchesCpuRef)
+TEST_P(TestGpuBatchnormFwdInfVarRef3DBfp16, MatchesCpuRef)
 {
-    this->runBatchnormFwdInfTest();
+    this->runBatchnormFwdInfWithVarianceTest();
 }
-TEST_P(TestGpuBatchnormFwdInfRef4DFp32, MatchesCpuRef)
+TEST_P(TestGpuBatchnormFwdInfVarRef4DFp32, MatchesCpuRef)
 {
-    this->runBatchnormFwdInfTest();
+    this->runBatchnormFwdInfWithVarianceTest();
 }
-TEST_P(TestGpuBatchnormFwdInfRef4DFp16, MatchesCpuRef)
+TEST_P(TestGpuBatchnormFwdInfVarRef4DFp16, MatchesCpuRef)
 {
-    this->runBatchnormFwdInfTest();
+    this->runBatchnormFwdInfWithVarianceTest();
 }
-TEST_P(TestGpuBatchnormFwdInfRef4DBfp16, MatchesCpuRef)
+TEST_P(TestGpuBatchnormFwdInfVarRef4DBfp16, MatchesCpuRef)
 {
-    this->runBatchnormFwdInfTest();
+    this->runBatchnormFwdInfWithVarianceTest();
 }
-TEST_P(TestGpuBatchnormFwdInfRef5DFp32, MatchesCpuRef)
+TEST_P(TestGpuBatchnormFwdInfVarRef5DFp32, MatchesCpuRef)
 {
-    this->runBatchnormFwdInfTest();
+    this->runBatchnormFwdInfWithVarianceTest();
 }
-TEST_P(TestGpuBatchnormFwdInfRef5DFp16, MatchesCpuRef)
+TEST_P(TestGpuBatchnormFwdInfVarRef5DFp16, MatchesCpuRef)
 {
-    this->runBatchnormFwdInfTest();
+    this->runBatchnormFwdInfWithVarianceTest();
 }
-TEST_P(TestGpuBatchnormFwdInfRef5DBfp16, MatchesCpuRef)
+TEST_P(TestGpuBatchnormFwdInfVarRef5DBfp16, MatchesCpuRef)
 {
-    this->runBatchnormFwdInfTest();
+    this->runBatchnormFwdInfWithVarianceTest();
 }
 
 // ============================================================================
@@ -815,56 +918,56 @@ TEST_P(TestGpuBatchnormFwdInfRef5DBfp16, MatchesCpuRef)
 // ============================================================================
 
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuBatchnormFwdInfRef3DFp32,
+                         TestGpuBatchnormFwdInfVarRef3DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormSmall3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuBatchnormFwdInfRef3DFp16,
+                         TestGpuBatchnormFwdInfVarRef3DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormSmall3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuBatchnormFwdInfRef3DBfp16,
+                         TestGpuBatchnormFwdInfVarRef3DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormSmall3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef3DFp32,
+                         TestGpuBatchnormFwdInfVarRef3DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormMedium3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef3DFp16,
+                         TestGpuBatchnormFwdInfVarRef3DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormMedium3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef3DBfp16,
+                         TestGpuBatchnormFwdInfVarRef3DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormMedium3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef3DFp32,
+                         TestGpuBatchnormFwdInfVarRef3DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef3DFp16,
+                         TestGpuBatchnormFwdInfVarRef3DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef3DBfp16,
+                         TestGpuBatchnormFwdInfVarRef3DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    TestGpuBatchnormFwdInfRef3DFp32,
+    TestGpuBatchnormFwdInfVarRef3DFp32,
     testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                      ::testing::ValuesIn(getBatchnormLargeStress3DTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    TestGpuBatchnormFwdInfRef3DFp16,
+    TestGpuBatchnormFwdInfVarRef3DFp16,
     testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                      ::testing::ValuesIn(getBatchnormLargeStress3DTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    TestGpuBatchnormFwdInfRef3DBfp16,
+    TestGpuBatchnormFwdInfVarRef3DBfp16,
     testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                      ::testing::ValuesIn(getBatchnormLargeStress3DTestCases())));
 
@@ -873,56 +976,56 @@ INSTANTIATE_TEST_SUITE_P(
 // ============================================================================
 
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuBatchnormFwdInfRef4DFp32,
+                         TestGpuBatchnormFwdInfVarRef4DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormSmall4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuBatchnormFwdInfRef4DFp16,
+                         TestGpuBatchnormFwdInfVarRef4DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormSmall4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuBatchnormFwdInfRef4DBfp16,
+                         TestGpuBatchnormFwdInfVarRef4DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormSmall4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef4DFp32,
+                         TestGpuBatchnormFwdInfVarRef4DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormMedium4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef4DFp16,
+                         TestGpuBatchnormFwdInfVarRef4DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormMedium4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef4DBfp16,
+                         TestGpuBatchnormFwdInfVarRef4DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormMedium4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef4DFp32,
+                         TestGpuBatchnormFwdInfVarRef4DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef4DFp16,
+                         TestGpuBatchnormFwdInfVarRef4DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef4DBfp16,
+                         TestGpuBatchnormFwdInfVarRef4DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    TestGpuBatchnormFwdInfRef4DFp32,
+    TestGpuBatchnormFwdInfVarRef4DFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      ::testing::ValuesIn(getBatchnormLargeStress4DTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    TestGpuBatchnormFwdInfRef4DFp16,
+    TestGpuBatchnormFwdInfVarRef4DFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      ::testing::ValuesIn(getBatchnormLargeStress4DTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    TestGpuBatchnormFwdInfRef4DBfp16,
+    TestGpuBatchnormFwdInfVarRef4DBfp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      ::testing::ValuesIn(getBatchnormLargeStress4DTestCases())));
 
@@ -931,55 +1034,55 @@ INSTANTIATE_TEST_SUITE_P(
 // ============================================================================
 
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuBatchnormFwdInfRef5DFp32,
+                         TestGpuBatchnormFwdInfVarRef5DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormSmall5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuBatchnormFwdInfRef5DFp16,
+                         TestGpuBatchnormFwdInfVarRef5DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormSmall5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuBatchnormFwdInfRef5DBfp16,
+                         TestGpuBatchnormFwdInfVarRef5DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormSmall5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef5DFp32,
+                         TestGpuBatchnormFwdInfVarRef5DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormMedium5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef5DFp16,
+                         TestGpuBatchnormFwdInfVarRef5DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormMedium5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef5DBfp16,
+                         TestGpuBatchnormFwdInfVarRef5DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormMedium5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef5DFp32,
+                         TestGpuBatchnormFwdInfVarRef5DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef5DFp16,
+                         TestGpuBatchnormFwdInfVarRef5DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef5DBfp16,
+                         TestGpuBatchnormFwdInfVarRef5DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    TestGpuBatchnormFwdInfRef5DFp32,
+    TestGpuBatchnormFwdInfVarRef5DFp32,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                      ::testing::ValuesIn(getBatchnormLargeStress5DTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    TestGpuBatchnormFwdInfRef5DFp16,
+    TestGpuBatchnormFwdInfVarRef5DFp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                      ::testing::ValuesIn(getBatchnormLargeStress5DTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    TestGpuBatchnormFwdInfRef5DBfp16,
+    TestGpuBatchnormFwdInfVarRef5DBfp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                      ::testing::ValuesIn(getBatchnormLargeStress5DTestCases())));

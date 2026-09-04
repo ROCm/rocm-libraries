@@ -99,6 +99,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestShallowGpuTensor.cpp
     gpu-ref/TestGpuFpReferenceCommon.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdInf.cpp
+    gpu-ref/TestGpuFpReferenceBatchnormFwdInfWithVariance.cpp
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests
