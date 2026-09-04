@@ -40,6 +40,9 @@ from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 from .codegen_policy import codegen_policy_for_kernel
 from .ir import (
+    F32,
+    I1,
+    I32,
     KernelDef,
     Op,
     Param,
@@ -1495,6 +1498,48 @@ class _Lowerer:
     def _operand_with_type(self, v: Value) -> str:
         return f"{_llvm_type(v.type)} {self._operand(v)}"
 
+    @staticmethod
+    def _composed_constant(value: int | float, ty: Type, ity: str) -> Value:
+        """Make an inline constant for a lowering-time operation expansion."""
+
+        result = Value("", ty)
+        producer = Op(
+            "arith.constant",
+            results=[result],
+            attrs={"value": value, "ity": ity},
+        )
+        result.op = producer
+        return result
+
+    def _lower_composed_op(
+        self,
+        name: str,
+        operands: List[Value],
+        result_type: Type,
+        hint: str,
+        *,
+        attrs: Optional[Dict[str, object]] = None,
+        result_name: Optional[str] = None,
+    ) -> Value:
+        """Lower one synthetic primitive while expanding a higher-level op.
+
+        The synthetic operation is not inserted into the public rocKE IR. It is
+        dispatched through the normal primitive lowering handler, so composite
+        operations do not have to duplicate LLVM spelling, intrinsic tracking,
+        or type handling.
+        """
+
+        result = Value(result_name or self._fresh(hint), result_type)
+        expanded = Op(
+            name,
+            operands=list(operands),
+            results=[result],
+            attrs=dict(attrs or {}),
+        )
+        result.op = expanded
+        self.lower_op(expanded)
+        return result
+
     def _anyptr_space(
         self, op: str, ptr: Value, allowed: Dict[int, str]
     ) -> Tuple[int, str]:
@@ -2658,83 +2703,56 @@ class _Lowerer:
         if v.type.name != "f32":
             raise ValueError(f"math.tanh requires f32 operand, got {v.type.name}")
 
-        # Follow the ROCm device-library f32 structure: a minimax polynomial
-        # below 0.625 and an exponential form above it.  The polynomial avoids
-        # the cancellation that an exp-only formula suffers near zero.  Sign
-        # restoration through the f32 sign bit preserves negative zero and
-        # negative subnormals while leaving NaNs as NaNs.
-        self._need("exp2.f32")
-        self._need("rcp.f32")
-        self._need("fmuladd.f32")
-        x_bits = self._fresh("tanh.xbits")
-        sign = self._fresh("tanh.sign")
-        abs_bits = self._fresh("tanh.abits")
-        abs_x = self._fresh("tanh.abs")
-        y2 = self._fresh("tanh.y2")
-        p0 = self._fresh("tanh.p0")
-        p1 = self._fresh("tanh.p1")
-        p2 = self._fresh("tanh.p2")
-        p3 = self._fresh("tanh.p3")
-        yp = self._fresh("tanh.yp")
-        poly = self._fresh("tanh.poly")
-        exp_scaled = self._fresh("tanh.escaled")
-        exp = self._fresh("tanh.exp")
-        exp_den = self._fresh("tanh.eden")
-        exp_inv = self._fresh("tanh.einv")
-        exp_mag = self._fresh("tanh.emag")
-        use_poly = self._fresh("tanh.small")
-        mag = self._fresh("tanh.mag")
-        mag_bits = self._fresh("tanh.mbits")
-        signed_bits = self._fresh("tanh.sbits")
-        operand = self._operand(v)
-        one = _fp32_hex(1.0)
-        neg_two = _fp32_hex(-2.0)
-        two_log2e = _fp32_hex(2.0 * 1.4426950408889634)
-        cutoff = _fp32_hex(0.625)
-        c0 = _fp32_hex(float.fromhex("-0x1.758e7ap-8"))
-        c1 = _fp32_hex(float.fromhex("0x1.521192p-6"))
-        c2 = _fp32_hex(float.fromhex("-0x1.b8389cp-5"))
-        c3 = _fp32_hex(float.fromhex("0x1.110704p-3"))
-        c4 = _fp32_hex(float.fromhex("-0x1.555532p-2"))
+        # OCML f32 tanh small-argument minimax polynomial for |x| < 0.625.
+        # Coefficients are in Horner power-basis order, not Taylor coefficients.
+        # Source: amd/device-libs/ocml/src/tanhF.cl.
+        f32 = lambda value: self._composed_constant(value, F32, "f32")
+        i32 = lambda value: self._composed_constant(value, I32, "i32")
+        lower = self._lower_composed_op
 
-        self._current().emit(f"  {x_bits} = bitcast float {operand} to i32")
-        self._current().emit(f"  {sign} = and i32 {x_bits}, -2147483648")
-        self._current().emit(f"  {abs_bits} = and i32 {x_bits}, 2147483647")
-        self._current().emit(f"  {abs_x} = bitcast i32 {abs_bits} to float")
-        self._current().emit(f"  {y2} = fmul float {abs_x}, {abs_x}")
-        self._current().emit(
-            f"  {p0} = call float @llvm.fmuladd.f32(float {y2}, float {c0}, float {c1})"
+        one = f32(1.0)
+        neg_two = f32(-2.0)
+        two_log2e = f32(2.0 * 1.4426950408889634)
+        cutoff = f32(0.625)
+        c0 = f32(float.fromhex("-0x1.758e7ap-8"))
+        c1 = f32(float.fromhex("0x1.521192p-6"))
+        c2 = f32(float.fromhex("-0x1.b8389cp-5"))
+        c3 = f32(float.fromhex("0x1.110704p-3"))
+        c4 = f32(float.fromhex("-0x1.555532p-2"))
+
+        x_bits = lower("arith.bitcast", [v], I32, "tanh.xbits")
+        sign = lower("arith.and", [x_bits, i32(-0x80000000)], I32, "tanh.sign")
+        abs_bits = lower("arith.and", [x_bits, i32(0x7FFFFFFF)], I32, "tanh.abits")
+        abs_x = lower("arith.bitcast", [abs_bits], F32, "tanh.abs")
+        y2 = lower("arith.fmul", [abs_x, abs_x], F32, "tanh.y2")
+        p0 = lower("arith.fma", [y2, c0, c1], F32, "tanh.p0")
+        p1 = lower("arith.fma", [y2, p0, c2], F32, "tanh.p1")
+        p2 = lower("arith.fma", [y2, p1, c3], F32, "tanh.p2")
+        p3 = lower("arith.fma", [y2, p2, c4], F32, "tanh.p3")
+        yp = lower("arith.fmul", [abs_x, p3], F32, "tanh.yp")
+        poly = lower("arith.fma", [y2, yp, abs_x], F32, "tanh.poly")
+        exp_scaled = lower("arith.fmul", [two_log2e, abs_x], F32, "tanh.escaled")
+        exp = lower("math.exp2", [exp_scaled], F32, "tanh.exp")
+        exp_den = lower("arith.fadd", [exp, one], F32, "tanh.eden")
+        exp_inv = lower("math.rcp_fast", [exp_den], F32, "tanh.einv")
+        exp_mag = lower("arith.fma", [neg_two, exp_inv, one], F32, "tanh.emag")
+        use_poly = lower(
+            "arith.fcmp",
+            [abs_x, cutoff],
+            I1,
+            "tanh.small",
+            attrs={"pred": "olt"},
         )
-        self._current().emit(
-            f"  {p1} = call float @llvm.fmuladd.f32(float {y2}, float {p0}, float {c2})"
+        mag = lower("arith.select", [use_poly, poly, exp_mag], F32, "tanh.mag")
+        mag_bits = lower("arith.bitcast", [mag], I32, "tanh.mbits")
+        signed_bits = lower("arith.or", [mag_bits, sign], I32, "tanh.sbits")
+        lower(
+            "arith.bitcast",
+            [signed_bits],
+            F32,
+            "tanh.result",
+            result_name=op.result.name,
         )
-        self._current().emit(
-            f"  {p2} = call float @llvm.fmuladd.f32(float {y2}, float {p1}, float {c3})"
-        )
-        self._current().emit(
-            f"  {p3} = call float @llvm.fmuladd.f32(float {y2}, float {p2}, float {c4})"
-        )
-        self._current().emit(f"  {yp} = fmul float {abs_x}, {p3}")
-        self._current().emit(
-            f"  {poly} = call float @llvm.fmuladd.f32(float {y2}, float {yp}, float {abs_x})"
-        )
-        self._current().emit(f"  {exp_scaled} = fmul float {two_log2e}, {abs_x}")
-        self._current().emit(f"  {exp} = call float @llvm.exp2.f32(float {exp_scaled})")
-        self._current().emit(f"  {exp_den} = fadd float {exp}, {one}")
-        self._current().emit(
-            f"  {exp_inv} = call float @llvm.amdgcn.rcp.f32(float {exp_den})"
-        )
-        self._current().emit(
-            f"  {exp_mag} = call float @llvm.fmuladd.f32("
-            f"float {neg_two}, float {exp_inv}, float {one})"
-        )
-        self._current().emit(f"  {use_poly} = fcmp olt float {abs_x}, {cutoff}")
-        self._current().emit(
-            f"  {mag} = select i1 {use_poly}, float {poly}, float {exp_mag}"
-        )
-        self._current().emit(f"  {mag_bits} = bitcast float {mag} to i32")
-        self._current().emit(f"  {signed_bits} = or i32 {mag_bits}, {sign}")
-        self._current().emit(f"  {op.result.name} = bitcast i32 {signed_bits} to float")
 
     # gpu
 
