@@ -22,12 +22,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <ffts/ffts.h>
-
 #include <atomic>
 #include <complex>
 
 #include "host_tensor_executors.hpp"
+
+#if RPP_USE_FFTS_LIB
+#include <ffts/ffts.h>
 
 inline bool is_pow2(Rpp64s n) {
     return (n & (n - 1)) == 0;
@@ -41,6 +42,11 @@ inline Rpp64s size_in_buf(Rpp64s n) {
 inline Rpp64s size_out_buf(Rpp64s n) {
     return can_use_real_impl(n) ? n + 2 : 2 * n;
 }
+#else
+#include <vector>
+
+#include "rpp_cpu_fft.hpp"
+#endif
 
 // Compute hanning window
 inline void hann_window(Rpp32f* output, Rpp32s windowSize) {
@@ -88,9 +94,16 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
     const Rpp32u windowOutputStride = maxNumWindows * nfft;
     if (windowOutputStride > 99532800) return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
 
+#if RPP_USE_FFTS_LIB
     bool useRealImpl = can_use_real_impl(nfft);
     const auto fftInSize = size_in_buf(nfft);
     const auto fftOutSize = size_out_buf(nfft);
+#else
+    // One read-only plan is shared across OpenMP threads (nfft is constant across the batch).
+    RppCpuFftPlan fftPlan;
+    if (!rpp_cpu_fft_plan_init(fftPlan, nfft)) return RPP_ERROR_INVALID_ARGUMENTS;
+    const Rpp32s fftScratchLen = fftPlan.isPow2 ? nfft : fftPlan.m;
+#endif
 
     Rpp32f* windowFn = static_cast<Rpp32f*>(calloc(windowLength, sizeof(Rpp32f)));
     Rpp32f* scratchMem = handle.GetInitHandle()->mem.mcpu.scratchBufferHost;
@@ -149,6 +162,7 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
         }
 
         // Generate FFT output
+#if RPP_USE_FFTS_LIB
         ffts_plan_t* p;
         if (useRealImpl)
             p = ffts_init_1d_real(nfft, FFTS_FORWARD);
@@ -165,15 +179,24 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
             _mm_malloc(fftInSize * sizeof(Rpp32f), 32));  // ffts requires 32-byte aligned memory
         alignas(32) Rpp32f* fftOutBuf = static_cast<Rpp32f*>(
             _mm_malloc(fftOutSize * sizeof(Rpp32f), 32));  // ffts requires 32-byte aligned memory
+#else
+        // Per-thread scratch/output buffers (the plan itself is read-only and shared).
+        std::vector<RppFftComplex> fftScratch(fftScratchLen);
+        std::vector<RppFftComplex> fftBins(numBins);
+        std::vector<Rpp32f> fftInReal(nfft);
+#endif
 
         for (Rpp32s w = 0; w < numWindows; w++) {
             Rpp32f* dstPtrBinTemp = dstPtrTemp + (w * hStride);
             Rpp32f* windowOutputTemp = windowOutput + (w * nfft);
+            Rpp32s inWindowStart = windowLength < nfft ? (nfft - windowLength) / 2 : 0;
+
+            std::complex<Rpp32f>* complexFft;
+#if RPP_USE_FFTS_LIB
             for (int k = 0; k < fftInSize; k++) fftInBuf[k] = 0.0f;
 
             for (int k = 0; k < fftOutSize; k++) fftOutBuf[k] = 0.0f;
 
-            Rpp32s inWindowStart = windowLength < nfft ? (nfft - windowLength) / 2 : 0;
             // Copy the window input to fftInBuf
             if (useRealImpl) {
                 for (int i = 0; i < windowLength; i++)
@@ -187,7 +210,15 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
             }
 
             ffts_execute(p, fftInBuf, fftOutBuf);
-            auto* complexFft = reinterpret_cast<std::complex<Rpp32f>*>(fftOutBuf);
+            complexFft = reinterpret_cast<std::complex<Rpp32f>*>(fftOutBuf);
+#else
+            std::fill(fftInReal.begin(), fftInReal.end(), 0.0f);
+            for (int i = 0; i < windowLength; i++)
+                fftInReal[inWindowStart + i] = windowOutputTemp[i];
+            rpp_cpu_fft_forward_real(fftPlan, fftInReal.data(), nfft, fftBins.data(),
+                                     fftScratch.data());
+            complexFft = fftBins.data();
+#endif
             Rpp32s outIdx = w;
             if (vertical) {
                 if (power == 1) {
@@ -210,9 +241,11 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
                 }
             }
         }
+#if RPP_USE_FFTS_LIB
         ffts_free(p);
         _mm_free(fftInBuf);
         _mm_free(fftOutBuf);
+#endif
     }
     if (windowFn) free(windowFn);
     RppStatus st = fftPlanStatus.load();
