@@ -395,9 +395,23 @@ namespace origami
         void setHardware(hardware_t::architecture_t arch);
 
         /**
+         * @brief Query whether Formocast can simulate a given architecture
+         *
+         * hardware_t::is_hardware_supported() answers the broader question of
+         * whether origami recognizes an architecture at all; Formocast models
+         * only a subset of those. Callers must consult this before setHardware()
+         * to avoid the throw below.
+         *
+         * @param arch GPU architecture identifier
+         * @return true if getHardwareConstants() has constants for @p arch
+         */
+        static bool isArchSupported(const hardware_t::architecture_t arch) noexcept;
+
+        /**
          * @brief Get hardware constants for a specific architecture
          * @param arch GPU architecture identifier
          * @return HardwareConstants structure with architecture-specific parameters
+         * @throws std::runtime_error if !isArchSupported(arch)
          */
         HardwareConstants getHardwareConstants(const hardware_t::architecture_t arch) const;
 

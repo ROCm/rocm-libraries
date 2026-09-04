@@ -34,6 +34,9 @@
 
 #include <origami/simulator/tensilelite/formocast_simulator.hpp>
 
+#include <iostream>
+#include <mutex>
+
 namespace TensileLite
 {
     namespace Client
@@ -246,7 +249,28 @@ namespace TensileLite
         static bool isPredictionAvailable(Hardware const& hardware)
         {
             auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-            return hipAMDGPU && hipAMDGPU->analyticalHardware;
+            // origami knows more architectures than Formocast can model, so a non-null
+            // analyticalHardware is not sufficient -- setHardware() would throw.
+            return hipAMDGPU && hipAMDGPU->analyticalHardware
+                   && origami::Formocast::isArchSupported(hipAMDGPU->analyticalHardware->arch);
+        }
+
+        // Once per process: a degraded run otherwise looks like one that never asked.
+        static void warnPredictionUnavailableOnce(std::shared_ptr<ResultReporter> const& reporter,
+                                                  Hardware const&                        hardware)
+        {
+            if(!reporter)
+                return;
+
+            static std::once_flag flag;
+            std::call_once(flag, [&]() {
+                reporter->log(LogLevel::Normal,
+                              concatenate("[SolutionIterator] Performance prediction is "
+                                          "unavailable on ",
+                                          hardware.archName(),
+                                          "; ignoring the requested prediction threshold and "
+                                          "benchmarking solutions in index order.\n"));
+            });
         }
 
         static origami::hardware_t::architecture_t getHardware(Hardware const& hardware)
@@ -364,7 +388,12 @@ namespace TensileLite
         void AllSolutionsIterator::preProblem(ContractionProblem* const problem)
         {
             SolutionIterator::preProblem(problem);
-            if (m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))
+            // !(x > 1.0), not (x <= 1.0), to stay an exact negation for NaN too.
+            bool const predictionRequested = !(m_predictionThreshold > 1.0);
+            m_usePrediction = predictionRequested && isPredictionAvailable(*m_hardware);
+            if(!m_usePrediction && predictionRequested)
+                warnPredictionUnavailableOnce(m_reporter, *m_hardware);
+            if(!m_usePrediction)
             {
                 m_currentSolutionIdx = m_firstSolutionIdx;
             }
@@ -442,7 +471,7 @@ namespace TensileLite
         {
             m_reporter->report(ResultKey::SolutionLibraryIndex, solution->libraryLogicIndex);
             m_reporter->report(ResultKey::SolutionIndex, m_currentSolutionIdx);
-            if (m_predictionThreshold > 1.0)
+            if (!m_usePrediction)
             {
                 m_reporter->report(ResultKey::SolutionProgress,
                      concatenate(m_currentSolutionIdx, "/", m_lastSolutionIdx));
@@ -458,7 +487,7 @@ namespace TensileLite
         void AllSolutionsIterator::postSolution()
         {
             ScopedTimer timer("post_solution_sol_advance");
-            if (m_predictionThreshold > 1.0)
+            if (!m_usePrediction)
             {
                 m_currentSolutionIdx++;
             }
@@ -476,7 +505,7 @@ namespace TensileLite
 
         bool AllSolutionsIterator::moreSolutionsInProblem() const
         {
-            if (m_predictionThreshold > 1.0)
+            if (!m_usePrediction)
                 return m_currentSolutionIdx <= m_lastSolutionIdx;
             else
                 return !m_qSolutionIdx.empty();
@@ -591,6 +620,12 @@ namespace TensileLite
         void TopSolutionIterator::preProblem(ContractionProblem* const problem)
         {
             SolutionIterator::preProblem(problem);
+            // !(x > 1.0), not (x <= 1.0), to stay an exact negation for NaN too.
+            bool const predictionRequested = !(m_predictionThreshold > 1.0);
+            m_usePrediction = predictionRequested && isPredictionAvailable(*m_hardware);
+            if(!m_usePrediction && predictionRequested)
+                warnPredictionUnavailableOnce(m_reporter, *m_hardware);
+
             if(auto groupedProblem = dynamic_cast<const ContractionProblemGroupedGemm*>(problem))
             {
                 m_solutions = m_library->findTopSolutionsGroupedGemm(
@@ -598,18 +633,12 @@ namespace TensileLite
             }
             else if(auto gemmProblem = dynamic_cast<const ContractionProblemGemm*>(problem))
             {
-                if(m_predictionThreshold > 1.0)
+                // -1 means "let prediction choose the set"; without prediction
+                // we still need the top-N query or m_solutions is left empty.
+                if(!m_usePrediction || m_numSolutions != -1)
                 {
                     m_solutions
                         = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions);
-                }
-                else
-                {
-                    if(m_numSolutions != -1)
-                    {
-                        m_solutions
-                            = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions);
-                    }
                 }
             }
             else
@@ -622,7 +651,7 @@ namespace TensileLite
                 m_solutions.push_back(m_library->solutions.find(0)->second);
             }
 
-            if(m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))
+            if(!m_usePrediction)
             {
                 m_currentSolutionIdx = 0;
             }
@@ -679,7 +708,7 @@ namespace TensileLite
         {
             m_reporter->report(ResultKey::SolutionLibraryIndex, solution->libraryLogicIndex);
             m_reporter->report(ResultKey::SolutionIndex, m_currentSolutionIdx);
-            if(m_predictionThreshold > 1.0)
+            if(!m_usePrediction)
                 m_reporter->report(ResultKey::SolutionProgress,
                                concatenate(m_currentSolutionIdx, "/", m_solutions.size()));
             else
@@ -691,7 +720,7 @@ namespace TensileLite
         void TopSolutionIterator::postSolution()
         {
             ScopedTimer timer("post_solution_sol_advance");
-            if(m_predictionThreshold > 1.0)
+            if(!m_usePrediction)
             {
                 m_currentSolutionIdx++;
             }
@@ -709,7 +738,7 @@ namespace TensileLite
 
         bool TopSolutionIterator::moreSolutionsInProblem() const
         {
-            if(m_predictionThreshold > 1.0)
+            if(!m_usePrediction)
                 return m_currentSolutionIdx < m_solutions.size();
             else
                 return !m_qSolutionIdx.empty();
