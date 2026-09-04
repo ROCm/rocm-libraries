@@ -980,6 +980,29 @@ ROWCOL_TENSOR_QUANT_DEFAULT_TILE = {
     "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16,
 }
 
+# gfx12xx (RDNA-style WMMA, e.g. gfx1250/MI400) cannot use the tile above: it is sized
+# for the gfx9 MFMA 32x32x16 fragment, which does not exist on WMMA hardware, so the
+# kernel compiles but produces all-zero output. The 8-bit WMMA fragment is 16x16x128,
+# and the FlatMM 8-bit tile below is the shape validated against it.
+ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX12 = {
+    "tile_m": 16, "tile_n": 64, "tile_k": 256,
+    "warp_m": 1, "warp_n": 4, "warp_k": 1,
+    "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 128,
+}
+
+
+def rowcol_tensor_quant_default_tile(gfx_arch: str = "") -> dict:
+    """Return the default RowColQuant/TensorQuant tile for `gfx_arch`.
+
+    Kept here, next to the tile dicts themselves, so the rowcolquant and tensorquant
+    runtime helpers select the arch-specific tile through one shared code path rather
+    than each carrying its own copy of the gfx12 shape.
+    """
+    if "gfx12" in gfx_arch:
+        return dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX12)
+    return dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE)
+
+
 # Default traits, shared for the same reason as the tile above. pad_m is enabled
 # because these kernels are used with M values that are not tile-aligned.
 ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS = {
