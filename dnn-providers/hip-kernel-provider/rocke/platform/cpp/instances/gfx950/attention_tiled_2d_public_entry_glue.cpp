@@ -290,6 +290,23 @@ bool rocke_gfx950_attention_tiled_2d_supports(
         rocke_g950_reason(reason, reason_cap, buf);
         return false;
     }
+    /* BLOCK_M must be divisible by num_queries_per_kv (Py962).
+     * Non-divisor values (e.g. NQK=3,5,7) produce a truncated BLOCK_Q whose
+     * phantom rows corrupt the softmax accumulator state. */
+    {
+        const int block_m = args->num_warps * args->block_m_per_warp;
+        if(block_m % args->num_queries_per_kv != 0)
+        {
+            snprintf(buf,
+                     sizeof(buf),
+                     "tiled 2D kernel requires BLOCK_M (%d) to be divisible by "
+                     "num_queries_per_kv (%d)",
+                     block_m,
+                     args->num_queries_per_kv);
+            rocke_g950_reason(reason, reason_cap, buf);
+            return false;
+        }
+    }
     /* fp8 K/V cache pairing (Py657-666). */
     if(args->kv_storage_dtype != NULL && strcmp(args->kv_storage_dtype, "fp8e4m3") != 0)
     {

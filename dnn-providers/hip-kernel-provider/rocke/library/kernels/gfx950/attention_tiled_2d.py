@@ -952,6 +952,21 @@ def supports_tiled_2d(
             False,
             f"tiled 2D kernel needs 1<=num_queries_per_kv<=16 (got {num_queries_per_kv})",
         )
+    # BLOCK_M = num_warps * block_m_per_warp rows are distributed across NQK
+    # query heads per KV head, so NQK must divide BLOCK_M exactly. Non-divisor
+    # values (e.g. NQK=3, 5, 6, 7) produce a truncated BLOCK_Q = BLOCK_M // NQK
+    # whose phantom rows corrupt the softmax accumulator state.
+    # Valid set for the default geometry (num_warps=4, block_m_per_warp=16,
+    # BLOCK_M=64): {1, 2, 4, 8, 16} — all powers of 2 that divide 64.
+    block_m = num_warps * block_m_per_warp
+    if block_m % num_queries_per_kv != 0:
+        return (
+            False,
+            f"tiled 2D kernel requires BLOCK_M ({block_m}) to be divisible by "
+            f"num_queries_per_kv ({num_queries_per_kv}); "
+            f"valid values for this geometry: "
+            f"{[n for n in range(1, 17) if block_m % n == 0]}",
+        )
     if num_warps not in (1, 2, 4, 8):
         return (
             False,
