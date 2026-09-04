@@ -702,7 +702,13 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffle
     static bool IsSupportedArgument(const Argument& arg)
     {
         if(arg.stride_overflow)
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Stride overflow." << std::endl;
+            }
             return false;
+        }
 
         // check device
         if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
@@ -791,6 +797,10 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffle
                  OutElementwiseOperation out_element_op,
                  const index_t split_k)
     {
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<CDataType>(e_g_n_k_wos_lengths);
+
         return Argument{p_in_grid,
                         p_wei_grid,
                         p_out_grid,
@@ -807,7 +817,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffle
                         in_element_op,
                         wei_element_op,
                         out_element_op,
-                        split_k};
+                        split_k,
+                        stride_ovf};
     }
 
     static auto MakeArgument(const InDataType* p_in_grid,
@@ -895,6 +906,10 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffle
                         OutElementwiseOperation out_element_op,
                         const index_t split_k) override
     {
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<CDataType>(e_g_n_k_wos_lengths);
+
         return std::make_unique<Argument>(static_cast<const InDataType*>(p_in_grid),
                                           static_cast<WeiDataType*>(p_wei_grid),
                                           static_cast<const OutDataType*>(p_out_grid),
@@ -911,7 +926,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffle
                                           in_element_op,
                                           wei_element_op,
                                           out_element_op,
-                                          split_k);
+                                          split_k,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseArgument>
