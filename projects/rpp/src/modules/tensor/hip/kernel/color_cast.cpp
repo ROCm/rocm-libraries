@@ -76,10 +76,13 @@ __global__ void color_cast_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstP
     d_float24 src_f24, dst_f24;
 
     rpp_hip_load24_pkd3_and_unpack_to_float24_pln3(srcPtr + srcIdx, &src_f24);
-    color_cast_hip_compute(srcPtr, &src_f24.f8[0], &dst_f24.f8[0], &b_f4, &alpha_f4);
+    color_cast_hip_compute(srcPtr, &src_f24.f8[0], &dst_f24.f8[0], &r_f4, &alpha_f4);
     color_cast_hip_compute(srcPtr, &src_f24.f8[1], &dst_f24.f8[1], &g_f4, &alpha_f4);
-    color_cast_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &r_f4, &alpha_f4);
-    rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
+    color_cast_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &b_f4, &alpha_f4);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &dst_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
 }
 
 template <typename T>
@@ -108,10 +111,14 @@ __global__ void color_cast_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
     d_float24 src_f24, dst_f24;
 
     rpp_hip_load24_pln3_and_unpack_to_float24_pln3(srcPtr + srcIdx, srcStridesNCH.y, &src_f24);
-    color_cast_hip_compute(srcPtr, &src_f24.f8[0], &dst_f24.f8[0], &b_f4, &alpha_f4);
+    color_cast_hip_compute(srcPtr, &src_f24.f8[0], &dst_f24.f8[0], &r_f4, &alpha_f4);
     color_cast_hip_compute(srcPtr, &src_f24.f8[1], &dst_f24.f8[1], &g_f4, &alpha_f4);
-    color_cast_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &r_f4, &alpha_f4);
-    rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &dst_f24);
+    color_cast_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &b_f4, &alpha_f4);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx, dstStridesNCH.y,
+                                                                   &dst_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &dst_f24);
 }
 
 template <typename T>
@@ -140,10 +147,14 @@ __global__ void color_cast_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T
     d_float24 src_f24, dst_f24;
 
     rpp_hip_load24_pkd3_and_unpack_to_float24_pln3(srcPtr + srcIdx, &src_f24);
-    color_cast_hip_compute(srcPtr, &src_f24.f8[0], &dst_f24.f8[0], &b_f4, &alpha_f4);
+    color_cast_hip_compute(srcPtr, &src_f24.f8[0], &dst_f24.f8[0], &r_f4, &alpha_f4);
     color_cast_hip_compute(srcPtr, &src_f24.f8[1], &dst_f24.f8[1], &g_f4, &alpha_f4);
-    color_cast_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &r_f4, &alpha_f4);
-    rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &dst_f24);
+    color_cast_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &b_f4, &alpha_f4);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx, dstStridesNCH.y,
+                                                                   &dst_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &dst_f24);
 }
 
 template <typename T>
@@ -172,10 +183,46 @@ __global__ void color_cast_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, 
     d_float24 src_f24, dst_f24;
 
     rpp_hip_load24_pln3_and_unpack_to_float24_pln3(srcPtr + srcIdx, srcStridesNCH.y, &src_f24);
-    color_cast_hip_compute(srcPtr, &src_f24.f8[0], &dst_f24.f8[0], &b_f4, &alpha_f4);
+    color_cast_hip_compute(srcPtr, &src_f24.f8[0], &dst_f24.f8[0], &r_f4, &alpha_f4);
     color_cast_hip_compute(srcPtr, &src_f24.f8[1], &dst_f24.f8[1], &g_f4, &alpha_f4);
-    color_cast_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &r_f4, &alpha_f4);
-    rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
+    color_cast_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &b_f4, &alpha_f4);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &dst_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
+}
+
+// PLN1 (1-channel/greyscale) kernel: the lone channel is cast using the R constant/formula,
+// matching the HOST PLN1 branches and the op's PLN1 contract.
+template <typename T>
+__global__ void color_cast_pln1_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                           uint2 dstStridesNH, RpptRGB* rgbTensor,
+                                           float* alphaTensor, RpptROIPtr roiTensorPtrSrc) {
+    int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
+    int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+    int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
+
+    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) ||
+        (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth)) {
+        return;
+    }
+
+    uint srcIdx = (id_z * srcStridesNH.x) +
+                  ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNH.y) +
+                  (id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x);
+    uint dstIdx = (id_z * dstStridesNH.x) + (id_y * dstStridesNH.y) + id_x;
+
+    float4 r_f4 = MAKE_FLOAT4((float)rgbTensor[id_z].R);
+    float4 alpha_f4 = MAKE_FLOAT4(alphaTensor[id_z]);
+
+    d_float8 src_f8, dst_f8;
+
+    rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+    color_cast_hip_compute(srcPtr, &src_f8, &dst_f8, &r_f4, &alpha_f4);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &dst_f8);
+    else
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
 }
 
 template <typename T>
@@ -247,6 +294,21 @@ RppStatus hip_exec_color_cast_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPt
                                rgbTensor, alphaTensor, roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
         }
+    } else if ((srcDescPtr->c == 1) && (dstDescPtr->c == 1)) {
+        int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
+        int globalThreads_y = dstDescPtr->h;
+        int globalThreads_z = handle.GetBatchSize();
+
+        hipLaunchKernelGGL(
+            color_cast_pln1_hip_tensor,
+            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                 ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                 ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(), srcPtr,
+            make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride), dstPtr,
+            make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride), rgbTensor,
+            alphaTensor, roiTensorPtrSrc);
+        HIP_CHECK_LAUNCH_RETURN();
     }
 
     return RPP_SUCCESS;
