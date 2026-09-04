@@ -5246,8 +5246,6 @@ namespace TensileLite
 
             size_t     skGrid    = tiles; // Fallback
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
-            if(streamKDP)
-                skGrid = tiles;
 
             // If K==0, run kernel as DP with Alpha=0 to skip main loop and apply beta*c
             size_t z = 1;
@@ -5258,7 +5256,9 @@ namespace TensileLite
             if(z == 0)
                 skGrid = tiles;
 
-            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+            AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(&hardware);
+            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            TENSILE_ASSERT_EXC(hipAMDGPU != nullptr);
 
             assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
             size_t cuCount = pAMDGPU->computeUnitCount;
@@ -5270,14 +5270,21 @@ namespace TensileLite
                 if(outFixedGridUsed)
                     *outFixedGridUsed = true;
             }
+            else if(streamKDP)
+            {
+                skGrid = tiles;
+            }
             else if(pAMDGPU->skDynamicGrid > 0)
             {
                 if(self.sizeMapping.streamK == 4 || sk5DynamicSubMode())
                 {
                     // Limit workgroups per CU to 3
                     // TODO Verify this limit is best
-                    auto kernelOccupancy = std::min(self.sizeMapping.CUOccupancy, 3);
-                    auto maxGrid         = cuCount * kernelOccupancy;
+                    constexpr int measuredMaxOccupancy = 3;
+                    auto          kernelOccupancy
+                        = std::min(self.sizeMapping.CUOccupancy, measuredMaxOccupancy);
+                    TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
+                    auto maxGrid = hipAMDGPU->analyticalHardware->N_CU * kernelOccupancy;
                     if(pAMDGPU->skMaxCUs > 0)
                     {
                         maxGrid = std::min(maxGrid, static_cast<size_t>(pAMDGPU->skMaxCUs));
@@ -5305,9 +5312,6 @@ namespace TensileLite
                     {
                         batch *= problem.batchSize(i);
                     }
-                    hip::HipAMDGPU const* hipAMDGPU
-                        = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-
                     // Fold both CU budgets into origami_problem.num_cus (the single
                     // source of truth select_grid_size derives its budget from).
                     // smCountTarget and skMaxCUs each use 0 to mean "no cap"; take the
