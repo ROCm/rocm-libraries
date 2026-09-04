@@ -38,7 +38,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   GlobalLoadB64, GlobalLoadB96, GlobalLoadD16B16, GlobalLoadD16U8, GlobalLoadD16HIU8, \
   GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, MXMFMAInstruction, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
-  SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
+  SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitTensorcnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
@@ -5323,11 +5323,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(kernelEndLabel)
       if kernel["ProblemType"]["OutputAmaxD"]:
         module.add(self.insertAmaxD(kernel))
-      # Mirror functionEnd's StreamK kernelEnd on the deferred-blocks epilogue.
-      # Single-hop next-neighbor work stealing self-resets its per-queue counters via the
-      # atomic_inc auto-reset bounds, so kernelEnd emits no explicit reset.
+      # GW_End skips SK_CloseLoop; kernelEnd waits persist USER -3. Drain TDM tensorcnt-only.
       skComponent = Component.StreamK.find(self)
       module.add(skComponent.kernelEnd(self, kernel))
+      if kernel.get("enableTDMA") and kernel.get("enableTDMB"):
+        module.add(SWaitTensorcnt(
+            tensorcnt=0,
+            comment="drain TDM before s_endpgm (no in-flight tensor ops for next kernel)"))
       module.add(SEndpgm(comment="Kernel End"))
     else:
       # If activation was deferred but no other deferred blocks exist, emit it before functionEnd
@@ -5554,6 +5556,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #   preLoopLocalWriteCode = self.preLoopLocalWriteDoMX(kernel, tensorParametersA, tensorParametersB)
       #   module.add(preLoopLocalWriteCode)
 
+      # TDM PGR>=2: retire cooperative tensor_load_to_lds (A/B plus MX scale)
+      # before ping-pong XOR of the descriptor LDS address. SIA=4 otherwise
+      # parks the PGR wait at skipPGR2 / tail, after mutating in-flight F8 MX
+      # descriptors. wait_tensorcnt 0 drains every outstanding tensor op.
+      if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["PrefetchGlobalRead"] >= 2:
+        # Tensorcnt only: tdmWait/_wait also emit s_waitcnt vlcnt=0, which SIA
+        # can park independently of the descriptor XOR. Extra MXSA/MXSB loads
+        # stay outstanding across that XOR unless tensorcnt is drained first.
+        module.add(SWaitTensorcnt(tensorcnt=0, comment="retire TDM before LDS ping-pong"))
+
       #TODO: TDM
       # Swap local ptrs A(MXSA)
       if kernel["enableTDMA"]:
@@ -5600,11 +5612,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # this prefetch stage sit inside the single-iteration guard branch,
           # past the generic per-load cluster-barrier bracketing boundary.
           # Bracket them with a self-contained cluster-scope handshake so every
-          # multicast load stays synchronized and signal/wait counts stay
-          # balanced. Gated on StreamKMulticast (only ever set on the StreamK=3
-          # component), so the emitted code is unchanged for every other path.
+          # multicast load stays synchronized. ForceDPOnly=0 cluster-multicast
+          # SK peers in one cluster can disagree on LoopCounterL, so closePrefetch
+          # repeats this handshake on the skipPGR2 fall-through. Gated on
+          # StreamKMulticast (only ever set on the StreamK=3 component).
+          # ForceDPOnly=0 SK-tail: skip when masks are already self-only.
           if streamKMulticast(kernel):
-            module.add(skComponent.streamKMulticastProloguePrefetchHandshake(self, kernel))
+            module.add(self.skipClusterPrefetchHandshakeIfSelfOnly(
+                kernel, skComponent.streamKMulticastProloguePrefetchHandshake(self, kernel)))
+            # After skip -3 arrive (not on it). Persist PGR2 defers USER wait
+            # to persist close; leftover TDM is still tensorcnt-only so MX
+            # descriptors cannot outlive persist / the next kernel.
+            if kernel.get("enableTDMA") and kernel.get("enableTDMB"):
+              module.add(SWaitTensorcnt(
+                  tensorcnt=0,
+                  comment="drain skipPGR2 leftover TDM after skip -3 (cannot outlive persist / next kernel)"))
           # For UnrollLoopSwapGlobalReadOrder, we also need to swap ds write A/B order.
           # In scheduling, we always schedule lwa first then lwb second,
           # Putting lwb in lwa's code object can easily change the order.
@@ -6824,6 +6846,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           bool(kernel.get("StreamK", 0)),
           kernel["ProblemType"]["DataType"].isDouble())
 
+      # InsertClusterBarrierPass: 1 = skip loop Rule 1/3/4; drain coop tensor_load.
+      skMulticastMode = 1 if streamKMulticast(kernel) else 0
+
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
                                # gfx1250 v0/v1 share ISA (12,5,0); this build-wide name (empty unless a
@@ -6858,18 +6883,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
-                               # StreamKMulticast gates the per-iteration cooperative-broadcast
-                               # drain in InsertClusterBarrierPass Rule 3 (mainloop): with PGR>=2
-                               # an `s_wait_tensorcnt 0` is emitted after the cooperative
-                               # tensor_load group so the broadcast retires before the back edge.
-                               # Defaults off; no-op for every other kernel.
-                               "StreamKMulticast": bool(streamKMulticast(kernel)),
+                               # See skMulticastMode above (0 off / 1 multicast).
+                               "StreamKMulticast": skMulticastMode,
                                # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
                                # between an urgent and a deferrable tensor_load group.
                                # Off by default.
                                "TDMLoadWaveSync": bool(kernel.get("TDMLoadWaveSync", False)),
-                               # PrefetchGlobalRead (PGR) for Tensile scheduling, and the
-                               # InsertClusterBarrierPass Rule 3 drain threshold. Defaults to 1.
+                               # PrefetchGlobalRead for Tensile scheduling. Defaults to 1.
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
                                # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
@@ -10884,6 +10904,44 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.halfPlrPapEntryLabels[loopCopy] = Label(
           self.labels.getNameInc("HalfPlrPAPEntry_%u" % loopCopy), "")
     return self.states.halfPlrPapEntryLabels[loopCopy]
+
+  def skipClusterPrefetchHandshakeIfSelfOnly(self, kernel, handshake, *, preserveScc=False):
+    """Skip PGR>=2 cluster -3 when DP masks have collapsed to self-only.
+
+    ``preserveScc`` restores SCC after the compare (ZeroIter / longBranchScc1).
+    """
+    if kernel.get("PrefetchGlobalRead", 1) < 2:
+      return handshake
+    if not streamKMulticast(kernel) or kernel.get("StreamKForceDPOnly", 0):
+      return handshake
+    module = Module("skip cluster prefetch handshake if self-only")
+    skip = Label(self.labels.getNameInc("SK_SkipPrefetchHSSelfOnly"), "")
+    if preserveScc:
+      with self.allocTmpSgpr(1, tag="SK_SkipPrefetchHS_SCC") as tmp:
+        module.add(SCSelectB32(dst=sgpr(tmp.idx), src0=1, src1=0,
+                               comment="save SCC before self-only prefetch -3 skip"))
+        module.add(SCmpEQU32(
+            src0=sgpr("MulticastMaskA"), src1=sgpr("MulticastMaskB"),
+            comment="SK-tail self-only (maskA==maskB after DP->SK clear): skip prefetch -3"))
+        module.add(SCBranchSCC1(
+            labelName=skip.getLabelName(),
+            comment="self-only SK: skip multicast prefetch -3"))
+        module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=1,
+                             comment="restore SCC for prefetch handshake"))
+        module.add(handshake)
+        module.add(skip)
+        module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=1,
+                             comment="restore SCC after self-only prefetch -3 skip"))
+    else:
+      module.add(SCmpEQU32(
+          src0=sgpr("MulticastMaskA"), src1=sgpr("MulticastMaskB"),
+          comment="SK-tail self-only (maskA==maskB after DP->SK clear): skip prefetch -3"))
+      module.add(SCBranchSCC1(
+          labelName=skip.getLabelName(),
+          comment="self-only SK: skip multicast prefetch -3"))
+      module.add(handshake)
+      module.add(skip)
+    return module
 
   def callHalfPlrPrefetchAcrossPersistent(self, kernel, loopCopy):
     """Jump to the shared PAP block before the final HalfPLR loop trip."""

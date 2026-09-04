@@ -57,7 +57,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SLShiftRightB64, SLoadB32, SLoadB64, SMFMAInstruction, SMemLoadInstruction, SMaxI32, SMaxU32, SMinI32, \
   SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SOrSaveExecB32, \
   SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
-  SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
+  SWaitCnt, SWaitXCnt, SWaitTensorcnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
   VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
   VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
   VCmpLtU32, VCmpNeU64, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, VCvtI32toF32, \
@@ -2359,7 +2359,7 @@ class KernelWriterAssembly(KernelWriter):
     # (ArgType-routed deepcopy(moduleWg) and normal moduleWg); getNameInc keeps
     # the labels unique across the two copies.
     module = Module("ClusterPadEarlyExit")
-    # Stream-K uses a 1-D cluster-aware grid (WorkGroup0 is the SK work-item
+    # Stream-K uses a linear grid (WorkGroup0 is the SK work-item
     # index, not an M-tile), and its grid is not padded, so this guard does not
     # apply.
     if not clusterEnabled(kernel["ClusterDim"]) or kernel["StreamK"] != 0:
@@ -2388,28 +2388,10 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def computeMulticastMaskReduction(self, kernel, module, sgprWgX, sgprWgY, maskColSgpr, maskRowSgpr):
-    """Emit the per-cluster reduced broadcast-bit masks for the padded edge-size path.
+    """Emit reduced broadcast-bit masks for padded edge clusters.
 
-    A boundary cluster (grid rounded up to ClusterDim) contains padded WGs that
-    early-exit and never issue a ld_bcst, so a full mask makes the load wait for
-    the multicast timeout every iteration. Keep only the low validX cols / validY
-    rows that map to real tiles (clusterBase = WorkGroup - wg, same for all
-    sharers of a row/column). GSU only scales the Y (WorkGroup1) extent to
-    tilesN*GSU.
-
-    Writes the reduced-bit masks into maskColSgpr/maskRowSgpr and returns True;
-    returns False (no write) where the caller must fall back to the full mask.
-
-    The Stream-K ForceDPOnly cluster multicast IS handled: at this (kernel-init)
-    point WorkGroup0/1 hold the raw M-tile/N-tile coords (the linear StreamKIdx
-    fold runs later in StreamK.preLoop), the ClusterDim axes are Cs (X/M,
-    B-multicast) and Ck (Y/N, A-multicast), and the grid is rounded up to a
-    ClusterDim multiple, so the same validX/validY reduction applies. Its padded
-    peers early-exit in StreamK.streamKClusterPadEarlyExit, so the surviving
-    peers' ld_bcst must wait only on the present lanes. The two-tile
-    (StreamKForceDPOnly==0) Stream-K cluster is excluded: WorkGroup0 there is the
-    linear work index rather than an M-tile, so it derives Multicast=False and
-    emits no multicast masks to reduce (cluster reduction only, as on develop).
+    Keep only validX/validY lanes; pads handshake then s_endpgm. GSU scales
+    the Y extent. ForceDPOnly=1 also drops WG2 past batch.
     """
     cx = kernel["ClusterDim"][0]
     cy = kernel["ClusterDim"][1]
@@ -2445,6 +2427,23 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SMinU32(dst=sgpr(tiles), src0=sgpr(tiles), src1=cy, comment="validY = min(.., cy)"))
       module.add(SMulI32(dst=sgpr(tiles), src0=sgpr(tiles), src1=cx, comment="validY*cx"))
       module.add(SBfmB32(dst=sgpr(maskColSgpr), src0=sgpr(tiles), src1=0, comment="maskCol bits = (1<<(validY*cx))-1"))
+      # ForceDPOnly=1: exclude KernelEnd-before-TDM (no-work) WGs like pads.
+      # Spatial validX/validY already dropped M/N pads; WG2 >= batch is the
+      # remaining no-work case still in that mask (cluster_z=1, uniform).
+      if kernel.get("StreamKForceDPOnly") and streamKMulticast(kernel):
+        nBatch = (kernel["ProblemType"]["NumIndicesC"]
+                  - kernel["ProblemType"]["NumIndicesFree"])
+        if nBatch > 0:
+          batchIdx = kernel["ProblemType"]["NumIndicesFree"]
+          module.add(SCmpGeU32(src0=sgpr("WorkGroup2"),
+                               src1=sgpr("SizesFree+%u" % batchIdx),
+                               comment="no-work cluster if WorkGroup2 >= batch"))
+          module.add(SCSelectB32(dst=sgpr(maskRowSgpr), src0=0,
+                                 src1=sgpr(maskRowSgpr),
+                                 comment="empty maskRow: KernelEnd-before-TDM WGs excluded like pads"))
+          module.add(SCSelectB32(dst=sgpr(maskColSgpr), src0=0,
+                                 src1=sgpr(maskColSgpr),
+                                 comment="empty maskCol: KernelEnd-before-TDM WGs excluded like pads"))
     return True
 
   def remapWgSerial(self, kernel, earlyStop=True):
@@ -2744,6 +2743,18 @@ class KernelWriterAssembly(KernelWriter):
             moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment=""))
             moduleRegInit.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment=""))
             moduleRegInit.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
+            # computeMasks runs after RemapWorkGroupDone and reads wg_x/wg_y/nwg_x
+            # from these temps. EnableCluster writes them; cluster_id==0 used to
+            # skip that extract so the multicast shift was stale. ClusterDim is
+            # a power of two, so AND is WG % Cs / Ck. Does not fold batch/Z.
+            cx = kernel["ClusterDim"][0]
+            cy = kernel["ClusterDim"][1]
+            moduleRegInit.add(SAndB32(dst=sgpr(sTmp+1), src0=sgpr("WorkGroup0"), src1=cx - 1,
+                               comment="wg_x = WG0 % Cs (cluster_id==0)"))
+            moduleRegInit.add(SAndB32(dst=sgpr(sTmp+2), src0=sgpr("WorkGroup1"), src1=cy - 1,
+                               comment="wg_y = WG1 % Ck (cluster_id==0)"))
+            moduleRegInit.add(SMovB32(dst=sgpr(sTmp+3), src=cx,
+                               comment="nwg_x = Cs (cluster_id==0)"))
             moduleRegInit.add(SBranch(label_calculate_workgroup_done.getLabelName()))
             moduleRegInit.add(label_enable_cluster)
             moduleRegInit.add(SMovB32(dst=sgpr(sTmp+0), src="ttmp6", comment="Read TTMP6 register"))
@@ -9890,15 +9901,17 @@ class KernelWriterAssembly(KernelWriter):
             if self.isPrefetchAcrossPersistentEnabled(kernel):
               module.add(SCMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                          comment="discard primed PAP group when current slice skips NLL"))
-            # StreamKMulticast: the long branch below skips the pass's first-load
-            # cluster wait on the zero-iteration path; emit the matching
-            # cluster-scope wait on that skip edge so the prologue cluster arrive
-            # is consumed on every control-flow path (whole-cluster barrier
-            # symmetry). scc (from checkLastIter) is preserved for the branch
-            # below. No-op unless StreamKMulticast.
+            # StreamKMulticast PGR>=2: LC==0 skips prefetch including skipPGR2
+            # -3. ForceDPOnly=0 [Cs,Ck] peers can disagree on LoopCounter, so
+            # streamKMulticastZeroIterClusterWait completes that prefetch -3
+            # on the LC==0 path and restores SCC for longBranchScc1. PGR1 is
+            # still a no-op (no prefetch -3 after the per-pass round).
             if streamKMulticast(kernel):
               skComponent = Component.StreamK.find(self)
-              module.add(skComponent.streamKMulticastZeroIterClusterWait(self, kernel))
+              module.add(self.skipClusterPrefetchHandshakeIfSelfOnly(
+                  kernel,
+                  skComponent.streamKMulticastZeroIterClusterWait(self, kernel),
+                  preserveScc=True))
             # use positive offset only long jump
             with self.allocTmpSgpr(3, tag="openSumAtLeastUnroll_tmpSgprInfo") as tmpSgprInfo:
               module.add(self.longBranchScc1(lastIterEnd, posNeg=1, tmpSgprInfo=tmpSgprInfo))
@@ -17274,6 +17287,17 @@ class KernelWriterAssembly(KernelWriter):
     elif idxPgr == 1 or idxPgr == kernel["PrefetchGlobalRead"]:
       skipPGRn = Label(self.labels.getName("skipPGR%d_%d"%(PGR, idxPgr)), "")
       imod.add(skipPGRn)
+      # skipPGR2_1 is LC==1 fall-through; complete the same prefetch -3 as the load path.
+      if idxPgr == 1 and streamKMulticast(kernel):
+        skComponent = Component.StreamK.find(self)
+        imod.addComment0("cluster B-multicast: skipPGR2 LC==1 path completes the same prefetch -3 round")
+        imod.add(self.skipClusterPrefetchHandshakeIfSelfOnly(
+            kernel, skComponent.streamKMulticastProloguePrefetchHandshake(self, kernel)))
+        # Drain leftover TDM after skip -3 (tensorcnt-only; not tdmWait).
+        if kernel.get("enableTDMA") and kernel.get("enableTDMB"):
+          imod.add(SWaitTensorcnt(
+              tensorcnt=0,
+              comment="drain skipPGR2 leftover TDM after skip -3 (cannot outlive persist / next kernel)"))
       if (kernel["DirectToLdsA"] and kernel["DirectToLdsB"]):
         # early exit case (idxPgr < PGR), need to wait for all prefetch here (vmcnt=0).
         # non early exit case, we wait only 1 set. Skip wait for (PGR-1) set
@@ -18442,6 +18466,11 @@ class KernelWriterAssembly(KernelWriter):
       # TODO- refine this part, put outside of this function
       if kernel["ProblemType"]["OutputAmaxD"]:
         imod.add(self.insertAmaxD(kernel))
+
+    # TDM leftover close: tensorcnt-only. Do not tdmWait at persist close.
+    if kernel.get("enableTDMA") and kernel.get("enableTDMB"):
+      imod.add(tdmWait(self.states, kernel, None, None, 0,
+                       "drain TDM before s_endpgm (no in-flight tensor ops for next kernel)"))
 
     imod.add(SEndpgm(comment="Kernel End"))
     return imod

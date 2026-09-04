@@ -23,6 +23,7 @@
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 
 #include <cstdint>
+#include <cstring>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -359,14 +360,9 @@ void insertRule3HandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor, AsmIRB
     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
 }
 
-/// Emit `s_wait_tensorcnt 0` immediately before \p anchor (the instruction
-/// right after a cooperative `tensor_load_to_lds` group). Under PGR>=2 the
-/// cooperative load is async and produced by a PEER wave, so the consumer's own
-/// tensor counter cannot order it. Draining right after the load issues makes
-/// the broadcast coherent before the back edge, so the publishing workgroup
-/// barrier at the next loop head orders it for the consuming waves. Matches
-/// PGR1's per-iteration drain.
-void insertProducerTensorDrainBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId) {
+/// Emit `s_wait_tensorcnt 0` immediately before \p anchor.
+void insertProducerTensorDrainBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId,
+                                     const char* comment) {
     const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_wait_tensorcnt, archId);
     assert(waitDesc && "s_wait_tensorcnt opcode is not supported on this architecture");
     StinkyInstruction* w = irBuilder.create(waitDesc, anchor);
@@ -374,8 +370,7 @@ void insertProducerTensorDrainBefore(IRBase* anchor, AsmIRBuilder& irBuilder, Gf
     SWaitTensorCntData d;
     d.tlcnt = 0;
     w->addModifier<SWaitTensorCntData>(d);
-    w->addModifier<CommentData>(
-        CommentData{"retire cooperative tensor_load_to_lds before back-edge (PGR>=2 coherence)"});
+    w->addModifier<CommentData>(CommentData{comment});
 }
 
 bool isLabelNamed(const StinkyInstruction& inst, const char* name) {
@@ -956,6 +951,68 @@ bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
     return false;
 }
 
+bool isSXorB32(const StinkyInstruction& inst) {
+    const HwInstDesc* desc = inst.getHwInstDesc();
+    return desc != nullptr && desc->mnemonic != nullptr &&
+           std::strcmp(desc->mnemonic, "s_xor_b32") == 0;
+}
+
+bool isWaitTensorCnt(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_WaitTensorCnt);
+}
+
+bool isImmediatelyPrecededByWaitTensorCnt(StinkyInstruction* anchor) {
+    BasicBlock* parent = anchor->getParent();
+    if (parent == nullptr) return false;
+    auto it = BasicBlock::iterator(anchor);
+    while (it != parent->begin()) {
+        --it;
+        auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (prev == nullptr) continue;
+        if (isPseudoInst(prev)) continue;
+        return isWaitTensorCnt(*prev);
+    }
+    return false;
+}
+
+/// First ``s_xor_b32`` after \p start in the same segment (TDM LDS ping-pong).
+StinkyInstruction* findXorInSegmentAfter(StinkyInstruction* start) {
+    for (StinkyInstruction* n = firstRealInstAfter(start); n != nullptr;
+         n = firstRealInstAfter(n)) {
+        if (isSegmentBoundary(*n)) return nullptr;
+        if (isSXorB32(*n)) return n;
+    }
+    return nullptr;
+}
+
+bool hasWaitTensorCntBetween(StinkyInstruction* start, StinkyInstruction* endExclusive) {
+    for (StinkyInstruction* n = firstRealInstAfter(start); n != nullptr && n != endExclusive;
+         n = firstRealInstAfter(n)) {
+        if (isWaitTensorCnt(*n)) return true;
+    }
+    return false;
+}
+
+/// Ends a cooperative A+MXSA tensor_load group. SIA=4 can split the two loads
+/// with TDM increments / ds_load; those are not terminators.
+bool isCoopLoadGroupTerminator(const StinkyInstruction& inst) {
+    return isSegmentBoundary(inst) || isSXorB32(inst) || isWaitTensorCnt(inst) || isBarrier(inst);
+}
+
+/// Instruction after the last tensor_load of the cooperative group that starts
+/// at \p tlIt. Walking only adjacent tensor_loads planted the PGR=1 SIA=4
+/// producer drain between A and MXSA (confirmed hang vs SIA=0).
+BasicBlock::iterator afterCooperativeTensorLoadGroup(BasicBlock::iterator tlIt, BasicBlock& bb) {
+    auto lastTlNext = std::next(tlIt);
+    for (auto postIt = lastTlNext; postIt != bb.end(); ++postIt) {
+        auto* pinst = dyn_cast<StinkyInstruction>(postIt.getNodePtr());
+        if (pinst == nullptr || isPseudoInst(pinst)) continue;
+        if (isCoopLoadGroupTerminator(*pinst)) break;
+        if (isTensorLoad(*pinst)) lastTlNext = std::next(postIt);
+    }
+    return lastTlNext;
+}
+
 struct PreLoopSignalAnchor {
     IRBase* anchor = nullptr;
     /// True when the climb found no workgroup barrier to sit behind. Only wave 0 issues the
@@ -1223,8 +1280,8 @@ class InsertClusterBarrierPassImpl : public Pass {
    public:
     static char ID;
 
-    InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue)
-        : streamKMulticast_(streamKMulticast), pgrValue_(pgrValue) {}
+    InsertClusterBarrierPassImpl(StreamKMulticastMode streamKMulticast)
+        : streamKMulticast_(streamKMulticast) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -1246,33 +1303,39 @@ class InsertClusterBarrierPassImpl : public Pass {
         // reading what is already in the way -- which signal is above, which wait stands
         // between a barrier and its load -- so anything planted out of turn is invisible to
         // the rule that should have seen it, and gets hoisted over or counted twice.
-        for (BasicBlock& bb : func) {
-            std::vector<IRBase*> gsu1Anchors;
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (inst == nullptr) continue;
-                if (!isLabelNamed(*inst, kGSU1LabelName)) continue;
-                if (isFollowedByClusterBarrierHandshakeOrSignal(inst)) continue;
-                auto nextIt = std::next(it);
-                gsu1Anchors.push_back((nextIt != bb.end()) ? nextIt.getNodePtr() : nullptr);
+        // Rules 1 and 2 are a matched prologue pair (signal then wait), so multicast-on
+        // suppresses them together -- the multicast kernel does its own prologue -3 wait
+        // and a Rule 1 arrive with no matching wait would unbalance the handshake.
+        if (streamKMulticast_ < kStreamKMulticastOn) {
+            for (BasicBlock& bb : func) {
+                std::vector<IRBase*> gsu1Anchors;
+                for (auto it = bb.begin(); it != bb.end(); ++it) {
+                    auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                    if (inst == nullptr) continue;
+                    if (!isLabelNamed(*inst, kGSU1LabelName)) continue;
+                    if (isFollowedByClusterBarrierHandshakeOrSignal(inst)) continue;
+                    auto nextIt = std::next(it);
+                    gsu1Anchors.push_back((nextIt != bb.end()) ? nextIt.getNodePtr() : nullptr);
+                }
+                if (gsu1Anchors.empty()) continue;
+                AsmIRBuilder irBuilder(bb, archId);
+                for (IRBase* anchor : gsu1Anchors) {
+                    insertRule1ClusterBarrierSignalBefore(anchor, irBuilder, archId);
+                }
             }
-            if (gsu1Anchors.empty()) continue;
-            AsmIRBuilder irBuilder(bb, archId);
-            for (IRBase* anchor : gsu1Anchors) {
-                insertRule1ClusterBarrierSignalBefore(anchor, irBuilder, archId);
-            }
-        }
 
-        // Rule 2: one cluster wait immediately before the run-up's first tensor load, pairing
-        // Rule 1's prologue arrive. Only skip when that load is already directly preceded by a
-        // cluster wait; a wait on a different CFG path above (e.g. StreamK zero-iter skip) does
-        // not count.
-        StinkyInstruction* firstTL = findFirstTensorLoadInFunc(func);
-        if (firstTL != nullptr && !isImmediatelyPrecededByClusterBarrierWait(firstTL)) {
-            BasicBlock* parent = firstTL->getParent();
-            AsmIRBuilder irBuilder(*parent, archId);
-            insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(firstTL),
-                                           "cluster_barrier wait", irBuilder, archId);
+            // Rule 2: one cluster wait immediately before the run-up's first tensor load,
+            // pairing Rule 1's prologue arrive. Only skip when that load is already directly
+            // preceded by a cluster wait; a wait on a different CFG path above (e.g. StreamK
+            // zero-iter skip) does not count.
+            StinkyInstruction* rule2FirstTL = findFirstTensorLoadInFunc(func);
+            if (rule2FirstTL != nullptr &&
+                !isImmediatelyPrecededByClusterBarrierWait(rule2FirstTL)) {
+                BasicBlock* parent = rule2FirstTL->getParent();
+                AsmIRBuilder irBuilder(*parent, archId);
+                insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(rule2FirstTL),
+                                               "cluster_barrier wait", irBuilder, archId);
+            }
         }
 
         for (BasicBlock& bb : func) {
@@ -1312,6 +1375,30 @@ class InsertClusterBarrierPassImpl : public Pass {
                     if (!seenTriggers.insert(trigger).second) continue;
                     if (isImmediatelyPrecededByClusterBarrierWait(trigger)) continue;
 
+                    // Record the instruction right after this cooperative
+                    // tensor_load group so a producer-side tensor drain can be
+                    // planted there (retire the load before the back edge / next
+                    // publishing barrier).
+                    //
+                    // Collected above Rule 3's loop-body gate: retiring the load
+                    // before the barrier that publishes it is owed by every
+                    // cooperative group, whether or not it sits in a loop, so the
+                    // drain does not share Rule 3's reason to stop at the loop.
+                    //
+                    // No PrefetchGlobalRead gate either: the drain is required at
+                    // every prefetch depth, not just PGR>=2. Group end comes from
+                    // afterCooperativeTensorLoadGroup rather than a walk over
+                    // immediately-adjacent tensor_loads -- SIA=4 can schedule TDM
+                    // increments / ds_loads between the operand load and its
+                    // MX-scale load, and the adjacent-only walk stopped at the
+                    // first of those and planted the drain between A and MXSA
+                    // (confirmed hang at PGR=1 SIA=4).
+                    if (streamKMulticast_ >= kStreamKMulticastOn) {
+                        auto postIt = afterCooperativeTensorLoadGroup(it, bb);
+                        producerDrainAnchors.push_back((postIt != bb.end()) ? postIt.getNodePtr()
+                                                                            : nullptr);
+                    }
+
                     // Rule 3 speaks for the loop body and nowhere else. Outside a loop there
                     // is no next trip to hand a token to and no exit to compensate at, and the
                     // run-up's own load is Rule 2's business.
@@ -1323,27 +1410,6 @@ class InsertClusterBarrierPassImpl : public Pass {
                     auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
                     triggers.push_back({trigger, segBegin, waitAnchor,
                                         (hoistedInst != nullptr) ? hoistedInst : trigger});
-
-                    // Record the instruction right after this cooperative
-                    // tensor_load group so a producer-side tensor drain can be
-                    // planted there (retire the load before the back edge / next
-                    // publishing barrier). Advance past any immediately-following
-                    // tensor_load(s) so the drain covers the whole group (e.g. the
-                    // A/B operand load plus its MX-scale load) rather than landing
-                    // between them.
-                    if (streamKMulticast_ && pgrValue_ >= 2) {
-                        auto postIt = std::next(it);
-                        while (postIt != bb.end()) {
-                            auto* pinst = dyn_cast<StinkyInstruction>(postIt.getNodePtr());
-                            if (pinst != nullptr && isTensorLoad(*pinst)) {
-                                ++postIt;
-                                continue;
-                            }
-                            break;
-                        }
-                        producerDrainAnchors.push_back((postIt != bb.end()) ? postIt.getNodePtr()
-                                                                            : nullptr);
-                    }
                 }
             }
 
@@ -1444,32 +1510,67 @@ class InsertClusterBarrierPassImpl : public Pass {
                 }
             }
 
-            if (pending.empty() && tailTL == nullptr && tailWait == nullptr) continue;
+            // producerDrainAnchors is tested too: it no longer implies a non-empty
+            // pending now that Rule 3 stops at the loop body and the drain does not.
+            if (pending.empty() && producerDrainAnchors.empty() && tailTL == nullptr &&
+                tailWait == nullptr)
+                continue;
 
             AsmIRBuilder irBuilder(bb, archId);
-            for (const auto& [trigger, signalAnchor, waitAnchor] : pending) {
-                insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
-                (void)trigger;
-            }
-            // kRule3CrossLoop true only: drain / skipCBWait for hoisted loops.
-            for (const LoopCompensation& comp : hoistedLoops) {
-                emitLoopCarriedCompensation(comp.head, comp.exitLabel, comp.preLoopSignal, bb, func,
-                                            archId);
+            // Multicast-on: skip loop -3 (mixed LoopCounter); keep producer drain.
+            // SCC is no longer restored at the handshake -- StinkyDAGSchedulerPass
+            // pins live-out SCC defs after every cluster wait instead (#11102).
+            if (streamKMulticast_ < kStreamKMulticastOn) {
+                for (const auto& [trigger, signalAnchor, waitAnchor] : pending) {
+                    insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
+                    (void)trigger;
+                }
+                // kRule3CrossLoop true only: drain / skipCBWait for hoisted loops.
+                // Inside the same gate as the handshakes it compensates for -- the
+                // drain wait swallows a token posted by a Rule 3 signal, so emitting
+                // it when those signals were suppressed would block on a token nobody
+                // posted.
+                for (const LoopCompensation& comp : hoistedLoops) {
+                    emitLoopCarriedCompensation(comp.head, comp.exitLabel, comp.preLoopSignal, bb,
+                                                func, archId);
+                }
             }
             // Producer-side drain right after each cooperative tensor_load
             // group (retire the async cooperative load before the back-edge so
             // the next loop-head barrier publishes it coherently).
             for (IRBase* postAnchor : producerDrainAnchors) {
-                insertProducerTensorDrainBefore(postAnchor, irBuilder, archId);
+                insertProducerTensorDrainBefore(
+                    postAnchor, irBuilder, archId,
+                    "retire cooperative tensor_load_to_lds before back-edge");
             }
-            if (tailWait != nullptr) {
-                IRBase* anchor =
-                    (tailWaitNextIt != bb.end()) ? tailWaitNextIt.getNodePtr() : nullptr;
-                insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
+            // Rule 4 (tail-loop pair). Multicast-on suppresses it for the same
+            // reason as Rule 3. Rule 1 is no longer emitted here -- #11406 moved
+            // it to its own loop above, where the gate is applied instead.
+            if (streamKMulticast_ < kStreamKMulticastOn) {
+                if (tailWait != nullptr) {
+                    IRBase* anchor =
+                        (tailWaitNextIt != bb.end()) ? tailWaitNextIt.getNodePtr() : nullptr;
+                    insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
+                }
+                if (tailTL != nullptr) {
+                    insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(tailTL),
+                                                   "cluster barrier wait", irBuilder, archId);
+                }
             }
-            if (tailTL != nullptr) {
-                insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(tailTL),
-                                               "cluster barrier wait", irBuilder, archId);
+        }
+
+        // Drain prologue TDM before the LDS ping-pong XOR of the descriptor.
+        // Rule 2's own firstTL lookup now lives in the relocated block above; this
+        // rule needs the same instruction, so it looks it up again here.
+        StinkyInstruction* firstTL = findFirstTensorLoadInFunc(func);
+        if (streamKMulticast_ >= kStreamKMulticastOn && firstTL != nullptr) {
+            StinkyInstruction* pingPongXor = findXorInSegmentAfter(firstTL);
+            if (pingPongXor != nullptr && !hasWaitTensorCntBetween(firstTL, pingPongXor) &&
+                !isImmediatelyPrecededByWaitTensorCnt(pingPongXor)) {
+                BasicBlock* parent = pingPongXor->getParent();
+                AsmIRBuilder irBuilder(*parent, archId);
+                insertProducerTensorDrainBefore(pingPongXor, irBuilder, archId,
+                                                "retire TDM before LDS ping-pong XOR");
             }
         }
 
@@ -1477,16 +1578,15 @@ class InsertClusterBarrierPassImpl : public Pass {
     }
 
    private:
-    const bool streamKMulticast_ = false;
-    const int pgrValue_ = 1;
+    const StreamKMulticastMode streamKMulticast_ = kStreamKMulticastOff;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
 
 }  // namespace
 
-std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue) {
-    return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast, pgrValue);
+std::unique_ptr<Pass> createInsertClusterBarrierPass(StreamKMulticastMode streamKMulticast) {
+    return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast);
 }
 
 namespace cluster_barrier {

@@ -36,8 +36,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
-                    streamKMulticast, streamK2DMulticast, \
-                    swizzleGeometry
+                    streamKMulticast, swizzleGeometry
 from Tensile.Common.DataType import DataType
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.CustomKernels import supportsUserSgprKernargPreload
@@ -245,27 +244,14 @@ def _validateStreamKClusterShape(cs, ck):
 
   Cs and Ck must each be powers of two and the total cluster C = Cs*Ck must lie
   in the hardware-supported [2, 16] range. The mask bit-math assumes powers of
-  two, so a non-pow2 factoring is rejected. A 1-D [Cs, 1] cluster is the Ck == 1
-  case of the same check.
+  two, so a non-pow2 factoring is rejected. Cs == 1 is valid (B has no M-axis
+  peers); Ck == 1 is valid (A has no N-axis peers).
   """
   return isPow2(cs) and isPow2(ck) and 2 <= cs * ck <= 16
 
 
 def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
-  """Validate the gfx1250 StreamK cluster cooperative-load (multicast) path.
-
-  The cluster co-locates ClusterDim = [Cs, Ck] StreamK workgroups: the Cs
-  M-adjacent peers share the same B over full K and the Ck N-adjacent peers
-  share the same A, so each operand is TDM-multicast across the peers that reuse
-  it. Sizes that are not a cluster multiple need no build-time check: the launch
-  rounds the grid up, the padded boundary peers s_endpgm before the -3 cluster
-  barrier, and the broadcast masks are trimmed to the peers actually present.
-
-  The path is auto-derived from StreamK=3 + ClusterDim != [1, 1] +
-  StreamKForceDPOnly=1, so the checks below reject an unusable cluster rather
-  than an explicit opt-in. They deliberately do not reach the FDPO=0 SK3
-  cluster (cluster reduction), which develop never constrained.
-  """
+  """Validate gfx1250 StreamK cluster multicast: SK3 + ClusterDim, TDM, no atomic, XCC=0."""
   if not streamKMulticast(state):
     return True
 
@@ -291,8 +277,8 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
     return False
 
   # Cluster shape: Cs = ClusterDim[0] M-axis peers sharing B, Ck = ClusterDim[1]
-  # N-axis peers sharing A. Ck == 1 (the 1-D [Cs, 1] cluster) is the degenerate
-  # case where A has no peers, so one shape check covers both.
+  # N-axis peers sharing A. Cs == 1 / Ck == 1 are the cases where that operand
+  # has no peers, so one shape check covers every ClusterDim.
   clusterDim = state["ClusterDim"]
   if not _validateStreamKClusterShape(clusterDim[0], clusterDim[1]):
     reject(state, printRejectionReason,
@@ -1172,11 +1158,10 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason,
               "Currently ClusterDim = 16x1 and 1x16 are not supported")
 
-    # Multicast uses a mask fixed to the physical cluster position, but Stream-K remaps
-    # each WG's tile per iteration, so the broadcast would target the wrong partner.
-    # Keep the cluster WG-id decode (gated on ClusterDim) but leave multicast off for Stream-K
-    # -- except on the DP-only SK3 cluster, where every WG owns one whole tile, so the
-    # peers stay the spatial tile neighbours the ClusterLoad component broadcasts between.
+    # Multicast uses a mask fixed to the physical cluster position. Stream-K
+    # remaps tiles per iteration except where streamKMulticast (SK3, ClusterDim
+    # not [1, 1]) keeps DP peers as spatial ClusterDim neighbours. ForceDPOnly
+    # is orthogonal and does not gate this.
     clusterPeersShareTiles = bool(state["ClusterDim"] != [1, 1]
                                   and (state["StreamK"] == 0 or streamKMulticast(state)))
     # Broadcasting additionally needs hardware TDM-multicast (an arch fact, in archCaps);
@@ -1872,28 +1857,24 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  "StreamK dynamic/hybrid (SK4/SK5) do not support ClusterDim "
                  "(cluster support is SK3-only)")
-        # A Y-extent > 1 means the Ck peers share A on N-adjacent tiles, which only
-        # works when the launch spans the real M x N tile space and the Y rank is
-        # folded back into a unique tile index (StreamK.preLoop). That is the
-        # ForceDPOnly cluster multicast; anywhere else a Y-extent > 1 would collide
-        # WorkGroup0 across work-groups that differ only in Y. A [1, Ck] cluster has
-        # no B-sharing X peers at all and is not a multicast shape.
-        if state["ClusterDim"][1] != 1 and not (streamK2DMulticast(state)
-                                                and state["StreamKForceDPOnly"]):
+        # Stream-K clustering is multicast-only: SK3 plus ClusterDim not [1, 1].
+        # Cs == 1 is A-only (N-adjacent peers); Ck == 1 is B-only.
+        elif not streamKMulticast(state):
           reject(state, printRejectionReason,
-                 "Stream-K + ClusterDim Y-extent > 1 requires StreamKForceDPOnly=1 "
-                 "and a cluster [Cs, Ck] with both axes > 1; got %s"
-                 % state["ClusterDim"])
-        # StreamKXCCMapping remaps WorkGroup0 with no cluster awareness; disable it.
-        state["StreamKXCCMapping"] = 0
-        # WorkGroupMappingXCC is the second WorkGroup0 remap (the wgmXCC CU-count
-        # remap, as opposed to the StreamKXCCMapping chiplet remap) and carries the
-        # same hazard: a cluster's peers are only adjacent in the unremapped id
-        # space, so any reshuffle breaks the tile adjacency the cooperative load
-        # and the cluster reduction both rely on. Force it to identity here rather
-        # than reject, and do it before the auto-WGMXCC check below so a clustered
-        # kernel never reaches that check still holding -1.
-        state["WorkGroupMappingXCC"] = 1
+                 "Stream-K + ClusterDim requires StreamK=3 cluster multicast "
+                 "(got StreamK=%s ClusterDim=%s)"
+                 % (state["StreamK"], state["ClusterDim"]))
+        else:
+          # StreamKXCCMapping remaps WorkGroup0 with no cluster awareness; disable it.
+          state["StreamKXCCMapping"] = 0
+          # WorkGroupMappingXCC is the second WorkGroup0 remap (the wgmXCC CU-count
+          # remap, as opposed to the StreamKXCCMapping chiplet remap) and carries the
+          # same hazard: a cluster's peers are only adjacent in the unremapped id
+          # space, so any reshuffle breaks the tile adjacency the cooperative load
+          # relies on. Force it to identity here rather than reject, and do it
+          # before the auto-WGMXCC check below so a clustered kernel never reaches
+          # that check still holding -1.
+          state["WorkGroupMappingXCC"] = 1
       if not state["EnableMatrixInstruction"]:
         # Source/MAC (non-MI) Stream-K: partial-write + fixup are datapath-agnostic,
         # so allow it for Assembly source kernels (other SK constraints still apply).

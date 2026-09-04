@@ -283,18 +283,79 @@ def _count_cluster_barriers(src):
     return signals, waits
 
 
+def _kernelend_has_gated_persist_wait(src):
+    """True when KernelEnd waits persist USER ``-3`` (GW_End skipped SK_CloseLoop)."""
+    lines = src.splitlines()
+    kend = next((i for i, ln in enumerate(lines)
+                 if ln.startswith("label_KernelEnd:")), None)
+    if kend is None:
+        return False
+    end = next(
+        (i for i, ln in enumerate(lines[kend + 1 :], start=kend + 1)
+         if ln.startswith("s_endpgm") or ln.startswith("label_ASM_End:")),
+        None,
+    )
+    window = lines[kend:end]
+    return (any("s_barrier_wait -3" in ln for ln in window)
+            and not any("s_barrier_signal -3" in ln for ln in window)
+            and any("wait last -3 at persist close" in ln for ln in window))
+
+
+def assert_kernelend_gated_persist_wait(src, base):
+    """GW_End skips SK_CloseLoop; KernelEnd must wait persist USER ``-3`` if arrived.
+
+    Not wait-only (flag==0 skips; pads already ``s_endpgm``). SK_CloseLoop
+    already waited and cleared the flag.
+    """
+    assert _kernelend_has_gated_persist_wait(src), (
+        f"Kernel {base!r}: GW_End branches to KernelEnd skipping SK_CloseLoop; "
+        f"KernelEnd must gated-wait persist USER -3 before s_endpgm"
+    )
+
+
+def assert_kernelend_tdm_drain(src, base):
+    """KernelEnd must ``s_wait_tensorcnt 0`` (not a 500-char lookbehind).
+
+    Drain in-flight TDM at KernelEnd so the next kernel does not start with
+    leftover tensor ops. tensorcnt-only: a full tdmWait also waits vlcnt=0
+    and can stall persist overlap. ``s_wait_xcnt 0`` is forbidden.
+    Persist close must not tdmWait.
+    """
+    lines = src.splitlines()
+    kend = next((i for i, ln in enumerate(lines)
+                 if ln.startswith("label_KernelEnd:")), None)
+    assert kend is not None, f"Kernel {base!r}: missing label_KernelEnd"
+    end = next(
+        (i for i, ln in enumerate(lines[kend + 1 :], start=kend + 1)
+         if ln.startswith("s_endpgm") or ln.startswith("label_ASM_End:")),
+        None,
+    )
+    assert end is not None, (
+        f"Kernel {base!r}: missing s_endpgm after label_KernelEnd"
+    )
+    window = "\n".join(lines[kend:end])
+    assert "s_wait_tensorcnt 0" in window, (
+        f"Kernel {base!r}: KernelEnd must s_wait_tensorcnt 0 before s_endpgm "
+        f"(deferred path must mirror functionEnd tdmWait). window={window!r}"
+    )
+    assert "s_wait_xcnt 0" not in window, (
+        f"Kernel {base!r}: KernelEnd must not s_wait_xcnt 0 "
+        f"(s_wait_xcnt 0 at KernelEnd stalls persist overlap)"
+    )
+
+
 def assert_cluster_barrier_balanced(src, base):
     """Cluster-scope split-barrier balance check shared by the gfx1250 StreamK
     cluster char tests. Every arrive (``s_barrier_signal -3``) must be consumed by
-    a completion (``s_barrier_wait -3``) on every control-flow path. The prologue
-    wave-0 arrive is consumed by exactly one of two mutually exclusive cluster
-    waits: the last-iteration guard's zero-iteration skip-edge wait, or the
-    first-load wait on the >=1-iteration fall-through. Both waits are emitted
-    statically but only one executes on any given path, so the static wait count
-    is exactly one greater than the signal count; every other arrive (including a
-    config's dedicated prologue-prefetch handshake) is a self-contained arrive/wait
-    pair. Any other imbalance would leave a cluster wait unpaired and stall the
-    cluster waves.
+    a completion (``s_barrier_wait -3``) on every control-flow path.
+
+    The prologue round is a self-contained arrive/wait (every launched member
+    including pads signal+wait, then pads ``s_endpgm``). The first-load wait and
+    zero-iteration skip wait are not emitted for that round. Every other arrive
+    (including a config's dedicated prologue-prefetch handshake and later loop
+    ``-3``) is also a self-contained arrive/wait pair, so the static wait count
+    equals the signal count. Any other imbalance would leave a cluster wait
+    unpaired and stall the cluster waves.
 
     Barriers inside cloned bodies are discounted the same way (see
     ``_count_cluster_barriers``): InsertClusterBarrierPass anchors the Rule 3
@@ -303,11 +364,399 @@ def assert_cluster_barrier_balanced(src, base):
     copies of which exactly one runs.
     """
     n_signal, n_wait = _count_cluster_barriers(src)
-    assert n_wait == n_signal + 1, (
+    # ForceDPOnly=0 persist PGR2: skipPGR2 and LDS1 load-path arrives are
+    # mutually exclusive; persist close waits once. Static instruction count
+    # would otherwise see +1 extra signal.
+    if "PGR2 skipPGR2: wait last -3 at persist close" in src:
+        n_signal -= 1
+    # LC==0 ZeroIter and LC>0 skipPGR2 / LDS1 are also mutually exclusive;
+    # persist PGR2 defers ZeroIter wait to the same persist-close wait.
+    if "PGR2 ZeroIter: arrive now; wait last -3 at persist close" in src:
+        n_signal -= 1
+    # GW_End long-branches to KernelEnd and skips SK_CloseLoop. A gated
+    # persist wait is emitted at both sites (dynamically exclusive).
+    if _kernelend_has_gated_persist_wait(src):
+        n_wait -= 1
+    assert n_wait == n_signal, (
         f"Kernel {base!r}: unexpected cluster barrier balance: "
-        f"{n_signal} signal(-3) vs {n_wait} wait(-3) (expected wait == signal + 1, "
+        f"{n_signal} signal(-3) vs {n_wait} wait(-3) (expected wait == signal, "
         "both counted outside cloned bodies)"
     )
+
+
+def assert_skip_pgr2_skip_path_handshake(src, base):
+    """The LC==1 skipPGR2 fall-through must complete the same ``-3`` round as
+    the LDS1 load path.
+
+    ForceDPOnly=0 [Cs,Ck] SK peers in one cluster can disagree on LoopCounterL
+    (partial vs remainder K). Handshake only inside the load-path guard leaves
+    LC==1 peers skipping ``s_barrier_signal/wait -3`` while others wait.
+
+    ForceDPOnly=0 persist PGR2 arrives in the skip window and waits at
+    persist close (WAVEDONE leftover). ForceDPOnly=1 keeps wait in-window.
+    """
+    lines = src.splitlines()
+    skip_idx = join_idx = None
+    for i, ln in enumerate(lines):
+        if ln.startswith("label_skipPGR2_1:"):
+            skip_idx = i
+        elif ln.startswith("label_skipPGR2_2:") and skip_idx is not None:
+            join_idx = i
+            break
+    assert skip_idx is not None, f"Kernel {base!r} missing label_skipPGR2_1"
+    assert join_idx is not None, (
+        f"Kernel {base!r} missing label_skipPGR2_2 after skipPGR2_1"
+    )
+    window = lines[skip_idx:join_idx]
+    # SIA4 may drop the Tensile comment and insert s_wait_tensorcnt around
+    # the handshake; the arrive (and wait, unless deferred to persist close)
+    # is the contract.
+    assert any("s_barrier_signal -3" in w for w in window), (
+        f"Kernel {base!r} skipPGR2 LC==1 path missing s_barrier_signal -3"
+    )
+    defer_close = "PGR2 skipPGR2: wait last -3 at persist close" in src
+    if defer_close:
+        assert not any("s_barrier_wait -3" in w for w in window), (
+            f"Kernel {base!r}: persist PGR2 skipPGR2 must not wait in-window "
+            f"(wait last -3 at persist close). window={window!r}"
+        )
+        close_idx = next((i for i, ln in enumerate(lines)
+                          if ln.startswith("label_SK_CloseLoop:")), None)
+        assert close_idx is not None, f"Kernel {base!r} missing label_SK_CloseLoop"
+        end = next(
+            (i for i, ln in enumerate(lines[close_idx + 1 :], start=close_idx + 1)
+             if ln.startswith("label_KernelEnd:") or ln.startswith("s_endpgm")),
+            None,
+        )
+        close_win = lines[close_idx:end]
+        assert any("s_barrier_wait -3" in ln for ln in close_win), (
+            f"Kernel {base!r}: persist PGR2 skipPGR2 must s_barrier_wait -3 "
+            f"at persist close. window={close_win!r}"
+        )
+    else:
+        assert any("s_barrier_wait -3" in w for w in window), (
+            f"Kernel {base!r} skipPGR2 LC==1 path missing s_barrier_wait -3"
+        )
+
+
+def assert_skip_pgr2_leftover_tdm_drain(src, base):
+    """After skipPGR2 -3 arrive (and in-window wait if not persist-close),
+    drain TDM so leftover cannot outlive persist / next kernel.
+
+    SIA=0 skip window has no wait_tensorcnt; leftover F8 MX descriptors parked
+    at skipPGR2 hang the next kernel's persist-DP -3. Drain after the skip -3
+    (not on it) and before WG -1. KernelEnd wait-only cluster -3 is
+    membership-unbalanced (pads already s_endpgm) and is not this close.
+    Persist PGR2 waits USER -3 at persist close; leftover TDM is still
+    tensorcnt-only after the skip arrive.
+    """
+    lines = src.splitlines()
+    skip_idx = join_idx = None
+    for i, ln in enumerate(lines):
+        if ln.startswith("label_skipPGR2_1:"):
+            skip_idx = i
+        elif ln.startswith("label_skipPGR2_2:") and skip_idx is not None:
+            join_idx = i
+            break
+    assert skip_idx is not None, f"Kernel {base!r} missing label_skipPGR2_1"
+    assert join_idx is not None, f"Kernel {base!r} missing label_skipPGR2_2"
+    window = lines[skip_idx:join_idx]
+    waits = [i for i, w in enumerate(window) if "s_barrier_wait -3" in w]
+    sigs = [i for i, w in enumerate(window) if "s_barrier_signal -3" in w]
+    assert sigs, f"Kernel {base!r} skipPGR2 missing s_barrier_signal -3"
+    after = skip_idx + (waits[0] if waits else sigs[0]) + 1
+    end = next(
+        (i for i, ln in enumerate(lines[after:], start=after)
+         if "ds_load" in ln or "tensor_load_to_lds" in ln),
+        None,
+    )
+    assert end is not None, (
+        f"Kernel {base!r} missing ds_load / tensor_load_to_lds after skipPGR2 -3"
+    )
+    drain = lines[after:end]
+    prologue_drained = any("s_wait_tensorcnt" in ln for ln in lines[:skip_idx])
+    if not prologue_drained:
+        assert any("s_wait_tensorcnt" in ln for ln in drain), (
+            f"Kernel {base!r}: skipPGR2 leftover TDM must drain after skip -3 "
+            f"and before LDS/TDM consume when the prologue has not drained. "
+            f"drain={drain!r}"
+        )
+
+
+def assert_zero_iter_prefetch_handshake_preserves_scc(src, base):
+    """LC==0 skip-prefetch must complete the PGR>=2 prefetch ``-3`` without
+    clobbering SCC for ``longBranchScc1``.
+
+    SIA4 may drop standalone Tensile comment0 lines; the skip/signal labels
+    and the SCC save/restore comments on real instructions are the contract.
+    """
+    assert "label_SKMC_ZeroIterSkipHS" in src, (
+        f"Kernel {base!r}: missing LC==0 skip-prefetch -3 pairing "
+        f"(label_SKMC_ZeroIterSkipHS)"
+    )
+    assert "label_SKMC_ZeroIterSignal" in src, (
+        f"Kernel {base!r}: missing LC==0 skip-prefetch elect-signal "
+        f"(label_SKMC_ZeroIterSignal)"
+    )
+    assert "save checkLastIter SCC (1 iff LC==0)" in src, (
+        f"Kernel {base!r}: missing checkLastIter SCC save before LC==0 handshake"
+    )
+    assert "restore SCC for longBranchScc1 (LC==0)" in src, (
+        f"Kernel {base!r}: missing SCC restore for longBranchScc1 after LC==0 handshake"
+    )
+    if "PGR2 skipPGR2: wait last -3 at persist close" in src:
+        lines = src.splitlines()
+        zskip = next((i for i, ln in enumerate(lines)
+                      if ln.startswith("label_SKMC_ZeroIterSkipHS")), None)
+        start = next(
+            (i for i, ln in enumerate(lines)
+             if "LC>0: skipPGR2 / LDS1 handshake is the matching round" in ln
+             and (zskip is None or i < zskip)),
+            None,
+        )
+        assert start is not None and zskip is not None and start < zskip, (
+            f"Kernel {base!r}: persist PGR2 ZeroIter must skipHS after LC>0 branch"
+        )
+        window = lines[start:zskip]
+        assert any("s_barrier_signal -3" in w for w in window), (
+            f"Kernel {base!r}: persist PGR2 ZeroIter missing s_barrier_signal -3"
+        )
+        assert not any("s_barrier_wait -3" in w for w in window), (
+            f"Kernel {base!r}: persist PGR2 ZeroIter must not wait in-window "
+            f"(wait last -3 at persist close). window={window!r}"
+        )
+        assert "PGR2 ZeroIter: arrive now; wait last -3 at persist close" in src, (
+            f"Kernel {base!r}: persist PGR2 ZeroIter must set persist-open flag"
+        )
+
+
+def assert_persist_open_until_wavedone(src, base):
+    """Persist-open flag must survive until persist wait; pads must not skip it.
+
+    WAVEDONE with USER ``-3`` still open leaves ``signal_count != 0`` for the
+    next kernel. Pads ``s_endpgm`` only after the prologue ``-3`` wait, before
+    persist-open. SK tile math must not dst-write the persist-open SGPR
+    between persist-open and persist wait. Dedicated PersistDpMcOpen is
+    ``s_mov 0/1``; skipPGR2 load/skip/ZeroIter can each set the flag.
+    """
+    lines = src.splitlines()
+    or_is = [
+        i for i, ln in enumerate(lines)
+        if "arrive now; wait last -3 at persist close" in ln
+        and ("s_or_b32" in ln or "s_mov_b32" in ln)
+    ]
+    assert or_is, (
+        f"Kernel {base!r}: missing persist-open OR/Mov "
+        f"(arrive now; wait last -3 at persist close)"
+    )
+    m = re.search(r"s_(?:or|mov)_b32 s(\d+),", lines[or_is[0]])
+    assert m, f"Kernel {base!r}: persist-open dst not sN in {lines[or_is[0]]!r}"
+    idx = m.group(1)
+    first_or = or_is[0]
+
+    def _is_persist_close_wait(i, ln):
+        if "s_barrier_wait -3" not in ln:
+            return False
+        window = "\n".join(lines[max(0, i - 4): i + 1])
+        return (
+            "wait last -3 at persist close" in window
+            or "complete last -3 before persist re-entry" in ln
+        )
+
+    wait_i = next(
+        (i for i, ln in enumerate(lines) if _is_persist_close_wait(i, ln)),
+        None,
+    )
+    assert wait_i is not None and wait_i > first_or, (
+        f"Kernel {base!r}: persist wait must follow persist-open OR"
+    )
+    dst_re = re.compile(
+        r"^\s*(?:s_mov_b32|s_cmov_b32|s_cselect_b32|s_add_u32|s_sub_u32|"
+        r"s_mul_i32|s_lshl_b32|s_lshr_b32|v_readfirstlane_b32)\s+s%s," % idx
+    )
+    # Dedicated PersistDpMcOpen is s_mov 0/1 (skipPGR2 load vs skip vs ZeroIter
+    # can each set the flag). Packed-bit AND/OR of the same SGPR is also the
+    # persist-open flag, not SK tile math.
+    allowed_flag = re.compile(r"^\s*s_mov_b32 s%s, [01]\b" % idx)
+    allowed_and_or = re.compile(
+        r"^\s*s_(?:and|or)_b32 s%s, s%s, (?:1|2)\b" % (idx, idx)
+    )
+    for i, ln in enumerate(lines[first_or + 1 : wait_i], start=first_or + 2):
+        if "arrive now; wait last -3 at persist close" in ln:
+            continue
+        if allowed_flag.search(ln) or allowed_and_or.search(ln):
+            continue
+        if dst_re.search(ln):
+            raise AssertionError(
+                f"Kernel {base!r}: SK tile math must not dst-write persist-open "
+                f"s{idx} between persist-open and persist wait. line {i}: {ln}"
+            )
+    pad_endpgm = [
+        i for i, ln in enumerate(lines)
+        if ln.startswith("s_endpgm")
+        and "padded work-group" in ln
+    ]
+    assert pad_endpgm, f"Kernel {base!r}: missing pad s_endpgm after prologue -3"
+    for pi in pad_endpgm:
+        assert pi < first_or, (
+            f"Kernel {base!r}: pad s_endpgm at {pi} is after persist-open "
+            f"(must exit on idle prologue -3, not skip persist wait)"
+        )
+        window = lines[max(0, pi - 8):pi]
+        assert any("s_barrier_wait -3" in w for w in window), (
+            f"Kernel {base!r}: pad s_endpgm must follow prologue -3 wait. "
+            f"window={window!r}"
+        )
+    for i, ln in enumerate(lines[first_or:], start=first_or + 1):
+        if not ln.startswith("s_endpgm"):
+            continue
+        pre = "\n".join(lines[max(first_or, i - 40):i])
+        assert "s_barrier_wait -3" in pre and (
+            "wait last -3 at persist close" in pre
+            or "complete last -3 before persist re-entry" in pre
+        ), (
+            f"Kernel {base!r}: s_endpgm after persist-open must be KernelEnd "
+            f"after gated persist wait (not a pad/no-work skip). line {i}: {ln}"
+        )
+
+
+def assert_pgr1_persist_dp_close_wait(src, base):
+    """PGR1 persist-DP must wait USER ``-3`` at persist close, not only graWorkGroup.
+
+    Arrive at graWorkGroup then GEMM/TDM, wait at SK_CloseLoop among remaining
+    WGs (pads already ``s_endpgm``). Waiting only at graWorkGroup leaves
+    ``signal_count != 0`` at WAVEDONE. Continue-SK must not wait-only. GW_End
+    long-branches to KernelEnd and skips SK_CloseLoop, so KernelEnd also
+    gated-waits (not wait-only).
+    """
+    lines = src.splitlines()
+    close_idx = next((i for i, ln in enumerate(lines)
+                      if ln.startswith("label_SK_CloseLoop:")), None)
+    assert close_idx is not None, f"Kernel {base!r} missing label_SK_CloseLoop"
+    end = next(
+        (i for i, ln in enumerate(lines[close_idx + 1 :], start=close_idx + 1)
+         if ln.startswith("label_KernelEnd:") or ln.startswith("s_endpgm")),
+        None,
+    )
+    assert end is not None, (
+        f"Kernel {base!r}: missing KernelEnd / s_endpgm after SK_CloseLoop"
+    )
+    window = lines[close_idx:end]
+    assert any("s_barrier_wait -3" in ln for ln in window), (
+        f"Kernel {base!r}: PGR1 persist-DP must s_barrier_wait -3 at persist "
+        f"close before re-entry / KernelEnd. window={window!r}"
+    )
+    assert any("PGR1 persist-DP: wait last -3 at persist close" in ln for ln in window), (
+        f"Kernel {base!r}: persist close must wait last persist-DP -3 "
+        f"(graWorkGroup arrive is not a WAVEDONE-idle close)"
+    )
+    assert not any("s_barrier_signal -3" in ln for ln in window), (
+        f"Kernel {base!r}: persist close must not arrive -3 "
+        f"(pads / owner-fixup / already-WAVEDONE). window={window!r}"
+    )
+    assert "PGR1 persist-DP: arrive now; wait last -3 at persist close" in src, (
+        f"Kernel {base!r}: PGR1 persist-DP must arrive in graWorkGroup and "
+        f"defer the wait to persist close"
+    )
+    # PGR1 arrive-only in graWorkGroup; wait at persist close.
+    or_i = next(
+        (i for i, ln in enumerate(lines)
+         if "PGR1 persist-DP: arrive now; wait last -3 at persist close" in ln
+         and ("s_or_b32" in ln or "s_mov_b32" in ln)),
+        None,
+    )
+    assert or_i is not None, (
+        f"Kernel {base!r}: missing PGR1 persist-open OR/Mov"
+    )
+    skip_mc_i = next(
+        (i for i, ln in enumerate(lines[or_i + 1 :], start=or_i + 1)
+         if ln.startswith("label_SK_SkipPassMulticast")),
+        None,
+    )
+    assert skip_mc_i is not None, (
+        f"Kernel {base!r}: missing label_SK_SkipPassMulticast after persist-open"
+    )
+    post = lines[or_i + 1:skip_mc_i]
+    assert any("s_barrier_signal -3" in ln for ln in post), (
+        f"Kernel {base!r}: persist-open must arrive USER -3 in graWorkGroup. "
+        f"post={post!r}"
+    )
+    assert not any("s_barrier_wait -3" in ln for ln in post), (
+        f"Kernel {base!r}: persist-DP arrive must not wait in graWorkGroup "
+        f"(wait is at persist close). post={post!r}"
+    )
+    assert "PGR1 persist-DP: wait last -3 at persist close" in src, (
+        f"Kernel {base!r}: missing persist-close wait of last persist-DP -3"
+    )
+    assert "PGR2 skipPGR2: wait last -3 at persist close" not in src, (
+        f"Kernel {base!r}: PGR1 has no skipPGR2 persist-close wait"
+    )
+    assert_kernelend_gated_persist_wait(src, base)
+    assert_kernelend_tdm_drain(src, base)
+    assert ".set sgprPersistDpMcOpen, UNDEF" not in "\n".join(
+        lines[:close_idx]
+    ), (
+        f"Kernel {base!r}: PersistDpMcOpen must stay live past endSummation "
+        f"until persist close / KernelEnd"
+    )
+    assert_persist_open_until_wavedone(src, base)
+
+
+def assert_pgr2_persist_prefetch_close_wait(src, base):
+    """PGR2 persist skipPGR2 / LDS1 must wait USER ``-3`` at persist close.
+
+    graWorkGroup still waits the per-pass DP round (must be idle before this
+    later ``-3``). Arrive at skipPGR2 / LDS1 then GEMM/TDM, wait at
+    SK_CloseLoop among remaining WGs (pads already ``s_endpgm``). Waiting
+    only at skipPGR2 leaves ``signal_count != 0`` at WAVEDONE. Continue-SK
+    must not wait-only. GW_End long-branches to KernelEnd and skips
+    SK_CloseLoop, so KernelEnd also gated-waits (not wait-only).
+    """
+    lines = src.splitlines()
+    close_idx = next((i for i, ln in enumerate(lines)
+                      if ln.startswith("label_SK_CloseLoop:")), None)
+    assert close_idx is not None, f"Kernel {base!r} missing label_SK_CloseLoop"
+    end = next(
+        (i for i, ln in enumerate(lines[close_idx + 1 :], start=close_idx + 1)
+         if ln.startswith("label_KernelEnd:") or ln.startswith("s_endpgm")),
+        None,
+    )
+    assert end is not None, (
+        f"Kernel {base!r}: missing KernelEnd / s_endpgm after SK_CloseLoop"
+    )
+    window = lines[close_idx:end]
+    assert any("s_barrier_wait -3" in ln for ln in window), (
+        f"Kernel {base!r}: PGR2 skipPGR2 must s_barrier_wait -3 at persist "
+        f"close before re-entry / KernelEnd. window={window!r}"
+    )
+    assert any("PGR2 skipPGR2: wait last -3 at persist close" in ln for ln in window), (
+        f"Kernel {base!r}: persist close must wait last skipPGR2 -3 "
+        f"(skipPGR2 in-window wait is not a WAVEDONE-idle close)"
+    )
+    assert not any("s_barrier_signal -3" in ln for ln in window), (
+        f"Kernel {base!r}: persist close must not arrive -3 "
+        f"(pads / owner-fixup / already-WAVEDONE). window={window!r}"
+    )
+    assert "PGR2 skipPGR2: arrive now; wait last -3 at persist close" in src, (
+        f"Kernel {base!r}: PGR2 skipPGR2 must arrive at prefetch and "
+        f"defer the wait to persist close"
+    )
+    assert "PGR2 skipPGR2: wait last -3 at persist close" in src, (
+        f"Kernel {base!r}: missing persist-close wait of last skipPGR2 -3"
+    )
+    assert "PGR1 persist-DP: wait last -3 at persist close" not in src, (
+        f"Kernel {base!r}: PGR>=2 must wait per-pass persist-DP -3 in "
+        f"graWorkGroup; persist-DP close wait is PGR1-only"
+    )
+    assert_kernelend_gated_persist_wait(src, base)
+    assert_kernelend_tdm_drain(src, base)
+    assert ".set sgprPersistDpMcOpen, UNDEF" not in "\n".join(
+        lines[:close_idx]
+    ), (
+        f"Kernel {base!r}: PersistDpMcOpen must stay live past endSummation "
+        f"until persist close / KernelEnd"
+    )
+    assert_persist_open_until_wavedone(src, base)
 
 
 def derive_states(config_path, arch=_DEFAULT_ARCH, limit_solutions=8):

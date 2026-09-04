@@ -465,14 +465,29 @@ TEST_F(IRParserTest, ParsesInstructionWithModifiers) {
 }
 
 TEST_F(IRParserTest, ParsesInstructionWithNegation) {
-    // MLIR format doesn't support negation modifiers like -v[2]
-    // Modifiers are specified in attributes instead
+    // Bracketed form historically used attributes instead of `-v[2]`.
     const std::string input = R"(v[0] = "st.v_add_f32"(v[1], v[2]) { negateOperand2 = true })";
 
     auto instructions = parseAssemblyString(input);
 
     // Parser should handle this format
     EXPECT_EQ(instructions.size(), 1);
+}
+
+TEST_F(IRParserTest, ParsesCompactNegatedVgprOperand) {
+    // Compact form used by AsmMovePropagationPass FileCheck: `-v0`.
+    const std::string input =
+        R"(v2 = "st.v_add_f32"(-v0, v3) { issueCycles = 1, latencyCycles = 5 })";
+
+    auto instructions = parseAssemblyString(input);
+
+    ASSERT_EQ(instructions.size(), 1);
+    ASSERT_EQ(instructions[0].srcRegs.size(), 2);
+    EXPECT_EQ(instructions[0].srcRegs[0].reg.type, RegType::V);
+    EXPECT_EQ(instructions[0].srcRegs[0].reg.idx, 0u);
+    EXPECT_EQ(instructions[0].srcRegs[0].reg.isMinus, 1u);
+    EXPECT_EQ(instructions[0].srcRegs[1].reg.idx, 3u);
+    EXPECT_EQ(instructions[0].srcRegs[1].reg.isMinus, 0u);
 }
 
 TEST_F(IRParserTest, ParsesInstructionWithAbsolute) {
@@ -555,6 +570,34 @@ TEST_F(IRParserTest, ParsesMultipleModifiers) {
     auto exec = instructions[0].modifiers.find("mod.exec");
     ASSERT_NE(exec, instructions[0].modifiers.end());
     EXPECT_EQ(exec->second["setHi"], "true");
+}
+
+TEST_F(IRParserTest, ParsesMultilineAttributesWithNestedModifierDict) {
+    // AsmMovePropagationPass FileCheck wraps attributes across lines inside st.func.
+    const std::string input = R"(
+st.func @compose_vop3_neg_with_mapped_neg() {
+^entry:
+  v0 = "st.v_mov_b32"(-v1) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v0, v3) {
+    issueCycles = 1, latencyCycles = 5, mod.vop3 = { neg_src0 = true }
+  }
+  v0 = "st.v_sub_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  "st.buffer_store_b32"(v40, v2) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    auto result = parseSourceStringWithDiagnostics(input);
+
+    ASSERT_FALSE(result.hasErrors()) << "multiline attributes must parse without errors";
+    ASSERT_NE(result.parsedFunction, nullptr);
+    ASSERT_EQ(result.parsedFunction->blocks.size(), 1u);
+    ASSERT_EQ(result.parsedFunction->blocks[0]->instructions.size(), 4u);
+    const auto& add = *result.parsedFunction->blocks[0]->instructions[1];
+    auto vop3 = add.modifiers.find("mod.vop3");
+    ASSERT_NE(vop3, add.modifiers.end());
+    const auto& fields = vop3->second;
+    ASSERT_TRUE(fields.contains("neg_src0"));
+    EXPECT_EQ(fields.at("neg_src0"), "true");
 }
 
 TEST_F(IRParserTest, RawAsmParsesFinalMatrixBScaleModifierWithoutTrailingComment) {

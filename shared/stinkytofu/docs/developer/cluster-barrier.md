@@ -1,12 +1,19 @@
 # Insert Cluster Barrier Pass
 
 `createInsertClusterBarrierPass` inserts cluster-barrier handshakes at four rules
-covering the main and tail loops.
+covering the main and tail loops, or -- under StreamK cluster multicast --
+producer-side tensor drains instead.
 
 The pass is created via:
 
 ```cpp
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass();
+enum StreamKMulticastMode : int {
+    kStreamKMulticastOff = 0,
+    kStreamKMulticastOn = 1,
+};
+
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
+    StreamKMulticastMode streamKMulticast = kStreamKMulticastOff);
 ```
 
 ## Overview
@@ -25,6 +32,51 @@ cluster signal; the other waves fall through to the label.
 
 **Idempotency:** each rule has its own skip check, so re-running the pass is a
 no-op when the handshake is already present.
+
+**Rules 1--4 are not unconditional.** All four fire only in
+`kStreamKMulticastOff`; see [Operating modes](#operating-modes) below.
+
+---
+
+## Operating modes
+
+The `streamKMulticast` argument selects between two disjoint behaviours:
+
+| Mode | Rules 1--4 | Producer tensor drains |
+|------|------------|------------------------|
+| `kStreamKMulticastOff` (default) | emitted | none |
+| `kStreamKMulticastOn` | **suppressed** | emitted -- see [Producer-side tensor drains](#producer-side-tensor-drains-multicast-on) |
+
+The value is plumbed in from TensileLite: `streamKMulticast(kernel)`
+(`Tensile/Common/Utilities.py`) becomes the `StreamKMulticast` module option
+(`Tensile/KernelWriter.py:6848`), crosses the binding as
+`ModuleOptions::StreamKMulticast`
+(`include/stinkytofu/bindings/python/Module.hpp:91` -- an `int`, so the enum can
+gain modes without another ABI change) and is cast back to
+`StreamKMulticastMode` in `buildGfx1250Pipeline`
+(`src/pipeline/backend/Gfx1250Backend.cpp:221-223`, under `ClusterBarrier`).
+
+### Why multicast suppresses the rules
+
+Every rule below plants a `-3` signal or wait inside the kernel's loop or tail
+structure. That is sound only when every workgroup in the cluster reaches it the
+same number of times.
+
+Under StreamK with `StreamKForceDPOnly=0` it does not. Peers in one cluster are
+assigned different iteration counts by construction, so `sgprLoopCounterL`
+differs across the cluster; a per-iteration compiler-inserted `-3` then deadlocks
+on unbalanced arrive/wait counts, one peer signalling N times while another waits
+N+1 times. Rule 1's `LoopCounterL != 0` gate only excludes the zero-iteration
+case -- it does not equalise the nonzero ones.
+
+In this mode TensileLite owns the handshakes and emits them only where it can
+predicate them explicitly, so every peer arrives the same number of times:
+`_clusterElectArriveSignal`, `streamKMulticastPrologueSignal`,
+`streamKMulticastProloguePrefetchHandshake`,
+`streamKMulticastZeroIterClusterWait` and `streamKClusterPadEarlyExit` in
+`Tensile/Components/StreamK.py`. What the pass still contributes is the drain
+placement, which depends on the post-scheduling instruction order TensileLite
+cannot see.
 
 ---
 
@@ -224,6 +276,64 @@ self-disables there.
 
 ---
 
+## Producer-side tensor drains (multicast On)
+
+Two `s_wait_tensorcnt 0` drains, both emitted by
+`insertProducerTensorDrainBefore` and both gated on
+`streamKMulticast >= kStreamKMulticastOn`. Neither consults
+`PrefetchGlobalRead`: the loop drain's earlier `PGR >= 2` restriction is gone, so
+it now fires at every prefetch depth (which is how the PGR=1 grouping bug below
+became reachable).
+
+### Loop drain -- after each cooperative `tensor_load_to_lds` group
+
+Emitted at the instruction following each cooperative load group. Groups are
+discovered by the same scan Rule 3 uses (a `tensor_load_to_lds` with a preceding
+workgroup `s_barrier_signal -1` in its segment, one drain per distinct trigger),
+so the drains land exactly where Rule 3's handshake would have.
+
+The cooperative load is asynchronous and lands in a **peer** workgroup's LDS, so
+the consumer's own tensor counter cannot order it. Retiring it before the back
+edge makes the broadcast coherent, and the next loop-head workgroup barrier then
+publishes it for the consuming waves.
+
+Emitted comment: `retire cooperative tensor_load_to_lds before back-edge`.
+
+#### Group termination
+
+`afterCooperativeTensorLoadGroup` returns the instruction after the **last**
+tensor load of the group, not after the first. A cooperative group is the operand
+load plus its MX-scale load (A + MXSA), and `ScheduleIterAlg=4` may schedule TDM
+descriptor increments or `ds_load`s *between* the two.
+
+The original walk advanced only over immediately-adjacent `tensor_load`s, so at
+PGR=1 with SIA=4 it stopped at the first interleaved instruction and planted the
+drain between A and MXSA -- a confirmed hang, which did not reproduce at SIA=0.
+
+The walk therefore skips non-terminator instructions and stops only at an
+`isCoopLoadGroupTerminator`: a segment boundary (label / branch / call), an
+`s_xor_b32`, an `s_wait_tensorcnt`, or a barrier.
+
+### Prologue drain -- before the LDS ping-pong `s_xor_b32`
+
+The prologue TDM descriptor SGPRs are ping-ponged to the next LDS buffer by an
+`s_xor_b32`. Hardware keeps reading a `tensor_load_to_lds` descriptor **after**
+the instruction issues, so that XOR must not execute while the load is in flight.
+
+The pass takes the function's first `tensor_load_to_lds`, finds the first
+`s_xor_b32` after it in the same segment (`findXorInSegmentAfter`) and inserts a
+drain before it -- unless one already sits between the two
+(`hasWaitTensorCntBetween`) or immediately above the XOR
+(`isImmediatelyPrecededByWaitTensorCnt`).
+
+Emitted comment: `retire TDM before LDS ping-pong XOR`.
+
+The same hazard is modelled generally, for every in-flight descriptor rather than
+just the prologue one, by
+[the tensor-descriptor WAR scan](../user/stinky-waitcnt-insertion-pass.md#tensor-descriptor-war)
+in `StinkyWaitCntInsertionPass`. That pass is region-scoped to `loopWithPrefetch`
+and `noLoadLoopBody`, so it does not see the prologue; this rule covers it. Where
+the two do overlap, the guards above suppress the duplicate.
 ## kRule3CrossLoop
 
 Compile-time switch in `cluster_barrier::kRule3CrossLoop`
@@ -329,3 +439,7 @@ exit has drain wait + skip path.
 
 - `src/transforms/asm/InsertClusterBarrierPass.cpp` -- implementation
 - `include/stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp` -- public API
+- `src/pipeline/backend/Gfx1250Backend.cpp` -- pipeline placement (kernel scope,
+  after the region adaptor that runs `StinkyWaitCntInsertionPass`)
+- `tests/unit/asm/InsertClusterBarrierPassTest.cpp` -- unit tests, including the
+  multicast-mode suppression and both producer drains

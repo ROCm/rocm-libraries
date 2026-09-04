@@ -88,7 +88,7 @@
     X(EnableSwInstructionPrefetchAbs, bool)       \
     X(SwInstructionPrefetchAbsBaseSgpr, int)      \
     X(ClusterBarrier, bool)                       \
-    X(StreamKMulticast, bool)                     \
+    X(StreamKMulticast, int)                      \
     X(TDMLoadWaveSync, bool)                      \
     X(PrefetchGlobalRead, int)                    \
     X(PrefetchLocalRead, int)                     \

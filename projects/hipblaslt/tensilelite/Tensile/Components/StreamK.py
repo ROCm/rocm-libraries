@@ -45,6 +45,10 @@ import abc
 
 from copy import deepcopy
 
+def _streamKPersistentMulticast(kernel):
+    """ForceDPOnly=0 spatial multicast (persist DP tiles, then SK tail)."""
+    return bool(streamKMulticast(kernel) and not kernel.get("StreamKForceDPOnly", 0))
+
 
 def _mailboxLds0Token(writer):
     return MemTokenData([writer.states.memTokenLdsBuffer0])
@@ -277,12 +281,12 @@ class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
         return module
 
     def acquireFence(self, writer) -> Module:
-        # Drop stale dev-scope cache lines so the next dependent read (the flag
-        # word in getFlagValue, or the partials after the flag is observed) is
-        # re-fetched from the L2-coherent point.
+        # Drop stale cache lines so the next dependent read (the flag word, or
+        # the partials after the flag is observed) is re-fetched from the
+        # coherent point.
         module = Module("StreamK acquire fence (dev-scope)")
         module.add(GlobalInv(scope=CacheScope.SCOPE_DEV,
-            comment="acquire: invalidate before dependent dev-scope read"))
+            comment="acquire: invalidate before dependent read"))
         module.add(SWaitCnt(vlcnt=0, comment="acquire: wait for global_inv"))
         return module
 
@@ -1303,6 +1307,69 @@ class StreamK(Component):
                 module.add(SSubU32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), src1=sgpr(tmpSgpr), comment="Adjust loop counter for tail loop"))
                 module.add(SMaxI32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), src1=0, comment="Avoid setting negative value to loopCounter"))
 
+        return module
+
+    def _pgr1PersistDpMcWaitAtClose(self, kernel):
+        """PGR1 persist-DP: arrive in graWorkGroup, wait at persist close."""
+        return (_streamKPersistentMulticast(kernel)
+                and kernel.get("PrefetchGlobalRead", 1) < 2)
+
+    def _pgr2PersistPrefetchMcWaitAtClose(self, kernel):
+        """PGR2 persist prefetch: arrive at skipPGR2 / LDS1, wait at persist close."""
+        return (_streamKPersistentMulticast(kernel)
+                and kernel.get("PrefetchGlobalRead", 1) >= 2)
+
+    def _persistDpMcOpenSgpr(self, writer, kernel):
+        """SGPR: this persist pass arrived USER -3 and has not waited. None unless ForceDPOnly=0 cluster multicast."""
+        if not _streamKPersistentMulticast(kernel):
+            return None
+        sgprIdx = getattr(writer.states, "persistDpMcOpenSgpr", None)
+        if sgprIdx is None:
+            sgprIdx = writer.sgprPool.checkOut(1, "PersistDpMcOpen")
+            writer.states.persistDpMcOpenSgpr = sgprIdx
+            names = writer.states.nonPostLoopSgpr
+            if "PersistDpMcOpen" not in names:
+                names.append("PersistDpMcOpen")
+        return sgprIdx
+
+    def _markPersistMcOpenArrived(self, writer, kernel, module, comment):
+        flag = self._persistDpMcOpenSgpr(writer, kernel)
+        if flag is None:
+            return
+        module.add(SMovB32(dst=sgpr(flag), src=1, comment=comment))
+
+    def persistDpMulticastCloseWait(self, writer, kernel):
+        """Complete persist USER -3 before persist re-entry / KernelEnd."""
+        module = Module("StreamK persist-DP multicast close wait")
+        flag = self._persistDpMcOpenSgpr(writer, kernel)
+        if flag is None:
+            return module
+        pgr2 = self._pgr2PersistPrefetchMcWaitAtClose(kernel)
+        skip = Label(writer.labels.getNameInc("SK_SkipPersistDpMcWait"), "")
+        SMovBX = SMovB32 if kernel.get("WavefrontSize", 32) == 32 else SMovB64
+        module.add(SMovBX(dst=EXEC(), src=-1,
+                          comment="Reset exec before persist USER -3 wait"))
+        if pgr2:
+            arrived_cmt = "this pass arrived skipPGR2 / LDS1 prefetch -3?"
+            skip_cmt = "continue-SK / no skipPGR2 arrive: do not wait-only"
+            wait_cmt = (
+                "PGR2 skipPGR2: wait last -3 at persist close "
+                "(complete last -3 before persist re-entry / KernelEnd)")
+            clear_cmt = "PGR2 skipPGR2 -3 idle"
+        else:
+            arrived_cmt = "this pass arrived persist-DP -3?"
+            skip_cmt = "continue-SK / no persist-DP arrive: do not wait-only"
+            wait_cmt = (
+                "PGR1 persist-DP: wait last -3 at persist close "
+                "(complete last -3 before persist re-entry / KernelEnd)")
+            clear_cmt = "PGR1 persist-DP -3 idle"
+        module.add(SCmpEQU32(src0=sgpr(flag), src1=0,
+                             comment=arrived_cmt))
+        module.add(SCBranchSCC1(labelName=skip.getLabelName(),
+                                comment=skip_cmt))
+        module.add(SBarrier(True, True, True, comment=wait_cmt))
+        module.add(SMovB32(dst=sgpr(flag), src=0, comment=clear_cmt))
+        module.add(skip)
         return module
 
     @abc.abstractmethod
@@ -3261,128 +3328,194 @@ class StreamKTwoTileDPFirst(StreamK):
         writer.sgprPool.checkIn(elect)
         return module
 
-    def streamKMulticastPrologueSignal(self, writer, kernel):
+    def streamKMulticastPrologueSignal(self, writer, kernel, wait=False):
         """Elect wave 0 to arrive at the cluster split barrier once per workgroup.
 
-        Supplies the prologue ``s_barrier_signal -3`` that the gfx1250
-        cluster-barrier pass's first-load wait expects but that is otherwise
-        never anchored on the StreamKMulticast path (GlobalSplitU == 0). One
-        wave per workgroup arrives (others branch over it), uniformly across
-        peers, keeping cluster-scope signal/wait counts balanced. Inert unless
-        the cluster multicast is active.
+        ``wait=True`` completes the round before membership can change.
         """
         module = Module("StreamK multicast prologue signal")
         if not streamKMulticast(kernel):
             return module
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
             "cluster B-multicast requires the HasClusterBarrier asm capability"
-        module.addComment0("cluster B-multicast: elect wave 0 to signal the cluster barrier (pairs first-load wait)")
+        if wait:
+            module.addComment0("cluster multicast: elect wave 0 to signal -3; all waves wait (round complete before pad exit)")
+        else:
+            module.addComment0("cluster B-multicast: elect wave 0 to signal the cluster barrier")
         self._clusterElectArriveSignal(
-            writer, module, labelBase="SKMC_SkipSignal", electTag="SKMulticastElect")
+            writer, module, labelBase="SKMC_SkipSignal", electTag="SKMulticastElect",
+            wait=wait)
         return module
 
     def streamKMulticastProloguePrefetchHandshake(self, writer, kernel):
-        """Bracket the PGR>=2 prologue double-buffer prefetch multicast load with
-        a self-contained cluster-scope arrive/wait handshake.
+        """Bracket the PGR>=2 prologue prefetch load with a cluster arrive.
 
-        That "LDS1" prefetch load sits inside the single-iteration guard branch,
-        which the generic per-load bracketing's backward anchor scan stops at, so
-        it needs its own handshake (one wave arrives, all waves wait). The guard
-        branches on LoopCounterL, uniform across co-located peers, so peers run it
-        in lockstep. Inert unless the cluster multicast is active.
+        Emit on both skipPGR2 sides (mixed LoopCounter). Persist PGR2 defers
+        the wait to persist close; ForceDPOnly=1 waits in-window.
         """
         module = Module("StreamK multicast prologue prefetch cluster handshake")
         if not streamKMulticast(kernel):
             return module
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
             "cluster B-multicast requires the HasClusterBarrier asm capability"
-        module.addComment0("cluster B-multicast: bracket prologue double-buffer prefetch load with cluster handshake")
+        deferWait = self._pgr2PersistPrefetchMcWaitAtClose(kernel)
+        if deferWait:
+            module.addComment0(
+                "PGR2 skipPGR2: arrive now; wait last -3 at persist close "
+                "(cannot WAVEDONE with open USER -3)")
+        else:
+            module.addComment0("cluster B-multicast: bracket prologue double-buffer prefetch load with cluster handshake")
         self._clusterElectArriveSignal(
-            writer, module, labelBase="SKMC_SkipPrefetchSignal", electTag="SKMulticastPrefetchElect", wait=True)
+            writer, module, labelBase="SKMC_SkipPrefetchSignal", electTag="SKMulticastPrefetchElect",
+            wait=not deferWait)
+        if deferWait:
+            self._markPersistMcOpenArrived(
+                writer, kernel, module,
+                "PGR2 skipPGR2: arrive now; wait last -3 at persist close")
         return module
 
     def streamKMulticastZeroIterClusterWait(self, writer, kernel):
-        """Consume the prologue cluster arrive on the zero-iteration skip path.
+        """Pair LC==0 skip-prefetch with the PGR>=2 prefetch -3 round.
 
-        The prologue arrive's only matching wait is the pass's first-load wait,
-        which sits after the last-iteration guard; on the zero-full-iteration
-        path (K not a whole multiple of DepthU) that guard skips the wait,
-        leaving the arrive unbalanced. Emit the matching all-waves wait on the
-        skip edge (scc1 == numIterL == 0; branch over it on scc0) so every peer
-        does exactly one arrive + one wait on every path. The wait leaves scc
-        intact for the following long branch. Inert unless the cluster multicast
-        is active.
+        Mixed LoopCounter: LC==0 would skip skipPGR2. Save/restore SCC for
+        ``longBranchScc1``. Persist PGR2 defers wait to persist close.
         """
         module = Module("StreamK multicast zero-iteration cluster wait")
-        if not streamKMulticast(kernel):
+        if not streamKMulticast(kernel) or kernel.get("PrefetchGlobalRead", 1) < 2:
             return module
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
             "cluster B-multicast requires the HasClusterBarrier asm capability"
-        module.addComment0("cluster B-multicast: zero-iteration skip path consumes the prologue cluster arrive (pairs prologue arrive)")
-        skipWait = Label(label=writer.labels.getNameInc("SKMC_SkipZeroIterClusterWait"), comment="")
-        module.add(SCBranchSCC0(labelName=skipWait.getLabelName(),
-                                comment=">=1 full iteration: the first-load cluster wait pairs the arrive"))
-        module.add(SBarrier(True, True, True, comment="cluster_barrier wait"))
-        module.add(skipWait)
+        deferWait = self._pgr2PersistPrefetchMcWaitAtClose(kernel)
+        if deferWait:
+            module.addComment0(
+                "PGR2 ZeroIter: arrive now; wait last -3 at persist close "
+                "(cannot WAVEDONE with open USER -3)")
+        else:
+            module.addComment0(
+                "LC==0 skip-prefetch path completes the same PGR>=2 prefetch -3 as LC>0")
+        with writer.allocTmpSgpr(1, tag="SKMC_ZeroIterSCC") as tmp:
+            # checkLastIter left SCC=1 iff LoopCounter==0. Handshake clobbers SCC.
+            module.add(SCSelectB32(dst=sgpr(tmp.idx), src0=1, src1=0,
+                                   comment="save checkLastIter SCC (1 iff LC==0)"))
+            skipHs = Label(writer.labels.getNameInc("SKMC_ZeroIterSkipHS"), "")
+            module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=0,
+                                 comment="LC>0? skip zero-iter prefetch -3"))
+            module.add(SCBranchSCC1(labelName=skipHs.getLabelName(),
+                                    comment="LC>0: skipPGR2 / LDS1 handshake is the matching round"))
+            self._clusterElectArriveSignal(
+                writer, module, labelBase="SKMC_ZeroIterSignal",
+                electTag="SKMulticastZeroIterElect", wait=not deferWait)
+            if deferWait:
+                self._markPersistMcOpenArrived(
+                    writer, kernel, module,
+                    "PGR2 ZeroIter: arrive now; wait last -3 at persist close")
+            module.add(skipHs)
+            module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=1,
+                                 comment="restore SCC for longBranchScc1 (LC==0)"))
         return module
 
-    def streamKClusterPadEarlyExit(self, writer, kernel):
-        """Exit padded boundary-cluster peers before the first cluster barrier.
+    def streamKClusterPadEarlyExit(self, writer, kernel, padFlagSgpr):
+        """Predicate padded boundary-cluster peers; do not ``s_endpgm``.
 
-        The cluster launch grid is rounded up to a ClusterDim multiple, so a
-        boundary cluster contains PADDED work-groups whose assigned tile lies
-        beyond the real M/N tile extent. Those padded peers must ``s_endpgm`` in
-        the prologue BEFORE the first ``s_barrier_signal -3`` so their WAVEDONE
-        decrements the cluster-barrier live-member count and the ``-3`` barrier
-        still completes for the present peers (otherwise the real peers wait on
-        peers that never arrive -> hang). Exiting before the load also means the
-        exited peers never issue a ``ld_bcst``; combined with
-        ``computeMulticastMaskReduction`` (which trims the broadcast mask to the
-        present peers), the surviving peers' ``ld_bcst`` waits only on peers that
-        are actually there.
-
-        This is the ForceDPOnly cluster path, which decodes the raw HW coords
-        (``WorkGroup0``=M-tile, ``WorkGroup1``=N-tile) into the linear DP index, so
-        a padded lane would both hang the ``-3`` barrier and stall ``ld_bcst``. On
-        a 1-D ``[Cs, 1]`` cluster ``WorkGroup1`` never exceeds its bound, so the
-        check degenerates to the M-tile one. The two-tile
-        (``StreamKForceDPOnly==0``) cluster instead defers its prologue cluster
-        arrive until AFTER the StreamK work-check (see ``preLoop``): there
-        ``StreamKIdx >= totalTiles`` does not imply "no work" (a K-split partial
-        still is work), so a coordinate-based exit would drop live partials.
-
-        MUST be called from ``preLoop`` BEFORE the tile-index fold overwrites
-        ``WorkGroup0`` and BEFORE ``streamKMulticastPrologueSignal``.
+        Callers handshake all launched members including pads, then
+        ``streamKClusterPadPostHandshakeExit``. ForceDPOnly=0 Y uses
+        ``skGrid / nWG0``; ForceDPOnly=1 uses tilesN. ForceDPOnly=1 also
+        flags ``StreamKIdx >= totalTiles`` as pads. Must run before the
+        tile-index fold overwrites ``WorkGroup0``.
         """
         module = Module("StreamK cluster pad early-exit")
         if not streamKMulticast(kernel):
             return module
         assert clusterEnabled(kernel["ClusterDim"]), \
             "streamKClusterPadEarlyExit requires an enabled cluster"
-        module.addComment1("Stream-K cluster multicast: exit padded boundary-cluster peers before the cluster barrier (grid rounded up to ClusterDim)")
-        padExit   = Label(writer.labels.getNameInc("SKClusterPad_EarlyStop"), "")
-        padNoExit = Label(writer.labels.getNameInc("SKClusterPad_NoEarlyStop"), "")
+        module.addComment1("Stream-K cluster multicast: predicate padded boundary-cluster peers (grid rounded up to ClusterDim); handshake then exit")
+        module.add(SMovB32(dst=sgpr(padFlagSgpr), src=0, comment="assume not padded"))
         # Raw HW coords here are the M-tile (WorkGroup0) / N-tile (WorkGroup1):
-        # the linear StreamKIdx fold has not run yet. NumWorkGroups0/1 hold the
-        # real (unrounded) tile counts; WorkGroup1 carries the GSU factor.
+        # the linear StreamKIdx fold has not run yet. NumWorkGroups0 holds the
+        # real (unrounded) M-tile count. ForceDPOnly uses NumWorkGroups1 as
+        # tilesN (* GSU); ForceDPOnly=0 cluster multicast uses skGrid / nWG0 as gridY.
         module.add(SCmpGeU32(src0=sgpr("WorkGroup0"), src1=sgpr("NumWorkGroups0"),
                              comment="padded if WorkGroup0 (M-tile) >= tilesM"))
-        module.add(SCBranchSCC1(labelName=padExit.getLabelName()))
+        module.add(SCMovB32(dst=sgpr(padFlagSgpr), src=1, comment="padded: M-tile beyond tilesM"))
         with writer.allocTmpSgpr(1, tag="skClusterPad_tmpSgpr") as padTmp:
-            boundN = "NumWorkGroups1"
-            if kernel["GlobalSplitU"] != 0:
-                module.add(SAndB32(dst=sgpr(padTmp.idx), src0=sgpr("GSU"),
-                                   src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
-                module.add(SMulI32(dst=sgpr(padTmp.idx), src0=sgpr("NumWorkGroups1"),
-                                   src1=sgpr(padTmp.idx), comment="tilesN * GSU"))
-                boundN = padTmp.idx
-            module.add(SCmpGeU32(src0=sgpr("WorkGroup1"), src1=sgpr(boundN),
-                                 comment="padded if WorkGroup1 (N-tile) >= tilesN*GSU"))
-            module.add(SCBranchSCC1(labelName=padExit.getLabelName()))
-            module.add(SBranch(labelName=padNoExit.getLabelName()))
-            module.add(padExit)
-            module.add(SEndpgm(comment="padded work-group: exit before any cluster barrier/load (WAVEDONE frees -3 barrier slot)"))
-            module.add(padNoExit)
+            if _streamKPersistentMulticast(kernel):
+                sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
+                if writer.isStreamKConstantsToVgprEnabled(kernel):
+                    module.add(VReadfirstlaneB32(
+                        dst=sgpr(sGrid),
+                        src=vgpr(writer.states.skConstVgprs["skGrid"])))
+                module.add(SMulI32(dst=sgpr(padTmp.idx), src0=sgpr("WorkGroup1"),
+                                   src1=sgpr("NumWorkGroups0"),
+                                   comment="WG1 * nWG0"))
+                module.add(SCmpGeU32(src0=sgpr(padTmp.idx), src1=sgpr(sGrid),
+                                     comment="padded if WorkGroup1 >= gridY (skGrid/nWG0); keep Ck-split Y-peers"))
+                writer.releaseStreamKConstSgpr(sGrid)
+            else:
+                module.add(SCmpGeU32(src0=sgpr("WorkGroup1"), src1=sgpr("NumWorkGroups1"),
+                                     comment="padded if WorkGroup1 (N-tile) >= tilesN"))
+            module.add(SCMovB32(dst=sgpr(padFlagSgpr), src=1, comment="padded: beyond N/Y launch extent"))
+        # ForceDPOnly=1: StreamKIdx >= totalTiles is KernelEnd-before-TDM.
+        # Same M-fastest fold as preLoop (WG0/1/2 still raw). Must run before
+        # the fold overwrites WorkGroup0. Pads never ld_bcst.
+        if kernel["StreamKForceDPOnly"]:
+            module.addComment0(
+                "no-work KernelEnd-before-TDM: treat StreamKIdx >= totalTiles like a pad")
+            with writer.allocTmpSgpr(2, tag="skClusterNoWork_tmpSgpr") as nwTmp:
+                tIdx = nwTmp.idx
+                tTiles = nwTmp.idx + 1
+                module.add(SMulI32(dst=sgpr(tIdx), src0=sgpr("WorkGroup1"),
+                                   src1=sgpr("NumWorkGroups0"),
+                                   comment="no-work: WG1 * nWG0"))
+                module.add(SAddU32(dst=sgpr(tIdx), src0=sgpr(tIdx),
+                                   src1=sgpr("WorkGroup0"),
+                                   comment="no-work: + WG0"))
+                module.add(SMulI32(dst=sgpr(tTiles), src0=sgpr("NumWorkGroups0"),
+                                   src1=sgpr("NumWorkGroups1"),
+                                   comment="no-work: nWG0 * nWG1"))
+                module.add(SMulI32(dst=sgpr(tTiles), src0=sgpr(tTiles),
+                                   src1=sgpr("WorkGroup2"),
+                                   comment="no-work: * WG2 (batch)"))
+                module.add(SAddU32(dst=sgpr(tIdx), src0=sgpr(tIdx),
+                                   src1=sgpr(tTiles),
+                                   comment="StreamKIdx = batch*(nWG0*nWG1)+N*nWG0+M"))
+                module.add(self.computeTotalTiles(writer, kernel, tTiles))
+                module.add(SCmpGeU32(
+                    src0=sgpr(tIdx), src1=sgpr(tTiles),
+                    comment="no-work if StreamKIdx >= totalTiles (KernelEnd before first TDM)"))
+                module.add(SCMovB32(dst=sgpr(padFlagSgpr), src=1,
+                                    comment="no-work: handshake then s_endpgm; never ld_bcst"))
+        return module
+
+    def streamKClusterPadPostHandshakeExit(self, writer, kernel, padFlagSgpr, *, labelBase="SKClusterPad"):
+        """``s_endpgm`` padded peers after the prologue ``-3`` round has waited.
+
+        Invariant: no work-group ``s_endpgm`` while ``-3`` signal_count != 0.
+        Pads signal+wait with everyone else, then exit on an idle barrier.
+        They never issue ``ld_bcst``; ``computeMulticastMaskReduction`` still
+        trims the broadcast mask to the surviving peers. ForceDPOnly=1 no-work
+        WGs (StreamKIdx >= totalTiles) share this exit so they are not in a
+        multicast mask at KernelEnd-before-TDM.
+        """
+        module = Module("StreamK cluster pad post-handshake exit")
+        padNoExit = Label(writer.labels.getNameInc("%s_NoEarlyStop" % labelBase), "")
+        module.add(SCmpEQU32(src0=sgpr(padFlagSgpr), src1=0, comment="padded peer? (0 = real tile)"))
+        module.add(SCBranchSCC1(labelName=padNoExit.getLabelName(),
+                                comment="real tile: continue after -3 idle"))
+        module.add(SEndpgm(comment="padded work-group: -3 signal+wait done; s_endpgm with barrier idle"))
+        module.add(padNoExit)
+        return module
+
+    def streamKMulticastBoundaryClear(self, writer, kernel):
+        """Drop DP multicast masks to self-only at the DP->SK boundary."""
+        module = Module("StreamK multicast DP->SK boundary clear")
+        if not _streamKPersistentMulticast(kernel):
+            return module
+        module.addComment0("clear BOTH A & B broadcast masks at DP->SK boundary")
+        module.add(SAndB32(dst=sgpr("MulticastMaskA"), src0=sgpr("MulticastMaskA"),
+                           src1=sgpr("MulticastMaskB"),
+                           comment="clear BOTH A & B broadcast masks at DP->SK boundary"))
+        module.add(SMovB32(dst=sgpr("MulticastMaskB"), src=sgpr("MulticastMaskA"),
+                           comment="DP->SK: drop A & B broadcast -> self-only (normal loads)"))
         return module
 
     def preLoop(self, writer, kernel):
@@ -3400,21 +3533,14 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
 
-        # Cluster multicast: exit padded boundary-cluster peers here, before the
-        # fold overwrites WorkGroup0 with the linear index and before the prologue
-        # cluster-barrier arrive, so their WAVEDONE frees the -3 barrier slot for
-        # the present peers. No-op unless this is the ForceDPOnly cluster path;
-        # the two-tile cluster instead defers the prologue arrive to AFTER the
-        # StreamK work-check (see below).
-        module.add(self.streamKClusterPadEarlyExit(writer, kernel))
+        # Spatial-multicast cluster: predicate padded M/N peers (do not s_endpgm
+        # yet). ForceDPOnly=0 and ForceDPOnly=1 cluster multicast share this path.
+        padFlag = None
+        if streamKMulticast(kernel):
+            padFlag = writer.sgprPool.checkOut(1, "SKClusterPadFlag")
+            module.add(self.streamKClusterPadEarlyExit(writer, kernel, padFlag))
 
-        # Cluster multicast: fold the 2-D (+batch) HW workgroup coords into the
-        # linear DP tile index the DP decode expects. WorkGroup0 = global M-tile
-        # (Cs B-peers M-adjacent), WorkGroup1 = global N-tile (Ck A-peers
-        # N-adjacent), WorkGroup2 = batch, so (M-fastest, matching skIndexToWG):
-        #   StreamKIdx = WorkGroup2*(nWG0*nWG1) + WorkGroup1*nWG0 + WorkGroup0
-        # written into WorkGroup0 so the save below copies the final index. A 1-D
-        # [Cs, 1] cluster launches the same 2-D grid, so it folds identically.
+        # Cluster multicast: fold M/N/batch HW coords into linear DP StreamKIdx.
         if streamKMulticast(kernel):
             with writer.allocTmpSgpr(2, tag="ClusterDPFold") as tRes:
                 t0 = tRes.idx
@@ -3437,17 +3563,15 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"),
                                comment="Save original StreamK index"))
 
-        # Cluster multicast: arrive once per workgroup at the cluster split barrier
-        # here in the prologue, before the first tensor_load_to_lds, so it pairs
-        # the cluster-barrier pass's first-load wait.
-        #
-        # EXCEPTION -- the two-tile (StreamKForceDPOnly==0) cluster: its no-work
-        # peers only reveal themselves at the StreamK work-check below, so arriving
-        # here would over-count the -3 barrier. DEFER that arrive to just after the
-        # work-check. The ForceDPOnly cluster has already dropped its no-work peers
-        # in streamKClusterPadEarlyExit above, so it arrives here.
+        # Cluster multicast: every launched member including pads signal+wait
+        # -3 (prologue round). Pads then s_endpgm on an idle barrier.
+        # ForceDPOnly=1 uses this as the only prologue arrive (first-load /
+        # zero-iter waits dropped). ForceDPOnly=0 [Cs,Ck] still emits a later
+        # per-pass arrive in graWorkGroup after pads have exited.
         if streamKMulticast(kernel):
-            module.add(self.streamKMulticastPrologueSignal(writer, kernel))
+            module.add(self.streamKMulticastPrologueSignal(writer, kernel, wait=True))
+            module.add(self.streamKClusterPadPostHandshakeExit(writer, kernel, padFlag))
+            writer.sgprPool.checkIn(padFlag)
 
         if kernel["StreamKForceDPOnly"]:
             sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
@@ -3464,6 +3588,9 @@ class StreamKTwoTileDPFirst(StreamK):
                 module.add(SMovB32(dst=sgpr("StreamKIterEnd"), src=sgpr(sTmp), comment="DP ending iteration"))
                 module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp), comment="Make sure there's work to do"))
             writer.releaseStreamKConstSgpr(sIpt)
+            # Prologue -3 already waited. ForceDPOnly no-work WGs were flagged
+            # as pads and s_endpgm'd after -3 (never ld_bcst). This KernelEnd
+            # is a safety net for any WG that still has StreamKIter >= totalIters.
             module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
             return module
 
@@ -3605,12 +3732,19 @@ class StreamKTwoTileDPFirst(StreamK):
         writer.sgprPool.checkIn(sTmp)
 
         module.add(skInitDone)
-        # check if this WG has no work to do
+        # No-work WGs already completed the prologue ``-3`` round (pads
+        # ``s_endpgm`` on that idle barrier). Jumping KernelEnd would skip
+        # the gated persist wait while remaining WGs still have USER ``-3``
+        # open. Exit like pads: ``s_endpgm`` here, never KernelEnd.
         with writer.allocTmpSgpr(1, tag="TotalIters") as sTmpRes:
             sTmp = sTmpRes.idx
             module.add(self.computeTotalIters(writer, kernel, sTmp))
             module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp), comment="Make sure there's work to do"))
-        module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+        hasWork = Label(writer.labels.getNameInc("SK_HasWork"), "")
+        module.add(SCBranchSCC1(labelName=hasWork.getLabelName(),
+                                comment="has work: enter persistent loop"))
+        module.add(SEndpgm(comment="no-work: prologue -3 idle; s_endpgm (do not KernelEnd-skip persist wait)"))
+        module.add(hasWork)
 
         return module
 
@@ -3699,7 +3833,19 @@ class StreamKTwoTileDPFirst(StreamK):
         # if StreamKIter >= sTmp+3, continue SK (add skShift?)
         module.add(SMovB32(dst=sgpr(sTmp+1), src=sgpr(sTmp+2), comment="SK iterations shift"))
         module.add(SCmpLeU32(src0=sgpr(sTmp+3), src1=sgpr("StreamKIter"), comment="Check if continuing in SK section"))
-        module.add(SCBranchSCC1(labelName=skUpdateDone.getLabelName(), comment="Done update"))
+        if _streamKPersistentMulticast(kernel):
+            # Continue-SK: self-only loads; skip per-pass -3 (owner may be in fixup).
+            skContClear = Label(writer.labels.getNameInc("SK_ContClearMasks"), "")
+            module.add(SCBranchSCC0(labelName=skContClear.getLabelName(),
+                                    comment="not continuing SK: DP->SK switch below"))
+            module.add(self.streamKMulticastBoundaryClear(writer, kernel))
+            module.add(SMovB32(dst=sgpr(sTmp+3), src=0,
+                               comment="continuing SK: skip per-pass multicast -3 (self-only)"))
+            module.add(SBranch(labelName=skUpdateDone.getLabelName(),
+                               comment="Done update (SK, masks self-only)"))
+            module.add(skContClear)
+        else:
+            module.add(SCBranchSCC1(labelName=skUpdateDone.getLabelName(), comment="Done update"))
         # if sTmp+1 > sTmp+3 and StreamKIter < sTmp+3, switch from DP to SK (add dpShift)
         # Per-tile extras when skGrid % skTiles == 0.
         # Release the 4-wide SKMappingTemp across extra-iters mapping (gfx1250
@@ -3730,9 +3876,21 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(self.computeTotalIters(writer, kernel, sTotalIters))
             # TODO maybe remove clamp, since extra iters code should guarantee total iterations match
             module.add(SMinU32(dst=sgpr("StreamKIterEnd"), src0=sgpr("StreamKIterEnd"), src1=sgpr(sTotalIters), comment="Cap ending iter at total SK iters"))
-            # check if this WG has no work to do
-            module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTotalIters), comment="Make sure there's work to do"))
-        module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+            if _streamKPersistentMulticast(kernel):
+                # skTileIndex already mapped the last DP tile. KernelEnd here
+                # would skip that tile and the per-pass -3 while cluster mates
+                # wait. closeLoop exits when the offset SK start (sTmp+1) is
+                # past totalIters (no SK work). Keep multicast masks: this pass
+                # is still the last DP tile, not SK (continue-SK cleared above).
+                module.addComment0(
+                    "cluster multicast: finish last DP + per-pass -3; closeLoop exits if no SK work")
+                module.add(SMovB32(dst=sgpr(sTmp+3), src=1,
+                                   comment="last DP tile: still need per-pass multicast -3"))
+            else:
+                # check if this WG has no work to do
+                module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTotalIters), comment="Make sure there's work to do"))
+        if not _streamKPersistentMulticast(kernel):
+            module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
 
         # If in SK, next iteration is sTmp+2
         # Increment StreamK iteration
@@ -3758,6 +3916,26 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr(sIpt), comment="Skip iterations"))
         writer.releaseStreamKConstSgpr(sIpt)
         module.add(alphaLabel)
+
+        # Per-pass multicast after pads exited. Continue-SK skips (sTmp+3==0).
+        # PGR1 defers wait to persist close; PGR>=2 waits here then skipPGR2 arrives.
+        if _streamKPersistentMulticast(kernel):
+            skipMc = Label(writer.labels.getNameInc("SK_SkipPassMulticast"), "")
+            pgr1CloseWait = self._pgr1PersistDpMcWaitAtClose(kernel)
+            flag = self._persistDpMcOpenSgpr(writer, kernel)
+            if flag is not None:
+                module.add(SMovB32(dst=sgpr(flag), src=0,
+                                   comment="persist USER -3 idle unless this pass arrives"))
+            module.add(SCmpEQU32(src0=sgpr(sTmp+3), src1=0,
+                                 comment="continuing SK? skip per-pass multicast -3"))
+            module.add(SCBranchSCC1(labelName=skipMc.getLabelName(),
+                                    comment="SK pass: self-only loads, no multicast -3"))
+            if flag is not None and pgr1CloseWait:
+                module.add(SMovB32(dst=sgpr(flag), src=1,
+                                   comment="PGR1 persist-DP: arrive now; wait last -3 at persist close"))
+            module.add(self.streamKMulticastPrologueSignal(
+                writer, kernel, wait=not pgr1CloseWait))
+            module.add(skipMc)
 
         writer.sgprPool.checkIn(sTmp)
 
@@ -3816,6 +3994,13 @@ class StreamKTwoTileDPFirst(StreamK):
 
     def kernelEnd(self, writer, kernel):
         module = Module("StreamK TwoTileDPFirst kernelEnd")
+        # GW_End long-branches here and skips SK_CloseLoop. Remaining WGs
+        # that arrived persist USER -3 (PGR1 graWorkGroup / PGR2 skipPGR2)
+        # must wait before s_endpgm or the next dispatched kernel hangs on
+        # its first -3. Gated on the persist-open flag: continue-SK / pads
+        # (already s_endpgm) must not wait-only. SK_CloseLoop already waited
+        # and cleared the flag, so that path is a no-op here.
+        module.add(self.persistDpMulticastCloseWait(writer, kernel))
         return module
 
 class StreamKDynamic(StreamK):

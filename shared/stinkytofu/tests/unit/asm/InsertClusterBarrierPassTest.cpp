@@ -36,6 +36,7 @@
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
@@ -529,10 +530,10 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     }
 
     // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
-    void runPass() {
+    void runPass(StreamKMulticastMode streamKMulticast = kStreamKMulticastOff) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
-        auto pass = createInsertClusterBarrierPass();
+        auto pass = createInsertClusterBarrierPass(streamKMulticast);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
                       << "\n";
@@ -762,6 +763,17 @@ TEST_F(InsertClusterBarrierPassTest, Rule1SignalBelowGsu1IsDrunkByRule2Wait) {
         << "the wait has to have Rule 1's token to drink:" << blockListing(*bb);
 }
 
+TEST_F(InsertClusterBarrierPassTest, Rule2SkippedForStreamKMulticast) {
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+
+    runPass(kStreamKMulticastOn);
+
+    StinkyInstruction* firstLoad = findFirstTensorLoad();
+    ASSERT_NE(firstLoad, nullptr);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(firstLoad))
+        << "Rule 2 must not insert a first-load wait; Tensile already waited the prologue -3";
+}
+
 TEST_F(InsertClusterBarrierPassTest, IdempotencySecondRunIsNoOp) {
     appendGsu1Preheader();
     openLoop();
@@ -873,6 +885,105 @@ IF_RULE3_CROSS_LOOP(TEST_F(InsertClusterBarrierPassTest,
     EXPECT_LT(indexOf(segBeginInst), indexOf(trigger))
         << "segBegin must precede the workgroup signal:" << blockListing(*bb);
 })
+
+TEST_F(InsertClusterBarrierPassTest, Rule3SkippedForStreamKMulticastKeepsProducerDrain) {
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+
+    runPass(kStreamKMulticastOn);
+
+    const auto [signals, waits] = clusterBarrierCounts();
+    EXPECT_EQ(signals, 0) << "multicast must not insert loop Rule 3 -3 (mixed LoopCounter)";
+    EXPECT_EQ(waits, 0);
+
+    bool sawTensorDrain = false;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        if (inst->getModifier<SWaitTensorCntData>() != nullptr) {
+            sawTensorDrain = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(sawTensorDrain) << "multicast PGR1 must retire cooperative tensor_load";
+}
+
+TEST_F(InsertClusterBarrierPassTest, PrologueTdmDrainBeforeLdsPingPongXor) {
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/12, /*src1Reg=*/16);
+    AsmIRBuilder xorBuilder(*bb, arch);
+    const HwInstDesc* xorDesc = getMCIDByUOp(GFX::s_xor_b32, arch);
+    ASSERT_NE(xorDesc, nullptr);
+    StinkyInstruction* xorInst = xorBuilder.create(xorDesc);
+    xorInst->addDestReg(StinkyRegister("s", 1, 1));
+    xorInst->addSrcReg(StinkyRegister("s", 1, 1));
+    xorInst->addSrcReg(StinkyRegister(0x10000));
+
+    runPass(kStreamKMulticastOn);
+
+    StinkyInstruction* xorAfter = nullptr;
+    for (IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* desc = inst->getHwInstDesc();
+        if (desc != nullptr && desc->mnemonic != nullptr &&
+            std::string(desc->mnemonic) == "s_xor_b32") {
+            xorAfter = inst;
+            break;
+        }
+    }
+    ASSERT_NE(xorAfter, nullptr);
+    StinkyInstruction* prev = nullptr;
+    {
+        BasicBlock* parent = xorAfter->getParent();
+        auto it = BasicBlock::iterator(xorAfter);
+        while (it != parent->begin()) {
+            --it;
+            auto* cand = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (cand == nullptr) continue;
+            if (isPseudoInst(cand)) continue;
+            prev = cand;
+            break;
+        }
+    }
+    ASSERT_NE(prev, nullptr);
+    EXPECT_NE(prev->getModifier<SWaitTensorCntData>(), nullptr)
+        << "prologue TDM must s_wait_tensorcnt 0 before the LDS ping-pong XOR";
+}
+
+TEST_F(InsertClusterBarrierPassTest, ProducerDrainAfterSia4SplitAMxsaGroup) {
+    // SIA=4 splits A and MXSA; producer drain must follow MXSA, not sit between.
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    AsmIRBuilder addBuilder(*bb, arch);
+    const HwInstDesc* addDesc = getMCIDByUOp(GFX::s_add_u32, arch);
+    ASSERT_NE(addDesc, nullptr);
+    StinkyInstruction* addInst = addBuilder.create(addDesc);
+    addInst->addDestReg(StinkyRegister("s", 2, 1));
+    addInst->addSrcReg(StinkyRegister("s", 2, 1));
+    addInst->addSrcReg(StinkyRegister(16));
+    createDSLoadInBlock(bb, arch, /*destReg=*/0, /*addrReg=*/8);
+    StinkyInstruction* mxsa = createTensorLoadInBlock(bb, arch, /*src0Reg=*/12, /*src1Reg=*/16);
+    ASSERT_NE(mxsa, nullptr);
+
+    runPass(kStreamKMulticastOn);
+
+    std::vector<StinkyInstruction*> tls;
+    std::vector<StinkyInstruction*> waits;
+    for (IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        auto* inst = cast<StinkyInstruction>(&ir);
+        if (isTensorLoad(*inst)) tls.push_back(inst);
+        if (inst->getModifier<SWaitTensorCntData>() != nullptr) waits.push_back(inst);
+    }
+    ASSERT_EQ(tls.size(), 2u);
+    ASSERT_FALSE(waits.empty()) << "multicast PGR1 must retire the cooperative group";
+    const size_t aIdx = indexOf(tls[0]);
+    const size_t mxsaIdx = indexOf(tls[1]);
+    const size_t waitIdx = indexOf(waits[0]);
+    EXPECT_LT(aIdx, mxsaIdx);
+    EXPECT_FALSE(aIdx < waitIdx && waitIdx < mxsaIdx)
+        << "producer drain must not sit between A and MXSA tensor_load";
+    EXPECT_LT(mxsaIdx, waitIdx) << "producer drain must follow the MXSA tensor_load";
+}
 
 // StinkyWaitCntInsertionPass runs before this pass and anchors its counter
 // drains on the same workgroup signal Rule 3(b) targets, so the slot right

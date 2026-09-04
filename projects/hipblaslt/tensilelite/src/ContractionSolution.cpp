@@ -1171,19 +1171,17 @@ namespace TensileLite
                     // SK5-off mirrors standalone SK3 arg packing.
                     uint32_t magicNumberItersPerTile;
                     uint32_t magicShiftItersPerTile;
-                    magicNumberItersPerTile = magicNumber(
-                        2, sk3_itersPerTile, &magicShiftItersPerTile);
+                    magicNumberItersPerTile
+                        = magicNumber(2, sk3_itersPerTile, &magicShiftItersPerTile);
                     assert((magicShiftItersPerTile & 0x40000000u) == 0u);
 
-                    uint32_t sk3_skItersPerWG;
-                    uint32_t sk3_skTiles;
+                    uint32_t sk3_skItersPerWG = 0;
+                    uint32_t sk3_skTiles      = 0;
                     if(sk.reduction == origami::reduction_t::parallel)
                     {
-                        uint32_t skSplit
-                            = static_cast<uint32_t>(sk.grid / sk3_tiles);
-                        sk3_skItersPerWG
-                            = static_cast<uint32_t>(sk3_itersPerTile) / skSplit;
-                        sk3_skTiles = skSplit;
+                        uint32_t skSplit = static_cast<uint32_t>(sk.grid / sk3_tiles);
+                        sk3_skItersPerWG = static_cast<uint32_t>(sk3_itersPerTile) / skSplit;
+                        sk3_skTiles      = skSplit;
                     }
                     else
                     {
@@ -1197,16 +1195,13 @@ namespace TensileLite
                         sk3_skItersPerWG = sk3_split.skItersPerWG;
                     }
 
-                    args.template append<uint32_t>("ItersPerTile",
-                                                   sk3_itersPerTile);
+                    args.template append<uint32_t>("ItersPerTile", sk3_itersPerTile);
                     args.template append<uint32_t>("MagicNumberItersPerTile",
                                                    magicNumberItersPerTile);
                     args.template append<uint32_t>("MagicShiftItersPerTile",
                                                    magicShiftItersPerTile);
-                    args.template append<uint32_t>("SKItersPerWG",
-                                                   sk3_skItersPerWG);
-                    args.template append<uint32_t>("skGrid",
-                                                   static_cast<uint32_t>(sk.grid));
+                    args.template append<uint32_t>("SKItersPerWG", sk3_skItersPerWG);
+                    args.template append<uint32_t>("skGrid", static_cast<uint32_t>(sk.grid));
                     args.template append<uint32_t>("skTiles", sk3_skTiles);
                 }
             }
@@ -2126,31 +2121,38 @@ namespace TensileLite
         if(gsu > 0)
             rv.numWorkGroups.y *= gsu;
 
+        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
+
         if(sizeMapping.streamK != 0)
         {
-            if(sizeMapping.streamKForceDPOnly != 0
-               && (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1))
+            if(sizeMapping.streamKForceDPOnly != 0 && enableCluster)
             {
-                // ForceDPOnly cluster multicast [Cs, Ck]: launch a grid spanning
-                // the full M x N tile space -- gridX = nWG0 (M-tiles), gridY = nWG1
-                // (N-tiles), gridZ = batch -- so the kernel's StreamKIdx fold
-                // (StreamK.preLoop) gives each work-group exactly one tile and the
-                // Cs X-peers of a cluster always land M-adjacent (sharing B). A 1-D
-                // [Cs, 1] cluster is the Ck == 1 case of the same launch. The
-                // round-up below pads non-multiple extents; sk.grid == tiles here.
+                // ForceDPOnly cluster multicast: one WG per tile.
+                // Cs==1 has no B-peers; Ck==1 has no A-peers.
                 rv.numWorkGroups.x = problemNumGroupTiles.x; // nWG0 (M-tiles)
                 // rv.numWorkGroups.y already = nWG1 * gsu (N-tiles); z stays batch.
             }
+            else if(sizeMapping.streamK == 3 && sizeMapping.streamKForceDPOnly == 0
+                    && enableCluster)
+            {
+                // ForceDPOnly=0 cluster multicast: persistent [nWG0, gridY, batch];
+                // pads handshake-exit. Same DP grid as ForceDPOnly=1.
+                rv.numWorkGroups.x = problemNumGroupTiles.x; // nWG0
+                rv.numWorkGroups.y = problemNumGroupTiles.x > 0
+                                         ? sk.grid / problemNumGroupTiles.x
+                                         : 1; // gridY
+                rv.numWorkGroups.z = problemNumGroupTiles.z; // batch
+            }
             else
             {
-                // Linear Stream-K launch (no cluster, or ForceDPOnly=0).
+                // Linear Stream-K launch (no cluster). ClusterDim not [1, 1]
+                // uses the persistent cluster grid above.
                 rv.numWorkGroups.x = sk.grid;
                 rv.numWorkGroups.y = 1;
                 rv.numWorkGroups.z = 1;
             }
         }
 
-        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
         if(!enableCluster)
         {
             if(internalArgsSupport.version >= 1)
@@ -2163,24 +2165,8 @@ namespace TensileLite
 
         rv.clusterDim = sizeMapping.clusterDim;
 
-        // The HIP driver rejects a cluster launch whose grid is not divisible by
-        // clusterDim, so round up. The grid set above holds the REAL extents and
-        // need not be a cluster multiple. The extra padded work-groups early-exit
-        // in the kernel prologue (StreamK.streamKClusterPadEarlyExit on the
-        // ForceDPOnly cluster path) BEFORE the -3 cluster barrier, so their
-        // WAVEDONE decrements the barrier's live member count, and the surviving
-        // peers' broadcast masks are trimmed to the present lanes
-        // (computeMulticastMaskReduction).
-        //
-        // Only the ForceDPOnly cluster multicast needs this: it is the path whose
-        // grid spans the real M x N tile space and whose padded peers have a
-        // pad-exit. A ForceDPOnly==0 Stream-K cluster keeps develop's launch --
-        // its 1-D sk.grid is not a tile space and it has no pad-exit, so rounding
-        // up would only add work-groups that run the whole Stream-K prologue
-        // before falling out on an empty iteration range.
-        bool skClusterMulticast = sizeMapping.streamK != 0
-                                  && sizeMapping.streamKForceDPOnly != 0 && enableCluster;
-        if(enableCluster && (sizeMapping.streamK == 0 || skClusterMulticast))
+        // Round up so HIP accepts grid % ClusterDim. Pads handshake then s_endpgm.
+        if(enableCluster)
         {
             rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
             rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
@@ -5593,6 +5579,32 @@ namespace TensileLite
                               << "); clamping the grid to " << flagEntries << ".\n";
                 }
                 skGrid = flagEntries;
+            }
+
+            // ForceDPOnly=0 cluster multicast: reshape skGrid into persistent [nWG0, gridY].
+            if(self.sizeMapping.streamK == 3 && self.sizeMapping.streamKForceDPOnly == 0
+               && (self.sizeMapping.clusterDim.x > 1 || self.sizeMapping.clusterDim.y > 1))
+            {
+                size_t ck = static_cast<size_t>(self.sizeMapping.clusterDim.y);
+                dim3   tilesMN;
+                dim3   dummyWg;
+                self.calculateGrid(dummyWg, tilesMN, problem);
+                size_t nwg0 = tilesMN.x;
+                size_t nwg1 = tilesMN.y;
+                // Cap Y at tilesN. Do not floor to a Ck multiple (drops N-rows)
+                // or inflate when tilesN < Ck (KernelEnd vs handshake).
+                size_t gridY = nwg0 > 0 ? (skGrid + nwg0 - 1) / nwg0 : 1;
+                if(ck > 1)
+                {
+                    size_t gridYCk = ((gridY + ck - 1) / ck) * ck;
+                    if(gridYCk <= nwg1)
+                        gridY = gridYCk;
+                }
+                if(gridY > nwg1)
+                    gridY = nwg1;
+                if(gridY < 1)
+                    gridY = 1;
+                skGrid = nwg0 * gridY;
             }
 
             return skGrid;

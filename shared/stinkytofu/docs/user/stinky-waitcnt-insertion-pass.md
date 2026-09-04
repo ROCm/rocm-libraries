@@ -8,7 +8,7 @@
 - **Four counter types**: DS (`dlcnt`), vector load (`vlcnt`), scalar memory (`kmcnt`), tensor (`tlcnt`), tracked as `CounterKind` in `WaitDataflow`
 - **Per-predecessor queues** — each counter keeps separate in-flight FIFOs tagged by CFG predecessor edge, so join consumers see each path's depth instead of a collapsed union queue
 - **Tensor loop policy** — TensileLite promises tagged tensor-token deps are correct without propagating `CK_Tensor` through loop back-edges, so by default exact `CK_Tensor` queues are frozen after the first solver sweep; blocks with untagged tensor anchors keep their live tensor queues because those anchors are fences, and `loopCarriedTokenDepsEnabled` restores normal tensor fixed-point iteration when conservative propagation is needed
-- **Anti-dependency scans** for hazards the SSA RAW chain does not capture (WAR-on-LDS, barrier ordering, untagged conservative fallbacks)
+- **Anti-dependency scans** for hazards the SSA RAW chain does not capture (WAR-on-LDS, barrier ordering, tensor-descriptor WAR, untagged conservative fallbacks)
 - **Existing waits are credited** — an `s_wait_*` already in the input drains the model like one the pass plans, so no duplicate is emitted; see "Existing waits in the input"
 - **Analyze → Optimize → Finalize** — dataflow solve, then `ShallowPredPromotion`, then `finalizePlan()` to align the plan with post-optimizer FIFO simulation
 - **Selective IR mutation**: `buildUseDefChain` and `WaitDataflow::solve()` run over every basic block so skipped preds still contribute in-flight state; `PassContext::shouldProcessBasicBlock` gates `emitWaits` and `removePHIs` only
@@ -102,7 +102,7 @@ df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 
 const auto numWaves = passCtx.getGemmTileConfig().NumWaves;
 df.setRawNeedsWait(CK_Tensor, [numWaves](const StinkyInstruction& i) {
-    return isBarrier(i) || numWaves == 1;
+    return (isBarrier(i) && !isClusterSplitBarrier(i)) || numWaves == 1;
 });
 
 df.solve();
@@ -194,11 +194,11 @@ Built-in default (`CounterPolicy` in `WaitDataflow.cpp`): tensor RAW deps drain 
 
 ```cpp
 df.setRawNeedsWait(CK_Tensor, [numWaves](const StinkyInstruction& i) {
-    return isBarrier(i) || numWaves == 1;
+    return (isBarrier(i) && !isClusterSplitBarrier(i)) || numWaves == 1;
 });
 ```
 
-When `NumWaves == 1`, `rawNeedsWait` is true at **every** instruction, so tensor RAW deps drain at each consumer (not only at barriers). In multi-wave kernels, tensor counter drains are limited to barriers — cross-wave LDS visibility is handled by the barrier itself.
+When `NumWaves == 1`, `rawNeedsWait` is true at **every** instruction, so tensor RAW deps drain at each consumer (not only at barriers). In multi-wave kernels, tensor counter drains are limited to LDS-fencing barriers — cross-wave LDS visibility is handled by the barrier itself, and a cluster `-3` provides none (see below).
 
 Loop-carried tensor-token dependencies are controlled separately:
 
@@ -206,7 +206,7 @@ Loop-carried tensor-token dependencies are controlled separately:
 df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 ```
 
-By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (`s_barrier`, DS read/write, or DS atomic). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
+By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (a fencing `s_barrier`, DS read/write, or DS atomic; cluster `-3` is excluded). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
 
 When `enableLoopCarriedTokenDeps` is **enabled**, `CK_Tensor` participates in the normal fixed-point iteration just like the other counters. This is the conservative mode and can reintroduce loop-header tensor waits when a back-edge carries tensor token state.
 
@@ -218,6 +218,14 @@ Entry points for the conservative mode:
 - `stinkytofu-opt`: `--StinkyWaitCntInsertionPass=enableLoopCarriedTokenDeps`
 
 DS, buffer, and KM counters use the default `rawNeedsWait` (drain at every consumer). Callers may override any counter via `WaitDataflow::setRawNeedsWait()` before `solve()`.
+
+### Cluster split barriers are not fences
+
+`s_barrier_signal -3` / `s_barrier_wait -3` is a **cluster-scope handshake**, not an LDS or tensor fence: it rendezvouses the workgroups of a gfx1250 cluster and says nothing about whether *this* workgroup's LDS writes or `tensor_load_to_lds` transfers have landed. `isClusterSplitBarrier` (`include/stinkytofu/ir/asm/StinkyAsmIR.hpp:588`) recognises it, and every fence-flavoured barrier test in the dataflow goes through `isLdsFenceBarrier` (`WaitDataflow.cpp:196`) rather than the raw `isBarrier` — the tensor `rawNeedsWait` above, `isTensorAnchor`, the DS anti-dep scan, the async anti-dep scan, and the untagged-barrier conservative fallbacks.
+
+Treating `-3` as an anchor would attach a full `s_wait_tensorcnt 0` to every cluster handshake. Kernels using StreamK cluster multicast emit those handshakes from TensileLite rather than from the compiler (`InsertClusterBarrierPass` suppresses its own under multicast — see [Insert Cluster Barrier Pass](../developer/cluster-barrier.md#operating-modes)), so those drains would serialise the asynchronous multicast prefetch they exist to overlap. Workgroup-scope `s_barrier_signal/wait -1` is unaffected and remains a fence.
+
+Pinned by `waitcnt_insertion_cluster_neg3_not_tensor_anchor.stir`: no `s_wait_tensorcnt` at the `-3` pair, and the drain for the following `ds_load` lands after `s_barrier_wait -3`, immediately before the `-1` signal.
 
 ### Selective processing
 
@@ -387,23 +395,42 @@ Each RAW contribution is gated by `rawNeedsWait[c](*inst)` — the per-counter p
 Per instruction, `required[c]` starts at `kUnused` and is tightened to the min wait across all contributing deps on counter `c`:
 
 1. **RAW from SSA** — walk `getSources()` as above; gated by `rawNeedsWait[c](*inst)`.
-2. **Anti-deps (DS)** — `scanDsAntiDeps` for LDS writers (`tensor_load_to_lds`, `ds_write`) and barriers with `MemTokenData` token overlap against per-pred DS queues; same-pipeline pairs (`ds_write` vs `ds_read`) skipped.
-3. **Tensor untagged scan** — tensor anchors with tagged tokens still scan for in-flight tensor loads lacking `MemTokenData`.
-4. **Conservative fallbacks** — force wait 0 when disjointness cannot be proved (see table below).
+2. **Tensor-descriptor WAR** — any instruction whose destination overlaps a source of an in-flight `tensor_load_to_lds` tightens `CK_Tensor` (see below).
+3. **Anti-deps (DS)** — `scanDsAntiDeps` for LDS writers (`tensor_load_to_lds`, `ds_write`) and LDS-fencing barriers with `MemTokenData` token overlap against per-pred DS queues; same-pipeline pairs (`ds_write` vs `ds_read`) skipped.
+4. **Tensor untagged scan** — tensor anchors with tagged tokens still scan for in-flight tensor loads lacking `MemTokenData`.
+5. **Conservative fallbacks** — force wait 0 when disjointness cannot be proved (see table below).
+
+### Tensor-descriptor WAR
+
+`tensor_load_to_lds` reads its tensor descriptor out of SGPRs, and the hardware keeps reading that descriptor **after the instruction issues** — for the whole duration of the asynchronous transfer, not just at issue. Ordinary register dataflow treats a source as consumed at issue, so it models no hazard at all here; overwriting the descriptor while the load is in flight silently corrupts the transfer.
+
+The exposure is real because the descriptor SGPRs are precisely what gets updated for the next buffer: an `s_add_u32` to advance the address, an `s_xor_b32` to ping-pong the LDS half. With `ScheduleIterAlg=4` the scheduler is free to hoist those above the `s_wait_tensorcnt`.
+
+`computeRequiredWaits` therefore scans, for every instruction that has destinations and is not itself a wait, the in-flight `CK_Tensor` queues:
+
+```cpp
+if (!instWritesSrcOf(*inst, *op)) continue;
+tightenRequired(CK_Tensor, clampWaitCount(qsize - idx - 1));
+```
+
+`instWritesSrcOf` is a plain register-overlap test (any dest of the writer against any src of the reader), and `qsize - idx - 1` is the ordinary `w(D)` arithmetic — the overlapping load is drained, anything issued after it stays in flight.
+
+Pinned by `waitcnt_insertion_tensor_descriptor_war.stir`. `InsertClusterBarrierPass` covers the same hazard in the prologue, which is outside this pass's regions — see [Prologue drain](../developer/cluster-barrier.md#prologue-drain----before-the-lds-ping-pong-s_xor_b32).
 
 ### Anti-dependencies (WAR-on-LDS and barrier ordering)
 
 The SSA RAW chain captures "consumer reads producer's result" but not anti-dependencies:
 
 - An **LDS writer** (`tensor_load_to_lds` or `ds_write`) must wait for prior LDS readers/atomics on a matching token (WAR): the write must not clobber LDS a reader has not consumed yet.
-- A **barrier** must wait for any prior DS op on a matching token.
+- An **LDS-fencing barrier** must wait for any prior DS op on a matching token.
 - Each in-flight DS op whose token set overlaps the anchor's becomes an extra DS dep.
 - **Same-pipeline pairs are skipped** (`isOnSamePipeline`): two DS ops are ordered by the DS FIFO in hardware.
 - A DS op with no `MemTokenData` is treated as overlapping — disjointness cannot be proved.
 
 Anchor helpers:
 
-- `isTensorAnchor` — barrier, `ds_read`, `ds_write`, `ds_atomic`
+- `isTensorAnchor` — LDS-fencing barrier, `ds_read`, `ds_write`, `ds_atomic`
+- `isLdsFenceBarrier` — any barrier except a cluster split barrier (`-3`)
 - `isLdsWriterAnchor` — `tensor_load_to_lds`, `ds_write`
 
 ### Conservative fallbacks
@@ -412,7 +439,7 @@ Anchor helpers:
 |------|-----------|--------|
 | Tensor anchor | Anchor lacks `MemTokenData` and any tensor load in flight | `required[CK_Tensor] = 0` |
 | LDS writer | Writer lacks `MemTokenData`, any DS op in flight, writer is not `ds_write` | `required[CK_DS] = 0` |
-| Barrier | Any in-flight DS op and (barrier untagged OR any pending DS op untagged) | `required[CK_DS] = 0` |
+| LDS-fencing barrier | Any in-flight DS op and (barrier untagged OR any pending DS op untagged) | `required[CK_DS] = 0` |
 
 These widen waits, never narrow them. In default tensor-freeze mode, blocks with untagged tensor anchors keep live tensor queues specifically so the tensor-anchor fallback can still see loop-carried tensor loads.
 

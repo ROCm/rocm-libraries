@@ -55,10 +55,14 @@ inline constexpr bool kRule3CrossLoop = false;
 
 class Pass;
 
-/// \p streamKMulticast and \p pgrValue only enable the Rule 3 producer-side
-/// tensor drain for StreamK cluster multicast at PrefetchGlobalRead >= 2; the
-/// barrier placement rules themselves derive everything they need from the IR.
+/// StreamK multicast for InsertClusterBarrierPass: Off vs skip loop -3
+/// (mixed LoopCounter) and drain cooperative tensor_load at any PGR.
+enum StreamKMulticastMode : int {
+    kStreamKMulticastOff = 0,
+    kStreamKMulticastOn = 1,
+};
+
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
-    bool streamKMulticast = false, int pgrValue = 1);
+    StreamKMulticastMode streamKMulticast = kStreamKMulticastOff);
 
 }  // namespace stinkytofu
