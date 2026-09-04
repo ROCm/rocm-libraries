@@ -21,73 +21,63 @@
 # THE SOFTWARE.
 
 from typing import Optional, OrderedDict, Callable
+from math import log2
 import sys
 import os
 
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
 from utils import TYPE_CONFIGS
-from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_VALUE_TYPES, COMMON_KEY_TYPES
+from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALUE_TYPES
+
+"""
+Inclusive range for params tuning, edit these to adjust tuning grid range.
+"""
+BLOCK_SIZES = [128, 256, 512, 1024]
+IPT = [2 ** i for i in range(17)]
 
 
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name="device_merge")
+        return TunerArgs(algo_full_name='device_merge_sort_block_merge')
 
-    def __init__(self, args: TunerArgs):
+    def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
 
     def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
-        """Returns tuning parameters and their possible values as an OrderedDict.
-        Each parameter maps to a list of valid values to explore during tuning."""
         params = OrderedDict()
-        params["block_size_x"] = list(range(64, 1025, 64))
-        params["ipt"] = [1, 2] + list(range(4, 33, 4))
+        params['block_size_x'] = BLOCK_SIZES
+        params['ipt'] = IPT
         return params
 
     def _get_restrictions(
-        self, key_type: str, value_type: Optional[str] = None
+        self, key_type: str, val_type: Optional[str] = None
     ) -> Callable[[dict], bool]:
-        """Constraints for what parameter combinations are valid during tuning"""
-        size = self.bytes_size // TYPE_CONFIGS[key_type].size
-        element_size = TYPE_CONFIGS[key_type].size
-        if value_type:
-            element_size += TYPE_CONFIGS[value_type].size
+        key_size = TYPE_CONFIGS[key_type].size
+        val_size = 1 if val_type == "rocprim::empty_type"  else TYPE_CONFIGS[val_type].size
 
+        max_shared_memory = 65536
+        max_size_per_element = key_size + val_size
         def validate(params):
-            block_size = params["block_size_x"]
-            ipt = params["ipt"]
+            block_size = params['block_size_x']
+            ipt = params['ipt']
+            max_ipt = max_shared_memory // (block_size * max_size_per_element)
 
-            # Total size constraint
-            if block_size * ipt > size:
-                return False
+            max_ipt_exponent = log2(max_ipt) - 1
 
-            # Memory size constraint
-            if block_size * ipt * element_size > 65536:
-                return False
+            return ipt <= (2 ** max_ipt_exponent)
 
-            # Block size constraint
-            if block_size > 1024:
-                return False
-
-            # Items per thread constraint - high ipts don't perform well
-            if ipt >= block_size:
-                return False
-
-            # High ipts on gfx1030 cause HSA_STATUS_ERROR_INVALID_ISA
-            if params.get("arch_name") == "gfx1030" and ipt > 28:
-                return False
-
-            return True
 
         return validate
 
     def tune_all(self) -> None:
-        """Tune for all key type and value type combinations"""
+        """Tune for all value type combinations"""
+
+        VALUE_TYPES = COMMON_VALUE_TYPES + ["rocprim::empty_type"]
+
         for key_type in COMMON_KEY_TYPES:
-            self.tune_type(key_type)
-            for value_type in COMMON_VALUE_TYPES:
+            for value_type in VALUE_TYPES:
                 self.tune_type(key_type, value_type)
 
 
