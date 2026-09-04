@@ -40,6 +40,12 @@
 #include <miopen/env.hpp>
 #include <miopen/generic_search_controls.hpp>
 
+#include <miopen/config.h>
+#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+#include <miopen/conv/heuristics/lgbm_pcfg_hook.hpp>
+#include <miopen/conv/problem_description.hpp>
+#endif
+
 #include <limits>
 #include <type_traits>
 #include <optional>
@@ -47,6 +53,11 @@
 
 /// Elevate log messages for Search to warnings.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_WARN_SEARCH)
+
+// When set, a "" (solver-default) entry in the lgbm_pcfg ranked list terminates
+// the walk. When unset (default), "" is skipped and the walk continues to the
+// first valid config -- see the hook below.
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PCFG_STOP_ON_DEFAULT)
 
 namespace miopen {
 
@@ -167,6 +178,63 @@ auto FindSolutionImpl(rank<1>,
             }
         }
     }
+
+#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+    // Perf-config picker: last resort before the generic default. Only fires for
+    // conv problems, when no perf_cfg was passed and the perf-db (+alt) missed
+    // and no search ran — i.e. exactly where GetDefaultPerformanceConfig would
+    // otherwise be used. Perf-db records remain authoritative ("perf-db wins").
+    //
+    // First-valid ranked walk: the picker returns candidates ordered best->worst
+    // by model score. We take the first config that passes IsValidPerformanceConfig;
+    // the top-ranked config is often invalid for a specific problem, and committing
+    // to an invalid one would drop the Find to ConvDirectNaive.
+    //
+    // The "" (solver-default) sentinel is skipped rather than terminating the walk:
+    // only one config per solver is benchmarked in Hybrid/DynamicHybrid Find, so
+    // stopping on "" would deny that solver a valid, higher-ranked real config.
+    // Every candidate is still validated, and exhausting the walk falls through to
+    // GetDefaultPerformanceConfig below, so an invalid config is never used. Set
+    // MIOPEN_DEBUG_LGBM_PCFG_STOP_ON_DEFAULT=1 to make "" terminate the walk.
+    if constexpr(std::is_same_v<Problem, ::miopen::conv::ProblemDescription>)
+    {
+        if(perf_cfg.empty() && !enforce.IsDbClean(context) &&
+           !(context.do_search || enforce.IsSearch(context)))
+        {
+            const auto ranked =
+                ai::lgbm::pcfg::MaybePickConfig(s.SolverDbId(), problem, context.GetStream());
+            const bool stop_on_default = env::enabled(MIOPEN_DEBUG_LGBM_PCFG_STOP_ON_DEFAULT);
+            using PerformanceConfig    = decltype(s.GetDefaultPerformanceConfig(context, problem));
+            for(const auto& desc : ranked)
+            {
+                if(desc.empty())
+                {
+                    if(stop_on_default)
+                    {
+                        // Legacy behavior: treat a ranked "" as "default beats the
+                        // rest" and stop, letting the default fallthrough handle it.
+                        MIOPEN_LOG_I2("lgbm_pcfg: default config outranks candidates for "
+                                      << s.SolverDbId());
+                        break;
+                    }
+                    // Default behavior: skip "" and keep walking to the first valid
+                    // real config.
+                    continue;
+                }
+                PerformanceConfig cfg{};
+                cfg.Deserialize(desc);
+                if(s.IsValidPerformanceConfig(context, problem, cfg))
+                {
+                    MIOPEN_LOG_I2("lgbm_pcfg: using picked config for " << s.SolverDbId());
+                    return s.GetSolution(context, problem, cfg);
+                }
+            }
+            if(!ranked.empty())
+                MIOPEN_LOG_I2("lgbm_pcfg: no valid config in ranked walk for "
+                              << s.SolverDbId() << "; using default");
+        }
+    }
+#endif
 
     return s.GetSolution(context, problem, s.GetDefaultPerformanceConfig(context, problem));
 }

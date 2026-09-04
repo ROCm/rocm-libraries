@@ -327,6 +327,25 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source anyramdb.cpp)
 endif()
 
+if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
+    list(APPEND MIOpen_Source
+        conv/heuristics/lgbm_pick.cpp
+        conv/heuristics/lgbm_metadata.cpp
+        conv/heuristics/lgbm_forest.cpp)
+    # The rank model ships as its native LightGBM text dump
+    # (kernels/lgbm_rank_model.txt, installed with the other model assets
+    # below) and is walked at runtime by lgbm_forest.cpp -- no generated C.
+
+    # Perf-config picker: one LightGBM lambdarank model PER tuneable solver.
+    # Each model ships as its native text dump (kernels/lgbm_pcfg_<solver>_
+    # model.txt, installed with the other model assets below) and is loaded +
+    # walked at runtime by lgbm_forest.cpp via the pcfg metadata loader. No
+    # generated C, so no per-solver symbol-rename / ODR machinery is needed.
+    list(APPEND MIOpen_Source
+        conv/heuristics/lgbm_pcfg_pick.cpp
+        conv/heuristics/lgbm_pcfg_metadata.cpp)
+endif()
+
 list(APPEND MIOpen_Source tmp_dir.cpp binary_cache.cpp md5.cpp)
 if(MIOPEN_ENABLE_SQLITE)
     list(APPEND MIOpen_Source sqlite_db.cpp)
@@ -1055,9 +1074,25 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         add_library(nlohmann_json INTERFACE IMPORTED GLOBAL)
         target_link_libraries(nlohmann_json INTERFACE nlohmann_json::nlohmann_json)
     endif()
-    file(GLOB MODEL_FILES CONFIGURE_DEPENDS kernels/*.model)
+    file(GLOB MODEL_FILES CONFIGURE_DEPENDS
+        kernels/*.model
+        kernels/lgbm_model_meta.json
+        kernels/lgbm_pcfg_model_meta.json
+        kernels/lgbm_pcfg_catalog.json
+        kernels/lgbm_rank_model.txt
+        kernels/lgbm_pcfg_*_model.txt)
     if(NOT ENABLE_ASAN_PACKAGING )
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
+    endif()
+    # Test-only golden-vector fixtures for the LGBM forest walker parity gates
+    # (test/gtest/lgbm_picker.cpp, lgbm_pcfg_picker.cpp). Copied next to the
+    # model assets so the tests find them via GetSystemDbPath(), but NOT
+    # installed into the package.
+    if(BUILD_TESTING)
+        configure_file("kernels/lgbm_rank_golden.json"
+            "${KERNELS_BINARY_DIR}/lgbm_rank_golden.json" COPYONLY)
+        configure_file("kernels/lgbm_pcfg_golden.json"
+            "${KERNELS_BINARY_DIR}/lgbm_pcfg_golden.json" COPYONLY)
     endif()
     foreach(MODEL_FILE ${MODEL_FILES})
         get_filename_component(MODEL_FILE_FILENAME "${MODEL_FILE}" NAME)
