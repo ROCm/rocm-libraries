@@ -95,9 +95,8 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( hipfft-clients-tests LANGUAGES CXX )
-
-if( NOT HIPFFT_BUILD_SCOPE )
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( hipfft-clients-tests LANGUAGES CXX )
   find_package( hipfft REQUIRED CONFIG PATHS )
 endif()
 
@@ -366,16 +365,14 @@ else()
   endif()
 endif()
 
-find_package( GTest 1.11.0 )
+find_package( GTest 1.17 QUIET )
 
 if( GTest_FOUND )
-  target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
   target_link_libraries( hipfft-test PRIVATE GTest::gtest )
 else()
-  # gtest build by the hipFFT
-  add_dependencies( hipfft-test gtest )
-  target_include_directories( hipfft-test PRIVATE hipfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
-  target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
+  set( GTEST_TARGET hipfft-test )
+  set( GTEST_LINK_MAIN OFF )
+  include( ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build-gtest.cmake )
 endif()
 
 # tests have callback functions, which need to be built as relocatable device code

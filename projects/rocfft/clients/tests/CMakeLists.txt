@@ -27,10 +27,10 @@ cmake_minimum_required( VERSION 3.16 )
 if( WIN32 )
   set( CMAKE_INSTALL_PREFIX "${PROJECT_BINARY_DIR}/package" CACHE PATH
     "Install path prefix, prepended onto install directories" )
-else( )
+else()
   set( CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH
     "Install path prefix, prepended onto install directories" )
-endif( )
+endif()
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
@@ -40,8 +40,10 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( rocfft-clients-tests LANGUAGES CXX )
-
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( rocfft-clients-tests LANGUAGES CXX C )
+endif()
+  
 set(CMAKE_CXX_STANDARD 20)
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
@@ -305,15 +307,13 @@ if( BUILD_CLIENTS_TESTS_OPENMP )
   )
 endif()
 
-find_package( GTest QUIET )
-
+find_package( GTest 1.17 QUIET )
 if( GTest_FOUND )
-    target_link_libraries( rocfft-test PRIVATE GTest::gtest )
+  target_link_libraries( rocfft-test PRIVATE GTest::gtest )
 else()
-  include( ${PROJECT_SOURCE_DIR}/../cmake/build-gtest.cmake )
-  add_dependencies( rocfft-test gtest )
-  list( APPEND rocfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
-  list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
+  set( GTEST_TARGET rocfft-test )
+  set( GTEST_LINK_MAIN OFF )
+  include( ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build-gtest.cmake )
 endif()
 
 target_compile_options( rocfft-test PRIVATE ${WARNING_FLAGS} -Wno-cpp )
@@ -327,10 +327,7 @@ if( NOT BUILD_SHARED_LIBS )
   list(APPEND rocfft-test_link_libs hip::host hip::device)
 endif()
 
-if( NOT ROCFFT_BUILD_SCOPE )
-  find_package(SQLite3 REQUIRED)
-  set( ROCFFT_SQLITE_LIB SQLite::SQLite3)
-endif()
+include( ../../cmake/sqlite.cmake )
 
 find_package( hiprtc REQUIRED CONFIG PATHS ${ROCM_PATH} )
 target_link_libraries( rocfft-test
@@ -377,11 +374,7 @@ target_link_libraries( rocfft-test PRIVATE
    hip::host
    hip::device )
 
-include( ../../cmake/sqlite.cmake )
-target_link_libraries( rocfft-test PUBLIC ${ROCFFT_SQLITE_LIB} )
 target_include_directories( rocfft-test PRIVATE ${sqlite_local_SOURCE_DIR} )
-
-set_property( TARGET rocfft-test APPEND PROPERTY LINK_LIBRARIES ${ROCFFT_SQLITE_LIB} )
 
 if(FFTW_MULTITHREAD)
   target_compile_options( rocfft-test PRIVATE -DFFTW_MULTITHREAD )
