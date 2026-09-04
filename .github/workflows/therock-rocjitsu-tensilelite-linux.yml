@@ -1,0 +1,115 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Run TensileLite common GEMM tests under rocjitsu CPU emulation.
+# Advisory (continue-on-error) sidecar job following the same pattern as
+# therock-rocjitsu-race-check-linux.yml.
+
+name: TheRock rocjitsu tensilelite test Linux
+
+on:
+  workflow_call:
+    inputs:
+      therock_ref:
+        type: string
+        required: true
+      build_runs_on:
+        type: string
+        required: true
+      amdgpu_families:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  rocjitsu-tensilelite-linux:
+    name: rocjitsu tensilelite (${{ inputs.amdgpu_families }})
+    continue-on-error: true
+    runs-on: ${{ inputs.build_runs_on }}
+    timeout-minutes: 600
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --user 0:0
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+    defaults:
+      run:
+        shell: bash
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      OUTPUT_ARTIFACTS_DIR: ./build
+      ROCM_PATH: ${{ github.workspace }}/build
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
+      ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
+      REPORT_DIR: ${{ github.workspace }}/rocjitsu-tensilelite-reports
+      PER_TEST_TIMEOUT: "2700"
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ inputs.therock_ref }}
+
+      - name: Checkout rocm-libraries repository for scripts
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-libraries
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout rocm-systems for rocjitsu
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ROCm/rocm-systems
+          # rocm-systems develop HEAD (bumped 2026-08-30 from b4cf5bec8 / 2026-08-21).
+          # Picks up post-b4cf5be rocjitsu perf + correctness work targeting the
+          # gfx1250 tensilelite timeouts and scaled/MX regressions seen on b4cf5bec8:
+          #   perf  - native-SIMD f32 WMMA (#10710) + MFMA (#10702, #10706): speeds up
+          #           the slow StreamK/MX GEMM kernels that hit the 45-min timeout cap.
+          #   fix   - CDNA5 async-LDS / scaled-WMMA execution (#10575), packed-F32 +
+          #           matrix layouts (#10589), gfx1250 DS byte transpose routing
+          #           (#10707): scaled/MX correctness (the *ss / sk_mx*gemm_tdm regressions).
+          # Pin must stay >= #9262 (0c7288aef8) for the hsa_hotswap_rocjitsu CMake
+          # target; all 3 build targets (rocjitsu_bin, rocjitsu_shared,
+          # hsa_hotswap_rocjitsu) exist on develop - re-verify the rocjitsu build at
+          # this SHA before trusting results (384 commits ahead of the prior pin).
+          ref: 8a43c008e9090f47038ccac33adff130beb853f1
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+            shared/machine-readable-isa/isa
+          sparse-checkout-cone-mode: true
+
+      - name: Install rocjitsu build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libdrm-dev
+
+      - name: Run setup test environment workflow
+        timeout-minutes: 15
+        uses: ./.github/actions/setup_test_environment
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: --blas --tests
+
+      - name: Run rocjitsu tensilelite tests
+        timeout-minutes: 570
+        run: bash rocm-libraries/.github/scripts/run_rocjitsu_tensilelite_test.sh
+
+      - name: Upload test reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: rocjitsu-tensilelite-reports-${{ inputs.amdgpu_families }}
+          path: rocjitsu-tensilelite-reports/
+          if-no-files-found: ignore
