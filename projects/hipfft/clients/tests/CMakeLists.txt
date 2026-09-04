@@ -394,7 +394,6 @@ target_link_libraries( hipfft-test
   PRIVATE
   Threads::Threads
   ${CMAKE_DL_LIBS}
-  ${googletest_LIBRARY}
   )
 
 # hipfft-test will opens the hipfftw library but does not link to it
