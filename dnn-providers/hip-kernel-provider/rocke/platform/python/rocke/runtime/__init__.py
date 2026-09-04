@@ -33,6 +33,10 @@ edge:
                       `HIP_LAUNCH_PARAM_BUFFER_POINTER` arg-buffer
                       lifetime race.
 
+  - ``device_capabilities``: reports named device features from the
+                      active gfx target and ASIC revision. Callers do
+                      not need to compare revision numbers themselves.
+
   - ``packing``     : torch-agnostic kernel-arg packing (`pack_args`,
                       `pack_args_kernelparams`) for the AMDGPU kernarg
                       ABI. Used by both the numpy and torch paths.
@@ -84,6 +88,11 @@ When to drop to the lower-level APIs:
 from __future__ import annotations
 
 from .comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
+from .device_capabilities import (
+    DeviceCapabilities,
+    DeviceCapability,
+    get_device_capabilities,
+)
 from .hip_module import HipError, Runtime
 from .launcher import (
     DeviceMem,
@@ -109,6 +118,8 @@ from .torch_interop import (
 __all__ = [
     "ComgrError",
     "ComgrTimings",
+    "DeviceCapabilities",
+    "DeviceCapability",
     "DeviceMem",
     "HipError",
     "KernelLauncher",
@@ -120,6 +131,7 @@ __all__ = [
     "WorkspacePool",
     "build_hsaco_from_llvm_ir",
     "empty_workspace",
+    "get_device_capabilities",
     "launch_torch_kernel",
     "no_fence",
     "pack_args",

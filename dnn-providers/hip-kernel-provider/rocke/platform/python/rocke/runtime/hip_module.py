@@ -152,7 +152,7 @@ _hip_inited = False
 # ROCm releases (and the props symbol was versioned to ``...R0600`` in ROCm 6.x), so
 # we keep the raw bytes and let each query read the field it needs rather than mirror
 # the struct. See get_device_arch (gcnArchName) / get_device_name (name).
-_device_props_cache: Dict[int, Optional[bytes]] = {}
+_device_props_cache: Dict[int, bytes] = {}
 
 
 def _ensure_hip_init() -> None:
@@ -203,12 +203,11 @@ def _device_props(device: int = 0) -> Optional[bytes]:
         fn = _b(sym, ctypes.c_void_p, ctypes.c_int)
         try:
             rc = fn(buf, device)
-        except (AttributeError, OSError):
+        except (AttributeError, HipError, OSError):
             continue
         if rc == 0:
             _device_props_cache[device] = buf.raw
             return buf.raw
-    _device_props_cache[device] = None
     return None
 
 
@@ -272,6 +271,11 @@ def get_device_count() -> int:
 # is far more durable than reading a field offset out of the churny hipDeviceProp_t.
 _HIP_ATTR_MULTIPROCESSOR_COUNT = 63
 
+# hipDeviceAttributeAsicRevision. This lives in the AMD-specific portion of the stable
+# ``hipDeviceAttribute_t`` ABI. Querying it through ``hipDeviceGetAttribute`` avoids
+# depending on the ROCm-version-specific offset of ``hipDeviceProp_t::asicRevision``.
+_HIP_ATTR_ASIC_REVISION = 10012
+
 
 def get_device_num_cus(device: int = 0) -> Optional[int]:
     """CU (multiprocessor) count of a HIP device, or None if unqueryable.
@@ -292,6 +296,24 @@ def get_device_num_cus(device: int = 0) -> Optional[int]:
     except (AttributeError, OSError):
         return None
     return int(v.value) if rc == 0 and v.value > 0 else None
+
+
+def _get_device_asic_revision(device: int = 0) -> Optional[int]:
+    """ASIC revision of a HIP device, or ``None`` when it cannot be queried.
+
+    Revision ``0`` is a valid result and must remain distinguishable from a failed
+    query. This private value is used to look up named capabilities. Callers should
+    use that capability API instead of comparing revision numbers themselves.
+    """
+
+    v = ctypes.c_int(-1)
+    try:
+        rc = _hipDeviceGetAttribute(
+            ctypes.byref(v), _HIP_ATTR_ASIC_REVISION, int(device)
+        )
+    except (AttributeError, HipError, OSError):
+        return None
+    return int(v.value) if rc == 0 and v.value >= 0 else None
 
 
 @dataclass
