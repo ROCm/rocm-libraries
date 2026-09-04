@@ -22,6 +22,7 @@
 
 #include "benchmark_block_discontinuity.hpp"
 
+#include "benchmark_utils.hpp"
 #include "primbench.hpp"
 
 constexpr auto crosslane
@@ -43,23 +44,20 @@ constexpr auto shared_mem
     CREATE_BENCHMARK_KINDS(T, BS, 4, WITH_TILE) \
     CREATE_BENCHMARK_KINDS(T, BS, 8, WITH_TILE)
 
+#define QUEUE_BENCHMARK(BS, WITH_TILE)                                            \
+    benchmark_types::queue_type<((benchmark_types::Type_Category::warp            \
+                                  ^ benchmark_types::Type_Category::type_float32  \
+                                  ^ benchmark_types::Type_Category::type_float64) \
+                                 | benchmark_types::Type_Category::type_int64     \
+                                 | benchmark_types::Type_Category::type_half)>(   \
+        executor,                                                                 \
+        [&](auto type_tag) { BENCHMARK_TYPE(typename decltype(type_tag)::type, BS, WITH_TILE) });
+
 template<typename Benchmark>
 void add_benchmarks(primbench::executor& executor)
 {
-    BENCHMARK_TYPE(int32_t, 256, false)
-    BENCHMARK_TYPE(int32_t, 256, true)
-    BENCHMARK_TYPE(int8_t, 256, false)
-    BENCHMARK_TYPE(int8_t, 256, true)
-    BENCHMARK_TYPE(uint8_t, 256, false)
-    BENCHMARK_TYPE(uint8_t, 256, true)
-    BENCHMARK_TYPE(rocprim::half, 256, false)
-    BENCHMARK_TYPE(rocprim::half, 256, true)
-    BENCHMARK_TYPE(int64_t, 256, false)
-    BENCHMARK_TYPE(int64_t, 256, true)
-    BENCHMARK_TYPE(rocprim::int128_t, 256, false)
-    BENCHMARK_TYPE(rocprim::int128_t, 256, true)
-    BENCHMARK_TYPE(rocprim::uint128_t, 256, false)
-    BENCHMARK_TYPE(rocprim::uint128_t, 256, true)
+    QUEUE_BENCHMARK(256, false)
+    QUEUE_BENCHMARK(256, true)
 }
 
 int main(int argc, char* argv[])

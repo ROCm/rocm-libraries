@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "benchmark_device_radix_sort.hpp"
+#include "benchmark_utils.hpp"
 #include "primbench.hpp"
 
 #include <hip/hip_runtime.h>
@@ -37,16 +38,14 @@ int main(int argc, char* argv[])
     settings.size = 128 * primbench::MiB;
     primbench::executor executor(argc, argv, settings);
 
-    CREATE_RADIX_SORT_BENCHMARK(int32_t)
-    CREATE_RADIX_SORT_BENCHMARK(float)
-    CREATE_RADIX_SORT_BENCHMARK(int64_t)
-    CREATE_RADIX_SORT_BENCHMARK(int8_t)
-    CREATE_RADIX_SORT_BENCHMARK(uint8_t)
-    CREATE_RADIX_SORT_BENCHMARK(rocprim::half)
-    CREATE_RADIX_SORT_BENCHMARK(int16_t)
-    CREATE_RADIX_SORT_BENCHMARK(custom_f32_i16)
-    CREATE_RADIX_SORT_BENCHMARK(rocprim::int128_t)
-    CREATE_RADIX_SORT_BENCHMARK(rocprim::uint128_t)
+    benchmark_types::queue_type<(benchmark_types::Type_Category::integer_signed
+                                 | benchmark_types::Type_Category::integer_128
+                                 | benchmark_types::Type_Category::type_custom_f32_i16
+                                 | (benchmark_types::Type_Category::floating_point
+                                    ^ benchmark_types::Type_Category::type_float64)
+                                 | benchmark_types::Type_Category::type_uint8)>(
+        executor,
+        [&](auto type_tag) { CREATE_RADIX_SORT_BENCHMARK(typename decltype(type_tag)::type) });
 
     CREATE_RADIX_SORT_BENCHMARK(int32_t, float)
     CREATE_RADIX_SORT_BENCHMARK(int32_t, double)
