@@ -112,7 +112,7 @@ bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, s
 // 256/512 stays under 800K elements and finishes in seconds while those three
 // start at 16.7M, so the threshold sits in the 21x gap between the clusters.
 constexpr std::string_view K_CPU_TIER_PREFIX = "quick_";
-constexpr int64_t K_CPU_MAX_WORKING_SET_ELEMENTS = 4 * 1024 * 1024;
+constexpr int64_t K_CPU_MAX_WORKING_SET_ELEMENTS = int64_t{4} * 1024 * 1024;
 
 namespace
 {
