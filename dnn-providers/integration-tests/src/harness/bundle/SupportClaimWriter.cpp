@@ -20,13 +20,8 @@ namespace hipdnn_integration_tests::bundle
 namespace
 {
 
-// Both sidecar shapes are the same claim set underneath: a single-graph bundle
-// is the one-case sweep. Flattening to this on read, and only re-imposing the
-// on-disk shape on write, keeps the whole middle of the writer shape-agnostic --
-// one overlay, not one per format.
-//
-//   engine -> caseId ("" for single-graph) -> arch -> platforms
-using FlatClaims = std::map<std::string, std::map<std::string, ArchPlatformMap>>;
+using EngineName = ObservedGraphSupport::EngineName;
+using CaseId = ObservedGraphSupport::CaseId;
 
 // The parsers reject any version but 1, so a claim set that survived a read is
 // version 1 and a claim set we invented starts there.
@@ -87,153 +82,150 @@ std::string sidecarDefect(const std::vector<ObservedGraphSupport>& observations)
     return {};
 }
 
-// Reads the file we are about to write, by the same rule the enforcer reads it.
-// Re-deriving the path from the directory would let the read and the write name
-// different files, and a read that misses returns an empty claim set -- which
-// overlays into a write that erases everything in it.
-//
-// Absent file yields an empty set. Throws if the file exists but will not parse.
-FlatClaims readFlatClaims(const std::filesystem::path& sidecarPath, bool isSweep)
+// Both sidecar shapes are the same claim set underneath: a single-graph bundle
+// is the one-case sweep. Flattening to this on load, and only re-imposing the
+// on-disk shape on serialize, keeps the whole middle of the writer shape-agnostic
+// -- one overlay, not one per format (RFC §9.2: flatten → overlay → regroup).
+class ClaimSet
 {
-    FlatClaims flat;
-    if(!std::filesystem::exists(sidecarPath))
+public:
+    static ClaimSet load(const std::filesystem::path& sidecarPath, bool isSweep)
     {
-        return flat;
-    }
-
-    if(isSweep)
-    {
-        for(const auto& [engine, groups] : loadSweepSupportClaimsFromPath(sidecarPath).claims)
+        ClaimSet result;
+        if(!std::filesystem::exists(sidecarPath))
         {
-            for(const auto& group : groups)
+            return result;
+        }
+
+        if(isSweep)
+        {
+            for(const auto& [engine, groups] : loadSweepSupportClaimsFromPath(sidecarPath).claims)
             {
-                // An empty footprint claims nothing; dropping it here is what
-                // lets an empty FlatClaims mean exactly "nothing to write".
-                if(group.support.empty())
+                for(const auto& group : groups)
                 {
-                    continue;
-                }
-                for(const auto& caseId : group.cases)
-                {
-                    flat[engine][caseId] = group.support;
+                    if(group.support.empty())
+                    {
+                        continue;
+                    }
+                    for(const auto& caseId : group.cases)
+                    {
+                        result._cells[engine][caseId] = group.support;
+                    }
                 }
             }
         }
-    }
-    else
-    {
-        for(const auto& [engine, support] : loadSupportClaimsFromPath(sidecarPath).claims)
+        else
         {
-            if(!support.empty())
+            for(const auto& [engine, support] : loadSupportClaimsFromPath(sidecarPath).claims)
             {
-                flat[engine][std::string{}] = support;
+                if(!support.empty())
+                {
+                    result._cells[engine][CaseId{}] = support;
+                }
             }
+        }
+
+        return result;
+    }
+
+    void apply(const ObservedGraphSupport& observation)
+    {
+        const CaseId& caseId = observation.claimLocator.caseId;
+
+        if(observation.engineIsSupported)
+        {
+            _cells[observation.engineName][caseId][observation.arch].insert(observation.platform);
+            return;
+        }
+
+        auto engineIt = _cells.find(observation.engineName);
+        if(engineIt == _cells.end())
+        {
+            return;
+        }
+        auto caseIt = engineIt->second.find(caseId);
+        if(caseIt == engineIt->second.end())
+        {
+            return;
+        }
+        auto archIt = caseIt->second.find(observation.arch);
+        if(archIt == caseIt->second.end())
+        {
+            return;
+        }
+
+        archIt->second.erase(observation.platform);
+        if(archIt->second.empty())
+        {
+            caseIt->second.erase(archIt);
+        }
+        if(caseIt->second.empty())
+        {
+            engineIt->second.erase(caseIt);
+        }
+        if(engineIt->second.empty())
+        {
+            _cells.erase(engineIt);
         }
     }
 
-    return flat;
-}
+    std::string serialize(bool isSweep) const
+    {
+        if(!isSweep)
+        {
+            SupportClaims out;
+            out.version = K_SUPPORT_CLAIMS_VERSION;
+            for(const auto& [engine, byCase] : _cells)
+            {
+                const auto caseIt = byCase.find(CaseId{});
+                if(caseIt != byCase.end())
+                {
+                    out.claims[engine] = caseIt->second;
+                }
+            }
+            return dumpCanonical(toJson(out));
+        }
 
-// Overlays one observation onto the loaded claims. True inserts; false erases,
-// because a resolved decline is the authoring signal that retires a stale claim.
-void applyObservation(FlatClaims& claims, const ObservedGraphSupport& observation)
-{
-    const std::string& caseId = observation.claimLocator.caseId;
-
-    if(observation.engineIsSupported)
-    {
-        claims[observation.engineName][caseId][observation.arch].insert(observation.platform);
-        return;
-    }
-
-    auto engineIt = claims.find(observation.engineName);
-    if(engineIt == claims.end())
-    {
-        return;
-    }
-    auto caseIt = engineIt->second.find(caseId);
-    if(caseIt == engineIt->second.end())
-    {
-        return;
-    }
-    auto archIt = caseIt->second.find(observation.arch);
-    if(archIt == caseIt->second.end())
-    {
-        return;
-    }
-
-    // Prune every container the erase emptied. A left-behind empty engine or
-    // case would serialize as an empty object, which reads back as "claimed
-    // nothing here" instead of "no claim", and keeps the file alive.
-    archIt->second.erase(observation.platform);
-    if(archIt->second.empty())
-    {
-        caseIt->second.erase(archIt);
-    }
-    if(caseIt->second.empty())
-    {
-        engineIt->second.erase(caseIt);
-    }
-    if(engineIt->second.empty())
-    {
-        claims.erase(engineIt);
-    }
-}
-
-// Re-imposes the on-disk shape. Sweeps group cases that share a footprint, so a
-// 500-case sweep where every case behaves alike stays one group rather than 500
-// repeats -- which is why the grouped format cannot be edited in place.
-std::string serializeFlatClaims(const FlatClaims& flat, bool isSweep)
-{
-    if(!isSweep)
-    {
-        SupportClaims out;
+        SweepSupportClaims out;
         out.version = K_SUPPORT_CLAIMS_VERSION;
-        for(const auto& [engine, byCase] : flat)
+        for(const auto& [engine, byCase] : _cells)
         {
-            const auto caseIt = byCase.find(std::string{});
-            if(caseIt != byCase.end())
+            std::map<ArchPlatformMap, std::vector<CaseId>> casesByFootprint;
+            for(const auto& [caseId, support] : byCase)
             {
-                out.claims[engine] = caseIt->second;
+                casesByFootprint[support].push_back(caseId);
+            }
+
+            std::vector<SweepClaimGroup> groups;
+            groups.reserve(casesByFootprint.size());
+            for(auto& [support, cases] : casesByFootprint)
+            {
+                groups.push_back({std::move(cases), support});
+            }
+
+            std::sort(groups.begin(),
+                      groups.end(),
+                      [](const SweepClaimGroup& a, const SweepClaimGroup& b) {
+                          return a.cases.front() < b.cases.front();
+                      });
+
+            if(!groups.empty())
+            {
+                out.claims[engine] = std::move(groups);
             }
         }
+
         return dumpCanonical(toJson(out));
     }
 
-    SweepSupportClaims out;
-    out.version = K_SUPPORT_CLAIMS_VERSION;
-    for(const auto& [engine, byCase] : flat)
+    bool empty() const
     {
-        // ArchPlatformMap is a std::map of std::sets, so it is directly usable
-        // as a key -- two cases land in the same bucket exactly when their
-        // support is equal. byCase is a std::map, so cases arrive sorted.
-        std::map<ArchPlatformMap, std::vector<std::string>> casesByFootprint;
-        for(const auto& [caseId, support] : byCase)
-        {
-            casesByFootprint[support].push_back(caseId);
-        }
-
-        std::vector<SweepClaimGroup> groups;
-        groups.reserve(casesByFootprint.size());
-        for(auto& [support, cases] : casesByFootprint)
-        {
-            groups.push_back({std::move(cases), support});
-        }
-
-        // Order groups by their first case id.
-        std::sort(
-            groups.begin(), groups.end(), [](const SweepClaimGroup& a, const SweepClaimGroup& b) {
-                return a.cases.front() < b.cases.front();
-            });
-
-        if(!groups.empty())
-        {
-            out.claims[engine] = std::move(groups);
-        }
+        return _cells.empty();
     }
 
-    return dumpCanonical(toJson(out));
-}
+private:
+    std::map<EngineName, std::map<CaseId, ArchPlatformMap>> _cells;
+};
 
 enum class WriteOutcome
 {
@@ -309,10 +301,10 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
 
         const bool isSweep = sidecarObservations.front().claimLocator.isSweep();
 
-        FlatClaims claims;
+        ClaimSet claims;
         try
         {
-            claims = readFlatClaims(sidecarPath, isSweep);
+            claims = ClaimSet::load(sidecarPath, isSweep);
         }
         catch(const std::exception& e)
         {
@@ -324,7 +316,7 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
 
         for(const auto& observation : sidecarObservations)
         {
-            applyObservation(claims, observation);
+            claims.apply(observation);
         }
         summary.observationsApplied += sidecarObservations.size();
 
@@ -336,7 +328,7 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
             continue;
         }
 
-        switch(writeIfChanged(sidecarPath, serializeFlatClaims(claims, isSweep)))
+        switch(writeIfChanged(sidecarPath, claims.serialize(isSweep)))
         {
         case WriteOutcome::Written:
             ++summary.filesWritten;

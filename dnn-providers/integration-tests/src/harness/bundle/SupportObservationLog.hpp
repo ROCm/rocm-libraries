@@ -20,11 +20,14 @@ namespace hipdnn_integration_tests::bundle
 // what the engines actually took, with no sidecar involved.
 struct ObservedGraphSupport
 {
+    using EngineName = std::string;
+    using CaseId = std::string;
+
     // Says which sidecar this observation belongs in and, for a sweep, which case
     // within it. Carried rather than re-derived: the writer must agree with the
     // enforcer about the target file, and this is the value the enforcer used.
     SupportClaimLocator claimLocator;
-    std::string engineName;
+    EngineName engineName;
     std::string arch;
     std::string platform;
 
