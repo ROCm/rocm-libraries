@@ -1169,7 +1169,13 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
     static bool IsSupportedArgument(const Argument& arg)
     {
         if(arg.stride_overflow)
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Stride overflow." << std::endl;
+            }
             return false;
+        }
 
         const index_t GemmM = arg.a_grid_desc_k0_m_k1_.GetLength(I1);
         const index_t GemmN = arg.b_grid_desc_k0_n_k1_.GetLength(I1);
@@ -1464,15 +1470,18 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                  const std::array<index_t, NDimSpatial + 3>& e_g_k_c_xs_strides,
                  const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths, // output
                  const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_strides,
-                 const std::array<ck::index_t, NDimSpatial>& conv_filter_strides,
-                 const std::array<ck::index_t, NDimSpatial>& conv_filter_dilations,
-                 const std::array<ck::index_t, NDimSpatial>& input_left_pads,
-                 const std::array<ck::index_t, NDimSpatial>& input_right_pads,
+                 const std::array<index_t, NDimSpatial>& conv_filter_strides,
+                 const std::array<index_t, NDimSpatial>& conv_filter_dilations,
+                 const std::array<index_t, NDimSpatial>& input_left_pads,
+                 const std::array<index_t, NDimSpatial>& input_right_pads,
                  InElementwiseOperation in_element_op,
                  WeiElementwiseOperation wei_element_op,
                  OutElementwiseOperation out_element_op,
-                 const ck::index_t split_k)
+                 const index_t split_k)
     {
+        const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<EDataType>(e_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
         return Argument{p_in_grid,
                         p_wei_grid,
                         p_out_grid,
@@ -1491,7 +1500,8 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                         in_element_op,
                         wei_element_op,
                         out_element_op,
-                        split_k};
+                        split_k,
+                        stride_ovf};
     }
 
     static auto MakeArgument(const InDataType* p_in_grid,
@@ -1569,15 +1579,19 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                         const std::array<index_t, NDimSpatial + 3>& e_g_k_c_xs_strides,
                         const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths, // output
                         const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_strides,
-                        const std::array<ck::index_t, NDimSpatial>& conv_filter_strides,
-                        const std::array<ck::index_t, NDimSpatial>& conv_filter_dilations,
-                        const std::array<ck::index_t, NDimSpatial>& input_left_pads,
-                        const std::array<ck::index_t, NDimSpatial>& input_right_pads,
+                        const std::array<index_t, NDimSpatial>& conv_filter_strides,
+                        const std::array<index_t, NDimSpatial>& conv_filter_dilations,
+                        const std::array<index_t, NDimSpatial>& input_left_pads,
+                        const std::array<index_t, NDimSpatial>& input_right_pads,
                         InElementwiseOperation in_element_op,
                         WeiElementwiseOperation wei_element_op,
                         OutElementwiseOperation out_element_op,
-                        const ck::index_t split_k) override
+                        const index_t split_k) override
     {
+        const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<EDataType>(e_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
+
         return std::make_unique<Argument>(static_cast<const InDataType*>(p_in_grid),
                                           static_cast<WeiDataType*>(p_wei_grid),
                                           static_cast<const OutDataType*>(p_out_grid),
@@ -1596,7 +1610,8 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                                           in_element_op,
                                           wei_element_op,
                                           out_element_op,
-                                          split_k);
+                                          split_k,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseArgument>
