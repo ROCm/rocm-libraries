@@ -1,0 +1,114 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Opt-in lane for MIOpen built with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON. Every other
+# MIOpen build here leaves it OFF, the shipping configuration, so nothing on the
+# default path exercises the wrapper's own gates.
+#
+# Kept out of component-ci-miopen.yml deliberately: that workflow is staying lean
+# while MIOpen CI moves to TheRock, and this lane is scaffolding that exists only
+# until the flag defaults on, so a separate file is removed in one move.
+#
+# This lane only checks that the parity harness is registered. Executing it needs
+# a GPU, which no runner here has, so the doubled runs happen wherever MIOpen's
+# ctest suite is run on hardware rather than being duplicated as a bespoke step.
+
+name: "MIOpen: hipDNN wrapper flag-on"
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  flag-on:
+    name: MIOpen wrapper flag-on checks
+    # `labeled` is in the trigger above so applying the label starts a run
+    # immediately instead of waiting for the next push.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'ci:wrapper-flag-on')
+    runs-on: azure-linux-scale-rocm
+    container:
+      image: rocm/miopen-dev:latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            dnn-providers/miopen-provider
+            projects/miopen
+            shared/ctest
+
+      - name: Pull DVC files for rocm-libraries
+        run: |
+          LOGNAME=github-runner dvc pull -v
+
+      - name: Configure build
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          export CXXFLAGS=-Werror
+          rm -rf projects/miopen/install
+          mkdir projects/miopen/install
+          cmake -S projects/miopen -B build \
+            -DMIOPEN_ENABLE_HIPDNN_WRAPPER=ON \
+            -DMIOPEN_INSTALL_CXX_HEADERS=ON \
+            -DCMAKE_BUILD_TYPE=release \
+            -DBUILD_DEV=OFF \
+            -DMIOPEN_TEST_DISCRETE=OFF \
+            -DMIOPEN_USE_MLIR=ON \
+            -DMIOPEN_GPU_SYNC=OFF \
+            -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
+            -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DGPU_TARGETS="gfx942"
+
+      - name: Build
+        run: cmake --build build --target install --target miopen_gtest -j$(nproc)
+
+      # The flag-on counterpart of the default build's public ABI gate. Beyond the
+      # symbol set and SONAME it asserts that the two halves were built together
+      # and that the wrapper stubs everything the implementation renamed: a missing
+      # stub links fine and fails only when a caller reaches that entry point.
+      # Globbing build/lib*/ keeps staging copies out and covers distros where the
+      # library directory resolves to lib64.
+      - name: Wrapper ABI check
+        run: |
+          lib=$(ls build/lib*/libMIOpen.so.1.0 2>/dev/null | head -1)
+          test -n "$lib" || { echo "libMIOpen.so.1.0 not found under build/lib*/"; exit 1; }
+          private=$(ls build/lib*/libMIOpen_private.so.1.0 2>/dev/null | head -1)
+          test -n "$private" || { echo "libMIOpen_private.so.1.0 not found under build/lib*/"; exit 1; }
+          echo "Checking $lib against $private"
+          python3 projects/miopen/script/check_public_abi.py check-wrapper \
+            "$lib" \
+            --baseline projects/miopen/test/public_abi/public_symbols.baseline \
+            --excluded projects/miopen/test/public_abi/wrapper_excluded_symbols.txt \
+            --private-lib "$private" \
+            --public-header projects/miopen/include/miopen/miopen.h
+
+      # The rename is a compile-time trick, so a staged header spelling an entry
+      # point by its private name would hand that name to consumers as public API.
+      - name: Installed header rename check
+        run: |
+          python3 projects/miopen/script/check_public_abi.py check-installed-headers \
+            projects/miopen/install/include
+
+      # The mirror image of the default build's zero-count assertion: with the
+      # wrapper on, the parity harness has to be there.
+      - name: Forwarding parity harness is registered
+        run: |
+          count=$(ctest --test-dir build -N -L forwarding_parity |
+            sed -n 's/^Total Tests: //p')
+          echo "forwarding_parity tests registered: ${count:-<unparsed>}"
+          test -n "$count" && test "$count" -gt 0 || {
+            echo "expected forwarding_parity tests with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON"
+            exit 1
+          }

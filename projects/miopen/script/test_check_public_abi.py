@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Tests for the source-only half of check_public_abi.py.
+"""Tests for check_public_abi.py.
 
 The declaration parser is the only thing standing between the range entry
 points and a divergence that links cleanly and corrupts arguments at run time,
@@ -9,8 +9,15 @@ so it is worth testing against inputs it is expected to reject as well as ones
 it is expected to accept. Running the check against a tree that is already
 correct only ever exercises the passing path.
 
-Everything here works on string fixtures, so no build, toolchain or GPU is
-needed and the module runs in a lint lane:
+The binary checks are covered the same way, against a stand-in that answers the
+three questions those checks ask of a shared object. That stand-in deliberately
+does not exercise the ELF parser itself: the parser reads a real libMIOpen.so on
+every packaging build, so it is continuously covered by construction, whereas
+the conditions the checks are meant to catch -- a stale half of a build, an
+entry point renamed with no stub -- appear in no tree that is working.
+
+Everything here works on string fixtures and stand-ins, so no build, toolchain
+or GPU is needed and the module runs in a lint lane:
 
     python -m pytest projects/miopen/script/test_check_public_abi.py
 """
@@ -524,3 +531,199 @@ def test_a_non_checkout_is_a_skip_not_a_failure(tmp_path):
     reasons: dict[str, str] = {}
     assert abi.read_tracked_source(tmp_path / "absent.hpp", tmp_path, reasons) is None
     assert "not a git checkout" in "".join(reasons.values())
+
+
+# --------------------------------------------------------------------------
+# Installed headers
+#
+# The staged include tree is what a consumer compiles against. A private
+# spelling that reaches it names a symbol only libMIOpen_private.so carries.
+# --------------------------------------------------------------------------
+
+
+def staged(tmp_path, files: dict[str, str]) -> Path:
+    """Build an include tree from {relative path: text} and return its root."""
+    root = tmp_path / "include"
+    for rel, text in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return root
+
+
+def test_a_clean_include_tree_passes(tmp_path):
+    root = staged(tmp_path, {"miopen/miopen.h": "miopenStatus_t miopenFoo(int);\n"})
+    assert abi.check_installed_headers(str(root), []) is True
+
+
+def test_a_leaked_rename_is_reported_with_file_and_line(tmp_path, capsys):
+    root = staged(
+        tmp_path,
+        {"miopen/miopen.h": "// header\nmiopenStatus_t miopenFoo_impl(int);\n"},
+    )
+    assert abi.check_installed_headers(str(root), []) is False
+    out = capsys.readouterr().out
+    assert "miopen/miopen.h:2: miopenFoo_impl" in out
+
+
+def test_the_private_directory_is_exempt(tmp_path):
+    """The private declarations spell the private names by definition."""
+    root = staged(
+        tmp_path,
+        {"miopen/private/miopen_impl.h": "miopenStatus_t miopenFoo_impl(int);\n"},
+    )
+    assert abi.check_installed_headers(str(root), ["miopen/private"]) is True
+
+
+def test_the_exemption_is_by_path_not_by_file_name(tmp_path, capsys):
+    """A file named like the private header, staged elsewhere, still trips.
+
+    Matching on the name alone would let any header called miopen_impl.h
+    smuggle the rename into the public tree.
+    """
+    root = staged(
+        tmp_path,
+        {"miopen/miopen_impl.h": "miopenStatus_t miopenFoo_impl(int);\n"},
+    )
+    assert abi.check_installed_headers(str(root), ["miopen/private"]) is False
+    assert "miopenFoo_impl" in capsys.readouterr().out
+
+
+def test_a_name_merely_containing_impl_is_not_a_leak(tmp_path):
+    """ck_impl_interface and friends are ordinary identifiers.
+
+    The check matches whole identifiers against the same pattern the symbol
+    checks use, so a substring search's false positives do not appear here.
+    """
+    root = staged(
+        tmp_path,
+        {
+            "miopen/miopen.h": (
+                "void ck_impl_interface(void);\n"
+                "int miopen_impl_helper;\n"
+                "void miopenFoo_implementation(void);\n"
+            )
+        },
+    )
+    assert abi.check_installed_headers(str(root), []) is True
+
+
+# --------------------------------------------------------------------------
+# The binary stand-in
+#
+# The co-version and superset checks ask a shared object for three things:
+# what it exports, what SONAME it declares, and what it is linked against.
+# --------------------------------------------------------------------------
+
+
+class FakeElf:
+    """A shared object as the binary checks see it."""
+
+    def __init__(self, path, symbols=(), soname="", needed=()):
+        self.path = Path(path)
+        self._symbols = set(symbols)
+        self._soname = soname
+        self._needed = tuple(needed)
+
+    def defined_dynamic_functions(self):
+        return set(self._symbols)
+
+    def soname(self):
+        return self._soname
+
+    def needed(self):
+        return sorted(self._needed)
+
+
+def wrapper_elf(
+    symbols=(), soname="libMIOpen.so.1", needed=("libMIOpen_private.so.1",)
+):
+    return FakeElf("libMIOpen.so", symbols, soname, needed)
+
+
+def private_elf(symbols=(), soname="libMIOpen_private.so.1"):
+    return FakeElf("libMIOpen_private.so", symbols, soname, ())
+
+
+# --------------------------------------------------------------------------
+# Co-versioning
+#
+# The two libraries are halves of one build. When they are not, the usual
+# cause is a stale build directory holding one half of an earlier one.
+# --------------------------------------------------------------------------
+
+
+def test_matched_versions_pass():
+    assert abi.check_coversioned(wrapper_elf(), private_elf()) is True
+
+
+def test_a_soname_major_mismatch_fails():
+    private = private_elf(soname="libMIOpen_private.so.2")
+    assert abi.check_coversioned(wrapper_elf(), private) is False
+
+
+def test_a_needed_version_mismatch_fails():
+    """The declared SONAMEs can agree while the link edge points elsewhere.
+
+    This is the case a SONAME-only comparison misses, and the one that
+    actually decides what the loader binds.
+    """
+    wrapper = wrapper_elf(needed=("libMIOpen_private.so.0",))
+    assert abi.check_coversioned(wrapper, private_elf()) is False
+
+
+def test_the_failure_names_all_three_observed_strings(capsys):
+    """Which of the three is the odd one out is the whole diagnosis."""
+    wrapper = wrapper_elf(soname="libMIOpen.so.1", needed=("libMIOpen_private.so.0",))
+    abi.check_coversioned(wrapper, private_elf(soname="libMIOpen_private.so.2"))
+    out = capsys.readouterr().out
+    assert "libMIOpen.so.1" in out
+    assert "libMIOpen_private.so.2" in out
+    assert "libMIOpen_private.so.0" in out
+
+
+def test_an_unversioned_wrapper_soname_fails():
+    """A wrapper with no soversion at all cannot be shown to match anything."""
+    wrapper = wrapper_elf(soname="libMIOpen.so", needed=("libMIOpen_private.so",))
+    assert (
+        abi.check_coversioned(wrapper, private_elf(soname="libMIOpen_private.so"))
+        is False
+    )
+
+
+# --------------------------------------------------------------------------
+# Private -> wrapper superset
+#
+# The baseline check compares the wrapper against a recorded list, so an entry
+# point the wrapper never re-exported is absent from both sides and passes.
+# Only the private library knows the full set of renamed entry points.
+# --------------------------------------------------------------------------
+
+
+def test_every_renamed_entry_point_having_a_stub_passes():
+    wrapper = wrapper_elf(symbols=("miopenFoo", "miopenBar"))
+    private = private_elf(symbols=("miopenFoo_impl", "miopenBar_impl"))
+    assert abi.check_impl_superset(wrapper, private) is True
+
+
+def test_a_renamed_entry_point_with_no_stub_fails():
+    wrapper = wrapper_elf(symbols=("miopenFoo",))
+    private = private_elf(symbols=("miopenFoo_impl", "miopenBar_impl"))
+    assert abi.check_impl_superset(wrapper, private) is False
+
+
+def test_the_missing_stub_is_reported_under_its_public_name(capsys):
+    """That is the name the stub would carry, and the one to grep for."""
+    wrapper = wrapper_elf(symbols=("miopenFoo",))
+    private = private_elf(symbols=("miopenFoo_impl", "miopenBar_impl"))
+    abi.check_impl_superset(wrapper, private)
+    out = capsys.readouterr().out
+    assert "  miopenBar\n" in out
+    assert "miopenBar_impl" not in out
+
+
+def test_private_symbols_that_were_never_renamed_are_not_required():
+    """Only the renamed set is forwarded; the rest stay private by design."""
+    wrapper = wrapper_elf(symbols=("miopenFoo",))
+    private = private_elf(symbols=("miopenFoo_impl", "miopenInternalThing"))
+    assert abi.check_impl_superset(wrapper, private) is True

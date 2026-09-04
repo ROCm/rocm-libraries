@@ -36,6 +36,18 @@ MIGraphX shims) stay on libMIOpen_private.so under their original names.
   6. Every excluded symbol is still exported, un-suffixed, from the private
      library (``--private-lib``), so the carve-out cannot delete a symbol from
      the whole installed surface.
+  7. With ``--private-lib``, the two libraries are co-versioned: their SONAME
+     majors agree and the wrapper's DT_NEEDED entry names that same major, so a
+     wrapper cannot bind to an implementation it was not built against.
+  8. With ``--private-lib``, every ``miopenFoo_impl`` the private library
+     exports has a matching ``miopenFoo`` on the wrapper. A renamed private
+     entry point with no wrapper stub is unreachable through libMIOpen.so.
+
+``check-installed-headers`` -- run on the staged include tree of a flag-on
+build. Fails if the private rename spelling (``miopenFoo_impl``) appears in any
+installed header outside the private include directory. The installed headers
+are the public contract; a rename that leaks into one makes a consumer compile
+against a name only the private library carries.
 
 ``check-headers`` -- a source-only cross-check of the five hand-maintained
 artifacts of the split. It needs no build, no GPU and no flag-on configuration,
@@ -114,6 +126,12 @@ PRIVATE_LIB_PREFIX = "libMIOpen_private"
 # miopen_sqlite3_memvfs_init.
 PUBLIC_API_RE = re.compile(r"^miopen[A-Z]")
 IMPL_RE = re.compile(r"^miopen[A-Za-z0-9_]*_impl$")
+
+# Directories, relative to the staged include tree, that may legitimately spell
+# entry points by their private names. Nothing stages the private declarations
+# today; the exemption is here so adding such an install rule later does not mean
+# rediscovering why this check started failing.
+PRIVATE_INCLUDE_DIRS = ("miopen/private",)
 
 
 class AbiError(Exception):
@@ -348,6 +366,33 @@ three places, because it is exported without being declared in miopen.h:
                                                local extern "C" declaration
 Update the two declarations to match the definition. These have C linkage, so a
 divergence links cleanly and corrupts arguments at run time.""".rstrip()
+
+INSTALLED_HEADERS_REMEDY = """
+An installed header names an entry point by its private spelling. The installed
+headers are what a consumer compiles against, and only libMIOpen_private.so
+carries a miopenFoo_impl symbol, so such a consumer either fails to link or
+binds past the wrapper.
+The usual cause is a header that was force-included through
+src/private/miopen_private_rename.h while being generated or copied, so the
+rename was baked into the staged text. Regenerate it with the rename inactive.
+Do not add the offending directory to the exemption list unless it genuinely
+holds the private declarations -- the exemption is by path so that a leak into a
+similarly-named header elsewhere still trips.""".rstrip()
+
+COVERSION_REMEDY = """
+The wrapper and the private library are two halves of one build and must ship
+the same soversion, with the wrapper's DT_NEEDED edge naming it. A mismatch
+means the two binaries came from different builds -- almost always a stale build
+or install directory holding one half of an earlier configuration. Rebuild both
+from a clean directory rather than adjusting a version to match.""".rstrip()
+
+SUPERSET_REMEDY = """
+The private library exports a renamed entry point that the wrapper does not
+re-export under its public name, so nothing outside libMIOpen_private.so can
+call it. Add the missing stub to src/private/wrapper.cpp -- and its declaration
+to src/private/miopen_impl.h and its #define to
+src/private/miopen_private_rename.h -- or, if the entry point is deliberately
+private, remove it from the rename set so it keeps its original name.""".rstrip()
 
 PROVIDER_REMEDY = """
 --require-provider was passed, so the provider's copies must be readable rather
@@ -808,22 +853,142 @@ def check_excluded_not_public(excluded: set[str], header_path: str) -> bool:
     return False
 
 
-def check_excluded_on_private(excluded: set[str], private_lib: str) -> bool:
-    elf = open_elf(private_lib, "private library")
-    exported = elf.defined_dynamic_functions()
+def check_excluded_on_private(excluded: set[str], private: Elf) -> bool:
+    exported = private.defined_dynamic_functions()
     missing = sorted(excluded - exported)
     if not missing:
         print(
             f"PASS: all {len(excluded)} excluded symbols are still exported "
-            f"un-suffixed from {Path(private_lib).name}"
+            f"un-suffixed from {Path(private.path).name}"
         )
         return True
     print(
-        f"FAIL: excluded symbols are absent from {Path(private_lib).name} -- they "
+        f"FAIL: excluded symbols are absent from {Path(private.path).name} -- they "
         "have vanished from the entire installed surface (renamed by mistake?):"
     )
     for sym in missing:
         print(f"  {sym}")
+    return False
+
+
+def soname_major(soname: str) -> str:
+    """Return the major soversion of an SONAME, or '' if it carries none.
+
+    'libMIOpen.so.1' -> '1'; 'libMIOpen.so.1.2.3' -> '1'; 'libMIOpen.so' -> ''.
+    """
+    _, sep, tail = soname.partition(".so.")
+    if not sep:
+        return ""
+    return tail.split(".", 1)[0]
+
+
+def check_coversioned(wrapper: Elf, private: Elf) -> bool:
+    """The wrapper and the private library must be halves of the same build.
+
+    Two things have to agree: the major soversion each library declares, and
+    the major named by the wrapper's DT_NEEDED edge onto the private library.
+    The second is what a loader actually resolves, so checking only the
+    declared SONAMEs would miss a wrapper linked against an older private
+    library that happens to still be on disk.
+    """
+    wrapper_soname = wrapper.soname()
+    private_soname = private.soname()
+    needed = next(
+        (n for n in wrapper.needed() if n.startswith(PRIVATE_LIB_PREFIX)),
+        "",
+    )
+
+    wrapper_major = soname_major(wrapper_soname)
+    private_major = soname_major(private_soname)
+    needed_major = soname_major(needed)
+
+    if wrapper_major and wrapper_major == private_major == needed_major:
+        print(
+            f"PASS: wrapper and private library are co-versioned at "
+            f"soversion {wrapper_major}"
+        )
+        return True
+
+    # Print all three observed strings unconditionally: which one is the odd
+    # one out is the whole diagnosis, and a message naming only the mismatched
+    # pair sends the reader looking in the wrong place.
+    print("FAIL: wrapper and private library are not co-versioned:")
+    print(f"  wrapper SONAME:            {wrapper_soname or '(none)'}")
+    print(f"  private SONAME:            {private_soname or '(none)'}")
+    print(f"  wrapper DT_NEEDED on it:   {needed or '(none)'}")
+    print(COVERSION_REMEDY)
+    return False
+
+
+def check_impl_superset(wrapper: Elf, private: Elf) -> bool:
+    """Every renamed private entry point must have a wrapper stub.
+
+    The baseline check cannot catch this: it compares the wrapper against a
+    recorded list, so an entry point the wrapper never re-exported is simply
+    absent from both sides and passes. Only the private library knows the full
+    set of renamed entry points.
+    """
+    renamed = impl_symbols(private)
+    exported = wrapper.defined_dynamic_functions()
+    # Report the public spelling -- that is the name the missing stub would
+    # carry, and the one the reader will grep for.
+    missing = sorted(
+        sym[: -len("_impl")] for sym in renamed if sym[: -len("_impl")] not in exported
+    )
+    if not missing:
+        print(
+            f"PASS: all {len(renamed)} renamed private entry points have a "
+            "wrapper stub"
+        )
+        return True
+    print(
+        "FAIL: private library exports renamed entry points with no matching "
+        "wrapper stub (unreachable through libMIOpen.so):"
+    )
+    for sym in missing:
+        print(f"  {sym}")
+    print(SUPERSET_REMEDY)
+    return False
+
+
+def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
+    """No installed header may name an entry point by its private spelling.
+
+    ``exempt`` holds directories, relative to ``include_dir``, that legitimately
+    carry the private declarations. Exempting by directory rather than by file
+    name keeps a leak into a similarly-named header elsewhere in the tree from
+    slipping through.
+    """
+    root = Path(include_dir)
+    if not root.is_dir():
+        raise AbiError(f"installed include directory not found: {root}")
+
+    exempt_roots = [root / rel for rel in exempt]
+    offenders: list[tuple[Path, int, str]] = []
+    scanned = 0
+
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if any(path.is_relative_to(d) for d in exempt_roots):
+            continue
+        scanned += 1
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            # Match on whole identifiers via the same pattern the symbol checks
+            # use, so a name that merely contains '_impl' -- ck_impl_interface,
+            # say -- is not mistaken for a renamed entry point.
+            for word in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", line):
+                if IMPL_RE.match(word):
+                    offenders.append((path, lineno, word))
+
+    if not offenders:
+        print(f"PASS: no private rename spelling in {scanned} installed headers")
+        return True
+    print("FAIL: installed headers name entry points by their private spelling:")
+    for path, lineno, word in offenders:
+        print(f"  {path}:{lineno}: {word}")
+    print(INSTALLED_HEADERS_REMEDY)
     return False
 
 
@@ -1045,9 +1210,19 @@ def cmd_check_wrapper(args) -> int:
     if args.public_header:
         ok &= check_excluded_not_public(excluded, args.public_header)
     if args.private_lib:
-        ok &= check_excluded_on_private(excluded, args.private_lib)
+        private = open_elf(args.private_lib, "private library")
+        ok &= check_excluded_on_private(excluded, private)
+        ok &= check_coversioned(elf, private)
+        ok &= check_impl_superset(elf, private)
 
     print(f"wrapper public-abi symbol check: {'PASS' if ok else 'FAIL'}")
+    return 0 if ok else 1
+
+
+def cmd_check_installed_headers(args) -> int:
+    exempt = args.exempt if args.exempt is not None else list(PRIVATE_INCLUDE_DIRS)
+    ok = check_installed_headers(args.include_dir, exempt)
+    print(f"installed-header rename check: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
 
@@ -1303,7 +1478,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--private-lib",
         help="path to libMIOpen_private.so; when given, every excluded symbol "
-        "must still be exported from it under its original name",
+        "must still be exported from it under its original name, the two "
+        "libraries must be co-versioned, and every renamed entry point it "
+        "exports must have a wrapper stub",
     )
     p.add_argument(
         "--public-header",
@@ -1311,6 +1488,23 @@ def build_parser() -> argparse.ArgumentParser:
         "may be declared there",
     )
     p.set_defaults(func=cmd_check_wrapper)
+
+    p = sub.add_parser(
+        "check-installed-headers",
+        help="gate the staged include tree of a flag-on build",
+    )
+    p.add_argument(
+        "include_dir", help="staged include directory, e.g. <install-prefix>/include"
+    )
+    p.add_argument(
+        "--exempt",
+        action="append",
+        default=None,
+        help="directory, relative to include_dir, that legitimately carries the "
+        f"private declarations (default: {' '.join(PRIVATE_INCLUDE_DIRS)}); "
+        "repeatable",
+    )
+    p.set_defaults(func=cmd_check_installed_headers)
 
     p = sub.add_parser("dump-symbols", help="print/write the public symbol set")
     p.add_argument("lib")

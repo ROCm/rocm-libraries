@@ -294,6 +294,59 @@ function(add_gtest TEST_NAME TEST_CPP)
       )
     endif()
 
+    # Forwarding parity harness: replay the hipDNN shim surface twice, changing only which
+    # implementation serves each entry point, and require the two runs to agree test for
+    # test. Run it with
+    # `ctest -j1 -L forwarding_parity`; DEPENDS orders the three entries under a serial run
+    # only, and does not hold the comparison back when ctest runs tests concurrently.
+    #
+    # Not registered in the discrete branch, where each test would need its own doubled
+    # replay for the same signal. Deliberately unsharded: sharding would split each run
+    # across GTEST_PARALLEL_LEVEL files that would have to be stitched back together
+    # before the two could be compared.
+    if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+      # Only the tests written against the shim surface are replayed. The rest of the suite
+      # reaches compute through internal headers that bypass the wrapper entirely, so
+      # replaying it would cost two full runs to prove nothing, and any flaky test in it
+      # would surface as a parity failure indistinguishable from a real divergence.
+      # HipdnnShim rather than a generic word so the filter cannot pick up unrelated tests
+      # that happen to mention forwarding; see README.md.
+      #
+      # Not a cache entry, so that a -D on the configure line wins and nothing freezes a
+      # stale value across reconfigures.
+      if(NOT DEFINED MIOPEN_FORWARDING_PARITY_FILTER)
+        set(MIOPEN_FORWARDING_PARITY_FILTER "*HipdnnShim*")
+      endif()
+      # Published upwards for the install-tree mirror at directory scope.
+      set(MIOPEN_FORWARDING_PARITY_FILTER "${MIOPEN_FORWARDING_PARITY_FILTER}" PARENT_SCOPE)
+
+      foreach(FORWARDING_MODE disabled enabled)
+        add_test(NAME ${TEST_NAME}_forwarding_${FORWARDING_MODE}
+          COMMAND ${TEST_NAME}
+            --gtest_filter=${MIOPEN_FORWARDING_PARITY_FILTER}
+            --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_forwarding_${FORWARDING_MODE}.xml
+          WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
+        )
+        set_tests_properties(${TEST_NAME}_forwarding_${FORWARDING_MODE} PROPERTIES
+          LABELS "forwarding_parity"
+          ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;MIOPEN_HIPDNN_FORWARDING=${FORWARDING_MODE}"
+        )
+      endforeach()
+
+      # --newer-than: two XML files left over from an earlier build compare just as cleanly
+      # as two fresh ones, so without it a run whose replays never executed would pass.
+      add_test(NAME ${TEST_NAME}_forwarding_parity
+        COMMAND ${PROJECT_SOURCE_DIR}/script/compare_forwarding_runs.py
+          ${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_forwarding_disabled.xml
+          ${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_forwarding_enabled.xml
+          --newer-than $<TARGET_FILE:${TEST_NAME}>
+      )
+      set_tests_properties(${TEST_NAME}_forwarding_parity PROPERTIES
+        LABELS "forwarding_parity"
+        DEPENDS "${TEST_NAME}_forwarding_disabled;${TEST_NAME}_forwarding_enabled"
+      )
+    endif()
+
   endif()
   target_link_libraries(${TEST_NAME} BZip2::BZip2)
   if(WIN32)
@@ -406,6 +459,34 @@ else()
         message(STATUS "No test categorization (YAML missing)")
 endif()
 
+# Mirror of the parity harness for the packaged test list. The installed
+# CTestTestfile.cmake is written from scratch above and populated only from
+# test_categories.yaml, so the add_test() calls above never reach it; without this,
+# `ctest -L forwarding_parity` in a packaged artifact would select nothing and report
+# success, which reads as parity coverage that was never run.
+#
+# Paths are relative to the installed CTestTestfile.cmake, which lands one directory below
+# the test binary and the comparison script.
+#
+# Nothing consumes these entries yet -- packaged artifacts are built with the wrapper off.
+# They are here so artifacts built with it on need no further change on either side. Only
+# the single-binary build packages a test executable and registers the harness mirrored
+# here.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
+  foreach(FORWARDING_MODE disabled enabled)
+    file(APPEND "${INSTALL_TEST_FILE}"
+"add_test(miopen_gtest_forwarding_${FORWARDING_MODE} \"../miopen_gtest\" \"--gtest_filter=${MIOPEN_FORWARDING_PARITY_FILTER}\" \"--gtest_output=xml:miopen_gtest_forwarding_${FORWARDING_MODE}.xml\")
+set_tests_properties(miopen_gtest_forwarding_${FORWARDING_MODE} PROPERTIES LABELS \"forwarding_parity\" ENVIRONMENT \"MIOPEN_INVOKED_FROM_CTEST=1;MIOPEN_HIPDNN_FORWARDING=${FORWARDING_MODE}\")
+
+")
+  endforeach()
+  file(APPEND "${INSTALL_TEST_FILE}"
+"add_test(miopen_gtest_forwarding_parity \"../compare_forwarding_runs.py\" \"miopen_gtest_forwarding_disabled.xml\" \"miopen_gtest_forwarding_enabled.xml\" \"--newer-than\" \"../miopen_gtest\")
+set_tests_properties(miopen_gtest_forwarding_parity PROPERTIES LABELS \"forwarding_parity\" DEPENDS \"miopen_gtest_forwarding_disabled;miopen_gtest_forwarding_enabled\")
+
+")
+endif()
+
 # Install CTestTestfile.cmake to bin/MIOpen/ subdirectory for TheRock distribution
 if( NOT ENABLE_ASAN_PACKAGING )
   install(
@@ -414,4 +495,13 @@ if( NOT ENABLE_ASAN_PACKAGING )
       COMPONENT tests
       RENAME "CTestTestfile.cmake"
   )
+
+  # The mirrored parity entries invoke this script from the installed tree.
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    install(
+        PROGRAMS "${PROJECT_SOURCE_DIR}/script/compare_forwarding_runs.py"
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT tests
+    )
+  endif()
 endif()
