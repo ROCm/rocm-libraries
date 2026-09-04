@@ -322,6 +322,7 @@ def buildTheRockDockerImage(Map conf=[:])
                          "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
                          "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
                          "--build-arg BUILD_TYPE=artifact " +
+                         "--build-arg THEROCK_NIGHTLY_TAG=${date} " +
                          "--label therock.git.hash=${theRockHash} " +
                          "--label therock.nightly.tag=${date} " +
                          "--target update_therock " +

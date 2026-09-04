@@ -275,7 +275,18 @@ RUN git sparse-checkout set build_tools cmake && \
 # --latest-release auto-selects the newest nightly by its embedded date. The
 # tarball is arch-agnostic (contains all families); THEROCK_ASIC still selects
 # which archs CK and MIOpen build for in the downstream stages.
-RUN python build_tools/install_rocm_from_artifacts.py \
+#
+# Cache-buster: --latest-release resolves to a newer nightly as the calendar rolls, but the
+# RUN command text is byte-identical day-to-day, so BuildKit's registry layer cache would keep
+# serving a stale download indefinitely -- the therock-<date> tag would advance while the ROCm
+# baked inside it did not. Referencing THEROCK_NIGHTLY_TAG (which buildTheRockDockerImage() sets
+# to the same <YYYYMMDD> used for the image tag) folds the date into this layer's cache key, so
+# a new date actually re-downloads the tarball and the tag and its contents stay in sync. The
+# venv/clone/sparse-checkout layers above are left cached (the ARG is declared here, not earlier),
+# so only the download and the stages below it re-run when the date rolls.
+ARG THEROCK_NIGHTLY_TAG=default
+RUN echo "TheRock nightly tag: ${THEROCK_NIGHTLY_TAG}" && \
+    python build_tools/install_rocm_from_artifacts.py \
         --latest-release --amdgpu-family multiarch --output-dir /opt/rocm
 
 #============================================================================
