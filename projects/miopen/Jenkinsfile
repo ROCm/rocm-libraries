@@ -230,9 +230,10 @@ def runTheRockDockerBuild() {
             withWorkingDir {
                 def result = utils.buildTheRockDockerImage()
                 // Expose values to subsequent stages via pipeline-scoped env vars.
-                env.THEROCK_CANDIDATE_IMAGE = result.image    ?: ""
-                env.THEROCK_FULL_HASH       = result.fullHash ?: ""
-                env.THEROCK_SHORT_HASH      = result.shortHash ?: ""
+                env.THEROCK_CANDIDATE_IMAGE = result.image       ?: ""
+                env.THEROCK_FULL_HASH       = result.fullHash    ?: ""
+                env.THEROCK_SHORT_HASH      = result.shortHash   ?: ""
+                env.THEROCK_ROCM_VERSION    = result.rocmVersion ?: ""
                 // "true" means the hash is already live on :therock - Promote stage is skipped.
                 env.THEROCK_SKIP_UPDATE     = result.skip ? "true" : "false"
             }
@@ -411,7 +412,7 @@ pipeline {
         Build_timeout_minutes = 420
     }
     stages{
-        // Builds rocm/miopen:therock-<hash> if the pinned hash changed; sets THEROCK_CANDIDATE_IMAGE.
+        // Builds rocm/miopen:therock-<rocm-version> for the newest nightly; sets THEROCK_CANDIDATE_IMAGE.
         stage('Build TheRock Docker: Build') {
             when {
                 expression { params.BUILD_THEROCK_DOCKER }

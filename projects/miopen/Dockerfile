@@ -240,7 +240,10 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
 # fragile, multi-hour source build for a single ~minutes tarball download; CK
 # and MIOpen are still built from THIS repo's own source, unchanged.
 #============================================================================
-FROM base AS artifact_therock
+# Shared TheRock installer tooling: the venv + boto3 + a sparse checkout of TheRock's
+# build_tools (pinned to THEROCK_GIT_HASH) that runs install_rocm_from_artifacts.py. Both the
+# cheap version resolver and the real download build FROM this stage so the setup is done once.
+FROM base AS therock_installer
 
 ARG THEROCK_GIT_HASH=default
 
@@ -261,33 +264,56 @@ RUN git sparse-checkout set build_tools cmake && \
         echo "Using default branch"; \
     fi
 
-# TheRock publishes a single multi-arch nightly release tarball
-# (therock-dist-linux-multiarch-<version>.tar.gz) containing every gfx family's
-# libraries plus the lib/run/dev components (only the test component is omitted).
-# Installing it lays /opt/rocm out exactly like the source build -- in particular
-# lib/rocblas/library/ is flat, with one TensileLibrary_lazy_<arch>.dat per arch --
-# so no per-arch install loop, rocBLAS accumulate, or subdir-flatten fixup is
-# needed (all of which the earlier per-component artifact approach required).
-# Because "dev" is included, the CMake package configs (ROCMConfig.cmake,
-# rocblasConfig.cmake, ...) that CK's and MIOpen's find_package() calls rely on
-# are present with no supplementary fetch. The tarball is served from an anonymous
-# S3 bucket, so no GITHUB_TOKEN / GitHub API rate-limit workaround is required, and
-# --latest-release auto-selects the newest nightly by its embedded date. The
-# tarball is arch-agnostic (contains all families); THEROCK_ASIC still selects
+# Resolve-only: --dry-run lists the newest multi-arch nightly on S3 and prints
+# "Found latest release: <version>" WITHOUT downloading the multi-GB tarball. We capture that
+# version to /rocm_version.txt so the pipeline can tag/label the image with the actual ROCm
+# nightly and then pin the real download to it. THEROCK_RESOLVE_BUST (set to the build date by
+# buildTheRockDockerImage()) folds the date into this layer's cache key so the resolve re-runs
+# as the nightly rolls, while the installer-setup layers above stay cached.
+FROM therock_installer AS resolve_therock
+ARG THEROCK_RESOLVE_BUST=default
+RUN echo "resolve bust: ${THEROCK_RESOLVE_BUST}" && \
+    python build_tools/install_rocm_from_artifacts.py \
+        --latest-release --amdgpu-family multiarch --dry-run 2>&1 | tee /tmp/resolve.log && \
+    grep 'Found latest release:' /tmp/resolve.log | awk '{print $NF}' > /rocm_version.txt && \
+    test -s /rocm_version.txt && \
+    echo "Resolved ROCm nightly version: $(cat /rocm_version.txt)"
+
+# Minimal export surface: a scratch stage carrying only the version file, so groovy can read it
+# back cheaply via `docker buildx build --target resolve_version_out --output type=local`.
+FROM scratch AS resolve_version_out
+COPY --from=resolve_therock /rocm_version.txt /rocm_version.txt
+
+# Real install, pinned to the resolved version. TheRock publishes a single multi-arch nightly
+# release tarball (therock-dist-linux-multiarch-<version>.tar.gz) containing every gfx family's
+# libraries plus the lib/run/dev components (only the test component is omitted). Installing it
+# lays /opt/rocm out exactly like the source build -- lib/rocblas/library/ is flat, with one
+# TensileLibrary_lazy_<arch>.dat per arch -- so no per-arch install loop, rocBLAS accumulate, or
+# subdir-flatten fixup is needed. Because "dev" is included, the CMake package configs
+# (ROCMConfig.cmake, rocblasConfig.cmake, ...) that CK's and MIOpen's find_package() calls rely
+# on are present with no supplementary fetch. The tarball is served from an anonymous S3 bucket,
+# so no GITHUB_TOKEN / GitHub API rate-limit workaround is required. THEROCK_ASIC still selects
 # which archs CK and MIOpen build for in the downstream stages.
 #
-# Cache-buster: --latest-release resolves to a newer nightly as the calendar rolls, but the
-# RUN command text is byte-identical day-to-day, so BuildKit's registry layer cache would keep
-# serving a stale download indefinitely -- the therock-<date> tag would advance while the ROCm
-# baked inside it did not. Referencing THEROCK_NIGHTLY_TAG (which buildTheRockDockerImage() sets
-# to the same <YYYYMMDD> used for the image tag) folds the date into this layer's cache key, so
-# a new date actually re-downloads the tarball and the tag and its contents stay in sync. The
-# venv/clone/sparse-checkout layers above are left cached (the ARG is declared here, not earlier),
-# so only the download and the stages below it re-run when the date rolls.
-ARG THEROCK_NIGHTLY_TAG=default
-RUN echo "TheRock nightly tag: ${THEROCK_NIGHTLY_TAG}" && \
-    python build_tools/install_rocm_from_artifacts.py \
-        --latest-release --amdgpu-family multiarch --output-dir /opt/rocm
+# ROCM_NIGHTLY_VERSION serves double duty: --release <version> pins the download to the exact
+# nightly the resolve stage found (so the image tag/label always match the installed ROCm, with
+# no "latest is a moving target" race), and referencing it in the RUN makes the version this
+# layer's cache key -- the tarball is re-downloaded only when the nightly actually changes, not
+# merely when the calendar rolls.
+# The pipeline passes ROCM_NIGHTLY_VERSION (from the resolve stage) to pin the exact nightly via
+# --release. A standalone `docker build` that omits it falls back to --latest-release so the image
+# still builds directly (matching the old behavior) -- staleness only matters for the pipeline,
+# which always pins.
+FROM therock_installer AS artifact_therock
+ARG ROCM_NIGHTLY_VERSION=default
+RUN echo "Installing ROCm nightly: ${ROCM_NIGHTLY_VERSION}" && \
+    if [ "${ROCM_NIGHTLY_VERSION}" = "default" ]; then \
+        python build_tools/install_rocm_from_artifacts.py \
+            --latest-release --amdgpu-family multiarch --output-dir /opt/rocm; \
+    else \
+        python build_tools/install_rocm_from_artifacts.py \
+            --release "${ROCM_NIGHTLY_VERSION}" --amdgpu-family multiarch --output-dir /opt/rocm; \
+    fi
 
 #============================================================================
 # REGULAR: Use the pre-built ROCm image from TheRock to build the rest of

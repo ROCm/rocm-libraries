@@ -329,12 +329,24 @@ This path downloads TheRock's multi-arch nightly release tarball
 lib/run/dev components) instead of building TheRock from source, then builds CK and MIOpen on
 top exactly as in the other modes. This is what nightly CI uses (`buildTheRockDockerImage()`):
 much faster and less prone to breaking on unrelated TheRock source-build changes than Option 3.
-The tarball is fetched from an anonymous S3 bucket, so no GitHub token or CI run ID is needed;
-`--latest-release` (used in the Dockerfile) auto-selects the newest nightly by its embedded date.
+The tarball is fetched from an anonymous S3 bucket, so no GitHub token or CI run ID is needed.
+
+In CI the version is resolved first and then pinned: `buildTheRockDockerImage()` runs the
+installer with `--latest-release --dry-run` (an S3 list, no download) to discover the newest
+nightly version (e.g. `10.1.0a20260904`), tags the base image `rocm/miopen:therock-<version>`,
+pins the real download with `--release <version>` (via the `ROCM_NIGHTLY_VERSION` build arg), and
+stamps a `rocm.nightly.version` label. The tag and label therefore always reflect the ROCm that is
+actually installed, and the version — not the calendar date — is the layer cache key and the
+build/skip key. The label propagates to the CI image and the published dev image, so
+`docker inspect --format '{{ index .Config.Labels "rocm.nightly.version" }}' <image>` reports
+which nightly any of them was built on.
 
 `THEROCK_ASIC` still selects which archs CK and MIOpen build for; the ROCm base itself is
 arch-agnostic (the tarball already contains all families). `THEROCK_GIT_HASH` is optional and
 only pins the version of TheRock's `build_tools` installer script (not the downloaded ROCm).
+
+A standalone build may omit `ROCM_NIGHTLY_VERSION` (the Dockerfile falls back to
+`--latest-release`) or pass it to pin an exact nightly:
 
 ```shell
 docker buildx build \
@@ -344,6 +356,7 @@ docker buildx build \
   --build-arg BUILD_TYPE=artifact \
   --build-arg PREFIX=/opt/rocm \
   --build-arg THEROCK_ASIC=gfx1101 \
+  --build-arg ROCM_NIGHTLY_VERSION=10.1.0a20260904 \
   -f ../../projects/miopen/Dockerfile \
   ../../projects/.
 ```
