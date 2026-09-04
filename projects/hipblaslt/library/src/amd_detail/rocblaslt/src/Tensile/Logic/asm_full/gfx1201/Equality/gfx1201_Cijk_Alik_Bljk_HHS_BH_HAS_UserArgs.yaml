@@ -235,7 +235,7 @@
     StoreRemapVectorWidth: 0
     StoreSyncOpt: 0
     StoreVectorWidth: 8
-    StreamK: 0
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -443,7 +443,7 @@
     StoreRemapVectorWidth: 0
     StoreSyncOpt: 0
     StoreVectorWidth: 8
-    StreamK: 0
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -651,7 +651,7 @@
     StoreRemapVectorWidth: 0
     StoreSyncOpt: 0
     StoreVectorWidth: 8
-    StreamK: 0
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 8
@@ -859,7 +859,7 @@
     StoreRemapVectorWidth: 0
     StoreSyncOpt: 0
     StoreVectorWidth: 8
-    StreamK: 0
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
