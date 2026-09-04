@@ -27,7 +27,9 @@
 #pragma once
 
 #include <atomic>
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <vector>
 
@@ -35,6 +37,10 @@
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
+
+#if ORIGAMI_ENABLE_NN
+#  include <origami/nn/nn.hpp>
+#endif
 
 #include <tensilelitehost/export.h>
 
@@ -54,6 +60,10 @@ namespace TensileLite
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
+
+#if ORIGAMI_ENABLE_NN
+        origami::nn::library_models_t nn_models;
+#endif
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
@@ -145,6 +155,8 @@ namespace TensileLite
                                                             int numSolutions) const override
         {
             SolutionVector<MySolution> rv;
+            if(numSolutions == 0)
+                return rv;
             size_t                     m     = 1;
             size_t                     n     = 1;
             size_t                     k     = 1;
@@ -215,8 +227,16 @@ namespace TensileLite
                     .b_mx_block_size = 0, // MX Data types come from rocroller
                 };
 
+                origami::rank_options_t rank_options;
+#if ORIGAMI_ENABLE_NN
+                rank_options.library_models = &nn_models;
+                const std::size_t nnDepth   = numSolutions < 0
+                                                  ? std::numeric_limits<std::size_t>::max()
+                                                  : static_cast<std::size_t>(numSolutions);
+                rank_options.nn.min_scored  = nnDepth;
+#endif
                 auto prediction_result = origami::rank_configs(
-                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list, rank_options);
 
                 for(const auto& r : prediction_result)
                 {
@@ -224,15 +244,37 @@ namespace TensileLite
                     {
                         continue;
                     }
+#if ORIGAMI_ENABLE_NN
+                    if(std::isnan(r.latency))
+                        continue;
+#endif
                     considerSolution(solution_list[r.config.index].second);
-                    if(rv.size() == numSolutions)
+                    if(rv.size() == static_cast<std::size_t>(numSolutions))
                     {
                         break;
                     }
                 }
+
+#if ORIGAMI_ENABLE_NN
+                if(rv.empty())
+                {
+                    for(const auto& r : prediction_result)
+                    {
+                        if(r.config.index >= solution_list.size())
+                        {
+                            continue;
+                        }
+                        considerSolution(solution_list[r.config.index].second);
+                        if(rv.size() == static_cast<std::size_t>(numSolutions))
+                        {
+                            break;
+                        }
+                    }
+                }
+#endif
             }
             // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
+            lastFindTopRetAll = (rv.size() < static_cast<std::size_t>(numSolutions));
             return rv;
         }
 
