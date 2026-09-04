@@ -209,7 +209,7 @@ void testing_hybmv(Arguments argus)
         // Copy HYB structure to CPU
         testhyb* dhyb = (testhyb*)hyb;
 
-        int ell_nnz = dhyb->ell_nnz;
+        int ell_nnz = static_cast<int>(dhyb->ell_nnz);
         int coo_nnz = dhyb->coo_nnz;
 
         std::vector<int> hell_col(ell_nnz);

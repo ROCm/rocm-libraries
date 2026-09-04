@@ -125,8 +125,9 @@ void testing_check_matrix_hyb(const Arguments& arg)
         rocsparse_hyb_mat ptr  = hyb;
         test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
 
-        double gbyte_count = check_matrix_hyb_gbyte_count<T>(dhyb->ell_nnz, dhyb->coo_nnz);
-        double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
+        double gbyte_count = check_matrix_hyb_gbyte_count<T>(
+            static_cast<rocsparse_int>(dhyb->ell_nnz), dhyb->coo_nnz);
+        double gpu_gbyte = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
         display_timing_info(display_key_t::M,
                             m,

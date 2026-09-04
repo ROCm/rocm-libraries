@@ -245,16 +245,20 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
         // LCOV_EXCL_STOP
     }
 
-    // Compute ELL non-zeros
-    hyb->ell_nnz = hyb->ell_width * m;
+    // Compute ELL non-zeros in 64-bit. ell_width and m are 32-bit, so the
+    // product can reach ~2^62 and must not be truncated into a 32-bit value
+    // (that under-sizes the device allocations below and corrupts memory).
+    hyb->ell_nnz = static_cast<int64_t>(hyb->ell_width) * static_cast<int64_t>(m);
 
     // Allocate ELL part
     if(hyb->ell_nnz > 0)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-            &hyb->ell_col_ind, sizeof(rocsparse_int) * hyb->ell_nnz, handle->stream));
         RETURN_IF_HIP_ERROR(
-            rocsparse_hipMallocAsync(&hyb->ell_val, sizeof(T) * hyb->ell_nnz, handle->stream));
+            rocsparse_hipMallocAsync(&hyb->ell_col_ind,
+                                     sizeof(rocsparse_int) * static_cast<size_t>(hyb->ell_nnz),
+                                     handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+            &hyb->ell_val, sizeof(T) * static_cast<size_t>(hyb->ell_nnz), handle->stream));
     }
 
     // Allocate workspace
