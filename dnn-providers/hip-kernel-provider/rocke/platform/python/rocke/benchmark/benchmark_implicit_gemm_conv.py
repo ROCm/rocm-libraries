@@ -94,6 +94,9 @@ class Result:
     vec_a: int = 1
     vec_b: int = 1
     vec_c: int = 1
+    # None means the spec default; only printed when explicitly swept, so the
+    # output of a run that never passes --lds-k-pad is byte-for-byte unchanged.
+    lds_k_pad: int | None = None
     passed: bool | None = None  # None when --verify was not requested
 
 
@@ -697,6 +700,19 @@ def main() -> int:
         default="fp16",
         choices=["fp16", "bf16", "fp32"],
         help="data type (default: fp16)",
+    )
+    parser.add_argument(
+        "--lds-k-pad",
+        default=None,
+        metavar="LIST",
+        help=(
+            "wgrad only: comma-separated lds_k_pad values to sweep as an extra "
+            "axis (e.g. 0,2,8,16). The pad sets the LDS row stride and so the "
+            "bank-conflict factor of the transpose-on-store, but it also has to "
+            "keep the consumer's wide ds_read aligned, so the two pull opposite "
+            "ways and the optimum is shape-dependent. Omitted (the default) "
+            "leaves the spec default and the sweep size unchanged."
+        ),
     )
     parser.add_argument(
         "--dtype-d",
@@ -1360,6 +1376,7 @@ def _build_wgrad_one(args_tuple):
         warp_tile_mn,
         pipeline,
         epilogue,
+        lds_k_pad,
         split_k,
     ) = combo
 
@@ -1420,6 +1437,7 @@ def _build_wgrad_one(args_tuple):
         split_k=resolved_split_k,
         lds_k_outer=lds_k_outer,
         async_dma=async_dma,
+        lds_k_pad=lds_k_pad,
     )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:
@@ -1935,6 +1953,7 @@ def _run_sweep(
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
+            f"{'' if r.lds_k_pad is None else f'pad{r.lds_k_pad} '}"
             f"{r.pipeline}/{r.epilogue}"
         )
         if show_verify:
@@ -2061,6 +2080,16 @@ def _run_wgrad_sweep(
     else:
         split_k_values = (args.split_k,)
 
+    # lds_k_pad rides between the epilogue and split_k so that it is part of the
+    # per-config key the split-K prune groups on: two pads are different kernels
+    # and must not prune each other. None means "spec default", which keeps the
+    # combination count identical to a run that never passes the flag.
+    _pad_arg = getattr(args, "lds_k_pad", None)
+    if _pad_arg:
+        lds_k_pad_values = tuple(int(x) for x in str(_pad_arg).split(","))
+    else:
+        lds_k_pad_values = (None,)
+
     combos = list(
         itertools.product(
             _TILE_MN,
@@ -2071,6 +2100,7 @@ def _run_wgrad_sweep(
             _WARP_TILE_MN,
             _PIPELINES,
             _EPILOGUES,
+            lds_k_pad_values,
             split_k_values,
         )
     )
@@ -2115,7 +2145,7 @@ def _run_wgrad_sweep(
     # _build_ir_parallel returns results in as_completed order (non-deterministic).
     # Re-sort: group by config (all combo dims except split_k), then split_k descending
     # so _SPLIT_K_AUTO order (128, 64, ..., 1) is preserved for --split-k-prune.
-    pending.sort(key=lambda r: (r[0][:8], -r[2]))
+    pending.sort(key=lambda r: (r[0][:9], -r[2]))
     n_skipped = len(combos) - len(pending)
 
     # ---------------------------------------------------------------------------
@@ -2173,9 +2203,18 @@ def _run_wgrad_sweep(
 
     n_run = 0
     for combo, spec, resolved_split_k, kernel in pending:
-        tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue, _ = (
-            combo
-        )
+        (
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_tile_mn,
+            pipeline,
+            epilogue,
+            _lds_k_pad,
+            _,
+        ) = combo
         warp_tile_k = spec.warp_tile_k
         artifact = artifact_map[kernel.name]
         _is_rt = resolved_split_k == 0  # runtime split-K kernel
@@ -2190,6 +2229,7 @@ def _run_wgrad_sweep(
                 warp_tile_mn,
                 pipeline,
                 epilogue,
+                _lds_k_pad,
             )
             if _cfg_key in _pruned_configs:
                 n_skipped += 1
@@ -2326,6 +2366,7 @@ def _run_wgrad_sweep(
                     vec_a=_va,
                     vec_b=_vb,
                     vec_c=_vc,
+                    lds_k_pad=_lds_k_pad,
                 )
             )
 
@@ -2358,6 +2399,7 @@ def _run_wgrad_sweep(
                 f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
                 f"{pipeline}/{epilogue:9s} {_spk_label:<7s} "
                 f"vec={_va}/{_vb}/{_vc} "
+                f"{'' if _lds_k_pad is None else f'pad{_lds_k_pad} '}"
                 f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms"
                 f"{prune_marker}",
                 flush=True,
@@ -2388,6 +2430,7 @@ def _run_wgrad_sweep(
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
+            f"{'' if r.lds_k_pad is None else f'pad{r.lds_k_pad} '}"
             f"{r.pipeline}/{r.epilogue} spk{r.split_k}"
         )
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")

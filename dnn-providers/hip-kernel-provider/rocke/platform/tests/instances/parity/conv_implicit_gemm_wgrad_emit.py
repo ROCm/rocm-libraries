@@ -354,6 +354,33 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    if idx == 14:
+        # pipeline="basic": the CK pipeline_basic loop, unrolled at build time
+        # with the global read for tile it+1 issued before the MFMA for tile it
+        # and the LDS write deferred past the second barrier. Needs a
+        # compile-time trip count, hence the fixed split_k.
+        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="basic",
+                epilogue="default",
+                data=ConvDataSpec(dtype_d="fp32"),
+                split_k=4,
+            ),
+            "gfx950",
+        )
+
     # ----------------------------------------------------------------
     # Negative cases: these specs must be REJECTED by the validator.
     # The harness (run_emit) expects a ValueError / SystemExit when

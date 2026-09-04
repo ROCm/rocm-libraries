@@ -156,6 +156,15 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->lds_k_outer = true;
         *arch = "gfx950";
         return 0;
+    case 14:
+        /* pipeline="basic": unrolled global-read/compute overlap loop. Needs a
+         * compile-time trip count, hence the fixed split_k. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->pipeline = "basic";
+        spec->dtype_d = "fp32";
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

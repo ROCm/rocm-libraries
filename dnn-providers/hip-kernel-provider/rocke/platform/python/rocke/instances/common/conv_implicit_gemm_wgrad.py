@@ -426,6 +426,14 @@ class WgradConvSpec:
             flags={
                 "async": self.async_dma,
                 "kouter": self.lds_k_outer,
+                # An explicit lds_k_pad changes the LDS row stride and so the
+                # emitted code, but nothing else in the name reflects it. Two
+                # pads would otherwise collide on one symbol and the compile
+                # cache -- which keys on kernel.name -- would hand every pad the
+                # same binary, silently making a pad sweep measure one kernel
+                # N times. Only tagged when set explicitly, so a spec that
+                # leaves it None keeps its historical name and golden.
+                f"pad{self.lds_k_pad}": self.lds_k_pad is not None,
                 f"spk{self.split_k}": self.split_k > 1,
                 "spkauto": self.split_k == -1,
                 "spkrt": self.split_k == 0,
@@ -494,7 +502,9 @@ class WgradConvSpec:
                 "global->LDS load needs a stride-1 reduction axis, which wgrad "
                 "only has once the tile is stored K-outer"
             )
-        if self.split_k == 0 and (self.async_dma or self.unroll_k):
+        if self.split_k == 0 and (
+            self.async_dma or self.unroll_k or self.pipeline == "basic"
+        ):
             # split_k == 0 means the split degree is a launch-time kernel
             # argument, so the K-slice length is not known at build time. The
             # async and unrolled k-loops both need a compile-time trip count to
@@ -504,7 +514,8 @@ class WgradConvSpec:
             # sweep drivers swallow into a silent skip.
             raise ValueError(
                 "wgrad split_k=0 (runtime degree) is incompatible with "
-                "async_dma/unroll_k: those pipelines need a compile-time "
+                "async_dma/unroll_k/pipeline='basic': those pipelines need a "
+                "compile-time "
                 "iteration count. Use a fixed split_k >= 1."
             )
         if self.lds_k_outer:
@@ -638,6 +649,9 @@ class WgradConvSpec:
 # ---------------------------------------------------------------------
 
 
+_MAX_BASIC_K_ITERS = 128
+
+
 def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for ``spec`` on ``arch``.
 
@@ -707,10 +721,13 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"scattered MFMA layout; cshuffle produces contiguous pairs)"
         )
 
-    if spec.split_k == 0 and (spec.async_dma or spec.unroll_k):
+    if spec.split_k == 0 and (
+        spec.async_dma or spec.unroll_k or spec.pipeline == "basic"
+    ):
         return False, (
             "wgrad split_k=0 (runtime degree) is incompatible with "
-            "async_dma/unroll_k: those pipelines need a compile-time iteration "
+            "async_dma/unroll_k/pipeline='basic': those pipelines need a "
+            "compile-time iteration "
             "count. Use a fixed split_k >= 1."
         )
     if spec.async_dma and not spec.lds_k_outer:
@@ -722,6 +739,46 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             "load needs a stride-1 reduction axis, which wgrad only has once "
             "the tile is stored K-outer"
         )
+
+    for _nm, _v, _chan in (
+        ("vector_size_a", spec.vector_size_a, spec.problem.kpg),
+        ("vector_size_b", spec.vector_size_b, spec.problem.cpg),
+    ):
+        if _v is None:
+            continue
+        # The A/B load widths are a cap on the free-axis auto-selection, so an
+        # inadmissible request must be rejected rather than silently downgraded
+        # by choose_vec -- otherwise the knob looks like it took effect and did
+        # not.
+        if spec.async_dma:
+            return False, (
+                f"{_nm} is not honoured on the async_dma path (the direct "
+                "global->LDS intrinsic derives its own width); leave it None"
+            )
+        _cap = 4 if spec.data.dtype_a == "fp32" else 8
+        if _v < 1 or _v > _cap:
+            return False, f"{_nm}={_v} out of range 1..{_cap} for this dtype"
+        if _chan % _v:
+            return False, (
+                f"{_nm}={_v} must divide the stride-1 channel run ({_chan}); a "
+                "wider vector would read across the contiguous boundary"
+            )
+
+    if spec.pipeline == "basic" and spec.async_dma:
+        return False, "pipeline='basic' is incompatible with async_dma=True"
+
+    if spec.pipeline == "basic":
+        # The basic loop is unrolled in Python, one full load+mfma body per K
+        # iteration, so a deep reduction would explode compile time and code
+        # size. The cap is a build-practicality bound, not a hardware one.
+        _slice_k = spec.wg_K_padded() // max(spec.split_k, 1)
+        _k_iters = (_slice_k + spec.tile_k - 1) // spec.tile_k
+        if _k_iters > _MAX_BASIC_K_ITERS:
+            return False, (
+                f"pipeline='basic' would unroll to {_k_iters} K iterations "
+                f"(slice_k={_slice_k}, tile_k={spec.tile_k}), over the "
+                f"{_MAX_BASIC_K_ITERS} limit; raise split_k or tile_k"
+            )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
     if not target.mma.has_shape(
@@ -753,7 +810,13 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _ab_bytes = (
         _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes
-    _double = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
+    # Only async_dma and unroll_k reach a K-loop that actually alternates between
+    # the two LDS buffers: async_dma takes the SoftwarePipeline branch and
+    # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
+    # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
+    # scheduling hints -- so charging it for a second A/B tile rejected specs for
+    # LDS the kernel never allocates.
+    _double = spec.async_dma or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
     _c_lds = (
@@ -1065,7 +1128,10 @@ def build_implicit_gemm_conv_wgrad(
 
     A_smem = b.smem_alloc(ir_dtype_a, _a_shape, name_hint="A_smem")
     B_smem = b.smem_alloc(ir_dtype_b, _b_shape, name_hint="B_smem")
-    double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
+    # See the LDS budget note in is_valid_*_spec: "compv4" alone does not reach a
+    # buffer-alternating K-loop, so allocating a second tile for it produced a
+    # dead allocation that the LDS pool then stripped anyway.
+    double_buffer = spec.async_dma or spec.unroll_k
     if double_buffer:
         A_smem2 = b.smem_alloc(ir_dtype_a, _a_shape, name_hint="A_smem2")
         B_smem2 = b.smem_alloc(ir_dtype_b, _b_shape, name_hint="B_smem2")
@@ -1111,22 +1177,31 @@ def build_implicit_gemm_conv_wgrad(
     load_vec_b = 1
     if not spec.async_dma:
 
-        def _free_axis_vec(chan: int, dtype: str) -> int:
+        def _free_axis_vec(chan: int, dtype: str, override: "int | None" = None) -> int:
+            """Auto free-axis load width, clamped by an explicit spec override.
+
+            ``vector_size_a`` / ``vector_size_b`` are a cap, not a replacement:
+            a wider request than the channel run allows would read across a
+            stride-1 boundary (wrong data), so the divisibility rule still
+            wins. The forward and dgrad instances honour the same two fields;
+            wgrad was the only conv family that declared and ignored them.
+            """
             widths = (8, 4, 2, 1) if dtype != "fp32" else (4, 2, 1)
-            return next(v for v in widths if chan % v == 0)
+            auto = next(v for v in widths if chan % v == 0)
+            return auto if override is None else min(auto, override)
 
         va = CoalescedTileLoader.choose_vec(
             tile_rows=block_m,
             tile_cols=block_k,
             block_size=threads,
-            max_vec=_free_axis_vec(p_load.kpg, spec.data.dtype_a),
+            max_vec=_free_axis_vec(p_load.kpg, spec.data.dtype_a, spec.vector_size_a),
             vector_axis="row",
         )
         vb = CoalescedTileLoader.choose_vec(
             tile_rows=block_n,
             tile_cols=block_k,
             block_size=threads,
-            max_vec=_free_axis_vec(p_load.cpg, spec.data.dtype_b),
+            max_vec=_free_axis_vec(p_load.cpg, spec.data.dtype_b, spec.vector_size_b),
             vector_axis="row",
         )
         if va > 1:
@@ -1236,14 +1311,18 @@ def build_implicit_gemm_conv_wgrad(
                 tile_rows=a_tile_rows,
                 tile_cols=a_tile_cols,
                 block_size=threads,
-                max_vec=_free_axis_vec(p_load.kpg, spec.data.dtype_a),
+                max_vec=_free_axis_vec(
+                    p_load.kpg, spec.data.dtype_a, spec.vector_size_a
+                ),
                 vector_axis="col",
             )
             b_vec = CoalescedTileLoader.choose_vec(
                 tile_rows=b_tile_rows,
                 tile_cols=b_tile_cols,
                 block_size=threads,
-                max_vec=_free_axis_vec(p_load.cpg, spec.data.dtype_b),
+                max_vec=_free_axis_vec(
+                    p_load.cpg, spec.data.dtype_b, spec.vector_size_b
+                ),
                 vector_axis="col",
             )
         else:
@@ -1315,6 +1394,63 @@ def build_implicit_gemm_conv_wgrad(
         b_sync_loader.load(
             b, tid=tid, smem_dst=B_dst, descriptor=b_desc_fn, rsrc=x_rsrc
         )
+
+    def _split_desc_fns():
+        """The (A, B) descriptor callbacks for the split global-read path.
+
+        Mirrors the ``lds_k_outer`` coordinate swap inside
+        :func:`emit_load_phase`: the K-outer tile is indexed ``(k, free)`` while
+        the descriptors take ``(free, k)``. Emits no IR, so hoisting it out of
+        the loader call cannot perturb SSA numbering.
+        """
+        if spec.lds_k_outer:
+
+            def _dy_kouter(b_, row, col):
+                return dy_descriptor(b_, col, row)
+
+            def _x_kouter(b_, row, col):
+                return x_descriptor(b_, col, row)
+
+            return _dy_kouter, _x_kouter
+        return dy_descriptor, x_descriptor
+
+    def emit_global_read(k_off: Value) -> tuple:
+        """Issue only the global reads (buffer_load_vN) for one K tile.
+
+        Returns ``(k_off, a_staged, b_staged)`` -- the tile offset plus the two
+        lists of ``(row, col, v)`` triples from
+        :meth:`CoalescedTileLoader.load_global`. The caller commits them later
+        with :func:`emit_lds_write`. Sync path only; this is what lets the
+        CK pipeline_basic loop overlap VMEM latency with MFMA compute.
+
+        ``k_off`` is carried in the tuple because wgrad's offsets are
+        ``add(k_lo, const)`` -- a real emitted op, unlike the forward conv's
+        cached ``const_i32`` -- so re-deriving it in :func:`emit_lds_write`
+        would strand an extra add after the barrier.
+        """
+        k_off_capture[0] = k_off
+        a_desc_fn, b_desc_fn = _split_desc_fns()
+        a_staged = a_sync_loader.load_global(
+            b, tid=tid, descriptor=a_desc_fn, rsrc=dy_rsrc
+        )
+        b_staged = b_sync_loader.load_global(
+            b, tid=tid, descriptor=b_desc_fn, rsrc=x_rsrc
+        )
+        return k_off, a_staged, b_staged
+
+    def emit_lds_write(staged_tuple: tuple, A_dst: Value, B_dst: Value) -> None:
+        """Commit previously staged VGPR values to LDS.
+
+        Restores ``k_off_capture`` so any descriptor consulted here sees the
+        offset the values were read at, even though the read and the write sit
+        in different loop positions. ``store_lds`` funnels through the same
+        ``_store_tile`` as the fused loader, so ``vector_axis="row"`` replays
+        the transpose-on-store scatter unchanged.
+        """
+        k_off, a_staged, b_staged = staged_tuple
+        k_off_capture[0] = k_off
+        a_sync_loader.store_lds(b, smem_dst=A_dst, staged=a_staged)
+        b_sync_loader.store_lds(b, smem_dst=B_dst, staged=b_staged)
 
     def emit_wmma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
@@ -1517,6 +1653,51 @@ def build_implicit_gemm_conv_wgrad(
             k_off_capture[0] = b.add(k_lo, b.const_i32(it * block_k))
             current_accs = emit_mfma_phase(cur[0], cur[1], current_accs)
             b.sync()
+
+        final_accs = current_accs
+    elif spec.pipeline == "basic":
+        # CK pipeline_basic: single LDS buffer, global-read/compute overlap.
+        #
+        # The buffer_load_vN for tile it+1 is issued BEFORE the sync+mfma for
+        # tile it, so the VMEM latency hides behind the MFMA stream. The LDS
+        # write is deferred past the second sync -- once every ds_read for tile
+        # it has drained -- which is what makes one buffer sufficient: the tile
+        # it+1 data waits in VGPRs, not in a second LDS tile. unroll_k needs
+        # A_smem2/B_smem2 precisely because it moves the *store* inside the
+        # read window; this does not.
+        #
+        # Per iteration:
+        #   emit_global_read(k_lo + (it+1)*block_k)   buffer_load, in flight
+        #   sync()      drain the previous ds_write   -> tile it RAW-safe
+        #   k_off_capture = k_lo + it*block_k         descriptors address tile it
+        #   emit_mfma_phase                           ds_read + mfma
+        #   sync()      drain the ds_reads            -> buffer WAR-safe
+        #   emit_lds_write(staged it+1)               ds_write
+        #
+        # Each k offset is materialised once and carried in the staged tuple:
+        # wgrad's offsets are add(k_lo, const), so re-deriving one in
+        # emit_lds_write would emit a stray add after the barrier.
+        slice_k = wg_K if k_hi is None else (spec.wg_K_padded() // spec.split_k)
+        K_iters = (slice_k + block_k - 1) // block_k
+        current_accs = [v for _, v in accs]
+
+        # Prologue: read tile 0 and commit it immediately -- no prior ds_read
+        # exists to drain, so the write needs no barrier in front of it.
+        emit_lds_write(emit_global_read(k_lo), A_smem, B_smem)
+
+        pending_staged = None
+        for it in range(K_iters):
+            if it + 1 < K_iters:
+                pending_staged = emit_global_read(
+                    b.add(k_lo, b.const_i32((it + 1) * block_k))
+                )
+            b.sync()
+            k_off_capture[0] = b.add(k_lo, b.const_i32(it * block_k))
+            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+            b.sync()
+            if pending_staged is not None:
+                emit_lds_write(pending_staged, A_smem, B_smem)
+                pending_staged = None
 
         final_accs = current_accs
     elif not spec.async_dma:

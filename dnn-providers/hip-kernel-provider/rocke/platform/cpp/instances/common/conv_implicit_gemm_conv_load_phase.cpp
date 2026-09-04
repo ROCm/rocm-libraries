@@ -330,24 +330,21 @@ void rocke_conv_emit_global_read(rocke_conv_build_ctx_t* ctx,
                                  rocke_ctl_staged_t* b_staged)
 {
     rocke_ir_builder_t* b = ctx->b;
+    /* Honour the per-family descriptor overrides, as rocke_conv_emit_load_phase
+     * already does.  wgrad installs its own (including the lds_k_outer
+     * coordinate-swap variants); without the fallback a wgrad basic kernel
+     * would emit forward-conv addressing.  Both are NULL on the forward path,
+     * so its emission is unchanged. */
+    rocke_loads_descriptor_fn a_fn
+        = (ctx->a_descriptor_fn != NULL) ? ctx->a_descriptor_fn : rocke_conv_a_descriptor;
+    rocke_loads_descriptor_fn b_fn
+        = (ctx->b_descriptor_fn != NULL) ? ctx->b_descriptor_fn : rocke_conv_b_descriptor;
     /* k_off_capture[0] = k_off */
     ctx->k_off_capture = k_off;
-    rocke_coalesced_tile_loader_load_global(b,
-                                            &ctx->a_sync_loader,
-                                            ctx->tid,
-                                            rocke_conv_a_descriptor,
-                                            ctx,
-                                            ctx->a_rsrc,
-                                            NULL,
-                                            a_staged);
-    rocke_coalesced_tile_loader_load_global(b,
-                                            &ctx->b_sync_loader,
-                                            ctx->tid,
-                                            rocke_conv_b_descriptor,
-                                            ctx,
-                                            ctx->b_rsrc,
-                                            NULL,
-                                            b_staged);
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, a_staged);
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, b_staged);
 }
 
 /* ===================================================================== *

@@ -429,9 +429,13 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem");
         ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_shape, 2, "B_smem");
 
-        /* double_buffer = compv4 || async_dma || unroll_k */
-        ctx->double_buffer = (spec->pipeline != NULL && strcmp(spec->pipeline, "compv4") == 0)
-                             || spec->async_dma || spec->unroll_k;
+        /* Only async_dma and unroll_k reach a K-loop that alternates buffers:
+         * async_dma takes the SoftwarePipeline branch and unroll_k hand-rolls a
+         * ping-pong.  "compv4" alone shares the plain single-buffer loop with
+         * "mem"/"compv3" and differs only in scheduling hints, so allocating a
+         * second A/B tile for it was dead and charged LDS the kernel never used.
+         * Mirrors the Python double_buffer condition. */
+        ctx->double_buffer = spec->async_dma || spec->unroll_k;
         if(ctx->double_buffer)
         {
             ctx->A_smem2 = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem2");

@@ -172,10 +172,11 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, kouter, spk{N}, spkauto  -- Python boolean flags */
+    /* flags: async, kouter, pad{N}, spk{N}, spkauto  -- Python boolean flags */
     char spk_flag[32] = {0};
-    const char* flag_names[4];
-    int flag_on[4];
+    char pad_flag[32] = {0};
+    const char* flag_names[5];
+    int flag_on[5];
     int n_flags = 0;
 
     flag_names[n_flags] = "async";
@@ -185,6 +186,18 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     flag_names[n_flags] = "kouter";
     flag_on[n_flags] = s->lds_k_outer ? 1 : 0;
     n_flags++;
+
+    /* An explicit lds_k_pad changes the LDS row stride and so the emitted code;
+     * without it in the name two pads collide on one symbol and a cache keyed on
+     * the kernel name hands them the same binary.  Only tagged when set, so a
+     * spec that leaves it unset keeps its historical name.  Mirrors Python. */
+    if(s->has_lds_k_pad)
+    {
+        snprintf(pad_flag, sizeof(pad_flag), "pad%d", s->lds_k_pad);
+        flag_names[n_flags] = pad_flag;
+        flag_on[n_flags] = 1;
+        n_flags++;
+    }
 
     if(s->split_k > 1)
     {
@@ -356,14 +369,15 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     /* split_k == 0 puts the split degree in a kernel argument, so the K-slice
      * length is unknown at build time; the async and unrolled k-loops both need
      * a compile-time trip count. Mirrors the Python validator. */
-    if(s->split_k == 0 && (s->async_dma || s->unroll_k))
+    if(s->split_k == 0
+       && (s->async_dma || s->unroll_k || (s->pipeline && strcmp(s->pipeline, "basic") == 0)))
     {
         if(reason && reason_cap)
             snprintf(reason,
                      reason_cap,
                      "wgrad split_k=0 (runtime degree) is incompatible with "
-                     "async_dma/unroll_k: those pipelines need a compile-time "
-                     "iteration count. Use a fixed split_k >= 1.");
+                     "async_dma/unroll_k/pipeline='basic': those pipelines need a "
+                     "compile-time iteration count. Use a fixed split_k >= 1.");
         return false;
     }
 
@@ -376,6 +390,37 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                      "global->LDS load needs a stride-1 reduction axis, which wgrad "
                      "only has once the tile is stored K-outer");
         return false;
+    }
+
+    if(s->pipeline && strcmp(s->pipeline, "basic") == 0 && s->async_dma)
+    {
+        if(reason && reason_cap)
+            snprintf(reason, reason_cap, "pipeline='basic' is incompatible with async_dma=True");
+        return false;
+    }
+
+    /* The basic loop is unrolled at build time, one full load+mfma body per K
+     * iteration, so a deep reduction explodes compile time and code size. A
+     * build-practicality bound, not a hardware one. Mirrors Python. */
+    if(s->pipeline && strcmp(s->pipeline, "basic") == 0)
+    {
+        const int spk = (s->split_k > 1) ? s->split_k : 1;
+        const int slice_k = rocke_wgrad_conv_spec_wg_K_padded(s) / spk;
+        const int k_iters = (slice_k + s->tile_k - 1) / s->tile_k;
+        if(k_iters > ROCKE_MAX_BASIC_K_ITERS)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "pipeline='basic' would unroll to %d K iterations "
+                         "(slice_k=%d, tile_k=%d), over the %d limit; "
+                         "raise split_k or tile_k",
+                         k_iters,
+                         slice_k,
+                         s->tile_k,
+                         ROCKE_MAX_BASIC_K_ITERS);
+            return false;
+        }
     }
 
     /* lds_k_outer: ds_read_b64_tr_b16 is a gfx950 wave64 16-bit transpose read.
@@ -1673,8 +1718,13 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
         ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_sh, 2, "A_smem");
         ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_sh, 2, "B_smem");
-        ctx->double_buffer = (spec->pipeline && strcmp(spec->pipeline, "compv4") == 0)
-                             || spec->async_dma || spec->unroll_k;
+        /* Only async_dma and unroll_k reach a K-loop that alternates buffers:
+         * async_dma takes the SoftwarePipeline branch and unroll_k hand-rolls a
+         * ping-pong.  "compv4" alone shares the plain single-buffer loop with
+         * "mem"/"compv3" and differs only in scheduling hints, so allocating a
+         * second A/B tile for it was dead and charged LDS the kernel never used.
+         * Mirrors the Python double_buffer condition. */
+        ctx->double_buffer = spec->async_dma || spec->unroll_k;
         if(ctx->double_buffer)
         {
             ctx->A_smem2 = rocke_b_smem_alloc(b, rocke_f16(), a_sh, 2, "A_smem2");
@@ -2074,6 +2124,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     /* --- K-loop --- */
     if(spec->unroll_k)
         rocke_conv_emit_kloop_unroll(&ctx);
+    else if(spec->pipeline && strcmp(spec->pipeline, "basic") == 0)
+        rocke_conv_emit_kloop_basic(&ctx);
     else if(!spec->async_dma)
         rocke_conv_emit_kloop_simple(&ctx);
     else
