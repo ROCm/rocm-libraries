@@ -2199,3 +2199,719 @@ RppStatus resize_mirror_normalize_u8_f16_host_tensor(
 
     return RPP_SUCCESS;
 }
+
+/************* NEAREST NEIGHBOR INTERPOLATION *************/
+
+// Nearest neighbor sourcing is layout agnostic - the generic stride-based addressing below
+// (cStride/hStride/wStride) is correct for NHWC and NCHW alike, so a single pair of branches
+// (3 channel / single channel) covers all 4 src-dst layout combinations already handled by the
+// bilinear variant above (mirroring the approach used by resize_nn_f16_f16_host_tensor).
+
+RppStatus resize_mirror_normalize_nn_u8_u8_host_tensor(
+    Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr, RpptDescPtr dstDescPtr,
+    RpptImagePatchPtr dstImgSize, Rpp32f* meanTensor, Rpp32f* stdDevTensor, Rpp32u* mirrorTensor,
+    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, RppLayoutParams layoutParams,
+    rpp::Handle& handle) {
+    RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
+#pragma omp parallel for
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
+        RpptROI roi;
+        RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
+        compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+
+        compute_dst_size_cap_host(&dstImgSize[batchCount],
+                                  dstDescPtr);  // Check if the dstImgSize exceeds dst buffer size
+        Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize[batchCount].width));
+        Rpp32f hRatio =
+            ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize[batchCount].height));
+        Rpp32u heightLimit = roi.xywhROI.roiHeight - 1;
+        Rpp32u widthLimit = roi.xywhROI.roiWidth - 1;
+        Rpp32f hOffset = hRatio * 0.5f;
+        Rpp32f wOffset = wRatio * 0.5f;
+
+        Rpp8u *srcPtrChannel, *dstPtrChannel, *srcPtrImage, *dstPtrImage;
+        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        dstPtrChannel = dstPtrImage;
+
+        // Set non ROI pixels to zero
+        memset(dstPtrImage, (Rpp8u)0, (size_t)dstDescPtr->strides.nStride);
+
+        Rpp32s srcLocationRow, srcLocationColumn;
+
+        std::vector<float> mean(srcDescPtr->c), invStdDev(srcDescPtr->c);
+        Rpp32u incrementPerImage = srcDescPtr->c * batchCount;
+        for (int c = 0; c < srcDescPtr->c; c++) {
+            mean[c] = meanTensor[incrementPerImage + c];
+            invStdDev[c] = 1.0 / stdDevTensor[incrementPerImage + c];
+        }
+        Rpp32u mirrorFlag = mirrorTensor[batchCount];
+        Rpp32u width = dstImgSize[batchCount].width;
+
+        // Resize Mirror Normalize with 3 channel inputs and outputs
+        if (srcDescPtr->c == 3 && dstDescPtr->c == 3) {
+            Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
+            srcPtrRowR = srcPtrChannel;
+            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+            Rpp8u *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+            dstPtrRowR = dstPtrChannel;
+            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp8u *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+                dstPtrTempR = dstPtrRowR;
+                dstPtrTempG = dstPtrRowG;
+                dstPtrTempB = dstPtrRowB;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                Rpp32s rowOffset = srcLocationRow * srcDescPtr->strides.hStride;
+                Rpp8u* srcPtrTempR = srcPtrRowR + rowOffset;
+                Rpp8u* srcPtrTempG = srcPtrRowG + rowOffset;
+                Rpp8u* srcPtrTempB = srcPtrRowB + rowOffset;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset, srcDescPtr->strides.wStride);
+                    *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
+                        ((Rpp32f)(*(srcPtrTempR + srcLocationColumn) - mean[0]) * invStdDev[0])));
+                    *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
+                        ((Rpp32f)(*(srcPtrTempG + srcLocationColumn) - mean[1]) * invStdDev[1])));
+                    *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
+                        ((Rpp32f)(*(srcPtrTempB + srcLocationColumn) - mean[2]) * invStdDev[2])));
+                    dstPtrTempR += dstDescPtr->strides.wStride;
+                    dstPtrTempG += dstDescPtr->strides.wStride;
+                    dstPtrTempB += dstDescPtr->strides.wStride;
+                }
+                dstPtrRowR += dstDescPtr->strides.hStride;
+                dstPtrRowG += dstDescPtr->strides.hStride;
+                dstPtrRowB += dstDescPtr->strides.hStride;
+            }
+        }
+
+        // Resize Mirror Normalize with single channel inputs and outputs
+        else {
+            Rpp8u *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp8u *srcPtrTemp, *dstPtrTemp;
+                dstPtrTemp = dstPtrRow;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset);
+                    *dstPtrTemp++ = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
+                        ((Rpp32f)(*(srcPtrTemp + srcLocationColumn) - mean[0]) * invStdDev[0])));
+                }
+                dstPtrRow += dstDescPtr->strides.hStride;
+            }
+        }
+    }
+
+    return RPP_SUCCESS;
+}
+
+RppStatus resize_mirror_normalize_nn_f32_f32_host_tensor(
+    Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr, RpptDescPtr dstDescPtr,
+    RpptImagePatchPtr dstImgSize, Rpp32f* meanTensor, Rpp32f* stdDevTensor, Rpp32u* mirrorTensor,
+    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, RppLayoutParams layoutParams,
+    rpp::Handle& handle) {
+    RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
+#pragma omp parallel for
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
+        RpptROI roi;
+        RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
+        compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+
+        compute_dst_size_cap_host(&dstImgSize[batchCount],
+                                  dstDescPtr);  // Check if the dstImgSize exceeds dst buffer size
+        Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize[batchCount].width));
+        Rpp32f hRatio =
+            ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize[batchCount].height));
+        Rpp32u heightLimit = roi.xywhROI.roiHeight - 1;
+        Rpp32u widthLimit = roi.xywhROI.roiWidth - 1;
+        Rpp32f hOffset = hRatio * 0.5f;
+        Rpp32f wOffset = wRatio * 0.5f;
+
+        Rpp32f *srcPtrChannel, *dstPtrChannel, *srcPtrImage, *dstPtrImage;
+        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        dstPtrChannel = dstPtrImage;
+
+        // Set non ROI pixels to zero
+        memset(dstPtrImage, (Rpp32f)0, (size_t)dstDescPtr->strides.nStride);
+
+        Rpp32s srcLocationRow, srcLocationColumn;
+
+        std::vector<float> mean(srcDescPtr->c), invStdDev(srcDescPtr->c);
+        Rpp32u incrementPerImage = srcDescPtr->c * batchCount;
+        for (int c = 0; c < srcDescPtr->c; c++) {
+            mean[c] = meanTensor[incrementPerImage + c] * ONE_OVER_255;
+            invStdDev[c] = 1.0 / stdDevTensor[incrementPerImage + c];
+        }
+        Rpp32u mirrorFlag = mirrorTensor[batchCount];
+        Rpp32u width = dstImgSize[batchCount].width;
+
+        // Resize Mirror Normalize with 3 channel inputs and outputs
+        if (srcDescPtr->c == 3 && dstDescPtr->c == 3) {
+            Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
+            srcPtrRowR = srcPtrChannel;
+            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+            Rpp32f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+            dstPtrRowR = dstPtrChannel;
+            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp32f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+                dstPtrTempR = dstPtrRowR;
+                dstPtrTempG = dstPtrRowG;
+                dstPtrTempB = dstPtrRowB;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                Rpp32s rowOffset = srcLocationRow * srcDescPtr->strides.hStride;
+                Rpp32f* srcPtrTempR = srcPtrRowR + rowOffset;
+                Rpp32f* srcPtrTempG = srcPtrRowG + rowOffset;
+                Rpp32f* srcPtrTempB = srcPtrRowB + rowOffset;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset, srcDescPtr->strides.wStride);
+                    *dstPtrTempR = RPPPIXELCHECKF32((*(srcPtrTempR + srcLocationColumn) - mean[0]) *
+                                                    invStdDev[0]);
+                    *dstPtrTempG = RPPPIXELCHECKF32((*(srcPtrTempG + srcLocationColumn) - mean[1]) *
+                                                    invStdDev[1]);
+                    *dstPtrTempB = RPPPIXELCHECKF32((*(srcPtrTempB + srcLocationColumn) - mean[2]) *
+                                                    invStdDev[2]);
+                    dstPtrTempR += dstDescPtr->strides.wStride;
+                    dstPtrTempG += dstDescPtr->strides.wStride;
+                    dstPtrTempB += dstDescPtr->strides.wStride;
+                }
+                dstPtrRowR += dstDescPtr->strides.hStride;
+                dstPtrRowG += dstDescPtr->strides.hStride;
+                dstPtrRowB += dstDescPtr->strides.hStride;
+            }
+        }
+
+        // Resize Mirror Normalize with single channel inputs and outputs
+        else {
+            Rpp32f *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp32f *srcPtrTemp, *dstPtrTemp;
+                dstPtrTemp = dstPtrRow;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset);
+                    *dstPtrTemp++ = RPPPIXELCHECKF32((*(srcPtrTemp + srcLocationColumn) - mean[0]) *
+                                                     invStdDev[0]);
+                }
+                dstPtrRow += dstDescPtr->strides.hStride;
+            }
+        }
+    }
+
+    return RPP_SUCCESS;
+}
+
+RppStatus resize_mirror_normalize_nn_f16_f16_host_tensor(
+    Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr, RpptDescPtr dstDescPtr,
+    RpptImagePatchPtr dstImgSize, Rpp32f* meanTensor, Rpp32f* stdDevTensor, Rpp32u* mirrorTensor,
+    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, RppLayoutParams layoutParams,
+    rpp::Handle& handle) {
+    RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
+#pragma omp parallel for
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
+        RpptROI roi;
+        RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
+        compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+
+        compute_dst_size_cap_host(&dstImgSize[batchCount],
+                                  dstDescPtr);  // Check if the dstImgSize exceeds dst buffer size
+        Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize[batchCount].width));
+        Rpp32f hRatio =
+            ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize[batchCount].height));
+        Rpp32u heightLimit = roi.xywhROI.roiHeight - 1;
+        Rpp32u widthLimit = roi.xywhROI.roiWidth - 1;
+        Rpp32f hOffset = hRatio * 0.5f;
+        Rpp32f wOffset = wRatio * 0.5f;
+
+        Rpp16f *srcPtrChannel, *dstPtrChannel, *srcPtrImage, *dstPtrImage;
+        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        dstPtrChannel = dstPtrImage;
+
+        // Set non ROI pixels to zero
+        memset(dstPtrImage, (Rpp16f)0, (size_t)dstDescPtr->strides.nStride);
+
+        Rpp32s srcLocationRow, srcLocationColumn;
+
+        std::vector<float> mean(srcDescPtr->c), invStdDev(srcDescPtr->c);
+        Rpp32u incrementPerImage = srcDescPtr->c * batchCount;
+        for (int c = 0; c < srcDescPtr->c; c++) {
+            mean[c] = meanTensor[incrementPerImage + c] * ONE_OVER_255;
+            invStdDev[c] = 1.0 / stdDevTensor[incrementPerImage + c];
+        }
+        Rpp32u mirrorFlag = mirrorTensor[batchCount];
+        Rpp32u width = dstImgSize[batchCount].width;
+
+        // Resize Mirror Normalize with 3 channel inputs and outputs
+        if (srcDescPtr->c == 3 && dstDescPtr->c == 3) {
+            Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
+            srcPtrRowR = srcPtrChannel;
+            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+            Rpp16f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+            dstPtrRowR = dstPtrChannel;
+            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp16f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+                dstPtrTempR = dstPtrRowR;
+                dstPtrTempG = dstPtrRowG;
+                dstPtrTempB = dstPtrRowB;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                Rpp32s rowOffset = srcLocationRow * srcDescPtr->strides.hStride;
+                Rpp16f* srcPtrTempR = srcPtrRowR + rowOffset;
+                Rpp16f* srcPtrTempG = srcPtrRowG + rowOffset;
+                Rpp16f* srcPtrTempB = srcPtrRowB + rowOffset;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset, srcDescPtr->strides.wStride);
+                    *dstPtrTempR = (Rpp16f)RPPPIXELCHECKF32(
+                        (Rpp32f)(*(srcPtrTempR + srcLocationColumn) - mean[0]) * invStdDev[0]);
+                    *dstPtrTempG = (Rpp16f)RPPPIXELCHECKF32(
+                        (Rpp32f)(*(srcPtrTempG + srcLocationColumn) - mean[1]) * invStdDev[1]);
+                    *dstPtrTempB = (Rpp16f)RPPPIXELCHECKF32(
+                        (Rpp32f)(*(srcPtrTempB + srcLocationColumn) - mean[2]) * invStdDev[2]);
+                    dstPtrTempR += dstDescPtr->strides.wStride;
+                    dstPtrTempG += dstDescPtr->strides.wStride;
+                    dstPtrTempB += dstDescPtr->strides.wStride;
+                }
+                dstPtrRowR += dstDescPtr->strides.hStride;
+                dstPtrRowG += dstDescPtr->strides.hStride;
+                dstPtrRowB += dstDescPtr->strides.hStride;
+            }
+        }
+
+        // Resize Mirror Normalize with single channel inputs and outputs
+        else {
+            Rpp16f *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp16f *srcPtrTemp, *dstPtrTemp;
+                dstPtrTemp = dstPtrRow;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset);
+                    *dstPtrTemp++ = (Rpp16f)RPPPIXELCHECKF32(
+                        (Rpp32f)(*(srcPtrTemp + srcLocationColumn) - mean[0]) * invStdDev[0]);
+                }
+                dstPtrRow += dstDescPtr->strides.hStride;
+            }
+        }
+    }
+
+    return RPP_SUCCESS;
+}
+
+RppStatus resize_mirror_normalize_nn_i8_i8_host_tensor(
+    Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr, RpptDescPtr dstDescPtr,
+    RpptImagePatchPtr dstImgSize, Rpp32f* meanTensor, Rpp32f* stdDevTensor, Rpp32u* mirrorTensor,
+    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, RppLayoutParams layoutParams,
+    rpp::Handle& handle) {
+    RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
+#pragma omp parallel for
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
+        RpptROI roi;
+        RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
+        compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+
+        compute_dst_size_cap_host(&dstImgSize[batchCount],
+                                  dstDescPtr);  // Check if the dstImgSize exceeds dst buffer size
+        Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize[batchCount].width));
+        Rpp32f hRatio =
+            ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize[batchCount].height));
+        Rpp32u heightLimit = roi.xywhROI.roiHeight - 1;
+        Rpp32u widthLimit = roi.xywhROI.roiWidth - 1;
+        Rpp32f hOffset = hRatio * 0.5f;
+        Rpp32f wOffset = wRatio * 0.5f;
+
+        Rpp8s *srcPtrChannel, *dstPtrChannel, *srcPtrImage, *dstPtrImage;
+        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        dstPtrChannel = dstPtrImage;
+
+        // Set non ROI pixels to zero
+        memset(dstPtrImage, (Rpp8s)0, (size_t)dstDescPtr->strides.nStride);
+
+        Rpp32s srcLocationRow, srcLocationColumn;
+
+        std::vector<float> mean(srcDescPtr->c), invStdDev(srcDescPtr->c);
+        Rpp32u incrementPerImage = srcDescPtr->c * batchCount;
+        for (int c = 0; c < srcDescPtr->c; c++) {
+            mean[c] = meanTensor[incrementPerImage + c];
+            invStdDev[c] = 1.0 / stdDevTensor[incrementPerImage + c];
+        }
+        Rpp32u mirrorFlag = mirrorTensor[batchCount];
+        Rpp32u width = dstImgSize[batchCount].width;
+
+        // Resize Mirror Normalize with 3 channel inputs and outputs
+        if (srcDescPtr->c == 3 && dstDescPtr->c == 3) {
+            Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
+            srcPtrRowR = srcPtrChannel;
+            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+            Rpp8s *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+            dstPtrRowR = dstPtrChannel;
+            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp8s *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+                dstPtrTempR = dstPtrRowR;
+                dstPtrTempG = dstPtrRowG;
+                dstPtrTempB = dstPtrRowB;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                Rpp32s rowOffset = srcLocationRow * srcDescPtr->strides.hStride;
+                Rpp8s* srcPtrTempR = srcPtrRowR + rowOffset;
+                Rpp8s* srcPtrTempG = srcPtrRowG + rowOffset;
+                Rpp8s* srcPtrTempB = srcPtrRowB + rowOffset;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset, srcDescPtr->strides.wStride);
+                    *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(
+                        ((Rpp32f)(*(srcPtrTempR + srcLocationColumn) + 128 - mean[0]) *
+                             invStdDev[0] -
+                         128));
+                    *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(
+                        ((Rpp32f)(*(srcPtrTempG + srcLocationColumn) + 128 - mean[1]) *
+                             invStdDev[1] -
+                         128));
+                    *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(
+                        ((Rpp32f)(*(srcPtrTempB + srcLocationColumn) + 128 - mean[2]) *
+                             invStdDev[2] -
+                         128));
+                    dstPtrTempR += dstDescPtr->strides.wStride;
+                    dstPtrTempG += dstDescPtr->strides.wStride;
+                    dstPtrTempB += dstDescPtr->strides.wStride;
+                }
+                dstPtrRowR += dstDescPtr->strides.hStride;
+                dstPtrRowG += dstDescPtr->strides.hStride;
+                dstPtrRowB += dstDescPtr->strides.hStride;
+            }
+        }
+
+        // Resize Mirror Normalize with single channel inputs and outputs
+        else {
+            Rpp8s *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp8s *srcPtrTemp, *dstPtrTemp;
+                dstPtrTemp = dstPtrRow;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset);
+                    *dstPtrTemp++ = (Rpp8s)RPPPIXELCHECKI8((
+                        (Rpp32f)(*(srcPtrTemp + srcLocationColumn) + 128 - mean[0]) * invStdDev[0] -
+                        128));
+                }
+                dstPtrRow += dstDescPtr->strides.hStride;
+            }
+        }
+    }
+
+    return RPP_SUCCESS;
+}
+
+RppStatus resize_mirror_normalize_nn_u8_f32_host_tensor(
+    Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr, RpptDescPtr dstDescPtr,
+    RpptImagePatchPtr dstImgSize, Rpp32f* meanTensor, Rpp32f* stdDevTensor, Rpp32u* mirrorTensor,
+    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, RppLayoutParams layoutParams,
+    rpp::Handle& handle) {
+    RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
+#pragma omp parallel for
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
+        RpptROI roi;
+        RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
+        compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+
+        compute_dst_size_cap_host(&dstImgSize[batchCount],
+                                  dstDescPtr);  // Check if the dstImgSize exceeds dst buffer size
+        Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize[batchCount].width));
+        Rpp32f hRatio =
+            ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize[batchCount].height));
+        Rpp32u heightLimit = roi.xywhROI.roiHeight - 1;
+        Rpp32u widthLimit = roi.xywhROI.roiWidth - 1;
+        Rpp32f hOffset = hRatio * 0.5f;
+        Rpp32f wOffset = wRatio * 0.5f;
+
+        Rpp8u *srcPtrChannel, *srcPtrImage;
+        Rpp32f *dstPtrChannel, *dstPtrImage;
+        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        dstPtrChannel = dstPtrImage;
+
+        // Set non ROI pixels to zero
+        memset(dstPtrImage, (Rpp32f)0, (size_t)dstDescPtr->strides.nStride);
+
+        Rpp32s srcLocationRow, srcLocationColumn;
+
+        std::vector<float> mean(srcDescPtr->c), invStdDev(srcDescPtr->c);
+        Rpp32u incrementPerImage = srcDescPtr->c * batchCount;
+        for (int c = 0; c < srcDescPtr->c; c++) {
+            mean[c] = meanTensor[incrementPerImage + c];
+            invStdDev[c] = 1.0 / stdDevTensor[incrementPerImage + c];
+        }
+        Rpp32u mirrorFlag = mirrorTensor[batchCount];
+        Rpp32u width = dstImgSize[batchCount].width;
+
+        // Resize Mirror Normalize with 3 channel inputs and outputs
+        if (srcDescPtr->c == 3 && dstDescPtr->c == 3) {
+            Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
+            srcPtrRowR = srcPtrChannel;
+            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+            Rpp32f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+            dstPtrRowR = dstPtrChannel;
+            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp32f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+                dstPtrTempR = dstPtrRowR;
+                dstPtrTempG = dstPtrRowG;
+                dstPtrTempB = dstPtrRowB;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                Rpp32s rowOffset = srcLocationRow * srcDescPtr->strides.hStride;
+                Rpp8u* srcPtrTempR = srcPtrRowR + rowOffset;
+                Rpp8u* srcPtrTempG = srcPtrRowG + rowOffset;
+                Rpp8u* srcPtrTempB = srcPtrRowB + rowOffset;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset, srcDescPtr->strides.wStride);
+                    *dstPtrTempR =
+                        ((Rpp32f)(*(srcPtrTempR + srcLocationColumn) - mean[0]) * invStdDev[0]);
+                    *dstPtrTempG =
+                        ((Rpp32f)(*(srcPtrTempG + srcLocationColumn) - mean[1]) * invStdDev[1]);
+                    *dstPtrTempB =
+                        ((Rpp32f)(*(srcPtrTempB + srcLocationColumn) - mean[2]) * invStdDev[2]);
+                    dstPtrTempR += dstDescPtr->strides.wStride;
+                    dstPtrTempG += dstDescPtr->strides.wStride;
+                    dstPtrTempB += dstDescPtr->strides.wStride;
+                }
+                dstPtrRowR += dstDescPtr->strides.hStride;
+                dstPtrRowG += dstDescPtr->strides.hStride;
+                dstPtrRowB += dstDescPtr->strides.hStride;
+            }
+        }
+
+        // Resize Mirror Normalize with single channel inputs and outputs
+        else {
+            Rpp8u* srcPtrRow;
+            Rpp32f* dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp8u* srcPtrTemp;
+                Rpp32f* dstPtrTemp;
+                dstPtrTemp = dstPtrRow;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset);
+                    *dstPtrTemp++ =
+                        ((Rpp32f)(*(srcPtrTemp + srcLocationColumn) - mean[0]) * invStdDev[0]);
+                }
+                dstPtrRow += dstDescPtr->strides.hStride;
+            }
+        }
+    }
+
+    return RPP_SUCCESS;
+}
+
+RppStatus resize_mirror_normalize_nn_u8_f16_host_tensor(
+    Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr, RpptDescPtr dstDescPtr,
+    RpptImagePatchPtr dstImgSize, Rpp32f* meanTensor, Rpp32f* stdDevTensor, Rpp32u* mirrorTensor,
+    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, RppLayoutParams layoutParams,
+    rpp::Handle& handle) {
+    RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
+#pragma omp parallel for
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
+        RpptROI roi;
+        RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
+        compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+
+        compute_dst_size_cap_host(&dstImgSize[batchCount],
+                                  dstDescPtr);  // Check if the dstImgSize exceeds dst buffer size
+        Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize[batchCount].width));
+        Rpp32f hRatio =
+            ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize[batchCount].height));
+        Rpp32u heightLimit = roi.xywhROI.roiHeight - 1;
+        Rpp32u widthLimit = roi.xywhROI.roiWidth - 1;
+        Rpp32f hOffset = hRatio * 0.5f;
+        Rpp32f wOffset = wRatio * 0.5f;
+
+        Rpp8u *srcPtrChannel, *srcPtrImage;
+        Rpp16f *dstPtrChannel, *dstPtrImage;
+        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        dstPtrChannel = dstPtrImage;
+
+        // Set non ROI pixels to zero
+        memset(dstPtrImage, (Rpp16f)0, (size_t)dstDescPtr->strides.nStride);
+
+        Rpp32s srcLocationRow, srcLocationColumn;
+
+        std::vector<float> mean(srcDescPtr->c), invStdDev(srcDescPtr->c);
+        Rpp32u incrementPerImage = srcDescPtr->c * batchCount;
+        for (int c = 0; c < srcDescPtr->c; c++) {
+            mean[c] = meanTensor[incrementPerImage + c];
+            invStdDev[c] = 1.0 / stdDevTensor[incrementPerImage + c];
+        }
+        Rpp32u mirrorFlag = mirrorTensor[batchCount];
+        Rpp32u width = dstImgSize[batchCount].width;
+
+        // Resize Mirror Normalize with 3 channel inputs and outputs
+        if (srcDescPtr->c == 3 && dstDescPtr->c == 3) {
+            Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
+            srcPtrRowR = srcPtrChannel;
+            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+            Rpp16f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+            dstPtrRowR = dstPtrChannel;
+            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp16f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+                dstPtrTempR = dstPtrRowR;
+                dstPtrTempG = dstPtrRowG;
+                dstPtrTempB = dstPtrRowB;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                Rpp32s rowOffset = srcLocationRow * srcDescPtr->strides.hStride;
+                Rpp8u* srcPtrTempR = srcPtrRowR + rowOffset;
+                Rpp8u* srcPtrTempG = srcPtrRowG + rowOffset;
+                Rpp8u* srcPtrTempB = srcPtrRowB + rowOffset;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset, srcDescPtr->strides.wStride);
+                    *dstPtrTempR = (Rpp16f)((Rpp32f)(*(srcPtrTempR + srcLocationColumn) - mean[0]) *
+                                            invStdDev[0]);
+                    *dstPtrTempG = (Rpp16f)((Rpp32f)(*(srcPtrTempG + srcLocationColumn) - mean[1]) *
+                                            invStdDev[1]);
+                    *dstPtrTempB = (Rpp16f)((Rpp32f)(*(srcPtrTempB + srcLocationColumn) - mean[2]) *
+                                            invStdDev[2]);
+                    dstPtrTempR += dstDescPtr->strides.wStride;
+                    dstPtrTempG += dstDescPtr->strides.wStride;
+                    dstPtrTempB += dstDescPtr->strides.wStride;
+                }
+                dstPtrRowR += dstDescPtr->strides.hStride;
+                dstPtrRowG += dstDescPtr->strides.hStride;
+                dstPtrRowB += dstDescPtr->strides.hStride;
+            }
+        }
+
+        // Resize Mirror Normalize with single channel inputs and outputs
+        else {
+            Rpp8u* srcPtrRow;
+            Rpp16f* dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+            for (int dstLocRow = 0; dstLocRow < dstImgSize[batchCount].height; dstLocRow++) {
+                Rpp8u* srcPtrTemp;
+                Rpp16f* dstPtrTemp;
+                dstPtrTemp = dstPtrRow;
+                compute_resize_nn_src_loc(dstLocRow, hRatio, heightLimit, srcLocationRow, hOffset);
+                srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
+
+                for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize[batchCount].width;
+                     vectorLoopCount++) {
+                    int dstLoc = (mirrorFlag) ? width - 1 - vectorLoopCount : vectorLoopCount;
+                    compute_resize_nn_src_loc(dstLoc, wRatio, widthLimit, srcLocationColumn,
+                                              wOffset);
+                    *dstPtrTemp++ = (Rpp16f)((Rpp32f)(*(srcPtrTemp + srcLocationColumn) - mean[0]) *
+                                             invStdDev[0]);
+                }
+                dstPtrRow += dstDescPtr->strides.hStride;
+            }
+        }
+    }
+
+    return RPP_SUCCESS;
+}
