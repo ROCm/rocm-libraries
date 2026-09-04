@@ -604,6 +604,11 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // the flag load.
     rv["HasInvWbDevFences"]            = checkInList(isaVersion, {{12, 5, 0}});
 
+    // gfx950 splits L2 across 8 XCDs. StreamK partial-tile fixup needs
+    // VMEM flags with glc+slc and waitcnt fences for cross-XCD coherence;
+    // gfx1250 uses HasInvWbDevFences (global_wb / global_inv) instead.
+    rv["HasXCDSplitL2"]                = checkInList(isaVersion, {{9, 5, 0}});
+
     // XNACK-replay drain. When set, in-flight VMEM ops can be replayed and
     // therefore reorder w.r.t. a subsequent volatile/atomic VMEM. An
     // `s_wait_xcnt 0` must precede the volatile/atomic VMEM op.

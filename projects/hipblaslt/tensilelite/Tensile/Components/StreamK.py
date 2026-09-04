@@ -184,14 +184,41 @@ class StreamKMemoryOrdering(Component):
       precede such ops. The flag itself must be read via VMEM (not SMEM)
       to observe the producer's release-side fence.
 
-    Selection is driven by the `HasInvWbDevFences` arch capability. The
-    XNACK-replay drain in `preVolatileVmem` is gated separately on
-    `RequiresXCntForVolatileVMEM` and lives on the abstract base so a
-    future arch needing only one of the two can be supported by adding a
-    single capability flag.
+    - gfx950: L2 is split across XCDs. Workspace partials already
+      store with glc+slc, but SMEM flag traffic and workspace loads without
+      glc+slc can observe a stale per-XCD L2 line. gfx950 cannot emit
+      `global_wb`/`global_inv` (that ISA is gfx1250-only), so the handshake
+      uses VMEM flags with glc+slc and waitcnt fences instead.
+
+    Selection is driven by `HasInvWbDevFences` (gfx1250) and
+    `HasXCDSplitL2` (gfx950). The XNACK-replay drain in
+    `preVolatileVmem` is gated separately on `RequiresXCntForVolatileVMEM`
+    and lives on the abstract base so a future arch needing only one of
+    the two can be supported by adding a single capability flag.
     """
     def __call__(self):
         assert(0)
+
+    def useSmemFlags(self) -> bool:
+        """True if the handshake may use SMEM s_store/s_load for the flag.
+
+        gfx950 must use VMEM: SMEM is not coherent across XCD-split L2.
+        """
+        return True
+
+    @staticmethod
+    def _hasXcdSplitL2(writer) -> bool:
+        """True on gfx950 (XCD-split L2).
+
+        Prefers the `HasXCDSplitL2` arch cap. If rocisa is older and the cap is
+        missing, fall back to ISA so kernel gen still takes the coherent path.
+        """
+        if writer.states.archCaps.get("HasXCDSplitL2"):
+            return True
+        ver = getattr(writer.states, "version", None)
+        if ver is None:
+            return False
+        return tuple(ver)[:3] in ((9, 5, 0),)
 
     def preVolatileVmem(self, writer, comment="") -> Module:
         """Drain in-flight VMEM (XNACK-replay) before a volatile/atomic VMEM op.
@@ -229,9 +256,17 @@ class StreamKMemoryOrdering(Component):
 class StreamKMemoryOrderingDefault(StreamKMemoryOrdering):
     """No-op cross-CU fences; SMEM flag with glc/dlc/SCOPE_DEV.
 
-    Used on every arch that does not require explicit cross-L2 fences.
+    Used on every arch that does not require explicit cross-L2 fences
+    and does not split L2 across XCDs (see StreamKMemoryOrderingGfx9Xcd).
     """
-    archCaps = {"HasInvWbDevFences": False}
+    archCaps = {"HasInvWbDevFences": False, "HasXCDSplitL2": False}
+
+    @classmethod
+    def matches(cls, writer, debug=False):
+        caps = writer.states.archCaps
+        if caps.get("HasInvWbDevFences", False):
+            return False
+        return not cls._hasXcdSplitL2(writer)
 
     def releaseFence(self, writer) -> Module:
         module = Module("StreamK release fence (default)")
@@ -254,6 +289,53 @@ class StreamKMemoryOrderingDefault(StreamKMemoryOrdering):
     def flagBufferMubuf(self) -> MUBUFModifiers:
         return MUBUFModifiers(offen=True, glc=True, dlc=True,
                               scope=CacheScope.SCOPE_DEV)
+
+
+class StreamKMemoryOrderingGfx9Xcd(StreamKMemoryOrdering):
+    """VMEM flags with glc+slc and waitcnt fences for XCD-split L2 (gfx950).
+
+    Do not emit global_wb/global_inv here: those instructions are illegal on
+    gfx9. Coherent workspace loads are handled separately in readInput('WS').
+    """
+    archCaps = {"HasInvWbDevFences": False, "HasXCDSplitL2": True}
+
+    @classmethod
+    def matches(cls, writer, debug=False):
+        caps = writer.states.archCaps
+        if caps.get("HasInvWbDevFences", False):
+            return False
+        return cls._hasXcdSplitL2(writer)
+
+    def useSmemFlags(self) -> bool:
+        return False
+
+    def releaseFence(self, writer) -> Module:
+        module = Module("StreamK release fence (gfx9 XCD)")
+        module.add(SWaitCnt(vlcnt=0, vscnt=0,
+            comment="release: wait for partials stores before flag"))
+        return module
+
+    def acquireFence(self, writer) -> Module:
+        module = Module("StreamK acquire fence (gfx9 XCD)")
+        module.add(SWaitCnt(vlcnt=0, vscnt=0,
+            comment="acquire: drain before reading partials"))
+        return module
+
+    def readFlag(self, writer, dst, soffset) -> Module:
+        streamk = Component.StreamK.find(writer)
+        module = Module("StreamK read flag (VMEM gfx9 XCD)")
+        flagVgpr = writer.vgprPool.checkOut(1, "flagAcq")
+        module.add(streamk.getFlagValue(writer, dst=vgpr(flagVgpr),
+            soffset=soffset, comment="acquire: get flag (VMEM)"))
+        module.add(SWaitCnt(vlcnt=0, comment="acquire: wait VMEM flag load"))
+        module.add(VReadfirstlaneB32(dst=sgpr(dst), src=vgpr(flagVgpr),
+            comment="move VMEM flag to SGPR for compare"))
+        writer.vgprPool.checkIn(flagVgpr)
+        return module
+
+    def flagBufferMubuf(self) -> MUBUFModifiers:
+        # glc+slc (sc0/sc1): miss per-XCD L2, same coherence as workspace stores.
+        return MUBUFModifiers(offen=True, glc=True, slc=True)
 
 
 class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
@@ -448,7 +530,7 @@ class StreamK(Component):
     # AddressFlags buffer layout (per problem):
     #   [0, numQueues*stride)     per-queue counters, one per cache line
     #   [numQueues*stride, ...)   partials/fixup ready flags (one word per tile)
-    # Counter stride == archCaps["CacheLineBytes"] (128B on gfx942/gfx950), so
+    # Counter stride == archCaps["CacheLineBytes"] (128B on gfx950), so
     # each per-XCD counter sits on its own line. Each counter's atomic_inc uses a
     # static predecessor-inclusive auto-reset bound, so it self-zeroes every
     # launch -- there is no explicit end-of-kernel reset.
@@ -474,7 +556,7 @@ class StreamK(Component):
         """Byte offset where the partials/fixup ready flags begin.
 
         The flags region starts right after the per-queue counters, i.e. after
-        ``numQueues * strideBytes`` bytes (8 * 128 = 1024 on gfx942/gfx950).
+        ``numQueues * strideBytes`` bytes (8 * 128 = 1024 on gfx950).
         """
         numQueues, _, _, cacheLineLog2 = self._wsQueueConstants(writer, kernel)
         return numQueues << cacheLineLog2
@@ -1505,12 +1587,8 @@ class StreamK(Component):
             module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr+2), src=vgpr("Serial"), comment="Wave 0 updates flags"))
             module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
             module.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(), comment="Skip flag reset"))
-            if writer.states.asmCaps["HasScalarStore"]:
-                # (tmpSgpr+2) contains a vlue of 0, use it to reset the flag
-                module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="reset flag"))
-            else:
-                module.add(VMovB32(dst=vgpr(tmpVgpr), src=0, comment="move 0 to tmpVgpr"))
-                module.add(self.setFlagValue(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr), comment="reset flag"))
+            # (tmpSgpr+2) is 0 on wave 0 (Serial==0); use it to reset the flag
+            module.add(self.emitFlagStore(writer, src=sgpr(tmpSgpr+2), soffset=sgpr(tmpSgpr), comment="reset flag"))
             module.add(skipFlagReset)
 
             writer.sgprPool.checkIn(tmpSgpr)
@@ -1595,12 +1673,8 @@ class StreamK(Component):
                 module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr+2), src=vgpr("Serial"), comment="Wave 0 updates flags"))
                 module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
                 module.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(), comment="Skip flag reset"))
-                if writer.states.asmCaps["HasScalarStore"]:
-                    # (tmpSgpr+2) contains a vlue of 0, use it to reset the flag
-                    module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="reset flag"))
-                else:
-                    module.add(VMovB32(dst=vgpr(tmpVgpr), src=0, comment="move 0 to tmpVgpr"))
-                    module.add(self.setFlagValue(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr), comment="reset flag"))
+                # (tmpSgpr+2) is 0 on wave 0 (Serial==0); use it to reset the flag
+                module.add(self.emitFlagStore(writer, src=sgpr(tmpSgpr+2), soffset=sgpr(tmpSgpr), comment="reset flag"))
                 module.add(skipFlagReset)
                 writer.sgprPool.checkIn(tmpSgpr)
 
@@ -2051,14 +2125,11 @@ class StreamK(Component):
                 module.add(VReadfirstlaneB32(dst=sgpr(flagSgpr), src=vgpr("Serial"), comment="Wave 0 updates flags"))
                 module.add(SCmpEQU32(src0=sgpr(flagSgpr), src1=0, comment="Check for wave 0"))
                 module.add(SCBranchSCC0(labelName=skipFlagSet.getLabelName(), comment="Skip flag set"))
-                if writer.states.asmCaps["HasScalarStore"]:
-                    module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
-                    module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="set flag"))
-                else:
-                    module.add(VMovB32(dst=vgpr(tmpVgpr), src=1, comment="move 1 to tmpVgpr"))
-                    module.add(self.setFlagValue(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr), comment="set flag"))
+                module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
+                module.add(self.emitFlagStore(writer, src=sgpr(flagSgpr), soffset=sgpr(tmpSgpr), comment="set flag"))
                 module.add(skipFlagSet)
-            module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
+            if memOrder.useSmemFlags():
+                module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
 
         if "Deferred" in endLabel.getLabelName():
             posLabel = writer.labels.getNameInc("PartialsDeferredReturnDir")
@@ -2070,6 +2141,25 @@ class StreamK(Component):
         # Finish one write path, reset currPreLoopVmcntCase to Undefined
         # self.currPreLoopVmcntCase = PreLoopVmcntCase.Undefined
 
+        return module
+
+    def emitFlagStore(self, writer, src, soffset, comment=""):
+        """Write the StreamK completion flag.
+
+        `src` is an SGPR holding the flag value (1 = ready, 0 = reset).
+        gfx950 uses VMEM even when HasScalarStore is available, because
+        SMEM stores are not coherent across XCD-split L2.
+        """
+        module = Module("StreamK emitFlagStore")
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
+        if writer.states.asmCaps["HasScalarStore"] and memOrder.useSmemFlags():
+            module.add(SStoreB32(src=src, base=sgpr("AddressFlags", 2), soffset=soffset,
+                                 smem=SMEMModifiers(glc=True), comment=comment))
+        else:
+            tmpVgpr = writer.vgprPool.checkOut(1, "flagVal")
+            module.add(VMovB32(dst=vgpr(tmpVgpr), src=src, comment="move flag value to vgpr"))
+            module.add(self.setFlagValue(writer, src=vgpr(tmpVgpr), soffset=soffset, comment=comment))
+            writer.vgprPool.checkIn(tmpVgpr)
         return module
 
     def setFlagValue(self, writer, src, soffset, comment=""):
@@ -2097,10 +2187,10 @@ class StreamK(Component):
     def getFlagValue(self, writer, dst, soffset, comment=""):
         """Buffer-load primitive for the StreamK flag.
 
-        Used by `StreamKMemoryOrderingDevScopeFences.readFlag` to perform a
-        VMEM-coherent flag load. Default arches read the flag via SMEM
-        directly in `StreamKMemoryOrderingDefault.readFlag` and never call
-        this helper.
+        Used by VMEM flag paths (`StreamKMemoryOrderingDevScopeFences` and
+        `StreamKMemoryOrderingGfx9Xcd`) to perform a coherent flag load.
+        Default arches read the flag via SMEM in
+        `StreamKMemoryOrderingDefault.readFlag` and never call this helper.
         """
         module = Module("Buffer Load Flag Value")
         memOrder = Component.StreamKMemoryOrdering.find(writer)
@@ -4300,12 +4390,8 @@ class StreamKDynamic(StreamK):
             module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr+2), src=vgpr("Serial"), comment="Wave 0 updates flags"))
             module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
             module.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(), comment="Skip flag reset"))
-            if writer.states.asmCaps["HasScalarStore"]:
-                # (tmpSgpr+2) contains a vlue of 0, use it to reset the flag
-                module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="reset flag"))
-            else:
-                module.add(VMovB32(dst=vgpr(tmpVgpr), src=0, comment="move 0 to tmpVgpr"))
-                module.add(self.setFlagValue(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr), comment="reset flag"))
+            # (tmpSgpr+2) is 0 on wave 0 (Serial==0); use it to reset the flag
+            module.add(self.emitFlagStore(writer, src=sgpr(tmpSgpr+2), soffset=sgpr(tmpSgpr), comment="reset flag"))
             module.add(skipFlagReset)
             writer.sgprPool.checkIn(tmpSgpr)
 
@@ -5217,14 +5303,9 @@ class StreamKHybrid(StreamK):
                 mod.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
                 mod.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(),
                                     comment="Skip flag reset"))
-                if writer.states.asmCaps["HasScalarStore"]:
-                    mod.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2),
-                                      soffset=sgpr(tmpSgpr),
-                                      smem=SMEMModifiers(glc=True), comment="reset flag"))
-                else:
-                    mod.add(VMovB32(dst=vgpr(tmpVgpr), src=0, comment="move 0 to tmpVgpr"))
-                    mod.add(self.setFlagValue(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr),
-                                              comment="reset flag"))
+                # (tmpSgpr+2) is 0 on wave 0 (Serial==0); use it to reset the flag
+                mod.add(self.emitFlagStore(writer, src=sgpr(tmpSgpr+2), soffset=sgpr(tmpSgpr),
+                                           comment="reset flag"))
                 mod.add(skipFlagReset)
                 writer.sgprPool.checkIn(tmpSgpr)
 
