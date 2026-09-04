@@ -285,7 +285,7 @@ TEST(TestReferenceOpCoverage, KnownGapLookupIsScopedToTheReferenceAsked)
 // The fp8 batch bundles are a GPU-only gap: the CPU reference implements fp8, so
 // listing them for CPU would wrongly assert it cannot run them. Pins the asymmetry
 // rather than leaving it to a comment.
-TEST(TestReferenceOpCoverage, Fp8BatchGapsAreGpuOnly)
+TEST(TestReferenceOpCoverage, Fp8BatchGapsAreNotListedForCpu)
 {
     for(const char* bundleId : {"quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
                                 "quick_SdpaFwd_bhsd_fp8_hd128_nomask_batch_Small.Small"})
@@ -344,7 +344,7 @@ TEST(TestReferenceOpCoverage, CpuSdpaIsLimitedByWorkingSet)
 
 // The gate is CPU-only: the GPU reference runs every one of these in milliseconds
 // and is what keeps the excluded bundles covered.
-TEST(TestReferenceOpCoverage, GpuIsNeverGatedOnCost)
+TEST(TestReferenceOpCoverage, OnlyTheCpuReferenceIsGatedOnCost)
 {
     const auto huge = buildSdpaGraph(8192);
 
