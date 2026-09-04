@@ -28,7 +28,7 @@ from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueSet, SignatureBase
 from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, True16Modifiers, \
-                      MUBUFModifiers, SMEMModifiers, EXEC, VCC, RegisterContainer, \
+                      MUBUFModifiers, SMEMModifiers, FLATModifiers, EXEC, VCC, RegisterContainer, \
                       DPPModifiers, vgpr, sgpr, accvgpr, mgpr, ContinuousRegister, \
                       HWRegContainer, GLOBALModifiers, MemTokenData
 from rocisa.instruction import SGetPositivePCOffset, SLongBranch, SLongBranchPositive, SLongBranchNegative, SCLongBranchScc0, SCLongBranchScc1, SCLongBranchVccnz, \
@@ -57,7 +57,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SLShiftRightB64, SLoadB32, SLoadB64, SMFMAInstruction, SMemLoadInstruction, SMaxI32, SMaxU32, SMinI32, \
   SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SOrSaveExecB32, \
   SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
-  SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
+  SWaitCnt, SWaitXCnt, SWaitAlu, SXorB32, FlatAtomicDecU32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
   VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
   VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
   VCmpLtU32, VCmpNeU64, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, VCvtI32toF32, \
@@ -17985,9 +17985,12 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SCmpEQU32(sgpr("Offset"), 0))
     mod.add(SCBranchSCC1(label_wave_end.getLabelName()))
     mod.add(SLShiftLeftB32(sgpr("Tmp"), 1, sgpr("Offset")))
-    mod.add(VCmpLtU32(sgpr("Tmp+2",2), vgpr("Widx"), sgpr("Tmp")))
-    mod.add(VCmpGEU32(sgpr("Tmp+4",2), vgpr("Widx"), sgpr("Offset")))
-    mod.add(SAndB64(VCC(), sgpr("Tmp+2",2), sgpr("Tmp+4",2)))
+    # EXEC/VCC masks are wave-width: 1 sgpr on wave32, 2 sgprs on wave64.
+    laneSGPRC = self.states.laneSGPRCount
+    SAndBX = SAndB32 if wave_size == 32 else SAndB64
+    mod.add(VCmpLtU32(sgpr("Tmp+2",laneSGPRC), vgpr("Widx"), sgpr("Tmp")))
+    mod.add(VCmpGEU32(sgpr("Tmp+4",laneSGPRC), vgpr("Widx"), sgpr("Offset")))
+    mod.add(SAndBX(VCC(), sgpr("Tmp+2",laneSGPRC), sgpr("Tmp+4",laneSGPRC)))
     mod.add(SCBranchVCCNZ(label_wave_upper.getLabelName()))
     mod.add(VCmpLtU32(VCC(), vgpr("Widx"), sgpr("Offset")))
     mod.add(SCBranchVCCNZ(label_wave_lower.getLabelName()))
@@ -18049,6 +18052,43 @@ class KernelWriterAssembly(KernelWriter):
     mod.addSpaceLine()
     return mod
 
+  def generateAtomicDecU32(self, kernel, dst, base) -> Module:
+    # HasSAtomic-gated wrap-decrement of a global synchronizer counter.
+    # dst holds the wrap value on input and receives the pre-decrement value.
+    # base is the 2-sgpr 64-bit global address of the counter.
+    module = Module("atomicDec")
+    if self.states.asmCaps["HasSAtomic"]:
+      module.add(SAtomicDec(dst=dst, base=base, smem=SMEMModifiers(glc=True)))
+    else:
+      # Arches without scalar atomic (e.g. gfx1250): flat atomic under a lane-0 EXEC mask.
+      addrVgpr = self.vgprPool.checkOutAligned(2, 2, "addrVgpr")
+      dataVgpr = self.vgprPool.checkOut(1)
+      dstVgpr  = self.vgprPool.checkOut(1)
+      numSgpr  = 1 if kernel["WavefrontSize"] == 32 else 2
+      SMovExec = SMovB32 if numSgpr == 1 else SMovB64
+      tmpSgpr  = self.sgprPool.checkOutAligned(numSgpr, numSgpr, preventOverflow=False)
+
+      module.add(VMovB32(dst=vgpr(dataVgpr), src=dst, comment="wrap value"))
+      module.add(VMovB64(dst=vgpr(addrVgpr, 2), src=base, comment="atomic address"))
+      module.add(SMovExec(dst=sgpr(tmpSgpr, numSgpr), src=EXEC(), comment="save EXEC"))
+      module.add(SMovExec(dst=EXEC(), src=1, comment="only lane 0 active"))
+      if self.states.archCaps["RequiresXCntForVolatileVMEM"] or \
+          self.states.archCaps["EnableXnackReplay"]:
+        module.add(SWaitXCnt(xcnt=0, comment="drain in-flight VMEM before flat atomic"))
+      atomicFlat = FLATModifiers(scope=CacheScope.SCOPE_DEV) \
+          if self.states.archCaps["DefaultScopeIsCULocal"] else None
+      module.add(FlatAtomicDecU32(dst=vgpr(dstVgpr), addr=vgpr(addrVgpr, 2),
+                                  data=vgpr(dataVgpr), modifier=atomicFlat))
+      module.add(SMovExec(dst=EXEC(), src=sgpr(tmpSgpr, numSgpr), comment="restore EXEC"))
+      module.add(SWaitCnt(vlcnt=0, comment="wait for atomic return"))
+      module.add(VReadfirstlaneB32(dst=dst, src=vgpr(dstVgpr), comment="read atomic return value"))
+
+      self.vgprPool.checkIn(addrVgpr)
+      self.vgprPool.checkIn(dataVgpr)
+      self.vgprPool.checkIn(dstVgpr)
+      self.sgprPool.checkIn(tmpSgpr)
+    return module
+
   def amax_output_result(self, kernel) -> Module:
     wave_size = kernel["WavefrontSize"]
     amaxInType = kernel["ProblemType"]["ComputeDataType"]
@@ -18061,6 +18101,17 @@ class KernelWriterAssembly(KernelWriter):
     label_final_loop = Label("final_loop", 'final_loop')
     label_final_output = Label("final_output", 'final_output')
     mod.addSpaceLine()
+
+    # The per-workgroup partial written below is consumed by whichever workgroup
+    # wins the flat_atomic_dec_u32 race, i.e. from a different CU. On arches that
+    # default VMEM ops to CU-local scope the partial could be served out of L1,
+    # so force device scope on both sides as the GSU workspace handshake does.
+    culocal = self.states.archCaps["DefaultScopeIsCULocal"]
+    trustBufferOob = self.states.asmCaps["HasPartialOOB"]
+    def wsMubuf():
+      if culocal:
+        return MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV)
+      return MUBUFModifiers(offen=True, glc=True, slc=True)
 
     mod.add(VReadfirstlaneB32(sgpr("Tmp"), vgpr("Serial")))
     mod.add(SCmpEQU32(sgpr("Tmp"), 0))
@@ -18082,12 +18133,18 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(VMovB32(vgpr("Offset"), 0))
 
     # TODO- select inst
-    mod.add(BufferStoreB32(vgpr("AmaxOut"), vgpr("Offset"), sgpr("Dst",4), sgpr("Offset"), MUBUFModifiers(offen=True, glc=True, slc=True)))
-    mod.add(SWaitCnt(vlcnt=0))
+    mod.add(BufferStoreB32(vgpr("AmaxOut"), vgpr("Offset"), sgpr("Dst",4), sgpr("Offset"), wsMubuf()))
+    if culocal:
+      # The atomic dec below advertises this partial, so the store has to have
+      # landed first; vlcnt does not track stores on these arches.
+      mod.add(SWaitCnt(vlcnt=0, vscnt=0, comment="wait for partial amax store"))
+    else:
+      mod.add(SWaitCnt(vlcnt=0))
     mod.addSpaceLine()
 
     mod.add(SSubI32(sgpr("Tmp"), sgpr("NumGroup"), 1))
-    mod.add(SAtomicDec(sgpr("Tmp"), sgpr("AddressSy",2), SMEMModifiers(glc=True)))
+    # HasSAtomic-gated: SAtomicDec on CDNA, flat_atomic_dec_u32 fallback on gfx1250.
+    mod.add(self.generateAtomicDecU32(kernel, dst=sgpr("Tmp"), base=sgpr("AddressSy",2)))
     mod.add(SWaitCnt(vlcnt=0, kmcnt=0))
     mod.add(SCmpEQU32(sgpr("Tmp"), 1))
     mod.add(SCBranchSCC0(label_end.getLabelName()))
@@ -18108,9 +18165,19 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(label_final_loop)
 
     # TODO- select inst
-    mod.add(BufferLoadB32(vgpr(f"Value"), vgpr("Offset"), sgpr("Src",4), 0, MUBUFModifiers(offen=True, glc=True, slc=True)))
+    mod.add(BufferLoadB32(vgpr(f"Value"), vgpr("Offset"), sgpr("Src",4), 0, wsMubuf()))
     mod.add(SWaitCnt(vlcnt=0))
     mod.addSpaceLine()
+
+    # NumGroup is rounded up to a whole wave here, so the last iteration reads
+    # past the partials this launch wrote. Where the buffer SRD does the OOB
+    # clipping those lanes read back as zero, but where it does not the tail
+    # slots still hold a previous launch's larger partials and skew the result.
+    if not trustBufferOob:
+      mod.add(VCmpLtU32(VCC(), vgpr("Offset"), sgpr("Src+2"), comment="slot within NumGroup?"))
+      mod.add(VCndMaskB32(dst=vgpr("Value"), src0=0, src1=vgpr("Value"), src2=VCC(), \
+                          comment="ignore partials past NumGroup"))
+      mod.addSpaceLine()
 
     # TODO- F16?
     mod.add(VMaxF32(vgpr("AmaxOut"), vgpr("AmaxOut"), vgpr("Value", isAbs=True)))

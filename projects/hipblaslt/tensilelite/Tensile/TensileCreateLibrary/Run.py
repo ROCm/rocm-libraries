@@ -561,9 +561,11 @@ def writeSolutionsAndKernels(
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
     compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
     with timing_context("python_kernel_write_assemble"):
+        # Duplicates share one .s/.o path; assemble each unique kernel once to avoid a parallel race.
+        uniqueResults = [r for r, k in zip(asmResults, asmKernels) if not k.duplicate]
         ret = ParallelMap2(
             compose(assemble, unaryWriteAssembly),
-            asmResults,
+            uniqueResults,
             "Writing assembly kernels",
             return_as="list",
             multiArg=False,
