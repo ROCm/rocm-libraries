@@ -331,10 +331,26 @@ struct BlockFmhaPipelineQRKSVS
                 set_tile(m, sink_v * scale_s * C_LOG2E);
             else
                 set_tile(m, sink_v * C_LOG2E);
+            // BLOCKSCALE scales every real-tile rowsum by 2^shift (see the p_compute stage
+            // below) so it stays in the accurate part of the FP8 range before the P*V GEMM;
+            // seed l in the same units, or the sink's share of the softmax denominator is
+            // diluted by that same factor once real tiles start accumulating into l.
+            if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
+            {
+#if CK_TILE_USE_OCP_FP8
+                set_tile(l, SMPLComputeDataType{exp2(OCP_FP8_SHIFT)});
+#else
+                set_tile(l, SMPLComputeDataType{exp2(FNUZ_FP8_SHIFT)});
+#endif
+            }
+            else
+            {
+                set_tile(l, SMPLComputeDataType{1.0f});
+            }
 #else
             set_tile(m, sink_v);
-#endif
             set_tile(l, SMPLComputeDataType{1.0f});
+#endif
         }
         else
         {
