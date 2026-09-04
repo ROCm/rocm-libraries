@@ -199,57 +199,71 @@ and use it as the compiler launcher. No additional configuration is needed.
 
 ## How to Rebuild Object Codes Directly from Assembly
 
-During the tuning process, it is of interest to modify an assembly file/s and rebuild the corresponding object file/s and then relink the corresponding co file. Currently, we generate additional source files and a script to provide this workflow.
+During tuning it is often useful to edit one or more assembly kernels and rebuild the `.co` without re-running the full Tensile pipeline. The `invoke asm` task handles that incremental rebuild and works on Linux and Windows.
 
-A new `Makefile` is added that manages rebuilding a co file during iterative development when tuning. One modifies an assembly file of interest, then runs `make` and make will detect what file/s changed and rebuild accordingly.
+**You don't need to rerun CMake unless you delete the `tensile-out` folder.**
 
-Assumptions:
+### Basic usage
 
-- Each problem directory contains a library directory with one co file corresponding to one architecture
+```bash
+# 1. Edit an assembly file under:
+#    tensile-out/1_BenchmarkProblems/<problem>/00_Final/.../assembly/
 
-**Edit**(2025/3/31) ``rocisa`` use the CMake build system instead of the ``virtualenv``. The behavior of the TensileLite changed a bit with only one extra line.
+# 2. Reassemble and relink
+invoke asm --tensile-out tensile-out
 
-Example:
-
-```cmake -DTENSILE_BIN=Tensile -DDEVELOP_MODE=ON -S <path-to-tensilelite-root> -B <tensile-out>```
-
-The script will be created in the build folder and will be named in Tensile.bat or Tensile.sh depending on the platform. Then you can then run the script under the ``tensile-out`` folder as usual:
-
-> **Deprecated:** `Tensile.sh` / `Tensile.bat` will be removed in a future release.
-> Run `Tensile/bin/Tensile` directly instead.
-
-```
-Tensile.sh <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
+# Default --tensile-out is build_tmp (matches invoke build-client), so if you
+# used the default build directory you can just run:
+invoke asm
 ```
 
-or
+The rebuilt `.co` is written back to the `library/` directory that
+`ClientParameters.ini` already references, so you can re-run the benchmark
+client immediately.
 
-```
-Tensile.bat <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
-```
+### Wavefront size
 
-**You don't need to rerun CMake unless you delete the ``tensile-out`` folder.**
+```bash
+# gfx942 / gfx950 (64-wide, default)
+invoke asm --tensile-out tensile-out --arch gfx942 --wave 64
 
-To build asm only:
-
-```
-# modify an assembly file in tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/source/build_tmp/SOURCE/assembly
-make co TENSILE_OUT=tensile-out
-# re-run the client
+# gfx1100 (32-wide)
+invoke asm --tensile-out tensile-out --arch gfx1100 --wave 32
 ```
 
-The Makefile will set the target based on the name of the co file and sets a default wavefront flag but each of these can be customized as follows:
+`--arch` is auto-detected from the `.co` filename (e.g. `TensileLibrary_gfx942.co` → `gfx942`).
+If detection fails, pass it explicitly — including the xnack suffix if needed:
 
-For 64 wavefront size systems,
-
-```
-make co TENSILE_OUT=tensile-out ARCH="gfx942" WAVE=64
-```
-
-For 32 wavefront size systems,
-
-```
-make co TENSILE_OUT=tensile-out ARCH="gfx1100" WAVE=32
+```bash
+invoke asm --tensile-out tensile-out --arch "gfx942:xnack-"
 ```
 
-In addition, we provide `ASM_ARGS` and `LINK_ARGS` as additional customization points for the assemble and link step respectively. If the architecture cannot be detect corectly, you may need to manually add ``ARCH="gfx942:xnack-"`` to the ``make`` command.
+### Targeting specific assembly files
+
+```bash
+ASM_DIR=tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/source/build_tmp/SOURCE/assembly
+
+# Rebuild a single kernel
+invoke asm --tensile-out tensile-out --srcfiles "$ASM_DIR/kernel_0.s"
+
+# Rebuild all kernels in a directory (glob)
+invoke asm --tensile-out tensile-out --srcfiles "$ASM_DIR/*.s"
+```
+
+### Extra assembler / linker flags
+
+```bash
+invoke asm --tensile-out tensile-out --asm-args "-v" --link-args "--emit-relocs"
+```
+
+### Full option reference
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--tensile-out` | `build_tmp` | Path to the Tensile output directory |
+| `--arch` | auto | GPU architecture (e.g. `gfx942`, `gfx1100`, `gfx942:xnack-`) |
+| `--wave` | `64` | Wavefront size: `32` or `64` |
+| `--srcfiles` | auto | Explicit `.s` file(s) or glob pattern to assemble |
+| `--asm-args` | — | Extra flags forwarded to the assembler step |
+| `--link-args` | — | Extra flags forwarded to the linker step |
+| `--rocm-path` | auto | Path to ROCm installation (uses `ROCM_PATH` env or `rocm-sdk` if omitted) |

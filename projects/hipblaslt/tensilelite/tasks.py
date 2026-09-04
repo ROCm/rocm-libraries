@@ -448,4 +448,128 @@ def build_coverage(
         ])
 
     c.run(shlex.join(cmake_cmd))
+
+
+@task(
+    help={
+        "tensile_out": "Tensile output directory (default: build_tmp, matching invoke build-client).",
+        "arch": "GPU architecture override (e.g. gfx942:xnack-). Auto-detected from .co filename if omitted.",
+        "wave": "Wavefront size: 32 or 64 (default: 64).",
+        "srcfiles": "Explicit .s file(s) to assemble instead of auto-detecting. Glob patterns are supported.",
+        "asm_args": "Extra flags passed to the assembler (amdclang++ -c step).",
+        "link_args": "Extra flags passed to the linker (amdclang++ link step).",
+        "rocm_path": "Path to ROCm installation for amdclang++.",
+    }
+)
+def asm(
+    c,
+    tensile_out="build_tmp",
+    arch=None,
+    wave=64,
+    srcfiles=None,
+    asm_args=None,
+    link_args=None,
+    rocm_path=None,
+):
+    """Reassemble and relink .co files from modified assembly under TENSILE_OUT.
+
+    Edit a .s file under TENSILE_OUT/1_BenchmarkProblems/*/00_Final/, then run
+    this task to rebuild. The rebuilt .co is written back to the library/
+    directory that ClientParameters.ini already references, so you can re-run
+    the benchmark client immediately.
+
+    Works on Linux and Windows without requiring make.
+
+    Examples::
+
+        invoke asm
+        invoke asm --arch gfx942 --wave 64
+        invoke asm --srcfiles "build_tmp/1_BenchmarkProblems/Cijk_.../00_Final/source/build_tmp/SOURCE/assembly/kernel_0.s"
+    """
+    import glob as _glob
+
+    if sys.platform == "win32":
+        _load_stinkytofu_tasks()._setup_msvc_env()
+    rocm = rocm_path or _detect_rocm()
+    amdclang = (
+        shutil.which("amdclang++")
+        or shutil.which("amdclang++.exe")
+        or os.path.join(rocm, "bin", "amdclang++")
+    )
+    if not shutil.which(amdclang) and not os.path.isfile(amdclang):
+        print("Error: amdclang++ not found. Run 'rocm-sdk init' or pass --rocm-path.", file=sys.stderr)
+        raise Exit(code=1)
+
+    tensile_path = pathlib.Path(tensile_out)
+    wavefront_flag = "-mwavefrontsize64" if int(wave) == 64 else "-mno-wavefrontsize64"
+
+    # Find all .co files under 1_BenchmarkProblems/*/00_Final/**/library/
+    co_files = [
+        f for f in tensile_path.glob("1_BenchmarkProblems/*/00_Final/**/*.co")
+        if "library" in f.parts
+    ]
+    if not co_files:
+        print(f"Error: no .co files found under {tensile_out}/1_BenchmarkProblems/*/00_Final/", file=sys.stderr)
+        raise Exit(code=1)
+
+    for co_file in co_files:
+        parts = co_file.parts
+        problem = parts[parts.index("1_BenchmarkProblems") + 1]
+        problem_final = tensile_path / "1_BenchmarkProblems" / problem / "00_Final"
+
+        # Resolve .s files
+        if srcfiles:
+            s_files = [pathlib.Path(p) for p in _glob.glob(srcfiles)]
+        else:
+            s_files = [f for f in problem_final.rglob("*.s") if "assembly" in f.parts]
+
+        if not s_files:
+            print(f"Warning: no .s files found for {problem}, skipping.")
+            continue
+
+        target_arch = arch or co_file.stem.replace("TensileLibrary_", "")
+
+        true16_flags = (
+            ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
+            if "gfx1250" in target_arch else []
+        )
+
+        extra_asm = shlex.split(asm_args) if asm_args else []
+        extra_link = shlex.split(link_args) if link_args else []
+
+        # Assemble .s -> .o
+        o_files = []
+        for s_file in s_files:
+            o_file = s_file.with_suffix(".o")
+            print(f"rebuilding {s_file.name} for {target_arch}")
+            subprocess.run(
+                [
+                    amdclang,
+                    "-x", "assembler",
+                    "-target", "amdgcn-amd-amdhsa",
+                    "-mcode-object-version=4",
+                    f"-mcpu={target_arch}",
+                    wavefront_flag,
+                    *true16_flags,
+                    *extra_asm,
+                    "-c", "-o", str(o_file), str(s_file),
+                ],
+                check=True,
+            )
+            o_files.append(o_file)
+
+        # Link .o -> .co
+        print(f"relinking {problem} {co_file.name}")
+        subprocess.run(
+            [
+                amdclang,
+                "-target", "amdgcn-amd-amdhsa",
+                "-Xlinker", "--build-id=sha1",
+                *true16_flags,
+                *extra_link,
+                "-o", str(co_file),
+                *[str(f) for f in o_files],
+            ],
+            check=True,
+        )
     c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
