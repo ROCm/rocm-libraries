@@ -77,6 +77,7 @@ from .SubtileGeometry import (
   ABLRGeometry,
   GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
   LRTag_1x1, LRTag_1x2, LRTag_TLU1,
+  GRCoopSpread, planGRCoopSpread,
   ABTilePair,
   CDTileGeometry,
   MXScaleInputGeometry,
@@ -321,6 +322,27 @@ AB_B16_TLU1_16x1 = ABTilePair(
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(16, 1), loadShape=LoadShape(m=16, k=1), loadWidth=32),                            # 256-bit LR: 16 bf16 along M
 )
 
+# Column-major FP4 (TLU=1, NT): the MFMA-K layout is recovered on the LDS read
+# via ds_read_b64_tr_b4.  Taller stacks below pack more MFMA-M tiles per
+# contiguous strip at the same b128 load width.
+AB_B4_TLU1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(2, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 2 MFMA-M tiles = 32 fp4 = 16 B contiguous along M, 1 b128 GR load
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(2, 1), loadShape=LoadShape(m=32, k=1)),                                   # 128-bit LR: 32 fp4 along M
+)
+AB_B4_TLU1_4x1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(4, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 4 MFMA-M tiles = 64 fp4 = 32 B contiguous along M, 2 b128 GR loads
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(4, 1), loadShape=LoadShape(m=32, k=1)),
+)
+AB_B4_TLU1_8x1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(8, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 8 MFMA-M tiles = 128 fp4 = 64 B contiguous along M, 4 b128 GR loads
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(8, 1), loadShape=LoadShape(m=32, k=1)),
+)
+AB_B4_TLU1_16x1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(16, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 16 MFMA-M tiles = 256 fp4 = 128 B contiguous along M, 8 b128 GR loads
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(16, 1), loadShape=LoadShape(m=32, k=1)),
+)
+
+
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
 _MXS_B8 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp8', 'bf8'))
@@ -357,6 +379,10 @@ AB_GEOMETRY_MAP = {
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
   "AB_B16_W32":  AB_B16_W32,
+  "AB_B4_TLU1":  AB_B4_TLU1,
+  "AB_B4_TLU1_4x1": AB_B4_TLU1_4x1,
+  "AB_B4_TLU1_8x1": AB_B4_TLU1_8x1,
+  "AB_B4_TLU1_16x1": AB_B4_TLU1_16x1,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
@@ -441,22 +467,69 @@ class TileInfo:
       self.subtileShape        = list(gr_cfg.subtileShape)
       self.subtileCount        = gr_cfg.subtileCount
       self.subtileStride       = gr_cfg.subtileStride
+      # Strip count along the free dim.  Rounded UP: a macro tile that is not a
+      # multiple of the stack (96 free-dim elements over an 8-tile stack) is
+      # covered by a whole strip whose surplus M tiles are fetched into LDS and
+      # never read back.  Exact for every power-of-two tile, so this is a no-op
+      # there.  Every consumer -- LDS sizing, the GR m0 walk, the LR K-window
+      # stride -- keys off this, so the round-up has to happen once, here.
       self.globalSubtileGrid = list(gr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
-      self.localSubtileGrid  = [int(self.localMMATileGrid[0] / self.subtileShape[0]),
+      self.globalSubtileGrid[0] = math.ceil(self.globalSubtileGrid[0])
+      # Waves per GR strip along the free dim.  Normally 1: the GR strip is one
+      # wave's M extent, so each wave owns whole strips.  With a tall stack the
+      # GR strip spans several waves' extents, so localMMATileGrid[0] (per wave)
+      # is smaller than subtileShape[0] and the plain ratio would floor to 0.
+      # Those waves cooperate on one strip instead, splitting its K rows.
+      grStackM      = int(self.subtileShape[0])
+      perWaveMTiles = int(self.localMMATileGrid[0])
+      self.grWavesPerStrip = max(1, grStackM // perWaveMTiles) if perWaveMTiles else 1
+      self.localSubtileGrid  = [max(1, int(perWaveMTiles / grStackM)),
                                  int(self.localMMATileGrid[1] / self.subtileShape[1])]
       self.subtileSize       = gr_cfg.subtileSizeBytes()
 
       # Cooperative GR load counts (scheduler: vmcnt, loop trip count).
       # loadRatioGR uses the global GR tile size (subtileShape * subtileCount),
       # which is the full hardware granularity for one cooperative load round.
-      _grBytesPerLoad      = gr_cfg.bytesPerLoad(self.numWaves)
-      _globalGRTileSize    = self.subtileSize * (int(self.subtileCount) if self.subtileCount else 1)
-      self.loadRatioGR     = _grBytesPerLoad / _globalGRTileSize if _globalGRTileSize else 0
+      # Waves that COOPERATE ON THE FETCH -- distinct from grWavesPerStrip, which
+      # counts waves sharing a strip on read-back and picks the swizzle.  See
+      # planGRCoopSpread for how the group is chosen; TLU=0 fetches with every
+      # wave and does not slice.
+      isTLU1 = isinstance(getattr(gr_cfg, "tag", None), GRTag_TLU1)
+      otherWaves = max(1, self.numWaves // self.waveGroupSize)
+      numWin = int(self.localSubtileGrid[1])
+      if isTLU1:
+        stripBytes = self.subtileSize * (int(self.subtileCount) if self.subtileCount else 1)
+        spread = planGRCoopSpread(wavesPerStrip=self.grWavesPerStrip,
+                                   otherWaves=otherWaves,
+                                   stripBytes=stripBytes,
+                                   numWindows=numWin,
+                                   bytesPerLoad=gr_cfg.bytesPerLoad)
+      else:
+        spread = GRCoopSpread(self.numWaves, 1)
+
+      self.grOtherAxisWaves = otherWaves
+      self.grCoopWaves = spread.coopWaves
+      # K slices a strip is cut into so the other-axis waves stop refetching it.
+      # >1 means a per-wave sub-strip offset is applied, which the XOR swizzle
+      # cannot absorb -- SubtileTLUSwizzle keys off this to pick col_scatter.
+      self.grKSplit = max(1, spread.coopWaves // max(1, self.grWavesPerStrip)) if isTLU1 else 1
+      # K windows the fetch group is additionally spread over.  A wave issues
+      # only grWindowsPerWave of them and reaches its own set through a runtime
+      # window offset applied to both the global and the LDS write address.
+      self.grKWindowSplit = spread.windowSplit
+      self.grWindowsPerWave = max(1, numWin // spread.windowSplit)
+      # Effective wave count for GR cooperative-load math (numGRPerSubtile,
+      # localGRGranularity): the waves whose loads tile one strip between them.
+      self.grLoadWaves = spread.coopWaves
+      coopBytesPerLoad      = gr_cfg.bytesPerLoad(self.grLoadWaves)
+      globalGRTileSize    = self.subtileSize * (int(self.subtileCount) if self.subtileCount else 1)
+      self.loadRatioGR     = coopBytesPerLoad / globalGRTileSize if globalGRTileSize else 0
       self.numGRPerSubtile = int(math.ceil(1.0 / self.loadRatioGR)) if self.loadRatioGR else 0
-      self.numGRTotal      = int(self.localSubtileGrid[0] * self.localSubtileGrid[1] / self.loadRatioGR) if self.loadRatioGR else 0
+      self.numGRTotal      = int(self.localSubtileGrid[0] * self.grWindowsPerWave / self.loadRatioGR) if self.loadRatioGR else 0
 
       # LR subtile grid — used by LR emit dispatch (may differ from GR)
       self.lrGlobalSubtileGrid = list(lr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
+      self.lrGlobalSubtileGrid[0] = math.ceil(self.lrGlobalSubtileGrid[0])
       self.lrSubtileSize       = lr_cfg.subtileSizeBytes()
       self.lrSubtileShape      = list(lr_cfg.subtileShape)
       self.lrLocalSubtileGrid  = list(self.localSubtileGrid)  # AB: LR iterates over GR subtile grid
@@ -547,9 +620,11 @@ class TileInfo:
       gr_cfg = self.gr.config
       lr_cfg = self.lr.config
       mmaM, mmaK = geometry.mmaTileShape
-      self._check_dim(self.macroTile, gr_cfg.subtileShape[0] * mmaM, self.globalSubtileGrid[0], self.waveGroupSize, 'macroTile[GR]')
+      # The free dim may be over-covered by up to one strip when the macro tile
+      # is not a multiple of the stack; the K dim must still tile exactly.
+      self._check_dim(self.macroTile, gr_cfg.subtileShape[0] * mmaM, self.globalSubtileGrid[0], self.waveGroupSize, 'macroTile[GR]', allowOver=True)
       self._check_dim(self.depthU,    gr_cfg.subtileShape[1] * mmaK, self.globalSubtileGrid[1], 1,                 'depthU[GR]')
-      self._check_dim(self.macroTile, lr_cfg.subtileShape[0] * mmaM, self.lrGlobalSubtileGrid[0], self.waveGroupSize, 'macroTile[LR]')
+      self._check_dim(self.macroTile, lr_cfg.subtileShape[0] * mmaM, self.lrGlobalSubtileGrid[0], self.waveGroupSize, 'macroTile[LR]', allowOver=True)
       self._check_dim(self.depthU,    lr_cfg.subtileShape[1] * mmaK, self.lrGlobalSubtileGrid[1], 1,                 'depthU[LR]')
     elif isinstance(geometry, MXScaleTilePair):
       # GR covers the full scale MMA tile grid (subtileShape = entire grid, globalSubtileGrid=[1,1])
@@ -568,14 +643,22 @@ class TileInfo:
 
   # --- Consistency validation ---
 
-  def _check_dim(self, mt, subtile_span, num_subtiles, wg_size, label):
+  def _check_dim(self, mt, subtile_span, num_subtiles, wg_size, label, allowOver=False):
     """Verify subtile_span * num_subtiles * wg_size == mt for one tile dimension.
 
     subtile_span : elements covered by one subtile in this dim
     num_subtiles : globalSubtileGrid value for this dim (may be float)
     wg_size      : wave group count partitioning this dim (1 = no partitioning)
+    allowOver    : accept over-coverage by less than one subtile.  The free dim
+                   rounds its strip count up, so a macro tile that is not a
+                   multiple of the stack is covered by a strip whose surplus is
+                   loaded but never read.  More than one whole surplus strip
+                   would mean a strip nothing reads at all, which is a bug.
     """
-    if subtile_span * num_subtiles != mt:
+    covered = subtile_span * num_subtiles
+    if allowOver and mt <= covered < mt + subtile_span:
+      return
+    if covered != mt:
       raise ValueError(
         f"TileInfo({self.tc}): {label}={mt} not covered exactly. "
         f"subtile_span({subtile_span}) x globalSubtileGrid({num_subtiles}) "
@@ -1337,8 +1420,11 @@ def mainLoop(writer, kernel):
 
   lrAGran = ReadGranularity(mn=1, k=1)
   lrBGran = ReadGranularity(mn=1, k=1)
-  grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1]
-  grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1]
+  # A K-window split spreads grKWindowSplit consecutive K windows over the
+  # fetch group, so one GR round covers that many windows' worth of subIterK
+  # even though a wave issues only its own.
+  grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1] * int(getattr(tiA, "grKWindowSplit", 1))
+  grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1] * int(getattr(tiB, "grKWindowSplit", 1))
   # TDM: one tensor_load_to_lds covers the full localMMATileGrid.
   if kernel.get("enableTDMA", False):
     grAGran = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])

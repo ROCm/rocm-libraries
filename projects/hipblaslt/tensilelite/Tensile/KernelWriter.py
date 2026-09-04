@@ -37,7 +37,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, GlobalLoadB128, GlobalLoadB192, GlobalLoadB32, \
   GlobalLoadB64, GlobalLoadB96, GlobalLoadD16B16, GlobalLoadD16U8, GlobalLoadD16HIU8, \
   GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
-  MFMAInstruction, MXMFMAInstruction, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
+  MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64
 from rocisa.register import RegisterPool
@@ -51,6 +51,7 @@ from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
+from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -5055,10 +5056,38 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Should check for is swizzled instead of usesubtileimpl
     # TODO: Move this calculation to host-side?
-    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockA"] and kernel["UseSubtileImpl"]:
-      module.addComment("Scale StridesMXSA by 32")
-      module.add(SLShiftLeftB32(sgpr("StridesMXSA"), 5, sgpr("StridesMXSA")))
-      module.add(SLShiftLeftB32(sgpr("StridesMXSB"), 5, sgpr("StridesMXSB")))
+    if (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) and kernel["UseSubtileImpl"]:
+      # The scale GR steps one group per 32 rows of the free dim, so Strides<tc>
+      # must hold that group's byte span: paddedKBlocks * 32.  Strides<tc>+0 is
+      # the first non-unit stride, which with the free dim slow (TLU=0) already
+      # is paddedKBlocks -- a shift by 5 finishes it.  With the free dim fastest
+      # it is the free size instead, and shifting that scales the span by M or N
+      # rather than K, so every group past the first reads off the end.
+      for tc in ("MXSA", "MXSB"):
+        mxBlock = kernel["ProblemType"]["MXBlock%s" % tc[-1]]
+        if not mxBlock:
+          # No scales on this operand, so Strides<tc> is not a scale stride --
+          # and may not be allocated at all.
+          continue
+        if kernel["ProblemType"]["TLU%s" % tc]:
+          # The ceil-divide below is a shift, so the block size has to be a
+          # power of two.  Every MX format defines it as 32.
+          assert mxBlock & (mxBlock - 1) == 0, \
+                 "MXBlock%s must be a power of two, got %u" % (tc[-1], mxBlock)
+          module.addComment("%s group span = roundUp(ceil(K/%u), 8) * 32" % (tc, mxBlock))
+          module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("SizesSum"), src1=(mxBlock - 1),
+                             comment="K + %u - 1"%mxBlock))
+          module.add(SLShiftRightB32(sgpr("Strides%s"%tc), mxBlock.bit_length() - 1, sgpr("Strides%s"%tc),
+                                     comment="ceil(K/%u) = K blocks"%mxBlock))
+          module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("Strides%s"%tc), src1=7,
+                             comment="+ 8 - 1"))
+          module.add(SLShiftRightB32(sgpr("Strides%s"%tc), 3, sgpr("Strides%s"%tc),
+                                     comment="roundUp(K blocks, 8) / 8"))
+          module.add(SLShiftLeftB32(sgpr("Strides%s"%tc), 8, sgpr("Strides%s"%tc),
+                                    comment="* 8 blocks * 32 bytes"))
+        else:
+          module.addComment("Scale Strides%s by 32" % tc)
+          module.add(SLShiftLeftB32(sgpr("Strides%s"%tc), 5, sgpr("Strides%s"%tc)))
 
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
@@ -7034,96 +7063,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.asmAssert = Assert(self.states.laneSGPRCount, kernel["WavefrontSize"], self.db["EnableAsserts"])
 
-    def selectGRSubtileShape(tc):
-      """Select GR subtile shape based on wave cooperation level.
-
-      The GR tile shape represents the effective coverage per GR load round.
-      When multiple waves cooperate on a single GR load (waves_coop >= 4),
-      the GR tile expands from (1,2) to (2,2) MMA tiles.
-
-      For A: waves_coop = numWaves / MIWaveGroup[0]
-      For B: waves_coop = numWaves / MIWaveGroup[1]
-
-      Wave config → GR shape:
-        1x4 WG: A=(2,2), B=(1,2)   — A has 4 cooperating waves
-        4x1 WG: A=(1,2), B=(2,2)   — B has 4 cooperating waves
-        2x2 WG: A=(1,2), B=(1,2)   — 2 cooperating waves each
-        1x1 WG: A=(1,2), B=(1,2)   — 1 wave each
-
-      LR subtile shape is always (1,2) regardless of wave config.
-      """
-      mi = kernel["MIWaveGroup"]
-      numWaves = mi[0] * mi[1]
-      wg_idx = 0 if tc == 'A' else 1
-      wg_m = mi[wg_idx]
-      waves_coop = numWaves // wg_m
-      return (2, 2) if waves_coop >= 4 else (1, 2)
-
-    def initSubTileInfo(tc):
-      tileMap = {
-        'A' : self.states.a,
-        'B' : self.states.b,
-        'D' : self.states.d,
-        'MXSA' : self.states.mxsa,
-        'MXSB' : self.states.mxsb,
-      }
-      matrixInfo = tileMap[tc]
-      if tc == 'D':
-        geometry = selectDGeometry(kernel)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-      elif tc in ('A', 'B'):
-        grShape = selectGRSubtileShape(tc)
-        matrixInfo.grSubtileShape = grShape
-        geometry = selectABGeometry(kernel, tc)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-      elif tc in ('MXSA', 'MXSB'):
-        geometry = selectMXScaleGeometry(kernel, tc)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-
-
     if kernel["UseSubtileImpl"]:
-      initSubTileInfo('A')
-      initSubTileInfo('B')
-      initSubTileInfo('D')
-
-      if kernel["ProblemType"].get("MXBlockA", 0) > 0:
-        initSubTileInfo('MXSA')
-      if kernel["ProblemType"].get("MXBlockB", 0) > 0:
-        initSubTileInfo('MXSB')
-
-      self.ldsStartOffsetA = 0
-      aTileInfo = self.states.a.tileInfo
-      bTileInfo = self.states.b.tileInfo
-      numASubtiles = int(aTileInfo.globalSubtileGrid[0] * aTileInfo.globalSubtileGrid[1])
-      numBSubtiles = int(bTileInfo.globalSubtileGrid[0] * bTileInfo.globalSubtileGrid[1])
-      readSize = 2*aTileInfo.subtileSize
-      # Align A and B sizes to readSize for DTL 2xsubtile reads.
-      # TDM-based solution use padding per row. Take that into account for size calculation.
-      mtA = kernel["MacroTile0"]
-      mtB = kernel["MacroTile1"]
-      padA = int(getattr(aTileInfo, "ldsRowPadBytes", 0)) * mtA
-      padB = int(getattr(bTileInfo, "ldsRowPadBytes", 0)) * mtB
-      sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + readSize-1) // readSize) * readSize)
-      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + readSize-1) // readSize) * readSize)
-      self.ldsStartOffsetB = sizeA
-      sizeMXSA = 0
-      sizeMXSB = 0
-      if kernel["ProblemType"].get("MXBlockA", 0) > 0 and kernel["ProblemType"].get("MXBlockB", 0) > 0:
-        mxsaTileInfo = self.states.mxsa.tileInfo
-        mxsbTileInfo = self.states.mxsb.tileInfo
-
-        # For Swizzled scale we use extra LDS space for now to allow wider DTL loads
-        numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
-        sizeMXSA = mxsaTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
-        sizeMXSB = mxsbTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
-        self.ldsStartOffsetMXSA = sizeA + sizeB
-        self.ldsStartOffsetMXSB = sizeA + sizeB + sizeMXSA
-
-      self.ldsTotalSize = sizeA + sizeB + sizeMXSA + sizeMXSB
-
-      kernel["LdsNumBytes"] = max(1, int(self.ldsTotalSize * kernel["NumLdsBlk"]))
-      if kernel["LdsNumBytes"] > self.states.archCaps["DeviceLDS"]:
-        self.states.overflowedResources = 8
+      applyLdsLayout(self, kernel)
 
 
     #print(self.states.a.tileInfo.getLocalSubtileId(1,0))

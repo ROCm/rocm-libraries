@@ -28,6 +28,7 @@
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGen.hpp>
+#include <mxDataGenerator/PreSwizzle.hpp> // preSwizzleScalesGFX950PaddedSize
 #include "DataInitializationHelpers.hpp"
 #endif
 #include "TensorDataManipulation.hpp"
@@ -2076,27 +2077,29 @@ namespace TensileLite
                 constexpr size_t swizzleTileMN = 32; // 2 SIMDs * 16 lanes per wave for MN access
                 constexpr size_t tileK         = 256 / swizzleTileMN; // scale blocks per wave in K
 
+                // The scale tensor is [K blocks, MN] for a K-contiguous operand and
+                // the transpose of that for a free-dim contiguous one.
+                auto scaleDimsFor = [](TensorDescriptor const& scaleDesc, size_t boundIdx) {
+                    auto const& s = scaleDesc.sizes();
+                    // returns {K blocks, MN}
+                    return std::make_pair(s[boundIdx], s[boundIdx == 0 ? 1 : 0]);
+                };
+
                 if(MiK > 0)
                 {
                     if(problem.mxBlockA() > 0 && MiK % problem.mxBlockA() == 0)
                     {
-                        // Scale tensor dimensions from setMXScaleA are already padded
-                        // (K/mxBlock to multiple of 8, M to multiple of 32)
-                        auto const& mxsaSizes  = problem.mxsa().sizes();
-                        size_t      scaleRowsA = mxsaSizes[0];
-                        size_t      scaleColsA = mxsaSizes[1];
-                        if(scaleRowsA % tileK == 0 && scaleColsA % swizzleTileMN == 0)
+                        auto const [kBlocksA, mnA]
+                            = scaleDimsFor(problem.mxsa(), problem.boundIndices()[0].a);
+                        if(kBlocksA % tileK == 0 && mnA % swizzleTileMN == 0)
                             layoutA = MXScaleLayout::GFX950;
                     }
 
                     if(problem.mxBlockB() > 0 && MiK % problem.mxBlockB() == 0)
                     {
-                        // Scale tensor dimensions from setMXScaleB are already padded
-                        // (K/mxBlock to multiple of 8, N to multiple of 32)
-                        auto const& mxsbSizes  = problem.mxsb().sizes();
-                        size_t      scaleRowsB = mxsbSizes[0];
-                        size_t      scaleColsB = mxsbSizes[1];
-                        if(scaleRowsB % tileK == 0 && scaleColsB % swizzleTileMN == 0)
+                        auto const [kBlocksB, mnB]
+                            = scaleDimsFor(problem.mxsb(), problem.boundIndices()[0].b);
+                        if(kBlocksB % tileK == 0 && mnB % swizzleTileMN == 0)
                             layoutB = MXScaleLayout::GFX950;
                     }
                 }
@@ -2126,6 +2129,8 @@ namespace TensileLite
                   auto         cols       = dataDesc.sizes()[1];
                   auto         stride     = dataDesc.strides()[1];
                   size_t const batchCount = dataDesc.sizes().size() > 2 ? dataDesc.sizes()[2] : 1;
+
+                  bool const kIsRows = (isMatrixA && transposed) || (!isMatrixA && !transposed);
 
                   auto& pristineData = m_vdata[dataTensorEnum].pristine[dataDesc.dataType()];
                   auto& pristineScale = m_vdata[scaleTensorEnum].pristine[scaleEltType];
@@ -2204,11 +2209,23 @@ namespace TensileLite
                           = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
                       size_t const canonicalScaleElems = scaleDesc.totalAllocatedElements();
 
-                      // gfx1250 dimk pads the fast dim up to dimk = 128/mxBlock.
-                      // The scale tensor is allocated unpadded on gfx1250, so size
-                      // the staging buffer for the padded worst case.
+                      // Both swizzles pad, so the staging buffer holds the padded
+                      // result rather than the canonical size.
+                      size_t const kExtentSw  = static_cast<size_t>(kIsRows ? rows : cols);
+                      size_t const mnExtentSw = static_cast<size_t>(kIsRows ? cols : rows);
+                      size_t const kBlocksSw
+                          = (mxBlock > 0) ? (kExtentSw + mxBlock - 1) / mxBlock : 0;
+
                       size_t swizzledScaleElems = canonicalScaleElems;
-                      if(swizzleLayout == MXScaleLayout::GFX1250 && mxBlock > 0)
+                      if(swizzleLayout == MXScaleLayout::GFX950)
+                      {
+                          size_t const padded
+                              = DGen::preSwizzleScalesGFX950PaddedSize(mnExtentSw, kBlocksSw)
+                                * batchCount;
+                          if(padded > swizzledScaleElems)
+                              swizzledScaleElems = padded;
+                      }
+                      else if(swizzleLayout == MXScaleLayout::GFX1250 && mxBlock > 0)
                       {
                           size_t const slowDim = static_cast<size_t>(cols);
                           size_t const fastDim

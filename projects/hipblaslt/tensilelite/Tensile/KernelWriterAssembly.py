@@ -547,7 +547,13 @@ class KernelWriterAssembly(KernelWriter):
     tP["enableLDSTr"] = kernel["enableLDSTr%s"%tChar]
 
     lrInstPoolName = "LocalRead"
-    if tP["enableLDSTr"]:
+    # UseSubtileImpl TLU tiles (free-dim contiguous in LDS) recover the MFMA
+    # K-layout with transposed ds_read; the subtile scheduler emits those reads
+    # itself, but tP["localReadInstruction"] must still resolve to the matching
+    # transpose instruction (the classic selector has no entry for a sub-byte
+    # single-element read).
+    useSubtileTr = bool(kernel.get("UseSubtileImpl") and tP.get("tlu") and tChar in ("A", "B"))
+    if tP["enableLDSTr"] or useSubtileTr:
       lrInstPoolName = "TrLocalRead"
       maxTrLoadNumReturnedVgpr = 4 if self.states.asmCaps["HasLDSTrB128B16"] else 2
       if tP["bpeDS"] in (0.5, 1):
@@ -4627,6 +4633,13 @@ class KernelWriterAssembly(KernelWriter):
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
 
         strideF = self.strideRef(tc, tP['tileIdx'])
+        # A swizzled scale is block-linear, and its GR walks blocks by
+        # Strides<tc>+0 whatever the layout.  On TLU=1 strideRef returns a
+        # constStride literal, which would drop the scale into the data-shaped
+        # branch below; name the block stride so both layouts take the block
+        # formula.  TLU=0 already resolves to the same register.
+        if isMxSwizzledScaleLayout and self.isConstUnitStride(strideF):
+          strideF = sgpr("Strides%s"%tc)
         if not self.isConstUnitStride(strideF):
           if useFixedSrd2:
             # Tile-boundary SRD+2 for UseSubtileImpl (unified for MX scale and data A/B).
@@ -4664,6 +4677,47 @@ class KernelWriterAssembly(KernelWriter):
                   module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
+        elif useFixedSrd2:
+          # Unit-stride tile dim (TLU=1): the strided formula above cannot fire,
+          # and without this Srd+2 stays 0 and every load returns 0.  Bound the
+          # window along K instead:
+          #   Srd+2 = ((DepthU - 1) * unrollStride + span) * bpe + prePad
+          # DepthU-1, not DepthU: the base advances a window per iteration, so
+          # DepthU overshoots by one row and hangs once that row is unmapped.
+          unrollIdx = kernel["ProblemType"]["IndexUnroll"]
+          unrollStride = self.strideRef(tc, unrollIdx)
+          freeSpan = kernel[tP["mt"]]  # MT free elements (unit stride)
+          prePadElems = self.states.srdShiftLeft[tc]
+          module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), \
+                    unrollStride, kernel["DepthU"] - 1, comment="(DepthU-1) * unrollStride (last K row in window)"))
+          # Clamp the span to what is left of the tensor, as the strided branch
+          # does with SMinU32: the last workgroup owns fewer than MT when the
+          # size leaves a remainder, and that overhang lands off the allocation
+          # on the final K window (tile 96 over M 2048 faults).  Round up to a
+          # whole load first -- DTL drops the LDS write for a partial load, so
+          # cutting mid-lane leaves stale LDS for the valid elements in it.
+          grTileInfo = self.states.a.tileInfo if tc == 'A' else \
+                       (self.states.b.tileInfo if tc == 'B' else None)
+          loadBytes  = int(getattr(grTileInfo, "loadWidthGR", 16) or 16)
+          chunkElems = max(1, int(loadBytes / float(tP["bpeGR"])))
+          for i in range(0, numDim):
+            idx = indices[i]
+            if idx == kernel["ProblemType"]["Index0"] or idx == kernel["ProblemType"]["Index1"]:
+              module.add(SSubU32(dst=sgpr(stmp+1), src0=self.sizeRef(idx), src1=sgpr(tileStart+0), \
+                        comment="numToEnd = size - WG*MT"))
+              module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=(chunkElems - 1), \
+                        comment="round up to a whole %uB load (%u elements)"%(loadBytes, chunkElems)))
+              module.add(SAndB32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=hex(~(chunkElems - 1) & 0xffffffff), \
+                        comment="mask off the partial load"))
+              module.add(SMinU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=freeSpan, \
+                        comment="free span = min(that, MT %u)"%freeSpan))
+              module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=prePadElems, \
+                        comment="+ prePad (%u)"%prePadElems))
+              module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(stmp+1), \
+                        comment="+ free span + prePad"))
+          module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), \
+                    comment="buffer_load limit for %s (unit-stride tile K-window)"%tc))
+          # tileStart stays in elements (stride 1); no scaling needed.
 
         skComponent = Component.StreamK.find(self)
         module.add(skComponent.computeLoadSrd(self, kernel, tP, stmp))
@@ -8922,8 +8976,13 @@ class KernelWriterAssembly(KernelWriter):
     numMIInUnroll    = max(numMIInputA//numTileInInstA, numMIInputB//numTileInInstB)
 
     miInInstType, miOutInstType, neg_flag = matrixInstructionTypes(
-        miInputTypeA, miInputTypeB, kernel["ProblemType"]["ComputeDataType"],
-        kernel["SourceSwap"], kernel["ProblemType"]["Sparse"], is_mfma)
+        miInputTypeA,
+        miInputTypeB,
+        kernel["ProblemType"]["ComputeDataType"],
+        kernel["SourceSwap"],
+        kernel["ProblemType"]["Sparse"],
+        is_mfma,
+    )
     miInScaleAInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSA"].toNameAbbrev())
     miInScaleBInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSB"].toNameAbbrev())
     numReadsIterCoalescedA = self.states.numReadsIterCoalescedA

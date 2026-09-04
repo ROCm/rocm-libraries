@@ -204,6 +204,157 @@ def _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
           and localSubtileGrid[0] % int(loadRatioGR) != 0)
 
 
+def _subtileWaveStraddlesStrip(stack, perWaveMTiles):
+  # A wave must own whole strips or share one with other waves; a fraction of a
+  # strip has no soffset register, and the GR emit indexes past the end of
+  # localSubtilesRegister.  Only reachable on a non-power-of-two free dim.
+  if stack <= 0 or perWaveMTiles <= 0:
+    return False
+  return perWaveMTiles % stack != 0 and stack % perWaveMTiles != 0
+
+
+def _subtilePerWaveMTiles(mtTiles, stack, wgSize):
+  # MFMA-M tiles per wave, measured against the strip: a strip is padded out to
+  # a whole stack and the wave owns that padding too.  Shared so the straddle
+  # check and the fetch-group count cannot drift apart.
+  if stack <= 0 or wgSize <= 0:
+    return max(1, int(mtTiles))
+  padded = -(-int(mtTiles) // int(stack)) * int(stack)
+  return max(1, padded // int(wgSize))
+
+
+# A TLU=1 fp4 strip is stackM * MatrixInstM * 0.5 bytes wide, so a 16-tile stack
+# fills one 128B cache line and a 2-tile stack uses only 16B of each line it
+# touches.  Taller is therefore better, up to a full line.
+_SUBTILE_STACK_SIZES = (16, 8, 4, 2)
+_SUBTILE_STACK_MIN = 2
+_SUBTILE_STACK_FULL_LINE = 16
+
+# Rounding a tile up to a taller stack pads it with tiles that are fetched and
+# written to LDS but never read, so the operand's global traffic and its LDS
+# footprint both grow by exactly the rounding ratio.  What that buys is bounded:
+# utilization is stack/_SUBTILE_STACK_FULL_LINE and stops improving once the
+# strip covers a whole line, and much of the gap it closes is served from cache
+# anyway, since the lines a narrow strip half-uses are finished by other lanes
+# and waves.  So the padding is a certain cost against a capped, partly-redundant
+# benefit; admit it only while it stays a small fraction of the operand.
+#
+# 4/3 is the smallest cap that admits a 12-tile operand (MT192 on a 16-row MFMA)
+# into the full-line 16-tile stack; 5/4 leaves it on a 4-tile stack and an exact
+# footprint.  Held as a rational because that case sits exactly on the boundary,
+# where a binary float cap decides it on rounding rather than on the ratio.
+_SUBTILE_STACK_MAX_PAD_NUM = 4
+_SUBTILE_STACK_MAX_PAD_DEN = 3
+
+
+def _subtileStackForTile(mtTiles):
+  """Free-dim MFMA-M tiles per LDS strip for one TLU=1 fp4 operand.
+
+  Prefers the tallest stack that divides the tile exactly, then takes a taller
+  power-of-two stack instead when its padding stays within the ratio cap.
+  """
+  mtTiles = int(mtTiles)
+  exact = next((s for s in _SUBTILE_STACK_SIZES if mtTiles % s == 0),
+               _SUBTILE_STACK_MIN)
+  if mtTiles <= 1:
+    return exact
+  roundedUp = min(_SUBTILE_STACK_FULL_LINE, 1 << (mtTiles - 1).bit_length())
+  withinPadCap = (roundedUp * _SUBTILE_STACK_MAX_PAD_DEN
+                  <= mtTiles * _SUBTILE_STACK_MAX_PAD_NUM)
+  if roundedUp > exact and withinPadCap:
+    return roundedUp
+  return exact
+
+
+# Strip sharing is only policed on gfx950; _validateSubtileGRKPartition returns
+# early elsewhere, and the stack chooser has to agree with it.
+_SUBTILE_STRIP_SHARING_ISA = (9, 5, 0)
+
+
+def _subtileStripSharingReason(state, tc, mtTiles, stack):
+  """Why tensor tc's waves cannot share a strip of `stack`, or None when they can.
+
+  These two rules hold for every subtile geometry, not just TLU=1 fp4, so they
+  stay separate from the fp4-only layout rules below.
+  """
+  wgSize = state["MIWaveGroup"][0 if tc == 'A' else 1]
+  perWaveMTiles = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
+  if _subtileWaveStraddlesStrip(stack, perWaveMTiles):
+    return ("UseSubtileImpl=1 leaves a wave straddling an LDS strip on tensor %s: "
+            "%d MMA tiles per wave against a strip of %d, so the wave neither owns "
+            "whole strips nor shares one"
+            % (tc, perWaveMTiles, stack))
+  # A shared strip is addressed as a whole number of per-wave MFMA windows, so
+  # the strip height has to divide by the wave's MIWaveTile.  perWaveMTiles
+  # above is the padded share, which can hide the misalignment: a 24-tile dim
+  # over 4 waves pads to 8 and looks clean against a strip of 16, while the
+  # wave actually owns 6 and straddles the strip boundary.
+  miWaveTile = int(state["MIWaveTile"][0 if tc == 'A' else 1])
+  wavesPerStrip = max(1, stack // perWaveMTiles) if perWaveMTiles else 1
+  if wavesPerStrip > 1 and miWaveTile and stack % miWaveTile != 0:
+    return ("UseSubtileImpl=1 shares an LDS strip on tensor %s between waves whose "
+            "MIWaveTile %d does not divide the strip of %d, so a wave's MFMA tiles "
+            "cross the strip boundary"
+            % (tc, miWaveTile, stack))
+  return None
+
+
+def _subtileTLU1StackReason(state, tc, mtTiles, stack):
+  """Why `stack` cannot lay out the TLU=1 fp4 operand tc, or None when it can."""
+  mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+  strips = -(-mtTiles // stack)
+  # A partial tail strip has no register list of its own, so the GR emit indexes
+  # past the end of localSubtilesRegister.  Padding is only emittable while the
+  # operand is a single strip.
+  if mtTiles % stack != 0 and strips > 1:
+    return ("UseSubtileImpl=1 TLU=1 fp4 pads tensor %s across more than one "
+            "LDS strip: %d MMA tiles on a stack of %d is %d strips with a "
+            "partial tail, which the GR emit cannot address (MacroTile=%d)"
+            % (tc, mtTiles, stack, strips, mtFree))
+  # The strip-sharing rules are enforced on gfx950 only, in
+  # _validateSubtileGRKPartition.  Apply the same gate here so the chooser never
+  # rejects a height the validator would have let through on another ISA.
+  if tuple(state["ISA"]) == _SUBTILE_STRIP_SHARING_ISA:
+    sharing = _subtileStripSharingReason(state, tc, mtTiles, stack)
+    if sharing:
+      return sharing
+  # A strip offers (blocks per strip) x (K windows) fetch slots.  With fewer
+  # slots than waves in the group the surplus waves reissue a load someone else
+  # made, so the operand comes off memory more than once.  Test the slots, not
+  # the tile shape -- a wide wavefront or a shallow DepthU reaches the same
+  # shortage.
+  wgSize     = state["MIWaveGroup"][0 if tc == 'A' else 1]
+  numWaves   = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
+  otherWaves = max(1, numWaves // wgSize)
+  perWave    = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
+  fetchGroup = max(1, stack // perWave) * otherWaves
+  stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * 0.5
+  slots      = int(stripBytes // (state["WavefrontSize"] * 16)) \
+               * (state["DepthU"] // state["MatrixInstK"])
+  if slots < fetchGroup:
+    return ("UseSubtileImpl=1 TLU=1 fp4 leaves the LDS strip on tensor %s with "
+            "%d (block x K window) slots for a fetch group of %d, so the surplus "
+            "waves refetch it (MacroTile=%d, DepthU=%d, stack=%d)"
+            % (tc, slots, fetchGroup, mtFree, state["DepthU"], stack))
+  return None
+
+
+def _subtileStackForTLU1(state, tc, mtTiles):
+  """Stack height for a TLU=1 fp4 operand, backing off when the geometry refuses it.
+
+  _subtileStackForTile picks purely on cache-line utilization.  A height it
+  likes can still be unlayoutable for this wave group, and a shorter one often
+  is not, so walk down the ladder rather than rejecting the solution outright.
+  The preferred height is tried first, so a solution that is valid today keeps
+  the stack it has today.
+  """
+  preferred = _subtileStackForTile(mtTiles)
+  for stack in [preferred] + [s for s in _SUBTILE_STACK_SIZES if s < preferred]:
+    if _subtileTLU1StackReason(state, tc, mtTiles, stack) is None:
+      return stack
+  return preferred
+
+
 def _validateSubtileGRKPartition(state, printRejectionReason):
   # TODO: TEMPORARY FIX. Reject gfx950 subtile solutions that hit the GR
   # K-partition bug (see _subtileGRKPartitionIsBuggy). Remove once
@@ -217,6 +368,12 @@ def _validateSubtileGRKPartition(state, printRejectionReason):
   from Tensile.Components.Subtile.Kernel import selectABGeometry, TileInfo
   for tc in ("A", "B"):
     tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
+    stack = int(tileInfo.subtileShape[0])
+    mtTiles = int(tileInfo.macroTile // state["MatrixInstM"])
+    sharingReason = _subtileStripSharingReason(state, tc, mtTiles, stack)
+    if sharingReason:
+      reject(state, printRejectionReason, sharingReason)
+      return False
     loadRatioGR = tileInfo.loadRatioGR
     localSubtileGrid = tileInfo.localSubtileGrid
     if _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
@@ -1095,8 +1252,18 @@ class Solution(collections.abc.Mapping):
       # DepthU must be a multiple of numSubIterK * MIK * LSU, where numSubIterK is the
       # number of K-subtiles per depth-U iteration: 1 for fp8 (AB_B8, subtileShape K=1),
       # 2 for fp4/bf16 (AB_B4/AB_B16, subtileShape K=2).
+      # TLU=1 (column-major / free-dim contiguous) geometries load one MFMA-K per
+      # DU iteration (subtileShape K=1), so their DU unit is a single MatrixInstK.
       dtype_a = state["ProblemType"]["DataTypeA"]
-      numSubIterK = 1 if dtype_a.is8bitFloat() else 2
+      tluA = state["ProblemType"].get("TLUA", False)
+      if dtype_a.is8bitFloat() or tluA:
+        numSubIterK = 1
+      else:
+        numSubIterK = 2
+      # An MX scale local read covers 2 scale MMA tiles in K, so the scales need
+      # two MatrixInstK per DepthU however few the data side needs.
+      if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
+        numSubIterK = max(numSubIterK, 2)
       duUnit = numSubIterK * state["MatrixInstK"] * state["LocalSplitU"]
       if state["DepthU"] == -1:
         state["DepthU"] = duUnit
@@ -1109,6 +1276,28 @@ class Solution(collections.abc.Mapping):
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
             state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
+          elif dtype.isFloat4():
+            # Two fp4 share a byte, so an odd free-dim extent leaves the K
+            # stride on a half byte and the elements-to-bytes shift truncates
+            # it; every K step then drifts, silently.  Only the contiguous
+            # operand is affected, so this must not become unconditional.
+            key = "AssertFree0ElementMultiple" if tc == 'A' else "AssertFree1ElementMultiple"
+            state[key] = max(state[key], 2)
+            # fp4 only: 6-bit shares this geometry's 0.5 bpe but neither
+            # bank-conflict layout covers it, so it falls to the reject below.
+            mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+            mtTiles = mtFree // state["MatrixInstM"]
+            stack = _subtileStackForTLU1(state, tc, mtTiles)
+            stackReason = _subtileTLU1StackReason(state, tc, mtTiles, stack)
+            if stackReason:
+              reject(state, printRejectionReason, stackReason)
+              return
+            state[f"_ABTilePair{tc}"] = {
+              2: "AB_B4_TLU1",
+              4: "AB_B4_TLU1_4x1",
+              8: "AB_B4_TLU1_8x1",
+              16: "AB_B4_TLU1_16x1",
+            }[stack]
           else:
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
@@ -2532,6 +2721,10 @@ class Solution(collections.abc.Mapping):
         return False
 
       if numBytes == 0.5:
+        # False on gfx950: the probe assembles ds_load_tr4_b64, the gfx1250
+        # spelling; gfx9 calls it ds_read_b64_tr_b4.  Harmless today (the
+        # subtile path emits it directly), but fixing the probe would flip this
+        # true and reach LDS padding off the subtile path -- own change.
         return asmCaps["HasLDSTrB64B4"]
       elif numBytes == 0.75:
         return asmCaps["HasLDSTrB96B6"]
@@ -5536,12 +5729,14 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "reject to reduce number of kernels")
 
     # GuaranteeNoPartial
-    if state["ProblemType"]["TLUA"]:
+    # UseSubtileImpl does its own edge masking (see Components/Subtile), so mark
+    # loads non-partial to skip the classic graShift path.
+    if state["ProblemType"]["TLUA"] and not state["UseSubtileImpl"]:
       state["GuaranteeNoPartialA"] = state["AssertFree0ElementMultiple"]%state["GlobalReadVectorWidthA"]==0
     else:
       state["GuaranteeNoPartialA"] = True
 
-    if state["ProblemType"]["TLUB"]:
+    if state["ProblemType"]["TLUB"] and not state["UseSubtileImpl"]:
       state["GuaranteeNoPartialB"] = state["AssertFree1ElementMultiple"]%state["GlobalReadVectorWidthB"]==0
     else:
       state["GuaranteeNoPartialB"] = True
