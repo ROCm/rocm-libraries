@@ -98,7 +98,7 @@ struct mtgp32_device_engine : ::rocrand_device::mtgp32_engine
     }
 };
 
-template<class T, class Distribution, unsigned int BlockSize>
+template<bool UseLDS, class T, class Distribution, unsigned int BlockSize>
 __host__
 void generate(unsigned int (&input)[BlockSize][Distribution::input_width],
               T (&output)[BlockSize][Distribution::output_width],
@@ -114,11 +114,16 @@ void generate(unsigned int (&input)[BlockSize][Distribution::input_width],
     }
     for(unsigned int j = 0; j < BlockSize; j++)
     {
-        distribution(input[j], output[j]);
+#ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+            distribution.generate_lds(input[j], output[j]);
+        else
+#endif
+            distribution(input[j], output[j]);
     }
 }
 
-template<class T, class Distribution>
+template<bool UseLDS, class T, class Distribution>
 __forceinline__ __device__
 void generate(unsigned int (&input)[Distribution::input_width],
               T (&output)[Distribution::output_width],
@@ -129,7 +134,12 @@ void generate(unsigned int (&input)[Distribution::input_width],
     {
         input[i] = engine.next();
     }
-    distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+    if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+        distribution.generate_lds(input, output);
+    else
+#endif
+        distribution(input, output);
 }
 
 template<class vec_type, class T, unsigned int output_width, unsigned int BlockSize>
@@ -234,7 +244,7 @@ void save_head_tail(T (&output)[output_width],
     save_head_tail_impl(output, index, data, n, head_size, tail_size, vec_n_up);
 }
 
-template<class ConfigProvider, bool IsDynamic, class T, class Distribution>
+template<class ConfigProvider, bool IsDynamic, class T, class Distribution, bool UseLDS = false>
 struct generate_mtgp
 {
     template<host::target_arch Arch = host::target_arch::unknown>
@@ -244,9 +254,9 @@ struct generate_mtgp
                          dim3 grid_dim,
                          dim3 /*block_dim*/,
                          mtgp32_device_engine* engines,
-                         T*                    data,
-                         const size_t          n,
-                         Distribution          distribution)
+                         T* __restrict__ data,
+                         const size_t n,
+                         Distribution distribution)
     {
         static_assert(is_single_tile_config<ConfigProvider, T, Arch>(IsDynamic),
                       "This kernel should only be used with single tile configs");
@@ -290,24 +300,31 @@ struct generate_mtgp
         const size_t vec_n_up        = remainder_value == 0 ? vec_n_down : (vec_n_down + BlockSize);
 
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
+#ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+        {
+            distribution.stage_to_lds(threadIdx.x, blockDim.x);
+            __syncthreads();
+        }
+#endif
         // Generate and store all aligned vector multiples
         while(index < vec_n_down)
         {
-            ::rocrand_impl::host::generate(input, output, distribution, engine);
+            ::rocrand_impl::host::generate<UseLDS>(input, output, distribution, engine);
             save_vec_n(vec_data, output, index);
             index += stride;
         }
         // Generate and store all aligned vector multiples for which not all threads participate in storing
         if(index < vec_n_up)
         {
-            ::rocrand_impl::host::generate(input, output, distribution, engine);
+            ::rocrand_impl::host::generate<UseLDS>(input, output, distribution, engine);
             save_n(vec_data, output, index, vec_n);
             index += stride;
         }
         // Generate and store the remaining T that are not aligned to vec_type
         if(output_width > 1 && (head_size > 0 || tail_size > 0))
         {
-            ::rocrand_impl::host::generate(input, output, distribution, engine);
+            ::rocrand_impl::host::generate<UseLDS>(input, output, distribution, engine);
             save_head_tail(output, index, data, n, head_size, tail_size, vec_n_up);
         }
 
@@ -523,24 +540,44 @@ public:
         // The host generator uses a block of size one to emulate a device generator that uses a shared memory state
         const dim3 threads
             = std::is_same_v<system_type, system::device_system> ? config.threads : dim3(1);
-        status
-            = dynamic_dispatch(m_order,
-                               [&, this](auto is_dynamic)
-                               {
-                                   return system_type::template launch<
-                                       generate_mtgp<ConfigProvider, is_dynamic, T, Distribution>,
-                                       ConfigProvider,
-                                       T,
-                                       is_dynamic>(target_arch,
-                                                   dim3(config.blocks),
-                                                   dim3(threads),
-                                                   0,
-                                                   m_stream,
-                                                   m_engines,
-                                                   data,
-                                                   data_size,
-                                                   distribution);
-                               });
+
+        auto launch_with_lds = [&](auto possible_lds_usage)
+        {
+            return dynamic_dispatch(
+                m_order,
+                [&, this](auto is_dynamic)
+                {
+                    return system_type::template launch<generate_mtgp<ConfigProvider,
+                                                                      is_dynamic,
+                                                                      T,
+                                                                      Distribution,
+                                                                      possible_lds_usage>,
+                                                        ConfigProvider,
+                                                        T,
+                                                        is_dynamic>(target_arch,
+                                                                    dim3(config.blocks),
+                                                                    dim3(threads),
+                                                                    0,
+                                                                    m_stream,
+                                                                    m_engines,
+                                                                    data,
+                                                                    data_size,
+                                                                    distribution);
+                });
+        };
+
+        if constexpr(is_discrete_distribution_v<Distribution>)
+        {
+            const bool use_lds = distribution.check_lds_size();
+            const auto use_lds_variant
+                = cpp_utils::constexpr_value_variant<bool, false, true>::create(use_lds);
+
+            status = std::visit(launch_with_lds, use_lds_variant);
+        }
+        else
+        {
+            status = launch_with_lds(std::false_type{});
+        }
 
         // Check kernel status
         if(status != ROCRAND_STATUS_SUCCESS)
