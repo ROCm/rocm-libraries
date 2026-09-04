@@ -94,6 +94,9 @@ LOG2E = 1.4426950408889634
 # v_exp_f32 saturates past this; the clamp keeps a saturated gate finite instead
 # of turning a whole chunk into NaN.
 EXP2_CLAMP = 126.0
+LN2 = 0.6931471805599453
+# softplus(x)=log1p(exp(x)); above this x, softplus(x) ~= x (avoids exp2 overflow).
+SOFTPLUS_THRESHOLD = 20.0
 
 _DTYPE_IR = {"bf16": BF16}
 # Declared coverage, exported so a dispatch candidate can state what it serves
@@ -560,9 +563,25 @@ def _apply_gate_fused(
     *,
     has_dt_bias: bool,
     dk: int,
+    gate_kind: str = "kda",
 ):
-    """``lower_bound * sigmoid(exp(A_log[h]) * (g + dt_bias[h,d]))``."""
+    """Per-(row,channel) natural-log-domain decay contribution.
+
+    kda: ``lower_bound * sigmoid(exp(A_log[h]) * (g + dt_bias[h,d]))``
+    gdn: ``-exp(A_log[h]) * softplus(a + dt_bias[h])``  (channel-independent;
+         ``raw_g`` carries the per-(token,head) input ``a``, ``dt_bias`` is [H]).
+    """
     g = b.cast_to_f32(raw_g)
+    if gate_kind == "gdn":
+        x = g
+        if has_dt_bias:
+            x = b.fadd(x, b.global_load_f32(dt_bias, head))
+        ex = b.exp2(b.fmul(x, b.const_f32(LOG2E)))
+        sp_small = b.fmul(b.log2(b.fadd(b.const_f32(1.0), ex)), b.const_f32(LN2))
+        sp = b.select(b.fcmp("ogt", x, b.const_f32(SOFTPLUS_THRESHOLD)), x, sp_small)
+        a = b.global_load_f32(a_log, head)
+        neg_expalog = b.fneg(b.exp2(b.fmul(a, b.const_f32(LOG2E))))
+        return b.fmul(neg_expalog, sp)
     if has_dt_bias:
         g = b.fadd(
             g,
@@ -1008,6 +1027,7 @@ def _emit_stage_commit(ctx: _ChunkCtx, issued) -> None:
                         spec.lower_bound,
                         has_dt_bias=spec.has_dt_bias,
                         dk=ctx.DK,
+                        gate_kind=spec.gate_kind,
                     )
                     _st(b, lds, row, col_j, value=gate, n=1)
             elif kind in ("k", "q") and raw is not None and spec.fuse_qk_l2norm:
