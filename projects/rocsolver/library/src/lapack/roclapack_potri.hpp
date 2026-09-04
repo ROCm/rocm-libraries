@@ -151,6 +151,16 @@ rocblas_status rocsolver_potri_template(rocblas_handle handle,
     const rocblas_int copyblocks = (n - 1) / BS2 + 1;
     T one = 1;
 
+    // tmpcopy is workspace and may hold data from a previous call. The copy
+    // below writes only the `uplo` triangle plus the diagonal, so without this
+    // the opposite triangle of tmpcopy keeps whatever was there. The TRMM that
+    // follows reads tmpcopy as a GENERAL matrix, so that stale data enters the
+    // product: potri then returns wrong -- or non-finite -- results while
+    // reporting info == 0. It is invisible in a fresh process, where the
+    // workspace happens to be zero, and appears once the workspace has been
+    // used, which is why it shows up only in long-running applications.
+    HIP_CHECK(hipMemsetAsync(tmpcopy, 0, sizeof(T) * size_t(n) * n * batch_count, stream));
+
     // copy elements of A to serve as B matrix for TRMM
     ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(copyblocks, copyblocks, batch_count), dim3(BS2, BS2),
                             0, stream, copymat_to_buffer, n, n, A, shiftA, lda, strideA, tmpcopy,
