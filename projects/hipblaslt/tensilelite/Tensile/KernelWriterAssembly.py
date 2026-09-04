@@ -393,7 +393,7 @@ class KernelWriterAssembly(KernelWriter):
   # Find Memory Instruction For Width and Stride
   ##############################################################################
   def findMemoryInstructionForWidthStride(self, width, strides, combine, \
-      instructions):
+      instructions, maxBlockWidth=None):
     for i in range(0, len(instructions)):
       instruction = instructions[i]
       numAddresses = instruction.numAddresses
@@ -403,7 +403,10 @@ class KernelWriterAssembly(KernelWriter):
       valid = True
       if width < blockWidth:
         valid = False
-      
+
+      if maxBlockWidth is not None and blockWidth > maxBlockWidth:
+        valid = False
+
       if ((width / blockWidth) != floor(width / blockWidth)):
         valid = False
 
@@ -433,7 +436,8 @@ class KernelWriterAssembly(KernelWriter):
       write2, # Para, Perp, None
       para2, # NumLoadsPara >= 2
       perp2, # NumLoadsPerp >= 2
-      strides ):
+      strides,
+      maxBlockWidth=None):
 
     #instructions = self.memoryArchitecture[operation]
     instructions = self.memoryInstructions[operation]
@@ -441,11 +445,11 @@ class KernelWriterAssembly(KernelWriter):
     if (write2 == "Coalesced" and para2) \
         or (write2 == "Perpendicular" and perp2):
       instructionIdx = self.findMemoryInstructionForWidthStride( \
-          width, strides, True, instructions)
+          width, strides, True, instructions, maxBlockWidth)
     # don't or can't combine
     else:
       instructionIdx = self.findMemoryInstructionForWidthStride( \
-          width, strides, False, instructions)
+          width, strides, False, instructions, maxBlockWidth)
 
     if instructionIdx < len(instructions): # found
       return instructionIdx
@@ -560,10 +564,20 @@ class KernelWriterAssembly(KernelWriter):
       loadNumReturnVgrp = min(int(localReadWidth*kernel["MIInputPerThread"]), maxTrLoadNumReturnedVgpr) if tChar != "Metadata" else 2
       localReadInstructionIdx = self.selectTransposedDSReadInstuctionIdx(loadNumReturnVgrp, tP["bpeDS"])
     else:
+      localReadElementWidth = tP["bpeDS"] / bpr
+      maxLocalReadBlockWidth = None
+      if (tChar in ("A", "B")
+          and kernel["EnableMatrixInstruction"]
+          and self.states.asmCaps["HasWMMA_V1"]
+          and not kernel["ConvertAfterDS"]
+          and tP["bpeDS"] == 2
+          and localReadWidth > localReadElementWidth):
+        # WMMA_V1 vector elements use separate K-strided LDS addresses.
+        maxLocalReadBlockWidth = localReadElementWidth
       localReadInstructionIdx = self.selectMemoryInstruction("LocalRead", localReadWidth, \
                                  False, \
                                  localRead2Coalesced, localRead2Perpendicular,
-                                 [localReadStrideCoalesced] )
+                                 [localReadStrideCoalesced], maxLocalReadBlockWidth)
     tP["localRead2Coalesced"]      = localRead2Coalesced
     tP["localRead2Perpendicular"]  = localRead2Perpendicular
     tP["localReadStrideCoalesced"] = localReadStrideCoalesced
@@ -1266,7 +1280,7 @@ class KernelWriterAssembly(KernelWriter):
             if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not (kernel["UsePLRPack"] and self.states.numItersPLR):
               ri = 0
           ri = 0
-          if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
+          if self.localReadNeedsValuPack(kernel, tPA):
             moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
             for bi in range(0,numBiFactor): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
@@ -1287,7 +1301,7 @@ class KernelWriterAssembly(KernelWriter):
                 moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_G%u"%(bi), "vgprValuA_X0_I0_BASE", ri))
                 ri += self.states.a.numVgprValuPerBlock // 2
           ri = 0
-          if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
+          if self.localReadNeedsValuPack(kernel, tPA):
             moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
             for data in range(1,int(self.states.bpr/tPA["bpeDS"])):
               for bi in range(0,numBiFactor): # buffer indices
@@ -1312,7 +1326,7 @@ class KernelWriterAssembly(KernelWriter):
             if (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) and not (kernel["UsePLRPack"] and self.states.numItersPLR):
               ri = 0
           ri = 0
-          if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
+          if self.localReadNeedsValuPack(kernel, tPB):
             moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
             for bi in range(0,numBiFactor): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
@@ -1333,7 +1347,7 @@ class KernelWriterAssembly(KernelWriter):
                 moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_G%u"%(bi), "vgprValuB_X0_I0_BASE", ri))
                 ri += self.states.b.numVgprValuPerBlock // 2
           ri = 0
-          if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
+          if self.localReadNeedsValuPack(kernel, tPB):
             moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
             for data in range(1,int(self.states.bpr/tPB["bpeDS"])):
               for bi in range(0,numBiFactor): # buffer indices
@@ -6730,7 +6744,7 @@ class KernelWriterAssembly(KernelWriter):
     valuVgprAlignment = 8 if self.states.asmCaps["HasVgprMSB"] else 2
     if self.states.a.numVgprValu > 0 and not kernel["DirectToVgprA"]:
       numValuA = self.states.a.numVgprValu
-      if tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
+      if self.localReadNeedsValuPack(kernel, tensorParametersA):
         if self.states.lrvwTileA > 1:
           numVgprValuPackA = ceil(kernel["VectorWidthA"] * tensorParametersA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadA"]
           if self.states.packDTVA:
@@ -6754,7 +6768,7 @@ class KernelWriterAssembly(KernelWriter):
     numVgprValuPackB = 0
     if self.states.b.numVgprValu > 0 and not kernel["DirectToVgprB"]:
       numValuB = self.states.b.numVgprValu
-      if tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
+      if self.localReadNeedsValuPack(kernel, tensorParametersB):
         if self.states.lrvwTileB > 1:
           numVgprValuPackB = ceil(kernel["VectorWidthB"] * tensorParametersB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadB"]
           if self.states.packDTVB:
