@@ -581,8 +581,8 @@ rocm_install(
 rocm_install_targets(
   TARGETS ${package_targets}
   INCLUDE
-    ${CMAKE_SOURCE_DIR}/library/include
-    ${CMAKE_BINARY_DIR}/include
+    ${PROJECT_SOURCE_DIR}/library/include
+    ${PROJECT_BINARY_DIR}/include
 )
 
 rocm_export_targets(
