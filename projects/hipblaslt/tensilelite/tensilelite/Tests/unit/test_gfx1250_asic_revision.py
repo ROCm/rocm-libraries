@@ -22,6 +22,7 @@ targeting gfx1250) and are skipped when the toolchain is unavailable.
 """
 
 import copy
+import importlib
 import inspect
 import os
 import sys
@@ -1139,7 +1140,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     """
     from unittest.mock import MagicMock
 
-    import tensilelite.tensilelite_create_library.run as RunModule
+    RunModule = importlib.import_module("tensilelite.tensilelite_create_library.run")
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
@@ -1628,7 +1629,7 @@ def _generateLogicData(monkeypatch, *architectureNames):
     from unittest.mock import MagicMock
 
     import tensilelite.LibraryIO as LibraryIO
-    import tensilelite.tensilelite_create_library.run as RunModule
+    RunModule = importlib.import_module("tensilelite.tensilelite_create_library.run")
 
     libraries = {}
     parsed = []
