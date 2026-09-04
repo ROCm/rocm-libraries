@@ -36,7 +36,7 @@ from math import log
 from pathlib import Path
 from typing import Sequence, Tuple, Optional
 
-from tensilelite import __version__
+from tensilelite import GENERATOR_VERSION as __version__
 
 from rocisa import rocIsa
 

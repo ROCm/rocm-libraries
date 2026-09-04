@@ -32,7 +32,7 @@ ROCJITSU_CONFIG="${ROCJITSU_CONFIG:-}"
 RACE_REPORT_DIR="${RACE_REPORT_DIR:-${PWD}/race-reports}"
 HIPBLASLT_BENCH="${HIPBLASLT_BENCH:-${ROCM_PATH}/bin/hipblaslt-bench}"
 TENSILELITE_ROOT="${TENSILELITE_ROOT:-${ROCM_PATH}/share/hipblaslt/tensilelite}"
-TENSILE_DRIVER="${TENSILE_DRIVER:-${TENSILELITE_ROOT}/tensilelite/bin/Tensile}"
+TENSILELITE_PYTHON="${TENSILELITE_PYTHON:-python3}"
 TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client}"
 RACE_TIMEOUT_SECONDS="${RACE_TIMEOUT_SECONDS:-180}"
 TENSILELITE_TIMEOUT_SECONDS="${TENSILELITE_TIMEOUT_SECONDS:-420}"
@@ -129,11 +129,6 @@ if [[ ! -d "${TENSILELITE_ROOT}" ]]; then
   exit 1
 fi
 
-if [[ ! -f "${TENSILE_DRIVER}" ]]; then
-  echo "TensileLite driver not found: ${TENSILE_DRIVER}" >&2
-  exit 1
-fi
-
 if [[ ! -x "${TENSILELITE_CLIENT}" ]]; then
   echo "tensilelite-client not found or not executable: ${TENSILELITE_CLIENT}" >&2
   exit 1
@@ -197,13 +192,19 @@ echo "ROCJITSU_BUILD_DIR=${ROCJITSU_BUILD_DIR}"
 echo "ROCJITSU_CONFIG=${ROCJITSU_CONFIG}"
 echo "HIPBLASLT_BENCH=${HIPBLASLT_BENCH}"
 echo "TENSILELITE_ROOT=${TENSILELITE_ROOT}"
-echo "TENSILE_DRIVER=${TENSILE_DRIVER}"
+echo "TENSILELITE_PYTHON=${TENSILELITE_PYTHON}"
 echo "TENSILELITE_CLIENT=${TENSILELITE_CLIENT}"
 echo "LIBOMP_PATH=${LIBOMP_PATH}"
 echo "RACE_REPORT_DIR=${RACE_REPORT_DIR}"
 echo "PATH=${PATH}"
 echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
 echo "PYTHONPATH=${PYTHONPATH}"
+
+TENSILELITE_ROCM_VERSION="$(<"${ROCM_PATH}/.info/version")" \
+  "${TENSILELITE_PYTHON}" -m pip install \
+    --disable-pip-version-check --force-reinstall --no-deps --no-build-isolation \
+    "${TENSILELITE_ROOT}"
+"${TENSILELITE_PYTHON}" -m tensilelite_configure_client --ensure-client "${TENSILELITE_CLIENT}"
 
 
 # TODO(newling): Track migration to a packaged rocjitsu once TheRock provides a
@@ -377,7 +378,6 @@ run_tensilelite_client_check() {
   local tensile_args=(
     "${yaml}"
     "${output_dir}"
-    --prebuilt-client "${TENSILELITE_CLIENT}"
     --gpu-targets "${ROCJITSU_GPU_TARGET}"
     --library-format msgpack
   )
@@ -386,10 +386,9 @@ run_tensilelite_client_check() {
   fi
 
   echo "running tensilelite-client under rocjitsu race detection"
-  # Drive the normal TensileLite front end with the client from the TheRock artifact.
-  # This covers a different surface from hipblaslt-bench: Python-side TensileLite
-  # setup, rocisa imports, generated client config, and the standalone
-  # tensilelite-client runtime path.
+  # Drive the installed TensileLite command with the TheRock artifact client
+  # bound to this interpreter. This covers Python-side setup, rocisa imports,
+  # generated client config, and the standalone tensilelite-client runtime path.
   timeout "${TENSILELITE_TIMEOUT_SECONDS}" \
     env \
       HSA_ENABLE_SDMA=1 \
@@ -399,7 +398,7 @@ run_tensilelite_client_check() {
       RJ_SINK_DIR="${sink_dir}" \
       "${ROCJITSU_BIN}" \
         --config "${ROCJITSU_CONFIG}" \
-        -- python3 "${TENSILE_DRIVER}" "${tensile_args[@]}" \
+        -- "${TENSILELITE_PYTHON}" -m tensilelite run "${tensile_args[@]}" \
     2>&1 | tee "${RACE_REPORT_DIR}/tensilelite-client.log"
   local status=$?
   if [[ "${status}" -ne 0 ]]; then

@@ -71,7 +71,6 @@ def _default_globalParameters_overrides(monkeypatch):
     monkeypatch.setitem(globalParameters, "MXScaleFormat", 0)
     monkeypatch.setitem(globalParameters, "ParallelGpuExecution", 1)
     monkeypatch.setitem(globalParameters, "ClientExecutionLockPath", None)
-    monkeypatch.setitem(globalParameters, "PrebuiltClient", "/fake/tensile_client")
     monkeypatch.setitem(globalParameters, "DataInitTypeAB", 3)
     monkeypatch.setitem(globalParameters, "DataInitTypeA", -1)
     monkeypatch.setitem(globalParameters, "DataInitTypeB", -1)
@@ -176,7 +175,6 @@ class TestWriteRunScriptNonBenchmark:
 
     def _run(self, tmp_path, monkeypatch, configPaths=None, clientExePath="/fake/client"):
         _default_globalParameters_overrides(monkeypatch)
-        monkeypatch.setitem(globalParameters, "PrebuiltClient", clientExePath)
 
         buildDir = tmp_path / "build"
         buildDir.mkdir(parents=True)
@@ -254,7 +252,6 @@ class TestWriteRunScriptBenchmark:
 
     def _run_benchmark(self, tmp_path, monkeypatch, configPaths=None, clientExePath="/fake/client"):
         _default_globalParameters_overrides(monkeypatch)
-        monkeypatch.setitem(globalParameters, "PrebuiltClient", clientExePath)
         monkeypatch.setitem(globalParameters, "DataInitTypeA", -1)
         monkeypatch.setitem(globalParameters, "DataInitTypeB", -1)
         monkeypatch.setitem(globalParameters, "DataInitTypeAB", 3)
@@ -622,7 +619,7 @@ class TestRunNewClient:
 # ---------------------------------------------------------------------------
 
 class TestGetClientExecutablePath:
-    """getClientExecutablePath exercises lines 804-814."""
+    """getClientExecutablePath exposes the immutable installation binding."""
 
     def test_raises_when_file_not_found(self, monkeypatch):
         """Lines 807-813: raises FileNotFoundError when PrebuiltClient doesn't exist."""
@@ -631,11 +628,10 @@ class TestGetClientExecutablePath:
         with pytest.raises(FileNotFoundError, match="TensileLite client executable not found"):
             CW.getClientExecutablePath()
 
-    def test_returns_path_when_file_exists(self, tmp_path, monkeypatch):
-        """Lines 805-806: returns PrebuiltClient path when it exists."""
-        fake_exe = tmp_path / "tensile_client"
-        fake_exe.write_text("#!/bin/bash\necho fake")
-        monkeypatch.setitem(globalParameters, "PrebuiltClient", str(fake_exe))
+    def test_global_parameter_cannot_override_binding(self, monkeypatch):
+        monkeypatch.setitem(globalParameters, "ClientExecutable", "/nonexistent/fake_client")
 
         result = CW.getClientExecutablePath()
-        assert result == str(fake_exe)
+
+        assert result != "/nonexistent/fake_client"
+        assert Path(result).is_file()
