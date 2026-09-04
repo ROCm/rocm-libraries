@@ -28,6 +28,7 @@
 #include "DataInitialization.hpp"
 
 #include <cstddef>
+#include <stdexcept>
 
 namespace TensileLite
 {
@@ -36,6 +37,7 @@ namespace TensileLite
         ClientProblemFactory::ClientProblemFactory(po::variables_map const& args)
             : m_problemSizes(args["problem-size"].as<std::vector<std::vector<size_t>>>())
             , m_stridedBatched(args["strided-batched"].as<bool>())
+            , m_batchMode(args["batch-mode"].as<int>())
             , m_groupedGemm(args["grouped-gemm"].as<bool>())
             , m_sparse(args["sparse"].as<int>())
             , m_highPrecisionAccumulate(args["high-precision-accumulate"].as<bool>())
@@ -68,6 +70,22 @@ namespace TensileLite
             , m_dOps(args["d-ops"].as<TensorOps>())
         {
             using std::static_pointer_cast;
+
+            if(m_batchMode < 0
+               || m_batchMode
+                      >= static_cast<int>(ContractionProblemGemm::BATCHMODE::BATCHMODE_COUNT))
+                throw std::invalid_argument("batch-mode must be 0 (strided) or 1 (pointer array)");
+
+            bool const pointerArrayBatch
+                = m_batchMode
+                  == static_cast<int>(ContractionProblemGemm::BATCHMODE::POINTER_ARRAY);
+            if(pointerArrayBatch && !m_stridedBatched)
+                throw std::invalid_argument(
+                    "batch-mode=1 requires a universal strided-batched problem");
+            if(pointerArrayBatch && m_groupedGemm)
+                throw std::invalid_argument("batch-mode=1 does not support grouped GEMM");
+            if(pointerArrayBatch && m_sparse)
+                throw std::invalid_argument("batch-mode=1 does not support sparse GEMM");
 
             if(m_mxBlockA || m_mxBlockB)
             {
@@ -391,6 +409,8 @@ namespace TensileLite
                                 rv.back().setBetaType(
                                     m_constantTypes[ContractionProblemGemm::CONST::BETA]);
                                 rv.back().setStridedBatched(m_stridedBatched);
+                                rv.back().setBatchMode(
+                                    static_cast<ContractionProblemGemm::BATCHMODE>(m_batchMode));
                                 rv.back().setHighPrecisionAccumulate(m_highPrecisionAccumulate);
                                 rv.back().setUseGradient(m_useGradient);
                                 rv.back().setUseBias(m_useBias);
