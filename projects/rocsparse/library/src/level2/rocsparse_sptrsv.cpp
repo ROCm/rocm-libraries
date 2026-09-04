@@ -474,14 +474,9 @@ namespace rocsparse
 
             case rocsparse_format_csc:
             {
-#ifndef ROCSPARSE_WITH_CSC_TRSV
-                // CSC support disabled at build time (BUILD_WITH_CSC_TRSV=OFF).
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_analysis_buffer_size(
                     handle, operation, A, buffer_size_in_bytes));
                 return rocsparse_status_success;
-#endif
             }
 
             case rocsparse_format_ell:
@@ -529,14 +524,9 @@ namespace rocsparse
 
             case rocsparse_format_csc:
             {
-#ifndef ROCSPARSE_WITH_CSC_TRSV
-                // CSC support disabled at build time (BUILD_WITH_CSC_TRSV=OFF).
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_solve_buffer_size(
                     handle, operation, A, x, y, buffer_size_in_bytes));
                 return rocsparse_status_success;
-#endif
             }
 
             case rocsparse_format_ell:
@@ -765,10 +755,6 @@ namespace rocsparse
             }
             case rocsparse_format_csc:
             {
-#ifndef ROCSPARSE_WITH_CSC_TRSV
-                // CSC support disabled at build time (BUILD_WITH_CSC_TRSV=OFF).
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
                 rocsparse_csrsv_info csrsv_info{};
                 switch(analysis_policy)
                 {
@@ -807,7 +793,6 @@ namespace rocsparse
                 }
 
                 return rocsparse_status_success;
-#endif
             }
             case rocsparse_format_ell:
             {
@@ -996,10 +981,6 @@ namespace rocsparse
 
             case rocsparse_format_csc:
             {
-#ifndef ROCSPARSE_WITH_CSC_TRSV
-                // CSC support disabled at build time (BUILD_WITH_CSC_TRSV=OFF).
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_solve(handle,
                                                                  operation,
                                                                  alpha_datatype,
@@ -1013,7 +994,6 @@ namespace rocsparse
                                                                  buffer));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
                 return rocsparse_status_success;
-#endif
             }
 
             case rocsparse_format_ell:
