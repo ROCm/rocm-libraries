@@ -312,7 +312,12 @@ class FmhaFwdApiTrait:
     def scheck(self) -> str:
         if self.mode == "group":
             return "true/*group mode spad always true*/"  # group mode only generate spad/skpad == true
-        if self.pipeline_tag in ["qr_async", "qr_async_trload", "qr_async_trload_v3", "qr_tdm"]:
+        if self.pipeline_tag == "qr_async_trload":
+            if self.spad == "t":
+                return "true"
+            else:
+                return f"a.seqlen_q % {self.bm0} == 0"
+        elif self.pipeline_tag in ["qr_async", "qr_async_trload_v3", "qr_tdm"]:
             if self.spad == "t":
                 return "true"  # always support
             else:
@@ -347,7 +352,12 @@ class FmhaFwdApiTrait:
                 return f"true /*a.seqlen_k % {self.bn0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
                 return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
-        elif self.pipeline_tag in ["qr_async_trload", "qr_async_trload_v3", "qr_tdm"]:
+        elif self.pipeline_tag == "qr_async_trload":
+            if self.skpad == "t":
+                return "true"
+            else:
+                return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
+        elif self.pipeline_tag in ["qr_async_trload_v3", "qr_tdm"]:
             if self.skpad == "t":
                 return "true"
             else:
