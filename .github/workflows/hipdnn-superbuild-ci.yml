@@ -26,7 +26,7 @@ concurrency:
 jobs:
   hipdnn-windows-superbuild:
     name: HipDNN Windows Superbuild
-    runs-on: azure-windows-scale-rocm
+    runs-on: aws-windows-scale-rocm-prod-mix
     defaults:
       run:
         shell: bash
@@ -247,7 +247,7 @@ jobs:
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-prod
     env:
       GPU_TARGET: gfx94X-dcgpu
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).

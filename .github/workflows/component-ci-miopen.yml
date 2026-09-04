@@ -90,7 +90,7 @@ jobs:
               -DGPU_TARGETS="gfx942"
             build_target: --target install --target all
 
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-prod
     steps:
       - name: Runner health status
         run: |

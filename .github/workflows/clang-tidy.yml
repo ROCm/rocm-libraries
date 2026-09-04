@@ -121,7 +121,7 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
       fail-fast: false
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-prod
     steps:
       - name: Checkout rocm-libraries
         timeout-minutes: 30
