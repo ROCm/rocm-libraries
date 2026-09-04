@@ -101,6 +101,79 @@ std::tuple<size_t, size_t, size_t, size_t> compute_cu_occupancy(const problem_t&
 }
 
 /* ======================================================================================== */
+/* Causal masking helpers                                                                   */
+/* ======================================================================================== */
+
+namespace {
+// Closed form for sum_{j=1}^{m} floor(j / s), s >= 1.
+//   with q = floor(m/s), r = m mod s:  s*q*(q-1)/2 + (r+1)*q
+size_t sum_floor_j_over_s(size_t m, size_t s) {
+  if (m == 0) return 0;
+  const size_t q = m / s;
+  const size_t r = m % s;
+  return s * q * (q - 1) / 2 + (r + 1) * q;
+}
+}  // namespace
+
+size_t causal_active_tile_pairs(size_t grid_m,
+                                size_t grid_n,
+                                size_t mt_m,
+                                size_t mt_n,
+                                size_t M,
+                                size_t N) {
+  if (grid_m == 0 || grid_n == 0) return 0;
+
+  // For causal attention: prefill has M=N, decode has M<N. M>N is invalid.
+  assert(M <= N && "Causal attention requires M <= N (Q_SEQ <= KV_SEQ)");
+  // Attention macro-tiles are powers of two, so one tile dim divides the other.
+  // The closed form below relies on that (mt_n | mt_m or mt_m | mt_n).
+  assert(((mt_m % mt_n == 0) || (mt_n % mt_m == 0)) &&
+         "causal_active_tile_pairs requires mt_n|mt_m or mt_m|mt_n");
+
+  // Bottom-right causal alignment: Q-tile i (1-indexed, i = 1..grid_m) attends
+  //   c(i) = ceil((i*mt_m + offset) / mt_n) KV-tiles, capped at grid_n.
+  // Total active pairs = sum_i min(c(i), grid_n): a capped sum of ceilings of an
+  // arithmetic progression. c(i) grows by mt_m/mt_n KV-tiles per Q-tile (not 1) --
+  // the factor the previous grid_m*(grid_m+1)/2 form dropped, undercounting
+  // non-square tiles by exactly mt_m/mt_n.
+  const size_t offset = N - M;
+
+  // Saturation index i_sat: smallest i >= 1 with c(i) >= grid_n (fully-covered).
+  // c(grid_m) >= grid_n always, so 1 <= i_sat <= grid_m. Tiles i >= i_sat each
+  // contribute grid_n; tiles i < i_sat form the diagonal band.
+  //   ceil((mt_m*i + offset)/mt_n) >= grid_n  <=>  mt_m*i >= (grid_n-1)*mt_n + 1 - offset
+  const long long rhs =
+      static_cast<long long>((grid_n - 1) * mt_n + 1) - static_cast<long long>(offset);
+  size_t i_sat = (rhs <= 0) ? 1 : math::safe_ceil_div(static_cast<size_t>(rhs), mt_m);
+  if (i_sat > grid_m) i_sat = grid_m;
+  const size_t U = i_sat - 1;  // unsaturated (diagonal-band) Q-tiles
+
+  // Diagonal band: sum_{i=1}^{U} ceil((mt_m*i + offset)/mt_n)
+  //             = sum_{i=1}^{U} floor((mt_m*i + C)/mt_n),  C = offset + mt_n - 1.
+  size_t triangular = 0;
+  if (U > 0) {
+    const size_t C = offset + mt_n - 1;
+    if (mt_m % mt_n == 0) {
+      // mt_n | mt_m: c(i) = (mt_m/mt_n)*i + floor(C/mt_n) exactly.
+      const size_t r = mt_m / mt_n;
+      triangular = r * U * (U + 1) / 2 + U * (C / mt_n);
+    } else {
+      // mt_m | mt_n: floor((mt_m*i + C)/mt_n) = floor((i + p)/s), p = floor(C/mt_m).
+      const size_t s = mt_n / mt_m;
+      const size_t p = C / mt_m;
+      triangular = sum_floor_j_over_s(p + U, s) - sum_floor_j_over_s(p, s);
+    }
+  }
+
+  const size_t result = triangular + (grid_m - U) * grid_n;
+
+  // Sanity check: causal work must be in [grid_m, grid_m * grid_n].
+  assert(result >= grid_m && "Causal active pairs below lower bound");
+  assert(result <= grid_m * grid_n && "Causal active pairs exceed rectangular count");
+  return result;
+}
+
+/* ======================================================================================== */
 /* Compute-related functions                                                                */
 /* ======================================================================================== */
 
@@ -164,6 +237,88 @@ double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_acti
   return std::min(bw_limited, 1.0);
 }
 
+/**
+ * @brief Diagonal-aware causal hit rate for a co-resident window of tile_m x tile_n WGs.
+ *
+ * Blends "dense" windows (entirely below the diagonal, full KV reuse, f=1) with
+ * "diagonal" windows (straddling the diagonal, ~half reuse, f=0.5), weighted by read
+ * volume. The per-window reuse model reduces to the rectangular formula at f=1:
+ *   total_A = (tile_m * a_elems) * (f * tile_n)   // Q re-read per active KV col
+ *   total_B = (tile_n * b_elems) * (f * tile_m)   // KV re-read per active Q row
+ * Cold (uncached) first-touch reads are unchanged; only reuse shrinks with f, so the
+ * hit rate drops. @p a_elems / @p b_elems are element counts (mt.mk() / mt.nk()), matching
+ * the non-causal estimators.
+ */
+static double causal_window_hit_rate(size_t tile_m,
+                                     size_t tile_n,
+                                     double a_elems,
+                                     double b_elems,
+                                     size_t grid_m,
+                                     size_t grid_n,
+                                     size_t mt_m,
+                                     size_t mt_n,
+                                     size_t M,
+                                     size_t N) {
+  tile_m = std::max(tile_m, static_cast<size_t>(1));
+  tile_n = std::max(tile_n, static_cast<size_t>(1));
+
+  // Per-window (cached_reads, total_reads) as a function of active fraction f in (0,1].
+  auto window_reads = [&](double f) {
+    const double uncached_A = static_cast<double>(tile_m) * a_elems;
+    const double uncached_B = static_cast<double>(tile_n) * b_elems;
+    const double total_A    = uncached_A * (f * static_cast<double>(tile_n));
+    const double total_B    = uncached_B * (f * static_cast<double>(tile_m));
+    const double total      = std::max(total_A + total_B, 1.0);
+    const double cached     = (total_A - uncached_A) + (total_B - uncached_B);
+    return std::make_pair(cached, total);
+  };
+
+  // Windows tiling the grid.
+  const size_t win_rows = math::safe_ceil_div(grid_m, tile_m);
+  const size_t win_cols = math::safe_ceil_div(grid_n, tile_n);
+
+  // Compute per-window active fraction based on causal geometry.
+  // For each window row, find min and max active fractions within that row.
+  const size_t offset = (N >= M) ? (N - M) : 0;
+
+  double total_cached = 0.0;
+  double total_reads = 0.0;
+
+  for (size_t win_row = 0; win_row < win_rows; ++win_row) {
+    // Q-tile range for this window row
+    const size_t m_tile_start = win_row * tile_m;
+    const size_t m_tile_end = std::min(m_tile_start + tile_m, grid_m);
+
+    // Compute average active fraction for Q-tiles in this window row.
+    // For simplicity, use the midpoint Q-tile's active fraction as representative.
+    const size_t m_tile_mid = (m_tile_start + m_tile_end - 1) / 2;
+    const size_t last_q_row = std::min((m_tile_mid + 1) * mt_m, M) - 1;
+    const size_t max_key = last_q_row + offset;
+    const size_t active_kv_tiles = std::min((max_key + 1 + mt_n - 1) / mt_n, grid_n);
+    const double f = static_cast<double>(active_kv_tiles) / static_cast<double>(grid_n);
+
+    // This window row contributes win_cols windows (though some may be inactive).
+    // Count how many windows in this row are actually in the active triangular region.
+    size_t active_wins_in_row = 0;
+    for (size_t win_col = 0; win_col < win_cols; ++win_col) {
+      // A window at (win_row, win_col) is active if win_col < active_kv_tiles_in_window
+      const size_t kv_tile_start = win_col * tile_n;
+      if (kv_tile_start < active_kv_tiles) {
+        active_wins_in_row++;
+      }
+    }
+
+    if (active_wins_in_row > 0) {
+      const auto win_stats = window_reads(f);
+      total_cached += static_cast<double>(active_wins_in_row) * win_stats.first;
+      total_reads += static_cast<double>(active_wins_in_row) * win_stats.second;
+    }
+  }
+
+  if (total_reads <= 0.0) return 0.0;
+  return std::max(0.0, std::min(total_cached / total_reads, 1.0));
+}
+
 double estimate_l2_hit(const problem_t& problem,
                        const hardware_t& hardware,
                        const config_t& config,
@@ -211,6 +366,14 @@ double estimate_l2_hit(const problem_t& problem,
     }
   }
 
+  // Causal masking: KV-tile reuse across co-resident Q-row workgroups is reduced by the
+  // triangular schedule (diagonal-aware per-window blend).
+  if (problem.causal) {
+    return causal_window_hit_rate(l2_tile_m, l2_tile_n, static_cast<double>(config.mt.mk()),
+                                  static_cast<double>(config.mt.nk()), workgroups_m, workgroups_n,
+                                  config.mt.m, config.mt.n, problem.size.m, problem.size.n);
+  }
+
   const long long uncached_A_reads     = static_cast<long long>(l2_tile_m) * config.mt.mk();
   const long long uncached_B_reads     = static_cast<long long>(l2_tile_n) * config.mt.nk();
   const long long total_uncached_reads = uncached_A_reads + uncached_B_reads;
@@ -248,6 +411,13 @@ double estimate_mall_hit(const problem_t& problem,
   mall_tile_m = std::max(std::min(workgroups_m, mall_tile_m), static_cast<size_t>(1));
   mall_tile_n = std::max(std::min(workgroups_n, mall_tile_n), static_cast<size_t>(1));
 
+  // Causal masking: reduced triangular KV-tile reuse (diagonal-aware per-window blend).
+  if (problem.causal) {
+    return causal_window_hit_rate(mall_tile_m, mall_tile_n, static_cast<double>(config.mt.mk()),
+                                  static_cast<double>(config.mt.nk()), workgroups_m, workgroups_n,
+                                  config.mt.m, config.mt.n, problem.size.m, problem.size.n);
+  }
+
   const long long uncached_A_reads     = static_cast<long long>(mall_tile_m) * config.mt.mk();
   const long long uncached_B_reads     = static_cast<long long>(mall_tile_n) * config.mt.nk();
   const long long total_uncached_reads = uncached_A_reads + uncached_B_reads;
@@ -284,8 +454,17 @@ double compute_l2_hit_rate_global(const problem_t& problem,
     return 0.1;
   }
 
-  const double total_A_reads = static_cast<double>(grid_m * grid_n * config.mt.mk());
-  const double total_B_reads = static_cast<double>(grid_m * grid_n * config.mt.nk());
+  // Causal masking makes the total reads triangular: only active (Q,KV) tile pairs are
+  // scheduled. The unique (uncached) working set is unchanged.
+  const double active_pairs =
+      problem.causal
+          ? static_cast<double>(
+                causal_active_tile_pairs(grid_m, grid_n, config.mt.m, config.mt.n,
+                                         problem.size.m, problem.size.n))
+          : static_cast<double>(grid_m * grid_n);
+
+  const double total_A_reads = active_pairs * static_cast<double>(config.mt.mk());
+  const double total_B_reads = active_pairs * static_cast<double>(config.mt.nk());
 
   const double uncached_A_reads = static_cast<double>(grid_m * config.mt.mk());
   const double uncached_B_reads = static_cast<double>(grid_n * config.mt.nk());
@@ -682,13 +861,23 @@ double compute_total_latency(const problem_t& problem,
   OLOG_DEBUG("  Epilogue (output write): " << L_epilogue << " cycles");
 
   // --- Number of pipeline iterations ---
-  // Total work = batch * grid_M * grid_N * grid_K tiles distributed across N_CU CUs
-  const size_t adjustment_factor = 8; // adjusting amount of work for prolog or epilogue bound tile sizes
-  double total_tiles = static_cast<double>(adjustment_factor) *
+  // Total work = batch * q_heads * (Q-tile, KV-tile) pairs * grid_K, distributed across CUs.
+  // For causal attention the (Q-tile, KV-tile) pairs are triangular (a Q-tile only processes
+  // KV-tiles on/below its diagonal), roughly halving the work for a square problem.
+  const size_t tile_pairs = problem.causal
+      ? causal_active_tile_pairs(grid_m, grid_n, MT_M, MT_N, M, N)
+      : (grid_m * grid_n);
+  OLOG_DEBUG("  Causal=" << problem.causal << " tile_pairs=" << tile_pairs
+             << " (rectangular=" << (grid_m * grid_n) << ")");
+
+  // Adjusting amount of work for prolog or epilogue bound tile sizes. The causal
+  // schedule has a different prolog/epilogue balance than the dense one, so it
+  // uses its own calibrated factor.
+  const double adjustment_factor = problem.causal ? 3.57 : 8.0;
+  double total_tiles = adjustment_factor *
                        static_cast<double>(batch) *
                        static_cast<double>(q_heads) *
-                       static_cast<double>(grid_m) *
-                       static_cast<double>(grid_n) *
+                       static_cast<double>(tile_pairs) *
                        static_cast<double>(grid_k);
   double num_iters = std::ceil(total_tiles / (static_cast<double>(wgs_per_cu) * static_cast<double>(num_active_cus)));
   num_iters = std::max(num_iters, 1.0);

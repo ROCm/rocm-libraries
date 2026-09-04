@@ -63,13 +63,15 @@ inline origami::problem_t make_problem(size_t m,
                                        origami::transpose_t b_trans = origami::transpose_t::N,
                                        size_t batch                 = 1,
                                        int mx_block_size            = 0,
-                                       size_t q_heads               = 32) {
+                                       size_t q_heads               = 32,
+                                       bool causal                  = false) {
   origami::problem_t problem;
   problem.size.m          = m;
   problem.size.n          = n;
   problem.size.k          = k;
   problem.batch           = batch;
   problem.q_heads         = q_heads;
+  problem.causal          = causal;
   problem.a_transpose     = a_trans;
   problem.b_transpose     = b_trans;
   problem.a_dtype         = origami::data_type_t::BFloat16;
@@ -110,6 +112,28 @@ inline origami::config_t make_config(size_t mt_m,
   config.stream_k                 = stream_k;
   if (stream_k == 0) { config.grid_selection = origami::grid_selection_t::data_parallel; }
   return config;
+}
+
+// Helper function for causal: number of KV-tiles a single Q-tile must process
+inline size_t causal_active_kv_tiles_for_qtile(size_t m_tile,
+                                                size_t mt_m,
+                                                size_t mt_n,
+                                                size_t M,
+                                                size_t N,
+                                                size_t grid_n) {
+  if (mt_n == 0 || grid_n == 0) return 0;
+
+  // Last query row (global, 0-indexed) covered by this Q-tile.
+  const size_t last_q_row = std::min((m_tile + 1) * mt_m, M) - 1;
+
+  // Bottom-right causal alignment: query row r attends keys [0 .. r + off].
+  const size_t off     = (N >= M) ? (N - M) : 0;
+  const size_t max_key = last_q_row + off;
+
+  // Number of KV-tiles needed to cover keys [0 .. max_key], at least the diagonal tile.
+  size_t kv_tiles = (max_key + 1 + mt_n - 1) / mt_n;  // ceil division
+  kv_tiles        = std::min(kv_tiles, grid_n);
+  return std::max(kv_tiles, static_cast<size_t>(1));
 }
 
 // Helper function to construct hardware_t with all parameters
