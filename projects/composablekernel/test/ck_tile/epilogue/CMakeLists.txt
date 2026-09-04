@@ -11,7 +11,11 @@ endif()
 
 if(GPU_TARGETS MATCHES "gfx950")
     add_gtest_executable(test_ck_tile_cshuffle_epilogue_fp8_gfx950 test_cshuffle_epilogue_fp8_gfx950.cpp)
+    add_gtest_executable(test_ck_tile_permuten_epilogue_scale_indices
+        test_permuten_epilogue_scale_indices.cpp)
     if(CK_USE_OCP_FP8)
         target_compile_options(test_ck_tile_cshuffle_epilogue_fp8_gfx950 PRIVATE -DCK_TILE_USE_OCP_FP8)
+        target_compile_options(test_ck_tile_permuten_epilogue_scale_indices
+            PRIVATE -DCK_TILE_USE_OCP_FP8)
     endif()
 endif()

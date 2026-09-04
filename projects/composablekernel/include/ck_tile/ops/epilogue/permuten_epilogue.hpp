@@ -140,6 +140,20 @@ struct PermuteNEpilogue
     static constexpr index_t MRepeat       = kMPerBlock / (MPerXdl * MWave);
     static constexpr index_t NRepeat       = kNPerBlock / (NPerXdl * NWave);
 
+    struct ScaleThreadBufferIndices
+    {
+        index_t m;
+        index_t n;
+    };
+
+    CK_TILE_HOST_DEVICE static constexpr ScaleThreadBufferIndices
+    GetScaleThreadBufferIndices(index_t m_lane, index_t n_idx)
+    {
+        return {m_lane * NRepeat, n_idx};
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr index_t GetScaleMWindowStep() { return MPerIteration; }
+
     CDElementwise elfunc_;
 
     // PermuteN epilogue does not support D tensors or non-passthrough elementwise operations.
@@ -383,10 +397,12 @@ struct PermuteNEpilogue
                         // always correct, so gather sm at (m2, n2=0). scale_n
                         // does not depend on m; gather it at (m2=0, n2) for the
                         // same robustness.
+                        const auto scale_indices = GetScaleThreadBufferIndices(m_lane, n_idx);
                         const auto sm =
-                            static_cast<float>(sm_tile.get_thread_buffer()[m_lane * NRepeat]);
-                        const auto sn = static_cast<float>(sn_tile.get_thread_buffer()[n_idx]);
-                        v             = static_cast<AccDataType>(v * sm * sn);
+                            static_cast<float>(sm_tile.get_thread_buffer()[scale_indices.m]);
+                        const auto sn =
+                            static_cast<float>(sn_tile.get_thread_buffer()[scale_indices.n]);
+                        v = static_cast<AccDataType>(v * sm * sn);
                     }
 
                     c_out_tensor.get_thread_buffer()[dst] = type_convert<ODataType>(v);
@@ -417,7 +433,7 @@ struct PermuteNEpilogue
             // need to move.
             if constexpr(has_scales && !has_scalar_scales)
             {
-                move_tile_window(scale_m_window, {number<MPerXdl * MWave>{}, number<0>{}});
+                move_tile_window(scale_m_window, {number<GetScaleMWindowStep()>{}, number<0>{}});
             }
         });
     }
