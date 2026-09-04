@@ -34,6 +34,7 @@ add_library(
     src/GpuFpReferenceConvolution.cpp
     src/GpuFpReferenceLayernorm.cpp
     src/GpuFpReferenceSdpa.cpp
+    src/GpuFpReferenceSdpaRagged.cpp
     src/GpuFpReferenceRMSNorm.cpp
     src/GpuFpReferenceBatchnorm.cpp
     src/GpuFpReferenceValidation.cpp

@@ -11,6 +11,7 @@
 #include "GpuPointwiseSignatureKey.hpp"
 #include "GpuRMSNormSignatureKey.hpp"
 #include "GpuSdpaFwdSignatureKey.hpp"
+#include "GpuSdpaRaggedFwdSignatureKey.hpp"
 
 namespace hipdnn_integration_tests::gpu_graph_executor::detail
 {
@@ -19,6 +20,7 @@ namespace hipdnn_integration_tests::gpu_graph_executor::detail
 // Add new signature key types here as GPU plans are implemented.
 using GpuPlanRegistrySignatureKey = std::variant<GpuConvolutionFwdSignatureKey,
                                                  GpuSdpaFwdSignatureKey,
+                                                 GpuSdpaRaggedFwdSignatureKey,
                                                  GpuPointwiseSignatureKey,
                                                  GpuRMSNormFwdSignatureKey,
                                                  GpuRMSNormBwdSignatureKey>;
