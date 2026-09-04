@@ -551,6 +551,18 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32("
         "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
     ),
+    "wmma.scale.gfx1250.f32.16x16x128.fp8.fp8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4."
+        "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
+        "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i32, "
+        "i32 immarg, i32 immarg, i32, i1 immarg, i1 immarg)"
+    ),
+    "wmma.scale16.gfx1250.f32.16x16x128.fp8.fp8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4."
+        "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
+        "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i64, "
+        "i32 immarg, i32 immarg, i64, i1 immarg, i1 immarg)"
+    ),
     "mfma.f32.16x16x16f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
         "<4 x half>, <4 x half>, <4 x float>, "
