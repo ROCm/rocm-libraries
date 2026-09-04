@@ -145,17 +145,7 @@ test_categories:
 # GPU-specific CTest suites (rocsparse-test_{category}_gfx1151_suite) exclude f64 real/complex
 # parameterized tests on Strix Halo (gfx1151). Run those *_gfx1151_* tests on that hardware;
 # other GPUs use the standard category suites without these exclusions.
-exclude_gpu:
-  exclude_gpu_gfx1151:
-    test_patterns:
-      - "*f64_r*"
-      - "*f64_c*"
-    labels:
-      - quick
-      - standard
-      - comprehensive
-      - full
-      - ex_gpu_gfx1151
+exclude_gpu: {}
 
 execution_settings:
   timeout_multiplier: 1
