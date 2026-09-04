@@ -17,7 +17,7 @@
 # TheRock/build_tools/github_actions/test_executable_scripts/test_tensilelite.py,
 # which ran two suites unconditionally:
 #   - rocisa_tests/            (rocisa pytest modules)
-#   - Tensile/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
+#   - tensilelite/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
 #
 # comprehensive/full reproduce that legacy set exactly (GPU tests included).
 # quick/standard run the same suites minus GPU-hardware tests (marker `gpu`) so
@@ -34,7 +34,7 @@ test_categories:
     description: "Fast host-only sanity checks (rocisa + TensileLite unit, no GPU)"
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     exclude_markers:
       - "gpu"
     pytest_args:
@@ -48,7 +48,7 @@ test_categories:
     description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     exclude_markers:
       - "gpu"
     pytest_args:
@@ -62,7 +62,7 @@ test_categories:
     description: "Nightly comprehensive run (rocisa + TensileLite unit, incl. GPU)"
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     pytest_args:
       - "--snapshot-warn-unused"
     labels:
@@ -74,7 +74,7 @@ test_categories:
     description: "Complete suite (rocisa + TensileLite unit, incl. GPU)"
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     pytest_args:
       - "--snapshot-warn-unused"
     labels:
@@ -88,7 +88,7 @@ test_categories:
   ffm-quick:
     description: "Common GEMM tests (FFM emulation)"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS}"
     # These GEMM tests build/run independent kernels; run them across xdist
@@ -98,7 +98,7 @@ test_categories:
     # `{ROCM_PATH}` is substituted with the install prefix at runtime (same as the
     # execution_settings.environment block). The `--prebuilt-client`,
     # `--global-parameters` and `--tensile-options` flags are custom options
-    # registered in tensilelite's conftest.py (Tensile/Tests/conftest.py).
+    # registered in tensilelite's conftest.py (tensilelite/Tests/conftest.py).
     pytest_args:
       - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
       - "--global-parameters=LibraryFormat='msgpack'"
@@ -114,7 +114,7 @@ test_categories:
   emu-fast:
     description: "Common GEMM tests for emulation pre-submits"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS} and emu_fast"
     parallel_workers: 16
@@ -129,7 +129,7 @@ test_categories:
   emu-full:
     description: "All common GEMM tests for emulation nightly"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS}"
     parallel_workers: 16

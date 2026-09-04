@@ -10,7 +10,7 @@ Or with pytest if available:
 
     pytest projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_register.py
 
-The tests assert behaviors that Tensile's KernelWriter implicitly depends on
+The tests assert behaviors that TensileLite's KernelWriter implicitly depends on
 (AMDGPU ABI, byte-for-byte parity with rocisa's allocator, etc.). Treat any
 failure here as a regression that will silently corrupt generated asm.
 """
@@ -95,7 +95,7 @@ class TestConstruction(unittest.TestCase):
 
 
 class TestKernArgAddressABI(unittest.TestCase):
-    """Tensile's _initKernel asserts SGPR0 == KernArgAddress.
+    """TensileLite's _initKernel asserts SGPR0 == KernArgAddress.
 
     Reproduces the exact call sequence at KernelWriter.py:7456-7466.
     """
@@ -199,7 +199,7 @@ class TestCheckOutAligned(unittest.TestCase):
             pool.checkOutAligned(4, 1, "x")
 
     def test_explicit_prevent_overflow_overrides_default(self):
-        """preventOverflow=False (the int 0, passed by Tensile's defineSgpr)
+        """preventOverflow=False (the int 0, passed by TensileLite's defineSgpr)
         must permit tail-grow even when defaultPreventOverflow=True.
 
         rocisa's tail-walk loop is ``for (i = size-1; i > 0; --i)`` — index 0
@@ -444,7 +444,7 @@ class TestDeepCopy(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Tensile-realistic mini scenario: replay the head of _initKernel
+# TensileLite-realistic mini scenario: replay the head of _initKernel
 # ---------------------------------------------------------------------------
 
 

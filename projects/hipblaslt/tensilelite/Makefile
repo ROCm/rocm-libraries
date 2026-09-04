@@ -25,9 +25,9 @@
 #
 # Usage:
 #
-# Assuming one runs the following Tensile command:
+# Assuming one runs the following TensileLite command:
 #
-#   Tensile/bin/Tensile <yaml> tensile-out
+#   tensilelite run <yaml> tensile-out
 #
 # One can invoke make from the directory containing this Makefile as follows:
 #

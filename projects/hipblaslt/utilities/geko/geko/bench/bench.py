@@ -377,7 +377,7 @@ def compare(
             Defaults to "benchmarks".
         verify (bool, optional): Whether to run accuracy verification tests.
             Defaults to True.
-        cache (bool, optional): Whether to reuse existing Tensile library and results.
+        cache (bool, optional): Whether to reuse existing TensileLite library and results.
             Defaults to False.
         duration (float, optional): Target benchmark duration in seconds.  
             This is the duration of each benchmark. It will be used to calculate the number of iterations.
@@ -397,7 +397,7 @@ def compare(
         ValueError: If no valid libraries found in lib_dir.
 
     Note:
-        - Creates Tensile library if not cached.
+        - Creates TensileLite library if not cached.
         - Generates benchmark input files for each library.
         - Compares reference vs tuned performance with ratio calculation.
     """

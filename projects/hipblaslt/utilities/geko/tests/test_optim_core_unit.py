@@ -65,7 +65,7 @@ def test_run_validates_inputs_and_empty_configs(monkeypatch: pytest.MonkeyPatch,
 
 def test_run_worker_flow_updates_config_and_timing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/Tensile/bin").mkdir(parents=True)
+    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
     tuning = tmp_path / "tuning"
     tuning.mkdir()
     cfg = tuning / "job_1.yaml"
@@ -268,7 +268,7 @@ def test_run_worker_running_state_and_nonzero_subprocess(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/Tensile/bin").mkdir(parents=True)
+    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
     tuning = tmp_path / "tuning"
     tuning.mkdir()
     cfg = tuning / "job_3.yaml"
