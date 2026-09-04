@@ -9,6 +9,9 @@ subtrees:
   - caption: Install
     entries:
     - file: install/rocALUTION-install.rst
+      title: Install rocALUTION
+    - file: install/rocALUTION-build-from-source.rst
+      title: Build rocALUTION from source
 
   - caption: Conceptual
     entries:
