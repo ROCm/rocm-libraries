@@ -383,6 +383,15 @@ function(install_hipdnn_ctest_files)
         file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${test_target} \"../${test_target}\")\n")
     endforeach()
 
+    # Test groups that one add_hipdnn_test() call cannot express (one binary, several fixture-
+    # sequenced ctest entries) install their own snippet file next to this one and register its
+    # file name here, so the installed tree runs the same set as the build tree.
+    get_property(extra_includes GLOBAL PROPERTY HIPDNN_INSTALLED_CTEST_INCLUDES)
+    foreach(extra_include ${extra_includes})
+        file(APPEND "${INSTALLED_CTEST_FILE}"
+             "include(\"${extra_include}\")\n")
+    endforeach()
+
     # Bake the YAML-driven category labels into the installed
     # CTestTestfile.cmake so `ctest --test-dir $THEROCK_BIN_DIR/hipdnn -L
     # <tier>` works against the install tree.

@@ -5,11 +5,26 @@
 
 #ifdef _WIN32
 
+// Only the macro names must not escape this header, not the lean include itself: define both
+// only if the includer has not already, and undefine only what we defined, right after
+// <windows.h>. This cannot restore min/max in a translation unit where <windows.h> was already
+// processed with NOMINMAX set elsewhere -- the undef does not re-run <windows.h>.
 #ifndef NOMINMAX
 #define NOMINMAX
+#define HIPDNN_UNDEF_NOMINMAX
 #endif
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#define HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#ifdef HIPDNN_UNDEF_NOMINMAX
+#undef NOMINMAX
+#undef HIPDNN_UNDEF_NOMINMAX
+#endif
+#ifdef HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
+#undef WIN32_LEAN_AND_MEAN
+#undef HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
 #endif
 
 #include <algorithm>
@@ -19,7 +34,6 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
-#include <windows.h>
 
 #include "StringUtil.hpp"
 

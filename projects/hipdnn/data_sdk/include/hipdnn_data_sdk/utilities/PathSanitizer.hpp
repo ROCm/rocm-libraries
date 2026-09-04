@@ -21,9 +21,11 @@ namespace hipdnn_data_sdk::utilities
 /// Sanitizes @p raw into a single path component safe to use as a directory or file name
 /// component on Linux and Windows alike.
 ///
-/// The result is always `<sanitized stem>-<fixed-width hash of raw>`. The hash suffix is
-/// unconditional, so two distinct inputs never produce the same result without needing a
-/// registry of names seen so far.
+/// The result is always `<sanitized stem>-<fixed-width hash of raw>`. The hash suffix is a
+/// 64-bit FNV-1a digest of the whole, untruncated @p raw (the stem it sits beside is lossy
+/// and truncated, but the hash is not), so two distinct inputs collide only on a 64-bit
+/// FNV-1a collision -- on the order of 2^-64 per pair -- without needing a registry of
+/// names seen so far.
 ///
 /// The stem keeps only printable ASCII. Control bytes (NUL included -- a NUL would
 /// truncate the component at the C-string boundary and drop the hash suffix with it) and

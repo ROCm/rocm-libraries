@@ -75,6 +75,24 @@ TEST_F(TestCacheRoot, UnsetEnvResolvesToPlatformDefaultAndDirectoryExists)
     EXPECT_EQ(root.string().rfind(fakeHome.string(), 0), 0u);
 }
 
+/// HOME/USERPROFILE unset (not merely absent from the environment -- ScopedEnvironmentVariableSetter
+/// sets it to the empty string, which getEnv() treats identically to unset) must not fall back to
+/// creating a literal "~" directory under the current working directory.
+TEST_F(TestCacheRoot, UnsetHomeDoesNotResolveToALiteralTildeDirectory)
+{
+#if defined(__linux__)
+    const ScopedEnvironmentVariableSetter home("HOME", "");
+#else
+    const ScopedEnvironmentVariableSetter home("USERPROFILE", "");
+#endif
+    unsetEnv("HIPDNN_CACHE_DIR");
+
+    const auto root = cacheRoot();
+
+    EXPECT_TRUE(root.empty());
+    EXPECT_FALSE(std::filesystem::exists("~"));
+}
+
 TEST_F(TestCacheRoot, CustomWritableDirIsUsedAndCreated)
 {
     const auto customDir = makeUniqueTempDir();
