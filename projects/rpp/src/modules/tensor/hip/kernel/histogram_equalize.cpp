@@ -119,9 +119,14 @@ __device__ inline void ycbcr_to_rgb_hip_compute(d_float24& rgb_f24, d_float8& y_
 }
 
 // Histogram collection kernel
+// applyRoiOffset selects the coordinate frame of srcPtr: true when srcPtr is the real tensor
+// (the ROI lives at (roi.xy.x, roi.xy.y) within it), false when srcPtr is an intermediate
+// buffer (e.g. the Y-plane staged by convert_rgb_*_to_ycbcr_pln3) that was already packed at
+// its own origin (0, 0) and must be indexed without re-applying the ROI offset.
 __global__ void collect_hist_pln_hip_tensor(const unsigned char* __restrict__ srcPtr,
                                             RpptROIPtr roiTensorPtrSrc, ulong2 srcStridesNH,
-                                            unsigned int* __restrict__ hist, int batchSize) {
+                                            unsigned int* __restrict__ hist, int batchSize,
+                                            bool applyRoiOffset = true) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x);
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
@@ -142,8 +147,10 @@ __global__ void collect_hist_pln_hip_tensor(const unsigned char* __restrict__ sr
 
     bool withinBounds = (id_y < roi.roiHeight) && (id_x < roi.roiWidth);
     if (withinBounds) {
+        int offsetX = applyRoiOffset ? roi.xy.x : 0;
+        int offsetY = applyRoiOffset ? roi.xy.y : 0;
         uint srcIdx =
-            (id_z * srcStridesNH.x) + ((id_y + roi.xy.y) * srcStridesNH.y) + (id_x + roi.xy.x);
+            (id_z * srcStridesNH.x) + ((id_y + offsetY) * srcStridesNH.y) + (id_x + offsetX);
         uint8_t pixVal = srcPtr[srcIdx];
         atomicAdd(&histShared[pixVal], 1);
     }
@@ -200,11 +207,16 @@ __global__ void build_lut_from_hist_kernel(const unsigned int* __restrict__ hist
 }
 
 // LUT application kernel
+// applyRoiOffset selects the coordinate frame of srcPtr, same convention as
+// collect_hist_pln_hip_tensor above (true = real tensor needing the ROI offset, false = an
+// already origin-packed intermediate buffer). dstPtr is always written packed at the origin
+// (id_x, id_y), which is unaffected by this flag.
 __global__ void apply_lut_pln1_hip_tensor(const unsigned char* __restrict__ srcPtr,
                                           ulong2 srcStridesNH, unsigned char* __restrict__ dstPtr,
                                           ulong2 dstStridesNH,
                                           const unsigned char* __restrict__ lut,
-                                          RpptROIPtr roiTensorPtrSrc, int batchSize) {
+                                          RpptROIPtr roiTensorPtrSrc, int batchSize,
+                                          bool applyRoiOffset = true) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x);
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
@@ -215,9 +227,9 @@ __global__ void apply_lut_pln1_hip_tensor(const unsigned char* __restrict__ srcP
         (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth))
         return;
 
-    uint srcIdx = (id_z * srcStridesNH.x) +
-                  ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNH.y) +
-                  (id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x);
+    int offsetX = applyRoiOffset ? roiTensorPtrSrc[id_z].xywhROI.xy.x : 0;
+    int offsetY = applyRoiOffset ? roiTensorPtrSrc[id_z].xywhROI.xy.y : 0;
+    uint srcIdx = (id_z * srcStridesNH.x) + ((id_y + offsetY) * srcStridesNH.y) + (id_x + offsetX);
     uint dstIdx = (id_z * dstStridesNH.x) + (id_y * dstStridesNH.y) + id_x;
 
     unsigned char pixVal = srcPtr[srcIdx];
@@ -434,13 +446,16 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                 d_hist, 0, batchSize * HISTOGRAM_BINS * sizeof(unsigned int), handle.GetStream()));
 
             globalThreads_x = srcDescPtr->w;
+            // yBuf is already packed at its own origin (see convert_rgb_pkd3_to_ycbcr_pln3
+            // above), so applyRoiOffset must be false here to avoid re-applying the ROI offset.
             hipLaunchKernelGGL(collect_hist_pln_hip_tensor,
                                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
                                     ceil((float)globalThreads_y / LOCAL_THREADS_Y),
                                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                                handle.GetStream(), yBuf, roiTensorPtrSrc,
-                               make_ulong2(yuvNStride, yuvHStride), d_hist, batchSize);
+                               make_ulong2(yuvNStride, yuvHStride), d_hist, batchSize,
+                               /*applyRoiOffset=*/false);
 
             hipLaunchKernelGGL(build_lut_from_hist_kernel, dim3(batchSize), dim3(HISTOGRAM_BINS), 0,
                                handle.GetStream(), d_hist, d_lut, roiTensorPtrSrc, batchSize);
@@ -448,6 +463,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
             globalThreads_x = dstDescPtr->w;
             globalThreads_y = dstDescPtr->h;
             globalThreads_z = dstDescPtr->n;
+            // Same origin-packed yBuf frame as above: applyRoiOffset=false on the source read.
             hipLaunchKernelGGL(apply_lut_pln1_hip_tensor,
                                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
                                     ceil((float)globalThreads_y / LOCAL_THREADS_Y),
@@ -455,7 +471,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                                handle.GetStream(), yBuf, make_ulong2(yuvNStride, yuvHStride), yBuf,
                                make_ulong2(yuvNStride, yuvHStride), d_lut, roiTensorPtrSrc,
-                               batchSize);
+                               batchSize, /*applyRoiOffset=*/false);
 
             globalThreads_x = (dstDescPtr->w + 7) >> 3;
             globalThreads_y = dstDescPtr->h;
@@ -508,13 +524,16 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                 d_hist, 0, batchSize * HISTOGRAM_BINS * sizeof(unsigned int), handle.GetStream()));
 
             globalThreads_x = srcDescPtr->w;
+            // yBuf is already packed at its own origin (see convert_rgb_pln3_to_ycbcr_pln3
+            // above), so applyRoiOffset must be false here to avoid re-applying the ROI offset.
             hipLaunchKernelGGL(collect_hist_pln_hip_tensor,
                                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
                                     ceil((float)globalThreads_y / LOCAL_THREADS_Y),
                                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                                handle.GetStream(), yBuf, roiTensorPtrSrc,
-                               make_ulong2(yuvNStride, yuvHStride), d_hist, batchSize);
+                               make_ulong2(yuvNStride, yuvHStride), d_hist, batchSize,
+                               /*applyRoiOffset=*/false);
 
             hipLaunchKernelGGL(build_lut_from_hist_kernel, dim3(batchSize), dim3(HISTOGRAM_BINS), 0,
                                handle.GetStream(), d_hist, d_lut, roiTensorPtrSrc, batchSize);
@@ -522,6 +541,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
             globalThreads_x = dstDescPtr->w;
             globalThreads_y = dstDescPtr->h;
             globalThreads_z = dstDescPtr->n;
+            // Same origin-packed yBuf frame as above: applyRoiOffset=false on the source read.
             hipLaunchKernelGGL(apply_lut_pln1_hip_tensor,
                                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
                                     ceil((float)globalThreads_y / LOCAL_THREADS_Y),
@@ -529,7 +549,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                                handle.GetStream(), yBuf, make_ulong2(yuvNStride, yuvHStride), yBuf,
                                make_ulong2(yuvNStride, yuvHStride), d_lut, roiTensorPtrSrc,
-                               batchSize);
+                               batchSize, /*applyRoiOffset=*/false);
 
             globalThreads_x = (dstDescPtr->w + 7) >> 3;
             globalThreads_y = dstDescPtr->h;
