@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "rocblas": {"header": "rocblas/rocblas.h", "language": "c"},
+    "hipblas": {"header": "hipblas/hipblas.h", "language": "c++"},
+    "hipblaslt": {"header": "hipblaslt/hipblaslt.h", "language": "c++"},
+    "hipblaslt_ext": {"header": "hipblaslt/hipblaslt-ext.hpp", "language": "c++"},
+    "rocsolver": {"header": "rocsolver/rocsolver.h", "language": "c"},
+    "hipsolver": {"header": "hipsolver/hipsolver.h", "language": "c++"},
+    "rocrand": {"header": "rocrand/rocrand.h", "language": "c"},
+    "hiprand": {"header": "hiprand/hiprand.h", "language": "c++"},
+    "hiprand_cpp": {"header": "hiprand/hiprand.hpp", "language": "c++"},
+    "rocrand_cpp": {
+      "header": "rocrand/rocrand.hpp",
+      "language": "c++",
+      "arguments": ["-include", "cstdio"]
+    }
+  },
+  "common_definitions": ["__HIP_PLATFORM_AMD__=1"],
+  "excluded_languages": ["fortran"]
+}

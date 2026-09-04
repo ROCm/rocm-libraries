@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Architecture component model specification</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="spec-review.css" />
+</head>
+<body>
+<nav class="spec-navigation" aria-label="Specification navigation">
+  <a class="spec-navigation__brand" href="index.html">ROCm interfaces<br><strong>Specifications</strong></a>
+  <div class="spec-navigation__label">Review set</div>
+  <a href="architecture-component-model.html">Architecture component model</a>
+  <a href="broker.html">Broker</a>
+  <a href="cohort.html">Cohort</a>
+  <a href="facade.html">Facade</a>
+  <a href="hipblaslt-horizontal.html">hipBLASLt horizontal</a>
+  <a href="hipblaslt-facade-path.html">hipBLASLt facade path</a>
+  <a href="manifest.html">Manifest</a>
+  <a href="provider-adapter.html">Provider adapter</a>
+  <a href="provider-binding.html">Provider binding</a>
+  <a href="provider-module.html">Provider module</a>
+  <a href="provider-protocol.html">Provider protocol</a>
+  <a href="provider.html">Provider</a>
+</nav>
+<header id="title-block-header">
+<h1 class="title">Architecture component model specification</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#scope" id="toc-scope">Scope</a></li>
+<li><a href="#non-goals" id="toc-non-goals">Non-goals</a></li>
+<li><a href="#terminology" id="toc-terminology">Terminology</a></li>
+<li><a href="#1-the-three-lanes" id="toc-1-the-three-lanes">1. The three
+lanes</a></li>
+<li><a href="#2-component-inventory" id="toc-2-component-inventory">2.
+Component inventory</a></li>
+<li><a href="#3-allowed-call-directions"
+id="toc-3-allowed-call-directions">3. Allowed call directions</a></li>
+<li><a href="#4-context-establishment"
+id="toc-4-context-establishment">4. Context establishment</a></li>
+<li><a href="#5-ordinary-operation-dispatch"
+id="toc-5-ordinary-operation-dispatch">5. Ordinary operation
+dispatch</a></li>
+<li><a href="#6-legacy-shadow-and-facade-as-overlays"
+id="toc-6-legacy-shadow-and-facade-as-overlays">6. Legacy, shadow, and
+facade as overlays</a></li>
+<li><a href="#7-architecture-level-invariants"
+id="toc-7-architecture-level-invariants">7. Architecture-level
+invariants</a></li>
+<li><a href="#8-open-decisions" id="toc-8-open-decisions">8. Open
+decisions</a></li>
+<li><a href="#9-cross-links" id="toc-9-cross-links">9.
+Cross-links</a></li>
+</ul>
+</nav>
+<p>Status: specification, not a description of a finished system.
+Umbrella document for the facade/provider architecture defined in
+../draft-plan-reboot. It is an overview: the nine siblings here are
+normative for each component's detail, and each component gets one line
+plus a link. Where a sibling disagrees, the sibling wins for its own
+component. Implementation status, test names, and evidence are
+non-normative and live in <a
+href="architecture-component-model.html">ledger/architecture-component-model</a>.</p>
+<h2 id="scope">Scope</h2>
+<p>The component inventory and each component's lane; the complete
+allowed-call-direction matrix, with everything not listed prohibited;
+the context-establishment flow, the ordinary-operation dispatch flow,
+and the rule separating them; legacy, shadow, and facade as three
+overlays over the same three lanes; the architecture-level
+invariants.</p>
+<h2 id="non-goals">Non-goals</h2>
+<p>Not specified here: the public contract of any math library (a facade
+inherits that contract, it does not define it), nor any sibling-owned
+topic - the manifest schema (<a href="manifest.html">manifest</a>), the
+protocol wire format ([provider-protocol](provider- protocol)),
+discovery and candidate ordering (<a href="broker.html">broker</a>),
+what a provider, adapter, or module implements (<a
+href="provider.html">provider</a>, [provider-adapter](provider-
+adapter), <a href="provider-module.html">provider-module</a>), binding
+state and lifetime (<a href="provider-binding.html">provider-
+binding</a>), cohort identity (<a href="cohort.html">cohort</a>), or the
+delivery plan. Nor does it claim the broker is a separately packaged
+component (TBD-2).</p>
+<h2 id="terminology">Terminology</h2>
+<p>Terms are as defined in ../draft-plan-reboot. Three are introduced
+here because the component model needs a name for them.</p>
+<ul>
+<li><strong>Lane</strong> - one of three boundary bands; every component
+sits in exactly one. The <strong>application lane</strong> is code the
+distribution does not own; the <strong>public-contract lane</strong> is
+the API, ABI, and library identity promised to it; the
+<strong>private-implementation lane</strong> is everything behind that
+promise, and nothing in it is a supported third-party interface.</li>
+<li><strong>Lease</strong> - the broker-issued object naming the
+selected provider and keeping its module resident. The broker's half of
+a provider binding, not a synonym for it.</li>
+<li><strong>Underlying implementation</strong> - the pre-existing
+math-library implementation a provider adapter reaches through its own
+private path. Not part of any public contract, even when in the legacy
+overlay that binary still owns one.</li>
+</ul>
+<h2 id="1-the-three-lanes">1. The three lanes</h2>
+<ul>
+<li>The application lane MUST reach the distribution only through the
+public-contract lane.</li>
+<li>The public-contract lane MUST be owned by exactly one component per
+contract. Two components MUST NOT both claim one public library identity
+in a shipped distribution.</li>
+<li>The private-implementation lane MUST NOT be reachable from the
+application lane at source, link, or load time. No symbol, header, or
+artifact in it is a supported application dependency.</li>
+</ul>
+<p>Documentation is not a boundary. A rule here that no check holds is a
+review-time rule.</p>
+<h2 id="2-component-inventory">2. Component inventory</h2>
+<p>Normative for lane assignment and allowed dependency direction. The
+sibling specification is normative for what each component owns and
+forbids.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Component</th>
+<th>Lane</th>
+<th>Role</th>
+<th>Allowed outbound</th>
+<th>Allowed inbound</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Application</td>
+<td>application</td>
+<td>Client code; owns only its own source and its choice of
+contract</td>
+<td>Public-contract lane only</td>
+<td>none</td>
+</tr>
+<tr class="even">
+<td>Compatibility facade</td>
+<td>public contract on its exported surface, private implementation
+inside</td>
+<td>Owns a public API, ABI, and library identity and delegates through
+the protocol; <a href="facade.html">facade</a></td>
+<td>Broker at establishment only; its retained binding; the protocol
+through the retained table; the loader-lock DSO</td>
+<td>Application</td>
+</tr>
+<tr class="odd">
+<td>Broker</td>
+<td>private implementation</td>
+<td>Turns a domain plus device key into a validated lease; <a
+href="broker.html">broker</a></td>
+<td>Manifest; module load and query symbol; the protocol query; the
+loader-lock DSO</td>
+<td>Facade only</td>
+</tr>
+<tr class="even">
+<td>Manifest</td>
+<td>private implementation (data)</td>
+<td>Declares the candidate set to the broker; <a
+href="manifest.html">manifest</a></td>
+<td>none, it is data</td>
+<td>Broker only</td>
+</tr>
+<tr class="odd">
+<td>Provider module</td>
+<td>private implementation (binary artifact)</td>
+<td>The loading and packaging unit carrying a protocol entry point; <a
+href="provider-module.html">provider-module</a></td>
+<td>Underlying implementation by <code>dlopen</code>; the loader-lock
+DSO; protocol headers</td>
+<td>Broker only, by load then query symbol lookup</td>
+</tr>
+<tr class="even">
+<td>Provider</td>
+<td>private implementation (logical facility)</td>
+<td>Supplies capabilities without owning any public contract; <a
+href="provider.html">provider</a></td>
+<td>Underlying implementation; the host services record; delegated
+bindings handed in at context creation</td>
+<td>Broker at query time; facade through the retained dispatch
+table</td>
+</tr>
+<tr class="odd">
+<td>Provider protocol</td>
+<td>private implementation (private ABI)</td>
+<td>The versioned query envelope, tables, records, and status
+vocabulary; <a href="provider-protocol.html">provider-protocol</a></td>
+<td>none, it is a contract not code</td>
+<td>Facade, broker, provider adapter</td>
+</tr>
+<tr class="even">
+<td>Provider adapter</td>
+<td>private implementation (source inside a provider)</td>
+<td>Translates protocol calls to one implementation; <a
+href="provider-adapter.html">provider-adapter</a></td>
+<td>Underlying implementation; the host services record</td>
+<td>The provider's own query symbol and dispatch table only</td>
+</tr>
+<tr class="odd">
+<td>Provider binding</td>
+<td>private implementation (held by the facade)</td>
+<td>The retained result of selection; <a
+href="provider-binding.html">provider-binding</a></td>
+<td>The protocol through the retained table</td>
+<td>Facade only</td>
+</tr>
+<tr class="even">
+<td>Cohort</td>
+<td>private implementation (policy over data)</td>
+<td>Asserts that a set of providers was qualified together; <a
+href="cohort.html">cohort</a></td>
+<td>none</td>
+<td>Broker during selection; facade for multi-domain contracts</td>
+</tr>
+<tr class="odd">
+<td>Underlying implementation</td>
+<td>private implementation</td>
+<td>The pre-existing implementation reached as a backend; <a
+href="provider.html">provider</a></td>
+<td>none within this architecture</td>
+<td>Provider adapter only, at run time</td>
+</tr>
+<tr class="even">
+<td>Dynamic-loader lock DSO</td>
+<td>private implementation (supporting)</td>
+<td>Process-shared serialization of <code>dlopen</code>,
+<code>dlsym</code>, <code>dlclose</code></td>
+<td>none</td>
+<td>Facade, broker, provider module</td>
+</tr>
+<tr class="odd">
+<td>Host services record</td>
+<td>private implementation (part of the protocol)</td>
+<td>Trace and service callbacks supplied to a provider</td>
+<td>none</td>
+<td>Provider adapter, as callbacks</td>
+</tr>
+</tbody>
+</table>
+<p>Three clarifications are normative. The facade straddles two lanes
+deliberately: its exported surface is the public-contract lane,
+everything inside it is private-implementation lane and MUST be
+invisible to the application. The cohort is not an artifact: no cohort
+binary, object, or API exists. The provider is not the module: one
+module MAY serve several domains and one provider MAY span several
+modules, so a rule about "the provider binary" is a category error. Two
+obligations fall to no sibling: the dynamic-loader lock DSO MUST export
+nothing but its lock interface and MUST NOT be optional for a facade;
+the host services record MUST NOT be load-bearing for correctness, and a
+provider MUST NOT assume it is non-null absent a stated rule
+(TBD-3).</p>
+<h2 id="3-allowed-call-directions">3. Allowed call directions</h2>
+<p>Rows are callers, columns are callees; a cell holds the edge
+identifier when allowed and <code>-</code> when prohibited. <strong>Any
+direction not listed is prohibited</strong>, and a prohibited direction
+is a conformance failure even when nothing currently breaks.</p>
+<table>
+<thead>
+<tr class="header">
+<th>caller \ callee</th>
+<th>App</th>
+<th>Facade</th>
+<th>Broker</th>
+<th>Manifest</th>
+<th>Module</th>
+<th>Provider</th>
+<th>Binding</th>
+<th>Impl</th>
+<th>Lock</th>
+<th>Host svcs</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>App</td>
+<td>-</td>
+<td>D1</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td>Facade</td>
+<td>-</td>
+<td>-</td>
+<td>D2</td>
+<td>-</td>
+<td>-</td>
+<td>D8</td>
+<td>D7</td>
+<td>-</td>
+<td>D12</td>
+<td>-</td>
+</tr>
+<tr class="odd">
+<td>Broker</td>
+<td>-</td>
+<td>D6</td>
+<td>-</td>
+<td>D3</td>
+<td>D4</td>
+<td>D5</td>
+<td>-</td>
+<td>-</td>
+<td>D13</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td>Manifest</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr class="odd">
+<td>Module</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>D9</td>
+<td>D14</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td>Provider</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>D11</td>
+<td>-</td>
+<td>D9</td>
+<td>D14</td>
+<td>D10</td>
+</tr>
+<tr class="odd">
+<td>Binding</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td>Impl</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr class="odd">
+<td>Lock</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td>Host svcs</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr class="header">
+<th>#</th>
+<th>Caller -&gt; callee</th>
+<th>Mechanism, and when</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>D1</td>
+<td>Application -&gt; facade</td>
+<td>Public API and ABI, export-allowlisted and version-noded; any
+time</td>
+</tr>
+<tr class="even">
+<td>D2</td>
+<td>Facade -&gt; broker</td>
+<td>In-process call into the registry; context establishment only</td>
+</tr>
+<tr class="odd">
+<td>D3</td>
+<td>Broker -&gt; manifest</td>
+<td>File read plus strict parse, inside one atomic load; during
+discovery</td>
+</tr>
+<tr class="even">
+<td>D4</td>
+<td>Broker -&gt; provider module</td>
+<td>Trusted-path load then query symbol lookup, serialized through the
+loader lock; during selection</td>
+</tr>
+<tr class="odd">
+<td>D5</td>
+<td>Broker -&gt; protocol</td>
+<td>The versioned query call into a loaded module; once per candidate
+evaluation</td>
+</tr>
+<tr class="even">
+<td>D6</td>
+<td>Broker -&gt; facade</td>
+<td>Return of the lease, plus rejection diagnostics through a
+non-load-bearing trace callback; return path of D2 only</td>
+</tr>
+<tr class="odd">
+<td>D7</td>
+<td>Facade -&gt; binding</td>
+<td>Local retention and read of binding state; establishment and every
+operation</td>
+</tr>
+<tr class="even">
+<td>D8</td>
+<td>Facade -&gt; protocol</td>
+<td>Call through the retained table with the retained provider context;
+ordinary operation, context create and destroy</td>
+</tr>
+<tr class="odd">
+<td>D9</td>
+<td>Provider adapter -&gt; underlying implementation</td>
+<td><code>dlopen</code> plus the implementation's private backend entry
+point, serialized through the loader lock; lazily, at most once per
+process for acquisition, then per call</td>
+</tr>
+<tr class="even">
+<td>D10</td>
+<td>Provider adapter -&gt; host services record</td>
+<td>Callback supplied in the request or context-creation record, called
+defensively; during a query or dispatch call</td>
+</tr>
+<tr class="odd">
+<td>D11</td>
+<td>Provider adapter -&gt; delegated binding in another provider</td>
+<td>Facade-constructed services record authenticated by a service token;
+only when the facade handed that delegated binding to this provider
+context at creation</td>
+</tr>
+<tr class="even">
+<td>D12, D13, D14</td>
+<td>Facade, broker, provider module -&gt; loader-lock DSO</td>
+<td>Link dependency and lock acquisition around <code>dlopen</code>,
+<code>dlsym</code>, <code>dlclose</code>; any loader operation</td>
+</tr>
+</tbody>
+</table>
+<p>Three readings are normative. The <code>Manifest</code>,
+<code>Binding</code>, <code>Impl</code>, <code>Lock</code>, and
+<code>Host svcs</code> rows are entirely <code>-</code>: they are
+leaves, called and never calling. The <code>App</code> row has exactly
+one allowed cell, the boundary the architecture exists to create.
+<code>Provider -&gt; Provider</code> is D11 and only D11.</p>
+<p>These prohibited edges are named because each has been reached for in
+a real design conversation:</p>
+<ul>
+<li>Application -&gt; broker, provider, module, manifest, protocol, or
+underlying implementation: makes a private-lane item a de facto public
+contract, versioned forever.</li>
+<li>Facade -&gt; underlying implementation: linking or loading the
+canonical library adds a layer instead of moving the implementation
+behind a boundary.</li>
+<li>Facade -&gt; provider module: a facade that knows a module path or
+name has hard-coded a selection that belongs to the broker.</li>
+<li>Facade -&gt; broker on the operation path: destroys context pinning
+and reintroduces per-call selection cost and risk.</li>
+<li>Broker -&gt; application, and broker -&gt; facade other than the D6
+return and the trace callback: the broker has no public surface, and
+calling facade logic inverts contract ownership.</li>
+<li>Provider -&gt; facade public API: re-enters the contract the
+provider implements, and under overlay C would recurse.</li>
+<li>Provider -&gt; broker: a provider that selects, orders, or rejects
+is a second broker with no diagnostics.</li>
+<li>Provider -&gt; another provider directly: bypasses cohort, lifetime,
+and token control; only D11 is legal.</li>
+<li>Anything -&gt; a provider adapter by name: requires exporting a
+symbol the module MUST NOT export.</li>
+<li>Underlying implementation -&gt; anything here: it is a leaf; a
+callback into a facade makes the private boundary circular.</li>
+</ul>
+<p>Two consequences are requirements. The graph over D1-D14 MUST be
+acyclic once D6, D10, and D11 are read as return paths and callbacks; a
+genuine cycle between facade and provider, or between two providers,
+MUST NOT exist. Every edge crossing into a separately compiled artifact
+- D4, D5, D8, D9, D11 - MUST be a C ABI with an explicit size and
+version header, or, for D9, the private contract the implementation
+itself declares (TBD-26).</p>
+<h2 id="4-context-establishment">4. Context establishment</h2>
+<p>Context establishment is the only moment at which discovery,
+selection, and validation may run. A conforming facade MUST perform it
+at most once per public context and MUST NOT perform any part of it
+again. The flow runs in three stages. The facade first validates its
+public arguments and resolves the device key. It then calls the broker
+with domain, device key, required prefix, and required abi_minor, and
+the broker runs its selection sequence - manifest parse, candidate
+filter, candidate ordering, and, per candidate, module load,
+query-symbol resolution, query, and response validation - and hands back
+a lease. That sequence and every rule governing it are <a
+href="broker.html">broker</a>'s; the steps are named here only so the
+flow reads end to end. The facade then checks required callbacks and
+capabilities, creates the provider context through the table, retains
+the binding, and returns a public handle.</p>
+<ul>
+<li>The facade MUST validate its public arguments before it reaches the
+broker.</li>
+<li>What the broker validates before it hands back a lease, and its
+no-caching of failures, are <a href="broker.html">broker</a>'s;
+establishment relies on both and states no rule of its own about
+them.</li>
+<li>Required-callback and capability checks MUST happen before a
+provider context is created; whether the facade or the broker performs
+them is open (TBD-10).</li>
+<li>When the contract requires several domains, every step from the
+manifest read to the capability check MUST complete for every domain
+under one cohort identity before the public context is returned. A
+partially bound context MUST NOT be returned.</li>
+<li>The facade MUST NOT return a public context whose binding is
+incomplete, and MUST release everything already acquired when any step
+fails.</li>
+<li>Whether a facade MAY defer establishment past construction to first
+use is open (TBD-24); selection is once-only either way, and pinning
+holds from the moment it happens.</li>
+</ul>
+<h2 id="5-ordinary-operation-dispatch">5. Ordinary operation
+dispatch</h2>
+<p>The broker is absent from this path, and that absence is the point of
+the architecture: selection cost and risk are paid once and never again
+for that context. The facade validates arguments, reads the retained
+table pointer and provider context from the binding, calls the table
+slot, translates the protocol status into its public status vocabulary,
+and returns.</p>
+<ul>
+<li>The facade MUST NOT re-derive the table pointer or provider context
+per call; re-derivation is a second selection and is prohibited.</li>
+<li>A failure at operation time MUST NOT trigger reselection or
+rebinding. The established context stays bound to the provider it was
+bound to and reports the failure.</li>
+<li>No exception may escape the provider into the facade, or the facade
+into the application.</li>
+<li>Argument ownership across the protocol boundary is <a
+href="provider-protocol.html">provider-protocol</a>'s; nothing on this
+path relaxes it.</li>
+<li>A delegated binding is reached only through the facade-constructed
+services record and its token, never by a direct provider-to-provider
+call.</li>
+<li>Whether one public context may be dispatched concurrently from
+several threads is open (TBD-20).</li>
+</ul>
+<h2 id="6-legacy-shadow-and-facade-as-overlays">6. Legacy, shadow, and
+facade as overlays</h2>
+<p>Legacy, shadow, and facade are not three architectures but three
+overlays over the same three lanes; what moves between them is which
+component owns the public-contract lane.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Lane</th>
+<th>Overlay A: legacy</th>
+<th>Overlay B: shadow</th>
+<th>Overlay C: facade</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Application</td>
+<td>Links the canonical SONAME</td>
+<td>Links or preloads the shadow SONAME deliberately, and MUST NOT get
+it by accident</td>
+<td>Links the same canonical SONAME as in A, unchanged and not
+relinked</td>
+</tr>
+<tr class="even">
+<td>Public contract</td>
+<td>Owned by the canonical implementation library</td>
+<td>Owned by the canonical library; the shadow carries a parallel,
+distinct identity</td>
+<td>Owned by the facade</td>
+</tr>
+<tr class="odd">
+<td>Private implementation</td>
+<td>The canonical library's own internals; no broker, manifest, or
+provider</td>
+<td>The full private lane exists and is exercised, with the canonical
+library reached as a backend</td>
+<td>Same as B; the legacy implementation is one provider backend among
+possibly several</td>
+</tr>
+<tr class="even">
+<td>What is proved</td>
+<td>Nothing new</td>
+<td>That the private lane is correct and complete while rollback costs
+nothing</td>
+<td>That the identity transfer preserved the contract</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>A distribution MUST be in exactly one overlay for a given contract
+at a given time (INV-1).</li>
+<li>Overlay B MUST NOT interpose on overlay A: the shadow MUST be
+installable with no file and no SONAME conflict and MUST NOT be selected
+by default. An application reaching the shadow without asking for it is
+overlay C without the qualification.</li>
+<li>Overlay B MUST subject the shadow to every check the overlay C
+facade will face: export allowlist equality, a version node on every
+export, absence of a canonical DSO in <code>DT_NEEDED</code>, presence
+of the dynamic-loader lock, and no RPATH.</li>
+<li>Overlay B MUST be qualified from an installed tree, not only from a
+build tree.</li>
+<li>The transition into overlay C MUST be reversible: a distribution
+MUST be able to reinstall the legacy library and have existing compiled
+clients keep working without relinking.</li>
+<li>In overlay C the legacy implementation MUST be reachable only as a
+provider backend and MUST NOT retain the public identity. The private
+path to it MUST guarantee that references originating inside the legacy
+DSO bind to that DSO's own implementation even when a facade exporting
+the same public names loaded first.</li>
+<li>Upgrade and rollback MUST be tested as a sequence, not as two
+independent installs.</li>
+<li>Exit criteria for leaving overlay B MUST be written before the
+transfer is attempted (TBD-1).</li>
+</ul>
+<h2 id="7-architecture-level-invariants">7. Architecture-level
+invariants</h2>
+<p>These belong to no single component and MUST be checked at the system
+level.</p>
+<ul>
+<li><strong>INV-1 One owner per public identity.</strong> Exactly one
+shipped component owns a given public library identity at a time.</li>
+<li><strong>INV-2 No private symbol in a public export set.</strong> A
+facade's export set MUST equal its allowlist exactly; a provider
+module's export set MUST be its single query symbol.</li>
+<li><strong>INV-3 No canonical implementation on a facade's link or load
+line.</strong></li>
+<li><strong>INV-4 Selection happens once per context.</strong> No
+component may perform discovery, ordering, or selection on the
+ordinary-operation path.</li>
+<li><strong>INV-5 Fail closed at every private-ABI boundary.</strong>
+Any size, version, identity, prefix, or capability disagreement MUST
+reject the candidate or the call; "proceed and hope" is prohibited.</li>
+<li><strong>INV-6 Atomic completeness.</strong> A multi-domain contract
+MUST NOT observe a partially acquired provider set.</li>
+<li><strong>INV-7 Residency follows the binding.</strong> A provider
+module MUST stay resident at least as long as any binding holds a
+pointer into it; the lease is the mechanism.</li>
+<li><strong>INV-8 Loader serialization.</strong> Every
+<code>dlopen</code>, <code>dlsym</code>, and <code>dlclose</code> in the
+private lane MUST be serialized through the loader lock (for modules,
+see TBD-29).</li>
+<li><strong>INV-9 No exception crosses a C ABI.</strong> Not the public
+ABI, not the protocol; translation is mandatory at both boundaries.</li>
+<li><strong>INV-10 Nothing in the private lane is a supported
+dependency.</strong> No manifest, module, protocol header, or provider
+symbol may be documented, packaged, or promised as third-party
+consumable.</li>
+<li><strong>INV-11 Concurrent facades in one process.</strong> Two
+facades in one process MUST NOT corrupt each other's discovery or
+loading.</li>
+<li><strong>INV-12 A public object carries no private identity.</strong>
+No protocol type, provider identity, cohort identity, manifest path, or
+module name may appear in a public header, a public struct layout, or a
+public status value.</li>
+</ul>
+<h2 id="8-open-decisions">8. Open decisions</h2>
+<p>Only decisions that block a contract stated above. Full statements,
+closing conditions, and the cross-cutting decisions owned by siblings
+are in <a
+href="architecture-component-model.html">ledger/architecture-component-
+model</a>.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Id</th>
+<th>Blocks</th>
+<th>Question</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>TBD-1</td>
+<td>Section 6 overlay C; INV-1</td>
+<td>How is the public identity transferred from the legacy library to
+the facade, and what are the exit criteria for leaving shadow
+qualification?</td>
+</tr>
+<tr class="even">
+<td>TBD-2</td>
+<td>Section 2; the D2 edge</td>
+<td>Who owns the broker in production: one shared instance per process,
+or a private registry per facade?</td>
+</tr>
+<tr class="odd">
+<td>TBD-3</td>
+<td>Section 2 host services; D10</td>
+<td>Which component injects and owns the host services record, and may a
+provider require it to be non-null?</td>
+</tr>
+<tr class="even">
+<td>TBD-4</td>
+<td>Section 3</td>
+<td>Is the allowed-call-direction matrix enforceable, or does it remain
+a review-time rule?</td>
+</tr>
+<tr class="odd">
+<td>TBD-10</td>
+<td>Section 4</td>
+<td>Does required-callback and capability gating belong in the facade or
+in the broker, so a deficient candidate falls through?</td>
+</tr>
+<tr class="even">
+<td>TBD-11</td>
+<td>INV-6</td>
+<td>Which domains require a cohort?</td>
+</tr>
+<tr class="odd">
+<td>TBD-15</td>
+<td>Every evidence claim</td>
+<td>Is there a required minimum registered test set, so an unregistered
+test family is visible as a skip rather than as an absence?</td>
+</tr>
+<tr class="even">
+<td>TBD-20</td>
+<td>Section 5</td>
+<td>Must a provider context be internally thread-safe, or may an adapter
+require caller serialization?</td>
+</tr>
+<tr class="odd">
+<td>TBD-24</td>
+<td>Section 4</td>
+<td>Is deferred first-use binding an approved binding shape or an
+inconsistency to reconcile?</td>
+</tr>
+<tr class="even">
+<td>TBD-26</td>
+<td>Section 3, D9</td>
+<td>Does the private backend contract come under the protocol's ABI
+header, or stay a separate private contract?</td>
+</tr>
+<tr class="odd">
+<td>TBD-29</td>
+<td>INV-8</td>
+<td>Must a provider module route its own loader calls through the
+dynamic-loader lock, and is that checked?</td>
+</tr>
+</tbody>
+</table>
+<h2 id="9-cross-links">9. Cross-links</h2>
+<p>Siblings, each normative for its own component: <a
+href="facade.html">facade</a>, <a href="broker.html">broker</a>, <a
+href="provider.html">provider</a>, <a
+href="provider-protocol.html">provider-protocol</a>, <a
+href="provider-binding.html">provider- binding</a>, <a
+href="provider-adapter.html">provider-adapter</a>, <a
+href="provider-module.html">provider- module</a>, <a
+href="manifest.html">manifest</a>, <a href="cohort.html">cohort</a>.
+Terminology: ../draft-plan-reboot. Non-normative evidence: <a
+href="architecture-component-model.html">ledger/architecture-
+component-model</a>. Style guide: ../STYLE.</p>
+</body>
+</html>
