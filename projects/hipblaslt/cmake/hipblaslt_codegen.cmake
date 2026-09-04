@@ -301,6 +301,12 @@ function(create_device_library)
     if(_cdl_REQUIRE_GFX1250V0_OVERLAY)
         list(APPEND _tensile_logic_args --require-gfx1250v0-overlay)
     endif()
+    set(_codegen_dependencies "${_known_bugs_resource}")
+    if(TARGET _rocisa)
+        list(APPEND _codegen_dependencies _rocisa)
+    elseif(HIPBLASLT_PYTHON_DEPS)
+        list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_DEPS})
+    endif()
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
@@ -309,7 +315,7 @@ function(create_device_library)
             "${_codegen_dir}/Tensile/bin/TensileLogic"
             ${_tensile_logic_args}
         COMMAND ${CMAKE_COMMAND} -E touch "${_logic_stamp}"
-        DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${_known_bugs_resource}"
+        DEPENDS ${_codegen_dependencies}
         VERBATIM
         USES_TERMINAL
     )
@@ -327,7 +333,7 @@ function(create_device_library)
         COMMENT "Building device libraries to ${_cdl_OUTPUT_DIR} ..."
         COMMAND ${_tcl_command}
         COMMAND ${CMAKE_COMMAND} -E touch "${_output_stamp}"
-        DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${_logic_stamp}"
+        DEPENDS ${_logic_stamp}
         VERBATIM
         USES_TERMINAL
     )
