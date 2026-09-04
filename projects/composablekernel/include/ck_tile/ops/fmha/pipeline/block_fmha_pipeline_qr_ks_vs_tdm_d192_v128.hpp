@@ -698,7 +698,7 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128 : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 });
             }
 
-            s_wait_tensorcnt_barrier<0>();
+            s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount>();
             if constexpr(!Policy::kUseCustomQkStageSchedule)
             {
                 v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
@@ -928,11 +928,11 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128 : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
             if constexpr(Policy::kUseFullHeadKSuQk)
             {
-                s_wait_tensorcnt_barrier<0>();
+                s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount>();
             }
             else
             {
-                s_wait_tensorcnt_barrier<0>();
+                s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount>();
                 k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
                 k_tile = load_tile(k_lds_read_window);
 
@@ -1025,6 +1025,13 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128 : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 output(i_j_idx) *= tmp;
             });
         });
+
+        // A partial prefetch wait can leave the terminal look-ahead TDM in flight.
+        if constexpr((Policy::kKPrefetchTensorCount != 0 || Policy::kVPrefetchTensorCount != 0) &&
+                     Policy::kPrefetchTailDrain)
+        {
+            s_wait_tensorcnt<0>();
+        }
 
         return output;
     }

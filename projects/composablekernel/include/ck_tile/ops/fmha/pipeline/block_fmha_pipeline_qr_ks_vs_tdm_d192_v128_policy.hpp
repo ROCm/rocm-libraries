@@ -11,6 +11,34 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_softmax.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp"
 
+#ifndef CK_TILE_FMHA_GFX125_D192_K_PREFETCH_TENSORCNT
+#define CK_TILE_FMHA_GFX125_D192_K_PREFETCH_TENSORCNT 0
+#endif
+
+#ifndef CK_TILE_FMHA_GFX125_D192_V_PREFETCH_TENSORCNT
+#define CK_TILE_FMHA_GFX125_D192_V_PREFETCH_TENSORCNT 0
+#endif
+
+#ifndef CK_TILE_FMHA_GFX125_D192_PREFETCH_TAIL_DRAIN
+#define CK_TILE_FMHA_GFX125_D192_PREFETCH_TAIL_DRAIN 1
+#endif
+
+#ifndef CK_TILE_FMHA_GFX125_D192_QK_STAGE0_TAIL_DSCNT
+#define CK_TILE_FMHA_GFX125_D192_QK_STAGE0_TAIL_DSCNT 24
+#endif
+
+#ifndef CK_TILE_FMHA_GFX125_D192_QK_STAGE1_TAIL_DSCNT
+#define CK_TILE_FMHA_GFX125_D192_QK_STAGE1_TAIL_DSCNT 24
+#endif
+
+#ifndef CK_TILE_FMHA_GFX125_D192_QK_STAGE2_TAIL_DSCNT
+#define CK_TILE_FMHA_GFX125_D192_QK_STAGE2_TAIL_DSCNT 24
+#endif
+
+#ifndef CK_TILE_FMHA_GFX125_D192_QK_STAGE3_TAIL_DSCNT
+#define CK_TILE_FMHA_GFX125_D192_QK_STAGE3_TAIL_DSCNT 16
+#endif
+
 namespace ck_tile {
 
 struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefaultPolicy
@@ -33,6 +61,41 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
     static constexpr bool kUseCustomPvStageSchedule   = true;
     static constexpr bool kUseOutputFragments         = true;
     static constexpr auto kORescaleToken              = FmhaD192ScheduleToken::ORescale;
+    static constexpr index_t kKPrefetchTensorCount = CK_TILE_FMHA_GFX125_D192_K_PREFETCH_TENSORCNT;
+    static constexpr index_t kVPrefetchTensorCount = CK_TILE_FMHA_GFX125_D192_V_PREFETCH_TENSORCNT;
+    static constexpr bool kPrefetchTailDrain = CK_TILE_FMHA_GFX125_D192_PREFETCH_TAIL_DRAIN != 0;
+    static constexpr index_t kQkStage0TailDsCount = CK_TILE_FMHA_GFX125_D192_QK_STAGE0_TAIL_DSCNT;
+    static constexpr index_t kQkStage1TailDsCount = CK_TILE_FMHA_GFX125_D192_QK_STAGE1_TAIL_DSCNT;
+    static constexpr index_t kQkStage2TailDsCount = CK_TILE_FMHA_GFX125_D192_QK_STAGE2_TAIL_DSCNT;
+    static constexpr index_t kQkStage3TailDsCount = CK_TILE_FMHA_GFX125_D192_QK_STAGE3_TAIL_DSCNT;
+    static_assert(kKPrefetchTensorCount == 0 || kKPrefetchTensorCount == 1);
+    static_assert(kVPrefetchTensorCount == 0 || kVPrefetchTensorCount == 1);
+    static_assert(kQkStage0TailDsCount == 0 || kQkStage0TailDsCount == 24);
+    static_assert(kQkStage1TailDsCount == 0 || kQkStage1TailDsCount == 24);
+    static_assert(kQkStage2TailDsCount == 0 || kQkStage2TailDsCount == 24);
+    static_assert(kQkStage3TailDsCount == 0 || kQkStage3TailDsCount == 16);
+
+    template <index_t Stage>
+    CK_TILE_DEVICE static void WaitQkStageTail()
+    {
+        static_assert(Stage >= 0 && Stage < 4);
+        if constexpr(Stage == 0)
+        {
+            s_wait_dscnt<kQkStage0TailDsCount>();
+        }
+        else if constexpr(Stage == 1)
+        {
+            s_wait_dscnt<kQkStage1TailDsCount>();
+        }
+        else if constexpr(Stage == 2)
+        {
+            s_wait_dscnt<kQkStage2TailDsCount>();
+        }
+        else
+        {
+            s_wait_dscnt<kQkStage3TailDsCount>();
+        }
+    }
 
     // Optionally pack the four buffers back to back instead of aligning each one to 64 KiB.
 #ifndef CK_TILE_FMHA_GFX125_D192_LDS_PACK
@@ -261,7 +324,7 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
         };
 
         Executor::template ExecuteQkStage<Stage>(emit_wmma, emit_token, emit_point);
-        s_wait_dscnt<0>();
+        WaitQkStageTail<Stage>();
     }
 
     template <index_t Stage,

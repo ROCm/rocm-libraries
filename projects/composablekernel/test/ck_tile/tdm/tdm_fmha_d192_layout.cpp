@@ -105,6 +105,14 @@ static_assert(D192Pipeline::kUsesTdmAffineDramPath);
 static_assert(D192Pipeline::kUsesFixedSegmentedLdsArena);
 static_assert(D192Pipeline::kBlockPerCu == 1);
 static_assert(D192Policy::GetQKReductionSteps<D192PolicyProblem>() == 6);
+static_assert(D192Policy::kKPrefetchTensorCount == CK_TILE_FMHA_GFX125_D192_K_PREFETCH_TENSORCNT);
+static_assert(D192Policy::kVPrefetchTensorCount == CK_TILE_FMHA_GFX125_D192_V_PREFETCH_TENSORCNT);
+static_assert(D192Policy::kPrefetchTailDrain ==
+              (CK_TILE_FMHA_GFX125_D192_PREFETCH_TAIL_DRAIN != 0));
+static_assert(D192Policy::kQkStage0TailDsCount == CK_TILE_FMHA_GFX125_D192_QK_STAGE0_TAIL_DSCNT);
+static_assert(D192Policy::kQkStage1TailDsCount == CK_TILE_FMHA_GFX125_D192_QK_STAGE1_TAIL_DSCNT);
+static_assert(D192Policy::kQkStage2TailDsCount == CK_TILE_FMHA_GFX125_D192_QK_STAGE2_TAIL_DSCNT);
+static_assert(D192Policy::kQkStage3TailDsCount == CK_TILE_FMHA_GFX125_D192_QK_STAGE3_TAIL_DSCNT);
 // Two arena layouts: the 64 KiB-aligned original and the packed one selected by
 // CK_TILE_FMHA_GFX125_D192_LDS_PACK. Both must keep the buffers non-overlapping
 // and 16-byte aligned; only the offsets differ.
