@@ -33,6 +33,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Enabled Composable Kernel (CK) depthwise convolution on RDNA wave32 GPUs.
 
 ### Changed
+* [Conv] Pruned ASM-GTC NHWC entries from the gfx908, gfx90a, gfx942, and gfx950 system find-databases for shapes the new large-tensor guard rejects, so immediate-mode lookups no longer resolve to a solver that is gated off at runtime. This removes 12,907 entries across the six databases, 4,668 of them rank-1, and empties 81 keys.
 * [Conv] Enabled the Winograd Rage RxS f2x3 solver on gfx950 and updated the gfx942 kernels to v4_6_1/v4_9_1.
 * [Conv] Updated the 3D AI heuristics (solver selection) for gfx942 and gfx950.
 
