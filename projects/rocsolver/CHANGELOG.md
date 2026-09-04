@@ -17,12 +17,18 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
     - LARFT_64
 
 ### Changed
+
+* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
+
 ### Removed
 ### Optimized
 
 * Improved the performance of sygst/hegst.
 
 ### Resolved issues
+
+* Fixed sparse functions potentially not using the stream set in the handle.
+
 ### Known issues
 ### Upcoming changes
 
