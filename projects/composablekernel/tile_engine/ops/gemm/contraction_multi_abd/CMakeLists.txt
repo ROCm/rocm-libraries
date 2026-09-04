@@ -42,10 +42,12 @@ set(_CMA_CTYPES_SRC
     "${CMAKE_CURRENT_LIST_DIR}/../../../../dispatcher/bindings/ctypes/batched_contraction_multi_abd_ctypes_lib.cpp")
 
 # ---------------------------------------------------------------------------
-# GPU target filter (same set as batched_contraction: gfx90a, gfx942, gfx950)
+# GPU target filter. gfx1250 (MI400) is wave32/WMMA and needs a warp tile the
+# default config does not sweep -- build it with
+# -DCONTRACTION_MULTI_ABD_CONFIG_FILE=smoke_ci_config_gfx1250.json.
 # ---------------------------------------------------------------------------
 set(CONTRACTION_MULTI_ABD_GPU_TARGETS "")
-set(_CMA_DESIRED_TARGETS "gfx90a;gfx942;gfx950")
+set(_CMA_DESIRED_TARGETS "gfx90a;gfx942;gfx950;gfx1250")
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     if(target IN_LIST _CMA_DESIRED_TARGETS)
         list(APPEND CONTRACTION_MULTI_ABD_GPU_TARGETS ${target})
@@ -55,7 +57,7 @@ endforeach()
 if(NOT CONTRACTION_MULTI_ABD_GPU_TARGETS)
     message(WARNING
         "Skipping contraction_multi_abd build: no supported GPU targets "
-        "(gfx90a, gfx942, gfx950) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+        "(${_CMA_DESIRED_TARGETS}) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
     return()
 endif()
 
