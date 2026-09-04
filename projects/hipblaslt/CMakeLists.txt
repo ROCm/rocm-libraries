@@ -556,10 +556,8 @@ if(HIPBLASLT_ENABLE_CLIENT)
             hipblaslt-bench
             hipblaslt-api-overhead
             hipblaslt-bench-groupedgemm-fixed-mk
-            hipblaslt-bench-extop-layernorm
             hipblaslt-bench-extop-matrixtransform
             hipblaslt-bench-extop-softmax
-            hipblaslt-bench-extop-amax
         COMPONENT benchmarks
     )
     if(HIPBLASLT_ENABLE_YAML)
@@ -684,14 +682,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
     )
 
-    # Imported directly by unit tests (test_amax_true16_activation.py), so it must
-    # ship at the tensilelite root, not under scripts/.
-    install(
-        FILES
-            "${_tensilelite_src}/AMaxGenerator.py"
-        DESTINATION "${_tensilelite_install_dest}"
-        COMPONENT tests
-    )
     # Preserve executable permissions on entry points
     install(
         PROGRAMS
@@ -799,10 +789,7 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
             sample_hipblaslt_groupedgemm_get_all_algos_ext
             sample_hipblaslt_gemm_mix_precision
             sample_hipblaslt_gemm_mix_precision_ext
-            sample_hipblaslt_gemm_mix_precision_with_amax_ext
             sample_hipblaslt_gemm_attr_tciA_tciB
-            sample_hipblaslt_ext_op_layernorm
-            sample_hipblaslt_ext_op_amax
             sample_hipblaslt_gemm_with_TF32
             sample_hipblaslt_gemm_swizzle_a
             sample_hipblaslt_gemm_bias_swizzle_a_ext

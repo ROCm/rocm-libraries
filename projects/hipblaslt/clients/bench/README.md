@@ -67,8 +67,6 @@ cd hipBLASLt; cd build/release
 --scaleA                   Apply scale for A buffer
 --scaleB                   Apply scale for B buffer
 --scaleAlpha_vector        Apply scaleAlpha vector
---amaxScaleA               Apple scale for A buffer by abs max of A buffer
---amaxScaleB               Apple scale for B buffer by abs max of B buffer
 --use_e                    Apply AUX output/ gradient input
 --gradient                 Enable gradient
 --grouped_gemm             Use grouped_gemm.

@@ -14,6 +14,12 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   See `hipblaslt.h`. `hipblaslt-bench --uniform_summation_order` forwards
   the descriptor attribute.
 
+### Removed
+
+* Removed the standalone `hipblasltExtAMax` and `hipblasltExtLayerNorm`
+  extension operations. Fused GEMM `HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER`
+  support is unchanged.
+
 ## hipBLASLt 1.4.0
 
 ### Added

@@ -16,30 +16,8 @@ These extensions support the following:
    input is contiguous on the second dimension.
    For sample code, see :ref:`client_extop_softmax`.
 
-*  ``hipblasltExtLayerNorm``
-
-   Converts a 2D tensor using LayerNorm to generate a new 2D normalized tensor.
-   This is an independent function used to call and get the result.
-   For sample code, see :ref:`sample_hipblaslt_ext_op_layernorm`.
-
-*  ``hipblasltExtAMax``
-
-   Determines the absolute maximum value of a 2D tensor.
-   This is an independent function used to call and get the result.
-   For sample code, see :ref:`sample_hipblaslt_ext_op_amax`.
-
 These APIs are explained in detail below.
 
 hipblasltExtSoftmax()
 ------------------------------------------
 .. doxygenfunction:: hipblasltExtSoftmax
-
-
-hipblasltExtLayerNorm()
-------------------------------------------
-.. doxygenfunction:: hipblasltExtLayerNorm
-
-
-hipblasltExtAMax()
-------------------------------------------
-.. doxygenfunction:: hipblasltExtAMax
