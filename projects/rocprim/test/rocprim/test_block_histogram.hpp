@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,8 +51,8 @@ struct Integral;
 block_histo_test_suite_type_def(suite_name_atomic, name_suffix)
 block_histo_test_suite_type_def(suite_name_sort, name_suffix)
 
-typed_test_suite_def(suite_name_atomic, name_suffix, block_params_atomic);
-typed_test_suite_def(suite_name_sort, name_suffix, block_params_sort);
+typed_test_suite_def(suite_name_atomic, name_suffix, block_params_atomic, block_params_name_generator);
+typed_test_suite_def(suite_name_sort, name_suffix, block_params_sort, block_params_name_generator);
 
 typed_test_def(suite_name_atomic, name_suffix, Histogram)
 {

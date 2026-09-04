@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include "test_utils.hpp"
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/config.hpp>
@@ -218,7 +219,19 @@ using IntrinsicsTestParams = ::testing::Types<params<int>,
                                               params<custom_notaligned>,
                                               params<custom_16aligned>>;
 
-TYPED_TEST_SUITE(RocprimIntrinsicsTests, IntrinsicsTestParams);
+struct RocprimIntrinsicsTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        using T = typename Params::type;
+        if constexpr(std::is_same_v<T, custom_notaligned>) return "CustomNotAligned";
+        else if constexpr(std::is_same_v<T, custom_16aligned>) return "Custom16Aligned";
+        else return type_tag<T>();
+    }
+};
+
+TYPED_TEST_SUITE(RocprimIntrinsicsTests, IntrinsicsTestParams, RocprimIntrinsicsTestsNameGenerator);
 
 /// A safe helper function to extract the least-significant \p bits bits from \p value. Shifting more bits
 /// than a type's width is undefined behavior on C++. With this function, it is safe to extract an amount of
