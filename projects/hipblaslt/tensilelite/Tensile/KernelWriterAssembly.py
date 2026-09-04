@@ -6294,8 +6294,30 @@ class KernelWriterAssembly(KernelWriter):
   # Calculate and apply stagger offsets and edge
   # Output: Sets sgpr(StaggerRowMask)
   ##############################################################################
+  def _staggerClusterDivide(self, module, reg, divisor, comment=""):
+    # Floor-divide an sgpr in place by a compile-time cluster extent, mapping a
+    # WG-derived stagger input down to a cluster-ID. Power-of-2 divisor collapses
+    # to a single shift (no scratch); otherwise magic-number division needs a
+    # 2-wide scratch. divisor==1 is a no-op (that axis is not clustered).
+    if divisor == 1:
+      return
+    # rReg must be a real sgpr (the rocisa binding rejects None); doRemainder=0
+    # means it is never written, so reuse reg itself as the throwaway slot.
+    if (divisor & (divisor - 1)) == 0:
+      module.add(scalarStaticDivideAndRemainder(reg, reg, reg, divisor, None,
+                 doRemainder=0))
+    else:
+      with self.allocTmpSgpr(2, tag="staggerClusterDiv") as divTmp:
+        module.add(scalarStaticDivideAndRemainder(reg, reg, reg, divisor,
+                   ContinuousRegister(idx=divTmp.idx, size=2), doRemainder=0))
+    if comment:
+      module.addComment0(comment)
+
   def declareStaggerParms(self, kernel):
     module = Module("declareStaggerParms")
+    enableCluster = clusterEnabled(kernel["ClusterDim"])
+    clusterX = kernel["ClusterDim"][0]
+    clusterY = kernel["ClusterDim"][1]
     #Calculate StaggerUIter
     with self.allocTmpSgpr(4, tag="declareStaggerParms_tmpSgprInfo") as tmpSgprInfo:
       beginStaggerUIterLabel = Label(self.labels.getNameInc("beginStaggerUIter"),comment="")
@@ -6342,20 +6364,46 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SCBranchSCC0(labelName=staggerLabel.getLabelName()))
         if i == 0:
           module.add(SMovB32(dst=sgpr(staggerInput), src=sgpr("WorkGroup0")))
+          # Cluster: WorkGroup0 = cluster_x*ClusterDim[0] + wg_x. Divide to
+          # cluster_x so every WG in a cluster gets the same stagger start.
+          if enableCluster:
+            self._staggerClusterDivide(module, staggerInput, clusterX,
+              comment="stagger by cluster_x = WorkGroup0 / ClusterDim[0]")
         elif i == 1:
           module.add(SMovB32(dst=sgpr(staggerInput), src=sgpr("WorkGroup1")))
+          if enableCluster:
+            self._staggerClusterDivide(module, staggerInput, clusterY,
+              comment="stagger by cluster_y = WorkGroup1 / ClusterDim[1]")
         elif i == 2 and len(kernel["ProblemType"]["IndicesBatch"]) > 2:
+          # WorkGroup2 is the batch axis; clusters only span M/N, so no divide.
           module.add(SMovB32(dst=sgpr(staggerInput), src=sgpr("WorkGroup2")))
         elif i == 3:
           wgSerial = staggerInput
           tmp = tmpSgpr+1
-          if len(kernel["ProblemType"]["IndicesBatch"]) > 2:
-            module.add(SMulI32(dst=sgpr(wgSerial), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), \
-              comment="wgSerial = (nwg0*ngw1)*wg2 + (nwg0)*wg1 + wg0"))
-            module.add(SMulI32(dst=sgpr(wgSerial), src0=sgpr(wgSerial), src1=sgpr("WorkGroup2")))
-          module.add(SMulI32(dst=sgpr(tmp), src0=sgpr("NumWorkGroups0"), src1=sgpr("WorkGroup1")))
-          module.add(SAddU32(dst=sgpr(wgSerial), src0=sgpr(wgSerial), src1=sgpr(tmp)))
-          module.add(SAddU32(dst=sgpr(wgSerial), src0=sgpr(wgSerial), src1=sgpr("WorkGroup0")))
+          if enableCluster:
+            # Cluster-serial shared by all WGs in a cluster: cluster_x + cluster_y*numClustersX,
+            # where cluster_i = WorkGroupI / ClusterDim[i], numClustersX = NumWorkGroups0 / ClusterDim[0]
+            # (grid is a ClusterDim multiple, so exact). Reuse tmpSgpr+1/+3 (dead here); +2 stays live.
+            clusterYReg = tmpSgpr+1
+            numClusterX = tmpSgpr+3
+            module.add(SMovB32(dst=sgpr(wgSerial), src=sgpr("WorkGroup0"), comment="cluster_x"))
+            self._staggerClusterDivide(module, wgSerial, clusterX)
+            module.add(SMovB32(dst=sgpr(numClusterX), src=sgpr("NumWorkGroups0"), comment="numClustersX"))
+            self._staggerClusterDivide(module, numClusterX, clusterX)
+            module.add(SMovB32(dst=sgpr(clusterYReg), src=sgpr("WorkGroup1"), comment="cluster_y"))
+            self._staggerClusterDivide(module, clusterYReg, clusterY)
+            module.add(SMulI32(dst=sgpr(clusterYReg), src0=sgpr(clusterYReg), src1=sgpr(numClusterX), \
+              comment="cluster_y * numClustersX"))
+            module.add(SAddU32(dst=sgpr(wgSerial), src0=sgpr(wgSerial), src1=sgpr(clusterYReg), \
+              comment="clusterSerial = cluster_x + cluster_y*numClustersX"))
+          else:
+            if len(kernel["ProblemType"]["IndicesBatch"]) > 2:
+              module.add(SMulI32(dst=sgpr(wgSerial), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), \
+                comment="wgSerial = (nwg0*ngw1)*wg2 + (nwg0)*wg1 + wg0"))
+              module.add(SMulI32(dst=sgpr(wgSerial), src0=sgpr(wgSerial), src1=sgpr("WorkGroup2")))
+            module.add(SMulI32(dst=sgpr(tmp), src0=sgpr("NumWorkGroups0"), src1=sgpr("WorkGroup1")))
+            module.add(SAddU32(dst=sgpr(wgSerial), src0=sgpr(wgSerial), src1=sgpr(tmp)))
+            module.add(SAddU32(dst=sgpr(wgSerial), src0=sgpr(wgSerial), src1=sgpr("WorkGroup0")))
         else:
           module.add(SMovB32(dst=sgpr(staggerInput), src=hex(-1)))
         module.add(SBranch(staggerLabel.getLabelName()))

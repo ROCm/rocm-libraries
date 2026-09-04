@@ -7142,17 +7142,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # - StreamK + MX (not enough sgpr. gfx950 only for now)
     # - BufferLoad=0 (stagger uses SRD increment which only exists in buffer mode)
     # - MX PAP without TDM/DTL (not enough sgpr)
-    # - workgroup cluster: staggerU offsets each WG's K start so WGs sharing the
-    #   same B never request the same address at the same time, which defeats
-    #   cross-WG multicast. Disable stagger so K phases stay aligned.
+    # Workgroup clusters keep staggerU: declareStaggerParms staggers per cluster-ID
+    # (staggerInput / ClusterDim) so WGs in a cluster share a K start and cross-WG
+    # multicast still hits, while different clusters stay staggered.
     self.states.staggerUCode = True
     if self.states.tailloopInNll or \
        not kernel["BufferLoad"] or \
        (kernel["StreamK"] and \
         hasMx and isgfx950) or \
        disableStaggerForMxPap or \
-       kernel["UseSubtileImpl"] or \
-       clusterEnabled(kernel["ClusterDim"]):
+       kernel["UseSubtileImpl"]:
       self.states.staggerUCode = False
     
     self.states.tailloopInNllmaxUnit = 1

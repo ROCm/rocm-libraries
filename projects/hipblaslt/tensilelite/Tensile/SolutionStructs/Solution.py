@@ -184,10 +184,6 @@ def _disableUnsupportedRuntimeStaggerU(state):
   # across the PAP persistent-tile handoff), so force runtime StaggerU off.
   if state["PrefetchAcrossPersistent"] and state["TDMInst"] == 3:
     _disableRuntimeStaggerU(state)
-  # Workgroup cluster: staggerU breaks cross-WG multicast, so force the runtime
-  # StaggerU path off too (KernelWriter already gates staggerUCode off for clusters).
-  if state.get("ClusterDim", [1, 1]) != [1, 1]:
-    _disableRuntimeStaggerU(state)
 
 
 def _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
