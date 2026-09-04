@@ -113,6 +113,10 @@ static_assert(D192Policy::kQkStage0TailDsCount == CK_TILE_FMHA_GFX125_D192_QK_ST
 static_assert(D192Policy::kQkStage1TailDsCount == CK_TILE_FMHA_GFX125_D192_QK_STAGE1_TAIL_DSCNT);
 static_assert(D192Policy::kQkStage2TailDsCount == CK_TILE_FMHA_GFX125_D192_QK_STAGE2_TAIL_DSCNT);
 static_assert(D192Policy::kQkStage3TailDsCount == CK_TILE_FMHA_GFX125_D192_QK_STAGE3_TAIL_DSCNT);
+static_assert(D192Policy::kPvStage0TailDsCount == CK_TILE_FMHA_GFX125_D192_PV_STAGE0_TAIL_DSCNT);
+static_assert(D192Policy::kPvStage1TailDsCount == CK_TILE_FMHA_GFX125_D192_PV_STAGE1_TAIL_DSCNT);
+static_assert(D192Policy::kPvStage2TailDsCount == CK_TILE_FMHA_GFX125_D192_PV_STAGE2_TAIL_DSCNT);
+static_assert(D192Policy::kPvStage3TailDsCount == CK_TILE_FMHA_GFX125_D192_PV_STAGE3_TAIL_DSCNT);
 // Two arena layouts: the 64 KiB-aligned original and the packed one selected by
 // CK_TILE_FMHA_GFX125_D192_LDS_PACK. Both must keep the buffers non-overlapping
 // and 16-byte aligned; only the offsets differ.

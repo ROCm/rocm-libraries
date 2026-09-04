@@ -1033,6 +1033,13 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128 : BlockFmhaPipelineQRKSVSTdm<Problem_,
             s_wait_tensorcnt<0>();
         }
 
+        // The final PV stage prefetches next-iteration K into VGPRs. The final loop iteration has
+        // no consumer to force those DS reads to retire, so explicitly drain them before return.
+        if constexpr(Policy::kPvStage3TailDsCount != 0)
+        {
+            s_wait_dscnt<0>();
+        }
+
         return output;
     }
 

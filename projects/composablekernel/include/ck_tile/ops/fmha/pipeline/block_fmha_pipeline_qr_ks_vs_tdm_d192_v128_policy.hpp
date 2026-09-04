@@ -39,6 +39,22 @@
 #define CK_TILE_FMHA_GFX125_D192_QK_STAGE3_TAIL_DSCNT 16
 #endif
 
+#ifndef CK_TILE_FMHA_GFX125_D192_PV_STAGE0_TAIL_DSCNT
+#define CK_TILE_FMHA_GFX125_D192_PV_STAGE0_TAIL_DSCNT 0
+#endif
+
+#ifndef CK_TILE_FMHA_GFX125_D192_PV_STAGE1_TAIL_DSCNT
+#define CK_TILE_FMHA_GFX125_D192_PV_STAGE1_TAIL_DSCNT 0
+#endif
+
+#ifndef CK_TILE_FMHA_GFX125_D192_PV_STAGE2_TAIL_DSCNT
+#define CK_TILE_FMHA_GFX125_D192_PV_STAGE2_TAIL_DSCNT 0
+#endif
+
+#ifndef CK_TILE_FMHA_GFX125_D192_PV_STAGE3_TAIL_DSCNT
+#define CK_TILE_FMHA_GFX125_D192_PV_STAGE3_TAIL_DSCNT 0
+#endif
+
 namespace ck_tile {
 
 struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefaultPolicy
@@ -68,12 +84,20 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
     static constexpr index_t kQkStage1TailDsCount = CK_TILE_FMHA_GFX125_D192_QK_STAGE1_TAIL_DSCNT;
     static constexpr index_t kQkStage2TailDsCount = CK_TILE_FMHA_GFX125_D192_QK_STAGE2_TAIL_DSCNT;
     static constexpr index_t kQkStage3TailDsCount = CK_TILE_FMHA_GFX125_D192_QK_STAGE3_TAIL_DSCNT;
+    static constexpr index_t kPvStage0TailDsCount = CK_TILE_FMHA_GFX125_D192_PV_STAGE0_TAIL_DSCNT;
+    static constexpr index_t kPvStage1TailDsCount = CK_TILE_FMHA_GFX125_D192_PV_STAGE1_TAIL_DSCNT;
+    static constexpr index_t kPvStage2TailDsCount = CK_TILE_FMHA_GFX125_D192_PV_STAGE2_TAIL_DSCNT;
+    static constexpr index_t kPvStage3TailDsCount = CK_TILE_FMHA_GFX125_D192_PV_STAGE3_TAIL_DSCNT;
     static_assert(kKPrefetchTensorCount == 0 || kKPrefetchTensorCount == 1);
     static_assert(kVPrefetchTensorCount == 0 || kVPrefetchTensorCount == 1);
     static_assert(kQkStage0TailDsCount == 0 || kQkStage0TailDsCount == 24);
     static_assert(kQkStage1TailDsCount == 0 || kQkStage1TailDsCount == 24);
     static_assert(kQkStage2TailDsCount == 0 || kQkStage2TailDsCount == 24);
     static_assert(kQkStage3TailDsCount == 0 || kQkStage3TailDsCount == 16);
+    static_assert(kPvStage0TailDsCount == 0 || kPvStage0TailDsCount == 16);
+    static_assert(kPvStage1TailDsCount == 0 || kPvStage1TailDsCount == 16);
+    static_assert(kPvStage2TailDsCount == 0 || kPvStage2TailDsCount == 16);
+    static_assert(kPvStage3TailDsCount == 0 || kPvStage3TailDsCount == 24);
 
     template <index_t Stage>
     CK_TILE_DEVICE static void WaitQkStageTail()
@@ -94,6 +118,28 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
         else
         {
             s_wait_dscnt<kQkStage3TailDsCount>();
+        }
+    }
+
+    template <index_t Stage>
+    CK_TILE_DEVICE static void WaitPvStageTail()
+    {
+        static_assert(Stage >= 0 && Stage < 4);
+        if constexpr(Stage == 0)
+        {
+            s_wait_dscnt<kPvStage0TailDsCount>();
+        }
+        else if constexpr(Stage == 1)
+        {
+            s_wait_dscnt<kPvStage1TailDsCount>();
+        }
+        else if constexpr(Stage == 2)
+        {
+            s_wait_dscnt<kPvStage2TailDsCount>();
+        }
+        else
+        {
+            s_wait_dscnt<kPvStage3TailDsCount>();
         }
     }
 
@@ -468,7 +514,7 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
         };
 
         Executor::template ExecutePvStage<Stage>(emit_wmma, emit_token, emit_point);
-        s_wait_dscnt<0>();
+        WaitPvStageTail<Stage>();
     }
 
     template <index_t Stage, typename NextBBlockTensor, typename BTileWindow, typename WmmaEmitter>
@@ -514,7 +560,7 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
         };
 
         Executor::template ExecutePvStage<Stage>(emit_wmma, emit_token, emit_point);
-        s_wait_dscnt<0>();
+        WaitPvStageTail<Stage>();
     }
 
     template <typename BlockGemm,
