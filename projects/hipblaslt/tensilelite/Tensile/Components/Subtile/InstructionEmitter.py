@@ -290,6 +290,46 @@ class InstructionEmitter:
         if force_drain:
             grCnt = 0
             label = "full drain"
+        elif counts.use_gr_placement_counts:
+            # Multi-partition reorder: A/B/SA/SB hold raw GRPlacement counts (atoms,
+            # not buffer_loads).  Convert using ceil(count/loadRatioGR) — correct for
+            # any partition/GR-subtile alignment, including non-divisible cases where
+            # tile_range rounds the partition boundary up to the next GR-subtile.
+            import math
+            sa_info = self.tileInfoMap.get('SA')
+            sb_info = self.tileInfoMap.get('SB')
+            def _to_loads(n, ratio):
+                return math.ceil(n / ratio) if (n and ratio) else 0
+            nA  = _to_loads(counts.A,  self.tileInfoA.loadRatioGR)
+            nB  = _to_loads(counts.B,  self.tileInfoB.loadRatioGR)
+            nSA = _to_loads(counts.SA, sa_info.loadRatioGR) if sa_info else 0
+            nSB = _to_loads(counts.SB, sb_info.loadRatioGR) if sb_info else 0
+            grCnt = nA + nB + nSA + nSB
+            assert grCnt > 0, (
+                f"use_gr_placement_counts=True but buffer_load sum is 0 "
+                f"(nA={nA} nB={nB} nSA={nSA} nSB={nSB}); "
+                f"check mt1_ops GRPlacement counts at build_preloop call site"
+            )
+            label = f"mt1-partition-0: A={nA} B={nB} SA={nSA} SB={nSB}"
+        elif counts.use_num_gr_total:
+            # Single-partition fast path: exact buffer_load count from tileInfo.
+            # Avoids the grMap formula which miscounts when loadRatioGR >= 1.
+            # Precondition: requires a fully constructed InstructionEmitter with
+            # tileInfoA, tileInfoB, and tileInfoMap set (always true in production;
+            # mock-only tests must supply them if testing this branch directly).
+            sa_info = self.tileInfoMap.get('SA')
+            sb_info = self.tileInfoMap.get('SB')
+            nA = self.tileInfoA.numGRTotal
+            nB = self.tileInfoB.numGRTotal
+            nSA = sa_info.numGRTotal if sa_info else 0
+            nSB = sb_info.numGRTotal if sb_info else 0
+            grCnt = nA + nB + nSA + nSB
+            assert grCnt > 0, (
+                f"use_num_gr_total=True but numGRTotal sums to 0 "
+                f"(nA={nA} nB={nB} nSA={nSA} nSB={nSB}); "
+                f"loadRatioGR may be 0 — check PGR=2 DTL preconditions at call site"
+            )
+            label = f"per-subIterK: A={nA} B={nB} SA={nSA} SB={nSB}"
         else:
             grCnt = (counts.A * grMap['A'] +
                      counts.B * grMap['B'] +
