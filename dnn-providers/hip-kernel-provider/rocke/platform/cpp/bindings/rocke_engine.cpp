@@ -45,6 +45,7 @@ extern "C" {
 #include "rocke/instance_gemm_multi_abd.h"
 #include "rocke/instance_gemm_multi_d.h"
 #include "rocke/instance_gemm_universal.h"
+#include "rocke/instance_gfx942_fp8_mqa_logits.h"
 #include "rocke/instance_grouped_gemm.h"
 #include "rocke/instance_matmul_nbits.h"
 #include "rocke/instance_mfma_gemm.h"
@@ -1021,6 +1022,64 @@ std::vector<std::string> mx_gemm_verify(const py::dict& d, const std::string& ar
                              rocke_mx_gemm_spec_t,
                              mx_build_spec,
                              rocke_build_mx_gemm_new(&b, &s, arch_or_default(arch)));
+}
+
+/* =========================== FP8 logits ============================== */
+
+rocke_fp8_mqa_logits_spec_t fp8_mqa_logits_build_spec(const py::dict& d,
+                                                      std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_fp8_mqa_logits_spec_t s = rocke_fp8_mqa_logits_spec_default();
+    s.num_heads = dict_int(d, "num_heads", s.num_heads);
+    s.head_dim = dict_int(d, "head_dim", s.head_dim);
+    s.block_kv = dict_int(d, "block_kv", s.block_kv);
+    s.rows_per_block = dict_int(d, "rows_per_block", s.rows_per_block);
+    s.waves_per_block = dict_int(d, "waves_per_block", s.waves_per_block);
+    if(d.contains("waves_per_eu"))
+    {
+        py::object value = d["waves_per_eu"];
+        s.has_waves_per_eu = !value.is_none();
+        if(s.has_waves_per_eu)
+            s.waves_per_eu = py::cast<int>(value);
+    }
+    {
+        std::string value;
+        if(dict_str(d, "name", value))
+            s.name = keep(value);
+    }
+    return s;
+}
+
+std::string fp8_mqa_logits_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    std::deque<std::string> store;
+    rocke_fp8_mqa_logits_spec_t s = fp8_mqa_logits_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_fp8_mqa_logits_lower_to_llvm(
+        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.fp8_mqa_logits_lower_llvm");
+}
+
+std::string fp8_mqa_logits_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.fp8_mqa_logits_serialize_ir",
+                                rocke_fp8_mqa_logits_spec_t,
+                                fp8_mqa_logits_build_spec,
+                                rocke_build_fp8_mqa_logits_new(&b, &s, arch_or_default(arch)));
+}
+
+std::vector<std::string> fp8_mqa_logits_verify(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.fp8_mqa_logits_verify",
+                             rocke_fp8_mqa_logits_spec_t,
+                             fp8_mqa_logits_build_spec,
+                             rocke_build_fp8_mqa_logits_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ============================== mfma GEMM ============================= */
@@ -3466,6 +3525,18 @@ PYBIND11_MODULE(rocke_engine, m)
          &block_scale_gemm_serialize_ir,
          &block_scale_gemm_verify);
     reg3("mx_gemm", &mx_gemm_lower_llvm, &mx_gemm_serialize_ir, &mx_gemm_verify);
+    m.def("fp8_mqa_logits_lower_llvm",
+          &fp8_mqa_logits_lower_llvm,
+          py::arg("spec"),
+          py::arg("arch") = "gfx942");
+    m.def("fp8_mqa_logits_serialize_ir",
+          &fp8_mqa_logits_serialize_ir,
+          py::arg("spec"),
+          py::arg("arch") = "gfx942");
+    m.def("fp8_mqa_logits_verify",
+          &fp8_mqa_logits_verify,
+          py::arg("spec"),
+          py::arg("arch") = "gfx942");
     reg3("mfma_gemm", &mfma_gemm_lower_llvm, &mfma_gemm_serialize_ir, &mfma_gemm_verify);
     m.def("mfma_gemm_is_valid", &mfma_gemm_is_valid, py::arg("spec"), py::arg("arch") = "gfx950");
 

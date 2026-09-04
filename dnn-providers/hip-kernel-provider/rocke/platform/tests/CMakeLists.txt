@@ -112,6 +112,26 @@ if(BUILD_TESTING)
                  rocke_tiled_attention_2d_reentrancy)
   endif()
 
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/fp8_mqa_logits_test.cpp")
+    add_executable(rocke_fp8_mqa_logits
+                   instances/fp8_mqa_logits_test.cpp)
+    target_link_libraries(rocke_fp8_mqa_logits PRIVATE rocke_core)
+    if(UNIX)
+      target_link_libraries(rocke_fp8_mqa_logits PRIVATE m)
+    endif()
+    add_test(NAME rocke_fp8_mqa_logits
+             COMMAND rocke_fp8_mqa_logits)
+    set_tests_properties(rocke_fp8_mqa_logits
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_fp8_mqa_logits)
+    set_target_properties(rocke_fp8_mqa_logits
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_fp8_mqa_logits
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_fp8_mqa_logits)
+  endif()
+
   # Apply YAML-driven quick/standard/comprehensive/full tier labels to the
   # three tests above. Must run in THIS directory scope: CMake (pre-3.28,
   # which this project's cmake_minimum_required predates) only allows

@@ -741,6 +741,19 @@ def mx_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
+def fp8_mqa_logits_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`Fp8MqaLogitsSpec` -> flat dict."""
+    return dict(
+        name=spec.name,
+        num_heads=spec.num_heads,
+        head_dim=spec.head_dim,
+        block_kv=spec.block_kv,
+        rows_per_block=spec.rows_per_block,
+        waves_per_block=spec.waves_per_block,
+        waves_per_eu=spec.waves_per_eu,
+    )
+
+
 def mfma_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`MfmaGemmSpec` -> flat dict."""
     return dict(
@@ -1264,6 +1277,43 @@ def lower_mx_gemm(
         py_fn,
         lambda: eng.mx_gemm_lower_llvm(sd, arch=arch),
         lambda: eng.mx_gemm_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_fp8_mqa_logits(
+    spec: Any,
+    *,
+    arch: str = "gfx942",
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower an :class:`Fp8MqaLogitsSpec`."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from ..instances.gfx942.fp8_mqa_logits import build_fp8_mqa_logits
+        from .lower_llvm import lower_kernel_to_llvm
+
+        kernel = build_fp8_mqa_logits(spec, arch=arch)
+        ll = lower_kernel_to_llvm(kernel, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(kernel)
+        return ll, ir
+
+    engine = _import_engine()
+    spec_dict = fp8_mqa_logits_spec_to_dict(spec)
+    return _lower_family(
+        "fp8_mqa_logits",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: engine.fp8_mqa_logits_lower_llvm(spec_dict, arch=arch),
+        lambda: engine.fp8_mqa_logits_serialize_ir(spec_dict, arch=arch),
         _name_of(spec),
     )
 
