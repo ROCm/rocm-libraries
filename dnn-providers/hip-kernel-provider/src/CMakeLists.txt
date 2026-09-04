@@ -298,6 +298,52 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
     endif()
 
+    # The gfx950 dense-attention ingestor engine, registered HERE as well as in
+    # src/integration_tests/CMakeLists.txt, because these two sites do different
+    # jobs and only this one is driven by CI.
+    #
+    # The inner site's target works when invoked by hand. It does NOT appear in the
+    # installed CTestTestfile.cmake, which is the file TheRock's test_runner.py
+    # drives `ctest -L quick` against -- so an engine registered only there sits
+    # unexercised while the suite reports green. Measured on a gfx950 device run:
+    # an install-tree `ctest -N -R external-integration-check` matched ZERO tests
+    # for this engine while the hand-rolled harness invocation dispatched 17 cases.
+    #
+    # Gated on the flags that PRODUCE the engine, not merely on the ingestor being
+    # compiled: without the rocKE production pack there are no descriptors, the
+    # engine never registers, and every case FAILS rather than skipping.
+    set(_gfx950_dense_external_category_args "")
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+        list(APPEND _gfx950_dense_external_category_args
+            INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+            TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-attention-dense-external-integration
+            ENVIRONMENT ${TEST_ENVIRONMENT}
+        )
+    endif()
+
+    if(TARGET hipdnn_integration_tests
+       AND HIPDNN_ENABLE_KERNEL_INGESTOR
+       AND HIPDNN_ENABLE_SDPA
+       AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE)
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            # Exactly as the UED spells it: --test-engine matches engineName, which
+            # for a descriptor-registered engine comes from the UED's own `name`.
+            ENGINE_NAME    hipkernel:Gfx950AttentionDense
+            INSTALL_SUBDIR hip_kernel_provider
+            REFERENCE_EXECUTOR gpu
+            # bshd only, quick AND standard. Every other SdpaFwd bundle is BHSD and
+            # this engine correctly declines it, so those are EXPECTED to skip under
+            # this pin -- read the dispatched FRACTION, never the exit code.
+            GTEST_FILTER   *_SdpaFwd_bshd_*.*
+            ${_gfx950_dense_external_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check target")
+    else()
+        message(STATUS "gfx950 attention-dense engine not built - skipping its external-integration-check")
+    endif()
+
     # Install the ctest files. When YAML-based categorization is active, install the
     # generated install_CTestTestfile.cmake to bin/hip_kernel_provider/ so TheRock CI's
     # test_runner.py can drive `ctest -L quick` (etc.) from the artifact's install tree.
