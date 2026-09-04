@@ -1,0 +1,78 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # F32X emulation Inf support (F32XEmulationInfSupport cap on gfx1250)
+
+# xf32/TF32 (F32X emulation) infinity support validation.
+#
+# Both A and B are initialized to +Infinity (DataInitType 5). The CPU reference
+# computes inf * inf = inf (IEEE), so the GPU kernel must also produce inf.
+# Without the Inf guard the 3xBF16 split makes lo = inf - fp32(bf16(inf)) =
+# inf - inf = nan, which contaminates the cross terms and yields nan ->
+# AlmostEqual(inf, nan) is false -> validation FAILS. With the guard the result
+# stays inf and validation PASSES. NumElementsToValidate: -1 checks every output
+# element.
+#
+# The Inf guard is NOT a kernel parameter: it is driven by the
+# F32XEmulationInfSupport hardware capability, which is on for gfx1250 (this
+# test) and off for gfx950. There is nothing to force-enable here.
+GlobalParameters:
+  Architecture: gfx1250
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  DataInitTypeAlpha: 1   # alpha = 1
+  DataInitTypeBeta: 0    # beta = 0 (D = alpha * A * B)
+  DataInitTypeA: 5       # +Infinity
+  DataInitTypeB: 5       # +Infinity
+  DataInitTypeC: 0
+  DataInitTypeD: 0
+  BoundsCheck: 0
+  KeepBuildTmp: True
+
+BenchmarkProblems:
+  ########################################
+  # F32X NT
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      F32XdlMathOp: X
+      TransposeA: False
+      TransposeB: True
+      UseBeta: False
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 4, 2, 2]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [0]
+        - SourceSwap: [true]
+        - DirectToVgprA: [False]
+        - StoreVectorWidth: [-1]
+        - TDMInst: [3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128]
+          - Exact: [128, 128, 1, 256]

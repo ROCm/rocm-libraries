@@ -306,6 +306,7 @@ class StateValues:
   startVgprSKConsts: int                 = -1
   numVgprSKConsts: int                   = 0
   startVgprIdentityMatrix: int           = -1
+  startVgprInfCheck: int                 = -1
 
   numSgprSizesSum: int                   = 0
   numSgprSizesFree: int                  = 0
@@ -424,6 +425,7 @@ class StateValues:
   doPackPreSchedulingThisLoop: bool      = False
   doPackPreSchedulingNextLoop: bool      = False
   doFullPackCodePrefetch: bool           = False
+  useTF32EmuInfSupport: bool             = False
   lockLdsReadTokenSwap: bool             = False
   useCommonSgprSwap: bool                = False
 
@@ -5006,6 +5008,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return module
 
   ##############################################################################
+  # Create a Src vreg value for TF32 Inf check (v_cmp_class_f32)
+  # 0x204 selects +Inf (bit 9) and -Inf (bit 2) for v_cmp_class_f32.
+  ##############################################################################
+  def createTF32ClassSrc(self, kernel):
+    module = Module("TF32InfClassSrc")
+    module.addComment0("Create a Src vreg value for TF32 Inf check")
+    module.add(VMovB32(dst=vgpr(self.states.startVgprInfCheck), src="0x204", comment="inf check for cmp_class"))
+    return module
+
+  ##############################################################################
   # GSU bit-mask helper (introduced for AdaptiveGemmNTAB)
   ##############################################################################
   def gsuMaskHex(self, kernel):
@@ -5507,6 +5519,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # MFMA F32XEmulation negative identity matrix
     if kernel["UseMFMAF32XEmulation"]:
       module.add(self.createNegIdentityMatrix(kernel))
+    # TF32 Emu Inf support: init the v_cmp_class_f32 source constant
+    if self.states.useTF32EmuInfSupport:
+      module.add(self.createTF32ClassSrc(kernel))
 
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
@@ -9083,6 +9098,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #         Wider local read case, we need TransposeCode=True
       #   False: Does not use interleave layout
       #         ider local read + index transpose case, this needs to be False
+      # TF32/F32X Inf support: gated by the F32XEmulationInfSupport hardware
+      # capability (on for gfx1250+, off for gfx950). Inf handling changes the
+      # numerical result, so it is a platform capability rather than a kernel
+      # parameter. Only meaningful under F32X emulation.
+      self.states.useTF32EmuInfSupport = bool(kernel["UseF32XEmulation"]) and bool(self.states.archCaps.get("F32XEmulationInfSupport", False))
+
       def initTF32Emu():
         # for UseF32XEmulation only
         if not kernel["UseF32XEmulation"]:
@@ -9223,6 +9244,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           kernel["UseMFMAF32XEmulation"] = False
           kernel["UseDot2F32XEmulation"] = True
 
+      # TF32 Emu Inf support: 1 vreg holding the v_cmp_class_f32 mask constant (0x204)
+      if self.states.useTF32EmuInfSupport:
+        self.states.startVgprInfCheck = vgprIdx
+        vgprIdx+=1
       # vreg allocation for UseMFMAF32XEmulation
       if kernel["UseMFMAF32XEmulation"]:
         vgprIdx = ((vgprIdx+1)//2)*2 #align 64 bit
