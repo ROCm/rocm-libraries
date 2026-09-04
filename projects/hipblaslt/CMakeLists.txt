@@ -641,8 +641,14 @@ if(HIPBLASLT_ENABLE_CLIENT)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
+    # hipblaslt-test-hostunit is the standalone host-only unit test binary. It is
+    # installed so it ships in TheRock's blas test artifact; see
+    # clients/tests/unit/CMakeLists.txt for why its name has to keep the
+    # "hipblaslt-test" prefix.
     rocm_install(
-        TARGETS hipblaslt-test
+        TARGETS
+            hipblaslt-test
+            hipblaslt-test-hostunit
         COMPONENT tests
     )
     rocm_install(
