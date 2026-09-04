@@ -35,13 +35,18 @@
 #include "lib_macros.hpp"
 #include "libcommon.hpp"
 
-#if defined(__GFX9__)
-__device__ static constexpr int WarpSize = 64;
-#else
-__device__ static constexpr int WarpSize = 32;
-#endif
-
 ROCSOLVER_BEGIN_NAMESPACE
+
+static constexpr int MinWarpSize = 32;
+
+template <int ThreadCount>
+static constexpr int MaxWarpCount = (ThreadCount + MinWarpSize - 1) / MinWarpSize;
+
+template <typename I>
+__device__ __host__ constexpr I num_warps(const I thread_count, const int warp_size)
+{
+    return (thread_count + warp_size - 1) / warp_size;
+}
 
 /*
  * ===========================================================================
