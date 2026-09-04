@@ -642,6 +642,10 @@ class _RawTokenAddr:
             head,
         )
 
+    def a_off(self, tile, row):
+        # GDN gate input `a` is [B,T,H]: same token-major layout as beta.
+        return self.beta_off(tile, row)
+
     def v_off(self, tile, chunk_row, ev, ev_dim):
         b = self.b
         batch, head, token = self._parts(tile, chunk_row)
@@ -955,8 +959,11 @@ def _emit_stage_issue(ctx: _ChunkCtx, ch):
         row = b.div(off, b.const_i32(DK))
         col4 = b.mod(off, b.const_i32(DK))
         if raw is not None:
-            gidx = raw.qk_off(tile, row, col4)
-            gval = b.global_load_vN(ctx.g_ptr, gidx, ELEM, 4)
+            if ctx.spec.gate_kind == "gdn":
+                gval = b.global_load_f32(ctx.g_ptr, raw.a_off(tile, row))
+            else:
+                gidx = raw.qk_off(tile, row, col4)
+                gval = b.global_load_vN(ctx.g_ptr, gidx, ELEM, 4)
             staged.append((ctx.g_lds, row, col4, gval, 4, valid, "g"))
         else:
             staged.append(
@@ -1014,22 +1021,39 @@ def _emit_stage_commit(ctx: _ChunkCtx, issued) -> None:
     for lds, row, col, value, n, valid, kind in staged:
         with b.scf_if(valid) if valid is not None else nullcontext():
             if kind == "g" and raw is not None and spec.fuse_gate:
-                for j in range(4):
-                    raw_g = b.vec_extract(value, j)
-                    col_j = b.add(col, b.const_i32(j))
+                if spec.gate_kind == "gdn":
+                    # GDN: one scalar `a` per row -> gate is channel-independent.
                     gate = _apply_gate_fused(
                         b,
-                        raw_g,
+                        value,
                         raw.a_log,
                         raw.dt_bias,
                         head,
-                        col_j,
+                        b.const_i32(0),
                         spec.lower_bound,
                         has_dt_bias=spec.has_dt_bias,
                         dk=ctx.DK,
-                        gate_kind=spec.gate_kind,
+                        gate_kind="gdn",
                     )
-                    _st(b, lds, row, col_j, value=gate, n=1)
+                    for j in range(4):
+                        _st(b, lds, row, b.add(col, b.const_i32(j)), value=gate, n=1)
+                else:
+                    for j in range(4):
+                        raw_g = b.vec_extract(value, j)
+                        col_j = b.add(col, b.const_i32(j))
+                        gate = _apply_gate_fused(
+                            b,
+                            raw_g,
+                            raw.a_log,
+                            raw.dt_bias,
+                            head,
+                            col_j,
+                            spec.lower_bound,
+                            has_dt_bias=spec.has_dt_bias,
+                            dk=ctx.DK,
+                            gate_kind=spec.gate_kind,
+                        )
+                        _st(b, lds, row, col_j, value=gate, n=1)
             elif kind in ("k", "q") and raw is not None and spec.fuse_qk_l2norm:
                 vals = [b.cast_to_f32(b.vec_extract(value, j)) for j in range(8)]
                 inv = _l2norm_scale8(b, vals)
