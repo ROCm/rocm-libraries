@@ -52,6 +52,25 @@ std::optional<std::set<NodeAttributes>> graphNodeTypes(const void* graphBuffer, 
 /// required-op set.
 bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, size_t size);
 
+/// False when running this graph on `type` would cost far more than it is worth.
+///
+/// Separate from referenceCoversGraph() on purpose: coverage answers "is this
+/// reference required to handle this op", and this answers "is this particular
+/// shape worth spending the time on". Folding the second into the first would make
+/// a runtime-cost decision look like a missing capability.
+///
+/// Only the CPU reference is gated, and only for Sdpa: it is scalar, so it is
+/// restricted to the `quick` tier and to shapes under a working-set cap. Excluded
+/// bundles stay covered by the GPU lane, so this trades CPU cross-checking of the
+/// larger shapes for a golden-data run that finishes.
+///
+/// `bundleId` is "<suiteName>.<testName>"; its leading path tier is what the tier
+/// cap reads.
+bool referenceShapeIsAffordable(ReferenceExecutorType type,
+                                std::string_view bundleId,
+                                const void* graphBuffer,
+                                size_t size);
+
 /// Human-readable node types the given reference does not cover, for diagnostics.
 ///
 /// An unreadable graph yields a single sentinel entry rather than nothing, so a
@@ -66,5 +85,37 @@ std::vector<std::string>
 /// registerReferenceValidationTests(), which is inline and reaches
 /// sharedReferenceExecutors() -- the unit target deliberately does not link that.
 std::string formatUncoveredOps(const std::set<std::string>& uncoveredOps);
+
+/// One bundle a reference is known to decline, with the reason and its tracker.
+///
+/// `bundleId` is "<suiteName>.<testName>" -- the registered GTest name minus the
+/// "_CpuRef"/"_GpuRef" suffix, so an entry can be copied straight out of a failing
+/// run.
+struct KnownReferenceGap
+{
+    ReferenceExecutorType reference;
+    std::string_view bundleId;
+    std::string_view reason;
+};
+
+/// The bundles a reference is currently expected to decline, and why.
+///
+/// This is NOT a skip list. A listed bundle still registers and still runs; the
+/// harness simply inverts its expectation, requiring the reference to report the
+/// graph inapplicable. The moment someone implements the missing shape, the
+/// inverted assertion fails and forces the entry to be deleted, so the list cannot
+/// outlive the gap it documents. A skip list would do the opposite: go quiet
+/// exactly when the gap closes, and stay quiet if a bundle silently stopped being
+/// verified for some unrelated reason.
+///
+/// It exists because referenceSupportedOps() is keyed on node type while both
+/// references dispatch on op *shape*, so "Sdpa but not fp8, and not variable
+/// sequence length" is not expressible there. Every entry is therefore a temporary
+/// stand-in for either real support or a shape-aware coverage set.
+const std::vector<KnownReferenceGap>& knownReferenceGaps();
+
+/// The entry for this (reference, bundle) pair, or nullptr when none exists.
+const KnownReferenceGap* findKnownReferenceGap(ReferenceExecutorType type,
+                                               std::string_view bundleId);
 
 } // namespace hipdnn_integration_tests::bundle

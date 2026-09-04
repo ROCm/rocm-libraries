@@ -37,6 +37,11 @@ namespace hipdnn_integration_tests::bundle
 /// cannot run the graph is a gap in the reference, so it fails rather than skips.
 /// The one skip is device availability, checked before that gate: the GPU
 /// reference needs a device, so its suite skips on a runner that has none.
+///
+/// A bundle named in knownReferenceGaps() is the sole exception, and it is still
+/// not a skip: the test runs and asserts the reference reports the graph
+/// *inapplicable*. Closing the gap therefore turns that test red until its entry
+/// is removed.
 class BundleReferenceValidationHarness : public ::testing::Test
 {
 public:
@@ -49,10 +54,16 @@ public:
     {
     }
 
-    void setBundle(std::shared_ptr<IntegrationTestBundle> bundle, std::filesystem::path path)
+    /// `bundleId` is "<suiteName>.<testName>", the registered GTest name minus the
+    /// reference suffix. It is what knownReferenceGaps() is keyed on, so it must
+    /// match the name printed for a failing test.
+    void setBundle(std::shared_ptr<IntegrationTestBundle> bundle,
+                   std::filesystem::path path,
+                   std::string bundleId = {})
     {
         _bundle = std::move(bundle);
         _bundlePath = std::move(path);
+        _bundleId = std::move(bundleId);
     }
 
     static const char* referenceLabel(ReferenceExecutorType type)
@@ -83,6 +94,7 @@ private:
     bool _requiresDevice;
     std::shared_ptr<IReferenceExecutors> _referenceExecutors;
     std::filesystem::path _bundlePath;
+    std::string _bundleId;
     std::shared_ptr<IntegrationTestBundle> _bundle;
 };
 

@@ -109,19 +109,19 @@ struct FailedLoad
     std::string message;
 };
 
-// A bundle that failed to load for an ordinary reason (malformed JSON, missing
-// metadata, a bad sweep case, ...). No test is registered for it — only the
-// diagnostic message to log. Kept distinct from FailedLoad so only the
-// RuntimePassByValueInvariantError contradiction (see IntegrationTestBundle.hpp)
-// turns the suite red; every other load failure keeps the original
-// log-and-skip behavior.
+// A bundle that failed to load for an ordinary reason (malformed JSON, an
+// absent sweep metadata block with no golden data to validate, a bad sweep
+// case, ...). No test is registered for it — only the diagnostic message to
+// log. Kept distinct from FailedLoad so only the failures that would otherwise
+// shrink the suite behind our backs turn it red; every other load failure keeps
+// the original log-and-skip behavior.
 struct SkippedLoad
 {
     std::string message;
 };
 
 // The result of attempting to load one discovered bundle: it loaded
-// successfully, it hit the PBV invariant and should hard-fail, or it failed to
+// successfully, it hit a contradiction that must hard-fail, or it failed to
 // load for some other reason and should be skipped quietly.
 using LoadOutcome = std::variant<LoadedBundle, FailedLoad, SkippedLoad>;
 
@@ -151,6 +151,17 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc)
 
     if(const auto* error = std::get_if<LoadError>(&loadResult))
     {
+        // Golden blobs on disk with no usable metadata is the one load failure that
+        // must not be a skip. Skipping it means pulling the DVC data *removes* a test
+        // and the run still passes — a more complete checkout verifying strictly less.
+        // Every other error describes a bundle that was already unusable.
+        if(*error == LoadError::UNVALIDATABLE_GOLDEN_DATA)
+        {
+            return FailedLoad{disc.suiteName,
+                              disc.testName,
+                              "Failed to load bundle " + diagnosticPath.string() + ": "
+                                  + toString(*error)};
+        }
         return SkippedLoad{"Skipping bundle " + diagnosticPath.string() + ": " + toString(*error)};
     }
 
@@ -212,14 +223,19 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles,
 //
 // Bundles that fall outside the reference's supported-op set are simply absent from
 // the suite, and the count is logged so the gap is visible rather than silent.
-inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bundles,
-                                             ReferenceExecutorType referenceType)
+//
+// Returns the number of bundles registered so the caller can tell "this reference
+// verified nothing" apart from "this whole run had nothing to verify".
+inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& bundles,
+                                               ReferenceExecutorType referenceType)
 {
     const char* label = BundleReferenceValidationHarness::referenceLabel(referenceType);
 
     size_t registered = 0;
     size_t noGolden = 0;
     size_t uncovered = 0;
+    size_t knownGaps = 0;
+    size_t tooCostly = 0;
     std::set<std::string> uncoveredOps;
 
     for(const auto& bundle : bundles)
@@ -246,6 +262,24 @@ inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bu
             continue;
         }
 
+        const std::string bundleId = bundle.suiteName + "." + bundle.testName;
+
+        // Deliberate cost exclusion, counted and printed rather than silent. Unlike
+        // an op-set miss this bundle IS validated -- by the other reference lane.
+        if(!referenceShapeIsAffordable(referenceType,
+                                       bundleId,
+                                       bundle.bundle->graphBuffer.data(),
+                                       bundle.bundle->graphBuffer.size()))
+        {
+            tooCostly++;
+            continue;
+        }
+
+        if(findKnownReferenceGap(referenceType, bundleId) != nullptr)
+        {
+            knownGaps++;
+        }
+
         ::testing::RegisterTest(
             (bundle.suiteName + "_" + label).c_str(),
             bundle.testName.c_str(),
@@ -253,7 +287,8 @@ inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bu
             nullptr,
             __FILE__,
             __LINE__,
-            [loaded = bundle.bundle, path = bundle.jsonPath, referenceType]() -> ::testing::Test* {
+            [loaded = bundle.bundle, path = bundle.jsonPath, bundleId, referenceType]()
+                -> ::testing::Test* {
                 // Only the GPU reference touches a device. Passing true for the CPU
                 // lane made SetUp() run SKIP_IF_NO_DEVICES() on work that reads and
                 // writes host memory, so CPU golden-data validation silently skipped
@@ -261,16 +296,50 @@ inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bu
                 const bool requiresDevice = referenceType == ReferenceExecutorType::GPU;
                 auto* test = new BundleReferenceValidationHarness(
                     referenceType, requiresDevice, sharedReferenceExecutors());
-                test->setBundle(loaded, path);
+                test->setBundle(loaded, path, bundleId);
                 return test;
             });
         registered++;
     }
 
+    // knownGaps is a subset of registered, not a third bucket: those tests still run,
+    // they just assert the reference declines. Printing it separately keeps "38
+    // registered" from reading as "38 validated against golden data".
     std::cerr << "Golden-data validation (" << label << "): " << registered
               << " bundle(s) registered, " << noGolden << " without golden data, " << uncovered
-              << " outside this reference's supported-op set" << formatUncoveredOps(uncoveredOps)
-              << "\n";
+              << " outside this reference's supported-op set" << formatUncoveredOps(uncoveredOps);
+    if(tooCostly > 0)
+    {
+        std::cerr << "\n       " << tooCostly
+                  << " excluded as too costly for this reference (see "
+                     "referenceShapeIsAffordable); the other reference lane covers them";
+    }
+    if(knownGaps > 0)
+    {
+        std::cerr << "\n       " << knownGaps << " of the " << registered
+                  << " registered are known reference gaps (see knownReferenceGaps()): they assert "
+                     "the reference declines the graph, and are NOT validated against golden data";
+    }
+    std::cerr << "\n";
+
+    // A reference lane that registered nothing while golden data was sitting right
+    // there verified nothing, and the whole-binary guard in main() cannot see it: a
+    // sibling reference that registered some bundles keeps the total non-zero. The
+    // legitimate ways to register zero with golden data present are declared and
+    // already printed above: every golden-bearing bundle fell outside this
+    // reference's op set, or every one was excluded on cost. Anything else is a
+    // bundle that should have been here and isn't.
+    if(registered == 0 && uncovered == 0 && tooCostly == 0 && noGolden != bundles.size())
+    {
+        registerFailedBundleLoad(std::string("GoldenDataValidation_") + label,
+                                 "RegisteredAtLeastOneBundle",
+                                 std::string("The ") + label
+                                     + " reference registered no golden-data validation tests, but "
+                                       "bundles carrying golden data were loaded. This lane "
+                                       "verified nothing.");
+    }
+
+    return registered;
 }
 
 } // namespace detail
@@ -356,9 +425,11 @@ inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool coun
     // synthetic failing test registered in its place — see
     // detail::registerFailedBundleLoad() — instead of just an ERROR log, so
     // that specific contradiction turns the suite red rather than quietly
-    // shrinking it. Every other load failure (malformed JSON, invalid graph,
-    // missing/invalid metadata, a bad sweep case, a wrong-size blob) keeps the
-    // original behavior: logged and skipped, no test registered. A bundle
+    // shrinking it. The same applies to golden blobs whose metadata is missing or
+    // unparseable (LoadError::UNVALIDATABLE_GOLDEN_DATA): pulling the data must never
+    // delete a test. Every other load failure (malformed JSON, invalid graph, a bad
+    // sweep case, a wrong-size blob) keeps the original behavior: logged and
+    // skipped, no test registered. A bundle
     // whose .bin blobs are absent loads with tensors == nullopt; its test
     // registers normally and the harness SKIPs it at run time.
     std::vector<LoadedBundle> bundles;
@@ -427,22 +498,23 @@ inline void registerBundleTests()
     HIPDNN_PLUGIN_LOG_INFO("Registered " << bundles->size() << " bundle test(s)");
 }
 
-/// Registers the golden-data validation suite for one reference executor.
+/// Registers the golden-data validation suite for one reference executor, and
+/// returns how many bundles it registered.
 ///
 /// Two harnesses, never both: verifying an engine and validating our own golden
 /// data are different jobs, so they live in different binaries. This one is the
 /// entry point for hipdnn_golden_data_tests, which loads no plugin and creates no
 /// handle -- see the binary's main() for why that separation is structural rather
 /// than a flag.
-inline void registerGoldenDataValidationTests(ReferenceExecutorType referenceType)
+inline size_t registerGoldenDataValidationTests(ReferenceExecutorType referenceType)
 {
     auto bundles = detail::discoverAndLoadBundles(/*countClaimCoverage=*/false);
     if(!bundles.has_value())
     {
-        return;
+        return 0;
     }
 
-    detail::registerReferenceValidationTests(*bundles, referenceType);
+    return detail::registerReferenceValidationTests(*bundles, referenceType);
 }
 
 } // namespace hipdnn_integration_tests::bundle

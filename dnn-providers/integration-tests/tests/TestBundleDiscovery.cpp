@@ -85,6 +85,25 @@ protected:
             << R"({"format_version": 1, "operation": "BatchnormInference"})";
     }
 
+    // Provenance-only metadata: valid JSON, but no `format_version`, so RFC 0011's
+    // reader rejects it. This is the exact shape the SdpaFwd generator emitted for
+    // 35 bundles, and the reason they vanished the moment their blobs were pulled.
+    static void writeMetadataWithoutFormatVersion(const std::filesystem::path& dir,
+                                                  const std::string& name)
+    {
+        std::ofstream(dir / (name + ".meta.json"))
+            << R"({"generator": "generate_sdpa_fwd_golden.py", "seed": 42})";
+    }
+
+    // uid 5 is the only non-virtual output of createMinimalBundle's graph, so its
+    // blob alone decides whether the bundle counts as golden.
+    static void writeGoldenOutputBlob(const std::filesystem::path& dir, const std::string& name)
+    {
+        const std::vector<char> data(480, 0);
+        std::ofstream out((dir / name).string() + ".tensor5.bin", std::ios::binary);
+        out.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+
     static void createLoadableBundle(const std::filesystem::path& dir, const std::string& name)
     {
         createMinimalBundle(dir, name);
@@ -511,6 +530,8 @@ TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMissingMetadataLoads)
 
 // A GOLDEN bundle (output .bin blobs present) WITHOUT a .meta.json companion is
 // a load error: metadata is mandatory whenever there is golden data to validate.
+// It is UNVALIDATABLE_GOLDEN_DATA rather than MISSING_METADATA because that
+// distinction is what makes classifyBundle() fail instead of skip.
 TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleMissingMetadataIsError)
 {
     auto dir = _tempDir / "op" / "goldennometa";
@@ -520,7 +541,51 @@ TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleMissingMetadataIsError)
 
     auto result = loadIntegrationTestBundle(jsonPath);
     ASSERT_TRUE(std::holds_alternative<LoadError>(result));
-    EXPECT_EQ(std::get<LoadError>(result), LoadError::MISSING_METADATA);
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::UNVALIDATABLE_GOLDEN_DATA);
+}
+
+// Present-but-unparseable metadata is as bad as absent metadata: either way the
+// golden blobs on disk have nothing describing how they were produced. A metadata
+// file that parses as JSON but is rejected by the schema (here: no
+// `format_version`) must not be treated as a softer failure than a missing file.
+TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleUnparseableMetadataIsError)
+{
+    auto dir = _tempDir / "op" / "goldenbadmeta";
+    createLoadableBundle(dir, "goldenbadmeta");
+    writeMetadataWithoutFormatVersion(dir, "goldenbadmeta");
+
+    auto result = loadIntegrationTestBundle(dir / "goldenbadmeta.json");
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::UNVALIDATABLE_GOLDEN_DATA);
+}
+
+// The invariant the whole change exists to protect: pulling golden data must never
+// make a bundle quietly disappear. One bundle, one unparseable .meta.json, observed
+// twice — before and after its output blob shows up. Without the blob it is an
+// ordinary graph-only bundle; with it the run must go red, never silently shrink.
+TEST_F(TestBundleDiscoveryFixture, PullingGoldenDataNeverSilentlyDropsABundle)
+{
+    auto dir = _tempDir / "op" / "pullme";
+    createLoadableBundle(dir, "pullme");
+    writeMetadataWithoutFormatVersion(dir, "pullme");
+    std::filesystem::remove(dir / "pullme.tensor5.bin"); // pre-`dvc pull` state
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto beforePull = loadIntegrationTestBundle(dir / "pullme.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(beforePull));
+    EXPECT_FALSE(std::get<IntegrationTestBundle>(beforePull).hasGoldenOutputs);
+    EXPECT_TRUE(
+        std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(discovered.front())));
+
+    writeGoldenOutputBlob(dir, "pullme"); // post-`dvc pull` state
+
+    auto afterPull = loadIntegrationTestBundle(dir / "pullme.json");
+    ASSERT_TRUE(std::holds_alternative<LoadError>(afterPull));
+    EXPECT_EQ(std::get<LoadError>(afterPull), LoadError::UNVALIDATABLE_GOLDEN_DATA);
+    EXPECT_TRUE(
+        std::holds_alternative<detail::FailedLoad>(detail::classifyBundle(discovered.front())));
 }
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
@@ -726,7 +791,8 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingFileIsError)
 }
 
 // A golden sweep case that omits its inline `metadata` block is rejected with
-// MISSING_METADATA: metadata is what validates the golden data.
+// UNVALIDATABLE_GOLDEN_DATA: metadata is what validates the golden data, and the
+// blobs are right there.
 TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseGoldenWithoutMetadataIsError)
 {
     createTemplateSweep(_tempDir / "quick" / "BatchnormFwdInference" / "Inference",
@@ -745,7 +811,42 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseGoldenWithoutMetadataIsE
 
     auto result = loadIntegrationTestBundle(discovered.front());
     ASSERT_TRUE(std::holds_alternative<LoadError>(result));
-    EXPECT_EQ(std::get<LoadError>(result), LoadError::MISSING_METADATA);
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::UNVALIDATABLE_GOLDEN_DATA);
+}
+
+// Same rule for sweeps as for direct bundles: a metadata block that is present but
+// rejected by the schema, next to golden blobs, is UNVALIDATABLE_GOLDEN_DATA — not
+// the quiet INVALID_SWEEP_CASE it would be for a case with no golden data.
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseGoldenWithUnparseableMetadataIsError)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"golden_bad_meta_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          true, // includeGolden
+                          true, // goldenHasPath
+                          true}}); // includeMetadata
+
+    // Strip the required format_version from the case's metadata block, leaving a
+    // well-formed JSON object the metadata reader still refuses.
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    sweepJson["cases"][0]["metadata"].erase("format_version");
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::UNVALIDATABLE_GOLDEN_DATA);
 }
 
 // Every sweep case must carry metadata, golden or not: a graph-only case that
@@ -942,6 +1043,29 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsSkippedLoadForOrdinaryIn
     EXPECT_NE(skipped.message.find(discovered.front().diagnosticPath().string()),
               std::string::npos);
     EXPECT_NE(skipped.message.find(toString(LoadError::INVALID_SWEEP_CASE)), std::string::npos);
+}
+
+// The counterpart to the SkippedLoad case above: golden blobs with no usable
+// metadata is the second failure that must turn the suite red. Pinning it here
+// stops a future refactor from folding it back into the quiet path, which is
+// precisely the regression that let 35 SdpaFwd bundles disappear.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForUnvalidatableGoldenData)
+{
+    auto dir = _tempDir / "op" / "goldenbadmeta";
+    createLoadableBundle(dir, "goldenbadmeta");
+    writeMetadataWithoutFormatVersion(dir, "goldenbadmeta");
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    auto& failed = std::get<detail::FailedLoad>(outcome);
+    EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
+    EXPECT_EQ(failed.testName, discovered.front().testName);
+    EXPECT_NE(failed.message.find(discovered.front().diagnosticPath().string()), std::string::npos);
+    EXPECT_NE(failed.message.find(toString(LoadError::UNVALIDATABLE_GOLDEN_DATA)),
+              std::string::npos);
 }
 
 // Direct regression test for the original review repro: corrupting one sweep

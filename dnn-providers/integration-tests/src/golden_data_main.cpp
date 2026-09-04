@@ -127,25 +127,44 @@ int main(int argc, char** argv) noexcept
         opts.configPath = std::move(configPath);
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
+        size_t cpuRegistered = 0;
+        size_t gpuRegistered = 0;
         if(runCpu)
         {
-            hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
+            cpuRegistered = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
                 hipdnn_integration_tests::ReferenceExecutorType::CPU);
         }
         if(runGpu)
         {
-            hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
+            gpuRegistered = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
                 hipdnn_integration_tests::ReferenceExecutorType::GPU);
+        }
+
+        // Per-reference, not just per-run. A lane that registered nothing while its
+        // sibling registered plenty is invisible in the binary-wide total below, and
+        // registerReferenceValidationTests() has already turned the un-explainable
+        // version of that into a failing test. This line is the human-readable
+        // counterpart, printed before the run so it frames the results that follow.
+        if(runCpu && runGpu && (cpuRegistered == 0) != (gpuRegistered == 0))
+        {
+            std::cerr << "NOTE: only one reference lane registered any golden-data validation "
+                         "tests (CpuRef: "
+                      << cpuRegistered << ", GpuRef: " << gpuRegistered
+                      << "). The empty lane verified nothing this run.\n";
         }
 
         const int result = RUN_ALL_TESTS();
 
         // An empty run here is not automatically an error: golden `.bin` blobs are
         // DVC-managed, so a tree that has not pulled them registers nothing and has
-        // nothing to say. Only a run whose data directory is actually present and
-        // still selected nothing is suspicious.
+        // nothing to say. Nor is it one when bundles were switched off outright --
+        // HIPDNN_TEST_ALLOW_BUNDLES=0 leaves this binary with nothing to do by
+        // construction, and the engine binary's equivalent guard already excludes it.
+        // Only a run whose data directory is actually present and still selected
+        // nothing is suspicious.
         const auto* unitTest = ::testing::UnitTest::GetInstance();
-        if(unitTest->test_to_run_count() == 0)
+        if(unitTest->test_to_run_count() == 0
+           && hipdnn_integration_tests::TestConfig::get().allowBundles())
         {
             const auto dataDir = hipdnn_integration_tests::bundle::resolveDataDir();
             std::cerr << "No golden-data validation tests ran. Bundle data directory: " << dataDir
