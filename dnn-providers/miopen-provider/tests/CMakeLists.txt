@@ -32,6 +32,7 @@ add_executable(
     engines/plans/TestMiopenConvPlanBuilder.cpp
     engines/plans/TestMiopenUnaryActivationPlanBuilder.cpp
     engines/plans/TestMiopenConvWrwPlan.cpp
+    engines/plans/TestMiopenBinaryPointwisePlanBuilder.cpp
     engines/TestMiopenEngine.cpp
     common/TestWorkarounds.cpp
     main.cpp

@@ -213,6 +213,9 @@ add_library(
     engines/plans/MiopenBatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.cpp
+    engines/plans/MiopenBinaryPointwiseApplicabilityChecks.cpp
+    engines/plans/MiopenBinaryPointwisePlan.cpp
+    engines/plans/MiopenBinaryPointwisePlanBuilder.cpp
     engines/plans/MiopenConvBwdPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlanBuilder.cpp
