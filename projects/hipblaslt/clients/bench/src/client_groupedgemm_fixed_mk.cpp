@@ -300,7 +300,13 @@ static int parse_arguments(int                          argc,
                 else if(arg == "--initialization")
                 {
                     std::string initializationStr = argv[++i];
-                    initialization = string2hipblaslt_initialization(initializationStr);
+                    if(auto parsed = string2hipblaslt_initialization(initializationStr))
+                        initialization = *parsed;
+                    else
+                    {
+                        std::cerr << "Invalid initialization type: " << initializationStr << '\n';
+                        return EXIT_FAILURE;
+                    }
                 }
                 else if(arg == "--sync_count")
                 {
