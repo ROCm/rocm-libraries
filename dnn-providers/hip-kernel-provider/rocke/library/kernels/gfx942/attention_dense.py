@@ -189,12 +189,11 @@ from rocke.core.ir import (
 )
 from rocke.helpers.attention import mfma_32x32x8_for_dtype
 
-# The spec is arch-neutral (compile-time shape + tuning knobs); reuse it rather than
-# fork the dataclass -- gfx942-only fields are added by SUBCLASSING it below, and
-# gfx942 defaults for the SHARED fields live in dispatch.
-from kernels.gfx950.attention_dense import (
+# Shared problem/geometry fields live in an architecture-neutral module.
+from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     DENSE_TILE_GEOMETRIES,
+    attention_dense_cache_key,
 )
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
@@ -325,7 +324,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #     * 8 did not survive a sweep on the arch it came from. gfx950's own sweep of
     #       the analogous V pad measured conflicts {pad 0: 30, pad 8: 29, pad 16: 11,
     #       pad 32: 0} -- i.e. +8 was essentially indistinguishable from no pad at all
-    #       (``AttentionDenseSpec.lds_v_row_pad`` in the gfx950 sibling).
+    #       (``Gfx950AttentionDenseSpec.lds_v_row_pad`` in the gfx950 sibling).
     #   Re-deriving both pad VALUES on gfx942 is the pad-value sweep tracked in the
     #   optimization plan; THIS field is the knob that sweep turns.
     lds_row_pad: int = _DEFAULT_LDS_ROW_PAD
@@ -500,6 +499,11 @@ def _as_gfx942_spec(spec: AttentionDenseSpec) -> Gfx942AttentionDenseSpec:
     """
     if isinstance(spec, Gfx942AttentionDenseSpec):
         return spec
+    if type(spec) is not AttentionDenseSpec:
+        raise TypeError(
+            "cannot promote a concrete architecture spec to gfx942: "
+            f"{type(spec).__name__}"
+        )
     return Gfx942AttentionDenseSpec(
         **{f.name: getattr(spec, f.name) for f in _dataclass_fields(AttentionDenseSpec)}
     )
@@ -866,7 +870,10 @@ def supports_attention_dense(
     # returning the structured rejection the contract promises.
     if not isinstance(spec, AttentionDenseSpec):
         return False, f"spec must be an AttentionDenseSpec, got {type(spec).__name__}"
-    spec = _as_gfx942_spec(spec)
+    try:
+        spec = _as_gfx942_spec(spec)
+    except TypeError as exc:
+        return False, str(exc)
     if spec.dtype not in _SUPPORTED_DTYPES:
         return (
             False,
@@ -1763,7 +1770,7 @@ def _build_attention_dense_single_buffer(
                 hq_v = b.add(b.mul(hkv_wi, b.const_i32(gqa)), hql)
                 qb_hi = b.sub(b.const_i32(NQB - 1 + half), blk)  # NQB-1-(blk-half)
                 qb_v = b.select(b.cmp_lt(blk, b.const_i32(half)), blk, qb_hi)
-            else:
+            elif spec.resolved_persist_decode == "qb_major":
                 # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the
                 # triangular causal-cost index) in the MSB spreads cheap+expensive
                 # query blocks across each CTA under grid-stride. Optional interleave
@@ -1778,6 +1785,12 @@ def _build_attention_dense_single_buffer(
                     qb_v = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
                 else:
                     qb_v = qb0
+            else:
+                raise ValueError(
+                    "gfx942 attention_dense: persist_decode="
+                    f"{spec.resolved_persist_decode!r} is not implemented "
+                    "by this builder"
+                )
             _run_work_item(qb_v, hq_v, bt_v)
     else:
         _run_work_item(b.block_id_x(), b.block_id_y(), b.block_id_z())
@@ -1861,13 +1874,9 @@ def run_attention_dense_torch(
     torch-free at import time. Serves both the default and the P4 persistent grid
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
 
-    Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` but keys the
-    launcher cache on :meth:`Gfx942AttentionDenseSpec.kernel_name` (not the shared
-    ``AttentionDenseSpec.kernel_name()``): this kernel bakes ``batch`` into the
-    buffer-resource extents, ``waves_per_eu`` into the register-allocation attribute,
-    and the gfx942-private sweep knobs into the body -- none of which the shared name
-    covers -- so two specs differing only in those MUST NOT share a cached binary, or a
-    B>1 launch is served the B=1 kernel and reads out of bounds.
+    Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` and keys
+    the launcher cache by ``(arch, concrete frozen spec)``. Every current and future
+    IR-live field therefore participates without relying on manual name tokens.
 
     varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
     ABI is always the 5-arg (q, k, v, o, scale) form; passing ``cu_seqlens_*`` is a
@@ -1884,9 +1893,7 @@ def run_attention_dense_torch(
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    # batch-, wpe- and knob-unique cache key (see docstring): the gfx942 subclass's
-    # kernel_name override, not the shared base one.
-    key = spec.kernel_name()
+    key = attention_dense_cache_key(spec, arch=arch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
         art = compile_kernel(
@@ -1895,7 +1902,10 @@ def run_attention_dense_torch(
             backend="python",
             capture_ir_text=False,
         )
-        assert art.kernel_name == key, (art.kernel_name, key)
+        assert art.kernel_name == spec.kernel_name(), (
+            art.kernel_name,
+            spec.kernel_name(),
+        )
         launcher = KernelLauncher(
             hsaco=art.hsaco,
             kernel_name=art.kernel_name,

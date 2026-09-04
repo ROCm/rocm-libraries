@@ -408,7 +408,7 @@ def build_attention_dense(arch, **over):
 
     def _build():
         from kernels.gfx950.attention_dense import (
-            AttentionDenseSpec,
+            Gfx950AttentionDenseSpec,
             build_attention_dense as _build_dense,
         )
 
@@ -423,7 +423,7 @@ def build_attention_dense(arch, **over):
             dtype="bf16",
         )
         spec.update(over)
-        return _build_dense(AttentionDenseSpec(**spec))
+        return _build_dense(Gfx950AttentionDenseSpec(**spec))
 
     return _build
 

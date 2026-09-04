@@ -93,18 +93,17 @@ class AttentionRequest(OperatorRequest):
     spec_id: str = "auto"
     use_fp8: bool = False
     fp8_fnuz: bool = False
-    # --- gfx950 attention_dense knobs (only consumed by the opt-in
+    # --- standalone attention_dense knobs (only consumed by the opt-in
     #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
     #     Defaults deliver the best qualified persistent prefill path for large Sq:
     #     ``dense_persistent="auto"`` turns on the grid-stride variant once there
     #     is enough work to fill the persistent grid, and ``persist_decode="auto"``
-    #     picks a one- or two-phase GQA-pair mapping when its CTA-count equation
-    #     holds, hkv-major where its broader balance condition holds, and qb-major
-    #     otherwise. Aligned persistent causal D128/BN64 shapes also enable wide
-    #     DMA/IGLP internally. ---
+    #     resolves through the selected architecture's concrete dense spec.
+    #     gfx950 may select one-/two-phase GQA pairing and wide DMA; gfx942
+    #     supports only qb-major/hkv-major ordering. ---
     dense_persistent: str = "auto"  # "auto" | "on" | "off"
     dense_num_persistent: int = 256
-    # "auto" | "qb_major" | "hkv_major" | "gqa_pair" | "gqa_pair_2phase"
+    # Common: auto/qb_major/hkv_major; gfx950 also supports gqa_pair variants.
     dense_persist_decode: str = "auto"
 
     def normalized(self) -> dict:

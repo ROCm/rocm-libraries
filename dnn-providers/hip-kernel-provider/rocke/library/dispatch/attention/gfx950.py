@@ -28,9 +28,7 @@ from .common import (
 )
 
 _DENSE_GEOMETRY = "default"
-_DENSE_PERSIST_DECODES = frozenset(
-    {"auto", "qb_major", "hkv_major", "gqa_pair", "gqa_pair_2phase"}
-)
+_DENSE_LAYOUT = "default"
 
 
 def _dense_spec(req: OperatorRequest):
@@ -42,24 +40,27 @@ def _dense_spec(req: OperatorRequest):
     where its broader balance condition holds, and qb-major otherwise. Aligned
     persistent causal D128/BN64 shapes use the wide-DMA+IGLP path. Non-tile-
     multiple self-attention lengths use the on-chip ragged path (no host pad)."""
-    from kernels.gfx950.attention_dense import (
-        AttentionDenseSpec,
+    from kernels.common.attention_dense_spec import (
         DENSE_TILE_GEOMETRIES,
+    )
+    from kernels.gfx950.attention_dense import (
+        GFX950_DENSE_LAYOUTS,
+        Gfx950AttentionDenseSpec,
     )
 
     assert isinstance(req, AttentionRequest)
+    if req.arch != "gfx950":
+        raise ValueError(
+            f"gfx950 dense spec factory requires arch='gfx950', got {req.arch!r}"
+        )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     sw = int(req.sliding_window)
     use_sinks = bool(req.use_sinks)
     geometry = DENSE_TILE_GEOMETRIES[_DENSE_GEOMETRY]
+    layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
     bm = int(geometry["block_m"])
     bn = int(geometry["block_n"])
     decode = req.dense_persist_decode.strip().lower()
-    if decode not in _DENSE_PERSIST_DECODES:
-        raise ValueError(
-            "dense_persist_decode must be one of "
-            f"{sorted(_DENSE_PERSIST_DECODES)}, got {req.dense_persist_decode!r}"
-        )
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
     ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
@@ -91,7 +92,7 @@ def _dense_spec(req: OperatorRequest):
         and not use_sinks
         and not ragged
     )
-    return AttentionDenseSpec(
+    return Gfx950AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
         seqlen_kv=sk,
@@ -102,7 +103,7 @@ def _dense_spec(req: OperatorRequest):
         dtype=req.dtype.lower(),
         block_m=bm,
         block_n=bn,
-        lds_v_row_pad=int(geometry["lds_v_row_pad"]),
+        lds_v_row_pad=int(layout["lds_v_row_pad"]),
         persistent=persistent,
         num_persistent=np,
         persist_decode=decode,
