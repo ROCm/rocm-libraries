@@ -169,6 +169,12 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
         cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {8, 16, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}}});
         cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {64, 16, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}}});
     }
+
+    // Large spatial shapes to exercise FWD spatial tiling with large tensors
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {1, 3, 600, 600}}, {datatype, miopenTensorNCHW, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {1, 3, 600, 600}}, {datatype, miopenTensorNHWC, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {8, 3, 200, 200}}, {datatype, miopenTensorNCHW, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {8, 3, 200, 200}}, {datatype, miopenTensorNHWC, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
     // clang-format on
 
     return cases;
