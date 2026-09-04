@@ -42,9 +42,12 @@ SCHEMA_VERSION = "rocke.bench.measurement/v1"
 # privileged. Callers that need configuration-specific identities should use a
 # configuration-specific kernel_name.
 # Primary regression metric is clock-invariant (cycles); wall time is the fallback
-# when the profiler was unavailable.
+# when the profiler was unavailable, and the profiler's own kernel duration is the
+# last resort when the launcher prints no PerfJSON line (so there is no wall run).
+# The three are never interchangeable, so `metric()` reports which one it used.
 PRIMARY_METRIC = "busy_cycles"  # from record["counters"]
 FALLBACK_METRIC = "ms_median"  # from record["wall"]
+PROFILED_METRIC = "profiled_ms_median"  # from record["profiled"]
 
 # Fields that, when present, form the diagnostic panel a regression report shows
 # (dynamic counters + static resources - both help localize a change).
@@ -124,10 +127,12 @@ def identity(record: Mapping[str, Any]) -> tuple:
 
 
 def metric(record: Mapping[str, Any]) -> tuple[Optional[float], str]:
-    """Return (value, which) - the primary cycle metric if present, else wall.
+    """Return (value, which) - the primary cycle metric if present, else a wall or
+    profiled-run wall-clock fallback.
 
-    `which` is "busy_cycles" or "ms_median" so callers/reports know which was used
-    (never compare a cycles number against a wall number).
+    `which` is "busy_cycles", "ms_median", or "profiled_ms_median" so callers/reports
+    know which was used (never compare across two of them: cycles are not ms, and a
+    profiled run carries profiler overhead a wall run does not).
     """
     counters = record.get("counters") or {}
     val = counters.get(PRIMARY_METRIC)
@@ -137,6 +142,10 @@ def metric(record: Mapping[str, Any]) -> tuple[Optional[float], str]:
     val = wall.get(FALLBACK_METRIC)
     if val is not None:
         return float(val), FALLBACK_METRIC
+    profiled = record.get("profiled") or {}
+    val = profiled.get("ms_median")
+    if val is not None:
+        return float(val), PROFILED_METRIC
     return None, ""
 
 

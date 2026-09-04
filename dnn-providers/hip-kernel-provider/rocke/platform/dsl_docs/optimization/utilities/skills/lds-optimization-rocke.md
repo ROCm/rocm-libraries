@@ -16,6 +16,11 @@ tools: Read,Edit,Bash,Grep,Glob,Agent
 Diagnose and fix LDS (shared memory) performance issues in CK DSL kernels
 on AMD CDNA GPUs (MI300X/MI308/MI350).
 
+The conflict periods and tuning advice below are CDNA-specific. The
+`rocke.benchmark.perf.tool` commands are architecture-generic: set `ARCH` to the
+GPU being profiled. `occupancy` reads the final ISA from the HSACO itself, while
+`profile` uses the named live architecture's counter map.
+
 ---
 
 ## When To Use
@@ -90,15 +95,18 @@ CK DSL provides built-in swizzle patterns via tile descriptor transforms:
 
 ## Diagnosing LDS Bottlenecks
 
-### Step 1: Capture rocprof Stats
+### Step 1: Record a Baseline and Read LDS Usage
 
-```bash
-rocprofv3 --stats --kernel-trace -f csv -o stats -- python my_gemm.py
-```
+Follow the operator-agnostic
+[before/after verification workflow](../../optimization_runbook.md#repeatable-beforeafter-verification)
+with the workload's real operation, shape, kernel identity, launch command, and
+HSACO. Do not label a non-GEMM workload as `gemm`.
 
-Check `stats_kernel_stats.csv` for LDS usage:
-- `LDS_Block_Size`: Total LDS bytes per workgroup
-- Compare against limits (64KB gfx942, 160KB gfx950)
+Inspect `lds_bytes`, register pressure, and occupancy against the target's limits.
+`occupancy` reads the ISA from the code object (reported as `target_arch`) and
+warns if `--arch` disagrees. This verifies size and speed; diagnosing *why* LDS is
+slow (bank conflicts or exposed write latency) is the WaveScope/PMC work below.
+The perf tool does not capture `LDSBankConflict`.
 
 ### Step 2: Analyze ATT Trace
 
@@ -227,7 +235,8 @@ The swizzle XORs row index bits into column index to distribute accesses across 
 Check ISA for XOR operations in LDS address computation:
 
 ```bash
-python src/stage3_extract_isa/count_instructions.py kernel.s | grep -A5 "LDS"
+python $ROCKE/platform/dsl_docs/optimization/utilities/tools/stage3_extract_isa/count_instructions.py \
+    kernel.s | grep -A5 "LDS"
 ```
 
 Look for patterns like:
@@ -347,13 +356,12 @@ assert summary.max_abs_diff < 1e-2, f"Verification failed: {summary.max_abs_diff
 
 ### 2. Re-profile
 
-```bash
-rocprofv3 --stats --kernel-trace -f csv -o stats_after -- python my_gemm.py
-```
-
-Compare before/after:
-- `LDS_Block_Size`: Should increase if padding added
-- Kernel latency: Should decrease if optimization successful
+Repeat the exact `profile` command used for the baseline. Accept the change only
+when its `[improved]` verdict clears the measured noise floor; `[within noise]`
+does not establish a win. Check the record's `lds_bytes` to confirm the expected
+resource change. See the
+[generic verification workflow](../../optimization_runbook.md#repeatable-beforeafter-verification)
+for verdict, history, and timing-source details.
 
 ### 3. Re-analyze ATT Trace
 
@@ -369,16 +377,13 @@ Check:
 
 ### 4. LDS Budget
 
-Verify LDS usage from rocprof `*_kernel_stats.csv`:
-
 ```bash
-# Check LDS_Block_Size column
-grep "LDS_Block_Size" stats_after_kernel_stats.csv
+python -m rocke.benchmark.perf.tool occupancy my_gemm.hsaco --arch "$ARCH"
 ```
 
-Ensure:
-- gfx942: LDS_Block_Size ≤ 65536 bytes (64 KB)
-- gfx950: LDS_Block_Size ≤ 163840 bytes (160 KB)
+Ensure the reported `lds_bytes` fits the per-CU budget:
+- gfx942: ≤ 65536 bytes (64 KB)
+- gfx950: ≤ 163840 bytes (160 KB)
 
 ---
 
@@ -555,4 +560,8 @@ From empirical measurements (ResNet50 conv3_1, gfx950):
 - `/capture-kernel-trace-rocke` - Profiling with rocprofv3
 - `/kernel-trace-analysis` - ATT trace bottleneck analysis
 - `/gemm-optimization-rocke` - GEMM-specific LDS usage patterns
-- `src/stage5_compare/compare_rocprof_stats.py` - Compare LDS_Block_Size before/after
+- `dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stats.py` -
+  compare TWO DIFFERENT kernels' rocprof stats (e.g. rocKE vs CK Tile); for one
+  kernel before/after a change use `rocke.benchmark.perf.tool profile` / `compare`
+- `rocke/platform/python/rocke/benchmark/perf/README.md` - the `profile` /
+  `occupancy` / `compare` tool used in Step 1 and the verification checklist
