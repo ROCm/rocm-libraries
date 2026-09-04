@@ -329,7 +329,6 @@ def buildTheRockDockerImage(Map conf=[:])
             --builder ci-builder \
             --target resolve_version_out \
             --output type=local,dest=${resolveDir} \
-            --build-arg THEROCK_GIT_HASH="${theRockHash}" \
             --build-arg THEROCK_RESOLVE_BUST=${date} \
             -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile \
             ${buildContext}
@@ -361,7 +360,6 @@ def buildTheRockDockerImage(Map conf=[:])
 
     if (!imageAlreadyBuilt) {
         def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
-                         "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
                          "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
                          "--build-arg BUILD_TYPE=artifact " +
                          "--build-arg ROCM_NIGHTLY_VERSION=${rocmVersion} " +

@@ -329,24 +329,28 @@ This path downloads TheRock's multi-arch nightly release tarball
 lib/run/dev components) instead of building TheRock from source, then builds CK and MIOpen on
 top exactly as in the other modes. This is what nightly CI uses (`buildTheRockDockerImage()`):
 much faster and less prone to breaking on unrelated TheRock source-build changes than Option 3.
-The tarball is fetched from an anonymous S3 bucket, so no GitHub token or CI run ID is needed.
+The tarball is fetched over plain HTTPS from AMD's nightly repo (`THEROCK_NIGHTLY_REPO`, default
+`https://nightly.repo.amd.com/rocm/core/tarball`), so no GitHub token, AWS creds, or CI run ID is
+needed. (We fetch it directly rather than via TheRock's `install_rocm_from_artifacts.py`, which
+still points at the legacy `therock-nightly-tarball` S3 bucket that went stale after 2026-08-22;
+the installer's "install" was just a `tarfile.extractall`, so a plain `curl` + `tar` is
+equivalent.)
 
-In CI the version is resolved first and then pinned: `buildTheRockDockerImage()` runs the
-installer with `--latest-release --dry-run` (an S3 list, no download) to discover the newest
-nightly version (e.g. `10.1.0a20260904`), tags the base image `rocm/miopen:therock-<version>`,
-pins the real download with `--release <version>` (via the `ROCM_NIGHTLY_VERSION` build arg), and
-stamps a `rocm.nightly.version` label. The tag and label therefore always reflect the ROCm that is
-actually installed, and the version — not the calendar date — is the layer cache key and the
-build/skip key. The label propagates to the CI image and the published dev image, so
+In CI the version is resolved first and then pinned: `buildTheRockDockerImage()` lists the repo
+index and picks the newest `linux-multiarch` version (e.g. `10.1.0a20260904`), tags the base image
+`rocm/miopen:therock-<version>`, pins the real download to that exact tarball (via the
+`ROCM_NIGHTLY_VERSION` build arg), and stamps a `rocm.nightly.version` label. The tag and label
+therefore always reflect the ROCm that is actually installed, and the version — not the calendar
+date — is the layer cache key and the build/skip key. The label propagates to the CI image and the
+published dev image, so
 `docker inspect --format '{{ index .Config.Labels "rocm.nightly.version" }}' <image>` reports
 which nightly any of them was built on.
 
 `THEROCK_ASIC` still selects which archs CK and MIOpen build for; the ROCm base itself is
-arch-agnostic (the tarball already contains all families). `THEROCK_GIT_HASH` is optional and
-only pins the version of TheRock's `build_tools` installer script (not the downloaded ROCm).
+arch-agnostic (the tarball already contains all families).
 
-A standalone build may omit `ROCM_NIGHTLY_VERSION` (the Dockerfile falls back to
-`--latest-release`) or pass it to pin an exact nightly:
+A standalone build may omit `ROCM_NIGHTLY_VERSION` (the Dockerfile resolves the latest from the
+repo at build time) or pass it to pin an exact nightly:
 
 ```shell
 docker buildx build \
