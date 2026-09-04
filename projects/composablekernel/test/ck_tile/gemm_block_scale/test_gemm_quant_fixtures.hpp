@@ -44,6 +44,28 @@ struct GemmConfigBase
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
     static constexpr ck_tile::index_t K_Warp_Tile = get_k_warp_tile<false>();
+
+    // Opt-in to the 64-bit global load/store path for tensors whose single-dimension
+    // byte extent exceeds the 2GB buffer-addressing limit. Off by default.
+    static constexpr bool LargeTensors = false;
+};
+
+// Enables the large-tensor (64-bit global load/store) code path. Same tile shape as the
+// base config; only the LargeTensors opt-in differs.
+struct GemmConfigLargeTensor : public GemmConfigBase
+{
+    static constexpr bool LargeTensors = true;
+};
+
+// Large-tensor path with padding enabled so non-tile-multiple M/N/K are accepted
+// (IsSupportedArgument gates the divisibility checks on kPad*) and the remainder tiles
+// are guarded on the unmasked 64-bit global path.
+struct GemmConfigLargeTensorPadded : public GemmConfigBase
+{
+    static constexpr bool kPadM        = true;
+    static constexpr bool kPadN        = true;
+    static constexpr bool kPadK        = true;
+    static constexpr bool LargeTensors = true;
 };
 
 struct GemmConfigDecode : public GemmConfigBase
@@ -1447,9 +1469,12 @@ class TestCkTileGemmRowColQuant
 
     void run_test_with_validation(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K)
     {
-        const ck_tile::index_t stride_A = K;
-        const ck_tile::index_t stride_B = K;
-        const ck_tile::index_t stride_C = N;
+        const ck_tile::index_t stride_A =
+            ck_tile::get_default_stride(M, K, 0, this->is_row_major(ALayout{}));
+        const ck_tile::index_t stride_B =
+            ck_tile::get_default_stride(K, N, 0, this->is_row_major(BLayout{}));
+        const ck_tile::index_t stride_C =
+            ck_tile::get_default_stride(M, N, 0, this->is_row_major(CLayout{}));
 
         // RowColQuant uses per-row and per-column scales
         const ck_tile::index_t stride_row_scales = 1;
@@ -1591,6 +1616,126 @@ class TestCkTileGemmRowColQuant
                       << " Absolute error threshold: " << rtol_atol.at(ck_tile::number<1>{})
                       << std::endl;
         }
+    }
+
+    // Launch-only path for tensors whose single-dimension byte extent exceeds the 2GB
+    // buffer-addressing limit, where a full host reference is infeasible. Materializes the
+    // inputs and scale vectors on the host, allocates the (uninitialized) output on the
+    // device, dispatches the kernel and synchronizes. invoke_quant_gemm throws if
+    // IsSupportedArgument rejects the configuration; the post-launch synchronize surfaces
+    // any asynchronous device-side fault on the 64-bit addressing path as a failure of
+    // this test. No numerical validation is performed.
+    void run_test_launch_only(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K)
+    {
+        const ck_tile::index_t stride_A =
+            ck_tile::get_default_stride(M, K, 0, this->is_row_major(ALayout{}));
+        const ck_tile::index_t stride_B =
+            ck_tile::get_default_stride(K, N, 0, this->is_row_major(BLayout{}));
+        const ck_tile::index_t stride_C =
+            ck_tile::get_default_stride(M, N, 0, this->is_row_major(CLayout{}));
+
+        const ck_tile::index_t stride_row_scales = 1;
+        const ck_tile::index_t stride_col_scales = 1;
+
+        // The ~2GB output allocation can exceed free device memory on shared or
+        // small-memory devices. Skip (rather than hard-fail) when capacity is insufficient.
+        {
+            size_t free_mem = 0, total_mem = 0;
+            ASSERT_EQ(hipMemGetInfo(&free_mem, &total_mem), hipSuccess);
+            const size_t required = static_cast<size_t>(M) * N * sizeof(CDataType) +
+                                    static_cast<size_t>(M) * K * sizeof(ADataType) +
+                                    static_cast<size_t>(K) * N * sizeof(BDataType);
+            if(free_mem < required + (size_t{256} << 20)) // 256 MiB headroom
+            {
+                GTEST_SKIP() << "Insufficient device memory for large-tensor launch-only test: "
+                             << "need ~" << ((required >> 20) + 256) << " MiB, have "
+                             << (free_mem >> 20) << " MiB free";
+            }
+        }
+
+        ck_tile::HostTensor<ADataType> a_m_k(
+            ck_tile::host_tensor_descriptor(M, K, stride_A, this->is_row_major(ALayout{})));
+        ck_tile::HostTensor<BDataType> b_k_n(
+            ck_tile::host_tensor_descriptor(K, N, stride_B, this->is_row_major(BLayout{})));
+        ck_tile::HostTensor<QDataType> row_scales_m(ck_tile::host_tensor_descriptor(
+            M, 1, stride_row_scales, ck_tile::bool_constant<true>{}));
+        ck_tile::HostTensor<QDataType> col_scales_n(ck_tile::host_tensor_descriptor(
+            N, 1, stride_col_scales, ck_tile::bool_constant<true>{}));
+
+        ck_tile::FillUniformDistribution<ADataType>{-0.5f, 0.5f}(a_m_k);
+        ck_tile::FillUniformDistribution<BDataType>{-0.5f, 0.5f}(b_k_n);
+        ck_tile::FillUniformDistribution<QDataType>{0.001f, 0.01f}(row_scales_m);
+        ck_tile::FillUniformDistribution<QDataType>{0.001f, 0.01f}(col_scales_n);
+
+        ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size() * sizeof(ADataType));
+        ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size() * sizeof(BDataType));
+        ck_tile::DeviceMem row_scales_dev_buf(row_scales_m.get_element_space_size() *
+                                              sizeof(QDataType));
+        ck_tile::DeviceMem col_scales_dev_buf(col_scales_n.get_element_space_size() *
+                                              sizeof(QDataType));
+        ck_tile::DeviceMem c_m_n_dev_buf(static_cast<size_t>(M) * N * sizeof(CDataType));
+
+        a_m_k_dev_buf.ToDevice(a_m_k.data());
+        b_k_n_dev_buf.ToDevice(b_k_n.data());
+        row_scales_dev_buf.ToDevice(row_scales_m.data());
+        col_scales_dev_buf.ToDevice(col_scales_n.data());
+
+        auto ds_m_n = ck_tile::generate_tuple(
+            [&](auto i) {
+                using DiLayout = ck_tile::remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+                using DiDataType =
+                    ck_tile::remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
+                ck_tile::HostTensor<DiDataType> d_m_n(ck_tile::host_tensor_descriptor(
+                    M, N, stride_C, this->is_row_major(DiLayout{})));
+                ck_tile::FillUniformDistribution<DiDataType>{-10.0f, 10.0f}(d_m_n);
+                return d_m_n;
+            },
+            ck_tile::number<NumDTensor>{});
+
+        std::array<ck_tile::DeviceMem, NumDTensor> ds_m_n_dev_buf;
+        std::array<const void*, NumDTensor> ds_ptr_buf;
+        std::array<ck_tile::index_t, NumDTensor> stride_Ds;
+
+        ck_tile::static_for<0, NumDTensor, 1>{}([&](auto i) {
+            ds_m_n_dev_buf[i].Realloc(ds_m_n[i].get_element_space_size_in_bytes());
+            ds_m_n_dev_buf[i].ToDevice(ds_m_n[i].data());
+            ds_ptr_buf[i] = ds_m_n_dev_buf[i].GetDeviceBuffer();
+            stride_Ds[i]  = stride_C;
+        });
+
+        ck_tile::QuantGemmMultiDHostArgs<NumDTensor> args{
+            a_m_k_dev_buf.GetDeviceBuffer(),      // a_ptr
+            b_k_n_dev_buf.GetDeviceBuffer(),      // b_ptr
+            ds_ptr_buf,                           // ds_ptr
+            c_m_n_dev_buf.GetDeviceBuffer(),      // c_ptr
+            row_scales_dev_buf.GetDeviceBuffer(), // aq_ptr (row scales)
+            col_scales_dev_buf.GetDeviceBuffer(), // bq_ptr (col scales)
+            1,                                    // k_batch
+            M,
+            N,
+            K, // M, N, K
+            1, // QK_A (row scales)
+            1, // QK_B (col scales)
+            stride_A,
+            stride_B,
+            stride_Ds,
+            stride_C,
+            stride_row_scales,
+            stride_col_scales // strides
+        };
+
+        ck_tile::stream_config stream_config{};
+        this->invoke_quant_gemm(args, stream_config);
+
+        // invoke_quant_gemm only enqueues the kernel; launch_and_check inspects
+        // hipPeekAtLastError() at enqueue time and does not synchronize. A device-side
+        // fault in the 64-bit addressing path (e.g. an out-of-range global address on the
+        // far-corner tiles, whose C byte offset exceeds 2^31) is reported asynchronously
+        // and would otherwise be swallowed by the DeviceMem destructors' hipFree. Force
+        // completion and surface any execution error as a failure of this test.
+        ASSERT_EQ(hipStreamSynchronize(stream_config.stream_id_), hipSuccess)
+            << "Device-side fault while executing the large-tensor RowColQuant kernel "
+            << "(M=" << M << ", N=" << N << ", K=" << K << ")";
     }
 
     private:

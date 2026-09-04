@@ -507,6 +507,11 @@ struct QuantGemmMultiDKernel
                                                 const index_t k_size,
                                                 const index_t i_m)
     {
+        // Route A through 64-bit global load/store only when the large-tensor global path
+        // is active and A is ColumnMajor (RowMajor A keeps the M base-shift path).
+        [[maybe_unused]] constexpr bool kAGlobalLoad =
+            UseLargeTensorGlobalLoad() && std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>;
+
         // Step 1: Create tensor view for A
         const auto& a_tensor_view = [&]() {
             if constexpr(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
@@ -520,7 +525,10 @@ struct QuantGemmMultiDKernel
             }
             else
             {
-                return make_naive_tensor_view<address_space_enum::global>(
+                return make_naive_tensor_view<address_space_enum::global,
+                                              memory_operation_enum::set,
+                                              amd_buffer_coherence_enum::coherence_default,
+                                              kAGlobalLoad>(
                     a_ptr,
                     make_tuple(k_size, kargs.M),
                     make_tuple(kargs.stride_A, 1),
@@ -543,7 +551,7 @@ struct QuantGemmMultiDKernel
                 return pad_tensor_view(a_tensor_view,
                                        make_tuple(number<TilePartitioner::KPerBlock>{},
                                                   number<TilePartitioner::MPerBlock>{}),
-                                       sequence<false, GemmPipeline::kPadM>{});
+                                       sequence<kAGlobalLoad, GemmPipeline::kPadM>{});
             }
         }();
 
@@ -760,6 +768,10 @@ struct QuantGemmMultiDKernel
                                                 const index_t k_size,
                                                 const index_t i_n)
     {
+        // Route B through 64-bit global load/store when the large-tensor global path is
+        // active (covers large N for both ColumnMajor and RowMajor B).
+        [[maybe_unused]] constexpr bool kBGlobalLoad = UseLargeTensorGlobalLoad();
+
         // Step 1: Create tensor view for B
         const auto& b_tensor_view = [&]() {
             if constexpr(std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>)
@@ -784,7 +796,10 @@ struct QuantGemmMultiDKernel
                 }
                 else
                 {
-                    return make_naive_tensor_view<address_space_enum::global>(
+                    return make_naive_tensor_view<address_space_enum::global,
+                                                  memory_operation_enum::set,
+                                                  amd_buffer_coherence_enum::coherence_default,
+                                                  kBGlobalLoad>(
                         b_ptr,
                         make_tuple(k_size, kargs.N),
                         make_tuple(kargs.stride_B, 1),
@@ -829,7 +844,10 @@ struct QuantGemmMultiDKernel
                     }
                     else
                     {
-                        return make_naive_tensor_view<address_space_enum::global>(
+                        return make_naive_tensor_view<address_space_enum::global,
+                                                      memory_operation_enum::set,
+                                                      amd_buffer_coherence_enum::coherence_default,
+                                                      kBGlobalLoad>(
                             b_ptr,
                             make_tuple(kargs.N, k_size),
                             make_tuple(kargs.stride_B, 1),
@@ -848,17 +866,19 @@ struct QuantGemmMultiDKernel
             }
             else if constexpr(std::is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>)
             {
+                // ColumnMajor B is (N, K), so K is dim1; on the unmasked 64-bit global path
+                // it must also carry the pad guard or the reduction-loop tail read faults.
                 return pad_tensor_view(b_tensor_view,
                                        make_tuple(number<TilePartitioner::NPerBlock>{},
                                                   number<TilePartitioner::KPerBlock>{}),
-                                       sequence<false, GemmPipeline::kPadK>{});
+                                       sequence<kBGlobalLoad, kBGlobalLoad || GemmPipeline::kPadK>{});
             }
             else
             {
                 return pad_tensor_view(b_tensor_view,
                                        make_tuple(number<TilePartitioner::KPerBlock>{},
                                                   number<TilePartitioner::NPerBlock>{}),
-                                       sequence<false, GemmPipeline::kPadN>{});
+                                       sequence<kBGlobalLoad, GemmPipeline::kPadN>{});
             }
         }();
 
@@ -1107,14 +1127,18 @@ struct QuantGemmMultiDKernel
                                                  const index_t i_m,
                                                  const index_t i_n)
     {
+        // Route Ds through 64-bit global load/store when the large-tensor global path is active.
+        [[maybe_unused]] constexpr bool kDGlobalLoad = UseLargeTensorGlobalLoad();
+
         // Step 1: Create tensor views
         const auto& ds_tensor_view = generate_tuple(
             [&](auto i) {
                 using DDataType_ = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
                 return make_tensor_view<address_space_enum::global,
                                         memory_operation_enum::set,
-                                        amd_buffer_coherence_enum::SYSTEM_NT1>(
-                    static_cast<const DDataType_*>(ds_ptr[i]), ds_desc[i]);
+                                        amd_buffer_coherence_enum::SYSTEM_NT1,
+                                        kDGlobalLoad>(static_cast<const DDataType_*>(ds_ptr[i]),
+                                                      ds_desc[i]);
             },
             number<NumDTensor>{});
 
@@ -1127,14 +1151,14 @@ struct QuantGemmMultiDKernel
                     return pad_tensor_view(ds_tensor_view[i],
                                            make_tuple(number<TilePartitioner::MPerBlock>{},
                                                       number<TilePartitioner::NPerBlock>{}),
-                                           sequence<false, GemmPipeline::kPadN>{});
+                                           sequence<kDGlobalLoad, GemmPipeline::kPadN>{});
                 }
                 else
                 {
                     return pad_tensor_view(ds_tensor_view[i],
                                            make_tuple(number<TilePartitioner::NPerBlock>{},
                                                       number<TilePartitioner::MPerBlock>{}),
-                                           sequence<false, GemmPipeline::kPadM>{});
+                                           sequence<kDGlobalLoad, GemmPipeline::kPadM>{});
                 }
             },
             number<NumDTensor>{});
@@ -1185,13 +1209,17 @@ struct QuantGemmMultiDKernel
                                                 const index_t i_m,
                                                 const index_t i_n)
     {
+        // Route C through 64-bit global load/store when the large-tensor global path is active.
+        [[maybe_unused]] constexpr bool kCGlobalLoad = UseLargeTensorGlobalLoad();
+
         // Step 1: Create tensor view for C
         const auto& c_tensor_view = [&]() {
             if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
             {
                 return make_naive_tensor_view<address_space_enum::global,
                                               DstInMemOp,
-                                              amd_buffer_coherence_enum::SYSTEM_NT1>(
+                                              amd_buffer_coherence_enum::SYSTEM_NT1,
+                                              kCGlobalLoad>(
                     c_ptr,
                     make_tuple(kargs.M, kargs.N),
                     make_tuple(kargs.stride_C, 1),
@@ -1202,12 +1230,12 @@ struct QuantGemmMultiDKernel
             {
                 return make_naive_tensor_view<address_space_enum::global,
                                               DstInMemOp,
-                                              amd_buffer_coherence_enum::SYSTEM_NT1>(
-                    c_ptr,
-                    make_tuple(kargs.M, kargs.N),
-                    make_tuple(1, kargs.stride_C),
-                    number<1>{},
-                    number<1>{});
+                                              amd_buffer_coherence_enum::SYSTEM_NT1,
+                                              kCGlobalLoad>(c_ptr,
+                                                            make_tuple(kargs.M, kargs.N),
+                                                            make_tuple(1, kargs.stride_C),
+                                                            number<1>{},
+                                                            number<1>{});
             }
         }();
 
@@ -1218,14 +1246,14 @@ struct QuantGemmMultiDKernel
                 return pad_tensor_view(c_tensor_view,
                                        make_tuple(number<TilePartitioner::MPerBlock>{},
                                                   number<TilePartitioner::NPerBlock>{}),
-                                       sequence<false, GemmPipeline::kPadN>{});
+                                       sequence<kCGlobalLoad, GemmPipeline::kPadN>{});
             }
             else
             {
                 return pad_tensor_view(c_tensor_view,
                                        make_tuple(number<TilePartitioner::MPerBlock>{},
                                                   number<TilePartitioner::NPerBlock>{}),
-                                       sequence<GemmPipeline::kPadM, false>{});
+                                       sequence<GemmPipeline::kPadM, kCGlobalLoad>{});
             }
         }();
 
@@ -1250,6 +1278,34 @@ struct QuantGemmMultiDKernel
         });
         suitable = suitable && std::is_same_v<tensor_layout::gemm::RowMajor, CLayout>;
         return suitable;
+    }
+
+    // Large single-dimension support (M or N whose byte extent exceeds the 2GB buffer
+    // limit) for layouts the M base-shift path cannot express: ColumnMajor A (large M),
+    // ColumnMajor/RowMajor B (large N) and the correspondingly large C/D outputs.  These
+    // are routed through 64-bit global load/store (the LargeTensor path) instead of
+    // buffer addressing.  Restricted to the RowColQuant, non-preshuffled, non-permuted B
+    // configuration whose A/B are loaded through the plain global views.
+    CK_TILE_HOST_DEVICE static constexpr bool IsLargeTensorGlobalLoadSupported()
+    {
+        return kQuantType == QuantType::RowColQuant && !PreshuffleB &&
+               !GemmPipeline::BlockGemmShape::PermuteB;
+    }
+
+    // Whether the compile-time LargeTensors opt-in is active and the configuration is one
+    // the global load/store path supports.  GemmPipeline::LargeTensors is only read on the
+    // RowColQuant path because only that path uses the plain gemm pipeline (which exposes
+    // LargeTensors); the grouped-quant pipelines do not.
+    CK_TILE_HOST_DEVICE static constexpr bool UseLargeTensorGlobalLoad()
+    {
+        if constexpr(kQuantType == QuantType::RowColQuant)
+        {
+            return GemmPipeline::LargeTensors && IsLargeTensorGlobalLoadSupported();
+        }
+        else
+        {
+            return false;
+        }
     }
 
     CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
@@ -1622,14 +1678,9 @@ struct QuantGemmMultiDKernel
             }
         }
 
-        const bool any_large_tensor = [&] {
-            constexpr size_t SizeLimit = (size_t{1} << 31);
-
-            auto is_large_tensor = [](auto layout,
-                                      index_t rows,
-                                      index_t cols,
-                                      index_t stride,
-                                      auto data_type) {
+        auto is_large_tensor =
+            [](auto layout, index_t rows, index_t cols, index_t stride, auto data_type) {
+                constexpr size_t SizeLimit = (size_t{1} << 31);
                 constexpr size_t PackedSize =
                     ck_tile::numeric_traits<remove_cvref_t<decltype(data_type)>>::PackedSize;
 
@@ -1640,6 +1691,7 @@ struct QuantGemmMultiDKernel
                 return n * stride * sizeof(data_type) / PackedSize >= SizeLimit;
             };
 
+        const bool any_large_tensor = [&] {
             bool r = false;
 
             r = r || is_large_tensor(ALayout{}, kargs.M, kargs.K, kargs.stride_A, ADataType{});
@@ -1657,7 +1709,29 @@ struct QuantGemmMultiDKernel
 
         if(any_large_tensor)
         {
-            if constexpr(!IsLargeTensorMOffsettingSupported())
+            if constexpr(IsLargeTensorMOffsettingSupported())
+            {
+                // Large M handled by the M base-shift path (RowMajor A/Ds/C).
+            }
+            else if constexpr(UseLargeTensorGlobalLoad())
+            {
+                // 64-bit global load/store covers a large B, C or D (any layout) and a
+                // large ColumnMajor A.  RowMajor A is kept on the base-shift path, so a
+                // large RowMajor A whose outputs are not all RowMajor cannot be supported.
+                if constexpr(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
+                {
+                    if(is_large_tensor(ALayout{}, kargs.M, kargs.K, kargs.stride_A, ADataType{}))
+                    {
+                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                        {
+                            CK_TILE_ERROR("Large RowMajor A requires RowMajor Ds/C for the M "
+                                          "base-shift path; global load/store cannot cover it!");
+                        }
+                        return false;
+                    }
+                }
+            }
+            else
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
