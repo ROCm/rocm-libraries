@@ -5074,6 +5074,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
                          comment="snapshot tensor base A"))
       module.add(SMovB64(dst=sgpr("AddressBBase", 2), src=sgpr("AddressB", 2),
                          comment="snapshot tensor base B"))
+      if kernel["ProblemType"].get("MXBlockA", 0):
+        module.add(SMovB64(dst=sgpr("AddressMXSABase", 2), src=sgpr("AddressMXSA", 2),
+                           comment="snapshot tensor base MXSA"))
+      if kernel["ProblemType"].get("MXBlockB", 0):
+        module.add(SMovB64(dst=sgpr("AddressMXSBBase", 2), src=sgpr("AddressMXSB", 2),
+                           comment="snapshot tensor base MXSB"))
 
     module.add(loopComponent.openPersistentLoop(self, kernel))
 
@@ -5106,7 +5112,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(globalReadDTLInitCommonSgpr(self, kernel))
 
     if mxsatileInfo != None and mxsbtileInfo != None:
-      if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
+      # Non-TDM or subtile gfx1250 (which uses TDM for scale loads but
+      # still needs explicit descriptor init):
+      _needScaleInit = not (kernel["enableTDMA"] and kernel["enableTDMB"]) \
+                         or (kernel.get("UseSubtileImpl") and self.states.asmCaps["HasTDM"])
+      _subtileScaleDeferred = kernel.get("UseSubtileImpl") and self.states.asmCaps["HasTDM"]
+      if _needScaleInit and not _subtileScaleDeferred:
         module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
 
     # TODOBS: globalWriteWorkGroupInit can be emitted here or later on, check..
@@ -5163,11 +5174,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
                          comment="re-base A to tensor base"))
       module.add(SMovB64(dst=sgpr("AddressB", 2), src=sgpr("AddressBBase", 2),
                          comment="re-base B to tensor base"))
+      if kernel["ProblemType"].get("MXBlockA", 0):
+        module.add(SMovB64(dst=sgpr("AddressMXSA", 2), src=sgpr("AddressMXSABase", 2),
+                           comment="re-base MXSA to tensor base"))
+      if kernel["ProblemType"].get("MXBlockB", 0):
+        module.add(SMovB64(dst=sgpr("AddressMXSB", 2), src=sgpr("AddressMXSBBase", 2),
+                           comment="re-base MXSB to tensor base"))
     if hasTDM:
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersA))
       module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA))
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersB))
       module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
+      # Subtile gfx1250 MX scale TDM init: deferred to here so that
+      # AddressMXSA/B have been rebased and we can apply per-WG offsets.
+      if mxsatileInfo is not None and kernel.get("UseSubtileImpl") \
+          and self.states.asmCaps["HasTDM"]:
+        module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
     if not hasTDM:
       module.add(graTileAssignment(self, kernel))
     module.add(lraTileAssignment(self, kernel))
@@ -5186,7 +5208,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersA))
       module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersB))
 
-    dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
+    # Defer D-tile allocation: when MX scales are present on gfx1250, the
+    # scheduler must allocate scale tiles first (they must stay below v255
+    # since WMMA scale operands are not covered by s_set_vgpr_msb).
+    # mainLoop() will allocate D tiles after scheduler.allocVgprTiles().
+    _deferDtileAlloc = kernel.get("UseSubtileImpl") and \
+                       kernel.get("MIArchVgpr", False) and \
+                       (kernel["ProblemType"].get("MXBlockA", 0) or kernel["ProblemType"].get("MXBlockB", 0))
+    if not _deferDtileAlloc:
+      dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
 
     if dtileInfo.vgprTiles:
       self._subtileDtileBaseVgpr = dtileInfo.vgprTiles[0].regList.indices[0]
@@ -9846,15 +9876,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
         requiredUnalignedSgprVar.append("LocalWriteBaseAddrA")
         requiredUnalignedSgprVar.append("LocalWriteBaseAddrB")
-        if kernel["ProblemType"]["MXBlockA"]:
-          requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSA")
-        if kernel["ProblemType"]["MXBlockB"]:
-          requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSB")
         requiredUnalignedSgprVar.append("SwapA")
         requiredUnalignedSgprVar.append("SwapB")
+      # Subtile MX scales: gfx950 uses SRD buffer loads (needs LocalWriteBaseAddr/Swap
+      # SGPRs), gfx1250 uses TDM tensor_load_to_lds (handled by tdmMXSA/BGroup).
+      _subtileScaleUseSrd = not self.states.asmCaps["HasTDM"]
+      if _subtileScaleUseSrd:
         if kernel["ProblemType"]["MXBlockA"]:
+          requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSA")
           requiredUnalignedSgprVar.append("SwapMXSA")
         if kernel["ProblemType"]["MXBlockB"]:
+          requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSB")
           requiredUnalignedSgprVar.append("SwapMXSB")
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         requiredUnalignedSgprVar.append("SwapMetadata")
@@ -9864,6 +9896,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["UseSubtileImpl"] and kernel["enableTDMA"] and kernel["enableTDMB"]:
       self.defineSgpr("AddressABase", numSgprAddressA, 2)
       self.defineSgpr("AddressBBase", numSgprAddressB, 2)
+      if kernel["ProblemType"].get("MXBlockA", 0):
+        self.defineSgpr("AddressMXSABase", numSgprAddressMXSA, 2)
+      if kernel["ProblemType"].get("MXBlockB", 0):
+        self.defineSgpr("AddressMXSBBase", numSgprAddressMXSB, 2)
 
     # Actual allocation: prioritise 4-aligned SGPRs whenever the pool is
     # already on a 4-aligned boundary, otherwise consume unaligned ones.

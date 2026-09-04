@@ -51,7 +51,7 @@ from rocisa.instruction import (
   MFMAInstruction, MXMFMAInstruction, SMFMAInstruction,
   SAddCU32, SAddU32, SBarrier, SBranch,
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ,
-  SCmpEQU32, SCmpLeU32, SCSelectB32, SLShiftLeftB32, SLongBranchPositive,
+  SAndB32, SCmpEQU32, SCmpLeU32, SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SLongBranchPositive,
   SMovB32, SMovB64, SMulI32, SNop,
   SSetPrior, SSetRegIMM32B32, SSubBU32, SSubU32, SWaitAlu, SWaitCnt, SXorB32,
   VAccvgprWrite, VAddCCOU32, VAddCOU32, VAddU32, VAndB32,
@@ -297,6 +297,13 @@ AB_B4 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),   # 128-bit GR: 32 fp4 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)), # 128-bit LR: 32 fp4 along K
 )
+
+# Wave32 fp4: 8 VGPRs per operand (WMMA V3 gfx1250)
+_B4_W32 = dict(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), instK=128, bpe=0.5, supportedTypes=('fp4',))
+AB_B4_W32 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_1x2(), **_B4_W32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),
+    lr=ABLRGeometry(tag=LRTag_1x2(), **_B4_W32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),
+)
 AB_B8 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)),  # 128-bit GR: 16 fp8 along K
     lr=ABLRGeometry(tag=LRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)), # 128-bit LR: 16 fp8 along K
@@ -357,6 +364,7 @@ AB_GEOMETRY_MAP = {
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
   "AB_B16_W32":  AB_B16_W32,
+  "AB_B4_W32":   AB_B4_W32,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
@@ -370,6 +378,38 @@ def selectDGeometry(kernel: dict) -> CDTileGeometry:
   if kernel["WavefrontSize"] == 32:
     return CD_F32_W32
   return CD_F32
+
+
+################################################################################
+# Wave-axis index decomposition
+################################################################################
+
+def emitWaveAxisIndex(mod, kernel, ti, dstSgprIdx):
+  """Compute the M-axis (ti=0) or N-axis (ti=1) wave index into sgpr(dstSgprIdx).
+
+  Decomposes the flat waveId (derived from Serial / WavefrontSize) into
+  per-axis indices using MIWaveGroup:
+    waveIdM = waveId %  MIWaveGroup[0]   (ti=0)
+    waveIdN = waveId // MIWaveGroup[0]   (ti=1)
+  """
+  wavelen = kernel["WavefrontSize"]
+  wgAxis = kernel["MIWaveGroup"][ti]
+  assert wgAxis > 0 and (wgAxis & (wgAxis - 1)) == 0, \
+      f"MIWaveGroup[{ti}] = {wgAxis} must be a power of 2"
+  mod.add(VReadfirstlaneB32(dst=sgpr(dstSgprIdx), src=vgpr("Serial"),
+          comment="lane 0 serial"))
+  mod.add(SLShiftRightB32(dst=sgpr(dstSgprIdx), src=sgpr(dstSgprIdx),
+          shiftHex=hex(int(math.ceil(math.log2(wavelen)))),
+          comment=f"waveId = serial / {wavelen}"))
+  if ti == 0:
+    mod.add(SAndB32(dst=sgpr(dstSgprIdx), src0=sgpr(dstSgprIdx),
+            src1=wgAxis - 1,
+            comment=f"waveIdM = waveId %% {wgAxis}"))
+  else:
+    wg0 = kernel["MIWaveGroup"][0]
+    mod.add(SLShiftRightB32(dst=sgpr(dstSgprIdx), src=sgpr(dstSgprIdx),
+            shiftHex=hex(int(math.ceil(math.log2(wg0)))),
+            comment=f"waveIdN = waveId / {wg0}"))
 
 
 ################################################################################
@@ -468,8 +508,10 @@ class TileInfo:
       # Derived byte-counts for emit logic
       self.depthUBytes   = int(self.depthU * geometry.bpe)
       self.subIterKBytes = self.depthUBytes // self.localSubtileGrid[1]
-      # TDM path. We apply 16 Bytes padding to each row.
-      # TDM only exists on gfx1250, which is never swizzled (gfx950-only).
+      # TDM data padding (gfx1250 only): 16 bytes per row, applied via the
+      # TDM descriptor's pad_interval/pad_amount fields at descriptor init
+      # (SubtileGREmit).  This is independent of calcLdsPad in Solution.py,
+      # which handles scale pads (LdsPadMXSA/B) and non-subtile data pads.
       isTDM = kernel.get("enableTDM%s" % tc, False)
       self.ldsRowPadBytes = 16 if isTDM else 0
 
@@ -541,6 +583,7 @@ class TileInfo:
 
     # --- Mutable register state (filled by allocOffsetRegisters) ---
     self.localSubtilesRegister: List = []
+    self.vgprTiles: List = []  # filled by allocVgprTileRegisters_legacy
 
     # --- Consistency checks ---
     if isinstance(geometry, ABTilePair):
@@ -1093,15 +1136,29 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
     # MX FP4: 16x16x128
     mxInstType = _selectF8F6F4InstType(kernel)
     if scaleAVgpr >= 0 and scaleBVgpr >= 0:
-      # Use actual loaded scale VGPRs
-      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
-                                   acc=dAccAlias(vgprDStart,opDSize), \
-                                   a=aOperand, \
-                                   b=bOperand, \
-                                   acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
-                                   vop3=VOP3PModifiers(op_sel=[scaleAsel%2, scaleBsel%2], op_sel_hi=[(scaleAsel>>1)%2, (scaleBsel>>1)%2]), \
-                                   comment=comment))
+      # Use actual loaded scale VGPRs.
+      # Scale lane selection differs by ISA:
+      #   gfx1250 (WMMA): mxScaleASel/BSel -> matrix_a_scale / matrix_b_scale modifiers
+      #   gfx950  (MFMA): VOP3PModifiers   -> op_sel / op_sel_hi modifiers
+      _asmCaps = getattr(getattr(writer, "states", None), "asmCaps", {})
+      if _asmCaps.get("HasWMMA", False):
+        module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
+                                     acc=dAccAlias(vgprDStart,opDSize), \
+                                     a=aOperand, \
+                                     b=bOperand, \
+                                     acc2=cAccAlias(vgprCStart,opCSize), \
+                                     mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
+                                     mxScaleASel=scaleAsel % 2, mxScaleBSel=scaleBsel % 2, \
+                                     comment=comment))
+      else:
+        module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
+                                     acc=dAccAlias(vgprDStart,opDSize), \
+                                     a=aOperand, \
+                                     b=bOperand, \
+                                     acc2=cAccAlias(vgprCStart,opCSize), \
+                                     mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
+                                     vop3=VOP3PModifiers(op_sel=[scaleAsel%2, scaleBsel%2], op_sel_hi=[(scaleAsel>>1)%2, (scaleBsel>>1)%2]), \
+                                     comment=comment))
     else:
       # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).
       # Initialized once in mainLoop() before emitMainAndExitLoops() — VMovB32 cannot live here
@@ -1391,7 +1448,17 @@ def mainLoop(writer, kernel):
           break
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+
   dtileInfo = writer.states.d.tileInfo
+
+  # Allocate D-tile VGPRs AFTER the scheduler's scale/data tiles so that
+  # scale tiles (which must stay below v255 on gfx1250 — the WMMA scale
+  # operand is not covered by s_set_vgpr_msb) get low VGPR indices and
+  # the large D-tile block lands above them.
+  if not dtileInfo.vgprTiles:
+    dtileInfo.allocVgprTileRegisters_legacy(writer, kernel)
+  if dtileInfo.vgprTiles:
+    writer._subtileDtileBaseVgpr = dtileInfo.vgprTiles[0].regList.indices[0]
 
   # For plain FP8 (miK=128, no MX scale): allocate a unit scale VGPR and initialize
   # it once here, before the loop. emitMfmaInstruction will reference it via kernel dict.

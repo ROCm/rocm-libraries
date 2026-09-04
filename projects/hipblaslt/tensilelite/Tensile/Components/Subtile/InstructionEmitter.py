@@ -234,12 +234,24 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+            kernel = self.kernel
+            wavelen = kernel["WavefrontSize"]
+            parentTc = tc[-1]  # 'A' or 'B'
+            mxBlock = kernel["ProblemType"][f"MXBlock{parentTc}"]
+            dimk = kernel["MatrixInstK"] // mxBlock
+            # InMemorySwizzle LDS layout: scale data is packed as
+            # {numKTiles, perWaveRows, dimk}.  Each M-group occupies
+            # wavelen * dimk contiguous bytes -- exactly one ds_load_b32.
+            groupStride = wavelen * dimk
+            numKGroups = ti.lrLocalSubtileGrid[1]
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn
                 kGroupIdx = placement.tiles.subIterK_start // ti.lrSubtileShape[1]
-                numKGroups = ti.lrLocalSubtileGrid[1]
-                dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
+                if numKGroups > 1:
+                    dsOffset = groupStride * (scaleGroupIdx * numKGroups + kGroupIdx)
+                else:
+                    dsOffset = groupStride * scaleGroupIdx
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
                 module.add(DSLoadB32(
                     dst=vgpr(vdst),

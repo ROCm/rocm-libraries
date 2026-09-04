@@ -759,10 +759,10 @@ class KernelWriterAssembly(KernelWriter):
       if not kernel["enableTDMB"]:
         module.add(self.defineSgpr("SrdB", 4, 4))
         self.addSgprVarToPool("SrdB")
-      if kernel["ProblemType"]["MXBlockA"] and not kernel["enableTDMA"]:
+      if kernel["ProblemType"]["MXBlockA"] and (not kernel["enableTDMA"] or (kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"])):
         module.add(self.defineSgpr("SrdMXSA", 4, 4))
         self.addSgprVarToPool("SrdMXSA")
-      if kernel["ProblemType"]["MXBlockB"] and not kernel["enableTDMB"]:
+      if kernel["ProblemType"]["MXBlockB"] and (not kernel["enableTDMB"] or (kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"])):
         module.add(self.defineSgpr("SrdMXSB", 4, 4))
         self.addSgprVarToPool("SrdMXSB")
       if not kernel["enableTDMMetadata"] and kernel["ProblemType"]["Sparse"]:
@@ -778,10 +778,10 @@ class KernelWriterAssembly(KernelWriter):
       if not kernel["enableTDMMetadata"] and kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("ShadowLimitMetadata", 2, 2))
     if self.states.use64bShadowLimitMX:
-      if kernel["ProblemType"]["MXBlockA"] and not kernel["enableTDMA"]:
+      if kernel["ProblemType"]["MXBlockA"] and (not kernel["enableTDMA"] or (kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"])):
         module.add(self.defineSgpr("ShadowLimitMXSA", 2, 2))
         self.addSgprVarToPool("ShadowLimitMXSA")
-      if kernel["ProblemType"]["MXBlockB"] and not kernel["enableTDMB"]:
+      if kernel["ProblemType"]["MXBlockB"] and (not kernel["enableTDMB"] or (kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"])):
         module.add(self.defineSgpr("ShadowLimitMXSB", 2, 2))
         self.addSgprVarToPool("ShadowLimitMXSB")
 
@@ -945,6 +945,11 @@ class KernelWriterAssembly(KernelWriter):
   def defineTdmSgprs(self, kernel):
     """Allocate TDM descriptor SGPRs. Extracted so subtile can defer this."""
     module = Module("DefineTdmSgprs")
+    # Default: subtile on non-TDM arches skips MX scale TDM SGPRs.
+    # Overwritten inside enableTDMA block; defined here defensively in
+    # case enableTDMB is true without enableTDMA in a future config.
+    _subtileSkipMxTdm = kernel.get("UseSubtileImpl") and not self.states.asmCaps["HasTDM"]
+
     if kernel["enableTDMA"]:
       module.add(self.defineSgpr("tdmAGroup0", 4, 4))
       module.add(self.defineSgpr("tdmAGroup1", 8, 4))
@@ -960,15 +965,20 @@ class KernelWriterAssembly(KernelWriter):
         # be a valid SGPR name; null is rejected by the assembler).
         module.add(RegSet("s", "sgprtdmAGroup3", "sgprtdmAGroup2"))
 
-      if kernel["ProblemType"]["MXBlockA"]:
+      # gfx950 subtile MX scales use SRD buffer loads (no TDM SGPRs needed).
+      # gfx1250 subtile MX scales need TDM tensor_load_to_lds (buffer_load lds
+      # is not supported), so allocate TDM descriptor SGPRs.
+      if kernel["ProblemType"]["MXBlockA"] and not _subtileSkipMxTdm:
         module.add(self.defineSgpr("tdmMXSAGroup0", 4, 4))
         module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))
 
     if kernel["enableTDMB"]:
       # Alias B descriptor onto A for multi-wave to reduce SGPR pressure.
-      # Subtile uses separate descriptors -- deferred allocation provides
-      # enough SGPR headroom, and separate descriptors avoid the reinit
-      # overhead before each tensor_load_to_lds.
+      # Non-subtile aliases both Group0 and Group1 (wave-separated: same
+      # descriptor is shared, per-wave parity selects A vs B fields).
+      # Subtile aliases only Group0 (global addr + LDS addr, patched inline
+      # before each B load) but keeps Group1 separate because B has its own
+      # Dim1/Stride0 values that differ from A's.
       if kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
         module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
         module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
@@ -978,15 +988,31 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["ProblemType"]["MXBlockB"]:
           module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmMXSAGroup0"))
           module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmMXSAGroup1"))
+      elif kernel["NumWaves"] > 1 and kernel.get("UseSubtileImpl"):
+        # Subtile: alias Group0 onto A (saves 4 SGPRs), keep Group1 separate
+        module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
+        module.add(self.defineSgpr("tdmBGroup1", 8, 4))
+        if kernel.get("_TDMIterateModeA", False) or kernel.get("_TDMIterateModeB", False):
+          module.add(RegSet("s", "sgprtdmBGroup2", "sgprtdmAGroup2"))
+          module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmAGroup2"))
+        if kernel["ProblemType"]["MXBlockB"] and not _subtileSkipMxTdm:
+          module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmMXSAGroup0"))
+          module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmMXSAGroup1"))
       else:
         module.add(self.defineSgpr("tdmBGroup0", 4, 4))
         module.add(self.defineSgpr("tdmBGroup1", 8, 4))
         if kernel.get("_TDMIterateModeB", False) or self.states.subtileIterateModeB:
           module.add(self.defineSgpr("tdmBGroup2", 4, 4))
           module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmBGroup2"))
-        if kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.defineSgpr("tdmMXSBGroup0", 4, 4))
-          module.add(self.defineSgpr("tdmMXSBGroup1", 8, 4))
+        if kernel["ProblemType"]["MXBlockB"] and not _subtileSkipMxTdm:
+          # Subtile gfx1250: alias MXSB onto MXSA — loads are sequential,
+          # so the descriptor is reinitialised between MXSA and MXSB loads.
+          if kernel.get("UseSubtileImpl"):
+            module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmMXSAGroup0"))
+            module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmMXSAGroup1"))
+          else:
+            module.add(self.defineSgpr("tdmMXSBGroup0", 4, 4))
+            module.add(self.defineSgpr("tdmMXSBGroup1", 8, 4))
 
     if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1:
       module.add(self.defineSgpr("tdmABIncs", 1))
@@ -995,7 +1021,8 @@ class KernelWriterAssembly(KernelWriter):
       # dim1 H0/H1 boundaries) transiently at point of use (see
       # _tdmSplitMultiWaveInc); nothing is persisted here.
 
-      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"] \
+          and not _subtileSkipMxTdm and not kernel.get("UseSubtileImpl"):
         module.add(self.defineSgpr("tdmMXSAMXSBIncs", 1))
 
     # Single-wave (NumWaves == 1): descriptors are independent, so TDMSplit
@@ -1017,6 +1044,9 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("tdmLdsAddrB", 1))
       module.add(self.defineSgpr("tdmLdsSwapMaskA", 1))
       module.add(self.defineSgpr("tdmLdsSwapMaskB", 1))
+      # Scale TDM swap mask (MXSA only; MXSB is aliased and doesn't swap)
+      if kernel["ProblemType"]["MXBlockA"] and not _subtileSkipMxTdm:
+        module.add(self.defineSgpr("tdmLdsSwapMaskMXSA", 1))
 
     return module
 
@@ -14915,7 +14945,15 @@ class KernelWriterAssembly(KernelWriter):
     if not isSize1:
       divisor   = kernel["MacroTile0"]
       destBpe   = int(kernel["ProblemType"]["DestDataType"].numBytes()) if self.states.storeAlign8 else 1
-      alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
+      alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe
+      # The exec-mask M guard disables entire lanes (each lane = one N
+      # column).  Each lane group (LG) covers miM / numLGs M-rows.
+      # alignSize must be >= rowsPerLG so that any partial-LG remainder
+      # is routed to the scalar Edge path instead of mismasking N columns.
+      if self.states.storeAlign8:
+        numLGs = kernel["WavefrontSize"] // 16
+        rowsPerLG = kernel["MatrixInstM"] // numLGs
+        alignSize = max(alignSize, rowsPerLG)
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
@@ -15028,20 +15066,11 @@ class KernelWriterAssembly(KernelWriter):
 
     edgeModule.addComment1("UseSubtileImpl NonEdge guards: numValidD1Steps (MatrixInstM=%d) and numValid16NBlocks" % kernel["MatrixInstM"])
 
-    # Read waveId once; extract M (lower bits) and N (upper bits) before AND destroys waveId.
-    waveSize = kernel["WavefrontSize"]
-    log2WaveSize = int(log(waveSize, 2))
-    edgeModule.add(VReadfirstlaneB32(dst=sgpr(tmpM), src=vgpr("Serial"),
-                                     comment="lane 0 serial of this wave"))
-    edgeModule.add(SLShiftRightB32(dst=sgpr(tmpM), src=sgpr(tmpM),
-                                   shiftHex=log2WaveSize, comment="waveId = serial >> %d" % log2WaveSize))
+    # Decompose Serial into per-axis wave indices (shared helper).
+    from Tensile.Components.Subtile.Kernel import emitWaveAxisIndex
+    emitWaveAxisIndex(edgeModule, kernel, 0, tmpM)
     if numWavesN > 1:
-      edgeModule.add(SLShiftRightB32(dst=sgpr(tmpN), src=sgpr(tmpM),
-                                     shiftHex=log2numWavesM,
-                                     comment="waveIdN = waveId >> log2(numWavesM=%d)" % numWavesM))
-    # MIWaveGroup[0] is always a power of 2, so AND is correct for modulo.
-    edgeModule.add(SAndB32(dst=sgpr(tmpM), src0=sgpr(tmpM), src1=numWavesM - 1,
-                           comment="waveIdM = waveId & (numWavesM-1=%d)" % (numWavesM - 1)))
+      emitWaveAxisIndex(edgeModule, kernel, 1, tmpN)
 
     # --- M guard ---
     # Each d1 step in the C-load batch corresponds to MatrixInstM rows.

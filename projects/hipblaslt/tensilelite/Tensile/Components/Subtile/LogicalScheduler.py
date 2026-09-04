@@ -3841,11 +3841,11 @@ class LogicalScheduler:
             return [_checkout_tile(writer.vgprPool, numRegs, "allocVgprTiles_vstart")
                     for _ in range(count)]
 
-        self.vgprTilesA = _alloc_tiles(self.tile_peaks.get('A', 0),
-                                       _tile_vgpr_count(tileInfoA, cfg.lrA))
-        self.vgprTilesB = _alloc_tiles(self.tile_peaks.get('B', 0),
-                                       _tile_vgpr_count(tileInfoB, cfg.lrB))
-
+        # Allocate scale tiles BEFORE data tiles.  The WMMA scale operands
+        # (mxsa / mxsb) are not covered by s_set_vgpr_msb, so they must
+        # reside in the low VGPR range (v0-v255).  Allocating them first
+        # ensures they get indices below the large A/B data tile blocks that
+        # may push the pool past v255.
         if cfg.hasScale and scaleTileInfoA and scaleTileInfoB:
             self.vgprTilesSA = _alloc_tiles(self.tile_peaks.get('SA', 0),
                                             _tile_vgpr_count(scaleTileInfoA, cfg.lrSA))
@@ -3854,6 +3854,11 @@ class LogicalScheduler:
         else:
             self.vgprTilesSA = []
             self.vgprTilesSB = []
+
+        self.vgprTilesA = _alloc_tiles(self.tile_peaks.get('A', 0),
+                                       _tile_vgpr_count(tileInfoA, cfg.lrA))
+        self.vgprTilesB = _alloc_tiles(self.tile_peaks.get('B', 0),
+                                       _tile_vgpr_count(tileInfoB, cfg.lrB))
 
         # Stash tile-info so _realloc_tail_tiles_flat can reallocate the
         # tail's flat tile set without the caller plumbing them in again.
@@ -4005,12 +4010,7 @@ class LogicalScheduler:
         _dealloc_all(self.vgprTilesSA)
         _dealloc_all(self.vgprTilesSB)
 
-        _swap(self.vgprTilesA,
-              _alloc_tiles(peaks.get('A', 0),
-                           _tile_vgpr_count(info['tileInfoA'], cfg.lrA)))
-        _swap(self.vgprTilesB,
-              _alloc_tiles(peaks.get('B', 0),
-                           _tile_vgpr_count(info['tileInfoB'], cfg.lrB)))
+        # Allocate scale tiles first (see allocVgprTiles comment).
         if cfg.hasScale and info['scaleTileInfoA'] and info['scaleTileInfoB']:
             _swap(self.vgprTilesSA,
                   _alloc_tiles(peaks.get('SA', 0),
@@ -4021,6 +4021,13 @@ class LogicalScheduler:
         else:
             _swap(self.vgprTilesSA, [])
             _swap(self.vgprTilesSB, [])
+
+        _swap(self.vgprTilesA,
+              _alloc_tiles(peaks.get('A', 0),
+                           _tile_vgpr_count(info['tileInfoA'], cfg.lrA)))
+        _swap(self.vgprTilesB,
+              _alloc_tiles(peaks.get('B', 0),
+                           _tile_vgpr_count(info['tileInfoB'], cfg.lrB)))
 
         # Flat tiles are freed wholesale by deallocVgprTiles at kernel end;
         # there are no pre-freed tids to skip.
