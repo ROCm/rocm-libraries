@@ -27,7 +27,7 @@ test_categories:
       - "*"
     exclude:
       - "*DISABLED*"
-      - "Standard*"
+      # - "Standard*"
       - "Comprehensive*"
       - "Full*"
     labels:
@@ -46,7 +46,7 @@ test_categories:
       # with bf16 output rounding exceeding absolute tolerance for several
       # large 4D/5D shapes (NCHW/NHWC/NDHWC). Tracked in
       # https://github.com/ROCm/rocm-libraries/issues/10560.
-      - "Standard/TestGpuRMSNormFwdRef4DBfp16.MatchesCpuRef*"
+      # - "Standard/TestGpuRMSNormFwdRef4DBfp16.MatchesCpuRef*"
       - "Standard/TestGpuRMSNormFwdRef5DBfp16.MatchesCpuRef*"
     labels:
       - "standard"
