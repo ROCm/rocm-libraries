@@ -4113,6 +4113,26 @@ def _get_2d_launcher(
     return launcher
 
 
+def gfx942_gqa_fold_eligible(
+    head_size, num_queries_per_kv, sliding_window, dtype, block_size
+) -> bool:
+    """GQA head-fold cohort predicate -- SINGLE source of truth for the builder and
+    the launch grid (they MUST agree or the kernel and its grid disagree).
+
+    The fold packs the 4 GQA query heads that share a kv-head into the 128-row M-tile
+    (32 tokens x 4 heads) so KV is loaded once per kv-head instead of 4x (the HBM
+    traffic cut). Applies to the D128 / 4:1-GQA / sliding-window / bf16 / paged cohort
+    with block_size <= 32 (the tiled 4-warp double-buffer path).
+    """
+    return (
+        int(head_size) == 128
+        and int(num_queries_per_kv) == 4
+        and int(sliding_window or 0) > 0
+        and str(dtype) == "bf16"
+        and int(block_size) <= 32
+    )
+
+
 def _get_2d_launch_meta(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
@@ -4123,14 +4143,24 @@ def _get_2d_launch_meta(
     arch = _resolve_attention_arch()
     route = _gfx942_4warp_route(problem)
     if route is not None:
-        # 4-warp GQA paged kernel: 4 wave64/CTA own BLOCK_M q-tokens for ONE
-        # query head. grid = (num_query_heads, q-token-blocks + per-seq padding).
-        # block_q == BLOCK_M, matching the kernel's binary_search_seq_idx.
-        total_num_q_blocks = problem.total_q // route.block_m + problem.num_seqs
-        meta = _Attention2DLaunchMeta(
-            grid=(int(problem.num_query_heads), int(total_num_q_blocks), 1),
-            block=route.block_dim,
+        _fold = gfx942_gqa_fold_eligible(
+            problem.head_size,
+            problem.num_queries_per_kv,
+            problem.sliding_window,
+            problem.dtype,
+            problem.block_size,
         )
+        if _fold:
+            # GQA head-fold cohort: one CTA covers 32 q-tokens x nqpk heads for one
+            # kv-head (KV loaded once). grid.x = num_kv_heads, grid.y = 32-token blocks.
+            total_num_q_blocks = problem.total_q // 32 + problem.num_seqs
+            grid = (int(problem.num_kv_heads), int(total_num_q_blocks), 1)
+        else:
+            # 4-warp GQA paged kernel: 4 wave64/CTA own BLOCK_M q-tokens for ONE query
+            # head. grid = (num_query_heads, q-token-blocks + per-seq padding).
+            total_num_q_blocks = problem.total_q // route.block_m + problem.num_seqs
+            grid = (int(problem.num_query_heads), int(total_num_q_blocks), 1)
+        meta = _Attention2DLaunchMeta(grid=grid, block=route.block_dim)
         _2D_LAUNCH_META[meta_key] = meta
         return meta
     if _enable_gfx942_bf16_flash(problem):
