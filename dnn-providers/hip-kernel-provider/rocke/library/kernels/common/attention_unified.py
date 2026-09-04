@@ -76,6 +76,28 @@ _apply_softcap = apply_softcap_log2
 # the unify phase lands it.
 
 
+def _is_fp8_long_kv_decode(problem: "UnifiedAttentionProblem") -> bool:
+    """The fp8 KV-cache decode cohort the gfx950 3D-routing and waves_per_eu
+    tunes target: fp8 decode, long context, no sliding window. Single source for
+    both gates (``_enable_fp8_decode_3d`` and ``_enable_gfx950_fp8_decode_wpe3``)
+    so the cohort has one edit point, not two."""
+    return (
+        problem.use_fp8
+        and problem.all_decode
+        and problem.sliding_window == 0
+        and problem.max_seqlen_k > 512
+    )
+
+
+def _enable_fp8_decode_3d(problem: "UnifiedAttentionProblem") -> bool:
+    # gfx950-only. fp8 decode is VALU-bound (per-element dequant); 3D split-KV
+    # fans that work across CTAs. On gfx950 num_cus resolves to a legacy count
+    # that undersizes the 2D-vs-3D target and mis-routes long-KV decode to 2D;
+    # forcing 3D restores the split-KV fan-out. gfx942 resolves its live CU count
+    # correctly, so it is excluded rather than routed unconditionally.
+    return _resolve_attention_arch() == "gfx950" and _is_fp8_long_kv_decode(problem)
+
+
 @dataclass(frozen=True)
 class UnifiedAttentionProblem:
     total_q: int
@@ -168,6 +190,8 @@ class UnifiedAttentionProblem:
         return self.target_ctas if self.target_ctas > 0 else self.num_cus * 4
 
     def select_path(self) -> str:
+        if _enable_fp8_decode_3d(self):
+            return "3d"
         target = self._effective_target_ctas
         num_2d = self.total_num_q_blocks_upper_bound * self.num_kv_heads
         return (
@@ -2004,6 +2028,17 @@ def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
     )
 
 
+def _enable_gfx950_fp8_decode_wpe3(problem: UnifiedAttentionProblem) -> bool:
+    """gfx950 fp8 long-KV decode (routed to the 3D split-KV path) -> waves_per_eu=3.
+
+    Same-run A/B (waves_per_eu the only difference) showed a small consistent win
+    on the long-KV decode shapes and reduced the run-to-run variance. waves_per_eu
+    is a pure AMDGPU occupancy hint (kernel attribute only, no compute change), so
+    output is bit-identical. Same cohort ``_enable_fp8_decode_3d`` routes to 3D.
+    """
+    return _resolve_attention_arch() == "gfx950" and _is_fp8_long_kv_decode(problem)
+
+
 def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
     """Gate the gfx942 fp16 transposed-x8 attention family.
 
@@ -2994,6 +3029,8 @@ def _gfx942_3d_tile_size_override(problem: UnifiedAttentionProblem) -> Optional[
 def _select_3d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
     if problem.waves_per_eu is not None:
         return problem.waves_per_eu
+    if _enable_gfx950_fp8_decode_wpe3(problem):
+        return 3
     if _resolve_attention_arch() == "gfx1250":
         return 2
     return None
