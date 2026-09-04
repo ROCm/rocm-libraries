@@ -84,14 +84,13 @@ foreach( bench ${bench_list})
   # On Linux, always include amdgcnspirv target so the clients work
   # on an architecture that the runtime supports but was not
   # specified a build time.
-  # TODO: amdgcnspirv is not compatible with ASAN.
-  get_target_property(bench_opts ${bench} COMPILE_OPTIONS)
-  if( NOT WIN32 AND NOT bench_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
-    target_compile_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
-    target_link_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
+  if( NOT WIN32 AND HIP_COMPILER_SUPPORTS_SPIRV )
+    # TODO: amdgcnspirv is not compatible with ASAN.
+    if( NOT WIN32 AND NOT bench_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+      target_compile_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
+      target_link_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
+    endif()
   endif()
-  # NB: hip-clang includes omp.h, so we need to specify the location
-  # of ROCM_CLANG_ROOT at cmake config time if we are using clang++.
 
   target_include_directories( ${bench}
     PRIVATE
