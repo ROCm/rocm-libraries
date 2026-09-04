@@ -1,14 +1,19 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+option(TENSILELITE_BUILD_SHARED_LIBS "Build the TensileLite host library as shared vs static." ON)
+set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
+
 option(TENSILELITE_ENABLE_HOST_ASAN "Enable AddressSanitizer for host code" OFF)
 option(TENSILELITE_ENABLE_HOST_TSAN "Enable ThreadSanitizer for host code" OFF)
+option(TENSILELITE_ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
+mark_as_advanced(TENSILELITE_ENABLE_HOST_ASAN)
+mark_as_advanced(TENSILELITE_ENABLE_HOST_TSAN)
+mark_as_advanced(TENSILELITE_ENABLE_COVERAGE)
 
 if(TENSILELITE_ENABLE_HOST_ASAN AND TENSILELITE_ENABLE_HOST_TSAN)
     message(FATAL_ERROR "ASAN and TSAN cannot be enabled simultaneously")
 endif()
-# Coverage instrumentation for C++ code
-option(TENSILELITE_ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
 
 add_subdirectory(rocisa)
 
@@ -20,8 +25,6 @@ endif()
 if(TENSILELITE_ENABLE_HOST)
     find_package(ZLIB REQUIRED)
 
-    option(TENSILELITE_BUILD_SHARED_LIBS "Build tensilelite-host as shared vs static" OFF)
-    set(BUILD_SHARED_LIBS ${TENSILELITE_BUILD_SHARED_LIBS})
     add_library(tensilelite-host)
     add_library(roc::tensilelite-host ALIAS tensilelite-host)
 
@@ -86,12 +89,13 @@ if(TENSILELITE_ENABLE_HOST)
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
     target_link_libraries(tensilelite-host
         PUBLIC
             $<BUILD_INTERFACE:rocisa::rocisa-cpp>
-            $<BUILD_INTERFACE:roc::origami>
+            roc::origami
             $<BUILD_INTERFACE:hip::host>
         PRIVATE
             hip::device
@@ -121,41 +125,24 @@ if(TENSILELITE_ENABLE_HOST)
     add_subdirectory(src)
     add_subdirectory(include)
 
+    install(TARGETS tensilelite-host
+        EXPORT hipblaslt-targets
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
+        FILE_SET tensilelite_public_headers
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+        FILE_SET tensilelite_generated_headers
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+        FILE_SET rocisa_public_headers
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+    )
+
     if(BUILD_SHARED_LIBS)
-        if(HIPBLASLT_ENABLE_HOST)
-            install(TARGETS tensilelite-host
-                EXPORT hipblaslt-targets
-                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
-                LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
-                ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
-                FILE_SET tensilelite_public_headers
-                    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
-                FILE_SET tensilelite_generated_headers
-                    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
-                FILE_SET rocisa_public_headers
-                    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
-            )
-        elseif(DEFINED TENSILELITE_HOST_EXPORT_SET)
-            install(TARGETS tensilelite-host
-                EXPORT ${TENSILELITE_HOST_EXPORT_SET}
-                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
-                LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
-                ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
-            )
-        else()
-            install(TARGETS tensilelite-host
-                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
-                LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
-                ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
-            )
-        endif()
         set_property(TARGET tensilelite-host APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
     endif()
 
     if(TENSILELITE_ENABLE_CLIENT)
-        # mxDataGenerator bootstrap and `hipblaslt::mxdatagen` helper target
-        # live in projects/hipblaslt/CMakeLists.txt and are guaranteed to be
-        # available before this subdirectory is processed.
         add_subdirectory(client)
     endif()
 
