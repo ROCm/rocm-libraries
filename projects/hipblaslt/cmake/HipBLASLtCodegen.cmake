@@ -94,6 +94,7 @@ function(hipblaslt_create_device_library)
     if(_cdl_REQUIRE_GFX1250V0_OVERLAY)
         list(APPEND _logic_opts --require-gfx1250v0-overlay)
     endif()
+
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
