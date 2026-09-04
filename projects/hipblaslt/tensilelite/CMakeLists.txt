@@ -12,11 +12,6 @@ option(TENSILELITE_ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
 
 add_subdirectory(rocisa)
 
-if(TENSILELITE_ENABLE_AUTOBUILD)
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-    include(tensilelite_auto_build)
-endif()
-
 if(TENSILELITE_ENABLE_HOST)
     find_package(ZLIB REQUIRED)
 

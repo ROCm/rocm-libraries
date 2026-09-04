@@ -62,7 +62,7 @@ option(HIPBLASLT_ENABLE_MATRIX_TRANSFORM "Build hipBLASLt MatrixTransform device
 option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
 option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
-option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
+option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build the in-tree rocisa Python extension." OFF)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
@@ -73,8 +73,6 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
-option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
-
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)

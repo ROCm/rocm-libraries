@@ -1071,7 +1071,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
 # TensileLite Create Library
 ################################################################################
 @profile
-def run():
+def run(argv=None):
     start = timer()
     print1("")
     print1(HR)
@@ -1079,7 +1079,7 @@ def run():
     print2(HR)
     print2("")
 
-    arguments = parseArguments()
+    arguments = parseArguments() if argv is None else parseArguments(argv)
     setVerbosity(arguments["PrintLevel"])
     outputPath = Path(ensurePath(os.path.abspath(arguments["OutputPath"])))
     cxxCompiler, _, offloadBundler, _, _ = validateToolchain(
@@ -1288,3 +1288,4 @@ def run():
     print(f"Total kernels processed: {numKernels}")
     print(f"Kernels processed per second: {(numKernels/(stop-start)):3.2f}")
     print(f"KernelHelperObjs: {len(kernelHelperObjs)}")
+    return 0
