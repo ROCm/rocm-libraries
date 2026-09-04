@@ -3,8 +3,10 @@
 #include "rocprim/device/detail/device_config_helper.hpp" 
 // Include 'rocprim::empty_type'.
 #include "rocprim/types.hpp" 
+{% block benchmarking_include %}
 // Include main benchmarking logic {{algo_type}}_{{algo_name}}_benchmark.
 #include "benchmark_{{algo_type}}_{{algo_name}}.hpp"
+{% endblock %}
 // Include primbench executor.
 #include "primbench.hpp"
 // Include fixed-width integers for interop with python.
