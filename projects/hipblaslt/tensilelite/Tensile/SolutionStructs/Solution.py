@@ -3994,9 +3994,12 @@ class Solution(collections.abc.Mapping):
       else:
         calLRVW()
 
-      def calcOptGRVW(lrvw: int, unrollMajorLDS: bool, datatype: DataType) -> int:
+      def calcOptGRVW(lrvw: int, unrollMajorLDS: bool, datatype: DataType, isSparseAxis: bool = False, directToLds: bool = False) -> int:
         # with UnrollMajorLDS, GRVW need to less or equal than LRVW to have conflict free LDS read with padding.
-        optGRVW = lrvw if unrollMajorLDS else 4 / datatype.numRegisters()
+        # For the sparse operand on non-DTL kernels this cap is unnecessary (ds_write LDS pad grows via
+        # calcLdsPad max(GRVW, optPad)), so relax it there to let GRVW=-1 reach the larger vector width.
+        relaxLRVWCap = isSparseAxis and not directToLds
+        optGRVW = lrvw if (unrollMajorLDS and not relaxLRVWCap) else 4 / datatype.numRegisters()
         if optGRVW * datatype.numBytes() > 16 and not(isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and datatype.numBytes() == 0.75):
           optGRVW = int(16 // datatype.numBytes())
         return optGRVW
@@ -4020,7 +4023,7 @@ class Solution(collections.abc.Mapping):
             elif state["enableGLTrA"]:
               state["GlobalReadVectorWidthA"] = 8
             else:
-              optGRVW = calcOptGRVW(state["LocalReadVectorWidthA"], state["UnrollMajorLDSA"], state["ProblemType"]["DataTypeA"])
+              optGRVW = calcOptGRVW(state["LocalReadVectorWidthA"], state["UnrollMajorLDSA"], state["ProblemType"]["DataTypeA"], state["ProblemType"]["Sparse"] == 1, state["DirectToLdsA"])
               curGRVW = 1
               state["GlobalReadVectorWidthA"] = int(curGRVW)
               while (curGRVW <= optGRVW):
@@ -4067,7 +4070,7 @@ class Solution(collections.abc.Mapping):
             elif state["enableGLTrB"]:
               state["GlobalReadVectorWidthB"] = 8
             else:
-              optGRVW = calcOptGRVW(state["LocalReadVectorWidthB"], state["UnrollMajorLDSB"], state["ProblemType"]["DataTypeB"])
+              optGRVW = calcOptGRVW(state["LocalReadVectorWidthB"], state["UnrollMajorLDSB"], state["ProblemType"]["DataTypeB"], state["ProblemType"]["Sparse"] == 2, state["DirectToLdsB"])
               curGRVW = 1
               state["GlobalReadVectorWidthB"] = int(curGRVW)
               while (curGRVW <= optGRVW):
