@@ -14,7 +14,8 @@ set -euo pipefail
 #   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
 #   2. Build rocjitsu from the rocm-systems checkout in ROCJITSU_SOURCE_DIR.
 #   3. Select a rocjitsu config for gfx942 or gfx950.
-#   4. Run hipblaslt-bench and a reduced TensileLite smoke under RJ_RACE=1.
+#   4. Run hipblaslt-bench, standalone extension-operation smoke tests, and a
+#      reduced TensileLite smoke under RJ_RACE=1.
 
 # These defaults match the GitHub Actions workspace layout: ROCM_PATH is the
 # unpacked TheRock artifact tree, ROCJITSU_SOURCE_DIR is the checked-out
@@ -31,6 +32,7 @@ ROCJITSU_BUILD_DIR="${ROCJITSU_BUILD_DIR:-${PWD}/rocjitsu-build}"
 ROCJITSU_CONFIG="${ROCJITSU_CONFIG:-}"
 RACE_REPORT_DIR="${RACE_REPORT_DIR:-${PWD}/race-reports}"
 HIPBLASLT_BENCH="${HIPBLASLT_BENCH:-${ROCM_PATH}/bin/hipblaslt-bench}"
+HIPBLASLT_TEST="${HIPBLASLT_TEST:-${ROCM_PATH}/bin/hipblaslt-test}"
 TENSILELITE_ROOT="${TENSILELITE_ROOT:-${ROCM_PATH}/share/hipblaslt/tensilelite}"
 TENSILE_DRIVER="${TENSILE_DRIVER:-${TENSILELITE_ROOT}/Tensile/bin/Tensile}"
 TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client}"
@@ -123,6 +125,11 @@ if [[ ! -x "${HIPBLASLT_BENCH}" ]]; then
   exit 1
 fi
 
+if [[ ! -x "${HIPBLASLT_TEST}" ]]; then
+  echo "hipblaslt-test not found or not executable: ${HIPBLASLT_TEST}" >&2
+  exit 1
+fi
+
 if [[ ! -d "${TENSILELITE_ROOT}" ]]; then
   echo "TensileLite artifacts not found: ${TENSILELITE_ROOT}" >&2
   echo "Expected TheRock BLAS test artifacts to contain share/hipblaslt/tensilelite" >&2
@@ -196,6 +203,7 @@ echo "ROCJITSU_SOURCE_DIR=${ROCJITSU_SOURCE_DIR}"
 echo "ROCJITSU_BUILD_DIR=${ROCJITSU_BUILD_DIR}"
 echo "ROCJITSU_CONFIG=${ROCJITSU_CONFIG}"
 echo "HIPBLASLT_BENCH=${HIPBLASLT_BENCH}"
+echo "HIPBLASLT_TEST=${HIPBLASLT_TEST}"
 echo "TENSILELITE_ROOT=${TENSILELITE_ROOT}"
 echo "TENSILE_DRIVER=${TENSILE_DRIVER}"
 echo "TENSILELITE_CLIENT=${TENSILELITE_CLIENT}"
@@ -293,6 +301,46 @@ run_hipblaslt_bench_check() {
     grep -q '^RACE ' "${RACE_REPORT_DIR}/hipblaslt-bench/race.log"; then
     echo "rocjitsu race detector reported a race in hipblaslt-bench:" >&2
     cat "${RACE_REPORT_DIR}/hipblaslt-bench/race.log" >&2
+    return 1
+  fi
+}
+
+run_extop_check() {
+  local test_dir="${RACE_REPORT_DIR}/hipblaslt-extops"
+  local sink_dir="${test_dir}/sinks"
+  mkdir -p "${sink_dir}"
+
+  echo "running hipBLASLt AMax and LayerNorm smoke tests under rocjitsu race detection"
+  # These parameterized gtests each dispatch the generated 256-thread extension
+  # kernel once. Keep the dimensions small to make this an instrumentation
+  # smoke test, while still exercising the inter-wave LDS-reduction code shared
+  # by the two operations.
+  timeout "${RACE_TIMEOUT_SECONDS}" \
+    env \
+      HSA_ENABLE_SDMA=1 \
+      RJ_RACE=1 \
+      RJ_LOG=1 \
+      RJ_SINKS=stderr,file \
+      RJ_SINK_DIR="${sink_dir}" \
+      "${ROCJITSU_BIN}" \
+        --config "${ROCJITSU_CONFIG}" \
+        -- "${HIPBLASLT_TEST}" \
+          --gtest_filter='ExtOpTest/ExtOpAMaxTest.amaxSuccess/1:ExtOpTest/ExtOpLayerNormTest.layernormSuccess/1' \
+    2>&1 | tee "${test_dir}/hipblaslt-extops.log"
+  local status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    echo "hipBLASLt extension-operation race check command failed with status ${status}" >&2
+    return "${status}"
+  fi
+
+  if ! grep -q '\[  PASSED  \] 2 tests\.' "${test_dir}/hipblaslt-extops.log"; then
+    echo "hipBLASLt extension-operation race check did not report two passing tests" >&2
+    return 1
+  fi
+
+  if [[ -f "${sink_dir}/race.log" ]] && grep -q '^RACE ' "${sink_dir}/race.log"; then
+    echo "rocjitsu race detector reported a race in hipBLASLt extension operations:" >&2
+    cat "${sink_dir}/race.log" >&2
     return 1
   fi
 }
@@ -426,18 +474,25 @@ run_timed "rocjitsu version" show_rocjitsu_version
 
 check_status=0
 
-# Run both workload checks even if the first one fails. That gives the uploaded
-# race-reports artifact a complete picture for the failing CI attempt instead of
-# forcing a second long run just to learn whether the other workload also broke.
+# Run all workload checks even if one fails. That gives the uploaded race-reports
+# artifact a complete picture for the failing CI attempt instead of forcing a
+# second long run just to learn whether another surface also broke.
 set +e
 run_timed "hipblaslt-bench race check" run_hipblaslt_bench_check
 hipblaslt_status=$?
+run_timed "hipblaslt extension-op race check" run_extop_check
+extop_status=$?
 run_timed "tensilelite-client race check" run_tensilelite_client_check
 tensilelite_status=$?
 set -e
 
 if [[ "${hipblaslt_status}" -ne 0 ]]; then
   echo "hipblaslt-bench race check failed with status ${hipblaslt_status}" >&2
+  check_status=1
+fi
+
+if [[ "${extop_status}" -ne 0 ]]; then
+  echo "hipblaslt extension-operation race check failed with status ${extop_status}" >&2
   check_status=1
 fi
 
