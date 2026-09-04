@@ -326,6 +326,20 @@ public:
         return _testSettings->findToleranceOverride(testName);
     }
 
+    // Find a validator override for one output tensor of the given test.
+    // Returns std::nullopt if no config loaded or nothing matches, which means the
+    // default allclose comparison.
+    std::optional<ValidatorOverride> findValidatorOverride(std::string_view testName,
+                                                           std::string_view tensorLabel) const
+    {
+        throwIfNotInitialized();
+        if(!_testSettings.has_value())
+        {
+            return std::nullopt;
+        }
+        return _testSettings->findValidatorOverride(testName, tensorLabel);
+    }
+
     // Raw gcnArchName for device 0 detected at init time (e.g.
     // "gfx942:sramecc+:xnack-"). Empty if detection failed.
     const std::string& getCurrentArch() const

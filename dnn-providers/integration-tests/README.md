@@ -388,7 +388,7 @@ Both the superbuild (target already present) and standalone provider builds
 (`find_package`) are supported; if the package is not found the target is
 skipped with a status message.
 
-### Per-provider TOML config (tolerance overrides & skips)
+### Per-provider TOML config (tolerance overrides, validator overrides & skips)
 
 Each provider owns one `--test-config` TOML file (e.g.
 `miopen-provider/config/MIOPEN_ENGINE.toml`,
@@ -399,6 +399,9 @@ recompiling or touching test source:
 - **Override tolerances** for specific tests/groups, when that engine's
   numerics legitimately differ from the default atol/rtol (e.g. reduced
   precision from split-k accumulation).
+- **Override the validator** for specific output tensors, when per-element
+  allclose is the wrong *question* for that tensor rather than merely too
+  tight. This is the only place a validator can be changed.
 - **Skip tests** on specific architectures (or globally), when that engine
   has no applicable kernel/solution for a case.
 
@@ -411,6 +414,12 @@ filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/14"]
 atol = 1.19
 rtol = 0.2
 
+[[validator_overrides]]
+filters       = ["*LayernormBackward*"]
+tensors       = ["*::DSCALE", "*::DBIAS"]
+validator     = "rms"
+rms_threshold = 1e-4
+
 [[test_skips]]
 archs   = ["gfx90a", "gfx10", "gfx11", "gfx12"]   # optional; omit to skip everywhere
 filters = ["*ConvFwdBiasActiv*"]
@@ -421,12 +430,30 @@ reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for
   GTest name — same string a `--gtest_filter` would match.
 - `tolerance_overrides`: later entries take precedence when multiple filters
   match. Both `atol` and `rtol` are required.
+- `validator_overrides`: later entries take precedence. An entry applies only
+  when a `filters` glob matches the test name **and** a `tensors` glob matches
+  the output tensor's label — its name (e.g. `LayernormBackward_0::DSCALE`), or
+  `uid=N` when the graph did not name it. Match on the tensor label rather than
+  the uid: uids differ between a C++ graph test and the bundle captured from it,
+  names do not. `validator` is `"allclose"` or `"rms"`; `rms_threshold` is
+  required and must be positive when the validator is `"rms"`. Absent any match
+  the comparison is allclose — **allclose is the default everywhere, and this
+  section is the only thing that changes it.** Use it when a per-element check
+  is the wrong question, not to buy slack: an output that is a long reduction
+  (layernorm/RMSNorm backward `dscale`/`dbias`) has elements that land
+  arbitrarily near zero through cancellation, so per-element relative error is
+  unbounded while the aggregate relative-RMS error is not. Prefer
+  `tolerance_overrides` for everything else. See ALMIOPEN-2561.
 - `test_skips`: the first matching entry wins; `reason` is surfaced in the
   `GTEST_SKIP` message. `archs` (substring match against the raw
   `gcnArchName`) and `platforms` (`"windows"`/`"linux"`) are both optional —
   omit either to match any.
 - Applies to **both** bundle/sweep tests and C++ graph tests; the lookup runs
   in the shared harness (`TestConfig`/`TestSettings`), not per test type.
+  One caveat for `validator_overrides`: golden data validated against a *reference*
+  executor (`BundleReferenceValidationHarness`) is always compared with allclose at
+  the default tolerance. An engine's config describes how far that engine may
+  drift; it never relaxes the gate on our own committed data.
 - `[meta] version = 1` is required; the file is rejected on parse if missing
   or on an unsupported version.
 

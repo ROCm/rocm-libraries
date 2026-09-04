@@ -22,6 +22,32 @@ version = 1
 #   atol: absolute tolerance
 #   rtol: relative tolerance
 #
+# -- Validator Overrides --
+# Change which comparison an output tensor is graded by. allclose is the default
+# everywhere and this is the only thing that can change it. Each entry requires:
+#   filters:       array of GTest globs matched against the full GTest name
+#   tensors:       array of globs matched against the output tensor's label — its
+#                  name, or "uid=N" when the graph did not name it
+#   validator:     "allclose" or "rms"
+#   rms_threshold: required when validator = "rms"
+# Later entries take precedence.
+#
+# Layernorm backward's dscale/dbias are reductions over the batch axes:
+#   dscale_j = sum_i dy*xhat, dbias_j = sum_i dy
+# over up to ~9e5 zero-mean terms. The GPU's reduction order differs from the CPU
+# reference's, and the resulting absolute error tracks the *tensor's* scale, not each
+# element's. Elements that land near zero through cancellation then blow past
+# atol + rtol*|ref| while the tensor as a whole is accurate to ~1e-6 relative.
+# Measured on gfx1151: 22 of 132 fp32/upcast Smoke cases fail under allclose; the atol
+# that would rescue them ranges 0.9x-52x the default depending on reduction length and
+# swings ~2x with the input seed, and applies to dx as well, whose real error is 4-5
+# decades smaller. Relative RMS stays 1e-6..8e-6 across the whole set. ALMIOPEN-2561.
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE", "*::DBIAS"]
+validator = "rms"
+rms_threshold = 1e-4
+#
 # RMSNormBackward Pure-Bfp16 (dy/x/dx all bf16) fails CPU-reference tolerance
 # at the suite's large-reduction shapes (x:[4096,128,1,1], x:[5,256,14,14],
 # x:[16,3,8,14,14]) — smaller shapes in the same suites pass reliably. The
