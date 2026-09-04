@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_r13_scaleab_vec_store_gfx942_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_SABV_UserArgs_MT16x16x16_MLH6GVOqOnxmiXu0-GiWJw46K3ARgWmOrKwJ5qml2bEw=',
+      'err': 0,
+    }),
+  ])
+# ---
