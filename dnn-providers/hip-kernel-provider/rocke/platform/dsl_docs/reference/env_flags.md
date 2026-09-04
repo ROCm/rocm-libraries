@@ -70,7 +70,7 @@ are diagnostics that intentionally change emission. None affect the default buil
 | Family | Variables | Area |
 |---|---|---|
 | MoE / preshuffle | `ROCKE_PRESHUFFLE_W_DOWN`, `ROCKE_PRESHUFFLE_W_GATE_UP_PACKED`, `ROCKE_PRESHUFFLE_W_GATE_UP_INTERLEAVED`, `ROCKE_ACTIVE_TILE_SKIP_GEMMS` | MoE weight layout / active-tile-skip |
-| FP8 MoE mega-kernel | `ROCKE_FP8_AGPR_MFMA_DOWN`, `ROCKE_FP8_MFMA_CLUSTER`, `ROCKE_FP8_MFMA_NOP`, `ROCKE_FP8_SCHED`, `ROCKE_FP8_XCD`, `ROCKE_FP8_X_DTLA` | FP8 MoE scheduling / MFMA experiments |
+| FP8 MoE mega-kernel | `ROCKE_FP8_XCD` | XCD remap sweep in the `fused_mega_moe` level replay. The shipped instance (`instances/common/moe_fused_mega_fp8.py`) reads no environment at all — every knob is a `FusedMegaKernelSpecFp8` field the dispatcher sets. |
 | matmul-nbits | `ROCKE_NBITS_DEBUG` | quantized-GEMM diagnostics |
 | Warp-specialized pipeline | `CK_WSP3_ASYNC`, `CK_WSP3_DEPTH`, `CK_WSP3_DRAIN`, `CK_WSP3_SCHED` | producer/consumer GEMM pipeline params |
 | Swizzle study | `CK_SWZ_L`, `CK_SWZ_R`, `CK_SWZ_W` | LDS swizzle levels (left/right/write) |

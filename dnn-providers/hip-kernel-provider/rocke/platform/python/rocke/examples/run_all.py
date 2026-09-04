@@ -122,6 +122,23 @@ REGISTRY: List[Example] = [
         arch="gfx950",
         timeout=240,
     ),
+    # MoE activation prologue (gather + rescale + fp8 round), numpy-checked.
+    # Compares A byte for byte rather than within a tolerance: the failure it
+    # exists to catch is a reciprocal-versus-divide rounding difference, which
+    # a tolerance check cannot see at all.
+    Example(
+        name="moe_gather_rescale_verify",
+        module="rocke.examples.gfx950.moe_gather_rescale.verify_gather_rescale",
+        argv=("--seed", "0"),
+        family="moe",
+        arch="gfx950",
+        timeout=240,
+        digest_keep=(
+            r"^\s*(PASS|FAIL)\s",
+            r"^VERDICT:",
+            r"token-slots,.*blocks",
+        ),
+    ),
     # L6 NUMERIC differential lane itself, as a repeatable example: it already
     # prints a per-config PASS/DRIFT table that is fully seed-deterministic.
     Example(

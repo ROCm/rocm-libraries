@@ -248,6 +248,37 @@ def _is_modern_flavor(flavor: str) -> bool:
     return flavor in _DATALAYOUT_KIND_FLAVORS[LlvmDatalayoutKind.P8_INDEXED]
 
 
+#: The oldest flavor whose LLVM knows ``-amdgpu-mfma-vgpr-form``. It first ships
+#: in the LLVM bundled with ROCm 7.2 and every later LLVM keeps it.
+_MFMA_VGPR_FORM_SINCE = LLVM_FLAVOR_LLVM22
+
+#: Flavors carrying that flag, derived as a threshold into :data:`LLVM_FLAVORS`
+#: rather than written out. Spelling the pair literally is what the enumeration
+#: exists to prevent: the flag is not a property of llvm22 and llvm23 in
+#: particular, so a literal list would quietly answer "unsupported" for the next
+#: flavor appended above them and lose the tuning on the newest toolchain.
+_MFMA_VGPR_FORM_FLAVORS: FrozenSet[str] = frozenset(
+    LLVM_FLAVORS[LLVM_FLAVORS.index(_MFMA_VGPR_FORM_SINCE) :]
+)
+
+
+def supports_mfma_vgpr_form() -> bool:
+    """Whether the LLVM that will run the compile accepts the VGPR-form hint.
+
+    This has to be asked rather than assumed, because passing an unknown
+    ``-mllvm`` flag is not benign: clang's option parser prints ``Unknown
+    command line argument`` and then calls ``exit()``. comgr runs clang
+    **in-process**, so an older LLVM does not fail the compile -- it takes the
+    whole host process down, which for a serving deployment means the worker
+    dies on the first MoE layer.
+
+    The deciding version is the one comgr resolves to, not the system's: a
+    torch process gets torch's bundled ``libamd_comgr.so`` (ROCm 7.0 for
+    torch 2.10) even where ``/opt/rocm`` is 7.2.
+    """
+    return _resolve_llvm_flavor() in _MFMA_VGPR_FORM_FLAVORS
+
+
 def _datalayout_for_flavor(flavor: str) -> str:
     """Module ``target datalayout`` string for an LLVM flavor.
 
@@ -5819,8 +5850,11 @@ def _llvm_type_from_name(name: str) -> str:
         inner = name[4:-1]
         elem, _, count = inner.partition("x")
         count = int(count)
-        elem_map = {"f32": "float", "f16": "half", "bf16": "bfloat", "i32": "i32"}
-        return f"<{count} x {elem_map[elem]}>"
+        # Recurse on the element so the vector and scalar spellings cannot
+        # drift: fp8e4m3 and i8 were reachable as scalars but not as vector
+        # elements, which made an fp8 fragment usable everywhere except as an
+        # scf.for loop-carried value.
+        return f"<{count} x {_llvm_type_from_name(elem)}>"
     raise NotImplementedError(f"no LLVM type for {name!r}")
 
 

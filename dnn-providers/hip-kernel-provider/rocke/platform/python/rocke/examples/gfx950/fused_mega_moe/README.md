@@ -16,6 +16,12 @@ gate GEMM + up GEMM  ->  SiLU  ->  Hidden (stays in LDS)  ->  reshape
 > math up), see [`ALGORITHM.md`](ALGORITHM.md). This file is the optimization
 > history: every lever, the gotchas, and the results.
 
+> This kernel is now the **small-token member of a family**: a split two-launch
+> kernel covers everything above `T ~ 12`, and an opt-in gather/rescale prologue
+> adapts pre-quantized activations. See
+> [the kernel family](#the-kernel-family--where-this-kernels-coverage-ends) for
+> what each one covers and what it contributes.
+
 ## What it shows
 
 - A correct single-kernel fused MoE that keeps the `silu(gate)*up` intermediate
@@ -75,6 +81,168 @@ The takeaway: the residual is a *small-batch dispatch floor*, not a compute
 deficit. The compute is already at parity (it has to be, for the kernel to beat
 the reference at T8) — so the larger the batch, the better this kernel does
 relative to hand-tuned asm.
+
+## The kernel family — where this kernel's coverage ends
+
+This mega-kernel is no longer the whole fp8 MoE story. Two siblings landed
+beside it — a **split (two-launch) kernel** and a **gather/rescale prologue** —
+and between them they change which token counts this kernel is actually
+responsible for. Recorded here because "how fast is the mega-kernel" is the
+wrong question once a dispatcher is choosing between them.
+
+> **Different shape and partition from the `Result` table above.** Everything in
+> this section is Qwen3-30B-A3B (`E=128, K=8, H=2048, I=768`) on **one XCD of
+> MI355X (32 CU)**, minimum of 3 runs. The T1/T8 numbers above are
+> `E=8, K=2, H=4096, I=7168` on all 256 CU. The two sets are not comparable.
+
+### Coverage — what the dispatcher actually selects
+
+Asked of the dispatcher directly, rather than inferred from which config won a
+sweep — those are different questions ("what gets shipped" vs "what was fastest
+on the day"). These are the declared closed bands from `_TOKEN_BANDS` in
+`dispatch/families/moe.py`, contiguous and jointly covering `1..4096`, each
+confirmed by dispatching a request at both of its edges:
+
+| tokens | selected candidate | launches | `tile_m` | `warp_m` |
+|---|---|---:|---:|---:|
+| **1 – 8** | `moe_fused_tm16` — **this kernel** | 1 | 16 | 1 |
+| **9 – 256** | `moe_split_coop_tm16` | 2 | 16 | 1 |
+| **257 – 512** | `moe_split_coop_tm32` | 2 | 32 | 2 |
+| **513 – 4096** | `moe_split_coop_tm64` | 2 | 64 | 4 |
+
+The mega-kernel owns the **bottom of the range only** — decode at `T <= 8`, one
+band of four. Everything above is the split family. `4096` is the configured
+ceiling, not an extrapolation: outside it the family declines rather than
+guessing.
+
+The `8|9` boundary is placed at the last point where the fused form wins
+*outright*, not the last point where it is merely not behind — at `T=32` the
+margin is ~1.5%, inside this shape's run-to-run spread, so the tie goes to the
+form with the better slope.
+
+Re-derive the whole table without a GPU — the plan is a pure function of the
+request, which is the point of having the knobs on the spec rather than in the
+environment:
+
+```python
+from rocke.dispatch.families.moe import (
+    MoeRequest, dispatch_moe_plan, moe_launch_kind)
+
+for t in (1, 8, 9, 256, 257, 512, 513, 4096):   # every band edge
+    plan = dispatch_moe_plan(MoeRequest(
+        num_tokens=t, hidden=2048, intermediate=768, num_experts=128,
+        top_k=8, arch="gfx950", dtype="fp8"))
+    print(t, plan[0].candidate.name,
+          "+".join(moe_launch_kind(r) for r in plan))
+```
+
+### The split kernel — `gate_up` + `down`, the `coop` family
+
+Two launches: the gate/up GEMM plus the Hidden requantize writes the
+intermediate to HBM, and a second launch contracts it. That gives up the fusion
+this whole document is about (`ALGORITHM.md` §3) and buys two things a single
+launch cannot have:
+
+- **A workgroup-shared weight tile.** With the intermediate materialized, the
+  gate/up launch stages each weight tile into LDS once per threadgroup and
+  shares it across every wave. This is what makes a wide `tile_m` pay at all:
+  `warp_m` splits M across waves so the per-wave accumulator count stays fixed,
+  but with a per-wave *private* weight copy every wave still streams the whole
+  tile, so the traffic is per-wave and `tile_m` buys nothing — measured,
+  `tile_m` 16 -> 64 left the gate/up stage unchanged. Sharing makes the traffic
+  per-threadgroup, so `tile_m=64` cuts the gate/up weight stream ~4x:
+  **6.63 GB -> 1.66 GB at `T=4096`**. The staging DMA is `global_load_lds`, so
+  there is no VGPR round-trip and no `ds_write` at all — only the read-back.
+  (This is also how Triton reaches 8 waves/CU on this shape: its 24 KB of LDS
+  backs 4 waves where our private-B form backs 1.)
+- **Room to grow `tile_m`,** because Hidden no longer has to live in LDS
+  alongside the weight staging.
+
+Contribution, against this kernel on the same shape and token count:
+
+The `<-` marks the band the dispatcher awards to each form.
+
+| tokens | this kernel (`fused tm16`) | best split | split is |
+|---:|---:|---|---:|
+| 1 | **38.8 us** `<-` | `coop tm16` 41.7 us | 0.93x |
+| 2 | **61.5 us** `<-` | `coop tm16` 65.8 us | 0.93x |
+| 4 | **115.6 us** `<-` | `coop tm16` 122.4 us | 0.95x |
+| 8 | **206.1 us** `<-` | `coop tm16` 209.2 us | 0.99x |
+| 16 | 324.0 us | `coop tm16` 307.3 us `<-` | **1.05x** |
+| 32 | 428.2 us | `coop tm16` 421.2 us `<-` | 1.02x |
+| 64 | 498.5 us | `coop tm16` 466.3 us `<-` | **1.07x** |
+| 128 | 527.9 us | `coop tm16` 477.0 us `<-` | **1.11x** |
+| 256 | 705.3 us | `coop tm16` 556.6 us `<-` | **1.27x** |
+| 512 | 1064.0 us | `coop tm32` 717.1 us `<-` | **1.48x** |
+| 1024 | 3119.1 us | `coop tm64` 1013.3 us `<-` | 3.08x (see gotcha) |
+| 2048 | 2954.8 us | `coop tm64` 1612.8 us `<-` | **1.83x** |
+| 4096 | 5337.6 us | `coop tm64` 2863.6 us `<-` | **1.86x** |
+
+So the split family is not a marginal alternative — from `T=256` up it is worth
+**1.27x to 1.86x**, and it is the only reason the prefill range is competitive at
+all. At `T <= 8` it loses, which is exactly the band the dispatcher keeps for the
+mega-kernel: with only a handful of token rows, the HBM round-trip for the
+intermediate (a ~1.4 MB re-read, plus a second launch) costs more than the shared
+weight tile saves, because there are too few rows to share the tile across. The
+crossover is the whole reason both kernels exist.
+
+**Gotcha:** the `T=1024` fused reading is bimodal on this box — the same config
+measured **1734, 4991 and 5001 us** on an otherwise idle machine — so `3.08x` is
+not a trustworthy figure. The `2048`/`4096` pair at 1.83x/1.86x is the stable
+statement of the prefill gap. The tell is visible in the table itself: fused
+`T=1024` reads *slower* than fused `T=2048`, which cannot be real. Every cell
+above is a minimum of 3 runs for this reason, and even that does not fully
+suppress it.
+
+### The gather/rescale prologue — `moe_gather_rescale_a`
+
+`ALGORITHM.md` §2 requires the activation block scale to be **row-uniform** over
+all `tile_m` rows of a block, because the dequant fold applies one per-lane
+scalar to output slots that span several different rows. A serving stack that
+quantizes *before* routing has the wrong thing: one scale per
+`(token, 128-group)`. This kernel is the adapter — it gathers the flattened
+`(token, slot)` ids into expert-block order and re-rounds each row onto the
+block's shared scale, emitting exactly the `A` / `AScale` / `SortedTokenIds` /
+`SortedWeights` the MoE launches consume.
+
+**Coverage: opt-in, deliberately.** It declines an `auto` request and never
+appears in a default plan — the only launch kinds `auto` will produce are
+`fused`, `gate_up` and `down`. It is requested explicitly, by `spec_id` or by
+`dispatch_moe_plan(..., with_prologue=True)`, which prepends it to whichever
+plan the band selected: `prologue+fused` at `T=1`, `prologue+gate_up+down` at
+`T=512`. It also does **not** replace the framework's block-align pass — it
+*consumes* `SortedIds`, it does not produce them.
+
+**Cost.** Device time is linear in tokens with a small fixed term, and
+bandwidth-bound at the top:
+
+| tokens | blocks | measured | implied | note |
+|---:|---:|---:|---:|---|
+| 512 | 314 | 37.6 us | 512 GB/s | **floor-limited** — an upper bound on time, lower bound on GB/s |
+| 1024 | 564 | 37.8 us | 962 GB/s | **floor-limited**, just barely |
+| 1536 | 827 | 52.9 us | 1018 GB/s | clears the floor |
+| 2048 | 1082 | 68.0 us | 1047 GB/s | |
+| 3072 | 1596 | 97.7 us | 1083 GB/s | |
+| 4096 | 2106 | 127.5 us | 1101 GB/s | |
+
+The four points that clear the floor fit `8.3 us + 29.1 ns/token` almost exactly,
+and the bandwidth flattens near **1.1 TB/s**, so the kernel is at its memory
+floor for a gather of this size — there is no compute headroom to reclaim in it.
+Extrapolating the fit downward gives roughly 23 us at `T=512`, 12 us at `T=128`,
+and 8 us at decode. Read that as a fraction of the MoE launch it feeds and it
+splits two ways: a **few percent** in the prefill band (23 us on 717 us at
+`T=512`, 127 us on 2864 us at `T=4096`), but a **material ~20% adder at decode**
+(8 us on 38.8 us at `T=1`). The prologue is cheap in absolute terms and only
+really costs where the whole MoE is already latency-bound — so if the serving
+stack can be made to hand over block-uniform scales directly, decode is the band
+where skipping the prologue is worth the integration work.
+
+**Gotcha:** the torch-free launch harness has a **~40 us per-launch submit
+floor**, so any single-launch kernel faster than that reads ~40 us no matter what
+it does. The proof is that `H=128` and `H=2048` — 16x the bytes moved — both read
+~40 us at `T=1`. This is why the two low rows above are marked as bounds rather
+than measurements. Below `T ~ 1024`, use the fit or a profiler; do not quote the
+harness number as device time.
 
 ## Optimization log (summary)
 
@@ -297,11 +465,19 @@ of existing kernels stays byte-identical):
 `reproduce_levels.py` is the single, self-contained entry point. It rebuilds each
 level (via a flag-config on the production kernel, or a curated snapshot under
 `levels/`), runs hardened parity + warm best-of-N perf, and prints the numeric
-per-level ledger (T1 and T8). No external dependencies.
+per-level ledger (T1 and T8).
+
+> **The two drivers need opposite interpreters, and this is the single most
+> common way to lose an afternoon here.** `reproduce_levels.py` uses torch for
+> its oracle and needs a ROCm-torch venv. `bench_moe_mega_fp8.py` must run on an
+> interpreter where torch is *not* importable, because a resident torch changes
+> which LLVM Comgr resolves: the compile does not fail, it stops finishing. The
+> harness asserts `"torch" not in sys.modules` for exactly this reason. Never run
+> them in one process.
 
 ```bash
 cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform/python
-VENV=python  # or the path to your venv's python
+VENV=~/rocke-venv/bin/python   # a venv with ROCm torch
 
 # whole ledger (parity + numeric perf, T1 and T8)
 PYTHONPATH=$(pwd) $VENV -m rocke.examples.gfx950.fused_mega_moe.reproduce_levels
@@ -320,4 +496,55 @@ PYTHONPATH=$(pwd) $VENV -m rocke.examples.gfx950.fused_mega_moe.reproduce_levels
 | `reproduce_levels.py` | self-contained per-level driver (parity + numeric perf) |
 | `levels/level_NN_<name>.py` | curated kernel snapshots for the structural levels (L0-L9) |
 | `levels/_build_by_path.py` | loads a snapshot without shadowing the production kernel |
-| `../../../instances/common/moe_fused_mega_fp8.py` | the fp8 mega-kernel (all levers default-on = the final best) |
+| `bench_moe_mega_fp8.py` | torch-free (numpy + HIP runtime) tuning harness: parity oracle + config sweep |
+| `bench_triton_baseline.py` | vLLM Triton `fused_moe` baseline on the same partition, for apples-to-apples |
+| `../../../instances/common/moe_fused_mega_fp8.py` | the fp8 mega-kernel **and** the split `gate_up`/`down` pair (all levers default-on = the final best) |
+| `../../../instances/common/moe_gather_rescale_a.py` | the gather/rescale prologue (opt-in; see the kernel-family section) |
+| `../moe_gather_rescale/` | the prologue's own README, ALGORITHM.md and byte-exact verifier |
+| `../../../dispatch/families/moe.py` | the dispatcher that chooses between all of the above per token band |
+
+## Tuning harness
+
+`bench_moe_mega_fp8.py` builds the kernel, checks it against a numpy f32 oracle
+that consumes exactly the operands the kernel consumes, and then times a named
+set of configs. Run it on a **torch-free** interpreter (see the warning above).
+
+The config list in `sweep_configs()` is a lab notebook rather than a tidy grid:
+it is appended to in blocks, each with a comment saying what it was testing and
+against which bottleneck. A lever rejected early often reappears later because a
+structural change moved the bottleneck, so read it in order.
+
+Generated fp8 expert weights are ~600 MB per shape, so the cache lives outside
+the source tree. Point `ROCKE_MOE_BENCH_CACHE` at scratch space (it defaults to
+`.cache/` next to the script, which is gitignored):
+
+```bash
+cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform/python
+export ROCKE_MOE_BENCH_CACHE=/scratch/moe-bench-cache
+NOTORCH=python3   # must NOT be able to import torch
+
+# best known config on the decode shape
+PYTHONPATH=$(pwd) $NOTORCH rocke/examples/gfx950/fused_mega_moe/bench_moe_mega_fp8.py \
+    --shape qwen3 --sweep --phase full --iters 200 --warmup 30 --configs gb_dn_d2_g1
+
+# the whole sweep, or any fnmatch pattern over config names
+PYTHONPATH=$(pwd) $NOTORCH rocke/examples/gfx950/fused_mega_moe/bench_moe_mega_fp8.py \
+    --shape qwen3 --sweep --phase full --configs 'gb_*'
+
+# measure the exact spec the MoE dispatcher chose, and capture the rows
+PYTHONPATH=$(pwd) $NOTORCH rocke/examples/gfx950/fused_mega_moe/bench_moe_mega_fp8.py \
+    --shape qwen3 --spec-json chosen.json --json result.json
+```
+
+`--spec-json` takes a JSON object of `Config` fields (unknown keys are an error,
+not a silent default), so a caller can time the kernel dispatch actually selected
+instead of a sweep label that merely happens to describe it today.
+
+The Triton baseline must be given the *same* routing so both kernels activate
+the same experts; pass the harness's cached routing directory:
+
+```bash
+python rocke/examples/gfx950/fused_mega_moe/bench_triton_baseline.py \
+    --shape qwen3 --iters 10 --warmup 5 \
+    --routing-from $ROCKE_MOE_BENCH_CACHE/qwen3_e128_seed11939
+```

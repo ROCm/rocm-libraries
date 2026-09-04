@@ -131,10 +131,15 @@ rocke_fused_mega_fp8_levers_t rocke_fused_mega_fp8_levers_default(void);
  * ============================================================ *
  *
  * One concrete fp8 fused-MoE mega-kernel configuration. Field order follows the
- * Python dataclass declaration order. `dtype` is fixed "fp8e4m3". sched_cadence
- * is an Optional[str] (Python level-9 flag): has_sched_cadence==false encodes
- * Python None (defer to the levers/env default); when true, sched_cadence pins
- * the per-loop cadence on the spec ("iglp1" | "none" | "sgb"). */
+ * Python dataclass declaration order. `dtype` is fixed "fp8e4m3".
+ *
+ * sched_cadence is a plain required str on the Python spec ("iglp1" | "none" |
+ * "sgb", default "iglp1"); it used to be Optional[str] and is no longer, because
+ * None read as "emit no scheduler hint" once the env fallback behind it was
+ * removed, silently costing the level-9 cadence. Python has no None to encode
+ * now, so has_sched_cadence==false means only "this C caller did not state one,
+ * use the lever default", which resolves to the same "iglp1". A caller
+ * mirroring a Python spec should set it true and pin the string. */
 typedef struct rocke_fused_mega_kernel_spec_fp8
 {
     const char* name; /* required (no default)                        */

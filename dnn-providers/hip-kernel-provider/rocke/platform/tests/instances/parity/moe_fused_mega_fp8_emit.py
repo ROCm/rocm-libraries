@@ -31,7 +31,9 @@ def _spec(idx: int):
                 gate_up_k=32,
                 down_k=32,
                 use_dtla=False,
-                sched_cadence=None,
+                # Was None, which deferred to the env default of iglp1; the
+                # cadence is a spec field now, so the same case says so.
+                sched_cadence="iglp1",
                 **common,
             ),
             False,
@@ -43,7 +45,7 @@ def _spec(idx: int):
                 gate_up_k=128,
                 down_k=128,
                 use_dtla=False,
-                sched_cadence=None,
+                sched_cadence="iglp1",
                 **common,
             ),
             False,

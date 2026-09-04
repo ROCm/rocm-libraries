@@ -54,7 +54,6 @@ toolkit (which dispatches the fp8 atom directly) rather than the
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Tuple
 
@@ -69,7 +68,6 @@ from ...core.ir import (
     PtrType,
     Value,
 )
-from ...helpers.asm import mfma_f8f6f4_agpr, mfma_f8f6f4_agpr_cluster
 from ...helpers.atoms import MfmaAtom
 from ...helpers.mfma_gemm_inner import (
     decode_mfma_lanes,
@@ -85,132 +83,24 @@ __all__ = [
     "build_moe_fused_mega_gemm_fp8",
     "moe_fused_mega_fp8_grid",
     "moe_fused_mega_fp8_signature",
+    "build_moe_split_down_fp8",
+    "moe_split_down_fp8_grid",
+    "moe_split_down_fp8_signature",
 ]
 
 
-# AGPR operand staging: route the gate/up/down K=128 fp8 MFMAs through the
-# inline-asm helper (``v_mfma_f32_16x16x128_f8f6f4`` with AGPR srcA/srcB +
-# VGPR acc, the aiter staging layout) instead of the scaled intrinsic. The
-# helper is numerically identical (cbsz/blgp=0 => fp8e4m3, scales pinned to
-# the neutral E8M0 0 => factor 1.0) and verified bit-exact vs the intrinsic
-# (asm_mfma_parity / asm_mfma_fp8frag). Forcing the fp8 A/B fragments to live
-# in the AGPR file across the K-loop is the lever (aiter keeps ~192 AGPR of
-# operand state; the intrinsic path leaves srcA/srcB placement to the register
-# allocator). Flip to True to force the AGPR-source inline-asm MFMA.
-#
-# DEFAULT False (intrinsic path): the forced-AGPR-source inline-asm route was
-# DEBUGGED TO BIT-EXACT CORRECTNESS (hardened parity passes at every hazard_nop
-# down to 0) but measured ~25% SLOWER same-session (T1 0.197-0.201 ms asm vs
-# 0.159 ms intrinsic, clean A/B/A). Root cause: the ``sideeffect`` inline-asm
-# MFMA is OPAQUE to the LLVM machine scheduler + GCNHazardRecognizer, so the
-# scheduler can no longer interleave independent VMEM loads / other MFMAs into
-# the MFMA latency window -- the exact overlap the AGPR-resident-operand lever
-# is meant to enable -- and the sideeffect barrier blocks reordering. The
-# intrinsic path ALREADY stages operands into AGPR via the register allocator
-# (verified ``v_accvgpr_write_b32`` in ISA) WITHOUT forfeiting the scheduler.
-# aiter's 192-AGPR staging works because aiter hand-schedules the ENTIRE asm
-# instruction stream (AGPR lifetime AND interleave together); comgr inline-asm
-# gives register-class control but forfeits the scheduler, which dominates here.
-# Kept behind a flag (correct, available) rather than reverted.
-_USE_ASM_AGPR_MFMA = False
-
-# NUCLEAR gemm2-only AGPR-source MFMA (rank-1 lever SCOPED to the down loop).
-# The global _USE_ASM_AGPR_MFMA flip measured ~25% slower because routing the
-# gate/up hot loop through the sideeffect inline-asm MFMA forfeits the LLVM
-# scheduler over the dominant gate/up HBM stream. The DOWN loop is a different
-# shape: it has atoms_per_group == 1 (one MFMA per 128-group) and immediately
-# DRAINS the AGPR accumulator via v_accvgpr_read_b32 to feed the per-group scale
-# FMA (64 accvgpr_read in the kernel, all from here). The AGPR-source asm MFMA
-# lands its result DIRECTLY in a VGPR accumulator -- removing the per-group
-# accvgpr_read drain AND matching pyisa's gemm2 register class
-# (v[acc], a[srcA], a[srcB]). This isolates the rank-1 lever to the stage where
-# its accvgpr-drain win is concrete and where it does NOT touch the gate/up
-# critical path. DEFAULT off (golden-safe / byte-identical); A/B-measured below.
-_USE_ASM_AGPR_MFMA_DOWN = os.environ.get("ROCKE_FP8_AGPR_MFMA_DOWN", "0").strip() in (
-    "1",
-    "true",
-    "True",
-)
-
-# X (A activation) direct-to-LDS staging toggle (NUCLEAR X-stage 1:1 drive).
-# pyisa stages X mem->LDS via ``buffer_load_dwordx4 ... lds`` then reshapes it
-# with ``ds_read_b128`` into the MFMA operand (its ``a_X``). Our DTLA path
-# keeps A as a cheap global->VGPR load. When this is set, the shared A fragment
-# of the DTLA gate/up group is instead staged global->LDS (one DMA per group,
-# in flight under the B stages) and read back with ds_read -- matching pyisa's
-# X mem->LDS + ds_read reshape FORM (verified in ISA: global_load_lds 16->18,
-# ds_read 43->45, srcA now sourced from ds_read instead of global_load).
-#
-# DEFAULT False (global->VGPR): debugged to BIT-EXACT parity (T1/T8/hard all
-# PASS) but measured CLEARLY SLOWER same-session (clean interleaved A/B,
-# best-of-6: baseline 0.14974 ms vs X-DTLA 0.16825 ms, ~13% regression EVERY
-# round). Same root cause as _USE_ASM_AGPR_MFMA: the X-via-LDS path adds an
-# LDS round-trip + a vmcnt-drain dependency ahead of the MFMA that comgr's
-# scheduler cannot hide -- pyisa makes the identical X mem->LDS FORM fast only
-# by hand-scheduling the X loads across MFMA slots (rolling vmcnt + wave-pair
-# odd/even attach), the scheduler surface comgr does not expose. The tiny,
-# reused global->VGPR A load is already the cheaper option here. Kept behind
-# this flag (additive, golden-safe: default-off build is byte-identical to the
-# pre-edit kernel) to document the dead-end, NOT activated.
-_USE_X_DTLA = os.environ.get("ROCKE_FP8_X_DTLA", "0").strip() in ("1", "true", "True")
-
-# NUCLEAR gate/up MFMA CLUSTER (the FINAL 1:1 lever). The per-op AGPR-source
-# inline-asm MFMA regressed +25-31% (sections 8/_USE_ASM_AGPR_MFMA) because EACH
-# sideeffect asm is its own opaque scheduling fence, so comgr cannot interleave
-# the weight loads into the MFMA shadow. This flag instead emits ALL 2*nni
-# gate/up MFMAs of one K-group as ONE inline-asm block
-# (``mfma_f8f6f4_agpr_cluster``) -- AGPR srcA/srcB + VGPR acc, the schedule
-# (back-to-back MFMAs into nni*2 independent VGPR accumulators + the trailing
-# result-latency s_nop) living INSIDE the asm, exactly aiter's
-# ``cl_gemm0_XmulG_gemm1_XmulU`` body. Because the burst is a SINGLE asm node
-# (not N fences), the machine scheduler can still hoist the next group's DMAs
-# around it -- the lever the per-op route forfeited. Bit-exact to the intrinsic
-# (asm_mfma_cluster_parity). DEFAULT off (golden-safe / byte-identical);
-# A/B-measured this pass.
-_USE_MFMA_CLUSTER = os.environ.get("ROCKE_FP8_MFMA_CLUSTER", "0").strip() in (
-    "1",
-    "true",
-    "True",
-)
-
-# Trailing ``s_nop`` count on each inline-asm MFMA (see helpers/asm.py). The
-# default-8 the helper bakes in is conservative: it is sized for a back-to-back
-# dependent accumulation chain on the SAME source AGPRs with no interleaved
-# work. The mega-kernel's K-loop emits multiple INDEPENDENT MFMAs back-to-back
-# (gate vs up; multiple ni accumulators), so the hardware MFMA pipeline is
-# already partially filled and a smaller nop suffices -- recovering the
-# throughput the blanket nop would otherwise serialise. This is SWEPT against
-# HARDENED parity (NOT a free perf knob: too-small a value silently corrupts
-# the accumulator, so every value is re-validated numerically). Overridable
-# via the ROCKE_FP8_MFMA_NOP env var for the sweep.
-_ASM_MFMA_HAZARD_NOP = int(os.environ.get("ROCKE_FP8_MFMA_NOP", "8"))
-
-# D5 scheduling-cadence sweep knob (additive). Values:
-#   "iglp1" -> (KEPT, default) emit ``b.iglp_opt(1)``
-#              (MFMASmallGemmSingleWaveOpt) once at the top of the gate/up + down
-#              K-loop bodies. The post-RA scheduler then imposes the canned
-#              MFMA/DS interleave for each loop region. Won the D5 sweep:
-#              same-session best-of-5 T1 ~0.1586 vs "none" ~0.1597 (strictly
-#              faster across 3 alternating thermal-controlled pairs, parity PASS,
-#              golden digest unchanged). Mutually exclusive with sched_*barrier
-#              (so no sched_group_barrier is emitted when this is set).
-#   "none"  -> no scheduler hint (pre-D5 baseline; byte-identical IR).
-#   "sgb"   -> explicit sched_group_barrier cadence in the active DTLA gate/up +
-#              down loops. D5-swept: REGRESSED (~0.166 T1) -> not kept.
-_SCHED_CADENCE = os.environ.get("ROCKE_FP8_SCHED", "iglp1").strip().lower()
+#: The cadences ``sched_cadence`` accepts. ``none`` is the explicit request for
+#: no scheduler hint, which is why the field rejects Python ``None``.
+_SCHED_CADENCES = frozenset({"iglp1", "none", "sgb"})
 
 
-def _emit_loop_cadence_hint(b: IRBuilder, cadence: str | None = None) -> None:
-    """Emit the D5 per-loop scheduler hint at the TOP of a K-loop body.
+def _emit_loop_cadence_hint(b: IRBuilder, cadence: str) -> None:
+    """Emit the per-loop scheduler hint at the TOP of a K-loop body.
 
     Only ``iglp1`` emits here (it owns the whole-loop schedule and must precede
     the loop body). ``sgb`` emits its cadence inline next to each MFMA instead.
-
-    ``cadence`` (level 9 flag) overrides the import-time ``_SCHED_CADENCE`` env
-    default when the spec pins it; ``None`` => use the env default (so the
-    default build is byte-identical).
     """
-    if (cadence if cadence is not None else _SCHED_CADENCE) == "iglp1":
+    if cadence == "iglp1":
         b.iglp_opt(1)
 
 
@@ -222,9 +112,7 @@ _SGB_DS_READ = 0x100
 _SGB_DS_WRITE = 0x200
 
 
-def _emit_sgb_gateup_dtla(
-    b: IRBuilder, n_mfma: int = 2, cadence: str | None = None
-) -> None:
+def _emit_sgb_gateup_dtla(b: IRBuilder, n_mfma: int, cadence: str) -> None:
     """compv4-style cadence for the DTLA gate/up loop body (per ni).
 
     The DTLA path stages B via ``global_load...lds`` (a VMEM read whose dest is
@@ -232,58 +120,29 @@ def _emit_sgb_gateup_dtla(
     DMA), DS_READ feeding the MFMA, then the MFMAs -- so the in-flight DMA + LDS
     read overlap the MFMA shadow. No-op unless cadence == 'sgb'.
     """
-    if (cadence if cadence is not None else _SCHED_CADENCE) != "sgb":
+    if cadence != "sgb":
         return
     b.sched_group_barrier(_SGB_VMEM_READ, 1, 0)
     b.sched_group_barrier(_SGB_DS_READ, n_mfma, 0)
     b.sched_group_barrier(_SGB_MFMA, int(n_mfma), 0)
 
 
-def _emit_sgb_down_group(
-    b: IRBuilder, n_mfma: int = 1, cadence: str | None = None
-) -> None:
+def _emit_sgb_down_group(b: IRBuilder, n_mfma: int, cadence: str) -> None:
     """compv4-style VMEM<->MFMA cadence for the down loop per-group body.
 
     The down loop issues a global VMEM W_down load then ``n_mfma`` MFMAs per
     128-group. Impose: 1 VMEM_READ (next group's W_down) under the MFMA(s).
     No-op unless cadence == 'sgb'.
     """
-    if (cadence if cadence is not None else _SCHED_CADENCE) != "sgb":
+    if cadence != "sgb":
         return
     b.sched_group_barrier(_SGB_VMEM_READ, 1, 0)
     b.sched_group_barrier(_SGB_MFMA, int(n_mfma), 0)
 
 
-def _emit_mfma(b: IRBuilder, atom: MfmaAtom, a: Value, bb: Value, acc: Value) -> Value:
-    """Issue one K=128 fp8 MFMA, optionally via the AGPR-source inline-asm helper.
-
-    When :data:`_USE_ASM_AGPR_MFMA` is set AND the atom is the K=128 fp8 hero
-    atom, route through :func:`mfma_f8f6f4_agpr` (AGPR srcA/srcB). The helper
-    bitcasts the ``<32 x fp8e4m3>`` fragment to ``<8 x i32>`` itself. Otherwise
-    fall back to the bit-identical scaled-intrinsic atom (``atom.emit``).
-    """
-    if _USE_ASM_AGPR_MFMA and atom.k == 128 and atom.dtype_in == "fp8e4m3":
-        return mfma_f8f6f4_agpr(b, a, bb, acc, hazard_nop=_ASM_MFMA_HAZARD_NOP)
-    return atom.emit(b, a, bb, acc)
-
-
-def _emit_mfma_down(
-    b: IRBuilder, atom: MfmaAtom, a: Value, bb: Value, acc: Value
-) -> Value:
-    """Down-loop MFMA: route through the AGPR-source asm helper iff the gemm2
-    scoped flag is set (see :data:`_USE_ASM_AGPR_MFMA_DOWN`).
-
-    Identical math to :func:`_emit_mfma`; the only difference is the operand
-    register class (AGPR srcA/srcB + VGPR acc) so the per-group accumulator is
-    already in a VGPR for the scale FMA (no v_accvgpr_read_b32 drain).
-    """
-    if _USE_ASM_AGPR_MFMA_DOWN and atom.k == 128 and atom.dtype_in == "fp8e4m3":
-        return mfma_f8f6f4_agpr(b, a, bb, acc, hazard_nop=_ASM_MFMA_HAZARD_NOP)
-    return _emit_mfma(b, atom, a, bb, acc)
-
-
 # Group block along the contraction axis (= 4 fp8_16x16x32 atoms).
 GROUP_K = 128
+
 # fp8e4m3 saturating clamp magnitude.
 FP8_MAX = quant_max_abs("fp8e4m3")  # 448.0
 # pyisa dynamic-quant amax floor.
@@ -325,9 +184,13 @@ class FusedMegaKernelSpecFp8:
       legacy global->VGPR->MFMA path. (DTLA requires ``atoms_per_group==1``, i.e.
       ``gate_up_k==128``; with K=32 the DTLA path is auto-bypassed.)
     * ``sched_cadence`` (level 9, "iglp_opt(1) cadence"): per-loop scheduler
-      hint. ``None`` (default) defers to the ``ROCKE_FP8_SCHED`` env var
-      (default ``iglp1`` = best); set to ``"iglp1"`` / ``"none"`` / ``"sgb"`` to
-      pin the cadence on the spec (overrides the env for this build).
+      hint, one of ``"iglp1"`` (default, best) / ``"none"`` / ``"sgb"``.
+      ``iglp1`` emits ``b.iglp_opt(1)`` once at the top of the gate/up + down
+      K-loop bodies, so the post-RA scheduler imposes its canned MFMA/DS
+      interleave over each loop region; it is mutually exclusive with the
+      ``sched_group_barrier`` cadence, so ``sgb`` emits nothing here and places
+      its barriers inline next to each MFMA instead. ``none`` is the pre-level-9
+      baseline (no hint at all).
     """
 
     name: str
@@ -348,7 +211,138 @@ class FusedMegaKernelSpecFp8:
     gate_up_k: int = 128  # level 7 (K=128 hero atom); 32 = legacy baseline
     down_k: int = 128  # level 7 (down hero atom); 32 = legacy baseline
     use_dtla: bool = True  # level 8 (direct-to-LDS gate+up); False = global->VGPR
-    sched_cadence: str | None = None  # level 9; None defers to ROCKE_FP8_SCHED env
+    sched_cadence: str = "iglp1"  # level 9; "iglp1" | "none" | "sgb"
+    # Gate/up emitter selection. True (default, byte-identical) = the fused
+    # across-ni K-loop with DTLA staging. False = the legacy per-(mi, ni)
+    # K-loop (``_emit_fp8_gateup_group_gemm``), which loads weights
+    # global->VGPR exactly like the down GEMM does. The fused emitter carries
+    # a_next/gb_next[ni]/ub_next[ni] live across EVERY ni at once, which is why
+    # its non-DTLA form is intractable for the backend; the per-cell emitter
+    # keeps one cell's operands live and compiles fine on the hero atom (the
+    # down GEMM has always used that shape).
+    use_fused_kloop: bool = True
+    # DTLA prefetch depth: how many gate/up N-cells are staged ahead of the one
+    # being consumed. 2 (default, byte-identical) = the original ping-pong,
+    # which issues cell ni+1 and then immediately blocks on cell ni -- only
+    # ~one iteration of MFMA work covers an HBM round trip, so waves sit in
+    # s_waitcnt. Deeper costs 2*chunks*wave_size*16B of LDS per extra buffer.
+    dtla_depth: int = 2
+    # LDS row padding in BYTES for the Hidden staging buffers (0 = off,
+    # byte-identical). The fp8 Hidden row stride is ``tile_n`` bytes, and at
+    # tile_n=128 that is exactly the 32-bank x 4B span, so every row starts on
+    # bank 0 and the down GEMM's A-read (16 lanes, 16 distinct rows) serializes
+    # 16 ways. Padding shifts each row by ``lds_pad/4`` banks. Must stay a
+    # multiple of 16 to keep ds_read_b128 / 16B stores aligned, which caps the
+    # distinct-bank count at 8 (so 16 rows land 2-way rather than 16-way).
+    lds_pad: int = 0
+    # Windowed (no-LDS) gate/up path: how many ni cells share one sched_barrier.
+    # 1 = a barrier after every cell (tightest register bound, least freedom to
+    # interleave); larger groups give the scheduler a wider region to overlap
+    # loads with MFMAs at the cost of more live fragments.
+    window_group: int = 1
+    # Down GEMM: fuse all n cells of an mi row into one K-loop so the LDS A
+    # fragment is read once instead of per cell, and the W_down loads are
+    # prefetched in a rolling window across cells. False (default) keeps the
+    # byte-identical per-cell emitter.
+    down_fused_cells: bool = False
+    down_depth: int = 2
+    down_group: int = 1
+    # How the windowed paths fence their scheduling regions. "barrier" =
+    # sched_barrier(0), a hard fence: bounds registers tightly but also caps how
+    # many loads can be in flight to one region's worth. "sgb" = express the
+    # VMEM/MFMA interleave with sched_group_barrier instead, which constrains
+    # placement without fencing, so loads from later regions can still hoist.
+    window_sched: str = "barrier"
+    # Width (along inter) of ONE dynamic fp8 scale block for the INTERMEDIATE
+    # hidden tensor. This is entirely internal -- gate/up produces it and the
+    # down GEMM consumes it -- unlike the weight scale groups, which are fixed
+    # at GROUP_K=128 by the checkpoint. The fuse-quant invariant needs a whole
+    # hidden scale block to live inside one CTA's inter tile, so pinning this to
+    # 128 is what forces tile_n_inter >= 128 and caps the grid at 6 inter
+    # slices. Lowering it to 64 legalises tile_n_inter=64 and doubles the CTA
+    # count. Requires down_k <= hidden_group_k so a down atom never straddles
+    # two hidden scale blocks, and down_fused_cells (the per-cell down emitter
+    # still assumes 128).
+    hidden_group_k: int = GROUP_K
+    # Consume the weights from the coalesced tiled layout produced by
+    # ``swizzle_b_fp8_weights`` instead of natural (out_rows, K) row-major.
+    # Independently settable for the gate/up streams and the down stream so the
+    # two can be attributed separately. False (default) = byte-identical
+    # row-major addressing. The CALLER must upload weights already permuted --
+    # these flags only change how the kernel addresses them, so a mismatch is
+    # silently wrong rather than an error. Each swizzled stream needs the hero
+    # atom (see ``b_swizzle_supported``); the builder enforces that.
+    swizzle_gu: bool = False
+    swizzle_down: bool = False
+    #: Build-time upper bound on the intermediate dimension, used ONLY by
+    #: :func:`build_moe_split_down_fp8` to size its static LDS staging buffer.
+    #: The contraction extent itself stays runtime, so one binary serves any
+    #: I <= this. Ignored by the fused kernel.
+    split_inter_max: int = 768
+    #: Number of ``tile_n_down``-wide output tiles ONE split-down CTA walks,
+    #: trading grid width for in-CTA reuse of the staged intermediate. At 1
+    #: (default) H_out is purely a grid axis, so the h_out/tile_n_down CTAs of
+    #: a token block each re-stage the SAME [tile_m, I] intermediate into their
+    #: own LDS -- 16x redundant staging at qwen3 prefill. Raising it stages
+    #: once and loops, which also gives each warp that many times more MFMAs to
+    #: amortise the staging prologue over. Ignored by the fused kernel.
+    down_h_loop: int = 1
+    #: Software-pipeline the split-down K loop: issue group ``kg+1``'s W_down
+    #: loads before consuming ``kg``'s. The existing ``down_depth`` window runs
+    #: along N, which in this kernel is only 2 cells wide, so it cannot put
+    #: more than 2 loads in flight no matter what it is set to. Ignored by the
+    #: fused kernel, whose down half has a different N width and shares its
+    #: K loop with the gate/up epilogue.
+    down_pipeline_k: bool = False
+    #: Take the intermediate's fp8 scale as an INPUT (in ``InterScale``, which
+    #: stage 1 otherwise writes) instead of deriving it from the tile's own
+    #: amax. The dynamic form is a three-pass, barrier-separated epilogue --
+    #: SiLU to an f32 LDS scratch, a cross-lane and cross-warp amax, then a
+    #: re-read and convert -- because a scale that depends on the whole tile
+    #: cannot be applied until the whole tile exists. A known scale collapses
+    #: all of that into the SiLU pass: convert and store fp8 straight from the
+    #: accumulators. Costs the f32 scratch, the amax buffer, two of three
+    #: barriers and the entire third pass. Split gate/up only; the fused
+    #: kernel's stage 2 consumes the scratch in place, so it is untouched.
+    static_inter_scale: bool = False
+    #: Have the MFMAs accumulate in arch VGPRs rather than AGPRs
+    #: (``-amdgpu-mfma-vgpr-form``). The block-scale fold has to bring every
+    #: accumulator into the VALU each K group -- with GROUP_K == atom.k there
+    #: is exactly one MFMA per scale group, so the fold runs at MFMA frequency
+    #: -- and out of AGPRs that costs a ``v_accvgpr_read`` per value: 64 per
+    #: K-loop iteration in gate/up, 19% of the loop body. Accumulating in VGPRs
+    #: deletes them and, because the two files share one 512-register budget,
+    #: also drops gate/up from 280 registers to 202 (1 -> 2 waves/SIMD).
+    mfma_vgpr_form: bool = False
+    #: Stage the gate/up weight tile ONCE per CTA into LDS, shared by every
+    #: wave, instead of each wave streaming its own private copy global->VGPR.
+    #:
+    #: This is what makes a wide ``tile_m`` actually pay. ``warp_m`` splits M
+    #: across waves so the accumulator count per wave stays fixed, but with
+    #: private B every wave still fetches the whole weight tile, so the weight
+    #: traffic is per-WAVE and ``tile_m`` buys nothing -- measured: tile_m 16 ->
+    #: 64 left stage 1 unchanged. Sharing makes the traffic per-CTA, so
+    #: tile_m=64 cuts the gate/up weight stream ~4x (6.63 GB -> 1.66 GB at
+    #: T=4096). It is also how Triton reaches 8 waves/CU on this shape: its
+    #: 24 KB of LDS backs 4 waves (6 KB/wave) where ours backs 1.
+    #:
+    #: Uses ``global_load_lds`` for the staging DMA, so unlike Triton there is
+    #: no VGPR round trip and no ``ds_write`` at all -- only the read-back.
+    #: Requires ``atoms_per_group == 1`` (gate_up_k=128) so one staged tile
+    #: serves exactly one scale group, and ``n_warps`` to divide the tile's
+    #: n-cell count so the staging splits evenly.
+    coop_b_lds: bool = False
+    #: Overlay the epilogue's fp8 Hidden staging on the cooperative B tile,
+    #: which would buy 1 -> 2 workgroups/CU. OFF because it does not hold: the
+    #: two live ranges look disjoint (the B tile dies at the last K group, the
+    #: staging is written after it, with the K loop's trailing barrier as the
+    #: handoff) but overlaying them fails parity identically at every geometry
+    #: -- including tile_m=16, a single wave with no barriers at all -- so the
+    #: hazard is not cross-wave. The smem pool's own liveness packer also
+    #: declines to overlap them, which is consistent with a real interference
+    #: this builder's local view does not show. Kept as an opt-in probe rather
+    #: than a silent 2x-occupancy trap.
+    coop_alias: bool = False
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -357,6 +351,43 @@ class FusedMegaKernelSpecFp8:
                 "block_size",
                 self.warp_m * self.warp_n * self.wave_size,
             )
+        # ``sched_cadence`` used to be ``str | None``, where None meant "defer
+        # to the environment", whose default was iglp1. Now that the knob lives
+        # here, None would compare unequal to every cadence name and so emit no
+        # hint at all -- the level-9 speedup dropped on the floor, with a kernel
+        # that still builds and still computes the right answer. A caller
+        # asking for no hint spells it "none".
+        if self.sched_cadence not in _SCHED_CADENCES:
+            raise ValueError(
+                f"sched_cadence={self.sched_cadence!r} is not one of "
+                f"{sorted(_SCHED_CADENCES)}"
+                + (
+                    "; None used to mean the iglp1 default and now means no "
+                    "scheduler hint, so it must be spelled explicitly"
+                    if self.sched_cadence is None
+                    else ""
+                )
+            )
+        # The four ``mfmas_*`` properties below are floor divisions, so a warp
+        # grid that does not tile its block exactly does not fail -- it silently
+        # drops the remainder. tile_n_down=128 with warp_n=3 gives 2 atoms per
+        # warp, i.e. 96 of 128 output columns written and the rest left at
+        # whatever was there, which reads as a plausible-looking wrong answer
+        # rather than a crash. Reject it at construction instead.
+        for field, extent, per_warp, axis, warps in (
+            ("tile_m", self.tile_m, self.warp_tile_m, "warp_m", self.warp_m),
+            ("tile_n_inter", self.tile_n_inter, self.warp_tile_n, "warp_n",
+             self.warp_n),
+            ("tile_n_down", self.tile_n_down, self.warp_tile_n, "warp_n",
+             self.warp_n),
+        ):
+            if extent % (per_warp * warps):
+                covered = (extent // warps // per_warp) * per_warp * warps
+                raise ValueError(
+                    f"{field}={extent} is not a multiple of {axis}={warps} x "
+                    f"{per_warp}, so the warp grid would silently cover only "
+                    f"{covered} of it"
+                )
 
     # -- derived geometry helpers ----------------------------------------
 
@@ -453,7 +484,10 @@ def moe_fused_mega_fp8_persistent_grid(
 
 
 def moe_fused_mega_fp8_signature(
-    spec: FusedMegaKernelSpecFp8, *, persistent: bool = False
+    spec: FusedMegaKernelSpecFp8,
+    *,
+    persistent: bool = False,
+    split_gateup: bool = False,
 ):
     from ...helpers.spec import SignatureBuilder
 
@@ -493,6 +527,12 @@ def moe_fused_mega_fp8_signature(
         # Persistent ABI variant: appended AFTER ``tokens`` to match the
         # builder's b.param() append order (grid_x, total_work, P).
         sb = sb.scalar("grid_x", "i32").scalar("total_work", "i32").scalar("P", "i32")
+    if split_gateup:
+        # PARTIAL-FUSION stage 1: the requantized intermediate leaves in HBM
+        # instead of staying in LDS for a fused stage 2. Appended after
+        # ``tokens`` to match the builder's b.param() order. WDown/WDownScale/
+        # SortedWeights/Y stay in the ABI but go unread, which costs nothing.
+        sb = sb.ptr("Inter", "fp8e4m3").ptr("InterScale", "f32")
     return sb.build()
 
 
@@ -519,6 +559,8 @@ def _emit_fp8_gateup_group_gemm(
     stride_gate_scale: Value,
     stride_up_scale: Value,
     tag: str,
+    swizzle_b: bool,
+    wave_size: int,
 ) -> Tuple[Value, Value]:
     """Gate + up fp8 GEMM, returning ``(gate_dq, up_dq)`` per-lane f32 vectors.
 
@@ -549,7 +591,13 @@ def _emit_fp8_gateup_group_gemm(
 
     # Per-lane scale offsets vary along the K-group index ``kg`` only.
     a_row_scale_base = b.mul(m_row, stride_a_scale)
-    n_blk = b.div(n_col, c_group_k)
+    # Derive the scale block from the WAVE-UNIFORM tile base, not from n_col.
+    # atom.n divides GROUP_K, so [n_tile_base, n_tile_base + atom.n) never
+    # straddles a scale block and the two agree exactly -- but only this form
+    # is visibly uniform to the backend, which is what lets the block scale be
+    # fetched with s_load into an SGPR instead of burning a vector memory slot
+    # on a 4-byte broadcast per MFMA.
+    n_blk = b.div(n_tile_base, c_group_k)
 
     zero = atom.zero_acc(b)
     gate_zero = atom.zero_acc(b)
@@ -604,6 +652,8 @@ def _emit_fp8_gateup_group_gemm(
                 n_tile_base=n_tile_base,
                 k_tile_base=k_tile_base,
                 N=K,
+                swizzle=swizzle_b,
+                wave_size=wave_size,
             )
             ub_frag = _load_b_fp8(
                 b,
@@ -613,9 +663,11 @@ def _emit_fp8_gateup_group_gemm(
                 n_tile_base=n_tile_base,
                 k_tile_base=k_tile_base,
                 N=K,
+                swizzle=swizzle_b,
+                wave_size=wave_size,
             )
-            g_new = _emit_mfma(b, atom, a_frag, gb_frag, g_acc)
-            u_new = _emit_mfma(b, atom, a_frag, ub_frag, u_acc)
+            g_new = atom.emit(b, a_frag, gb_frag, g_acc)
+            u_new = atom.emit(b, a_frag, ub_frag, u_acc)
             b.scf_yield(g_new, u_new)
         group_gate = ginner.results[0]
         group_up = ginner.results[1]
@@ -648,8 +700,14 @@ def _emit_fp8_gateup_fused_kloop(
     stride_gate_scale: Value,
     stride_up_scale: Value,
     tag: str,
+    cadence: str,
+    prefetch_depth: int,
+    sched_group: int,
+    sched_mode: str,
+    swizzle_b: bool,
+    wave_size: int,
     dtla=None,
-    cadence: str | None = None,
+    coop_b=None,
 ):
     """Gate + up fp8 GEMM fused across ALL ni cells of one mi row.
 
@@ -685,9 +743,28 @@ def _emit_fp8_gateup_fused_kloop(
     m_row = b.add(m_tile_base, lane_decode.m_in_atom)
     a_row_scale_base = b.mul(m_row, stride_a_scale)
 
-    # Per-ni n_col / n_blk for the weight-scale index math.
+    # Per-ni n_col / n_blk for the weight-scale index math. The scale block
+    # comes off the WAVE-UNIFORM tile base (atom.n divides GROUP_K, so an atom
+    # never straddles a block); n_cols stays lane-varying for the weight data
+    # addresses. Only the uniform form lets these 4-byte block scales be
+    # fetched with s_load instead of a vector memory slot per MFMA.
     n_cols = [b.add(nb, lane_decode.n_in_atom) for nb in n_tile_bases]
-    n_blks = [b.div(nc, c_group_k) for nc in n_cols]
+    # One scale block per WARP, not per cell. The builder already requires a
+    # warp's whole N-extent to sit inside one GROUP_K block (the fuse-quant
+    # invariant), so every cell's n_tile_base floor-divides to the same block.
+    # Deriving it per cell instead made the backend emit nni separate s_load
+    # chains -- 16 s_load_dword plus ~80 SALU of 64-bit address math per K
+    # group in the shipped gate/up loop, ~36% of the body -- to fetch two
+    # distinct f32 values eight times each. It cannot CSE them itself because
+    # proving (base + 16) // 128 == base // 128 needs the alignment fact.
+    # Divisibility, not just "fits": it is what makes the warp's base a
+    # multiple of its own extent and therefore unable to straddle a block.
+    shared_blk = GROUP_K % (nni * atom.n) == 0
+    n_blks = (
+        [b.div(n_tile_bases[0], c_group_k)] * nni
+        if shared_blk
+        else [b.div(nb, c_group_k) for nb in n_tile_bases]
+    )
 
     # Outer iter-args: gate[0..nni), up[0..nni).
     zero = atom.zero_acc(b)
@@ -701,18 +778,23 @@ def _emit_fp8_gateup_fused_kloop(
     outer = b.scf_for_iter(
         b.const_i32(0), num_groups, b.const_i32(1), iter_args, iv_name=f"kg_{tag}"
     )
+    # The windowed global->VGPR path drives its own schedule with explicit
+    # sched_barriers, and iglp_opt "owns the loop schedule" -- letting it run
+    # here would undo the window and hoist every cell's loads back to the top.
+    # Scoped to THIS loop so the down GEMM keeps its iglp cadence.
+    _use_window = dtla is None and atoms_per_group == 1
     with outer as (kg, outs):
-        _emit_loop_cadence_hint(b, cadence)
+        _emit_loop_cadence_hint(b, "none" if _use_window else cadence)
         gate_outer = list(outs[:nni])
         up_outer = list(outs[nni:])
 
         # Per-group scales (hoisted alongside the operand prefetch).
+        gate_ab = []
+        up_ab = []
         a_scale_off = b.add(a_row_scale_base, kg)
         a_scale_v = b.global_load_f32(AScale, a_scale_off)
         kg_gate = b.mul(kg, stride_gate_scale)
         kg_up = b.mul(kg, stride_up_scale)
-        gate_ab = []
-        up_ab = []
         for ni in range(nni):
             gsc = b.global_load_f32(WGateScale, b.add(kg_gate, n_blks[ni]))
             usc = b.global_load_f32(WUpScale, b.add(kg_up, n_blks[ni]))
@@ -743,6 +825,8 @@ def _emit_fp8_gateup_fused_kloop(
                 n_tile_base=n_tile_bases[ni],
                 k_tile_base=kbase,
                 N=K,
+                swizzle=swizzle_b,
+                wave_size=wave_size,
             )
 
         def _ub_at(ni, kk):
@@ -755,13 +839,77 @@ def _emit_fp8_gateup_fused_kloop(
                 n_tile_base=n_tile_bases[ni],
                 k_tile_base=kbase,
                 N=K,
+                swizzle=swizzle_b,
+                wave_size=wave_size,
             )
 
         # Fresh per-group accumulators, one gate + one up per ni.
         g_acc = [zero] * nni
         u_acc = [zero] * nni
 
-        if dtla is not None and atoms_per_group == 1:
+        if coop_b is not None:
+            # ---- cooperative CTA-shared B tile ------------------------------
+            # Every wave in the CTA needs the SAME gate/up weight tile for this
+            # K group (B does not depend on M), so the CTA stages it once and
+            # all waves read it back. The A activation stays private per wave:
+            # each wave owns its own rows, A is ~1/4 of the CTA's bytes, and
+            # keeping it out of LDS saves both budget and a barrier.
+            a_cur = _load_a_fp8(
+                b,
+                A=A,
+                atom=atom,
+                lane_decode=lane_decode,
+                m_tile_base=m_tile_base,
+                k_tile_base=k_group_base,
+                K=K,
+            )
+            for half, Bptr in ((0, WGate), (1, WUp)):
+                for j, n_base in enumerate(coop_b["stage_n_bases"]):
+                    _dtla_stage_b_fp8(
+                        b,
+                        B=Bptr,
+                        atom=atom,
+                        lane_decode=lane_decode,
+                        n_tile_base=n_base,
+                        k_tile_base=k_group_base,
+                        N=K,
+                        stage_view=coop_b["view"],
+                        slot=j,
+                        wave_lds_base=coop_b["stage_bases"][half],
+                        lane=coop_b["lane"],
+                        wave_size=coop_b["wave_size"],
+                        swizzle=swizzle_b,
+                    )
+            # b.sync() drains vmcnt+lgkmcnt BEFORE the barrier, which is what
+            # makes another wave's DMA visible: s_barrier alone orders execution,
+            # not memory.
+            b.sync()
+            for ni in range(nni):
+                gb = _dtla_read_b_fp8(
+                    b,
+                    atom=atom,
+                    stage_view=coop_b["view"],
+                    slot=ni,
+                    lane=coop_b["lane"],
+                    warp_row_base=coop_b["read_row_base"],
+                    wave_size=coop_b["wave_size"],
+                )
+                ub = _dtla_read_b_fp8(
+                    b,
+                    atom=atom,
+                    stage_view=coop_b["view"],
+                    slot=coop_b["n_cells_all"] + ni,
+                    lane=coop_b["lane"],
+                    warp_row_base=coop_b["read_row_base"],
+                    wave_size=coop_b["wave_size"],
+                )
+                g_acc[ni] = atom.emit(b, a_cur, gb, g_acc[ni])
+                u_acc[ni] = atom.emit(b, a_cur, ub, u_acc[ni])
+            # Second barrier: the tile is single-buffered (a double buffer would
+            # need 64 KiB and halve occupancy), so no wave may start the next
+            # group's DMA until every wave has finished reading this one.
+            b.sync()
+        elif dtla is not None and atoms_per_group == 1:
             # ---- DTLA path (GOAL 1): direct-to-LDS gate+up B operands -------
             # The A activation stays a cheap global->VGPR load (tiny, reused).
             # The dominant WGate/WUp weight streams go global->LDS->MFMA via
@@ -770,35 +918,15 @@ def _emit_fp8_gateup_fused_kloop(
             # vmcnt drain + ds_read feed the MFMA. Per-wave LDS base + CACHE_ALL
             # are threaded via the ``dtla`` bundle.
             kbase0 = k_group_base
-            # X (A) operand: either the cheap global->VGPR load (default) or,
-            # under _USE_X_DTLA, staged mem->LDS first (FIFO-earliest, so it is
-            # complete by the first B drain) then ds_read -- pyisa's X form.
-            a_cur = None
-            if _USE_X_DTLA and dtla.get("x_slot") is not None:
-                _xdtla_stage_a_fp8(
-                    b,
-                    A=A,
-                    atom=atom,
-                    lane_decode=lane_decode,
-                    m_tile_base=m_tile_base,
-                    k_tile_base=kbase0,
-                    K=K,
-                    stage_view=dtla["view"],
-                    slot=dtla["x_slot"],
-                    wave_lds_base=dtla["base"],
-                    lane=dtla["lane"],
-                    wave_size=dtla["wave_size"],
-                )
-            else:
-                a_cur = _load_a_fp8(
-                    b,
-                    A=A,
-                    atom=atom,
-                    lane_decode=lane_decode,
-                    m_tile_base=m_tile_base,
-                    k_tile_base=kbase0,
-                    K=K,
-                )
+            a_cur = _load_a_fp8(
+                b,
+                A=A,
+                atom=atom,
+                lane_decode=lane_decode,
+                m_tile_base=m_tile_base,
+                k_tile_base=kbase0,
+                K=K,
+            )
 
             def _stage(ni, slot_pair):
                 # slot_pair 0/1 -> gate slot 2*pair, up slot 2*pair+1.
@@ -815,6 +943,7 @@ def _emit_fp8_gateup_fused_kloop(
                     wave_lds_base=dtla["base"],
                     lane=dtla["lane"],
                     wave_size=dtla["wave_size"],
+                    swizzle=swizzle_b,
                 )
                 _dtla_stage_b_fp8(
                     b,
@@ -829,6 +958,7 @@ def _emit_fp8_gateup_fused_kloop(
                     wave_lds_base=dtla["base"],
                     lane=dtla["lane"],
                     wave_size=dtla["wave_size"],
+                    swizzle=swizzle_b,
                 )
 
             def _read(slot_pair):
@@ -852,93 +982,74 @@ def _emit_fp8_gateup_fused_kloop(
                 )
                 return g, u
 
-            # Prime: stage ni=0 into ping slot 0.
-            _stage(0, 0)
+            # Prime the pipeline: stage the first ``depth-1`` cells so that when
+            # the loop blocks on cell ni there are already ``depth-1`` further
+            # cells in flight behind it. depth=2 reproduces the original
+            # single-cell prime exactly.
+            depth = max(2, int(dtla.get("depth", 2)))
+            for _j in range(min(depth - 1, nni)):
+                _stage(_j, _j % depth)
             # DMAs per _stage call: gate + up, each ceil(b_per_lane/16) chunks.
             chunks_per_frag = (atom.b_per_lane + DTLA_CHUNK - 1) // DTLA_CHUNK
             dmas_per_stage = 2 * chunks_per_frag
-            if _USE_MFMA_CLUSTER:
-                # ---- NUCLEAR cluster path: all 2*nni gate/up MFMAs of this -----
-                # K-group emitted as ONE inline-asm block (AGPR srcA/srcB +
-                # VGPR acc), the schedule living INSIDE the asm (pyisa's
-                # cl_gemm0_XmulG_gemm1_XmulU back-to-back MFMA stream). The
-                # per-op route is N sideeffect fences (the +25-31% regression);
-                # this is ONE node, so the machine scheduler can still hoist the
-                # NEXT group's DMAs around it. DMAs/reads stay DSL-issued: stage
-                # all ni first (rolling vmcnt overlap), read all fragments, then
-                # fire the single cluster. Order matches pyisa wave-pair
-                # interleave (gate0,up0,gate1,up1,...).
-                if a_cur is None:
-                    a_cur = _xdtla_read_a_fp8(
-                        b,
-                        atom=atom,
-                        stage_view=dtla["view"],
-                        slot=dtla["x_slot"],
-                        lane=dtla["lane"],
-                        warp_row_base=dtla["warp_row_base"],
-                        wave_size=dtla["wave_size"],
-                    )
-                # Issue every remaining stage up front so all weight DMAs are in
-                # flight together (FIFO), then drain fully before the read-back.
-                # Only 2 ping-pong slots exist, so stage in pairs and drain to
-                # the still-outstanding count to keep the prefetch in flight.
-                gb_all = [None] * nni
-                ub_all = [None] * nni
-                for ni in range(nni):
-                    if ni + 1 < nni:
-                        _stage(ni + 1, (ni + 1) % 2)
-                        b.s_waitcnt(vmcnt=dmas_per_stage)
+            for ni in range(nni):
+                pair = ni % depth
+                # Issue cell ni+depth-1's DMA BEFORE consuming this cell, so
+                # ``depth-1`` cells stay in flight across the wait. Drain only
+                # DOWN TO those outstanding DMAs -- vmcnt(0) here would
+                # serialize and kill the overlap (the DTLA-alone regression
+                # trap). VMEM completes ~FIFO, so cell ni has landed once
+                # only the cells behind it remain.
+                nxt = ni + depth - 1
+                if nxt < nni:
+                    _stage(nxt, nxt % depth)
+                ahead = min(depth - 1, nni - 1 - ni)
+                b.s_waitcnt(vmcnt=ahead * dmas_per_stage)
+                gb, ub = _read(pair)
+                g_acc[ni] = atom.emit(b, a_cur, gb, g_acc[ni])
+                u_acc[ni] = atom.emit(b, a_cur, ub, u_acc[ni])
+                _emit_sgb_gateup_dtla(b, 2, cadence)
+        elif atoms_per_group == 1:
+            # ---- windowed global->VGPR->MFMA path (no LDS) ------------------
+            # The hero atom leaves atoms_per_group == 1, so the loop below
+            # degenerates to a single trip and the legacy form ends up issuing
+            # ALL 2*nni weight fragments before the first MFMA -- 128 VGPRs of
+            # weights at nni=8, which is what makes the backend's allocator
+            # blow up. Instead roll a window of ``prefetch_depth`` cells: cell
+            # ni+depth-1's loads are issued before cell ni's MFMAs consume
+            # theirs, so at most ``depth`` gate/up pairs are live at once and
+            # the loads stay in flight under the MFMAs.
+            #
+            # Unlike DTLA there is no manual vmcnt bookkeeping: the fragments
+            # land in VGPRs, so the backend derives an exact per-register wait
+            # and only blocks on the fragment actually being consumed.
+            depth = max(2, int(prefetch_depth))
+            window_group = max(1, int(sched_group))
+            sched_mode = str(sched_mode)
+            a_cur = _a_at(0)
+            win: dict[int, tuple] = {}
+            for _j in range(min(depth, nni)):
+                win[_j] = (_gb_at(_j, 0), _ub_at(_j, 0))
+            for ni in range(nni):
+                nxt = ni + depth
+                if nxt < nni:
+                    win[nxt] = (_gb_at(nxt, 0), _ub_at(nxt, 0))
+                gb, ub = win.pop(ni)
+                g_acc[ni] = atom.emit(b, a_cur, gb, g_acc[ni])
+                u_acc[ni] = atom.emit(b, a_cur, ub, u_acc[ni])
+                # Pin the [issue ni+depth-1][consume ni] grouping. Without this
+                # the pre-RA scheduler hoists every cell's loads to the top of
+                # the block to maximise ILP, which recreates the all-cells-live
+                # register pressure the window exists to bound. The barrier only
+                # constrains instruction motion, so the issued loads still stay
+                # in flight across it.
+                if (ni + 1) % window_group == 0 or ni + 1 == nni:
+                    if sched_mode == "sgb":
+                        # 2 chunks x (gate, up) VMEM reads and 2 MFMAs per cell.
+                        b.sched_group_barrier(_SGB_VMEM_READ, 4 * window_group, 0)
+                        b.sched_group_barrier(_SGB_MFMA, 2 * window_group, 0)
                     else:
-                        b.s_waitcnt(vmcnt=0)
-                    gb_all[ni], ub_all[ni] = _read(ni % 2)
-                accs = []
-                srcs = []
-                for ni in range(nni):
-                    accs.append(g_acc[ni])
-                    srcs.append((a_cur, gb_all[ni]))
-                    accs.append(u_acc[ni])
-                    srcs.append((a_cur, ub_all[ni]))
-                outs = mfma_f8f6f4_agpr_cluster(
-                    b,
-                    accs,
-                    srcs,
-                    tail_nop=_ASM_MFMA_HAZARD_NOP,
-                )
-                for ni in range(nni):
-                    g_acc[ni] = outs[2 * ni]
-                    u_acc[ni] = outs[2 * ni + 1]
-            else:
-                for ni in range(nni):
-                    pair = ni % 2
-                    # Issue next ni's DMA into the OTHER slot BEFORE consuming
-                    # this ni's MFMAs (in flight under the MFMA). Drain only DOWN
-                    # TO the next stage's outstanding DMA count so the prefetch
-                    # stays in flight (vmcnt(0) here would serialize and kill the
-                    # overlap -- the regression DTLA-alone trap). VMEM completes
-                    # ~FIFO so this ni's stage is done once only the next
-                    # stage's DMAs remain.
-                    if ni + 1 < nni:
-                        _stage(ni + 1, (ni + 1) % 2)
-                        b.s_waitcnt(vmcnt=dmas_per_stage)
-                    else:
-                        b.s_waitcnt(vmcnt=0)
-                    if a_cur is None:
-                        # X-DTLA: A's DMA was issued FIRST (FIFO-earliest) and is
-                        # complete after the first partial drain above. Read it
-                        # once from LDS and reuse across every ni (ds_read).
-                        a_cur = _xdtla_read_a_fp8(
-                            b,
-                            atom=atom,
-                            stage_view=dtla["view"],
-                            slot=dtla["x_slot"],
-                            lane=dtla["lane"],
-                            warp_row_base=dtla["warp_row_base"],
-                            wave_size=dtla["wave_size"],
-                        )
-                    gb, ub = _read(pair)
-                    g_acc[ni] = _emit_mfma(b, atom, a_cur, gb, g_acc[ni])
-                    u_acc[ni] = _emit_mfma(b, atom, a_cur, ub, u_acc[ni])
-                    _emit_sgb_gateup_dtla(b, n_mfma=2, cadence=cadence)
+                        b.sched_barrier(0)
         else:
             # ---- legacy global->VGPR->MFMA path ----------------------------
             # Prefetch atom 0 operands (A shared + all ni B fragments).
@@ -958,8 +1069,8 @@ def _emit_fp8_gateup_fused_kloop(
                     if not last:
                         gb_next_ni = _gb_at(ni, kk + 1)
                         ub_next_ni = _ub_at(ni, kk + 1)
-                    g_acc[ni] = _emit_mfma(b, atom, a_cur, gb_cur[ni], g_acc[ni])
-                    u_acc[ni] = _emit_mfma(b, atom, a_cur, ub_cur[ni], u_acc[ni])
+                    g_acc[ni] = atom.emit(b, a_cur, gb_cur[ni], g_acc[ni])
+                    u_acc[ni] = atom.emit(b, a_cur, ub_cur[ni], u_acc[ni])
                     if not last:
                         gb_cur[ni] = gb_next_ni
                         ub_cur[ni] = ub_next_ni
@@ -1017,14 +1128,150 @@ def _load_a_fp8(
     return _global_load_fp8_vec(b, A, a_addr, atom.a_per_lane)
 
 
+# 16-byte VMEM payload cap (== global_load_dwordx4 / global_load_lds_dwordx4
+# on gfx950). Both the plain B load and the direct-to-LDS DMA split their
+# per-lane fragment into chunks of this width.
+VMEM_CHUNK_BYTES = 16
+
+
+# ---------------------------------------------------------------------------
+# B (weight) FRAGMENT SWIZZLE
+# ---------------------------------------------------------------------------
+#
+# In the natural (out_rows, K) row-major layout the 64 lanes of one B fragment
+# read ``atom.n`` (=16) DISJOINT runs of ``atom.k`` (=128) bytes, one per output
+# row, separated by the full row stride K (2048B for gate/up). Each 16-byte
+# chunk instruction therefore touches 16 distinct cache lines instead of the 8
+# a fully coalesced 64x16B access would, and both chunks of the fragment touch
+# the same 16 lines -- 32 line-touches per fragment against a possible 16. The
+# kernel is memory bound on the L1 (TCP) tag pipe rather than on HBM bytes, so
+# that 2x in tag-pipe work is paid in full.
+#
+# The fix is to store the weights in the order the lanes consume them. A
+# swizzle tile is exactly one wave's fragment -- ``atom.n`` rows x ``atom.k``
+# bytes == ``wave_size * atom.b_per_lane`` bytes -- laid out so that chunk ``c``
+# of lane ``L`` lives at tile offset ``(c*wave_size + L) * 16``. Then a chunk
+# instruction reads ``wave_size * 16`` == 1024 CONTIGUOUS bytes (8 cache lines)
+# and the whole fragment is one contiguous 2048-byte run.
+#
+# Tiles are ordered row-block-major, ``tile_idx = (n/atom.n) * (K/atom.k) +
+# (k/atom.k)``, which keeps the K-loop's consecutive iterations adjacent in
+# memory. The resulting base address is WAVE-UNIFORM::
+#
+#     tile_base = n_tile_base * K + k_tile_base * atom.n
+#
+# so the only lane-varying term left is ``lane * 16``.
+#
+# Nothing outside this kernel consumes the weight buffers, so the layout is
+# free to change; :func:`swizzle_b_fp8_weights` is the host-side permutation
+# that produces it and is the single source of truth paired with
+# :func:`_load_b_fp8_swizzled` below.
+
+
+def b_swizzle_tile_bytes(atom: MfmaAtom) -> int:
+    """Bytes in one swizzle tile (== one wave's B fragment)."""
+    return atom.n * atom.k
+
+
+def b_swizzle_supported(atom: MfmaAtom, wave_size: int = 64) -> bool:
+    """Whether ``atom``'s B fragment maps onto the swizzle tiling.
+
+    Requires the fragment to be an exact wave-sized cover of the tile and the
+    per-lane fragment to be a whole number of 16-byte chunks. True for the
+    fp8 16x16x128 hero atom (16*128 == 64*32, 32 == 2*16); false for the
+    legacy 16x16x32 atom, whose 8-byte fragment is narrower than a chunk.
+    """
+    return (
+        atom.b_per_lane % VMEM_CHUNK_BYTES == 0
+        and atom.n * atom.k == wave_size * atom.b_per_lane
+    )
+
+
+def swizzle_b_fp8_weights(w, *, atom_n: int = 16, atom_k: int = 128, wave_size: int = 64):
+    """Permute a stack of fp8 weights into the layout described above.
+
+    ``w`` is ``(E, out_rows, K)`` uint8/fp8 with ``out_rows % atom_n == 0`` and
+    ``K % atom_k == 0``. Returns a C-contiguous array of the SAME shape and
+    size -- only the byte order within each expert changes, so every stride the
+    kernel signature carries stays valid.
+
+    The inverse of the kernel's address math: byte ``j`` of chunk ``c`` of lane
+    ``L`` in the tile at ``(n_tile, k_tile)`` must hold
+    ``w[e, n_tile*atom_n + L % atom_n, k_tile*atom_k + (L // atom_n)*per_lane
+    + c*16 + j]``.
+    """
+    import numpy as np
+
+    e, rows, k = w.shape
+    if rows % atom_n or k % atom_k:
+        raise ValueError(
+            f"weight {w.shape} not tileable by ({atom_n}, {atom_k}) for the B swizzle"
+        )
+    per_lane = atom_n * atom_k // wave_size
+    k_blks = wave_size // atom_n  # distinct k_blk values across the wave
+    chunks = per_lane // VMEM_CHUNK_BYTES
+    if per_lane % VMEM_CHUNK_BYTES or k_blks * per_lane != atom_k:
+        raise ValueError(f"atom ({atom_n}, {atom_k}) does not map onto a {wave_size}-lane swizzle tile")
+
+    t = w.reshape(e, rows // atom_n, atom_n, k // atom_k, k_blks, chunks, VMEM_CHUNK_BYTES)
+    #        axes: 0=E  1=n_tile          2=row  3=k_tile      4=k_blk  5=chunk  6=byte
+    # Tile-internal order must be (chunk, k_blk, row, byte) so that position
+    # ``c*wave_size + (k_blk*atom_n + row)`` is at offset ``pos*16``.
+    t = t.transpose(0, 1, 3, 5, 4, 2, 6)
+    return np.ascontiguousarray(t).reshape(e, rows, k)
+
+
+def _load_b_fp8_swizzled(
+    b: IRBuilder, *, B, atom, lane_decode, n_tile_base, k_tile_base, N, wave_size: int
+) -> Value:
+    """Fully coalesced per-lane fp8 B load from the swizzled weight layout.
+
+    Emits the same ``b_per_lane // 16`` ``global_load_dwordx4`` as the row-major
+    form and returns a bit-identical fragment, but each one reads
+    ``wave_size * 16`` contiguous bytes instead of ``atom.n`` scattered runs.
+    """
+    tile_base = b.add(b.mul(n_tile_base, N), b.mul(k_tile_base, b.const_i32(atom.n)))
+    base = b.add(tile_base, b.mul(lane_decode.lane, b.const_i32(VMEM_CHUNK_BYTES)))
+    block = wave_size * VMEM_CHUNK_BYTES
+    acc = None
+    for c in range(atom.b_per_lane // VMEM_CHUNK_BYTES):
+        addr = base if c == 0 else b.add(base, b.const_i32(c * block))
+        v = b.global_load_vN(B, addr, FP8E4M3, VMEM_CHUNK_BYTES)
+        acc = v if acc is None else b.vec_concat(acc, v)
+    return acc
+
+
 def _load_b_fp8(
-    b: IRBuilder, *, B, atom, lane_decode, n_tile_base, k_tile_base, N
+    b: IRBuilder,
+    *,
+    B,
+    atom,
+    lane_decode,
+    n_tile_base,
+    k_tile_base,
+    N,
+    swizzle: bool,
+    wave_size: int,
 ) -> Value:
     """Per-lane fp8 B load for row-major (K, N) -- col-strided scalar loads.
 
     ``N`` is the weight's K extent (the matrix is stored (out, K) row-major;
     B[k, n] address = (n_tile_base + n_in_atom) * K + (k_base + j)).
+
+    With ``swizzle`` the weights are instead in the tiled layout produced by
+    :func:`swizzle_b_fp8_weights` and the load becomes fully coalesced.
     """
+    if swizzle:
+        return _load_b_fp8_swizzled(
+            b,
+            B=B,
+            atom=atom,
+            lane_decode=lane_decode,
+            n_tile_base=n_tile_base,
+            k_tile_base=k_tile_base,
+            N=N,
+            wave_size=wave_size,
+        )
     n_col = b.add(n_tile_base, lane_decode.n_in_atom)
     k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.b_per_lane))
     k_base = b.add(k_tile_base, k_lane_start)
@@ -1066,7 +1313,7 @@ def _load_b_fp8(
 # MFMA is still reading. CACHE_ALL keeps the reused weights resident in L2.
 
 # 16-byte direct-to-LDS payload cap (== global_load_lds_dwordx4 on gfx950).
-DTLA_CHUNK = 16
+DTLA_CHUNK = VMEM_CHUNK_BYTES
 
 
 def _dtla_stage_b_fp8(
@@ -1083,6 +1330,7 @@ def _dtla_stage_b_fp8(
     wave_lds_base: Value,
     lane: Value,
     wave_size: int,
+    swizzle: bool = False,
 ) -> None:
     """Issue the direct-to-LDS DMA of one lane's ``b_per_lane`` fp8 weight bytes.
 
@@ -1092,21 +1340,35 @@ def _dtla_stage_b_fp8(
     ``slot_base + c*wave_size*16 + L*16`` (the destination is wave-uniform; the
     per-lane spread is implicit). The DMA completes on the VMEM counter; the
     caller drains ``s_waitcnt(vmcnt=0)`` before the read-back.
-    """
-    n_col = b.add(n_tile_base, lane_decode.n_in_atom)
-    k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.b_per_lane))
-    k_base = b.add(k_tile_base, k_lane_start)
-    row_base = b.mul(n_col, N)
-    src_elem = b.add(row_base, k_base)  # per-lane element (== byte) source offset
 
+    Under ``swizzle`` the source is the tiled layout of
+    :func:`swizzle_b_fp8_weights`, whose tile-internal order was chosen to be
+    exactly this lane-block spread -- so chunk ``c``'s 64 source addresses are
+    the ``wave_size*16`` contiguous bytes at ``tile_base + c*wave_size*16``, and
+    the bytes landing in LDS (hence :func:`_dtla_read_b_fp8`) are unchanged.
+    """
     frag_bytes = atom.b_per_lane  # fp8 == 1 byte/elem
     chunks = (frag_bytes + DTLA_CHUNK - 1) // DTLA_CHUNK
     block_bytes = wave_size * DTLA_CHUNK  # one DMA's lane-block footprint
     slot_base_off = slot * chunks * block_bytes
 
+    if swizzle:
+        tile_base = b.add(
+            b.mul(n_tile_base, N), b.mul(k_tile_base, b.const_i32(atom.n))
+        )
+        src_elem = b.add(tile_base, b.mul(lane_decode.lane, b.const_i32(DTLA_CHUNK)))
+        src_stride = block_bytes
+    else:
+        n_col = b.add(n_tile_base, lane_decode.n_in_atom)
+        k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.b_per_lane))
+        k_base = b.add(k_tile_base, k_lane_start)
+        row_base = b.mul(n_col, N)
+        src_elem = b.add(row_base, k_base)  # per-lane element (== byte) source offset
+        src_stride = DTLA_CHUNK
+
     for c in range(chunks):
         chunk = min(DTLA_CHUNK, frag_bytes - c * DTLA_CHUNK)
-        src = src_elem if c == 0 else b.add(src_elem, b.const_i32(c * DTLA_CHUNK))
+        src = src_elem if c == 0 else b.add(src_elem, b.const_i32(c * src_stride))
         # WAVE-UNIFORM destination for chunk c (no per-lane term -- HW spreads).
         dst = b.smem_ptr_add(
             wave_lds_base, b.const_i64(slot_base_off + c * block_bytes)
@@ -1132,77 +1394,6 @@ def _dtla_read_b_fp8(
     re-form the full ``b_per_lane`` fragment -- bit-identical to the VGPR load.
     """
     frag = atom.b_per_lane
-    chunks = (frag + DTLA_CHUNK - 1) // DTLA_CHUNK
-    acc = None
-    for c in range(chunks):
-        chunk = min(DTLA_CHUNK, frag - c * DTLA_CHUNK)
-        row = b.add(
-            warp_row_base,
-            b.add(b.const_i32((slot * chunks + c) * wave_size), lane),
-        )
-        v = b.smem_load_vN(stage_view.base, row, b.const_i32(0), dtype=FP8E4M3, n=chunk)
-        acc = v if acc is None else b.vec_concat(acc, v)
-    return acc
-
-
-# ---------------------------------------------------------------------------
-# X (A activation) direct-to-LDS staging for the gate+up GEMM (NUCLEAR X stage)
-# ---------------------------------------------------------------------------
-#
-# Mirrors _dtla_stage_b_fp8 / _dtla_read_b_fp8 but for the A operand layout
-# (row-major (M, K), K contiguous). The lane streams its ``a_per_lane`` fp8
-# bytes from A[m_row, k_base + j] via ``global_load_lds`` (== pyisa's
-# ``buffer_load_dwordx4 ... lds`` for X) and reads them back with ds_read --
-# the X mem->LDS + ds_read reshape pyisa uses, instead of global->VGPR.
-
-
-def _xdtla_stage_a_fp8(
-    b: IRBuilder,
-    *,
-    A: Value,
-    atom: MfmaAtom,
-    lane_decode,
-    m_tile_base: Value,
-    k_tile_base: Value,
-    K: Value,
-    stage_view,
-    slot: int,
-    wave_lds_base: Value,
-    lane: Value,
-    wave_size: int,
-) -> None:
-    """Issue the direct-to-LDS DMA of one lane's ``a_per_lane`` fp8 X bytes."""
-    m_row = b.add(m_tile_base, lane_decode.m_in_atom)
-    k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.a_per_lane))
-    k_base = b.add(k_tile_base, k_lane_start)
-    row_base = b.mul(m_row, K)
-    src_elem = b.add(row_base, k_base)
-
-    frag_bytes = atom.a_per_lane
-    chunks = (frag_bytes + DTLA_CHUNK - 1) // DTLA_CHUNK
-    block_bytes = wave_size * DTLA_CHUNK
-    slot_base_off = slot * chunks * block_bytes
-    for c in range(chunks):
-        chunk = min(DTLA_CHUNK, frag_bytes - c * DTLA_CHUNK)
-        src = src_elem if c == 0 else b.add(src_elem, b.const_i32(c * DTLA_CHUNK))
-        dst = b.smem_ptr_add(
-            wave_lds_base, b.const_i64(slot_base_off + c * block_bytes)
-        )
-        b.global_load_lds(A, src, dst, chunk, CACHE_ALL)
-
-
-def _xdtla_read_a_fp8(
-    b: IRBuilder,
-    *,
-    atom: MfmaAtom,
-    stage_view,
-    slot: int,
-    lane: Value,
-    warp_row_base: Value,
-    wave_size: int,
-) -> Value:
-    """Read back a lane's fp8 A fragment staged by :func:`_xdtla_stage_a_fp8`."""
-    frag = atom.a_per_lane
     chunks = (frag + DTLA_CHUNK - 1) // DTLA_CHUNK
     acc = None
     for c in range(chunks):
@@ -1271,7 +1462,9 @@ def _emit_fp8_down_group_gemm(
     stride_down_scale: Value,
     m_row_base: Value,
     tag: str,
-    cadence: str | None = None,
+    cadence: str,
+    swizzle_b: bool,
+    wave_size: int,
 ) -> Value:
     """Down fp8 GEMM for one warp-atom output cell -> per-lane f32 vector.
 
@@ -1301,7 +1494,9 @@ def _emit_fp8_down_group_gemm(
     atoms_per_group = GROUP_K // atom.k  # 4
 
     n_col = b.add(n_tile_base, lane_decode.n_in_atom)
-    h_out_blk = b.div(n_col, c_group_k)
+    # Wave-uniform scale block (see the gate/up emitter): atom.n divides
+    # GROUP_K, so this equals n_col // GROUP_K but stays scalarisable.
+    h_out_blk = b.div(n_tile_base, c_group_k)
     # CORRECTNESS FIX: the down-GEMM A operand row must follow the per-mi atom
     # m-base (m_row_base = down_warp_m_off + mi*atom.m), not a hardcoded 0.
     # HiddenScale is row-uniform-within-block so this term is harmless for the
@@ -1360,6 +1555,8 @@ def _emit_fp8_down_group_gemm(
                 n_tile_base=n_tile_base,
                 k_tile_base=b.add(global_k_group, b.mul(b.const_i32(kk_idx), c_atom_k)),
                 N=inter_full,
+                swizzle=swizzle_b,
+                wave_size=wave_size,
             )
 
         def _load_a_at(kk_idx):
@@ -1380,19 +1577,241 @@ def _emit_fp8_down_group_gemm(
             # Issue the NEXT atom's W_down load (in flight during the MFMA).
             if kk + 1 < atoms_per_group:
                 b_next = _load_b_at(kk + 1)
-            d_new = _emit_mfma_down(b, atom, a_frag, b_cur, group_acc)
+            d_new = atom.emit(b, a_frag, b_cur, group_acc)
             group_acc = d_new
             if kk + 1 < atoms_per_group:
                 b_cur = b_next
 
-        # D5 sgb: place the next-group W_down VMEM under this group's MFMA(s).
-        _emit_sgb_down_group(b, n_mfma=atoms_per_group, cadence=cadence)
+        # sgb cadence: place the next-group W_down VMEM under this group's MFMA(s).
+        _emit_sgb_down_group(b, atoms_per_group, cadence)
 
         scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
         down_outer_new = b.vector_fma(group_acc, scale_vec, down_outer)
         b.scf_yield(down_outer_new)
 
     return outer.results[0]
+
+
+def _emit_fp8_down_fused_cells(
+    b: IRBuilder,
+    *,
+    a_view,
+    WDown: Value,
+    WDownScale: Value,
+    atom: MfmaAtom,
+    lane_decode,
+    n_tile_bases,
+    scale_view,
+    inter_slice: int,
+    inter_full: Value,
+    inter_col_base: Value,
+    stride_down_scale: Value,
+    m_row_base: Value,
+    tag: str,
+    cadence: str,
+    prefetch_depth: int,
+    sched_group: int,
+    sched_mode: str,
+    hidden_group_k: int,
+    swizzle_b: bool,
+    wave_size: int,
+    pipeline_k: bool = False,
+    scale_row: Value | None = None,
+):
+    """Down fp8 GEMM fused across ALL n cells of one mi row.
+
+    Same dataflow and index conventions as ``_emit_fp8_down_group_gemm``, but
+    every output cell of the mi row shares ONE K-loop. Two wins over the
+    per-cell form:
+
+    * The A (Hidden, LDS) fragment depends only on ``m_row_base`` and k, NOT on
+      the cell, so it is read from LDS ONCE and reused across cells instead of
+      being re-read ``nni`` times -- and that read is the 16-way bank-conflict
+      one.
+    * The W_down fragments are prefetched in a rolling ``prefetch_depth`` window
+      across cells. At ``down_k=128`` the per-cell form has
+      ``atoms_per_group == 1``, so its register double-buffer never engages and
+      each cell loads then immediately consumes -- no load is ever in flight
+      under an MFMA. This is the same degeneracy the gate/up path had.
+
+    ``pipeline_k`` adds a second, outer software pipeline. The window above is
+    over the N axis and so can never be deeper than ``nni``; in the split-down
+    kernel ``nni`` is 2, which is why ``prefetch_depth`` 2/4/8 all compile to
+    identical ISA there and why that kernel shows only 4 loads in flight, half
+    its waits full ``vmcnt(0)`` drains, and 71 wait-cycles per memory
+    instruction against the gate/up kernel's 18. With the flag on, iteration
+    ``kg`` issues the loads for ``kg+1`` before consuming the fragments it
+    carried in, so a K group's loads are in flight underneath the previous
+    group's MFMAs. The fragments ride the loop as ``iter_args``, which is what
+    pushes the ``s_waitcnt`` out of the load's own iteration.
+
+    Returns one f32 outer accumulator per entry of ``n_tile_bases``.
+    """
+    c_group_k = b.const_i32(GROUP_K)
+    c_atom_k = b.const_i32(atom.k)
+    # The contraction walks HIDDEN scale blocks (the A-side granularity). The
+    # W_down scale stays on the checkpoint's 128-wide grid and is re-derived
+    # from the absolute inter column below, so a 64-wide hidden block simply
+    # reads the same b-scale for its two halves.
+    hgk = int(hidden_group_k)
+    c_hgk = b.const_i32(hgk)
+    atoms_per_group = hgk // atom.k
+    nni = len(n_tile_bases)
+    depth = max(2, int(prefetch_depth))
+    group = max(1, int(sched_group))
+
+    n_cols = [b.add(nb, lane_decode.n_in_atom) for nb in n_tile_bases]
+    # Wave-uniform scale block (see the gate/up emitter). n_cols stays
+    # lane-varying -- it addresses the actual W_down data, not the scale.
+    # Same per-cell-to-per-warp dedup as gate/up: when the warp's output extent
+    # divides GROUP_K its base cannot straddle a block, so all nni cells read
+    # one scale and the backend needs one s_load chain instead of nni.
+    h_out_blks = (
+        [b.div(n_tile_bases[0], c_group_k)] * nni
+        if GROUP_K % (nni * atom.n) == 0
+        else [b.div(nb, c_group_k) for nb in n_tile_bases]
+    )
+    m_row = b.add(m_row_base, lane_decode.m_in_atom)
+
+    iter_args = [(f"down_outer_{tag}_{ni}", atom.zero_acc(b)) for ni in range(nni)]
+    # ``inter_slice`` is a compile-time int for the fused kernel (it is a tile
+    # width) but a runtime Value for the partial-fusion down kernel, whose
+    # contraction extent is the whole intermediate dimension.
+    num_groups = (
+        b.const_i32(inter_slice // hgk)
+        if isinstance(inter_slice, int)
+        else b.div(inter_slice, c_hgk)
+    )
+
+    # Only the atoms_per_group == 1 shape is pipelined: with more than one atom
+    # per group the inner kk loop already has somewhere to hide the latency,
+    # and carrying a fragment per (ni, kk) would cost more registers than the
+    # stall it removes.
+    pipe = bool(pipeline_k) and atoms_per_group == 1
+
+    def _b_frags_for_group(k_group):
+        return [
+            _load_b_fp8(
+                b,
+                B=WDown,
+                atom=atom,
+                lane_decode=lane_decode,
+                n_tile_base=n_tile_bases[ni],
+                k_tile_base=k_group,
+                N=inter_full,
+                swizzle=swizzle_b,
+                wave_size=wave_size,
+            )
+            for ni in range(nni)
+        ]
+
+    if pipe:
+        # Prologue: the kg=0 fragments enter the loop already in flight.
+        for ni, frag in enumerate(_b_frags_for_group(inter_col_base)):
+            iter_args.append((f"down_bpf_{tag}_{ni}", frag))
+        c_last_group = b.sub(num_groups, b.const_i32(1))
+
+    outer = b.scf_for_iter(
+        b.const_i32(0), num_groups, b.const_i32(1), iter_args, iv_name=f"dg_{tag}"
+    )
+    with outer as (kg, outs):
+        # As in the gate/up window: iglp_opt owns the loop schedule and would
+        # hoist every cell's loads to the top, undoing the window.
+        _emit_loop_cadence_hint(b, "none")
+        down_outer = list(outs[:nni])
+        carried_b = list(outs[nni:]) if pipe else []
+
+        # ``scale_row`` pins the A-scale read to a single LDS row. The scale is
+        # row-uniform by construction, so a [1, n_blocks] scale_view carries the
+        # same information as a [tile_m, n_blocks] one -- and saves the writer
+        # from broadcasting each value down tile_m rows, which is where 56 of
+        # the split-down kernel's 60 DS instructions were going.
+        local_k_group = b.mul(kg, c_hgk)
+        global_k_group = b.add(inter_col_base, local_k_group)
+        a_scale_v = b.vec_extract(
+            b.smem_load_vN(
+                scale_view.base,
+                m_row if scale_row is None else scale_row,
+                kg,
+                dtype=F32,
+                n=1,
+            ),
+            0,
+        )
+        global_blk = b.div(global_k_group, c_group_k)
+        base_scale_off = b.mul(global_blk, stride_down_scale)
+        ab_scales = [
+            b.fmul(
+                a_scale_v,
+                b.global_load_f32(WDownScale, b.add(base_scale_off, h_out_blks[ni])),
+            )
+            for ni in range(nni)
+        ]
+
+        def _load_b_at(ni, kk):
+            return _load_b_fp8(
+                b,
+                B=WDown,
+                atom=atom,
+                lane_decode=lane_decode,
+                n_tile_base=n_tile_bases[ni],
+                k_tile_base=b.add(global_k_group, b.mul(b.const_i32(kk), c_atom_k)),
+                N=inter_full,
+                swizzle=swizzle_b,
+                wave_size=wave_size,
+            )
+
+        def _load_a_at(kk):
+            return _load_a_fp8_lds(
+                b,
+                a_view=a_view,
+                atom=atom,
+                lane_decode=lane_decode,
+                m_tile_base=m_row_base,
+                k_tile_base=b.add(local_k_group, b.mul(b.const_i32(kk), c_atom_k)),
+            )
+
+        g_acc = [atom.zero_acc(b)] * nni
+        next_b: list[Value] = []
+        if pipe:
+            # Next group's loads go out BEFORE this group's MFMAs, and nothing
+            # in this iteration reads them, so the compiler has no reason to
+            # emit a wait for them until the next iteration consumes them.
+            # Clamping instead of predicating keeps the last iteration's
+            # (discarded) prefetch inside the tensor.
+            kg_next = b.smin(b.add(kg, b.const_i32(1)), c_last_group)
+            next_b = _b_frags_for_group(
+                b.add(inter_col_base, b.mul(kg_next, c_hgk))
+            )
+
+        for kk in range(atoms_per_group):
+            a_frag = _load_a_at(kk)
+            win: dict[int, Value] = {}
+            if pipe:
+                win = {ni: carried_b[ni] for ni in range(nni)}
+            else:
+                for _j in range(min(depth, nni)):
+                    win[_j] = _load_b_at(_j, kk)
+            for ni in range(nni):
+                nxt = ni + depth
+                if not pipe and nxt < nni:
+                    win[nxt] = _load_b_at(nxt, kk)
+                g_acc[ni] = atom.emit(b, a_frag, win.pop(ni), g_acc[ni])
+                if (ni + 1) % group == 0 or ni + 1 == nni:
+                    if sched_mode == "sgb":
+                        # 2 chunks of W_down VMEM and 1 MFMA per cell.
+                        b.sched_group_barrier(_SGB_VMEM_READ, 2 * group, 0)
+                        b.sched_group_barrier(_SGB_MFMA, group, 0)
+                    else:
+                        b.sched_barrier(0)
+
+        new_outer = []
+        for ni in range(nni):
+            sv = b.vector_splat(ab_scales[ni], atom.c_per_lane)
+            new_outer.append(b.vector_fma(g_acc[ni], sv, down_outer[ni]))
+        b.scf_yield(*new_outer, *next_b)
+
+    return list(outer.results)
 
 
 def _emit_down_atomic_reduce(
@@ -1537,6 +1956,48 @@ def _store_hidden_f32_pass(
     return amax_partial
 
 
+def _store_hidden_fp8_static_pass(
+    b: IRBuilder,
+    *,
+    atom,
+    gate_list,
+    up_list,
+    fp8_view,
+    warp_m_off: Value,
+    warp_n_off: Value,
+    lane: Value,
+    mfmas_m: int,
+    mfmas_n: int,
+    one_f32: Value,
+    c_neg_log2e: Value,
+    inv_scale: Value,
+) -> None:
+    """Single-pass epilogue for a scale that is known before the tile is.
+
+    The dynamic path has to spill every cell to an f32 scratch and come back
+    for it, because the divisor is the tile's own amax. Given the scale up
+    front, each cell can go silu -> scale -> fp8 in registers and land in its
+    final LDS slot immediately: no scratch, no amax reduction, no second sweep,
+    and two fewer barriers. Cell order and addressing are otherwise identical
+    to :func:`_store_hidden_f32_pass`, so the fp8 tile it leaves behind is the
+    same one the three-pass form leaves for the same scale.
+    """
+    for mi in range(mfmas_m):
+        for ni in range(mfmas_n):
+            flat = mi * mfmas_n + ni
+            g_vec = gate_list[flat]
+            u_vec = up_list[flat]
+            for i in range(atom.c_per_lane):
+                row_in, col_in = atom.lane_to_output(b, lane, i)
+                row = b.add(warp_m_off, b.add(b.const_i32(mi * atom.m), row_in))
+                col = b.add(warp_n_off, b.add(b.const_i32(ni * atom.n), col_in))
+                g = b.vec_extract(g_vec, i)
+                u = b.vec_extract(u_vec, i)
+                h = _silu_mul_f32(b, g, u, one_f32=one_f32, c_neg_log2e=c_neg_log2e)
+                q = b.cvt_f32_to_fp8(b.fmul(h, inv_scale))
+                b.smem_store_vN(fp8_view.base, [row, col], q, 1)
+
+
 def f32_view_store(b: IRBuilder, view, row: Value, col: Value, val: Value) -> None:
     b.smem_store_vN(view.base, [row, col], val, 1)
 
@@ -1551,8 +2012,316 @@ def f32_view_load(b: IRBuilder, view, row: Value, col: Value) -> Value:
 # ---------------------------------------------------------------------------
 
 
+def moe_split_down_fp8_grid(
+    num_m_blocks: int, h_out: int, spec: FusedMegaKernelSpecFp8
+) -> Tuple[int, int, int]:
+    """Launch grid for the partial-fusion down kernel.
+
+    ``grid = (ceil(H_out / (tile_n_down * down_h_loop)), num_m_blocks, 1)``.
+    The parallel axis is the OUTPUT hidden dimension, not the intermediate,
+    which is the whole point: no CTA holds a partial sum, so there is no
+    cross-CTA reduction. ``down_h_loop`` folds that many output tiles into one
+    CTA so the staged intermediate is read from HBM once instead of once per
+    tile.
+    """
+    per_cta = spec.tile_n_down * spec.down_h_loop
+    gx = (h_out + per_cta - 1) // per_cta
+    return (gx, num_m_blocks, 1)
+
+
+def moe_split_down_fp8_signature(spec: FusedMegaKernelSpecFp8):
+    from ...helpers.spec import SignatureBuilder
+
+    return (
+        SignatureBuilder()
+        .ptr("Inter", "fp8e4m3")
+        .ptr("InterScale", "f32")
+        .ptr("WDown", "fp8e4m3")
+        .ptr("WDownScale", "f32")
+        .ptr("SortedTokenIds", "i32")
+        .ptr("SortedWeights", "f32")
+        .ptr("BlockExpertIds", "i32")
+        .ptr("Y", "f32")
+        .scalar("N", "i32")  # = I (intermediate, the full contraction extent)
+        .scalar("H_out", "i32")
+        .scalar("stride_b_down", "i32")
+        .scalar("stride_down_scale", "i32")
+        .scalar("stride_down_scale_e", "i32")
+        .scalar("tokens", "i32")
+        .build()
+    )
+
+
+def build_moe_split_down_fp8(
+    spec: FusedMegaKernelSpecFp8, arch: str = "gfx950"
+) -> KernelDef:
+    """Down GEMM as its own launch, tiled over H_out (PARTIAL FUSION stage 2).
+
+    Measurement, not theory, motivates this kernel. Per-launch profiling of the
+    fused mega-kernel against vLLM's Triton path showed the fused gate/up half
+    is ~4 us FASTER than Triton's equivalent, but the fused down half is
+    ~16.7 us SLOWER -- and 7.2 us of that is atomic traffic the fused shape
+    forces. Fusing pins a token block's intermediate to one CTA's LDS, so the
+    only axis left to parallelize stage 2 over is the intermediate, which is
+    the CONTRACTION axis; six CTAs then each own a partial and recombine
+    through 12.6 MB of fp32 atomics.
+
+    Splitting stage 2 into its own launch frees it to tile over H_out instead.
+    Each CTA then reduces the ENTIRE intermediate in-block and owns its outputs
+    outright, so the only atomics left are the topk (not slice) accumulation:
+    2.1 MB. The price is re-reading the intermediate from HBM (1.4 MB, plus L2
+    re-reads across h-tiles) and one extra launch.
+
+    Grid ``(H_out/tile_n_down, num_m_blocks)``; each CTA reads
+    ``[tile_m, I]`` of the intermediate into LDS, then runs the same
+    :func:`_emit_fp8_down_fused_cells` the fused kernel uses, with the
+    contraction extent widened from one inter slice to all of ``I``.
+    """
+    ok, why, _ = validate_arch_and_block_size(arch, spec.block_size)
+    if not ok:
+        raise ValueError(f"invalid fp8 split-down spec for {arch}: {why}")
+    down_atom = spec.down_atom()
+    if spec.swizzle_down and not b_swizzle_supported(down_atom, spec.wave_size):
+        raise ValueError("swizzle_down needs a B fragment that tiles onto lanes x 16B")
+
+    atom = down_atom
+    tile_m = spec.tile_m
+    HGK = int(spec.hidden_group_k)
+    cadence = spec.sched_cadence
+
+    b = IRBuilder(spec.kernel_name() + "_splitdown")
+    b.kernel.attrs["max_workgroup_size"] = spec.block_size
+    if spec.mfma_vgpr_form:
+        b.kernel.attrs["mfma_vgpr_form"] = True
+
+    Inter = b.param(
+        "Inter", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16
+    )
+    InterScale = b.param(
+        "InterScale", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
+    WDown = b.param(
+        "WDown", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16
+    )
+    WDownScale = b.param(
+        "WDownScale", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
+    SortedTokenIds = b.param(
+        "SortedTokenIds", PtrType(I32, "global"), noalias=True, readonly=True, align=4
+    )
+    SortedWeights = b.param(
+        "SortedWeights", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
+    BlockExpertIds = b.param(
+        "BlockExpertIds", PtrType(I32, "global"), noalias=True, readonly=True, align=4
+    )
+    Y = b.param("Y", PtrType(F32, "global"), noalias=True, align=16)
+    N = b.param("N", I32)
+    H_out = b.param("H_out", I32)
+    stride_b_down = b.param("stride_b_down", I32)
+    stride_down_scale = b.param("stride_down_scale", I32)
+    stride_down_scale_e = b.param("stride_down_scale_e", I32)
+    tokens = b.param("tokens", I32)
+
+    # The down tile's output width is split across warps exactly as in the
+    # fused kernel, but here a CTA owns ONE h-tile rather than looping them.
+    tile_n_down = spec.tile_n_down
+    warp_n = spec.warp_n
+    if tile_n_down % (warp_n * atom.n):
+        raise ValueError(
+            f"tile_n_down ({tile_n_down}) must be a multiple of "
+            f"warp_n*atom.n ({warp_n * atom.n})"
+        )
+    mfmas_n_down = tile_n_down // (warp_n * atom.n)
+    # Must divide by warp_m: this is the count of M atoms ONE warp owns, and it
+    # scales down_warp_m_off. Deriving it from tile_m alone made every warp claim
+    # the whole tile, so with warp_m>1 the row offsets ran off the end of the
+    # tile and the output was NaN. spec.mfmas_m_down is the shared definition the
+    # fused builder already uses.
+    mfmas_m_down = spec.mfmas_m_down
+    if mfmas_m_down * spec.warp_m * atom.m != tile_m:
+        raise ValueError(
+            f"warp_m ({spec.warp_m}) must split tile_m ({tile_m}) into whole "
+            f"{atom.m}-row atoms"
+        )
+
+    c_wave = b.const_i32(spec.wave_size)
+    c_warps_n = b.const_i32(warp_n)
+    c_block_m = b.const_i32(tile_m)
+    c_threads = b.const_i32(spec.block_size)
+    c_group_k = b.const_i32(GROUP_K)
+    c0 = b.const_i32(0)
+
+    tid = b.thread_id_x()
+    warp_id = b.div(tid, c_wave)
+    warp_m_idx = b.div(warp_id, c_warps_n)
+    warp_n_idx = b.mod(warp_id, c_warps_n)
+    lane = b.mod(tid, c_wave)
+
+    m_block_idx = b.block_id_y()
+    block_m_off = b.mul(m_block_idx, c_block_m)
+    h_loop = int(spec.down_h_loop)
+    ho_base = b.mul(b.block_id_x(), b.const_i32(tile_n_down * h_loop))
+
+    expert_idx = b.global_load_i32(BlockExpertIds, m_block_idx)
+    WDown = b.global_ptr_add(
+        WDown,
+        b.mul(b.sext(expert_idx, I64), b.sext(stride_b_down, I64)),
+    )
+    WDownScale = b.global_ptr_add(
+        WDownScale,
+        b.mul(
+            b.mul(b.sext(expert_idx, I64), b.sext(stride_down_scale_e, I64)),
+            b.const_i64(4),
+        ),
+    )
+
+    # ---- LDS: the whole intermediate tile, staged from HBM ----------------
+    # inter_max is a build-time bound on I so the LDS allocation is static;
+    # the CONTRACTION extent stays the runtime N, so one binary serves any
+    # I <= inter_max.
+    inter_max = int(spec.split_inter_max)
+    if inter_max % HGK:
+        raise ValueError(f"split_inter_max ({inter_max}) must be a multiple of {HGK}")
+    pad_fp8 = spec.lds_pad
+    hid_w = inter_max + pad_fp8
+    n_blocks_full = inter_max // HGK
+    Hidden_smem = b.smem_alloc(FP8E4M3, [tile_m, hid_w], name_hint="Hidden_smem")
+    # ONE row, not tile_m: stage 1 reduces the amax over every row of a block,
+    # so all tile_m rows of a column block hold the same f32. Storing it once
+    # and reading row 0 turns 96 LDS stores per CTA into 6.
+    HiddenScale_smem = b.smem_alloc(
+        F32, [1, n_blocks_full], name_hint="HiddenScale_smem"
+    )
+    fp8_view = TensorView(
+        base=Hidden_smem,
+        desc=TensorDescriptor.packed((tile_m, hid_w), FP8E4M3),
+        addr_space="lds",
+    )
+    scale_view = TensorView(
+        base=HiddenScale_smem,
+        desc=TensorDescriptor.packed((1, n_blocks_full), F32),
+        addr_space="lds",
+    )
+
+    lane_decode = decode_mfma_lanes(b, atom, lane)
+
+    # Stage [tile_m, N] fp8 into LDS, 16 bytes per lane per step.
+    n16 = b.div(N, b.const_i32(16))
+    load_sweep = b.scf_for_iter(
+        tid, b.mul(b.const_i32(tile_m), n16), c_threads, [], iv_name="lcell"
+    )
+    with load_sweep as lcell:
+        row = b.div(lcell, n16)
+        col16 = b.mul(b.mod(lcell, n16), b.const_i32(16))
+        v16 = b.global_load_vN(
+            Inter,
+            b.add(b.mul(b.add(block_m_off, row), N), col16),
+            FP8E4M3,
+            16,
+        )
+        b.smem_store_vN(fp8_view.base, [row, col16], v16, 16)
+        b.scf_yield()
+
+    # Scales are row-uniform (stage 1 reduces the amax over all rows of a
+    # block), so one f32 per inter block is stored once and every lane reads
+    # row 0. Broadcasting it down all tile_m rows instead -- which is what this
+    # did -- cost 96 LDS stores per CTA to publish 6 distinct values, and the
+    # compiler emitted them as 56 ds_write2_b32, 93% of the kernel's DS traffic.
+    nb = b.div(N, c_group_k)
+    scale_sweep = b.scf_for_iter(tid, nb, c_threads, [], iv_name="scell")
+    with scale_sweep as blk:
+        s = b.global_load_f32(InterScale, b.add(b.mul(m_block_idx, nb), blk))
+        b.smem_store_vN(scale_view.base, [c0, blk], s, 1)
+        b.scf_yield()
+    b.sync()
+
+    # ---- down GEMM: the FULL intermediate reduced inside this CTA ---------
+    down_warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m_down * atom.m))
+    down_warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n_down * atom.n))
+
+    def emit_h_tile(ho_off):
+        """One ``tile_n_down``-wide output tile against the staged LDS tile.
+
+        Reads LDS only, so repeating it needs no extra barrier: the single
+        ``b.sync()`` after staging still dominates every iteration.
+        """
+        down_list = []
+        for mi in range(mfmas_m_down):
+            m_row_base = b.add(down_warp_m_off, b.const_i32(mi * atom.m))
+            n_tile_bases_down = [
+                b.add(ho_off, b.add(down_warp_n_off, b.const_i32(ni * atom.n)))
+                for ni in range(mfmas_n_down)
+            ]
+            down_list.extend(
+                _emit_fp8_down_fused_cells(
+                    b,
+                    a_view=fp8_view,
+                    WDown=WDown,
+                    WDownScale=WDownScale,
+                    atom=atom,
+                    lane_decode=lane_decode,
+                    n_tile_bases=n_tile_bases_down,
+                    scale_view=scale_view,
+                    inter_slice=N,  # runtime: all of I, no cross-CTA partials
+                    inter_full=N,
+                    inter_col_base=c0,
+                    stride_down_scale=stride_down_scale,
+                    m_row_base=m_row_base,
+                    hidden_group_k=HGK,
+                    tag=f"sd{mi}",
+                    cadence=cadence,
+                    prefetch_depth=spec.down_depth,
+                    sched_group=spec.down_group,
+                    sched_mode=spec.window_sched,
+                    swizzle_b=spec.swizzle_down,
+                    wave_size=spec.wave_size,
+                    pipeline_k=spec.down_pipeline_k,
+                    scale_row=c0,
+                )
+            )
+
+        # Only the topk accumulation is atomic now -- 2.1 MB, not 12.6 MB.
+        _emit_down_atomic_reduce(
+            b,
+            atom=atom,
+            down_list=down_list,
+            warp_m_off=down_warp_m_off,
+            warp_n_off=down_warp_n_off,
+            lane=lane,
+            mfmas_m=mfmas_m_down,
+            mfmas_n=mfmas_n_down,
+            block_m_off=block_m_off,
+            ho_off=ho_off,
+            H_out=H_out,
+            SortedTokenIds=SortedTokenIds,
+            SortedWeights=SortedWeights,
+            Y=Y,
+            tokens=tokens,
+        )
+
+    if h_loop == 1:
+        emit_h_tile(ho_base)
+    else:
+        # Runtime loop, not an unrolled one: at h_loop=16 unrolling would
+        # multiply an already ~700-instruction body by 16 for no scheduling
+        # gain, since consecutive tiles share no operands.
+        h_sweep = b.scf_for_iter(
+            c0, b.const_i32(h_loop), b.const_i32(1), [], iv_name="htile"
+        )
+        with h_sweep as it:
+            emit_h_tile(b.add(ho_base, b.mul(it, b.const_i32(tile_n_down))))
+            b.scf_yield()
+    b.ret()
+    return b.kernel
+
+
 def build_moe_fused_mega_gemm_fp8(
-    spec: FusedMegaKernelSpecFp8, arch: str = "gfx950", *, persistent: bool = False
+    spec: FusedMegaKernelSpecFp8,
+    arch: str = "gfx950",
+    *,
+    persistent: bool = False,
+    split_gateup: bool = False,
 ) -> KernelDef:
     """Build the STAGE 1 fp8 fused-MoE mega-kernel.
 
@@ -1589,6 +2358,24 @@ def build_moe_fused_mega_gemm_fp8(
     if not ok:
         raise ValueError(f"invalid fp8 fused-mega spec for {arch}: {why}")
     atom = spec.gate_up_atom()
+    # The down GEMM contracts the INTERMEDIATE, whose scale-block width is
+    # hidden_group_k, so its atom must be no wider than that. It shares the
+    # 16x16 C layout (and therefore lane_decode) with the gate/up atom, only
+    # the K extent differs. At the default down_k=128 this IS gate_up_atom, so
+    # existing configs are unchanged.
+    down_atom = spec.down_atom()
+    # The swizzled weight layout is defined by the consuming atom's fragment
+    # shape, so a stream may only be swizzled if its atom tiles cleanly.
+    for _flag, _name, _at in (
+        (spec.swizzle_gu, "swizzle_gu", atom),
+        (spec.swizzle_down, "swizzle_down", down_atom),
+    ):
+        if _flag and not b_swizzle_supported(_at, spec.wave_size):
+            raise ValueError(
+                f"{_name} needs a B fragment that tiles onto "
+                f"{spec.wave_size} lanes x 16B; atom {_at.m}x{_at.n}x{_at.k} "
+                f"has b_per_lane={_at.b_per_lane}"
+            )
     # L6: the unscaled fp8 16x16x128 hero atom reuses the (catalog-registered)
     # ``mfma.scale.f32.16x16x128.f8f6f4`` intrinsic with the in-instruction E8M0
     # scales pinned to the neutral value (verified numerically standalone), so it
@@ -1600,13 +2387,12 @@ def build_moe_fused_mega_gemm_fp8(
     if atom.k != 128:
         validate_mfma_atom_in_catalog(atom, arch, where="moe_fused_mega_fp8")
 
-    # L9 flag (sched_cadence): pin the per-loop scheduler-hint cadence on the
-    # spec, or (default None) defer to the import-time ``ROCKE_FP8_SCHED`` env
-    # (default ``iglp1`` = best). None => byte-identical default build.
     cadence = spec.sched_cadence
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
+    if spec.mfma_vgpr_form:
+        b.kernel.attrs["mfma_vgpr_form"] = True
 
     # ---- params (BUILD_SPEC_FP8 Section 2.7) ---------------------------
     A = b.param("A", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16)
@@ -1619,10 +2405,18 @@ def build_moe_fused_mega_gemm_fp8(
     WDown = b.param(
         "WDown", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16
     )
-    AScale = b.param("AScale", PtrType(F32, "global"), readonly=True, align=4)
-    WGateScale = b.param("WGateScale", PtrType(F32, "global"), readonly=True, align=4)
-    WUpScale = b.param("WUpScale", PtrType(F32, "global"), readonly=True, align=4)
-    WDownScale = b.param("WDownScale", PtrType(F32, "global"), readonly=True, align=4)
+    AScale = b.param(
+        "AScale", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
+    WGateScale = b.param(
+        "WGateScale", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
+    WUpScale = b.param(
+        "WUpScale", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
+    WDownScale = b.param(
+        "WDownScale", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
     SortedTokenIds = b.param(
         "SortedTokenIds", PtrType(I32, "global"), noalias=True, readonly=True, align=4
     )
@@ -1632,7 +2426,7 @@ def build_moe_fused_mega_gemm_fp8(
     BlockExpertIds = b.param(
         "BlockExpertIds", PtrType(I32, "global"), noalias=True, readonly=True, align=4
     )
-    Y = b.param("Y", PtrType(F32, "global"), align=16)
+    Y = b.param("Y", PtrType(F32, "global"), noalias=True, align=16)
     M = b.param("M", I32)
     N = b.param("N", I32)  # = I (inter dim)
     K = b.param("K", I32)  # = H (hidden contraction)
@@ -1664,28 +2458,77 @@ def build_moe_fused_mega_gemm_fp8(
         p_grid_x = b.param("grid_x", I32)
         p_total_work = b.param("total_work", I32)
         p_P = b.param("P", I32)
+    if split_gateup:
+        Inter = b.param(
+            "Inter", PtrType(FP8E4M3, "global"), noalias=True, align=16
+        )
+        InterScale = b.param(
+            "InterScale", PtrType(F32, "global"), noalias=True, align=4
+        )
 
     tile_m = spec.tile_m
     tile_n = spec.tile_n_inter
-    n_blocks = tile_n // GROUP_K
+    HGK = int(spec.hidden_group_k)
+    if HGK != GROUP_K:
+        if not spec.down_fused_cells:
+            raise ValueError(
+                "hidden_group_k != 128 requires down_fused_cells=True "
+                "(the per-cell down emitter assumes a 128-wide hidden block)"
+            )
+        # Check the ATOM's k, not spec.down_k: down_k only selects between the
+        # 32- and 128-wide atoms, so an unrepresentable value like 64 would
+        # otherwise silently land on the 128 atom and make atoms_per_group 0.
+        _dk = spec.down_atom().k
+        if _dk > HGK or HGK % _dk:
+            raise ValueError(
+                f"down atom k ({_dk}, from down_k={spec.down_k}) must divide "
+                f"hidden_group_k ({HGK}) so a down atom stays inside one hidden "
+                "scale block"
+            )
+    n_blocks = tile_n // HGK
+
+    static_scale = bool(spec.static_inter_scale)
+    if static_scale:
+        if not split_gateup:
+            raise ValueError(
+                "static_inter_scale is split gate/up only: the fused kernel's "
+                "stage 2 reads the f32 scratch this mode does not produce"
+            )
+        if n_blocks != 1:
+            # With more than one scale block per tile the divisor stops being
+            # CTA-uniform, so the single wave-uniform load below would apply
+            # one block's scale to another block's columns.
+            raise ValueError(
+                f"static_inter_scale needs tile_n_inter ({tile_n}) == "
+                f"hidden_group_k ({HGK}), got {n_blocks} scale blocks per tile"
+            )
 
     # LEVER (fuse-quant) invariant: each warp's N-extent must lie inside exactly
     # one 128-inter scale block, AND each block must be covered by an integer
-    # number of consecutive warps, so the register-amax combine
-    # (block ``blk`` <- warps {warps_per_block*blk .. +warps_per_block-1}) is
-    # exact. With warp_m=1 the warp N-extent = warp_n_cols below.
+    # number of warps, so the register-amax combine is exact.
+    #
+    # The scale is row-uniform over the whole tile (see Pass A below), so a
+    # block's amax must be reduced over EVERY warp that holds part of it. With
+    # ``warp_m > 1`` that set is 2-D: warp ``mi*warp_n + ni`` for all mi and for
+    # the ni covering the block. The combine below walks exactly that set, which
+    # collapses to the old consecutive-warp run when warp_m == 1.
+    #
+    # warp_m is what makes wide tile_m affordable: it splits M across warps, so
+    # tile_m can grow with the per-wave accumulator count held fixed. Without it
+    # tile_m=64 needs 416 VGPR + 160 AGPR and drops to one wave per SIMD.
     warp_n_cols = tile_n // spec.warp_n  # mfmas_n * atom.n
-    warps_per_block = GROUP_K // warp_n_cols
+    warps_per_block = HGK // warp_n_cols
     if (
-        spec.warp_m != 1
+        (tile_m // spec.warp_m) % spec.warp_tile_m
         or warp_n_cols * spec.warp_n != tile_n
-        or GROUP_K % warp_n_cols != 0
+        or HGK % warp_n_cols != 0
         or warps_per_block * n_blocks != spec.warp_n
     ):
         raise ValueError(
-            "fuse-quant lever requires warp_m==1 and warps to tile the "
-            f"128-inter blocks evenly (got tile_n={tile_n}, warp_n="
-            f"{spec.warp_n}, warp_n_cols={warp_n_cols})"
+            "fuse-quant lever requires warps to tile the 128-inter blocks "
+            f"evenly and warp_m to divide tile_m into whole atoms (got "
+            f"tile_m={tile_m}, warp_m={spec.warp_m}, tile_n={tile_n}, "
+            f"warp_n={spec.warp_n}, warp_n_cols={warp_n_cols})"
         )
 
     c_wave = b.const_i32(spec.wave_size)
@@ -1783,17 +2626,30 @@ def build_moe_fused_mega_gemm_fp8(
     # ---- LDS allocations ----------------------------------------------
     # Persistent fp8 Hidden buffer (half the f16 bytes): silu(gate)*up quantized
     # here, reused as the down-GEMM LDS-resident A operand in STAGE 2.
-    Hidden_smem = b.smem_alloc(FP8E4M3, [tile_m, tile_n], name_hint="Hidden_smem")
+    if spec.lds_pad % 16:
+        raise ValueError(f"lds_pad must be a multiple of 16B (got {spec.lds_pad})")
+    pad_fp8 = spec.lds_pad  # 1 byte/elem
+    pad_f32 = spec.lds_pad // 4  # 4 bytes/elem
+    hid_w = tile_n + pad_fp8
+    f32_w = tile_n + pad_f32
+    Hidden_smem = b.smem_alloc(FP8E4M3, [tile_m, hid_w], name_hint="Hidden_smem")
     # Per-(row, 128-inter-block) dynamic scales for the down dequant (STAGE 2).
     HiddenScale_smem = b.smem_alloc(
         F32, [tile_m, n_blocks], name_hint="HiddenScale_smem"
     )
-    # f32 scratch for the exact per-block amax reduction (STAGE 1 only).
-    HiddenF32_smem = b.smem_alloc(F32, [tile_m, tile_n], name_hint="HiddenF32_smem")
+    # f32 scratch for the exact per-block amax reduction (STAGE 1 only). Under
+    # a supplied scale there is no amax to reduce and nothing to re-read, so
+    # the scratch shrinks to a placeholder rather than costing LDS for a buffer
+    # the epilogue never touches.
+    HiddenF32_smem = b.smem_alloc(
+        F32, [1, 1] if static_scale else [tile_m, f32_w], name_hint="HiddenF32_smem"
+    )
     # Tiny per-warp amax partials (one f32 per warp). Each warp's N-extent lands
     # inside ONE 128-inter block, so warps {2*blk, 2*blk+1} cover block ``blk``.
     n_warps = spec.warp_m * spec.warp_n
-    WarpAmax_smem = b.smem_alloc(F32, [n_warps], name_hint="WarpAmax_smem")
+    WarpAmax_smem = b.smem_alloc(
+        F32, [1] if static_scale else [n_warps], name_hint="WarpAmax_smem"
+    )
 
     # ---- DTLA gate+up B staging (GOAL 1) -----------------------------------
     # Per-wave, ping-pong (4 logical slots: gate/up x 2 ni-buffers) direct-to-LDS
@@ -1801,9 +2657,9 @@ def build_moe_fused_mega_gemm_fp8(
     # -- the lane-contiguous spread the global.load.lds HW imposes. Shape
     # [n_warps*DTLA_SLOTS*DTLA_CHUNKS*wave_size, 16] fp8: 4*4*2*64*16 = 32 KiB
     # at the canonical geometry.
-    # 4 B slots (gate/up x 2 ni ping-pong) + 1 X (A) slot under _USE_X_DTLA.
-    DTLA_SLOTS = 5 if _USE_X_DTLA else 4
-    X_SLOT = 4 if _USE_X_DTLA else None
+    # 2 B slots (gate/up) per prefetch buffer.
+    _dtla_depth = max(2, int(spec.dtla_depth))
+    DTLA_SLOTS = 2 * _dtla_depth
     DTLA_CHUNKS = (atom.b_per_lane + DTLA_CHUNK - 1) // DTLA_CHUNK
     bstage_rows = n_warps * DTLA_SLOTS * DTLA_CHUNKS * spec.wave_size
     BStage_smem = b.smem_alloc(
@@ -1815,14 +2671,52 @@ def build_moe_fused_mega_gemm_fp8(
         addr_space="lds",
     )
 
+    # ---- cooperative CTA-shared gate/up B tile -----------------------------
+    # One slot per (half, n-cell) for the WHOLE tile rather than per wave: gate
+    # cells [0, mfmas_n_all) then up cells [mfmas_n_all, 2*mfmas_n_all). At the
+    # canonical geometry that is 2*8 slots * 2 chunks * 64 lanes * 16 B = 32 KiB,
+    # which with the epilogue buffer packed on top of it (their live ranges are
+    # disjoint, so the smem pool's liveness packer overlaps them) leaves 2
+    # workgroups per CU -- 8 waves/CU at 4 waves per workgroup.
+    mfmas_n_all = tile_n // atom.n
+    BCoop_smem = None
+    coop_view = None
+    coop_bytes = 0
+    if spec.coop_b_lds:
+        if GROUP_K // atom.k != 1:
+            raise ValueError(
+                "coop_b_lds needs one MFMA atom per scale group (gate_up_k=128); "
+                f"got {GROUP_K // atom.k} atoms per group"
+            )
+        if mfmas_n_all % n_warps:
+            raise ValueError(
+                f"coop_b_lds needs n_warps ({n_warps}) to divide the tile's "
+                f"n-cell count ({mfmas_n_all}) so staging splits evenly"
+            )
+        coop_rows = 2 * mfmas_n_all * DTLA_CHUNKS * spec.wave_size
+        coop_bytes = coop_rows * DTLA_CHUNK
+        BCoop_smem = b.smem_alloc(
+            FP8E4M3, [coop_rows, DTLA_CHUNK], name_hint="BCoop_smem"
+        )
+        coop_view = TensorView(
+            base=BCoop_smem,
+            desc=TensorDescriptor.packed((coop_rows, DTLA_CHUNK), FP8E4M3),
+            addr_space="lds",
+        )
+
     f32_view = TensorView(
         base=HiddenF32_smem,
-        desc=TensorDescriptor.packed((tile_m, tile_n), F32),
+        desc=TensorDescriptor.packed((tile_m, f32_w), F32),
         addr_space="lds",
     )
+    # The overlay only saves anything if the B tile is at least as large as the
+    # staging it would absorb (see ``coop_alias`` for why it is off by default).
+    hidden_base = Hidden_smem
+    if spec.coop_alias and BCoop_smem is not None and coop_bytes >= tile_m * hid_w:
+        hidden_base = BCoop_smem
     fp8_view = TensorView(
-        base=Hidden_smem,
-        desc=TensorDescriptor.packed((tile_m, tile_n), FP8E4M3),
+        base=hidden_base,
+        desc=TensorDescriptor.packed((tile_m, hid_w), FP8E4M3),
         addr_space="lds",
     )
     scale_view = TensorView(
@@ -1845,6 +2739,7 @@ def build_moe_fused_mega_gemm_fp8(
     c_floor = b.const_f32(AMAX_FLOOR)
 
     c_group_k = b.const_i32(GROUP_K)
+    c_hgk = b.const_i32(HGK)
     c_threads = b.const_i32(spec.block_size)
     _c_n_blocks = b.const_i32(n_blocks)
     _c_tile_n = b.const_i32(tile_n)
@@ -1884,14 +2779,96 @@ def build_moe_fused_mega_gemm_fp8(
                 "warp_row_base": warp_row_base,
                 "lane": lane,
                 "wave_size": spec.wave_size,
-                "x_slot": X_SLOT,
+                "depth": _dtla_depth,
             }
         else:
             dtla_bundle = None
+
+        # Cooperative-shared B bundle. Two runtime pieces, and the split between
+        # them is deliberate: the STAGING half keeps ``half`` (gate vs up)
+        # compile-time so the weight pointer can be selected at build time, and
+        # pushes the only runtime term (this wave's n-cell range) into the LDS
+        # base. The READ half likewise keeps the slot compile-time and puts
+        # warp_n's contribution in the row base. Both sit inside _dtla_*'s
+        # existing addressing, so no new LDS layout is introduced.
+        if spec.coop_b_lds:
+            coop_base_i64 = b.smem_addr_of(BCoop_smem)
+            slot_bytes = DTLA_CHUNKS * spec.wave_size * DTLA_CHUNK
+            ni_per_wave = mfmas_n_all // n_warps
+            warp_stage_off = b.mul(warp_id, b.const_i32(ni_per_wave * slot_bytes))
+            coop_bundle = {
+                "view": coop_view,
+                # gate slots start at 0, up slots at mfmas_n_all
+                "stage_bases": [
+                    b.smem_ptr_add(
+                        coop_base_i64,
+                        b.sext(
+                            b.add(
+                                warp_stage_off,
+                                b.const_i32(half * mfmas_n_all * slot_bytes),
+                            ),
+                            I64,
+                        ),
+                    )
+                    for half in range(2)
+                ],
+                # the n-cells THIS wave stages (both halves)
+                "stage_n_bases": [
+                    b.add(
+                        gu_n_off,
+                        b.mul(
+                            b.add(
+                                b.mul(warp_id, b.const_i32(ni_per_wave)),
+                                b.const_i32(j),
+                            ),
+                            b.const_i32(atom.n),
+                        ),
+                    )
+                    for j in range(ni_per_wave)
+                ],
+                "read_row_base": b.mul(
+                    warp_n_idx, b.const_i32(mfmas_n * DTLA_CHUNKS * spec.wave_size)
+                ),
+                "n_cells_all": mfmas_n_all,
+                "lane": lane,
+                "wave_size": spec.wave_size,
+            }
+        else:
+            coop_bundle = None
         for mi in range(mfmas_m):
             m_tile_base = b.add(
                 block_m_off, b.add(warp_m_off, b.const_i32(mi * atom.m))
             )
+            if not spec.use_fused_kloop:
+                # Legacy per-(mi, ni) K-loop: one cell's operands live at a
+                # time, weights global->VGPR (no DTLA), same shape as the down
+                # GEMM's emitter.
+                for ni in range(mfmas_n):
+                    g_dq, u_dq = _emit_fp8_gateup_group_gemm(
+                        b,
+                        A=A,
+                        WGate=WGate,
+                        WUp=WUp,
+                        AScale=AScale,
+                        WGateScale=WGateScale,
+                        WUpScale=WUpScale,
+                        atom=atom,
+                        lane_decode=lane_decode,
+                        m_tile_base=m_tile_base,
+                        n_tile_base=b.add(
+                            gu_n_off, b.add(warp_n_off, b.const_i32(ni * atom.n))
+                        ),
+                        K=K,
+                        stride_a_scale=stride_a_scale,
+                        stride_gate_scale=stride_gate_scale,
+                        stride_up_scale=stride_up_scale,
+                        tag=f"{mi}_{ni}",
+                        swizzle_b=spec.swizzle_gu,
+                        wave_size=spec.wave_size,
+                    )
+                    gate_list.append(g_dq)
+                    up_list.append(u_dq)
+                continue
             n_tile_bases = [
                 b.add(gu_n_off, b.add(warp_n_off, b.const_i32(ni * atom.n)))
                 for ni in range(mfmas_n)
@@ -1915,9 +2892,58 @@ def build_moe_fused_mega_gemm_fp8(
                 tag=f"{mi}",
                 dtla=dtla_bundle,
                 cadence=cadence,
+                prefetch_depth=_dtla_depth,
+                sched_group=spec.window_group,
+                sched_mode=spec.window_sched,
+                swizzle_b=spec.swizzle_gu,
+                wave_size=spec.wave_size,
+                coop_b=coop_bundle,
             )
             gate_list.extend(g_dqs)
             up_list.extend(u_dqs)
+
+        def _emit_split_gateup_store(write_scale: bool = True) -> None:
+            """Publish the fp8 tile (and, when it owns it, its scale) to HBM.
+
+            Layout: Inter is [num_m_blocks*tile_m, N] fp8 row-major, so this
+            CTA owns rows [block_m_off, +tile_m) x cols [gu_n_off, +tile_n).
+            Scales are row-uniform by construction, so only
+            [num_m_blocks, N/GROUP_K] are stored, not one per row. Under
+            ``static_inter_scale`` the host supplied those scales, so writing
+            them back would just copy the input over itself.
+            """
+            c_tile_n16 = b.const_i32(tile_n // 16)
+            store_sweep = b.scf_for_iter(
+                tid,
+                b.const_i32((tile_m * tile_n) // 16),
+                c_threads,
+                [],
+                iv_name="wcell",
+            )
+            with store_sweep as wcell:
+                row = b.div(wcell, c_tile_n16)
+                col16 = b.mul(b.mod(wcell, c_tile_n16), b.const_i32(16))
+                v16 = b.smem_load_vN(
+                    fp8_view.base, row, col16, dtype=FP8E4M3, n=16
+                )
+                g_off = b.add(
+                    b.mul(b.add(block_m_off, row), N), b.add(gu_n_off, col16)
+                )
+                b.global_store_vN(Inter, g_off, v16, 16)
+                b.scf_yield()
+            if not write_scale:
+                return
+            # One f32 per (m_block, inter block); n_blocks is 1 at the shipped
+            # tile_n_inter=128, so this is a single lane doing a single store.
+            with b.scf_if(b.cmp_lt(tid, _c_n_blocks)):
+                sc = b.smem_load_vN(scale_view.base, c0, tid, dtype=F32, n=1)
+                s_off = b.add(
+                    b.mul(
+                        b.div(block_m_off, c_block_m), b.div(N, c_group_k)
+                    ),
+                    b.add(b.div(gu_n_off, c_group_k), tid),
+                )
+                b.global_store_vN(InterScale, s_off, sc, 1)
 
         # ---- STAGE 1b Pass A (FUSED): SiLU(gate)*up -> f32 LDS + amax -----
         # pyisa G_dyn_quant granularity = per-token-block (sub_x=32), NOT
@@ -1937,6 +2963,38 @@ def build_moe_fused_mega_gemm_fp8(
         # warp's N-extent lives in ONE 128-inter block, the two warps that
         # share a block (2*blk, 2*blk+1) are combined below. This removes the
         # 4096-iter per-thread re-read scan and one whole barrier.
+        if static_scale:
+            # One pass, one barrier. InterScale is an input here, so the
+            # divisor is available before the first cell is written and the
+            # scratch/amax/re-read machinery below is all dead.
+            inv_scale = b.rcp_fast(
+                b.global_load_f32(
+                    InterScale,
+                    b.add(
+                        b.mul(b.div(block_m_off, c_block_m), b.div(N, c_group_k)),
+                        b.div(gu_n_off, c_group_k),
+                    ),
+                )
+            )
+            _store_hidden_fp8_static_pass(
+                b,
+                atom=atom,
+                gate_list=gate_list,
+                up_list=up_list,
+                fp8_view=fp8_view,
+                warp_m_off=warp_m_off,
+                warp_n_off=warp_n_off,
+                lane=lane,
+                mfmas_m=mfmas_m,
+                mfmas_n=mfmas_n,
+                one_f32=one_f32,
+                c_neg_log2e=c_neg_log2e,
+                inv_scale=inv_scale,
+            )
+            b.sync()
+            _emit_split_gateup_store(write_scale=False)
+            return
+
         amax_lane = _store_hidden_f32_pass(
             b,
             atom=atom,
@@ -1952,35 +3010,39 @@ def build_moe_fused_mega_gemm_fp8(
             c_neg_log2e=c_neg_log2e,
             c_floor=c_floor,
         )
-        # 64-lane butterfly max over the warp (xor 1,2,4,8,16,32).
+        # Butterfly max over the whole wave: the block amax has to be exact, so
+        # every lane must see every other lane's partial. Halving strides cover
+        # a power-of-two wave in log2(wave_size) steps (1,2,4,... at wave 64).
         amax_warp = amax_lane
-        for xm in (1, 2, 4, 8, 16, 32):
+        xm = 1
+        while xm < spec.wave_size:
             amax_warp = b.fmax(amax_warp, b.warp_shuffle_xor(amax_warp, xm))
+            xm *= 2
         # Lane 0 of each warp publishes its partial.
         with b.scf_if(b.cmp_eq(lane, c0)):
             b.smem_store_vN(WarpAmax_smem, [warp_id], amax_warp, 1)
         b.sync()
 
-        # ---- STAGE 1b combine: per-block amax from the 2 warps' partials --
-        # block ``blk`` is covered by warps {2*blk, 2*blk+1}; combine + scale +
-        # broadcast to every row so any ``m_in_atom`` read returns the scale.
+        # ---- STAGE 1b combine: per-block amax from its warps' partials -----
+        # Block ``blk`` is held by warps ``mi*warp_n + (warps_per_block*blk+wo)``
+        # for every mi in [0, warp_m) -- the whole M column of the warp grid,
+        # because the scale is row-uniform. Combine + scale + broadcast to every
+        # row so any ``m_in_atom`` read returns the block scale. At warp_m=1 this
+        # is the original consecutive-warp run, op for op.
         sweep = b.scf_for_iter(
             tid, b.const_i32(n_blocks), c_threads, [], iv_name="cell"
         )
         with sweep as blk:
             w0 = b.mul(blk, b.const_i32(warps_per_block))
-            amax = b.vec_extract(b.smem_load_vN(WarpAmax_smem, w0, dtype=F32, n=1), 0)
-            for wo in range(1, warps_per_block):
-                pw = b.vec_extract(
-                    b.smem_load_vN(
-                        WarpAmax_smem,
-                        b.add(w0, b.const_i32(wo)),
-                        dtype=F32,
-                        n=1,
-                    ),
-                    0,
-                )
-                amax = b.fmax(amax, pw)
+            amax = None
+            for mi_w in range(spec.warp_m):
+                for wo in range(warps_per_block):
+                    off = mi_w * spec.warp_n + wo
+                    wid = w0 if off == 0 else b.add(w0, b.const_i32(off))
+                    pw = b.vec_extract(
+                        b.smem_load_vN(WarpAmax_smem, wid, dtype=F32, n=1), 0
+                    )
+                    amax = pw if amax is None else b.fmax(amax, pw)
             scale = b.fmul(amax, b.rcp(c_fp8_max))  # amax / 448
             row_bc = b.scf_for_iter(c0, c_block_m, b.const_i32(1), [], iv_name="rb")
             with row_bc as rr:
@@ -2008,7 +3070,7 @@ def build_moe_fused_mega_gemm_fp8(
         with qsweep as qcell:
             row = b.div(qcell, c_tile_n4)
             col4 = b.mul(b.mod(qcell, c_tile_n4), b.const_i32(4))
-            blk = b.div(col4, c_group_k)
+            blk = b.div(col4, c_hgk)
             hv4 = b.smem_load_vN(f32_view.base, row, col4, dtype=F32, n=4)
             sc = b.smem_load_vN(scale_view.base, row, blk, dtype=F32, n=1)
             # Fast reciprocal (~1 ulp): the divide-by-block-scale quant step
@@ -2036,6 +3098,18 @@ def build_moe_fused_mega_gemm_fp8(
         # contraction extent is the LOCAL inter slice tile_n_inter; A reads local
         # inter columns, W_down reads GLOBAL inter columns (full inter row stride
         # N) at this slice's base. inter_blk_base = gu_n_off // GROUP_K.
+        if split_gateup:
+            # ---- PARTIAL FUSION: publish the intermediate, skip stage 2 ----
+            # The fused kernel's stage 2 can only parallelize over the inter
+            # (reduction) axis, because a token block's intermediate is pinned
+            # to this CTA's LDS. That costs 12.6 MB of cross-slice fp32
+            # atomics. Writing the intermediate out lets the down GEMM run as
+            # its own launch tiled over H_out, which reduces all of I in-block
+            # and writes 2.1 MB instead. See build_moe_split_down_fp8.
+            #
+            _emit_split_gateup_store()
+            return
+
         inter_blk_base = b.div(gu_n_off, c_group_k)
         down_for = b.scf_for_iter(
             c0, H_out, b.const_i32(spec.tile_n_down), [], iv_name="ho"
@@ -2044,7 +3118,38 @@ def build_moe_fused_mega_gemm_fp8(
             down_warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m_down * atom.m))
             down_warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n_down * atom.n))
             down_list = []
-            for mi in range(mfmas_m_down):
+            for mi in range(mfmas_m_down) if spec.down_fused_cells else ():
+                m_row_base = b.add(down_warp_m_off, b.const_i32(mi * atom.m))
+                n_tile_bases_down = [
+                    b.add(ho, b.add(down_warp_n_off, b.const_i32(ni * atom.n)))
+                    for ni in range(mfmas_n_down)
+                ]
+                down_list.extend(
+                    _emit_fp8_down_fused_cells(
+                        b,
+                        a_view=fp8_view,
+                        WDown=WDown,
+                        WDownScale=WDownScale,
+                        atom=down_atom,
+                        lane_decode=lane_decode,
+                        n_tile_bases=n_tile_bases_down,
+                        scale_view=scale_view,
+                        inter_slice=tile_n,
+                        inter_full=N,
+                        inter_col_base=gu_n_off,
+                        stride_down_scale=stride_down_scale,
+                        m_row_base=m_row_base,
+                        hidden_group_k=HGK,
+                        tag=f"dm{mi}",
+                        cadence=cadence,
+                        prefetch_depth=spec.down_depth,
+                        sched_group=spec.down_group,
+                        sched_mode=spec.window_sched,
+                        swizzle_b=spec.swizzle_down,
+                        wave_size=spec.wave_size,
+                    )
+                )
+            for mi in range(mfmas_m_down) if not spec.down_fused_cells else ():
                 for ni in range(mfmas_n_down):
                     # Down output column base (along H_out) for this warp-atom.
                     n_tile_base = b.add(
@@ -2070,6 +3175,8 @@ def build_moe_fused_mega_gemm_fp8(
                         m_row_base=m_row_base,
                         tag=f"d{mi}_{ni}",
                         cadence=cadence,
+                        swizzle_b=spec.swizzle_down,
+                        wave_size=spec.wave_size,
                     )
                     down_list.append(d_dq)
             # Barrier before the next H_out tile reuses Hidden_smem reads

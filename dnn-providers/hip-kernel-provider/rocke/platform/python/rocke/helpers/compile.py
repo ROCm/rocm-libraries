@@ -41,6 +41,7 @@ Typical use:
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -51,7 +52,7 @@ from ..core.codegen_policy import codegen_policy_for_kernel
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
 from ..core.lower_hip import lower_kernel_to_hip
-from ..core.lower_llvm import _lower_kernel_to_llvm_python
+from ..core.lower_llvm import _lower_kernel_to_llvm_python, supports_mfma_vgpr_form
 from ..core.passes import PassStats, optimize_kernel
 from ..runtime.comgr import build_hsaco_from_llvm_ir
 
@@ -215,13 +216,34 @@ def _lower_llvm_via_backend(
     )
 
 
+_WARNED_NO_MFMA_VGPR_FORM = False
+
+
 def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:
     """Return AMDGPU codegen options implied by kernel attrs."""
+
+    global _WARNED_NO_MFMA_VGPR_FORM
 
     options = ["-O3"]
     agpr_alloc = kernel.attrs.get("agpr_alloc")
     if kernel.attrs.get("mfma_vgpr_form") or _is_zero_agpr_alloc(agpr_alloc):
-        options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form"])
+        # Only pass the hint to an LLVM that knows it. An older one exits the
+        # process from clang's option parser rather than failing the compile,
+        # so this cannot be left to be discovered at runtime -- see
+        # :func:`supports_mfma_vgpr_form`.
+        if supports_mfma_vgpr_form():
+            options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form"])
+        elif not _WARNED_NO_MFMA_VGPR_FORM:
+            _WARNED_NO_MFMA_VGPR_FORM = True
+            sys.stderr.write(
+                "[rocke] WARNING: dropping '-amdgpu-mfma-vgpr-form' for kernel "
+                f"{kernel.name!r}: the resolved LLVM does not accept it, and "
+                "passing it would exit this process from clang's option parser. "
+                "The kernel is correct but keeps its per-K-group "
+                "v_accvgpr_read traffic, so it will be slower than the "
+                "configuration it was tuned as. Compile against ROCm 7.2 or "
+                "newer (or a torch built on it) to get the tuned codegen.\n"
+            )
     return options
 
 

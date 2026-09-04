@@ -15,6 +15,10 @@ rocke/benchmark/
     tests/
       test_fp16_rcr_sweep.py
       test_fp16_rcr_multigpu.py
+  moe/
+    fused_mega_fp8_dispatch.py   # dispatcher-driven fused-MoE fp8 benchmark
+    tests/
+      test_fused_mega_fp8_dispatch.py
 ```
 
 ## GEMM FP16 RCR Sweep
@@ -64,6 +68,50 @@ The document contains:
 - `builds`: HSACO/manifest build records;
 - `runs`: `run_manifest` correctness/benchmark records.
 
+## MoE Fused-Mega FP8 Dispatch Bench
+
+`moe/fused_mega_fp8_dispatch.py` sweeps the token count through
+`dispatch_moe_plan` and runs whatever comes back. Token count is a selection
+knob for this family, so the default set spans the fused band (one launch), the
+split band (two launches), and both `tile_m` bands -- a routing regression
+shows up as a changed kernel, a changed launch count, or a failed check.
+
+This harness must run on a **torch-free** interpreter: importing torch before
+the first Comgr compile resolves Comgr against torch's bundled LLVM and changes
+codegen. It asserts torch is absent, and numpy is the only dependency it needs.
+
+Routing decisions only, no GPU:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
+  python3 -m rocke.benchmark.moe.fused_mega_fp8_dispatch --plan-only
+```
+
+Build, run, check and time the default shapes:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
+  python3 -m rocke.benchmark.moe.fused_mega_fp8_dispatch \
+  --json /tmp/rocke_moe_dispatch.json
+```
+
+A short smoke run on a shared GPU:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
+  python3 -m rocke.benchmark.moe.fused_mega_fp8_dispatch \
+  --tokens 1,32 --warmup 20 --iters 10 --check sample
+```
+
+Correctness is a numpy f32 model of exactly the operands the kernel consumes:
+every token up to `--check auto`'s oracle limit, a random exact-checked sample
+of tokens above it, and a finiteness check over the whole output either way.
+The reported `check` column says which was used. The JSON output uses schema:
+
+```text
+ck.dsl.benchmark.moe.fused_mega_fp8_dispatch/v1
+```
+
 ## Run Tests
 
 No-GPU sweep planning tests:
@@ -81,6 +129,14 @@ GPU-gated multi-GPU sweep smoke:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
   ~/atom-venv/bin/python -m unittest \
   dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/benchmark/gemm/tests/test_fp16_rcr_multigpu.py
+```
+
+No-GPU MoE dispatch-bench tests:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
+  python3 -m unittest \
+  rocke.benchmark.moe.tests.test_fused_mega_fp8_dispatch
 ```
 
 All GEMM benchmark tests:
