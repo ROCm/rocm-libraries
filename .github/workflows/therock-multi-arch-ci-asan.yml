@@ -98,7 +98,7 @@ jobs:
       id-token: write
 
   multi_arch_ci_summary:
-    name: Multi-Arch CI Summary
+    name: Multi-Arch CI ASAN Summary
     if: always()
     needs:
       - setup
