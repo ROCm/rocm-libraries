@@ -273,9 +273,17 @@ inline void saturate_pixel(Rpp32f& pixel, Rpp16f* dst) {
     *dst = static_cast<Rpp16f>(RPPPIXELCHECKF32(pixel));
 }
 
-// Host-only utility function for calculating optimal thread count for intra-image parallelization
+// HOST-ONLY utility function for calculating optimal thread count for intra-image parallelization
 // This function determines whether to use batch-level or intra-image parallelization based on
-// batch size and image dimensions
+// batch size and image dimensions.
+//
+// Thread allocation strategy:
+// - If batch_size >= num_threads: Use single thread per image (batch-level parallelization only)
+// - Otherwise: Distribute threads within single image based on available parallelism
+//
+// MIN_ROWS_PER_THREAD = 8 is a conservative threshold to avoid excessive thread overhead
+// for small images. Tuned for typical L1 cache (64-128 bytes) and SIMD efficiency.
+// May need adjustment for non-standard architectures or memory hierarchies.
 inline Rpp32u GetIntraImageNumThreads(const rpp::Handle& handle, Rpp32u batchSize,
                                       Rpp32u imageHeight) {
     const Rpp32u MIN_ROWS_PER_THREAD = 8;
