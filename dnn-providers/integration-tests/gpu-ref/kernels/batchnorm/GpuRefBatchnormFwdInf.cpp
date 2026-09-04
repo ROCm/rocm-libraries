@@ -19,34 +19,24 @@
 
 using namespace gpu_ref;
 
-extern "C" __global__ void BatchnormFwdInfRef(BatchnormFwdArgs args)
+__device__ __forceinline__ void batchnormFwdInfImpl(long long tidx,
+                                                    long long tidy,
+                                                    long long tidz,
+                                                    const BatchnormFwdInfCommonArgs& args,
+                                                    COMPUTE_TYPE compInvVar)
 {
+    const long long& batchSize = args.batchSize;
+    const long long& cStride = args.cStride;
+    const long long& hwStride = args.hwStride;
+    const long long& batchStride = args.batchStride;
+
     auto* input = static_cast<const INPUT_TYPE*>(args.input);
     auto* scale = static_cast<const SCALE_BIAS_TYPE*>(args.scale);
     auto* bias = static_cast<const SCALE_BIAS_TYPE*>(args.bias);
     auto* estMean = static_cast<const MEAN_VAR_TYPE*>(args.estMean);
-    auto* invVar = static_cast<const MEAN_VAR_TYPE*>(args.invVar);
     auto* output = static_cast<OUTPUT_TYPE*>(args.output);
 
-    const long long tidx = blockIdx.x * LOCAL_SIZE_X + threadIdx.x;
-    const long long tidy = blockIdx.y * LOCAL_SIZE_Y + threadIdx.y;
-    const long long tidz = blockIdx.z;
-
-    const long long c = static_cast<long long>(args.c);
-    const long long hw = static_cast<long long>(args.hw);
-    const long long batchSize = static_cast<long long>(args.batchSize);
-    const long long cStride = static_cast<long long>(args.cStride);
-    const long long hwStride = static_cast<long long>(args.hwStride);
-    const long long batchStride = static_cast<long long>(args.batchStride);
-
-    // skip execution for out-of-bound threads
-    if(tidx >= c || tidy >= hw || tidz >= batchSize)
-    {
-        return;
-    }
-
     auto compMean = static_cast<COMPUTE_TYPE>(estMean[tidx]);
-    auto compVar = static_cast<COMPUTE_TYPE>(invVar[tidx]);
     auto compScale = static_cast<COMPUTE_TYPE>(scale[tidx]);
     auto compBias = static_cast<COMPUTE_TYPE>(bias[tidx]);
 
@@ -54,10 +44,27 @@ extern "C" __global__ void BatchnormFwdInfRef(BatchnormFwdArgs args)
     {
         const long long batchIndex = (n * batchStride) + (tidx * cStride) + (tidy * hwStride);
         COMPUTE_TYPE value = static_cast<COMPUTE_TYPE>(input[batchIndex]);
-        COMPUTE_TYPE inhat = (value - compMean) * compVar;
+        COMPUTE_TYPE inhat = (value - compMean) * compInvVar;
         inhat = compScale * inhat + compBias;
         output[batchIndex] = static_cast<OUTPUT_TYPE>(inhat);
     }
+}
+
+extern "C" __global__ void BatchnormFwdInfRef(BatchnormFwdInfArgs args)
+{
+    const long long tidx = blockIdx.x * LOCAL_SIZE_X + threadIdx.x;
+    const long long tidy = blockIdx.y * LOCAL_SIZE_Y + threadIdx.y;
+    const long long tidz = blockIdx.z;
+
+    // skip execution for out-of-bound threads
+    if(tidx >= args.common.c || tidy >= args.common.hw || tidz >= args.common.batchSize)
+    {
+        return;
+    }
+
+    auto* invVar = static_cast<const MEAN_VAR_TYPE*>(args.invVar);
+    auto compInvVar = static_cast<COMPUTE_TYPE>(invVar[tidx]);
+    batchnormFwdInfImpl(tidx, tidy, tidz, args.common, compInvVar);
 }
 
 namespace gpu_ref::detail
@@ -80,43 +87,22 @@ __forceinline__ __device__ __bf16 rsqrt(__bf16 x)
 }
 } // namespace gpu_ref::detail
 
-extern "C" __global__ void BatchnormFwdInfWithVarRef(BatchnormFwdWithVarArgs args)
+extern "C" __global__ void BatchnormFwdInfWithVarRef(BatchnormFwdInfWithVarArgs args)
 {
-    auto* input = static_cast<const INPUT_TYPE*>(args.input);
-    auto* scale = static_cast<const SCALE_BIAS_TYPE*>(args.scale);
-    auto* bias = static_cast<const SCALE_BIAS_TYPE*>(args.bias);
-    auto* estMean = static_cast<const MEAN_VAR_TYPE*>(args.estMean);
-    auto* estVar = static_cast<const MEAN_VAR_TYPE*>(args.estVar);
-    auto* output = static_cast<OUTPUT_TYPE*>(args.output);
     const long long tidx = blockIdx.x * LOCAL_SIZE_X + threadIdx.x;
     const long long tidy = blockIdx.y * LOCAL_SIZE_Y + threadIdx.y;
     const long long tidz = blockIdx.z;
-    const long long c = static_cast<long long>(args.c);
-    const long long hw = static_cast<long long>(args.hw);
-    const long long batchSize = static_cast<long long>(args.batchSize);
-    const long long cStride = static_cast<long long>(args.cStride);
-    const long long hwStride = static_cast<long long>(args.hwStride);
-    const long long batchStride = static_cast<long long>(args.batchStride);
+
     // skip execution for out-of-bound threads
-    if(tidx >= c || tidy >= hw || tidz >= batchSize)
+    if(tidx >= args.common.c || tidy >= args.common.hw || tidz >= args.common.batchSize)
     {
         return;
     }
-    auto compMean = static_cast<COMPUTE_TYPE>(estMean[tidx]);
-    auto compVar = static_cast<COMPUTE_TYPE>(estVar[tidx]);
-    auto compEpsilon = static_cast<COMPUTE_TYPE>(args.epsilon);
 
     // Compute inverse variance = 1 / sqrt(variance + epsilon)
+    auto compEpsilon = static_cast<COMPUTE_TYPE>(args.epsilon);
+    auto* estVar = static_cast<const MEAN_VAR_TYPE*>(args.estVar);
+    auto compVar = static_cast<COMPUTE_TYPE>(estVar[tidx]);
     auto compInvVar = gpu_ref::detail::rsqrt(compVar + compEpsilon);
-    auto compScale = static_cast<COMPUTE_TYPE>(scale[tidx]);
-    auto compBias = static_cast<COMPUTE_TYPE>(bias[tidx]);
-
-    for(long long n = blockIdx.z; n < batchSize; n += gridDim.z)
-    {
-        const long long batchIndex = (n * batchStride) + (tidx * cStride) + (tidy * hwStride);
-        COMPUTE_TYPE value = static_cast<COMPUTE_TYPE>(input[batchIndex]);
-        COMPUTE_TYPE inhat = (value - compMean) * compInvVar;
-        inhat = compScale * inhat + compBias;
-        output[batchIndex] = static_cast<OUTPUT_TYPE>(inhat);
-    }
+    batchnormFwdInfImpl(tidx, tidy, tidz, args.common, compInvVar);
 }

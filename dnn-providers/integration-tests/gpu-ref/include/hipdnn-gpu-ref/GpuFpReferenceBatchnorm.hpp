@@ -320,22 +320,6 @@ private:
                       "data types.");
     }
 
-    // --- Helpers ---
-
-    static bool isChannelLastLayout(const std::vector<int64_t>& strides)
-    {
-        if(strides.size() < 3)
-        {
-            throw std::invalid_argument(
-                "Batchnorm forward requires tensor rank to be at least 3 for layout validation.");
-        }
-
-        const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(strides);
-        return strideOrder == hipdnn_data_sdk::utilities::TensorLayout::NLC.strideOrder
-               || strideOrder == hipdnn_data_sdk::utilities::TensorLayout::NHWC.strideOrder
-               || strideOrder == hipdnn_data_sdk::utilities::TensorLayout::NDHWC.strideOrder;
-    }
-
     // --- Kernel launchers (defined in GpuFpReferenceBatchnorm.cpp) ---
     static void launchFwdInf(const void* inputPtr,
                              const std::vector<int64_t>& inputDims,

@@ -6,13 +6,12 @@
 // --- Batchnorm argument structs ---
 // Shared between device kernels and host launch code for ABI compatibility.
 
-struct BatchnormFwdArgs
+struct BatchnormFwdInfCommonArgs
 {
     const void* input;
     const void* scale;
     const void* bias;
     const void* estMean;
-    const void* invVar;
     void* output;
     long long c;
     long long hw;
@@ -22,19 +21,15 @@ struct BatchnormFwdArgs
     long long batchStride;
 };
 
-struct BatchnormFwdWithVarArgs
+struct BatchnormFwdInfArgs
 {
-    const void* input;
-    const void* scale;
-    const void* bias;
-    const void* estMean;
+    const void* invVar;
+    BatchnormFwdInfCommonArgs common;
+};
+
+struct BatchnormFwdInfWithVarArgs
+{
     const void* estVar;
-    void* output;
     double epsilon;
-    long long c;
-    long long hw;
-    long long batchSize;
-    long long cStride;
-    long long hwStride;
-    long long batchStride;
+    BatchnormFwdInfCommonArgs common;
 };
