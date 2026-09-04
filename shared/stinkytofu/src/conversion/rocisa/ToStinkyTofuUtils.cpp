@@ -1415,11 +1415,8 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
         "isMnemonicSupportedByStinkyTofu",
         [](const std::string& mnemonic, nb::object arch_obj) {
             std::array<int, 3> archArray = convertArch(arch_obj);
-            const auto* info =
-                ArchHelper::getInstance().getArchInfo(archArray[0], archArray[1], archArray[2]);
-            if (!info) return false;
-            const auto& map = info->getMnemonicToIsaOpcodeMap();
-            return map.find(mnemonic) != map.end();
+            return isMnemonicSupportedOnArch(
+                mnemonic, getGfxArchID(archArray[0], archArray[1], archArray[2]));
         },
         nb::arg("mnemonic"), nb::arg("arch"),
         "Check if StinkyTofu has a hardware instruction definition for the mnemonic on this "

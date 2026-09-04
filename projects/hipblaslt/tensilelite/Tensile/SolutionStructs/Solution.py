@@ -1081,6 +1081,15 @@ class Solution(collections.abc.Mapping):
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
 
+    if isgfx1250 and not state["ProblemType"].get("Batched", True):
+        reject(state, printRejectionReason, "Non-batched (Batched=False) not supported on gfx1250")
+
+    if isgfx1250 and state["ScheduleGlobalRead"] != 1:
+        reject(state, printRejectionReason, "ScheduleGlobalRead not supported on gfx1250 (requires ScheduleGlobalRead=1)")
+
+    if isgfx1250 and state["ScheduleLocalWrite"] != 1:
+        reject(state, printRejectionReason, "ScheduleLocalWrite not supported on gfx1250 (requires ScheduleLocalWrite=1)")
+
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
@@ -2261,12 +2270,17 @@ class Solution(collections.abc.Mapping):
       state["DirectToLdsMetadata"] = 0
       state["MIWaveTileMetadata"] = 0
 
+    if not state["ProblemType"]["UseGateResidual"] and state["NonTemporalGate"] != 0:
+      reject(state, printRejectionReason, "NonTemporalGate requires UseGateResidual=True")
+      return
+
     if state["NonTemporal"] != -1:
       state["NonTemporalA"] = state["NonTemporal"]
       state["NonTemporalB"] = state["NonTemporal"]
       state["NonTemporalC"] = state["NonTemporal"]
       state["NonTemporalD"] = state["NonTemporal"]
-      state["NonTemporalGate"] = state["NonTemporal"]
+      if state["ProblemType"]["UseGateResidual"]:
+        state["NonTemporalGate"] = state["NonTemporal"]
       state["NonTemporalMetadata"] = state["NonTemporal"]
 
     if isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
@@ -3774,16 +3788,22 @@ class Solution(collections.abc.Mapping):
         if (not state["enableLDSTrB"]) and (state["ProblemType"]["Sparse"] == 2):
           state["LocalReadVectorWidthB"] = min(state["LocalReadVectorWidthB"], state["MIInputPerThreadB"])
 
+      def maxLocalReadVectorWidth(tc):
+        # One local read moves at most MAX_NUM_DS_LOAD_BYTES, so the widest lrvw is
+        # however many elements that holds. 6-bit float is the exception: b128 plus
+        # b64 mimic a b192, which reaches 32 elements.
+        numBytes = state["ProblemType"]["MacDataType%s" % tc].numBytes()
+        if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and numBytes == 0.75:
+          return 32
+        return int(Solution.MAX_NUM_DS_LOAD_BYTES // numBytes)
+
       def calLRVW():
         # Default LocalReadVectorWidth
         if state["EnableMatrixInstruction"]:
           # Default LocalReadVectorWidth
           autoLRVWA = False
           maxNumDsLoadBytesA = Solution.MAX_NUM_DS_LOAD_BYTES
-          maxLRVWA = int(maxNumDsLoadBytesA // state["ProblemType"]["MacDataTypeA"].numBytes())
-          # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
-          if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeA"].numBytes() == 0.75:
-            maxLRVWA = 32
+          maxLRVWA = maxLocalReadVectorWidth("A")
           if state["LocalReadVectorWidthA"] == -1:
             autoLRVWA = True
             if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeA"].numBytes() > maxNumDsLoadBytesA):
@@ -3815,10 +3835,7 @@ class Solution(collections.abc.Mapping):
           # Default LocalReadVectorWidth
           autoLRVWB = False
           maxNumDsLoadBytesB = Solution.MAX_NUM_DS_LOAD_BYTES
-          maxLRVWB = int(maxNumDsLoadBytesB // state["ProblemType"]["MacDataTypeB"].numBytes())
-          # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
-          if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeB"].numBytes() == 0.75:
-            maxLRVWB = 32
+          maxLRVWB = maxLocalReadVectorWidth("B")
           if state["LocalReadVectorWidthB"] == -1:
             autoLRVWB = True
             if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeB"].numBytes() > maxNumDsLoadBytesB):
@@ -3993,6 +4010,55 @@ class Solution(collections.abc.Mapping):
         calLRVWFor950MX()
       else:
         calLRVW()
+
+      # gfx1250 constrains the local read widths from two independent directions.
+      # Both checks sit after calLRVW so they see the derived widths, not just the
+      # ones spelled out in the config: calLRVW's own lrvw rule only guards values
+      # the user set, while the auto path can still halve a width for scheduling.
+      # Gated on the arch as well as the cap, the way TileSpan is: gfx950 also
+      # carries ds_load_tr, and the geometry reasoned about below is gfx1250's.
+      isGfx1250 = state["ISA"] == IsaVersion(12, 5, 0)
+      if isGfx1250 and isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+
+        # ds_load_tr walks the unroll dimension with the increments hard-coded in
+        # LocalRead's per-bpe branches, and those constants spell out the geometry
+        # of one full-width read, so lrvw has to sit at its ceiling. A narrower
+        # width re-tiles the reads while the increments stay put and the offsets
+        # stop lining up. The ceiling is per operand, which is what lets mixed
+        # element sizes read at genuinely different widths. Note this keys off
+        # MacDataType, matching how enableLDSTr and the ceiling itself are picked;
+        # LocalRead actually branches on bpeDS, which only differs from MacDataType
+        # under ConvertAfterDS, and that is off for every ds_load_tr config today.
+        for tc in ("A", "B"):
+          if not state["enableLDSTr%s" % tc]:
+            continue
+          maxLRVW = maxLocalReadVectorWidth(tc)
+          if state["LocalReadVectorWidth%s" % tc] != maxLRVW:
+            reject(state, printRejectionReason,
+                   "ds_load_tr on gfx1250 requires LocalReadVectorWidth%s == %u for %s, got %u" \
+                   % (tc, maxLRVW, state["ProblemType"]["MacDataType%s" % tc],
+                      state["LocalReadVectorWidth%s" % tc]))
+            return
+
+        # WMMA takes the A and B local reads as one operand pair, so both have to
+        # walk the unroll dimension in the same order. A lane reads K row
+        #   kId * lrvw + lrvw * (rIdx // lrvw) + rIdx * numElementPerRead
+        # (LraTileAssignment.strideK plus calcGfx1250LdsOffset), counted in K rows
+        # rather than bytes. Operands sharing an element size also share
+        # numElementPerRead, so lrvw alone picks the order and the two widths have
+        # to be equal as element counts. Mixed element sizes read with per-operand
+        # geometry and are each pinned by their own ceiling above instead. The
+        # comparison is on element size rather than datatype identity because that
+        # is what numElementPerRead keys off, so f8 against bf8 still counts as one
+        # size and still has to agree on lrvw.
+        if state["ProblemType"]["MacDataTypeA"].numBytes() \
+               == state["ProblemType"]["MacDataTypeB"].numBytes() \
+           and state["LocalReadVectorWidthA"] != state["LocalReadVectorWidthB"]:
+          reject(state, printRejectionReason,
+                 "gfx1250 requires LocalReadVectorWidthA == LocalReadVectorWidthB for equally "
+                 "sized operands, got %u and %u" \
+                 % (state["LocalReadVectorWidthA"], state["LocalReadVectorWidthB"]))
+          return
 
       def calcOptGRVW(lrvw: int, unrollMajorLDS: bool, datatype: DataType) -> int:
         # with UnrollMajorLDS, GRVW need to less or equal than LRVW to have conflict free LDS read with padding.
