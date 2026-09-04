@@ -64,6 +64,10 @@ setup(
         "joblib>=1.4.0",
         "filelock",
         "numpy",
+        # ROCm currently supplies raw rocisa through a scoped PYTHONPATH rather
+        # than an installed distribution. Install this controlled wheel with
+        # --no-deps; pip check will report rocisa missing until proper rocisa
+        # packaging is implemented as a follow-up.
         "rocisa",
     ],
     cmdclass={"build_py": CleanBuildPy},
