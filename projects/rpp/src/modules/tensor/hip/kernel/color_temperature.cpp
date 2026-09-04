@@ -162,7 +162,8 @@ RppStatus hip_exec_color_temperature_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T
                                             RpptDescPtr dstDescPtr, Rpp32s* adjustmentValueTensor,
                                             RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                             rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3)) {
         int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
