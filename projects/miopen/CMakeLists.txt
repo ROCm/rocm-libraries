@@ -1,6 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# Temporary no-op change on miopen to exercise TheRock Multi-Arch CI.
+
 cmake_minimum_required( VERSION 3.15 )
 
 #Add a name for the rocm-libraries location
