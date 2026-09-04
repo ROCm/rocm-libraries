@@ -406,7 +406,10 @@ __device__ __forceinline__ void rpp_hip_interpolate1_bilinear_pln1(T* srcPtr, ui
     if (checkRange &&
         ((locSrcFloor_f2.x < roiPtrSrc_i4->x) || (locSrcFloor_f2.y < roiPtrSrc_i4->y) ||
          (locSrcFloor_f2.x > roiPtrSrc_i4->z) || (locSrcFloor_f2.y > roiPtrSrc_i4->w))) {
-        *dst = 0.0f;
+        if constexpr (std::is_same<T, schar>::value)
+            *dst = -128.0f;  // I8 black (unbiased signed pixel domain)
+        else
+            *dst = 0.0f;
     } else {
         weightedWH_f2.x = locSrcX - locSrcFloor_f2.x;
         weightedWH_f2.y = locSrcY - locSrcFloor_f2.y;
@@ -434,7 +437,10 @@ __device__ __forceinline__ void rpp_hip_interpolate3_bilinear_pkd3(T* srcPtr, ui
     if (checkRange &&
         ((locSrcFloor_f2.x < roiPtrSrc_i4->x) || (locSrcFloor_f2.y < roiPtrSrc_i4->y) ||
          (locSrcFloor_f2.x > roiPtrSrc_i4->z) || (locSrcFloor_f2.y > roiPtrSrc_i4->w))) {
-        *dst_f3 = MAKE_FLOAT3(0.0f);
+        if constexpr (std::is_same<T, schar>::value)
+            *dst_f3 = MAKE_FLOAT3(-128.0f);  // I8 black (unbiased signed pixel domain)
+        else
+            *dst_f3 = MAKE_FLOAT3(0.0f);
     } else {
         weightedWH_f2.x = locSrcX - locSrcFloor_f2.x;
         weightedWH_f2.y = locSrcY - locSrcFloor_f2.y;
@@ -618,7 +624,10 @@ __device__ __forceinline__ void rpp_hip_interpolate1_nearest_neighbor_pln1(
 
     if ((locSrc.x < roiPtrSrc_i4->x) || (locSrc.y < roiPtrSrc_i4->y) ||
         (locSrc.x > roiPtrSrc_i4->z) || (locSrc.y > roiPtrSrc_i4->w)) {
-        *dst = 0.0f;
+        if constexpr (std::is_same<T, schar>::value)
+            *dst = -128.0f;  // I8 black (unbiased signed pixel domain)
+        else
+            *dst = 0.0f;
     } else {
         int srcIdx = locSrc.y * srcStrideH + locSrc.x;
         rpp_hip_interpolate1_nearest_neighbor_load_pln1(srcPtr + srcIdx, dst);
@@ -636,7 +645,10 @@ __device__ __forceinline__ void rpp_hip_interpolate3_nearest_neighbor_pkd3(
 
     if ((locSrc.x < roiPtrSrc_i4->x) || (locSrc.y < roiPtrSrc_i4->y) ||
         (locSrc.x > roiPtrSrc_i4->z) || (locSrc.y > roiPtrSrc_i4->w)) {
-        *dst_f3 = MAKE_FLOAT3(0.0f);
+        if constexpr (std::is_same<T, schar>::value)
+            *dst_f3 = MAKE_FLOAT3(-128.0f);  // I8 black (unbiased signed pixel domain)
+        else
+            *dst_f3 = MAKE_FLOAT3(0.0f);
     } else {
         int srcIdx = locSrc.y * srcStrideH + locSrc.x * 3;
         rpp_hip_interpolate3_nearest_neighbor_load_pkd3(srcPtr + srcIdx, dst_f3);
