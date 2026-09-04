@@ -10499,12 +10499,12 @@ class KernelWriterAssembly(KernelWriter):
         activeMask = "0xFFFFFFFF" if (waveSize == 32) else "0xFFFFFFFFFFFFFFFF"
         SMovBX     = SMovB32 if (waveSize == 32) else SMovB64
         module.add(SMovBX(dst=sgpr(fullExec,sgprCnt), src=activeMask, comment="to restore all threads active"))
-        bpeVgpr = self.vgprPool.checkOut(1, "bpeVgpr")
-        module.add(VMovB32(dst=vgpr(bpeVgpr), src=int(tP["bpeGR"]), comment="bpeGR"))
+        #bpeVgpr = self.vgprPool.checkOut(1, "bpeVgpr")
+        #module.add(VMovB32(dst=vgpr(bpeVgpr), src=int(tP["bpeGR"]), comment="bpeGR"))
 
         # can remove this?
-        zeroVgpr = self.vgprPool.checkOut(1,"zeroVgpr")
-        module.add(VMovB32(dst=vgpr(zeroVgpr), src=0, comment="zero"))
+        #zeroVgpr = self.vgprPool.checkOut(1,"zeroVgpr")
+        #module.add(VMovB32(dst=vgpr(zeroVgpr), src=0, comment="zero"))
 
     def globalReadGuardKBody(tP, optParams = None):
       if optParams != None:
@@ -10888,18 +10888,24 @@ class KernelWriterAssembly(KernelWriter):
                     instOffsetInc += ldsInc
 
                 else: # Not buffer load, ie 'global' load
-                  # mask if current address if in bounds
-                  module.add(VCmpXLtU64(dst=VCC(), \
-                      src0=vgpr("GlobalReadAddr%s+%u"%(tP["tensorChar"], graIdx),2), \
-                      src1=vgpr(maxAddrVgpr,2), \
-                      comment="addr < maxAddr"))
                   if kernel["ProblemType"]["DataType%s"%tcDataType].isHalf() or kernel["ProblemType"]["DataType%s"%tcDataType].isBFloat16():
                     hi16 = loopCnt%2 if tP["glvw"]==1 else r%2
                   else:
                     hi16 = 0
                   destVgpr="G2L%s+%u+%u"%(tc, g2lIdx, regIdx)
+                  loadVgprDest = destVgprHi if (hi16 and destVgprHi != None) else destVgpr
+
+                  # Zero the destination register BEFORE masking exec to avoid garbage data in masked-out threads
+                  module.add(VMovB32(dst=vgpr(loadVgprDest), src=0, comment="init to zero for out-of-bounds threads"))
+
+                  # mask if current address if in bounds
+                  module.add(VCmpXLtU64(dst=VCC(), \
+                      src0=vgpr("GlobalReadAddr%s+%u"%(tP["tensorChar"], graIdx),2), \
+                      src1=vgpr(maxAddrVgpr,2), \
+                      comment="addr < maxAddr"))
+
                   module.add(self.chooseGlobalRead(False, \
-                            bpl, destVgpr=destVgprHi if (hi16 and destVgprHi != None) else destVgpr, \
+                            bpl, destVgpr=loadVgprDest, \
                             addr0=vgpr("GlobalReadAddr%s+%u"%(tc,graIdx),2), addr1="", \
                             soffset=0, offset=0, \
                             glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
@@ -10915,12 +10921,13 @@ class KernelWriterAssembly(KernelWriter):
                       dst=vgpr("GlobalReadAddr%s+%u+0"%(tP["tensorChar"], graIdx)), \
                       dst1=VCC(), \
                       src0=vgpr("GlobalReadAddr%s+%u+0"%(tP["tensorChar"], graIdx)),  \
-                      src1=bpl, comment="gra += %u element(s) (lower)"%(numElementsPerLoad)))
+                      src1=int(bpl), comment="gra += %u element(s) (lower)"%(numElementsPerLoad)))
                   module.add(VAddCCOU32(
                       dst=vgpr("GlobalReadAddr%s+%u+1"%(tP["tensorChar"], graIdx)), \
                       dst1=VCC(), \
                       src0=vgpr("GlobalReadAddr%s+%u+1"%(tP["tensorChar"], graIdx)), \
-                      src1=vgpr(zeroVgpr), \
+                      src1=0, \
+                      #src1=vgpr(zeroVgpr), \
                       src2=VCC(), comment="gra += 1 (upper)"))
 
                 # int8 byte:
@@ -11088,8 +11095,8 @@ class KernelWriterAssembly(KernelWriter):
     # BufferLoad=0 VGPRs are local to each call — always free them
     if not isTr and not kernel["BufferLoad"]:
       self.vgprPool.checkIn(maxAddrVgpr)
-      self.vgprPool.checkIn(bpeVgpr)
-      self.vgprPool.checkIn(zeroVgpr)
+      #self.vgprPool.checkIn(bpeVgpr)
+      #self.vgprPool.checkIn(zeroVgpr)
 
     if doTailOpt == 2:
       return module, loadCnt, vgprList, directToLdsLoads

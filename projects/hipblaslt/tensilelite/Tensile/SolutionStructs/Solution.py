@@ -2416,11 +2416,11 @@ class Solution(collections.abc.Mapping):
       if problemType["GroupedGemm"]:
         reject(state, printRejectionReason, "BufferLoad=0 does not support GroupedGemm")
         return
-      # Sub-dword types (fp8, int8, fp16, bf16) have correctness issues with flat
+      # Sub-word types (fp8, int8) have correctness issues with flat
       # addressing: tail loop reload uses globalread_gpr_record not populated for
       # flat path, and edge/tail global reads produce wrong results.
-      if problemType["DataType"].numBytes() < 4:
-        reject(state, printRejectionReason, "BufferLoad=0 does not support sub-dword data types (flat addressing not validated)")
+      if problemType["DataType"].numBytes() < 2:
+        reject(state, printRejectionReason, "BufferLoad=0 does not support sub-word data types (flat addressing not validated)")
         return
       if state["TDMInst"]:
         reject(state, printRejectionReason, "BufferLoad=0 does not support TDMInst")

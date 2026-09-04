@@ -213,7 +213,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # cgemm TN
     - # ProblemType
@@ -298,7 +298,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # cgemm TT
     - # ProblemType
@@ -383,7 +383,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # cgemm NC
     - # ProblemType
@@ -468,7 +468,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # cgemm CN
     - # ProblemType
@@ -553,7 +553,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # cgemm TC
     - # ProblemType
@@ -638,7 +638,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # cgemm CT
     - # ProblemType
@@ -723,7 +723,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # cgemm CC
     - # ProblemType
@@ -808,7 +808,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # dgemm NN
     - # ProblemType
@@ -905,7 +905,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # dgemm NT
     - # ProblemType
@@ -990,7 +990,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # dgemm TN
     - # ProblemType
@@ -1075,7 +1075,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # dgemm TT
     - # ProblemType
@@ -1160,7 +1160,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # sgemm NN
     - # ProblemType
@@ -1257,7 +1257,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # sgemm NT
     - # ProblemType
@@ -1342,7 +1342,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # sgemm TN
     - # ProblemType
@@ -1356,7 +1356,6 @@ BenchmarkProblems:
       TransposeB: False
       ComplexConjugateA: False
       ComplexConjugateB: False
-
     - # BenchmarkProblemSizeGroup - Assembly
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -1427,7 +1426,7 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
 
   - # sgemm TT
     - # ProblemType
@@ -1512,4 +1511,652 @@ BenchmarkProblems:
           # - Exact: [67, 67, 1, 27]
           # - Exact: [67, 67, 1, 31]
           - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-          - Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+  - # hgemm NN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      UseBeta: False         
+      Batched: True
+      TransposeA: False
+      TransposeB: False
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      HighPrecisionAccumulate: True
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
+          - [32, 32, 8, 1,  1,   1, 1,  4,1 ]
+          - [16, 16,16, 1,  1,  11, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   7, 2,  1,4 ]
+          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [8]
+        - ExpandPointerSwap: [false]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - DepthU: [32]
+        - BufferLoad: [False]
+        - BufferStore: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [32, 32, 1, 8]
+          #- Exact: [16, 16, 1, 2]
+          #- Exact: [2048, 2048, 1, 256] #128x128(times16)
+          #- Exact: [1024, 1024, 1, 64] #64x64(times16)
+          #- Exact: [512, 512, 1, 32] #32x32
+          #- Exact: [64, 64, 1, 16]
+          #- Exact: [64, 64, 1, 128]
+          #- Exact: [4096, 4096, 1, 8192]
+          #- Range: [[16,37, 512],[16,57,512],[1],[1,1,64]]
+          #- Exact: [13, 13, 1, 1]
+          #- Exact: [17, 17, 1, 1]
+          #- Exact: [25, 25, 1, 1]
+          #- Exact: [33, 33, 1, 1]
+          #- Exact: [65, 65, 1, 1]
+          #- Exact: [13, 13, 1, 3]
+          #- Exact: [17, 17, 1, 3]
+          #- Exact: [25, 25, 1, 3]
+          #- Exact: [33, 33, 1, 3]
+          #- Exact: [65, 65, 1, 3]
+          - Exact: [13, 13, 1, 5]
+          - Exact: [17, 17, 1, 5]
+          - Exact: [25, 25, 1, 5]
+          - Exact: [33, 33, 1, 5]
+          #- Exact: [65, 65, 1, 5]
+          #- Exact: [65, 65, 1, 9]
+          #- Exact: [65, 65, 1, 11]
+          #- Exact: [65, 65, 1, 15]
+          #- Exact: [65, 65, 1, 21]
+          #- Exact: [65, 65, 1, 25]
+          #- Exact: [65, 65, 1, 27]
+          #- Exact: [65, 65, 1, 31]
+          #- Exact: [67, 67, 1, 5]
+          - Exact: [67, 67, 1, 9]
+          - Exact: [67, 67, 1, 11]
+          - Exact: [67, 67, 1, 15]
+          #- Exact: [67, 67, 1, 21]
+          #- Exact: [67, 67, 1, 25]
+          #- Exact: [67, 67, 1, 27]
+          #- Exact: [67, 67, 1, 31]
+          #- Range: [ [127,1,129], 0, [2], [63,1,64] ]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]] 
+  - # hgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      UseBeta: False         
+      Batched: True
+      TransposeA: False
+      TransposeB: True
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      HighPrecisionAccumulate: True
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
+          - [32, 32, 8, 1,  1,   1, 1,  4,1 ]
+          - [16, 16,16, 1,  1,  11, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   7, 2,  1,4 ]
+          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [8]
+        - ExpandPointerSwap: [false]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - DepthU: [32]
+        - BufferLoad: [False]
+        - BufferStore: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [32, 32, 1, 8]
+          #- Exact: [16, 16, 1, 2]
+          #- Exact: [2048, 2048, 1, 256] #128x128(times16)
+          #- Exact: [1024, 1024, 1, 64] #64x64(times16)
+          #- Exact: [512, 512, 1, 32] #32x32
+          #- Exact: [64, 64, 1, 16]
+          #- Exact: [64, 64, 1, 128]
+          #- Exact: [4096, 4096, 1, 8192]
+          #- Range: [[16,37, 512],[16,57,512],[1],[1,1,64]]
+          #- Exact: [13, 13, 1, 1]
+          #- Exact: [17, 17, 1, 1]
+          #- Exact: [25, 25, 1, 1]
+          #- Exact: [33, 33, 1, 1]
+          #- Exact: [65, 65, 1, 1]
+          #- Exact: [13, 13, 1, 3]
+          #- Exact: [17, 17, 1, 3]
+          #- Exact: [25, 25, 1, 3]
+          #- Exact: [33, 33, 1, 3]
+          #- Exact: [65, 65, 1, 3]
+          - Exact: [13, 13, 1, 5]
+          - Exact: [17, 17, 1, 5]
+          - Exact: [25, 25, 1, 5]
+          - Exact: [33, 33, 1, 5]
+          #- Exact: [65, 65, 1, 5]
+          #- Exact: [65, 65, 1, 9]
+          #- Exact: [65, 65, 1, 11]
+          #- Exact: [65, 65, 1, 15]
+          #- Exact: [65, 65, 1, 21]
+          #- Exact: [65, 65, 1, 25]
+          #- Exact: [65, 65, 1, 27]
+          #- Exact: [65, 65, 1, 31]
+          #- Exact: [67, 67, 1, 5]
+          - Exact: [67, 67, 1, 9]
+          - Exact: [67, 67, 1, 11]
+          - Exact: [67, 67, 1, 15]
+          #- Exact: [67, 67, 1, 21]
+          #- Exact: [67, 67, 1, 25]
+          #- Exact: [67, 67, 1, 27]
+          #- Exact: [67, 67, 1, 31]
+          # - Range: [ [127,1,129], 0, [2], [63,1,64] ]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]] 
+  - # hgemm TN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      UseBeta: False         
+      Batched: True
+      TransposeA: True
+      TransposeB: False
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      HighPrecisionAccumulate: True
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
+          - [32, 32, 8, 1,  1,   1, 1,  4,1 ]
+          - [16, 16,16, 1,  1,  11, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   7, 2,  1,4 ]
+          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [8]
+        - ExpandPointerSwap: [false]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - DepthU: [32]
+        - BufferLoad: [False]
+        - BufferStore: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [32, 32, 1, 8]
+          #- Exact: [16, 16, 1, 2]
+          #- Exact: [2048, 2048, 1, 256] #128x128(times16)
+          #- Exact: [1024, 1024, 1, 64] #64x64(times16)
+          #- Exact: [512, 512, 1, 32] #32x32
+          #- Exact: [64, 64, 1, 16]
+          #- Exact: [64, 64, 1, 128]
+          #- Exact: [4096, 4096, 1, 8192]
+          #- Range: [[16,37, 512],[16,57,512],[1],[1,1,64]]
+          #- Exact: [13, 13, 1, 1]
+          #- Exact: [17, 17, 1, 1]
+          #- Exact: [25, 25, 1, 1]
+          #- Exact: [33, 33, 1, 1]
+          #- Exact: [65, 65, 1, 1]
+          #- Exact: [13, 13, 1, 3]
+          #- Exact: [17, 17, 1, 3]
+          #- Exact: [25, 25, 1, 3]
+          #- Exact: [33, 33, 1, 3]
+          #- Exact: [65, 65, 1, 3]
+          - Exact: [13, 13, 1, 5]
+          - Exact: [17, 17, 1, 5]
+          - Exact: [25, 25, 1, 5]
+          - Exact: [33, 33, 1, 5]
+          #- Exact: [65, 65, 1, 5]
+          #- Exact: [65, 65, 1, 9]
+          #- Exact: [65, 65, 1, 11]
+          #- Exact: [65, 65, 1, 15]
+          #- Exact: [65, 65, 1, 21]
+          #- Exact: [65, 65, 1, 25]
+          #- Exact: [65, 65, 1, 27]
+          #- Exact: [65, 65, 1, 31]
+          #- Exact: [67, 67, 1, 5]
+          - Exact: [67, 67, 1, 9]
+          - Exact: [67, 67, 1, 11]
+          - Exact: [67, 67, 1, 15]
+          #- Exact: [67, 67, 1, 21]
+          #- Exact: [67, 67, 1, 25]
+          #- Exact: [67, 67, 1, 27]
+          #- Exact: [67, 67, 1, 31]
+          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+  - # hgemm TT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      UseBeta: False         
+      Batched: True
+      TransposeA: True
+      TransposeB: True
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      HighPrecisionAccumulate: True
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
+          - [32, 32, 8, 1,  1,   1, 1,  4,1 ]
+          - [16, 16,16, 1,  1,  11, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   7, 2,  1,4 ]
+          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [8]
+        - ExpandPointerSwap: [false]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - DepthU: [32]
+        - BufferLoad: [False]
+        - BufferStore: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [32, 32, 1, 8]
+          #- Exact: [16, 16, 1, 2]
+          #- Exact: [2048, 2048, 1, 256] #128x128(times16)
+          #- Exact: [1024, 1024, 1, 64] #64x64(times16)
+          #- Exact: [512, 512, 1, 32] #32x32
+          #- Exact: [64, 64, 1, 16]
+          #- Exact: [64, 64, 1, 128]
+          #- Exact: [4096, 4096, 1, 8192]
+          #- Range: [[16,37, 512],[16,57,512],[1],[1,1,64]]
+          #- Exact: [13, 13, 1, 1]
+          #- Exact: [17, 17, 1, 1]
+          #- Exact: [25, 25, 1, 1]
+          #- Exact: [33, 33, 1, 1]
+          #- Exact: [65, 65, 1, 1]
+          #- Exact: [13, 13, 1, 3]
+          #- Exact: [17, 17, 1, 3]
+          #- Exact: [25, 25, 1, 3]
+          #- Exact: [33, 33, 1, 3]
+          #- Exact: [65, 65, 1, 3]
+          - Exact: [13, 13, 1, 5]
+          - Exact: [17, 17, 1, 5]
+          - Exact: [25, 25, 1, 5]
+          - Exact: [33, 33, 1, 5]
+          #- Exact: [65, 65, 1, 5]
+          #- Exact: [65, 65, 1, 9]
+          #- Exact: [65, 65, 1, 11]
+          #- Exact: [65, 65, 1, 15]
+          #- Exact: [65, 65, 1, 21]
+          #- Exact: [65, 65, 1, 25]
+          #- Exact: [65, 65, 1, 27]
+          #- Exact: [65, 65, 1, 31]
+          #- Exact: [67, 67, 1, 5]
+          - Exact: [67, 67, 1, 9]
+          - Exact: [67, 67, 1, 11]
+          - Exact: [67, 67, 1, 15]
+          #- Exact: [67, 67, 1, 21]
+          #- Exact: [67, 67, 1, 25]
+          #- Exact: [67, 67, 1, 27]
+          #- Exact: [67, 67, 1, 31]
+          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]                               
+  - # bgemm NN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      UseBeta: True         
+      Batched: True
+      TransposeA: False
+      TransposeB: False
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      HighPrecisionAccumulate: True
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
+          - [32, 32, 8, 1,  1,   1, 1,  4,1 ]
+          - [16, 16,16, 1,  1,  11, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   7, 2,  1,4 ]
+          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [8]
+        - ExpandPointerSwap: [false]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - DepthU: [32,64]
+        - BufferLoad: [False]
+        - BufferStore: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [32, 32, 1, 8]
+          #- Exact: [16, 16, 1, 2]
+          #- Exact: [2048, 2048, 1, 256] #128x128(times16)
+          #- Exact: [1024, 1024, 1, 64] #64x64(times16)
+          #- Exact: [512, 512, 1, 32] #32x32
+          #- Exact: [64, 64, 1, 16]
+          #- Exact: [64, 64, 1, 128]
+          #- Exact: [4096, 4096, 1, 8192]
+          #- Range: [[16,37, 512],[16,57,512],[1],[1,1,64]]
+          #- Exact: [13, 13, 1, 1]
+          #- Exact: [17, 17, 1, 1]
+          #- Exact: [25, 25, 1, 1]
+          #- Exact: [33, 33, 1, 1]
+          #- Exact: [65, 65, 1, 1]
+          #- Exact: [13, 13, 1, 3]
+          #- Exact: [17, 17, 1, 3]
+          #- Exact: [25, 25, 1, 3]
+          #- Exact: [33, 33, 1, 3]
+          #- Exact: [65, 65, 1, 3]
+          - Exact: [13, 13, 1, 5]
+          - Exact: [17, 17, 1, 5]
+          - Exact: [25, 25, 1, 5]
+          - Exact: [33, 33, 1, 5]
+          #- Exact: [65, 65, 1, 5]
+          #- Exact: [65, 65, 1, 9]
+          #- Exact: [65, 65, 1, 11]
+          #- Exact: [65, 65, 1, 15]
+          #- Exact: [65, 65, 1, 21]
+          #- Exact: [65, 65, 1, 25]
+          #- Exact: [65, 65, 1, 27]
+          #- Exact: [65, 65, 1, 31]
+          #- Exact: [67, 67, 1, 5]
+          - Exact: [67, 67, 1, 9]
+          - Exact: [67, 67, 1, 11]
+          - Exact: [67, 67, 1, 15]
+          #- Exact: [67, 67, 1, 21]
+          #- Exact: [67, 67, 1, 25]
+          #- Exact: [67, 67, 1, 27]
+          #- Exact: [67, 67, 1, 31]
+          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]] 
+  - # bgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      UseBeta: True         
+      Batched: True
+      TransposeA: False
+      TransposeB: True
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      HighPrecisionAccumulate: True
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
+          - [32, 32, 8, 1,  1,   1, 1,  4,1 ]
+          - [16, 16,16, 1,  1,  11, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   7, 2,  1,4 ]
+          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [8]
+        - ExpandPointerSwap: [false]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - DepthU: [32,64]
+        - BufferLoad: [False]
+        - BufferStore: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [32, 32, 1, 8]
+          #- Exact: [16, 16, 1, 2]
+          #- Exact: [2048, 2048, 1, 256] #128x128(times16)
+          #- Exact: [1024, 1024, 1, 64] #64x64(times16)
+          #- Exact: [512, 512, 1, 32] #32x32
+          #- Exact: [64, 64, 1, 16]
+          #- Exact: [64, 64, 1, 128]
+          #- Exact: [4096, 4096, 1, 8192]
+          #- Range: [[16,37, 512],[16,57,512],[1],[1,1,64]]
+          #- Exact: [13, 13, 1, 1]
+          #- Exact: [17, 17, 1, 1]
+          #- Exact: [25, 25, 1, 1]
+          #- Exact: [33, 33, 1, 1]
+          #- Exact: [65, 65, 1, 1]
+          #- Exact: [13, 13, 1, 3]
+          #- Exact: [17, 17, 1, 3]
+          #- Exact: [25, 25, 1, 3]
+          #- Exact: [33, 33, 1, 3]
+          #- Exact: [65, 65, 1, 3]
+          - Exact: [13, 13, 1, 5]
+          - Exact: [17, 17, 1, 5]
+          - Exact: [25, 25, 1, 5]
+          - Exact: [33, 33, 1, 5]
+          #- Exact: [65, 65, 1, 5]
+          #- Exact: [65, 65, 1, 9]
+          #- Exact: [65, 65, 1, 11]
+          #- Exact: [65, 65, 1, 15]
+          #- Exact: [65, 65, 1, 21]
+          #- Exact: [65, 65, 1, 25]
+          #- Exact: [65, 65, 1, 27]
+          #- Exact: [65, 65, 1, 31]
+          #- Exact: [67, 67, 1, 5]
+          - Exact: [67, 67, 1, 9]
+          - Exact: [67, 67, 1, 11]
+          - Exact: [67, 67, 1, 15]
+          #- Exact: [67, 67, 1, 21]
+          #- Exact: [67, 67, 1, 25]
+          #- Exact: [67, 67, 1, 27]
+          #- Exact: [67, 67, 1, 31]
+          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+  - # bgemm TN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      UseBeta: True         
+      Batched: True
+      TransposeA: True
+      TransposeB: False
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      HighPrecisionAccumulate: True
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
+          - [32, 32, 8, 1,  1,   1, 1,  4,1 ]
+          - [16, 16,16, 1,  1,  11, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   7, 2,  1,4 ]
+          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [8]
+        - ExpandPointerSwap: [false]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - DepthU: [32,64]
+        - BufferLoad: [False]
+        - BufferStore: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [32, 32, 1, 8]
+          #- Exact: [16, 16, 1, 2]
+          #- Exact: [2048, 2048, 1, 256] #128x128(times16)
+          #- Exact: [1024, 1024, 1, 64] #64x64(times16)
+          #- Exact: [512, 512, 1, 32] #32x32
+          #- Exact: [64, 64, 1, 16]
+          #- Exact: [64, 64, 1, 128]
+          #- Exact: [4096, 4096, 1, 8192]
+          #- Range: [[16,37, 512],[16,57,512],[1],[1,1,64]]
+          #- Exact: [13, 13, 1, 1]
+          #- Exact: [17, 17, 1, 1]
+          #- Exact: [25, 25, 1, 1]
+          #- Exact: [33, 33, 1, 1]
+          #- Exact: [65, 65, 1, 1]
+          #- Exact: [13, 13, 1, 3]
+          #- Exact: [17, 17, 1, 3]
+          #- Exact: [25, 25, 1, 3]
+          #- Exact: [33, 33, 1, 3]
+          #- Exact: [65, 65, 1, 3]
+          - Exact: [13, 13, 1, 5]
+          - Exact: [17, 17, 1, 5]
+          - Exact: [25, 25, 1, 5]
+          - Exact: [33, 33, 1, 5]
+          #- Exact: [65, 65, 1, 5]
+          #- Exact: [65, 65, 1, 9]
+          #- Exact: [65, 65, 1, 11]
+          #- Exact: [65, 65, 1, 15]
+          #- Exact: [65, 65, 1, 21]
+          #- Exact: [65, 65, 1, 25]
+          #- Exact: [65, 65, 1, 27]
+          #- Exact: [65, 65, 1, 31]
+          #- Exact: [67, 67, 1, 5]
+          - Exact: [67, 67, 1, 9]
+          - Exact: [67, 67, 1, 11]
+          - Exact: [67, 67, 1, 15]
+          #- Exact: [67, 67, 1, 21]
+          #- Exact: [67, 67, 1, 25]
+          #- Exact: [67, 67, 1, 27]
+          #- Exact: [67, 67, 1, 31]
+          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]
+  - # bgemm TT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      UseBeta: True         
+      Batched: True
+      TransposeA: True
+      TransposeB: True
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      HighPrecisionAccumulate: True
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
+          - [32, 32, 8, 1,  1,   1, 1,  4,1 ]
+          - [16, 16,16, 1,  1,  11, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   7, 2,  1,4 ]
+          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
+          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [8]
+        - ExpandPointerSwap: [false]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - DepthU: [32,64]
+        - BufferLoad: [False]
+        - BufferStore: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [32, 32, 1, 8]
+          #- Exact: [16, 16, 1, 2]
+          #- Exact: [2048, 2048, 1, 256] #128x128(times16)
+          #- Exact: [1024, 1024, 1, 64] #64x64(times16)
+          #- Exact: [512, 512, 1, 32] #32x32
+          #- Exact: [64, 64, 1, 16]
+          #- Exact: [64, 64, 1, 128]
+          #- Exact: [4096, 4096, 1, 8192]
+          #- Range: [[16,37, 512],[16,57,512],[1],[1,1,64]]
+          #- Exact: [13, 13, 1, 1]
+          #- Exact: [17, 17, 1, 1]
+          #- Exact: [25, 25, 1, 1]
+          #- Exact: [33, 33, 1, 1]
+          #- Exact: [65, 65, 1, 1]
+          #- Exact: [13, 13, 1, 3]
+          #- Exact: [17, 17, 1, 3]
+          #- Exact: [25, 25, 1, 3]
+          #- Exact: [33, 33, 1, 3]
+          #- Exact: [65, 65, 1, 3]
+          - Exact: [13, 13, 1, 5]
+          - Exact: [17, 17, 1, 5]
+          - Exact: [25, 25, 1, 5]
+          - Exact: [33, 33, 1, 5]
+          #- Exact: [65, 65, 1, 5]
+          #- Exact: [65, 65, 1, 9]
+          #- Exact: [65, 65, 1, 11]
+          #- Exact: [65, 65, 1, 15]
+          #- Exact: [65, 65, 1, 21]
+          #- Exact: [65, 65, 1, 25]
+          #- Exact: [65, 65, 1, 27]
+          #- Exact: [65, 65, 1, 31]
+          #- Exact: [67, 67, 1, 5]
+          - Exact: [67, 67, 1, 9]
+          - Exact: [67, 67, 1, 11]
+          - Exact: [67, 67, 1, 15]
+          #- Exact: [67, 67, 1, 21]
+          #- Exact: [67, 67, 1, 25]
+          #- Exact: [67, 67, 1, 27]
+          #- Exact: [67, 67, 1, 31]
+          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
+          #- Range: [ [16, 16, 32], [16, 16, 32], [1], [256, 256, 512]]                    
