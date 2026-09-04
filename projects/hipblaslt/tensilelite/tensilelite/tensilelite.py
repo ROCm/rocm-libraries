@@ -38,7 +38,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from tensilelite import __version__
+from tensilelite import GENERATOR_VERSION as __version__
 from tensilelite.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
@@ -51,7 +51,7 @@ from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalPa
 from tensilelite.Common.TimingInstrumentation import timing_context, flush_timing_buffer
 from tensilelite.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from tensilelite.Toolchain.Source import SourceToolchain, makeSourceToolchain
-from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
+from tensilelite.Toolchain.Validators import deviceEnumeratorCandidates, validateToolchain, ToolchainDefaults
 from tensilelite.Utilities.Decorators.Profile import profile
 from tensilelite import BenchmarkProblems
 from tensilelite import ClientWriter
@@ -668,7 +668,7 @@ def tensilelite(userArgs):
     if args.gpuTargets:
         enumerator = None  # not needed — ISA comes from --gpu-targets
     else:
-        enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR if args.rocm_agent_enumerator is None else args.rocm_agent_enumerator)
+        enumerator = deviceEnumeratorCandidates(args.rocm_agent_enumerator)
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
