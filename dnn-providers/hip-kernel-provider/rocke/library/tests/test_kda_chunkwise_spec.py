@@ -377,3 +377,34 @@ class TestGdnFlags:
         )
         name = spec.kernel_name()
         assert "gdn" in name and "g2" in name
+
+    def _gdn(self, **over):
+        base = dict(
+            raw_inputs=True,
+            fuse_gate=True,
+            fuse_qk_l2norm=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+            gate_kind="gdn",
+        )
+        base.update(over)
+        return KdaChunkPrepSpec(**base)
+
+    def test_gdn_requires_all_fuses(self):
+        ok, why = is_valid_spec(
+            KdaChunkPrepSpec(raw_inputs=True, fuse_gate=True, gate_kind="gdn"),
+            arch=ARCH,
+        )
+        assert not ok and "fuse_qk_l2norm" in why
+
+    def test_gdn_valid_when_all_fuses_on(self):
+        ok, why = is_valid_spec(self._gdn(), arch=ARCH)
+        assert ok, why
+
+    def test_kda_gqa_rejected_in_v1(self):
+        ok, why = is_valid_spec(KdaChunkPrepSpec(kv_group=2), arch=ARCH)
+        assert not ok and "kv_group" in why
+
+    def test_bad_gate_kind_rejected(self):
+        ok, why = is_valid_spec(KdaChunkPrepSpec(gate_kind="banana"), arch=ARCH)
+        assert not ok and "gate_kind" in why

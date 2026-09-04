@@ -422,6 +422,17 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
     if spec.dtype not in _DTYPE_IR:
         return False, f"unsupported dtype {spec.dtype!r} (bf16 only)"
 
+    if spec.gate_kind not in ("kda", "gdn"):
+        return False, f"gate_kind must be 'kda' or 'gdn' (got {spec.gate_kind!r})"
+    if spec.gate_kind == "gdn":
+        for _flag in ("raw_inputs", "fuse_gate", "fuse_qk_l2norm", "fuse_beta_sigmoid"):
+            if not getattr(spec, _flag):
+                return False, f"gate_kind='gdn' requires {_flag}=True"
+    if spec.kv_group < 1:
+        return False, f"kv_group must be >= 1 (got {spec.kv_group})"
+    if spec.kv_group > 1 and spec.gate_kind != "gdn":
+        return False, "kv_group>1 (GQA) is only valid with gate_kind='gdn' in v1"
+
     if spec.has_dt_bias and not spec.fuse_gate:
         return False, "has_dt_bias requires fuse_gate"
     for flag, name in (
