@@ -506,8 +506,17 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 endif()
 
-# Both the device-library contents and custom kernels in the rocroller directory should be installed if selected for
-if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
+# Both the device-library contents and custom kernels in the rocroller directory should be installed if selected for.
+#
+# HIPBLASLT_ENABLE_ROCROLLER on its own is not sufficient to conclude that the
+# directory has content: the rocRoller custom kernels are gfx950-only, so a
+# rocRoller-enabled build for other targets produces nothing here. The
+# custom-kernels directory therefore advertises itself rather than having this
+# guard duplicate that arch check (which would silently stop installing them if
+# another arch is ever added).
+get_property(_hipblaslt_has_rocroller_custom_kernels
+    GLOBAL PROPERTY HIPBLASLT_HAS_ROCROLLER_CUSTOM_KERNELS)
+if(HIPBLASLT_ENABLE_DEVICE OR _hipblaslt_has_rocroller_custom_kernels)
     if(WIN32)
         # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library")
