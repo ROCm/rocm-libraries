@@ -24,6 +24,7 @@ from rocke.dispatch.core import (
 )
 
 from . import gfx950
+from . import prefill_gfx950
 from .common import (
     FAMILY,
     GDN_ABI_VERSION,
@@ -31,6 +32,12 @@ from .common import (
     GdnDecodeRequest,
     normalize_dtype,
     request_errors,
+)
+from .prefill_common import (
+    FAMILY_PREFILL,
+    GDN_PREFILL_ABI_VERSION,
+    GDN_PREFILL_DIM_VOCABULARY,
+    GdnPrefillRequest,
 )
 
 _ARCH_MODULES = (gfx950,)
@@ -40,6 +47,12 @@ GDN_REGISTRY = CandidateRegistry(
 )
 for _module in _ARCH_MODULES:
     _module.register(GDN_REGISTRY)
+
+GDN_PREFILL_REGISTRY = CandidateRegistry(
+    FAMILY_PREFILL, dim_vocabulary=GDN_PREFILL_DIM_VOCABULARY, require_build=True
+)
+for _module in (prefill_gfx950,):
+    _module.register(GDN_PREFILL_REGISTRY)
 
 
 def gdn_candidates() -> Tuple[KernelCandidate, ...]:
@@ -107,6 +120,64 @@ def dispatch_gdn_decode(
     )
 
 
+def gdn_prefill_candidates() -> Tuple[KernelCandidate, ...]:
+    return GDN_PREFILL_REGISTRY.candidates()
+
+
+def _prefill_kernel_id(
+    req: GdnPrefillRequest, candidate: KernelCandidate, spec: Any
+) -> KernelId:
+    return KernelId(
+        op="gdn_prefill",
+        family=FAMILY_PREFILL,
+        candidate=candidate.name,
+        algorithm=candidate.algorithm,
+        spec_id=candidate.spec_id,
+        arch=req.arch,
+        abi_version=candidate.abi_version,
+        request_hash=stable_json_hash(req.normalized(), n=16),
+        spec_hash=stable_json_hash(asdict(spec), n=16),
+    )
+
+
+def dispatch_gdn_prefill(
+    req: GdnPrefillRequest, *, ranker: Ranker | None = None
+) -> DispatchResult:
+    """Select a GDN prefill split-half for ``req``.
+
+    GDN prefill is a two-launch split path with no fused default, so the caller
+    pins ``algorithm="chunk_prep"`` then ``"chunk_scan"``; ``auto`` is rejected
+    rather than resolved to one half of a two-launch path.
+    """
+    if (
+        req.algorithm.strip().lower() == "auto"
+        and req.spec_id.strip().lower() == "auto"
+    ):
+        raise ValueError(
+            "GDN prefill has no fused default: dispatch algorithm='chunk_prep' "
+            "then algorithm='chunk_scan' (there is no single-kernel GDN prefill)"
+        )
+    candidate = GDN_PREFILL_REGISTRY.select(req, ranker=ranker)
+    spec = candidate.select_spec(req)
+    kid = _prefill_kernel_id(req, candidate, spec)
+    return DispatchResult(
+        request=req,
+        candidate=candidate,
+        spec=spec,
+        kernel_id=kid,
+        grid=candidate.grid(spec, req),
+        block=candidate.block(spec),
+        signature=tuple(candidate.signature(spec)),
+        explanation=(
+            f"selected {candidate.name} for BH={req.batch_heads} on {req.arch}",
+            f"value_splits={getattr(spec, 'value_splits', 1)}, "
+            f"block_size={spec.tile.block_size}, chunk={spec.tile.chunk}",
+            f"spec_id={candidate.spec_id}",
+            f"spec_hash={kid.spec_hash}",
+        ),
+    )
+
+
 __all__ = [
     "FAMILY",
     "GDN_ABI_VERSION",
@@ -117,4 +188,11 @@ __all__ = [
     "gdn_candidates",
     "gdn_sweep_space",
     "normalize_dtype",
+    "FAMILY_PREFILL",
+    "GDN_PREFILL_ABI_VERSION",
+    "GDN_PREFILL_DIM_VOCABULARY",
+    "GDN_PREFILL_REGISTRY",
+    "GdnPrefillRequest",
+    "dispatch_gdn_prefill",
+    "gdn_prefill_candidates",
 ]
