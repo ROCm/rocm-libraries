@@ -22,9 +22,10 @@
 #include "device/kernel-generator-embed.h"
 #include "rtc_kernel.h"
 
-std::string chirp_rtc_kernel_name(rocfft_precision precision)
+std::string chirp_rtc_kernel_name(rocfft_precision precision, const KIntType& itype)
 {
     std::string kernel_name = "chirp_gen";
+    kernel_name += rtc_kint_name(itype);
     kernel_name += rtc_precision_name(precision);
     return kernel_name;
 }
@@ -42,36 +43,36 @@ static std::string chirp_rtc_launch_bounds()
 static std::string chirp_rtc_args()
 {
     std::string args = "(";
-    args += "size_t N";
+    args += "integer_type N";
     args += ", scalar_type* output";
     args += ")";
     return args;
+}
+
+// Type wide enough to hold 2N and the full i * i product for any N that
+// integer_type can express, so that the reduction below is exact.
+static std::string chirp_rtc_wide_type_decl(const KIntType& itype)
+{
+    return itype == KIntType::U64 ? "typedef __uint128_t wide_type;\n"
+                                  : "typedef unsigned long long wide_type;\n";
 }
 
 static std::string chirp_rtc_body()
 {
     std::string body = "{";
     body += R"_SRC(
-        auto i = threadIdx.x + blockIdx.x * blockDim.x;
+        integer_type i = threadIdx.x + blockIdx.x * blockDim.x;
 
         if(i < N)
         {
-            unsigned int twoN = 2 * N;
-            unsigned int iSq  = i * i;
+            // The chirp phase is i * i modulo 2N.  Reduce in wide_type:
+            // both 2N and i * i overflow integer_type near the top of its
+            // range, so neither the doubling nor the product can be done
+            // at the kernel's index width.
+            wide_type twoN = 2 * static_cast<wide_type>(N);
+            wide_type iSq  = static_cast<wide_type>(i) * i;
 
-            auto f = (double)iSq / (double)twoN;
-
-            unsigned int fRnd = floor(f);
-
-            auto aLow = iSq;
-            auto bLow = twoN * fRnd;
-
-            auto aHi = __umulhi(i, i);
-            auto bHi = __umulhi(twoN, fRnd);
-
-            auto f1 = (aHi - bHi) * (double)(0x100000000 % twoN) / (double)twoN;
-            auto f2 = (double)((aLow - bLow) % twoN) / (double)twoN;
-            auto fp = (f1 - floor(f1)) + f2;
+            double fp = (double)(iSq % twoN) / (double)twoN;
 
             output[i].x = cos(TWO_PI * fp);
             output[i].y = sin(TWO_PI * fp);
@@ -81,13 +82,16 @@ static std::string chirp_rtc_body()
     return body;
 }
 
-std::string chirp_rtc(const std::string& kernel_name, rocfft_precision precision)
+std::string
+    chirp_rtc(const std::string& kernel_name, rocfft_precision precision, const KIntType& itype)
 {
     std::string src;
 
     src += rocfft_complex_h;
     src += common_h;
     src += device_enum_h;
+    src += rtc_kint_type_decl(itype);
+    src += chirp_rtc_wide_type_decl(itype);
     src += rtc_precision_type_decl(precision);
     src += "static constexpr double TWO_PI = 6.283185307179586476925286766559;\n";
 

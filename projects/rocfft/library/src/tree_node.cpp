@@ -29,6 +29,7 @@
 #include "rocfft_mpi.h"
 #include "twiddles.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <sstream>
@@ -263,8 +264,7 @@ void LeafNode::Print(rocfft_ostream& os, int indent) const
 
 bool LeafNode::CreateDevKernelArgs()
 {
-    devKernArg = kargs_create(length, inStride, outStride, iDist, oDist);
-    return (devKernArg != nullptr);
+    return devKernArg.create(length, inStride, outStride, iDist, oDist, GetKIntType());
 }
 
 bool LeafNode::CreateDeviceResources()
@@ -364,20 +364,6 @@ void LeafNode::SetupGridParam(GridParam& gp)
 // grid params are set up by RTC
 void TransposeNode::SetupGridParam_internal(GridParam& gp) {}
 
-IndexType TransposeNode::GetKernelIndexType() const
-{
-    auto idx_limit = GetU32KernelIndexLimit();
-
-    // No scalar_type reinterpretation by this kernel (see rtc_transpose_gen.cpp).
-    // INT32_MAX, not UINT32_MAX: the compiler may sign-extend 32-bit indices to 64-bit.
-    if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
-       || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit)
-    {
-        return IndexType::U64;
-    }
-    return IndexType::U32;
-}
-
 size_t LeafNode::MaxKernelIndex(io_data_label io) const
 {
     // Offsets (iOffset/oOffset) are applied to base pointers before
@@ -385,8 +371,53 @@ size_t LeafNode::MaxKernelIndex(io_data_label io) const
     const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
     const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
     const auto  io_length = io == io_data_label::INPUT ? length : GetOutputLength();
+
     // compute_ptrdiff returns the buffer size (one-past-the-end).
-    return compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
+    auto ptrdiff = compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
+
+    // Fused Bluestein kernels index the Bluestein work buffer in the same
+    // kernel, over the same lengths but with the Bluestein strides + dist.
+    // Whichever side reaches further decides the integer type.
+    const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
+    if(fuseBlue == BFT_NONE || io_stride_blue.size() < io_length.size())
+        return ptrdiff;
+
+    const auto& io_dist_blue = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
+
+    return std::max(ptrdiff, compute_ptrdiff(io_length, io_stride_blue, batch, io_dist_blue) - 1);
+}
+
+size_t LeafNode::MaxKernelStride(io_data_label io) const
+{
+    // These are the values KernelArgsBuffer::create packs into the stride
+    // array, so they must fit in the kernel's integer type regardless of
+    // how far the kernel actually indexes.
+    const auto& io_stride  = io == io_data_label::INPUT ? inStride : outStride;
+    const auto& io_dist    = io == io_data_label::INPUT ? iDist : oDist;
+    auto        max_stride = io_stride.empty() ? static_cast<size_t>(0)
+                                               : *std::max_element(io_stride.begin(), io_stride.end());
+    max_stride             = std::max(max_stride, io_dist);
+
+    if(fuseBlue == BFT_NONE)
+        return max_stride;
+
+    // Fused Bluestein kernels also take the Bluestein lengths, and the
+    // higher-dimension Bluestein strides + dist, as integer_type.  See
+    // BluesteinData and RTCKernelStockham::get_launch_args.
+    max_stride = std::max({max_stride, lengthBlueN, lengthBlue});
+
+    // BFT_FWD_CHIRP passes zeros for the Bluestein strides and dist.
+    if(fuseBlue == BFT_FWD_CHIRP)
+        return max_stride;
+
+    const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
+    const auto& io_dist_blue   = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
+
+    // Only dims 2 and 3 are packed; dims 0 and 1 are implied by lengthBlue.
+    for(size_t i = 2; i < io_stride_blue.size() && i < 4; ++i)
+        max_stride = std::max(max_stride, io_stride_blue[i]);
+
+    return std::max(max_stride, io_dist_blue);
 }
 
 void TreeNode::SetTransposeOutputLength()

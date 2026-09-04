@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "../../include/rtc_kernel.h"
 #include "generator.h"
 
 enum BluesteinOperationType
@@ -47,14 +48,15 @@ public:
     // templates
     //
     Variable scalar_type{"scalar_type", "typename"};
+    Variable integer_type{"integer_type", "typename"};
 
     //
     // internal variables
     //
     Variable chirp{"chirp", "const scalar_type", true, true};
-    Variable data_idx{"data_idx", "size_t"};
-    Variable data_voffset{"data_voffset", "size_t"};
-    Variable data_soffset{"data_soffset", "size_t"};
+    Variable data_idx{"data_idx", "integer_type"};
+    Variable data_voffset{"data_voffset", "integer_type"};
+    Variable data_soffset{"data_soffset", "integer_type"};
     Variable data_rw_flag{"data_rw_flag", "bool"};
     Variable buf_in{"buf_in", "scalar_type", true};
     Variable buf_inre{"buf_inre", "real_type_t<scalar_type>", true, true};
@@ -66,21 +68,21 @@ public:
     Variable data_bufre{"data_bufre", "real_type_t<scalar_type>", true, true};
     Variable data_bufim{"data_bufim", "real_type_t<scalar_type>", true, true};
     Variable data_elem{"data_elem", "scalar_type"};
-    Variable length_N_blue{"length_N_blue", "const size_t"};
-    Variable length_M_blue{"length_M_blue", "const size_t"};
-    Variable global_stride_in_0{"global_stride_in_0", "const size_t"};
-    Variable global_stride_in_1{"global_stride_in_1", "const size_t"};
-    Variable global_idist{"global_idist", "const size_t"};
-    Variable global_stride_out_0{"global_stride_out_0", "const size_t"};
-    Variable global_stride_out_1{"global_stride_out_1", "const size_t"};
-    Variable global_odist{"global_odist", "const size_t"};
-    Variable transform_idx{"transform_idx", "const size_t"};
+    Variable length_N_blue{"length_N_blue", "const integer_type"};
+    Variable length_M_blue{"length_M_blue", "const integer_type"};
+    Variable global_stride_in_0{"global_stride_in_0", "const integer_type"};
+    Variable global_stride_in_1{"global_stride_in_1", "const integer_type"};
+    Variable global_idist{"global_idist", "const integer_type"};
+    Variable global_stride_out_0{"global_stride_out_0", "const integer_type"};
+    Variable global_stride_out_1{"global_stride_out_1", "const integer_type"};
+    Variable global_odist{"global_odist", "const integer_type"};
+    Variable transform_idx{"transform_idx", "const integer_type"};
 
     //
     // variables borrowed from stockham_gen_base.h
     //
-    Variable global_data_id{"global_data_id", "size_t"};
-    Variable global_transf_id{"global_transf_id", "size_t"};
+    Variable global_data_id{"global_data_id", "integer_type"};
+    Variable global_transf_id{"global_transf_id", "integer_type"};
     Variable load_cb_data{"load_cb_data", "void*"};
     Variable load_cb_fn{"load_cb_fn", "void", true, true};
     Variable store_cb_data{"store_cb_data", "void*"};
@@ -602,7 +604,7 @@ private:
 
     std::string render_template()
     {
-        return "<" + data.scalar_type.render() + ">";
+        return "<" + data.scalar_type.render() + "," + data.integer_type.render() + ">";
     }
 
     const std::vector<std::string> function_name = {"bluestein_load_cc_fwd_chirp_device",
@@ -716,6 +718,7 @@ private:
     {
         TemplateList tpls;
         tpls.append(blueData.scalar_type);
+        tpls.append(blueData.integer_type);
 
         return tpls;
     }

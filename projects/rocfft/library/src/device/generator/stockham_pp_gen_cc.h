@@ -81,17 +81,17 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
     unsigned int transforms_per_block_unscaled;
 
-    Variable trans_local{"trans_local", "size_t"};
+    Variable trans_local{"trans_local", rtc_kint_type(KIntType::U32)};
 
-    Variable thread_lds{"thread_lds", "unsigned int"};
+    Variable thread_lds{"thread_lds", rtc_kint_type(KIntType::U32)};
 
-    Variable tid_hor_lds{"tid_hor_lds", "unsigned int"};
-    Variable tid_hor_pp{"tid_hor_pp", "unsigned int"};
-    Variable offset_tid_hor{"offset_tid_hor", "unsigned int"};
+    Variable tid_hor_lds{"tid_hor_lds", rtc_kint_type(KIntType::U32)};
+    Variable tid_hor_pp{"tid_hor_pp", rtc_kint_type(KIntType::U32)};
+    Variable offset_tid_hor{"offset_tid_hor", "integer_type"};
 
-    Variable block_idx_pp{"block_idx_pp", "unsigned int"};
+    Variable block_idx_pp{"block_idx_pp", "integer_type"};
 
-    Variable thread_in_device_twd{"thread_in_device_twd", "unsigned int"};
+    Variable thread_in_device_twd{"thread_in_device_twd", rtc_kint_type(KIntType::U32)};
 
     std::vector<unsigned int> launcher_lengths() override
     {
@@ -190,12 +190,10 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
     StatementList calculate_offsets() override
     {
-        Variable d{"d", "int"};
-        Variable index_along_d{"index_along_d", "size_t"};
-        Variable remaining{"remaining", "size_t"};
-        Variable plength{"plength", "size_t"};
-        Variable global_stride_in{"global_stride_in", "const size_t"};
-        Variable global_stride_out{"global_stride_out", "const size_t"};
+        Variable d{"d", std::string(rtc_kint_type(KIntType::U32))};
+        Variable index_along_d{"index_along_d", "integer_type"};
+        Variable remaining{"remaining", "integer_type"};
+        Variable plength{"plength", "integer_type"};
 
         StatementList stmts;
         stmts += Declaration{tile_index};

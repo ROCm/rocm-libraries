@@ -26,10 +26,11 @@
 struct RTCKernelRealComplex : public RTCKernel
 {
     RTCKernelRealComplex(const std::string&                       kernel_name,
+                         KIntType                                 itype,
                          std::shared_future<hipModule_wrapper_t>& module,
                          dim3                                     gridDim,
                          dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+        : RTCKernel(kernel_name, itype, module, gridDim, blockDim)
     {
     }
 
@@ -42,11 +43,12 @@ struct RTCKernelRealComplex : public RTCKernel
 struct RTCKernelRealComplexEven : public RTCKernel
 {
     RTCKernelRealComplexEven(const std::string&                       kernel_name,
+                             KIntType                                 itype,
                              size_t                                   half_N,
                              std::shared_future<hipModule_wrapper_t>& module,
                              dim3                                     gridDim,
                              dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+        : RTCKernel(kernel_name, itype, module, gridDim, blockDim)
         , half_N(half_N)
     {
     }
@@ -61,10 +63,11 @@ struct RTCKernelRealComplexEven : public RTCKernel
 struct RTCKernelRealComplexEvenTranspose : public RTCKernel
 {
     RTCKernelRealComplexEvenTranspose(const std::string&                       kernel_name,
+                                      KIntType                                 itype,
                                       std::shared_future<hipModule_wrapper_t>& module,
                                       dim3                                     gridDim,
                                       dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+        : RTCKernel(kernel_name, itype, module, gridDim, blockDim)
     {
     }
 

@@ -665,7 +665,7 @@ public:
     size_t           twiddles_pp_size      = 0;
     void*            chirp                 = nullptr;
     size_t           chirp_size            = 0;
-    gpubuf_t<size_t> devKernArg;
+    KernelArgsBuffer devKernArg;
 
     hipDeviceProp_t deviceProp = {};
     function_pool   pool;
@@ -1037,20 +1037,36 @@ public:
     FMKey        GetKernelKey() const override;
 
     // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
-    virtual size_t GetU32KernelIndexLimit() const
+    virtual size_t GetU32IntegerLimit() const
     {
 
         return is_device_gcn_arch(deviceProp, "gfx1250") ? static_cast<size_t>(INT32_MAX)
                                                          : static_cast<size_t>(UINT32_MAX);
     }
-    // Return the index type for this node's kernel.
-    // Overridden by nodes that use narrower index types
-    virtual IndexType GetKernelIndexType() const
+    // Return the integer type for this node's kernel.
+    // Overridden by nodes that use narrower integer types
+    virtual KIntType GetKIntType() const
     {
-        return IndexType::U64;
+        auto idx_limit = GetU32IntegerLimit();
+
+        // The strides and dists also have to fit, not just the indices the
+        // kernel reaches.  A dist is packed into the argument buffer even
+        // when batch is 1, where it contributes nothing to the max index.
+        if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
+           || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit
+           || MaxKernelStride(io_data_label::INPUT) > idx_limit
+           || MaxKernelStride(io_data_label::OUTPUT) > idx_limit)
+        {
+            return KIntType::U64;
+        }
+        return KIntType::U32;
     }
     // Max element index the kernel would compute for a given I/O side.
-    size_t       MaxKernelIndex(io_data_label io) const;
+    size_t MaxKernelIndex(io_data_label io) const;
+    // Max stride or dist packed into the kernel argument buffer for a given
+    // I/O side.  Not bounded by MaxKernelIndex: an unused dist can be
+    // arbitrarily large.
+    size_t       MaxKernelStride(io_data_label io) const;
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
 };
@@ -1074,8 +1090,6 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
-    IndexType GetKernelIndexType() const override;
-
     // Transpose tiles read more row-ish and write more column-ish.  So
     // assume output benefits more from padding than input.
     bool PaddingBenefitsOutput() override

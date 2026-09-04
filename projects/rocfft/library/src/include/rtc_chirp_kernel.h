@@ -27,8 +27,18 @@
 struct RTCKernelChirp : public RTCKernel
 {
     // generate chirp kernel from precision
-    static std::shared_future<std::unique_ptr<RTCKernel>> generate(const std::string& gpu_arch,
-                                                                   rocfft_precision   precision);
+    static std::shared_future<std::unique_ptr<RTCKernel>>
+        generate(const std::string& gpu_arch, const size_t& N, rocfft_precision precision);
+
+    static inline KIntType itype(const std::string& gpu_arch, const size_t& N)
+    {
+        // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
+        size_t u32_idx_limit = gpu_arch.find("gfx1250") != std::string::npos
+                                   ? static_cast<size_t>(INT32_MAX)
+                                   : static_cast<size_t>(UINT32_MAX);
+
+        return N > u32_idx_limit ? KIntType::U64 : KIntType::U32;
+    }
 
     // no DeviceCallIn is available at chirp generation time -
     // these kernels are launched without it
@@ -39,10 +49,11 @@ struct RTCKernelChirp : public RTCKernel
 
 protected:
     RTCKernelChirp(const std::string&                       kernel_name,
+                   KIntType                                 itype,
                    std::shared_future<hipModule_wrapper_t>& module,
                    dim3                                     gridDim,
                    dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+        : RTCKernel(kernel_name, itype, module, gridDim, blockDim)
     {
     }
 };
