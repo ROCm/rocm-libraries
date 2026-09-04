@@ -6,7 +6,7 @@
 """
 GPU correctness tests for TensorQuant GEMM dispatcher.
 
-Requires a gfx942 or gfx950 GPU and hipcc in PATH.  Skipped automatically when neither
+Requires a gfx942, gfx950 or gfx1250 GPU and hipcc in PATH.  Skipped automatically when neither
 is available (pytest.skip) so CI without a GPU still passes.
 
 Tests:
@@ -53,14 +53,40 @@ def _has_hipcc() -> bool:
     return shutil.which("hipcc") is not None
 
 
+def normalize_gfx_arch(arch: str) -> str:
+    """Strip feature suffixes from a gfx target string.
+
+    ``rocm_agent_enumerator`` and ``hipDeviceProp_t::gcnArchName`` may report the
+    target with trailing feature flags, e.g. ``"gfx942:sramecc+:xnack-"``. Every
+    comparison we do here (and the ``--offload-arch`` we hand to hipcc) wants the
+    bare target, so normalize once at the boundary.
+    """
+    return arch.split(":", 1)[0]
+
+
+def arch_is_supported(arch: str, supported=None) -> bool:
+    """True if `arch` names a supported target, ignoring feature suffixes.
+
+    An exact ``arch in _SUPPORTED_ARCHES`` test returns False for
+    ``"gfx942:sramecc+:xnack-"``, so on a machine whose enumerator reports
+    suffixes these GPU tests would SKIP on a fully supported device. A skip reads
+    as a green run, so the regression would be invisible -- the bug is the silent
+    skip, not the missing coverage. The C++ bridge already prefix-matches in
+    ``is_supported_arch()``; this keeps the Python gate consistent with it.
+    """
+    if supported is None:
+        supported = _SUPPORTED_ARCHES
+    return normalize_gfx_arch(arch) in supported
+
+
 def _detect_gfx_arch() -> str:
     """Return the first usable GPU arch, or empty string if none found."""
     try:
         r = subprocess.run(["rocm_agent_enumerator"], capture_output=True, text=True, timeout=10)
         for line in r.stdout.splitlines():
             arch = line.strip()
-            if arch.startswith("gfx") and arch != "gfx000":
-                return arch
+            if arch.startswith("gfx") and normalize_gfx_arch(arch) != "gfx000":
+                return normalize_gfx_arch(arch)
     except Exception:
         pass
     return ""
@@ -69,11 +95,11 @@ def _detect_gfx_arch() -> str:
 _GFX_ARCH = _detect_gfx_arch()
 # TensorQuant fp8/bf8 kernels use CK CompV3 pipelines that require native fp8 hardware.
 # gfx90a (MI200 series) lacks native fp8 support and produces incorrect results.
-# Only gfx942 (MI300X) and gfx950 (MI350X) are validated.
-_SUPPORTED_ARCHES = ("gfx942", "gfx950")
+# Only gfx942 (MI300X), gfx950 (MI350X) and gfx1250 (MI400) are validated.
+_SUPPORTED_ARCHES = ("gfx942", "gfx950", "gfx1250")
 
 requires_gpu = pytest.mark.skipif(
-    not (_has_hipcc() and _GFX_ARCH in _SUPPORTED_ARCHES),
+    not (_has_hipcc() and arch_is_supported(_GFX_ARCH)),
     reason=(
         f"GPU test: requires hipcc and native fp8 GPU ({', '.join(_SUPPORTED_ARCHES)}); "
         f"detected arch='{_GFX_ARCH}'"
@@ -296,7 +322,10 @@ TESTS = [
 def main():
     parser = argparse.ArgumentParser(
         description="TensorQuant GPU correctness tests")
-    parser.add_argument("--gfx", default="gfx950")
+    # Default to the arch of the GPU we are actually on. A hardcoded default builds a
+    # gfx950 image on any other device, which then aborts with "device kernel image is
+    # invalid" (or is rejected by the .so's compile-vs-runtime arch guard).
+    parser.add_argument("--gfx", default=None)
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
@@ -306,6 +335,12 @@ def main():
         format="%(levelname)s: %(message)s",
     )
 
+    gfx = args.gfx or _GFX_ARCH
+    if not gfx:
+        log.error("no GPU detected and --gfx not given")
+        return 1
+    log.info("Target arch: %s", gfx)
+
     out_dir = args.output_dir or Path(tempfile.mkdtemp(prefix="tensorquant_gpu_test_"))
     log.info("Kernel output dir: %s", out_dir)
 
@@ -313,7 +348,7 @@ def main():
     for name, fn in TESTS:
         log.info("--- Running %s ---", name)
         try:
-            status, detail = fn(out_dir, args.gfx)
+            status, detail = fn(out_dir, gfx)
         except Exception as exc:
             status, detail = "FAIL", f"{name}: exception: {exc}"
         results.append((name, status, detail))
