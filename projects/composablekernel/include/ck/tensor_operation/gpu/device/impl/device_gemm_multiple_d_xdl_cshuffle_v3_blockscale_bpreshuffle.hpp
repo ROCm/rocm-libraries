@@ -262,88 +262,104 @@ struct DeviceGemmMultiD_BlockScale_Xdl_CShuffle_V3_BPreshuffle
             // unconditional 2 to remove agpr usage
             constexpr index_t minimum_occupancy = 2;
 
-            if(has_main_k_block_loop)
+            // split-K accumulates the per-slice partials into C with atomics; the C buffer is
+            // zeroed above for that case.
+            const auto RunWithCDataOp = [&](auto c_data_op) {
+                constexpr InMemoryDataOperationEnum CDataOp = decltype(c_data_op)::value;
+                if(has_main_k_block_loop)
+                {
+                    // Tail number always full
+                    if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1)
+                    {
+                        if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
+                        {
+                            const auto kernel =
+                                kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
+                                    GridwiseGemm,
+                                    true,
+                                    CDataOp,
+                                    minimum_occupancy,
+                                    TailNumber::Odd>;
+                            Run(kernel);
+                        }
+                        else
+                        {
+                            const auto kernel =
+                                kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
+                                    GridwiseGemm,
+                                    true,
+                                    CDataOp,
+                                    minimum_occupancy,
+                                    TailNumber::Even>;
+                            Run(kernel);
+                        }
+                    }
+                    else if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v3)
+                    {
+                        if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
+                        {
+                            const auto kernel =
+                                kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle_2lds<
+                                    GridwiseGemm,
+                                    true,
+                                    CDataOp,
+                                    minimum_occupancy,
+                                    TailNumber::Odd>;
+                            Run(kernel);
+                        }
+                        else
+                        {
+                            const auto kernel =
+                                kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle_2lds<
+                                    GridwiseGemm,
+                                    true,
+                                    CDataOp,
+                                    minimum_occupancy,
+                                    TailNumber::Even>;
+                            Run(kernel);
+                        }
+                    }
+                }
+                else
+                {
+                    // Tail number always 1
+                    if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1)
+                    {
+                        if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
+                        {
+                            const auto kernel =
+                                kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
+                                    GridwiseGemm,
+                                    false,
+                                    CDataOp,
+                                    minimum_occupancy,
+                                    TailNumber::Odd>;
+                            Run(kernel);
+                        }
+                        else
+                        {
+                            const auto kernel =
+                                kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
+                                    GridwiseGemm,
+                                    false,
+                                    CDataOp,
+                                    minimum_occupancy,
+                                    TailNumber::Even>;
+                            Run(kernel);
+                        }
+                    }
+                }
+            };
+
+            if(arg.KBatch > 1)
             {
-                // Tail number always full
-                if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1)
-                {
-                    if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
-                    {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
-                                GridwiseGemm,
-                                true,
-                                InMemoryDataOperationEnum::Set,
-                                minimum_occupancy,
-                                TailNumber::Odd>;
-                        Run(kernel);
-                    }
-                    else
-                    {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
-                                GridwiseGemm,
-                                true,
-                                InMemoryDataOperationEnum::Set,
-                                minimum_occupancy,
-                                TailNumber::Even>;
-                        Run(kernel);
-                    }
-                }
-                else if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v3)
-                {
-                    if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
-                    {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle_2lds<
-                                GridwiseGemm,
-                                true,
-                                InMemoryDataOperationEnum::Set,
-                                minimum_occupancy,
-                                TailNumber::Odd>;
-                        Run(kernel);
-                    }
-                    else
-                    {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle_2lds<
-                                GridwiseGemm,
-                                true,
-                                InMemoryDataOperationEnum::Set,
-                                minimum_occupancy,
-                                TailNumber::Even>;
-                        Run(kernel);
-                    }
-                }
+                RunWithCDataOp(integral_constant<InMemoryDataOperationEnum,
+                                                 InMemoryDataOperationEnum::AtomicAdd>{});
             }
             else
             {
-                // Tail number always 1
-                if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1)
-                {
-                    if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
-                    {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
-                                GridwiseGemm,
-                                false,
-                                InMemoryDataOperationEnum::Set,
-                                minimum_occupancy,
-                                TailNumber::Odd>;
-                        Run(kernel);
-                    }
-                    else
-                    {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
-                                GridwiseGemm,
-                                false,
-                                InMemoryDataOperationEnum::Set,
-                                minimum_occupancy,
-                                TailNumber::Even>;
-                        Run(kernel);
-                    }
-                }
+                RunWithCDataOp(
+                    integral_constant<InMemoryDataOperationEnum, InMemoryDataOperationEnum::Set>{});
             }
             return ave_time;
         }
@@ -385,6 +401,13 @@ struct DeviceGemmMultiD_BlockScale_Xdl_CShuffle_V3_BPreshuffle
             return false;
         }
         if(!is_bf16_atomic_supported() && std::is_same_v<CDataType, ck::bhalf_t> && arg.KBatch > 1)
+        {
+            return false;
+        }
+
+        // Each split must start on a scale-block boundary, otherwise a K slice would need a
+        // fraction of a scale.
+        if(arg.KBatch > 1 && arg.KRead % ScaleBlockK != 0)
         {
             return false;
         }
@@ -442,7 +465,8 @@ struct DeviceGemmMultiD_BlockScale_Xdl_CShuffle_V3_BPreshuffle
                              const void* p_b_scale,
                              AElementwiseOperation a_element_op,
                              BElementwiseOperation b_element_op,
-                             CElementwiseOperation c_element_op)
+                             CElementwiseOperation c_element_op,
+                             const index_t KBatch = 1)
     {
         return Argument{static_cast<const ADataType*>(p_a),
                         static_cast<const BDataType*>(p_b),
@@ -457,7 +481,7 @@ struct DeviceGemmMultiD_BlockScale_Xdl_CShuffle_V3_BPreshuffle
                         StrideC,
                         static_cast<const AScaleDataType*>(p_a_scale),
                         static_cast<const BScaleDataType*>(p_b_scale),
-                        1,
+                        KBatch,
                         a_element_op,
                         b_element_op,
                         c_element_op};

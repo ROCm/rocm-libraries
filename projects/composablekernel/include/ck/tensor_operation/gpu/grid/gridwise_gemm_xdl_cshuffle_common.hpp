@@ -26,6 +26,53 @@
 
 namespace ck {
 
+// Tag for the specialized row-major, M-broadcast per-channel scale epilogue.
+// The generic ternary operator remains available to kernels that do not meet
+// the specialized XDL C-shuffle constraints.
+struct MultiplyPerChannel
+{
+    template <typename E, typename C, typename D>
+    __host__ __device__ constexpr void operator()(E& e, const C& c, const D& d) const
+    {
+        e = type_convert<E>(type_convert<float>(c) * type_convert<float>(d));
+    }
+};
+
+template <typename DsDataType, typename DsLayout, typename CDEElementwiseOperation>
+struct IsTaggedPerChannelScale : integral_constant<bool, false>
+{
+};
+
+template <typename DDataType, typename DLayout>
+struct IsTaggedPerChannelScale<Tuple<DDataType>, Tuple<DLayout>, MultiplyPerChannel>
+    : integral_constant<bool,
+                        is_same_v<DDataType, float> &&
+                            is_same_v<DLayout, tensor_layout::gemm::RowMajor>>
+{
+};
+
+template <index_t ScalarPerVector>
+struct PreloadedPerChannelScale
+{
+    using ScaleVector = typename vector_type<float, ScalarPerVector>::type;
+
+    ScaleVector scales_;
+    mutable index_t scalar_id_;
+
+    __device__ constexpr explicit PreloadedPerChannelScale(ScaleVector scales)
+        : scales_{scales}, scalar_id_{0}
+    {
+        static_assert(ScalarPerVector > 1,
+                      "the channel-scale epilogue requires a vectorized C-shuffle store");
+    }
+
+    template <typename E, typename C>
+    __device__ void operator()(E& e, const C& c) const
+    {
+        e = type_convert<E>(type_convert<float>(c) * scales_[scalar_id_++]);
+    }
+};
+
 enum Activation
 {
     gelu_and_mul       = 0,
@@ -2063,6 +2110,71 @@ struct GridwiseGemm_xdl_cshuffle_base
                     c_grid_desc_mblock_mperblock_nblock_nperblock, c_global_step);
             }
         });
+    }
+
+    template <InMemoryDataOperationEnum CGlobalMemoryDataOperation,
+              bool TransposeC,
+              typename BlockwiseGemmPipe,
+              typename CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+              typename CThreadBuffer>
+    __device__ static void RunPerChannelScaleEpilogue(
+        const BlockwiseGemmPipe& blockwise_gemm_pipeline,
+        const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
+            c_grid_desc_mblock_mperblock_nblock_nperblock,
+        CThreadBuffer& c_thread_buf,
+        index_t block_m_id,
+        index_t block_n_id,
+        void* p_shared,
+        const float* p_channel_scale_grid,
+        EDataType* p_c_grid)
+    {
+        constexpr index_t MWave = MPerBlock / (MXdlPerWave * MPerXdl);
+        constexpr index_t NWave = NPerBlock / (NXdlPerWave * NPerXdl);
+        using StoreSliceLengths =
+            Sequence<1,
+                     CShuffleMXdlPerWavePerShuffle * MWave * MPerXdl,
+                     1,
+                     CShuffleNXdlPerWavePerShuffle * NWave * NPerXdl>;
+        using StoreClusterLengths =
+            CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock;
+        constexpr auto store_thread_slice_lengths = StoreSliceLengths{} / StoreClusterLengths{};
+
+        static_assert(StoreClusterLengths::Size() == 4,
+                      "the channel-scale epilogue requires a four-dimensional store cluster");
+        static_assert(StoreSliceLengths::At(I1) == MPerBlock &&
+                          StoreSliceLengths::At(I3) == NPerBlock,
+                      "the channel-scale epilogue requires one C-shuffle access");
+        static_assert(store_thread_slice_lengths[I0] == 1 &&
+                          store_thread_slice_lengths[I1] == 1 &&
+                          store_thread_slice_lengths[I2] == 1 &&
+                          store_thread_slice_lengths[I3] ==
+                              CShuffleBlockTransferScalarPerVector_NPerBlock,
+                      "each store thread must own exactly one channel-scale vector");
+
+        constexpr auto store_cluster_desc =
+            make_cluster_descriptor(StoreClusterLengths{}, Sequence<0, 1, 2, 3>{});
+        const auto store_thread_cluster_idx = store_cluster_desc.CalculateBottomIndex(
+            make_multi_index(ThisThreadBlock::GetThreadId()));
+        const auto store_thread_data_idx =
+            store_thread_cluster_idx * store_thread_slice_lengths;
+
+        constexpr index_t ScaleVectorWidth =
+            CShuffleBlockTransferScalarPerVector_NPerBlock;
+        using ScaleVector = typename vector_type<float, ScaleVectorWidth>::type;
+        const index_t channel_offset =
+            block_n_id * NPerBlock + store_thread_data_idx[I3];
+        const auto channel_scales =
+            *reinterpret_cast<const ScaleVector*>(p_channel_scale_grid + channel_offset);
+
+        RunEpilogue<CGlobalMemoryDataOperation, false, TransposeC>(
+            blockwise_gemm_pipeline,
+            c_grid_desc_mblock_mperblock_nblock_nperblock,
+            c_thread_buf,
+            block_m_id,
+            block_n_id,
+            p_shared,
+            p_c_grid,
+            PreloadedPerChannelScale<ScaleVectorWidth>{channel_scales});
     }
 
     template <InMemoryDataOperationEnum CGlobalMemoryDataOperation,
