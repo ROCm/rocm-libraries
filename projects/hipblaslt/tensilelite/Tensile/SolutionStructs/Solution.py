@@ -5445,6 +5445,19 @@ class Solution(collections.abc.Mapping):
       else:
         state["1LDSBuffer"] = 1
 
+    # gfx1250 TDMInst=3 (TDM A+B) without the subtile implementation requires
+    # 1LDSBuffer=0 and ScheduleIterAlg in [0, 4]. Evaluated here so 1LDSBuffer's
+    # -1 (auto) sentinel is already resolved to its concrete 0/1 value above.
+    if state.get("TDMInst", 0) == 3 and tuple(state["ISA"])[:2] == (12, 5) \
+       and not state["UseSubtileImpl"]:
+      if state["1LDSBuffer"] != 0:
+        reject(state, printRejectionReason,
+               "gfx1250 TDMInst=3 requires 1LDSBuffer=0, got %d" % state["1LDSBuffer"])
+      if state["ScheduleIterAlg"] not in (0, 4):
+        reject(state, printRejectionReason,
+               "gfx1250 TDMInst=3 requires ScheduleIterAlg in [0, 4], got %d"
+               % state["ScheduleIterAlg"])
+
     if _segDeferForBuf:
       # 1LDSBuffer resolved now; re-run the oracle. A newly-eligible tight interleave is safe (pure
       # reorder, no LDS growth); an aligned one needs LDS not reserved above, so a forced request is
