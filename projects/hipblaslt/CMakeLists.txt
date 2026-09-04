@@ -855,7 +855,7 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         DEPENDS hipblaslt-test
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
-        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_coverage_tests.sh" "$<TARGET_FILE:hipblaslt-test>" "${coverage_dir}"
+        COMMAND bash -c "${CMAKE_SOURCE_DIR}/cmake/run_coverage_tests.sh $<TARGET_FILE:hipblaslt-test> ${coverage_dir} || true"
         COMMENT "Running hipblaslt testcases for coverage report"
       )
 
@@ -877,9 +877,11 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         coverage
         DEPENDS code_cov_tests
         COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/hipblaslt-coverage_*.profraw" -o "${coverage_dir}/hipblaslt.profdata"
-        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*"
-        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=html -output-dir="${coverage_dir}"
-        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp"
+        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp" -format=html -output-dir="${coverage_dir}"
+        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp" -format=lcov > "${coverage_dir}/coverage.info"
+        COMMAND ${CMAKE_COMMAND} -E echo "Coverage report generated in ${coverage_dir}/index.html"
+        COMMAND ${CMAKE_COMMAND} -E env bash ${CMAKE_SOURCE_DIR}/cmake/check_coverage_exit_code.sh ${coverage_dir}
         COMMENT "Generating code coverage report"
       )
 endif()
