@@ -113,14 +113,18 @@ def _activation_args(enums):
     return SimpleNamespace(settingList=[SimpleNamespace(activationEnum=e) for e in enums])
 
 
+def _gate_args(values):
+    return SimpleNamespace(gateTypes=[_Enum(v) for v in values])
+
+
 # ===========================================================================
 # _writeSolutionsHeader
 # ===========================================================================
 
-def _header(problemSizes, biasArgs, actArgs):
+def _header(problemSizes, biasArgs, actArgs, gateArgs=None):
     import io
     buf = io.StringIO()
-    L._writeSolutionsHeader(buf, problemSizes, biasArgs, actArgs)
+    L._writeSolutionsHeader(buf, problemSizes, biasArgs, actArgs, gateArgs)
     return _norm(buf.getvalue())
 
 
@@ -137,6 +141,13 @@ def test_header_with_problem_sizes(snapshot):
 def test_header_with_bias_and_activation(snapshot):
     ps = _problem_sizes(ranges=[], exacts=[])
     assert _header(ps, _bias_args([0, 4]), _activation_args(["relu", "gelu"])) == snapshot
+
+
+def test_header_with_bias_and_gate(snapshot):
+    # Pins the GateTypeArgs line and the bias-without-activation ordering. Both
+    # list fields are written flat; see DECISIONS D24 / ADR 0014.
+    ps = _problem_sizes(ranges=[], exacts=[])
+    assert _header(ps, _bias_args([0, 4]), None, _gate_args([3])) == snapshot
 
 
 # ===========================================================================

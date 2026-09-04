@@ -106,13 +106,22 @@ def test_form_9bit_mi_inst_empty_raises():
 # ---------------------------------------------------------------------------
 # formForkParams
 # ---------------------------------------------------------------------------
-def test_form_fork_params_skip_mi_raises():
-    # LATENT BUG (pinned): when MI is skipped the code sets temp="None" (a str)
-    # then calls formGroups(temp), which does temp.items() -> AttributeError.
-    # So the skipMI / MI-disabled path is currently broken. See DECISIONS D14.
-    sol = {"EnableMatrixInstruction": False}
-    with pytest.raises(AttributeError):
-        M.formForkParams(sol, skipMI=True)
+def test_form_fork_params_skip_mi_emits_workgroup():
+    # D14 / AIHPBLAS-4409 (was pinned, now FIXED): this path used to pass the
+    # string "None" to formGroups, whose .items() raised AttributeError. It now
+    # emits a WorkGroup group, so the skipMI / MI-disabled path works.
+    sol = {"EnableMatrixInstruction": False, "WorkGroup": [16, 16, 1]}
+    data = M.formForkParams(sol, skipMI=True)
+    grp = data["ForkParameters"][-1]["Groups"][0][0]
+    assert list(grp["WorkGroup"]) == [16, 16, 1]
+    assert "MatrixInstruction" not in grp
+
+
+def test_form_fork_params_skip_mi_without_workgroup_raises():
+    # formGroups is the only emitter for WorkGroup, so a solution that omits it
+    # cannot produce a group at all.
+    with pytest.raises(KeyError):
+        M.formForkParams({"EnableMatrixInstruction": False}, skipMI=True)
 
 
 def test_form_fork_params_with_mi():
@@ -172,11 +181,168 @@ def test_form_problem_size_origami_none(capsys, monkeypatch):
 # ---------------------------------------------------------------------------
 # formLibraryLogic
 # ---------------------------------------------------------------------------
+def _solution_source(**overrides):
+    fields = dict(
+        versionString={"MinimumRequiredVersion": "1.2.3"},
+        scheduleName="sched",
+        architectureName="gfx942",
+        deviceNames=["Device 75a0"],
+        problemType={},
+        solution={},
+    )
+    fields.update(overrides)
+    return M.SolutionSource(**fields)
+
+
 def test_form_library_logic():
-    data = M.formLibraryLogic("sched", ["Device 75a0"], "gfx942")
+    data = M.formLibraryLogic(_solution_source())
     assert str(data["ScheduleName"]) == "sched"
     assert str(data["ArchitectureName"]) == "gfx942"
     assert [str(x) for x in data["DeviceNames"]] == ["Device 75a0"]
+
+
+def test_form_library_logic_prefers_run_config(monkeypatch):
+    # Values recorded by the run config win over the ones derived from the input.
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
+    runSettings = M.RunSettings(
+        libraryLogic={
+            "ScheduleName": "recorded",
+            "ArchitectureName": "gfx950",
+            "DeviceNames": ["Device 0050"],
+        }
+    )
+    data = M.formLibraryLogic(_solution_source(), runSettings)
+    assert str(data["ScheduleName"]) == "recorded"
+    assert str(data["ArchitectureName"]) == "gfx950"
+    assert [str(x) for x in data["DeviceNames"]] == ["Device 0050"]
+
+
+def test_form_library_logic_unwraps_dict_architecture():
+    # rawLibraryLogic may hand back {'Architecture': 'gfx950', 'CUCount': 128}.
+    data = M.formLibraryLogic(
+        _solution_source(architectureName={"Architecture": "gfx950", "CUCount": 128})
+    )
+    assert str(data["ArchitectureName"]) == "gfx950"
+
+
+# ---------------------------------------------------------------------------
+# BiasTypeArgs shape normalization / benchmark header scan
+# ---------------------------------------------------------------------------
+def test_normalize_bias_type_args_flattens_nested():
+    # LibraryIO._writeSolutionsHeader wrote "[{}]".format([7]) -> [[7]] for
+    # years, so existing benchmark data files carry the nested shape while the
+    # benchmark config schema takes a flat list. See DECISIONS D24.
+    assert M.normalizeBiasTypeArgs([[7]]) == [7]
+    assert M.normalizeBiasTypeArgs([[0, 4]]) == [0, 4]
+
+
+def test_normalize_bias_type_args_passes_flat_through():
+    assert M.normalizeBiasTypeArgs([7]) == [7]
+    assert M.normalizeBiasTypeArgs(["s"]) == ["s"]
+
+
+def test_normalize_bias_type_args_empty_is_absent():
+    # [[]] is what the old writer emitted for an empty bias list; both it and []
+    # must read as "not set" so the BiasDataTypeList fallback engages.
+    assert M.normalizeBiasTypeArgs([[]]) is None
+    assert M.normalizeBiasTypeArgs([]) is None
+    assert M.normalizeBiasTypeArgs(None) is None
+
+
+def test_form_problem_size_flattens_nested_bias():
+    data = M.formProblemSize(
+        exactLogic=None,
+        solutionIndex=0,
+        problemTypeStat={"BiasDataTypeList": [0]},
+        problemSizes=[{"Exact": [128, 64, 1, 256]}],
+        biasTypeArgs=[[7]],
+    )
+    assert list(data["BenchmarkFinalParameters"][1]["BiasTypeArgs"]) == [7]
+
+
+def test_form_problem_size_empty_bias_falls_back_to_problem_type():
+    data = M.formProblemSize(
+        exactLogic=None,
+        solutionIndex=0,
+        problemTypeStat={"BiasDataTypeList": [0]},
+        problemSizes=[{"Exact": [128, 64, 1, 256]}],
+        biasTypeArgs=[[]],
+    )
+    assert list(data["BenchmarkFinalParameters"][1]["BiasTypeArgs"]) == [0]
+
+
+def test_split_benchmark_header_all_optional_fields():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"BiasTypeArgs": [[7]]},
+        {"ActivationArgs": [[{"Enum": "relu"}]]},
+        {"GateTypeArgs": [[4]]},
+        {"ProblemType": {}},
+    ]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 5
+    assert header["BiasTypeArgs"] == [[7]]
+    assert "GateTypeArgs" in header
+
+
+def test_split_benchmark_header_optional_fields_absent():
+    # Each optional entry is written only when set, so a file without bias or
+    # activation puts the first solution at index 2, not at a fixed offset.
+    data = [{"MinimumRequiredVersion": "1.2.3"}, {"ProblemSizes": []}, {"ProblemType": {}}]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 2
+    assert header == {}
+
+
+def test_split_benchmark_header_skips_absent_middle_key():
+    # Each optional entry is independent, so activation can be present with no
+    # bias. The scan must keep going rather than stop at the first miss.
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"ActivationArgs": [[{"Enum": "relu"}]]},
+        {"ProblemType": {}},
+    ]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 3
+    assert "ActivationArgs" in header
+    assert "BiasTypeArgs" not in header
+
+
+def test_split_benchmark_header_bias_and_gate_without_activation():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"BiasTypeArgs": [[7]]},
+        {"GateTypeArgs": [[3]]},
+        {"ProblemType": {}},
+    ]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 4
+    assert header["BiasTypeArgs"] == [[7]]
+    assert header["GateTypeArgs"] == [[3]]
+    assert "ActivationArgs" not in header
+
+
+def test_benchmark_reader_matches_without_optional_header():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"ProblemType": {"DataType": "S"}, "ISA": [9, 4, 2], "SolutionIndex": 0},
+    ]
+    assert M.BenchmarkDataReader.matches(data) is True
+
+
+def test_benchmark_reader_reads_nested_bias_as_flat():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": [{"Exact": [128, 64, 1, 256]}]},
+        {"BiasTypeArgs": [[7]]},
+        {"ProblemType": {"DataType": "S"}, "ISA": [9, 4, 2], "SolutionIndex": 0},
+    ]
+    source = M.BenchmarkDataReader.read(data, 0)
+    assert source.biasTypeArgs == [7]
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +435,11 @@ def test_main_single_index(monkeypatch):
     monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
     monkeypatch.setattr(M.sys, "argv", ["prog", "-i", "in.yaml", "-d", "0", "-o", "out.yaml"])
     calls = []
-    monkeypatch.setattr(M, "TensileLibLogicToYaml", lambda inp, idx, out, skip: calls.append((idx, out)))
+    monkeypatch.setattr(
+        M,
+        "TensileLibLogicToYaml",
+        lambda inp, idx, out, skip, runCfg, useRunCfg: calls.append((idx, out)),
+    )
     M.main()
     assert len(calls) == 1
     assert calls[0][0] == 0
@@ -279,7 +449,11 @@ def test_main_multi_index_suffixes(monkeypatch):
     monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
     monkeypatch.setattr(M.sys, "argv", ["prog", "-i", "in.yaml", "-d", "1,2", "-o", "/tmp/out.yaml"])
     calls = []
-    monkeypatch.setattr(M, "TensileLibLogicToYaml", lambda inp, idx, out, skip: calls.append((idx, out)))
+    monkeypatch.setattr(
+        M,
+        "TensileLibLogicToYaml",
+        lambda inp, idx, out, skip, runCfg, useRunCfg: calls.append((idx, out)),
+    )
     M.main()
     assert [c[0] for c in calls] == [1, 2]
     # multi-id appends _<id> before .yaml
