@@ -169,7 +169,7 @@ static bool wouldFwdByteStridesFitUint32(
     return ok;
 }
 
-static std::string getKernelCoPath(std::string coName, const std::string& archId, bool isMi308)
+static std::string getKernelTocKey(std::string coName, const std::string& archId, bool isMi308)
 {
     if(archId == "gfx942")
     {
@@ -183,7 +183,7 @@ static std::string getKernelCoPath(std::string coName, const std::string& archId
             coName = coName.substr(0, pos + 1) + "MI300/" + coName.substr(pos + 1);
         }
     }
-    return asm_kernels::getAsmKernelPath(coName);
+    return asm_kernels::getAsmKernelTocKey(coName);
 }
 
 bool SdpaFwdPlanBuilder::isApplicable(
@@ -578,17 +578,18 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
 
-    // Load kernel module
-    auto coPath = getKernelCoPath(config.co_name, deviceString, isMi308);
+    // Load kernel module from kpack archive
+    auto tocKey = getKernelTocKey(config.co_name, deviceString, isMi308);
 
-    HIPDNN_PLUGIN_LOG_INFO("Using kernel with path: " << coPath);
+    HIPDNN_PLUGIN_LOG_INFO("Using kernel with tocKey: " << tocKey << " arch: " << deviceString);
 
-    auto kernel = moduleCache().getOrLoad(coPath, config.knl_name.c_str());
+    auto kernel = moduleCache().getOrLoad(tocKey, deviceString, config.knl_name.c_str());
     if(!kernel)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel module from " + coPath);
+            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel tocKey='" + tocKey + "' arch='"
+                + deviceString + "'");
     }
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(kernel), params));

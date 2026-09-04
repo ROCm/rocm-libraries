@@ -38,7 +38,6 @@ target_link_libraries(
 # Ensure that the hip_kernel_plugin is built before the integration tests
 add_dependencies(hip_kernel_provider_integration_tests hip_kernel_provider)
 
-set(HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV "")
 if(ENABLE_ASM_SDPA_ENGINE)
     if(NOT HIPDNN_ENABLE_SDPA)
         message(WARNING
@@ -57,11 +56,6 @@ if(ENABLE_ASM_SDPA_ENGINE)
         )
         # Ensure codegen runs before compiling the integration tests
         add_dependencies(hip_kernel_provider_integration_tests asm_kernel_codegen)
-        target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE
-            AITER_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../engines/asm_sdpa_engine/asm/asm_kernels"
-        )
-        set(HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV
-            "HIPDNN_AITER_ASM_DIR=${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels")
     endif()
 endif()
 
@@ -125,8 +119,7 @@ clang_tidy_check(hip_kernel_provider_integration_tests)
 # installed copy in an install tree. Naming one explicitly would pin the build path into
 # the install-time CTest file and stop the installed descriptors from ever being read.
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
-    LABELS slow
-    ENVIRONMENT ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV})
+    LABELS slow)
 
 # Forward the merged raw-test environment (published by add_integration_test_target)
 # to the parent scope so the tiered CTest suites created in ../CMakeLists.txt can
@@ -146,13 +139,6 @@ endif()
 
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
-    set(_synthetic_root "/__hipdnn_install_root__")
-    set(_install_cwd_abs "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/hip_kernel_provider")
-    set(_install_asm_abs
-        "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels"
-    )
-    file(RELATIVE_PATH _install_asm_dir "${_install_cwd_abs}" "${_install_asm_abs}")
-
     add_external_integration_test_target(
         TARGET_NAME hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests
         PLUGIN_TARGET hip_kernel_provider
@@ -161,9 +147,5 @@ if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER
             Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/*
-        ENVIRONMENT
-            ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV}
-        INSTALL_ENVIRONMENT
-            "HIPDNN_AITER_ASM_DIR=${_install_asm_dir}"
     )
 endif()

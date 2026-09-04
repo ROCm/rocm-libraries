@@ -70,6 +70,7 @@ target_include_directories(hip_kernel_provider_impl PRIVATE
 
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/asm/PluginModuleDir.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaBwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaBwdPlan.cpp
