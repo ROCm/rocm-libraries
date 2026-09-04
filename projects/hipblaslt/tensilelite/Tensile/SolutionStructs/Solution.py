@@ -1577,9 +1577,10 @@ class Solution(collections.abc.Mapping):
         # Use AssertSummationElementMultiple (BoundSizeMultiple in predicates) to exclude failed tail-loop cases
         state["AssertSummationElementMultiple"] = max(state["AssertSummationElementMultiple"], state["DepthU"])
 
-    # for DTVB, does not work with NN and Tail-loop
-    if tc == 'B' and (not state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):
-        # Use AssertSummationElementMultiple (BoundSizeMultiple in predicates) to exclude failed tail-loop cases
+    # DTVB tail-loop global loads over-read B when K is not a multiple of
+    # DepthU (gfx1200 VM-fault at the next 2MB VRAM page). The old guard
+    # only covered NN; NT (Ailk_Bjlk / LoRA dgrad) hits the same over-read.
+    if tc == 'B':
         state["AssertSummationElementMultiple"] = max(state["AssertSummationElementMultiple"], state["DepthU"])
 
     # Does not work with DirectToLDS
