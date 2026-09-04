@@ -275,7 +275,6 @@ def _make_spec(
         wave_size=target.wave_size,
         lds_k_outer=lds_k_outer,
         async_dma=async_dma,
-        lds_k_pad=0 if async_dma else None,
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=split_k,
@@ -995,23 +994,47 @@ class TestWgradDefaultLdsKOuter(unittest.TestCase):
         self.assertFalse(self._sel(warp_tile_m=64))
         self.assertFalse(self._sel(wave_size=32))
 
-    def test_env_override(self):
+    def test_no_env_override(self):
+        """The policy is a pure function of its arguments.
+
+        It used to carry a ``ROCKE_WGRAD_LDS_K_OUTER=auto|on|off`` escape hatch.
+        That went away with the benchmark flag: the gate is deducible, so there
+        is one selection point and nothing to override.
+        """
+        import inspect
+
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        src = inspect.getsource(WgradConvSpec.default_lds_k_outer)
+        self.assertNotIn("environ", src)
         prev = os.environ.get("ROCKE_WGRAD_LDS_K_OUTER")
         try:
             os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = "off"
-            self.assertFalse(self._sel())
-            os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = "on"
             self.assertTrue(self._sel())
-            # "on" still respects the gate rather than producing a spec that
-            # validate() would reject.
-            self.assertFalse(self._sel(arch="gfx942"))
-            os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = "nonsense"
-            with self.assertRaises(ValueError):
-                self._sel()
         finally:
             os.environ.pop("ROCKE_WGRAD_LDS_K_OUTER", None)
             if prev is not None:
                 os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = prev
+
+    def test_dispatch_uses_the_same_policy(self):
+        """Dispatch must not carry its own copy of the gate.
+
+        The divergent copy compared a module constant against a tuple, which is
+        constant-true regardless of the request, and never checked wave_size.
+        """
+        try:
+            from library.dispatch.grouped_convolution import _wgrad_lds_k_outer
+        except ImportError:
+            self.skipTest("library.dispatch not importable in this environment")
+
+        class _Req:
+            def __init__(self, arch, dtype):
+                self.arch, self.dtype = arch, dtype
+
+        self.assertTrue(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 32))
+        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx942", "bf16"), 32))
+        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "fp32"), 32))
+        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 64))
 
     def test_policy_agrees_with_validate(self):
         """Anything the policy turns on must actually construct."""

@@ -1,18 +1,18 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for the AsyncTileLoader chunk -> (row, col) decode.
+"""Unit tests for the AsyncTileLoader chunk -> (row, col) addressing.
 
 Regression cover for a defect that shipped silently: ``cols_per_chunk`` returned
 ``elems_per_chunk`` while :meth:`AsyncTileLoaderSlot.issue` used it as the number
 of *chunks per tile row*. Those two coincide only when
 ``tile_cols == elems_per_chunk ** 2`` (tile_cols=64 for a 2-byte dtype at
-dwords=4), so tile_cols=64 loaded correctly and every other width decoded to the
+dwords=4), so tile_cols=64 loaded correctly and every other width resolved to the
 wrong row and to a column past the end of the tile. Nothing in the suite caught
 it because no test exercised the async path's addressing at all.
 
 These tests are pure integer arithmetic -- no GPU, no torch, no IR build -- so
-they run in the fast tier and pin the decode for every admissible tile shape.
+they run in the fast tier and pin the mapping for every admissible tile shape.
 """
 
 from __future__ import annotations
@@ -40,8 +40,8 @@ def _loader(tile_rows, tile_cols, block_size, dtype=BF16):
     )
 
 
-def _decode(loader, chunk_idx):
-    """Mirror of the integer decode in AsyncTileLoaderSlot.issue."""
+def _chunk_to_tile_coord(loader, chunk_idx):
+    """Mirror of the integer chunk -> (row, col) map in AsyncTileLoaderSlot.issue."""
     row = chunk_idx // loader.chunks_per_row
     col = (chunk_idx % loader.chunks_per_row) * loader.elems_per_chunk
     return row, col
@@ -77,7 +77,7 @@ class TestChunksPerRow:
         assert L32.chunks_per_row != L32.elems_per_chunk
 
 
-class TestDecodeCoversTileExactlyOnce:
+class TestChunkMapCoversTileExactlyOnce:
     """Every element of the tile must be written exactly once, by one chunk."""
 
     @pytest.mark.parametrize("tile_cols", _TILE_COLS)
@@ -91,13 +91,13 @@ class TestDecodeCoversTileExactlyOnce:
 
         seen = set()
         for chunk_idx in range(L.chunks_total):
-            row, col = _decode(L, chunk_idx)
+            row, col = _chunk_to_tile_coord(L, chunk_idx)
             assert 0 <= row < tile_rows, (
-                f"chunk {chunk_idx} decoded to row {row}, outside "
-                f"[0,{tile_rows}) -- the decode overruns the tile"
+                f"chunk {chunk_idx} mapped to row {row}, outside "
+                f"[0,{tile_rows}) -- the chunk map overruns the tile"
             )
             assert 0 <= col <= tile_cols - L.elems_per_chunk, (
-                f"chunk {chunk_idx} decoded to col {col}, which runs past "
+                f"chunk {chunk_idx} mapped to col {col}, which runs past "
                 f"tile_cols={tile_cols} with {L.elems_per_chunk} elems/chunk"
             )
             for e in range(L.elems_per_chunk):
@@ -107,19 +107,19 @@ class TestDecodeCoversTileExactlyOnce:
 
         assert (
             len(seen) == tile_rows * tile_cols
-        ), f"decode covered {len(seen)} of {tile_rows * tile_cols} elements"
+        ), f"chunk map covered {len(seen)} of {tile_rows * tile_cols} elements"
 
     def test_lane_payload_is_lds_contiguous(self):
         """Adjacent chunk indices must land at adjacent LDS byte offsets.
 
         The intrinsic writes lane-contiguously (lane i at base + i*bytes), so the
-        decode is only sound if consecutive chunk indices are consecutive in the
+        mapping is only sound if consecutive chunk indices are consecutive in the
         tile's row-major byte order.
         """
         L = _loader(64, 128, 256)
         for chunk_idx in range(L.chunks_total - 1):
-            r0, c0 = _decode(L, chunk_idx)
-            r1, c1 = _decode(L, chunk_idx + 1)
+            r0, c0 = _chunk_to_tile_coord(L, chunk_idx)
+            r1, c1 = _chunk_to_tile_coord(L, chunk_idx + 1)
             flat0 = r0 * 128 + c0
             flat1 = r1 * 128 + c1
             assert flat1 - flat0 == L.elems_per_chunk, (

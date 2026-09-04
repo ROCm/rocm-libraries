@@ -85,6 +85,3 @@ __pycache__/
 *.profraw
 
 .cache
-
-# rocKE benchmark output (sweep result tables)
-rocke/*.csv

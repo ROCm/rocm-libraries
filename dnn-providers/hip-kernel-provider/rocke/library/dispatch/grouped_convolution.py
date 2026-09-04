@@ -1040,7 +1040,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
 # ---------------------------------------------------------------------------
 
 
-def _wgrad_lds_k_outer(req: "ConvGroupedRequest") -> bool:
+def _wgrad_lds_k_outer(req: "ConvGroupedRequest", warp_tile_mn: int) -> bool:
     """Whether the gfx950 wgrad candidate should use the K-outer LDS layout.
 
     wgrad's stride-1 global axis is the GEMM *free* axis, so an M-outer LDS tile
@@ -1056,11 +1056,18 @@ def _wgrad_lds_k_outer(req: "ConvGroupedRequest") -> bool:
     Gated to exactly what the transpose-read lane mapping is validated for:
     gfx950 (the instruction does not exist on gfx942), wave64 MFMA, 16-bit A/B
     operands, and a 16- or 32-wide atom edge.
+
+    Delegates so dispatch and the sweep driver cannot drift: this used to be a
+    second copy of the gate that compared the module constant against a tuple
+    (constant-true regardless of the request) and never checked wave_size.
     """
-    return (
-        req.arch == "gfx950"
-        and _GFX950_WARP_TILE_MN in (16, 32)
-        and req.dtype.lower() in ("fp16", "bf16")
+    return WgradConvSpec.default_lds_k_outer(
+        arch=req.arch,
+        dtype_a=req.dtype.lower(),
+        dtype_b=req.dtype.lower(),
+        warp_tile_m=warp_tile_mn,
+        warp_tile_n=warp_tile_mn,
+        wave_size=ArchTarget.from_gfx(req.arch).wave_size,
     )
 
 
@@ -1092,7 +1099,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
         return WgradConvSpec(
             problem=_problem(req),
             name=name,
-            lds_k_outer=_wgrad_lds_k_outer(req),
+            lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
             data=_data_spec(req),
             tile_m=tm,
             tile_n=tn,
@@ -1143,7 +1150,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             warp_tile_k=wtk,
             pipeline=_PIPELINE,
             epilogue=_ep,
-            lds_k_outer=_wgrad_lds_k_outer(req),
+            lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=_sk,

@@ -381,6 +381,38 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
+    /* The K-outer row stride comes from ROCKE_WGRAD_KOUTER_PAD in the builder,
+     * so an explicit pad changes the kernel name and the LDS budget charged
+     * here without changing a single emitted op. Reject rather than ignore.
+     * Mirrors Python is_valid_wgrad_spec / WgradConvSpec.validate. */
+    if(s->lds_k_outer && s->has_lds_k_pad)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer does not honour an explicit lds_k_pad: the "
+                     "K-outer row stride is fixed by the transpose-read bank "
+                     "analysis, not by the layout; got lds_k_pad=%d",
+                     s->lds_k_pad);
+        return false;
+    }
+
+    /* validate() covers the dtype/atom/wave_size half of the lds_k_outer gate,
+     * but it has no arch to check against. Without this an older target builds
+     * cleanly and emits ds_read_tr16_b64, which only exists on CDNA4.
+     * Mirrors Python _LDS_K_OUTER_ARCH in conv_implicit_gemm_wgrad.py. */
+    if(s->lds_k_outer && (!arch || strcmp(arch, ROCKE_WGRAD_LDS_K_OUTER_ARCH) != 0))
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer requires %s (ds_read_tr16_b64 is a CDNA4 "
+                     "transpose read); got %s",
+                     ROCKE_WGRAD_LDS_K_OUTER_ARCH,
+                     arch ? arch : "(null)");
+        return false;
+    }
+
     if(s->async_dma && !s->lds_k_outer)
     {
         if(reason && reason_cap)

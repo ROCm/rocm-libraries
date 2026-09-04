@@ -380,6 +380,5 @@ dual-engine vs Python-only split.
 | `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (must match the ROCm `comgr` in use: <7.2, 7.2-7.12, 7.13+) |
 | `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
-| `ROCKE_WGRAD_LDS_K_OUTER` | `auto` (default) \| `on` \| `off` — overrides `WgradConvSpec.default_lds_k_outer`, the K-outer LDS tile selection policy for wgrad. Selection only: it does not change the `lds_k_outer` spec default, so goldens are unaffected. `on` still respects the arch/dtype/atom gate |
 | `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
 | `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |

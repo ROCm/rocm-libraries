@@ -324,7 +324,6 @@ def _spec(idx: int):
                 data=ConvDataSpec(dtype_d="fp32"),
                 lds_k_outer=True,
                 async_dma=True,
-                lds_k_pad=0,
                 split_k=4,
             ),
             "gfx950",

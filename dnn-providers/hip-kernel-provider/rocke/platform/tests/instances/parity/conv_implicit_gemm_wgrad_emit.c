@@ -138,8 +138,6 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->dtype_d = "fp32";
         spec->lds_k_outer = true;
         spec->async_dma = true;
-        spec->has_lds_k_pad = true;
-        spec->lds_k_pad = 0;
         spec->split_k = 4;
         *arch = "gfx950";
         return 0;

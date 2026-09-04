@@ -66,6 +66,10 @@ _WARP_MN_GFX1250 = (1, 2, 4, 8, 16)
 _WARP_TILE_MN = (16, 32)
 _PIPELINES = ("mem", "compv3", "compv4", "wavelet", "basic")
 _EPILOGUES = ("default", "cshuffle")
+# The async leg overrides spec.pipeline (SchedulePolicy.for_pipeline("async_dma"))
+# and its K-loop branch ignores it, so one canonical value stands for all of
+# _PIPELINES there. "mem" is the neutral one: no scheduling hints.
+_ASYNC_PIPELINE = "mem"
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
 _SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
 
@@ -94,9 +98,6 @@ class Result:
     vec_a: int = 1
     vec_b: int = 1
     vec_c: int = 1
-    # None means the spec default; only printed when explicitly swept, so the
-    # output of a run that never passes --lds-k-pad is byte-for-byte unchanged.
-    lds_k_pad: int | None = None
     passed: bool | None = None  # None when --verify was not requested
 
 
@@ -702,31 +703,6 @@ def main() -> int:
         help="data type (default: fp16)",
     )
     parser.add_argument(
-        "--lds-k-pad",
-        default=None,
-        metavar="LIST",
-        help=(
-            "wgrad only: comma-separated lds_k_pad values to sweep as an extra "
-            "axis (e.g. 0,2,8,16). The pad sets the LDS row stride and so the "
-            "bank-conflict factor of the transpose-on-store, but it also has to "
-            "keep the consumer's wide ds_read aligned, so the two pull opposite "
-            "ways and the optimum is shape-dependent. Omitted (the default) "
-            "leaves the spec default and the sweep size unchanged."
-        ),
-    )
-    parser.add_argument(
-        "--dtype-d",
-        default=None,
-        choices=["fp16", "bf16", "fp32"],
-        help=(
-            "wgrad only: output (dW) dtype when it differs from --dtype; "
-            "defaults to --dtype. fp32 is what reaches split-K on a shape the "
-            "packed 16-bit atomic cannot serve: that epilogue pairs (c, c+1) "
-            "within one filter position and so needs an even cpg=C/groups, "
-            "while the fp32 path uses a scalar atomic with no pairing rule."
-        ),
-    )
-    parser.add_argument(
         "--top",
         type=int,
         default=10,
@@ -795,28 +771,6 @@ def main() -> int:
             "instead of random. Defaults to 1.0 when given without a value. "
             "With ones the expected dW[k,y,x,c] = N * valid_spatial_count(y,x) "
             "— a simple integer pattern easy to verify by eye or compare exactly."
-        ),
-    )
-    parser.add_argument(
-        "--async-dma",
-        action="store_true",
-        dest="async_dma",
-        help=(
-            "wgrad only: load the A/B tiles with the direct global->LDS "
-            "intrinsic instead of staging them through registers. Requires "
-            "--lds-k-outer (the intrinsic needs a stride-1 reduction axis, "
-            "which wgrad only has on the K-outer tile)."
-        ),
-    )
-    parser.add_argument(
-        "--lds-k-outer",
-        action="store_true",
-        dest="lds_k_outer",
-        help=(
-            "wgrad only: store the A/B LDS tiles K-outer (LDS[k][m]) and feed the "
-            "MFMA with gfx950 ds_read_b64_tr_b16 transpose reads instead of "
-            "transposing on store. Removes the per-element ds_write_b16 scatter "
-            "and its bank conflicts."
         ),
     )
     parser.add_argument(
@@ -1366,7 +1320,7 @@ def _build_wgrad_one(args_tuple):
     Returns ``(combo, spec, resolved_split_k, kernel)`` on success, or ``None``.
     Must live at module level for pickle.
     """
-    combo, problem, dtype, arch, lds_k_outer, async_dma, dtype_d = args_tuple
+    combo, problem, dtype, arch = args_tuple
     (
         tile_m,
         tile_n,
@@ -1376,7 +1330,7 @@ def _build_wgrad_one(args_tuple):
         warp_tile_mn,
         pipeline,
         epilogue,
-        lds_k_pad,
+        async_dma,
         split_k,
     ) = combo
 
@@ -1403,6 +1357,18 @@ def _build_wgrad_one(args_tuple):
         return None
 
     warp_tile_k = atom.k
+    # Deduced per combo rather than carried as a run-level flag: the gate reads
+    # warp_tile_mn, which is itself a sweep axis, so a single bool for the whole
+    # run would arm the K-outer tile on combos it does not apply to. This is the
+    # same predicate dispatch uses.
+    lds_k_outer = WgradConvSpec.default_lds_k_outer(
+        arch=arch,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        warp_tile_m=warp_tile_mn,
+        warp_tile_n=warp_tile_mn,
+        wave_size=target.wave_size,
+    )
     if split_k == -1:
         from rocke.helpers.split_k import select_split_k_wgrad
 
@@ -1422,7 +1388,7 @@ def _build_wgrad_one(args_tuple):
     spec = WgradConvSpec(
         problem=problem,
         name="rocke_bench_igemm_wgrad",
-        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype_d or dtype),
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
@@ -1437,7 +1403,6 @@ def _build_wgrad_one(args_tuple):
         split_k=resolved_split_k,
         lds_k_outer=lds_k_outer,
         async_dma=async_dma,
-        lds_k_pad=lds_k_pad,
     )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:
@@ -1953,7 +1918,6 @@ def _run_sweep(
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
-            f"{'' if r.lds_k_pad is None else f'pad{r.lds_k_pad} '}"
             f"{r.pipeline}/{r.epilogue}"
         )
         if show_verify:
@@ -2027,8 +1991,7 @@ def _run_wgrad_sweep(
     # pairs (c, c+1) inside one filter position and so requires an even
     # cpg=C/groups; an fp32 dW uses a scalar atomic with no pairing rule, which
     # is the only way to reach split-K at all on an odd-cpg shape.
-    dtype_d = getattr(args, "dtype_d", None) or dtype
-    _torch_dtype_d = _TORCH_DT[dtype_d]
+    _torch_dtype_d = _TORCH_DT[dtype]
     torch.manual_seed(42)
 
     def _make(*shape):
@@ -2054,11 +2017,6 @@ def _run_wgrad_sweep(
     flop = float(p.flops)
 
     sig = conv_args_signature(dtype)
-    if dtype_d != dtype:
-        _d_ir = {"fp16": "f16", "bf16": "bf16", "fp32": "f32"}[dtype_d]
-        for _arg in sig:
-            if _arg["name"] == "D":
-                _arg["type"] = f"ptr<{_d_ir}, global>"
     # Extended signature for runtime split-K kernels (split_k=0): adds ks i32 arg.
     sig_rt = sig + [{"name": "ks", "type": "i32", "size_bytes": 4}]
 
@@ -2070,40 +2028,45 @@ def _run_wgrad_sweep(
     # --split-k 0 means "sweep every degree". Normally one runtime-degree kernel
     # (split_k=0) covers them all: the degree rides a kernel argument and the
     # degrees in _SPLIT_K_AUTO are swept at launch time, which saves recompiling
-    # per degree. The async and unrolled pipelines cannot use that kernel -- they
-    # need a compile-time trip count to lay out the pipeline -- so for those we
-    # compile one kernel per concrete degree instead. Same coverage, more
+    # per degree. The async and Python-unrolled loops cannot use that kernel --
+    # they need a compile-time trip count to lay out the pipeline -- so for those
+    # we compile one kernel per concrete degree instead. Same coverage, more
     # compiles.
-    if args.split_k == 0:
-        _rt_capable = not bool(getattr(args, "async_dma", False))
-        split_k_values = (0,) if _rt_capable else _SPLIT_K_AUTO
-    else:
-        split_k_values = (args.split_k,)
+    #
+    # Decided per combo, not once per run. A run-level predicate that tested only
+    # async_dma silently dropped every pipeline='basic' combo from a --split-k 0
+    # sweep, because 'basic' is runtime-incapable too and its specs then failed
+    # validation and were discarded without a reason string.
+    def _split_k_values_for(pipeline: str, async_dma: bool) -> tuple:
+        if args.split_k != 0:
+            return (args.split_k,)
+        if async_dma or pipeline == "basic":
+            return _SPLIT_K_AUTO
+        return (0,)
 
-    # lds_k_pad rides between the epilogue and split_k so that it is part of the
-    # per-config key the split-K prune groups on: two pads are different kernels
-    # and must not prune each other. None means "spec default", which keeps the
-    # combination count identical to a run that never passes the flag.
-    _pad_arg = getattr(args, "lds_k_pad", None)
-    if _pad_arg:
-        lds_k_pad_values = tuple(int(x) for x in str(_pad_arg).split(","))
-    else:
-        lds_k_pad_values = (None,)
+    # async_dma is a swept axis rather than a flag: unlike lds_k_outer it is not
+    # deducible from (arch, spec). It removes the register staging of the tile,
+    # but it also forces the K-outer row stride to 0 -- and a stride on a
+    # multiple of the LDS bank period is the pathology K-outer exists to avoid --
+    # and it coarsens the load-width ladder to the chunk widths the intrinsic
+    # accepts. Both terms are functions of tile width and channel run, which are
+    # sweep axes, so the sweep has to answer it.
+    #
+    # On the async leg the pipeline is pinned: SchedulePolicy.for_pipeline is
+    # called with "async_dma" rather than spec.pipeline, and the K-loop branch
+    # ignores it too, so sweeping it there would compile the same body under
+    # several kernel names and measure one kernel several times.
+    _legs = [(_p, False) for _p in _PIPELINES] + [(_ASYNC_PIPELINE, True)]
 
-    combos = list(
-        itertools.product(
-            _TILE_MN,
-            _TILE_MN,
-            _TILE_K,
-            _WARP_MN,
-            _WARP_MN,
-            _WARP_TILE_MN,
-            _PIPELINES,
-            _EPILOGUES,
-            lds_k_pad_values,
-            split_k_values,
+    combos = [
+        (*_geom, _pipeline, _epilogue, _async_dma, _sk)
+        for _geom in itertools.product(
+            _TILE_MN, _TILE_MN, _TILE_K, _WARP_MN, _WARP_MN, _WARP_TILE_MN
         )
-    )
+        for _epilogue in _EPILOGUES
+        for _pipeline, _async_dma in _legs
+        for _sk in _split_k_values_for(_pipeline, _async_dma)
+    ]
 
     if args.sample is not None:
         total = len(combos)
@@ -2135,9 +2098,6 @@ def _run_wgrad_sweep(
             problem,
             dtype,
             arch,
-            bool(getattr(args, "lds_k_outer", False)),
-            bool(getattr(args, "async_dma", False)),
-            dtype_d,
         )
         for combo in combos
     ]
@@ -2212,7 +2172,7 @@ def _run_wgrad_sweep(
             warp_tile_mn,
             pipeline,
             epilogue,
-            _lds_k_pad,
+            _async_dma,
             _,
         ) = combo
         warp_tile_k = spec.warp_tile_k
@@ -2229,7 +2189,7 @@ def _run_wgrad_sweep(
                 warp_tile_mn,
                 pipeline,
                 epilogue,
-                _lds_k_pad,
+                _async_dma,
             )
             if _cfg_key in _pruned_configs:
                 n_skipped += 1
@@ -2345,7 +2305,7 @@ def _run_wgrad_sweep(
             n_run += 1
 
             _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
-                p.C, p.K, dtype_d, split_k=_launch_sk
+                p.C, p.K, dtype, split_k=_launch_sk
             )
             results.append(
                 Result(
@@ -2366,7 +2326,6 @@ def _run_wgrad_sweep(
                     vec_a=_va,
                     vec_b=_vb,
                     vec_c=_vc,
-                    lds_k_pad=_lds_k_pad,
                 )
             )
 
@@ -2382,6 +2341,7 @@ def _run_wgrad_sweep(
                     warp_tile_mn,
                     pipeline,
                     epilogue,
+                    _async_dma,
                 )
                 best = _best_tflops.get(_cfg_key)
                 if best is None:
@@ -2398,8 +2358,8 @@ def _run_wgrad_sweep(
                 f"warp={warp_m}x{warp_n} "
                 f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
                 f"{pipeline}/{epilogue:9s} {_spk_label:<7s} "
+                f"{'async ' if _async_dma else '      '}"
                 f"vec={_va}/{_vb}/{_vc} "
-                f"{'' if _lds_k_pad is None else f'pad{_lds_k_pad} '}"
                 f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms"
                 f"{prune_marker}",
                 flush=True,
@@ -2430,7 +2390,6 @@ def _run_wgrad_sweep(
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
-            f"{'' if r.lds_k_pad is None else f'pad{r.lds_k_pad} '}"
             f"{r.pipeline}/{r.epilogue} spk{r.split_k}"
         )
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")

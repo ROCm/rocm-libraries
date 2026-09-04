@@ -83,7 +83,6 @@ When ``split_k == 1`` the kernel writes ``dW`` normally (no atomics).
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field, replace as dc_replace
 from typing import List, Optional, Sequence, Tuple
 
@@ -544,7 +543,21 @@ class WgradConvSpec:
                     "lds_k_outer requires wave_size=64 (ds_read_b64_tr_b16 is a "
                     f"wave64 instruction); got {self.wave_size}"
                 )
+            if self.lds_k_pad is not None:
+                # The K-outer tile derives its row stride from _KOUTER_PAD in
+                # the builder, not from effective_lds_layout(), so an explicit
+                # pad never reaches the emitted body. It would still fork the
+                # kernel name and change the LDS budget is_valid_wgrad_spec
+                # charges, i.e. change which specs are admissible without
+                # changing any of them. Reject rather than ignore.
+                raise ValueError(
+                    "lds_k_outer does not honour an explicit lds_k_pad: the "
+                    "K-outer row stride is fixed by the transpose-read bank "
+                    f"analysis, not by the layout; got lds_k_pad={self.lds_k_pad}"
+                )
         layout = self.effective_lds_layout()
+        if self.async_dma:
+            layout.validate_for_async()
         if self.async_dma and self.lds_k_pad not in (None, 0):
             raise ValueError(
                 "async_dma requires lds_k_pad to be 0/None because "
@@ -574,7 +587,7 @@ class WgradConvSpec:
 
     @staticmethod
     def default_vector_sizes(
-        C: int, K: int, dtype: str, split_k: int = 1
+        C: int, K: int, dtype: str, split_k: int = 1, dtype_d: "Optional[str]" = None
     ) -> "Tuple[int, int, int]":
         """Return ``(vec_a, vec_b, vec_c)`` for a wgrad problem.
 
@@ -583,17 +596,23 @@ class WgradConvSpec:
           B (X):   NHWC → last dim C → vec_b
           D (dW):  KYXC → last dim C → vec_c
 
+        ``dtype`` is the compute (A/B) dtype and sizes vec_a/vec_b only.
+        ``dtype_d`` is the dW dtype and sizes vec_c only; it defaults to
+        ``dtype``. They are separate because the element width sets the
+        candidate ladder, so folding an fp32 dW into ``dtype`` would clamp the
+        reported A/B widths to 4 while the kernel still loads 8 wide.
+
         When ``split_k != 1`` (including ``split_k == 0`` for runtime selection)
         the epilogue is ``default`` (direct scalar store), which does not support
         vec_c > 1, so vec_c is forced to 1.
         """
-        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
 
-        def _vec(n: int) -> int:
+        def _vec(n: int, dt: str) -> int:
+            sizes = [8, 4, 2, 1] if dt != "fp32" else [4, 2, 1]
             return next(v for v in sizes if n % v == 0)
 
-        vec_c = 1 if split_k != 1 else _vec(C)
-        return _vec(K), _vec(C), vec_c
+        vec_c = 1 if split_k != 1 else _vec(C, dtype_d or dtype)
+        return _vec(K, dtype), _vec(C, dtype), vec_c
 
     @staticmethod
     def default_lds_k_outer(
@@ -620,22 +639,15 @@ class WgradConvSpec:
         the transpose moves to the ``ds_read_b64_tr_b16`` operand fetch. It is
         a strict instruction-count win wherever the transpose read exists,
         which is the whole of the gate below; there is no shape regime where
-        the scatter is preferable.
-
-        ``ROCKE_WGRAD_LDS_K_OUTER`` overrides: ``auto`` (default), ``on``,
-        ``off``. ``on`` still respects the gate -- an unsupported spec would
-        raise in ``validate()``.
+        the scatter is preferable. Because the answer is a pure function of
+        arch/dtype/atom with nothing shape-dependent in it, this is the single
+        selection point: there is no benchmark flag and no env override, and
+        both the sweep driver and dispatch call this rather than keeping their
+        own copies.
         """
-        override = os.environ.get("ROCKE_WGRAD_LDS_K_OUTER", "auto").strip().lower()
-        if override in ("0", "off", "false", "no"):
-            return False
-        if override not in ("1", "on", "true", "yes", "auto", ""):
-            raise ValueError(
-                f"ROCKE_WGRAD_LDS_K_OUTER must be auto/on/off; got {override!r}"
-            )
         # Mirrors the validate() gate: a 16-bit wave64 transpose read over a
         # 16- or 32-wide atom edge, which today is gfx950 only.
-        if arch != "gfx950":
+        if arch != _LDS_K_OUTER_ARCH:
             return False
         if dtype_a not in ("bf16", "fp16") or dtype_b not in ("bf16", "fp16"):
             return False
@@ -648,6 +660,11 @@ class WgradConvSpec:
 # Arch-aware spec validation
 # ---------------------------------------------------------------------
 
+
+# The K-outer LDS tile is fed by ds_read_tr16_b64, a CDNA4 transpose read.
+# Emitting it for an older target produces IR the assembler will reject, so
+# this gates both the selection policy and the arch-aware validator.
+_LDS_K_OUTER_ARCH = "gfx950"
 
 _MAX_BASIC_K_ITERS = 128
 
@@ -730,6 +747,23 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             "compile-time iteration "
             "count. Use a fixed split_k >= 1."
         )
+    if spec.lds_k_outer and spec.lds_k_pad is not None:
+        # Mirror of the validate() gate: the K-outer row stride comes from
+        # _KOUTER_PAD in the builder, so an explicit pad changes the kernel name
+        # and the LDS budget charged here without changing a single emitted op.
+        return False, (
+            "lds_k_outer does not honour an explicit lds_k_pad: the K-outer row "
+            "stride is fixed by the transpose-read bank analysis, not by the "
+            f"layout; got lds_k_pad={spec.lds_k_pad}"
+        )
+    if spec.lds_k_outer and arch != _LDS_K_OUTER_ARCH:
+        # validate() covers the dtype/atom/wave_size half of the gate, but it
+        # has no arch to check against. Without this an older target builds
+        # cleanly and emits ds_read_tr16_b64, which only exists on CDNA4.
+        return False, (
+            f"lds_k_outer requires {_LDS_K_OUTER_ARCH} (ds_read_tr16_b64 is a "
+            f"CDNA4 transpose read); got {arch}"
+        )
     if spec.async_dma and not spec.lds_k_outer:
         # Mirror of the WgradConvSpec.validate() gate: the async intrinsic maps
         # contiguous-global to contiguous-LDS, and wgrad only has a stride-1
@@ -739,6 +773,16 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             "load needs a stride-1 reduction axis, which wgrad only has once "
             "the tile is stored K-outer"
         )
+    if spec.async_dma:
+        # Soft mirror of the validate() gate. An explicit ``lds_layout`` object
+        # beats the scalar ``lds_k_pad`` field in effective_lds_layout(), and
+        # xor_swizzled has no scalar analogue at all, so the pad check above
+        # cannot stand in for this. Without it the sweep drivers turn the
+        # builder's late ValueError into a silent skip with no reason string.
+        try:
+            spec.effective_lds_layout().validate_for_async()
+        except ValueError as e:
+            return False, str(e)
 
     for _nm, _v, _chan in (
         ("vector_size_a", spec.vector_size_a, spec.problem.kpg),

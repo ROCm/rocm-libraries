@@ -52,6 +52,11 @@
  * off a multiple of the LDS bank period while staying 16-byte aligned for the
  * wide store. Mirrors _KOUTER_PAD in conv_implicit_gemm_wgrad.py. */
 #define ROCKE_WGRAD_KOUTER_PAD 8
+
+/* The K-outer LDS tile is fed by ds_read_tr16_b64, a CDNA4 transpose read.
+ * Emitting it for an older target produces IR the assembler will reject.
+ * Mirrors _LDS_K_OUTER_ARCH in conv_implicit_gemm_wgrad.py. */
+#define ROCKE_WGRAD_LDS_K_OUTER_ARCH "gfx950"
 #include <stddef.h>
 
 #include "rocke/helper_rocke.instances.common.conv_implicit_gemm.h" /* rocke_conv_problem_t */
