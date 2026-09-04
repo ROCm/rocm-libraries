@@ -24,14 +24,17 @@
 
 import rocisa
 
+import atexit
 import copy
 import functools
+import gc
 import glob
 import itertools
 import os
 import shutil
 import pickle
 import zlib
+from contextlib import contextmanager
 from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
@@ -927,6 +930,49 @@ def renameFallbacksPerArch(masterLibraries) -> None:
         _renameFallbackPlaceholders(master.library, arch)
 
 
+@contextmanager
+def deferCyclicGC():
+    """Suspend cyclic garbage collection while a large object graph is loaded.
+
+    Note that this operates under the premise that the objects loaded during
+    the lifetime of the context manager are needed later in the program and
+    should not be freed when the context manager exits.
+
+    On entering the context manager, we "freeze" garbage collection, which
+    means that the garbage collector will consider all currently existing
+    objects as permanent residents. It will also improve memory sharing with
+    child processes in some situations, see
+    https://docs.python.org/3/library/gc.html#gc.freeze. Then, we disable
+    garbage collection.
+
+    The `finally` block is entered after the code wrapped by this context
+    manager has finished (or raised an exception).
+    We freeze the currently existing objects again and re-enable garbage
+    collection in case it was enabled before. This converts the objects that
+    got added in the meantime to permanent residents, and, thus, avoids them to
+    be analyzed by garbage collection now (remember that they shouldn't be
+    freed at this point, anyway).
+    We also register an exit hook, such that we "unfreeze" the "frozen" objects
+    on program exit and make them available to be garbage collected. This makes
+    leak checking tooling happy.
+    """
+    wasEnabled = gc.isenabled()
+    gc.freeze()
+    gc.disable()
+    try:
+        yield
+    finally:
+        gc.freeze()
+        if wasEnabled:
+            gc.enable()
+        # Frozen objects survive even the collection CPython runs during
+        # interpreter shutdown, so extension leak checkers -- nanobind, via
+        # rocisa -- report every surviving instance and spray "leaked N
+        # instances" over the build log. Unfreeze at exit: teardown is then
+        # clean, and a collection at that point costs nothing we care about.
+        atexit.register(gc.unfreeze)
+
+
 @timing
 def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInfoMap):
 
@@ -988,38 +1034,42 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     # replace the global collector with this clean aggregate so
     # raiseIfTypeMismatches() can format the existing fatal aggregate error.
     typeMismatchAggregate: dict = {}
-    parsedLibraries = ParallelMap2(
-        LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
-    )
-    for library in parsedLibraries:
-        scheduleName, architectureName, _, _, _, newLibrary, typeMismatches = library
-        mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
+    # Every library pulled out of the generator below is retained for the rest
+    # of the run, which makes the cyclic collector the dominant cost of this
+    # phase (5x) if left running. See deferCyclicGC.
+    with deferCyclicGC():
+        parsedLibraries = ParallelMap2(
+            LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
+        )
+        for library in parsedLibraries:
+            scheduleName, architectureName, _, _, _, newLibrary, typeMismatches = library
+            mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
 
-        if architectureName == "":
-            continue
+            if architectureName == "":
+                continue
 
-        # A silicon stepping cannot label a library. This name keys masterLibraries,
-        # while the writes are keyed by the ISA-derived name, so a stepping-named
-        # file is dropped there without a word and the build reports success having
-        # written nothing for it. Honoring the name instead would be no better: the
-        # runtime resolves libraries by the architecture the driver reports, so
-        # library/gfx1250v0/ is a directory nothing ever looks in. Tuned logic
-        # records the architecture; the stepping is a build-time capability
-        # distinction, selected by --architecture.
-        if architectureName in ARCH_COMPILER_TARGET:
-            raise ValueError(
-                f"Library logic '{scheduleName}' declares ArchitectureName "
-                f"'{architectureName}', which names a silicon stepping rather than an "
-                f"architecture. Record it as "
-                f"'{ARCH_COMPILER_TARGET[architectureName]}' and select the stepping "
-                f"at build time with --architecture={architectureName}."
-            )
+            # A silicon stepping cannot label a library. This name keys masterLibraries,
+            # while the writes are keyed by the ISA-derived name, so a stepping-named
+            # file is dropped there without a word and the build reports success having
+            # written nothing for it. Honoring the name instead would be no better: the
+            # runtime resolves libraries by the architecture the driver reports, so
+            # library/gfx1250v0/ is a directory nothing ever looks in. Tuned logic
+            # records the architecture; the stepping is a build-time capability
+            # distinction, selected by --architecture.
+            if architectureName in ARCH_COMPILER_TARGET:
+                raise ValueError(
+                    f"Library logic '{scheduleName}' declares ArchitectureName "
+                    f"'{architectureName}', which names a silicon stepping rather than an "
+                    f"architecture. Record it as "
+                    f"'{ARCH_COMPILER_TARGET[architectureName]}' and select the stepping "
+                    f"at build time with --architecture={architectureName}."
+                )
 
-        if architectureName in masterLibraries:
-            nextSolIndex = masterLibraries[architectureName].merge(newLibrary, nextSolIndex)
-        else:
-            masterLibraries[architectureName] = newLibrary
-            masterLibraries[architectureName].version = args["CodeObjectVersion"]
+            if architectureName in masterLibraries:
+                nextSolIndex = masterLibraries[architectureName].merge(newLibrary, nextSolIndex)
+            else:
+                masterLibraries[architectureName] = newLibrary
+                masterLibraries[architectureName].version = args["CodeObjectVersion"]
 
     # After all YAML files have been parsed and Solution objects created,
     # fail on any type mismatches that were collected.
