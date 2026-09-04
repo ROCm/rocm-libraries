@@ -660,7 +660,8 @@ RppStatus hip_exec_gridmask_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                    Rpp32f gridAngle, RpptUintVector2D translateVector,
                                    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                    rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
     int globalThreads_x = (dstDescPtr->w + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;

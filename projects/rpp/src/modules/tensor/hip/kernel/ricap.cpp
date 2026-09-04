@@ -224,7 +224,7 @@ RppStatus hip_exec_ricap_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                 RpptROIPtr roiPtrInputCropRegion, RpptRoiType roiType,
                                 rpp::Handle& handle) {
     if (roiType == RpptRoiType::LTRB)
-        hip_exec_roi_conversion_ltrb_to_xywh(roiPtrInputCropRegion, handle);
+        roiPtrInputCropRegion = hip_exec_roi_conversion_ltrb_to_xywh(roiPtrInputCropRegion, handle);
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;

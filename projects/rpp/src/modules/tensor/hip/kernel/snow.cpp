@@ -338,7 +338,8 @@ RppStatus hip_exec_snow_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr, Rpp
                                Rpp32f* brightnessCoefficient, Rpp32f* snowThreshold,
                                Rpp32s* darkMode, RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;

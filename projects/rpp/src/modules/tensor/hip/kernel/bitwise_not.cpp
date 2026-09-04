@@ -150,7 +150,8 @@ __global__ void bitwise_not_pln3_pkd3_hip_tensor(Rpp8u* srcPtr, uint3 srcStrides
 RppStatus hip_exec_bitwise_not_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
                                       RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc,
                                       RpptRoiType roiType, rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
     int globalThreads_x = (dstDescPtr->w + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
