@@ -897,8 +897,8 @@ bool kernelMatches(const MatchContext& context,
     // engine has no field for.
     if(featureIsSet(WIDE_LDS_DMA_FIELD))
     {
-        if(intField(PERSISTENT_FIELD) == 0 || intField(HEAD_SIZE_FIELD) != 128
-           || blockN != 64 || intField(RAGGED_FIELD) != 0)
+        if(intField(PERSISTENT_FIELD) == 0 || intField(HEAD_SIZE_FIELD) != 128 || blockN != 64
+           || intField(RAGGED_FIELD) != 0)
         {
             return false;
         }
@@ -946,8 +946,7 @@ bool kernelMatches(const MatchContext& context,
     // for a hand-added bm128 variant, and there the spec is the authority -- it is
     // what the builder actually compiled. Dividing by 256 for a bm128 binary would
     // call a `Sq=384` graph ragged when that binary tiles it exactly.
-    const bool aligned
-        = problem.seqLenQ % blockM == 0 && problem.seqLenKv % blockN == 0;
+    const bool aligned = problem.seqLenQ % blockM == 0 && problem.seqLenKv % blockN == 0;
     const bool graphIsRagged = problem.seqLenQ == problem.seqLenKv && !aligned;
     const bool kernelIsRagged = intField(RAGGED_FIELD) != 0;
     if(graphIsRagged != kernelIsRagged)
@@ -971,8 +970,21 @@ bool kernelMatches(const MatchContext& context,
  * mis-specialization). What would replace it: measured per-config timings, or a UHD
  * model. Note the kernel's own note says block_n 64 and 128 BOTH match ~peak and 64
  * is more resource-efficient, so preferring the wider tile is not obviously right on
- * this arch -- it is a placeholder awaiting the isolation arms of step 4a-2, and the
- * shipped parity set carries a single block_n so nothing currently depends on it.
+ * this arch -- it is a placeholder awaiting the isolation arms of step 4a-2.
+ *
+ * WHAT THIS RETURNS ON THE SHIPPED SET, STATED PLAINLY: all 787 shipped variants
+ * carry block_n = 64, so this returns the SAME value for every candidate and the
+ * ranking is effectively a tie broken by candidate order. That is acceptable only
+ * because no shape can currently present two candidates: the 104 matcher tuples
+ * holding more than one batch variant are ALL `persistent`, where kernelMatches
+ * requires batch EQUALITY, so at most one survives. Zero non-persistent tuples --
+ * the arm where batch is a capacity BOUND and several variants could otherwise
+ * qualify -- carry a second variant.
+ *
+ * So this is a tie that never happens rather than a tie that is resolved well, and
+ * it stops being safe the moment either (a) a second block_n ships, or (b) the
+ * non-persistent arm gains two batch variants for one tuple. Both are ordinary
+ * sizing changes, so re-check this function when the variant set changes.
  */
 double scoreKernel(const MatchContext& /*context*/,
                    const BoundTokens& /*bound*/,
