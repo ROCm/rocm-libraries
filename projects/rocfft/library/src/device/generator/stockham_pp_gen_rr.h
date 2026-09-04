@@ -41,7 +41,7 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
 {
     explicit StockhamPartialPassKernelRR(const StockhamGeneratorSpecs&    specs,
                                          const StockhamPartialPassParams& params)
-        : StockhamPartialPassKernel(specs, params)
+        : StockhamPartialPassKernel(specs, params, LDSColumnPattern::NON_INTERLEAVED)
     {
         length_off_dim = params.parent_length[params.off_dim];
 
@@ -312,15 +312,20 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
 
     ArgumentList global_arguments() override
     {
-        auto arguments
-            = static_dim
-                  ? ArgumentList{twiddles_pp, twiddles_off_dim, twiddles, lengths, stride, nbatch}
-                  : ArgumentList{
-                      twiddles_pp, twiddles_off_dim, twiddles, dim, lengths, stride, nbatch};
-        for(const auto& arg : get_callback_args().arguments)
-            arguments.append(arg);
-        arguments.append(buf);
-        return arguments;
+        if(transform_type_pp != rocfft_transform_type_real_inverse)
+        {
+            auto arguments = ArgumentList{twiddles_pp, twiddles_off_dim};
+
+            auto arguments_base = StockhamKernel::global_arguments();
+            for(const auto& arg : arguments_base.arguments)
+                arguments.append(arg);
+
+            return arguments;
+        }
+        else
+        {
+            return StockhamKernel::global_arguments();
+        }
     }
 
     Function generate_global_function() override
@@ -384,6 +389,9 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
             body += Else{loadlds};
         }
 
+        if(transform_type_pp == rocfft_transform_type_real_inverse)
+            body += generate_partial_pass_steps_3_4();
+
         body += LineBreak{};
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
         body += Declaration{thread_in_device, thread_id % threads_per_transform};
@@ -441,7 +449,8 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
             body += real_trans_pre_post();
         }
 
-        body += generate_partial_pass_steps_1_2();
+        if(transform_type_pp != rocfft_transform_type_real_inverse)
+            body += generate_partial_pass_steps_1_2();
 
         body += LineBreak{};
         StatementList storelds;

@@ -881,11 +881,18 @@ public:
         if(!pp_parent_node)
             throw std::runtime_error("Invalid parent node for partial pass");
 
-        return PPFMKey(pp_parent_node->length[0],
-                       pp_parent_node->length[1],
-                       pp_parent_node->length[2],
+        auto transform_type = GetRootPlanTransformType();
+        auto parent_length  = pp_parent_node->length;
+
+        // For c2r we want the real length, not the complex length for querying the function pool
+        if(transform_type == rocfft_transform_type_real_inverse)
+            parent_length[0] = (parent_length[0] - 1) * 2;
+
+        return PPFMKey(parent_length[0],
+                       parent_length[1],
+                       parent_length[2],
                        precision,
-                       GetRootPlanTransformType(),
+                       transform_type,
                        pp_parent_node->scheme);
     }
 
