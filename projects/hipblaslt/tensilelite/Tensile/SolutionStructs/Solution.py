@@ -2571,7 +2571,7 @@ class Solution(collections.abc.Mapping):
         or (numBytesB == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
       )
 	  
-    if state["enableLDSTrA"] or state["enableGLTrA"]:
+    if (state["enableLDSTrA"] or state["enableGLTrA"]) and (not state["SourceSwap"]):
       state["VectorWidthA"] = 1
 
     if state["enableLDSTrB"] or state["enableGLTrB"]:
@@ -4459,7 +4459,7 @@ class Solution(collections.abc.Mapping):
     # Default GlobalStoreVectorWidth
     if state["StoreVectorWidth"] == -1:
       if state["SourceSwap"]:
-        state["StoreVectorWidth"] = state["VectorWidthA"]
+        state["StoreVectorWidth"] = state["MIOutputVectorWidth"]
       else:
         if state["EnableMatrixInstruction"]:
           # Adjusting StoreVectorWidth for larger CGEMM register count
