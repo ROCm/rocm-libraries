@@ -286,10 +286,10 @@ inline Rpp32u GetIntraImageNumThreads(const rpp::Handle& handle, Rpp32u batchSiz
         return 1;
     }
 
-    Rpp32u maxThreads = numThreads / batchSize;
-    Rpp32u optimalThreads = imageHeight / MIN_ROWS_PER_THREAD;
+    Rpp32u maxThreads = std::max(1u, numThreads / batchSize);
+    Rpp32u optimalThreads = std::max(1u, imageHeight / MIN_ROWS_PER_THREAD);
 
-    return std::min(maxThreads, std::max(1u, optimalThreads));
+    return std::min(maxThreads, optimalThreads);
 }
 
 #endif  // RPP_CPU_COMMON_HPP

@@ -60,192 +60,336 @@ inline void compute_contrast_8_host(__m256* p, __m256* pContrastParams) {
                            pContrastParams[1]);  // contrast adjustment
 }
 
+// Helper function for u8->u8 contrast processing
+inline void contrast_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDescPtr, Rpp8u* dstPtrImage,
+                                     RpptDescPtr dstDescPtr, Rpp32f contrastFactor,
+                                     Rpp32f contrastCenter, RpptROI roi,
+                                     RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+
+    Rpp8u *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
+    Rpp32u alignedLength = (bufferLength / 48) * 48;
+    Rpp32u vectorIncrement = 48;
+    Rpp32u vectorIncrementPerChannel = 16;
+
+    __m256 pContrastParams[2];
+    pContrastParams[0] = _mm256_set1_ps(contrastFactor);
+    pContrastParams[1] = _mm256_set1_ps(contrastCenter);
+
+    // contrast with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);
+                compute_contrast_48_host(p, pContrastParams);  // contrast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
+                    ((Rpp32f)(srcPtrTemp[0]) - contrastCenter) * contrastFactor + contrastCenter));
+                *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
+                    ((Rpp32f)(srcPtrTemp[1]) - contrastCenter) * contrastFactor + contrastCenter));
+                *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
+                    ((Rpp32f)(srcPtrTemp[2]) - contrastCenter) * contrastFactor + contrastCenter));
+
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
+            }
+        }
+    }
+
+    // contrast with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);                 // simd loads
+                compute_contrast_48_host(p, pContrastParams);  // contrast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                dstPtrTemp[0] = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
+                    ((Rpp32f)(*srcPtrTempR) - contrastCenter) * contrastFactor + contrastCenter));
+                dstPtrTemp[1] = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
+                    ((Rpp32f)(*srcPtrTempG) - contrastCenter) * contrastFactor + contrastCenter));
+                dstPtrTemp[2] = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
+                    ((Rpp32f)(*srcPtrTempB) - contrastCenter) * contrastFactor + contrastCenter));
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // contrast without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
+    else {
+        Rpp32u alignedLength = bufferLength & ~15;
+        for (int c = 0; c < layoutParams.channelParam; c++) {
+            Rpp8u *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp8u *srcPtrTemp, *dstPtrTemp;
+                srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+                dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+                int vectorLoopCount = 0;
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
+                    __m256 p[2];
+                    rpp_simd_load(rpp_load16_u8_to_f32_avx, srcPtrTemp, p);  // simd loads
+                    compute_contrast_16_host(p, pContrastParams);            // contrast adjustment
+                    rpp_simd_store(rpp_store16_f32_to_u8_avx, dstPtrTemp, p);  // simd stores
+                    srcPtrTemp += vectorIncrementPerChannel;
+                    dstPtrTemp += vectorIncrementPerChannel;
+                }
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    *dstPtrTemp = (Rpp8u)RPPPIXELCHECK(
+                        std::nearbyintf(((Rpp32f)(*srcPtrTemp) - contrastCenter) * contrastFactor +
+                                        contrastCenter));
+                    srcPtrTemp++;
+                    dstPtrTemp++;
+                }
+            }
+
+            srcPtrChannel += srcDescPtr->strides.cStride;
+            dstPtrChannel += dstDescPtr->strides.cStride;
+        }
+    }
+}
+
 RppStatus contrast_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
                                      RpptDescPtr dstDescPtr, Rpp32f* contrastFactorTensor,
                                      Rpp32f* contrastCenterTensor, RpptROIPtr roiTensorPtrSrc,
                                      RpptRoiType roiType, RppLayoutParams layoutParams,
                                      rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    Rpp32u intraThreads = GetIntraImageNumThreads(handle, dstDescPtr->n, srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32f contrastFactor = contrastFactorTensor[batchCount];
-        Rpp32f contrastCenter = contrastCenterTensor[batchCount];
+        Rpp8u* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp8u* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp8u *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        contrast_u8_u8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                 contrastFactorTensor[batchCount], contrastCenterTensor[batchCount],
+                                 roi, layoutParams, intraThreads);
+    }
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+    return RPP_SUCCESS;
+}
 
-        Rpp8u *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+// Helper function for f32->f32 contrast processing
+inline void contrast_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                       Rpp32f* dstPtrImage, RpptDescPtr dstDescPtr,
+                                       Rpp32f contrastFactor, Rpp32f contrastCenter, RpptROI roi,
+                                       RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
-        Rpp32u alignedLength = (bufferLength / 48) * 48;
-        Rpp32u vectorIncrement = 48;
-        Rpp32u vectorIncrementPerChannel = 16;
+    Rpp32f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
 
-        __m256 pContrastParams[2];
-        pContrastParams[0] = _mm256_set1_ps(contrastFactor);
-        pContrastParams[1] = _mm256_set1_ps(contrastCenter);
+    Rpp32u alignedLength = (bufferLength / 24) * 24;
+    Rpp32u vectorIncrement = 24;
+    Rpp32u vectorIncrementPerChannel = 8;
 
-        // contrast with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+    __m256 pContrastParams[2];
+    pContrastParams[0] = _mm256_set1_ps(contrastFactor);
+    pContrastParams[1] = _mm256_set1_ps(contrastCenter);
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    // contrast with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp32f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);
-                    compute_contrast_48_host(p, pContrastParams);  // contrast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
-                        ((Rpp32f)(srcPtrTemp[0]) - contrastCenter) * contrastFactor +
-                        contrastCenter));
-                    *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
-                        ((Rpp32f)(srcPtrTemp[1]) - contrastCenter) * contrastFactor +
-                        contrastCenter));
-                    *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
-                        ((Rpp32f)(srcPtrTemp[2]) - contrastCenter) * contrastFactor +
-                        contrastCenter));
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                compute_contrast_24_host(p, pContrastParams);  // contrast adjustment
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
 
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTempR = RPPPIXELCHECKF32((srcPtrTemp[0] - contrastCenter) * contrastFactor +
+                                                contrastCenter);
+                *dstPtrTempG = RPPPIXELCHECKF32((srcPtrTemp[1] - contrastCenter) * contrastFactor +
+                                                contrastCenter);
+                *dstPtrTempB = RPPPIXELCHECKF32((srcPtrTemp[2] - contrastCenter) * contrastFactor +
+                                                contrastCenter);
 
-        // contrast with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);                 // simd loads
-                    compute_contrast_48_host(p, pContrastParams);  // contrast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf(((Rpp32f)(*srcPtrTempR) - contrastCenter) * contrastFactor +
-                                        contrastCenter));
-                    dstPtrTemp[1] = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf(((Rpp32f)(*srcPtrTempG) - contrastCenter) * contrastFactor +
-                                        contrastCenter));
-                    dstPtrTemp[2] = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf(((Rpp32f)(*srcPtrTempB) - contrastCenter) * contrastFactor +
-                                        contrastCenter));
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // contrast without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else {
-            Rpp32u alignedLength = bufferLength & ~15;
-            for (int c = 0; c < layoutParams.channelParam; c++) {
-                Rpp8u *srcPtrRow, *dstPtrRow;
-                srcPtrRow = srcPtrChannel;
-                dstPtrRow = dstPtrChannel;
-
-                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                    Rpp8u *srcPtrTemp, *dstPtrTemp;
-                    srcPtrTemp = srcPtrRow;
-                    dstPtrTemp = dstPtrRow;
-
-                    int vectorLoopCount = 0;
-                    for (; vectorLoopCount < alignedLength;
-                         vectorLoopCount += vectorIncrementPerChannel) {
-                        __m256 p[2];
-                        rpp_simd_load(rpp_load16_u8_to_f32_avx, srcPtrTemp, p);  // simd loads
-                        compute_contrast_16_host(p, pContrastParams);  // contrast adjustment
-                        rpp_simd_store(rpp_store16_f32_to_u8_avx, dstPtrTemp, p);  // simd stores
-                        srcPtrTemp += vectorIncrementPerChannel;
-                        dstPtrTemp += vectorIncrementPerChannel;
-                    }
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                        *dstPtrTemp = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
-                            ((Rpp32f)(*srcPtrTemp) - contrastCenter) * contrastFactor +
-                            contrastCenter));
-                        srcPtrTemp++;
-                        dstPtrTemp++;
-                    }
-
-                    srcPtrRow += srcDescPtr->strides.hStride;
-                    dstPtrRow += dstDescPtr->strides.hStride;
-                }
-
-                srcPtrChannel += srcDescPtr->strides.cStride;
-                dstPtrChannel += dstDescPtr->strides.cStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // contrast with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);                 // simd loads
+                compute_contrast_24_host(p, pContrastParams);  // contrast adjustment
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                dstPtrTemp[0] = RPPPIXELCHECKF32((*srcPtrTempR - contrastCenter) * contrastFactor +
+                                                 contrastCenter);
+                dstPtrTemp[1] = RPPPIXELCHECKF32((*srcPtrTempG - contrastCenter) * contrastFactor +
+                                                 contrastCenter);
+                dstPtrTemp[2] = RPPPIXELCHECKF32((*srcPtrTempB - contrastCenter) * contrastFactor +
+                                                 contrastCenter);
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // contrast without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
+    else {
+        Rpp32u alignedLength = bufferLength & ~(vectorIncrementPerChannel - 1);
+        for (int c = 0; c < layoutParams.channelParam; c++) {
+            Rpp32f *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp32f *srcPtrTemp, *dstPtrTemp;
+                srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+                dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+                int vectorLoopCount = 0;
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
+                    __m256 p[1];
+                    rpp_simd_load(rpp_load8_f32_to_f32_avx, srcPtrTemp, p);  // simd loads
+                    compute_contrast_8_host(p, pContrastParams);             // contrast adjustment
+                    rpp_pixel_check_0to1(p, 1);
+                    rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTemp, p);  // simd stores
+                    srcPtrTemp += vectorIncrementPerChannel;
+                    dstPtrTemp += vectorIncrementPerChannel;
+                }
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    *dstPtrTemp = RPPPIXELCHECKF32((*srcPtrTemp - contrastCenter) * contrastFactor +
+                                                   contrastCenter);
+                    srcPtrTemp++;
+                    dstPtrTemp++;
+                }
+            }
+
+            srcPtrChannel += srcDescPtr->strides.cStride;
+            dstPtrChannel += dstDescPtr->strides.cStride;
+        }
+    }
 }
 
 RppStatus contrast_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
@@ -254,185 +398,180 @@ RppStatus contrast_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, R
                                        RpptRoiType roiType, RppLayoutParams layoutParams,
                                        rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    Rpp32u intraThreads = GetIntraImageNumThreads(handle, dstDescPtr->n, srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32f contrastFactor = contrastFactorTensor[batchCount];
-        Rpp32f contrastCenter = contrastCenterTensor[batchCount] * ONE_OVER_255;
+        Rpp32f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp32f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32f *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        contrast_f32_f32_host_impl(
+            srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, contrastFactorTensor[batchCount],
+            contrastCenterTensor[batchCount] * ONE_OVER_255, roi, layoutParams, intraThreads);
+    }
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+    return RPP_SUCCESS;
+}
 
-        Rpp32f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+// Helper function for f16->f16 contrast processing
+inline void contrast_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                       Rpp16f* dstPtrImage, RpptDescPtr dstDescPtr,
+                                       Rpp32f contrastFactor, Rpp32f contrastCenter, RpptROI roi,
+                                       RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
-        Rpp32u alignedLength = (bufferLength / 24) * 24;
-        Rpp32u vectorIncrement = 24;
-        Rpp32u vectorIncrementPerChannel = 8;
+    Rpp16f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
 
-        __m256 pContrastParams[2];
-        pContrastParams[0] = _mm256_set1_ps(contrastFactor);
-        pContrastParams[1] = _mm256_set1_ps(contrastCenter);
+    Rpp32u alignedLength = (bufferLength / 24) * 24;
+    Rpp32u vectorIncrement = 24;
+    Rpp32u vectorIncrementPerChannel = 8;
 
-        // contrast with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+    __m256 pContrastParams[2];
+    pContrastParams[0] = _mm256_set1_ps(contrastFactor);
+    pContrastParams[1] = _mm256_set1_ps(contrastCenter);
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    // contrast with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp16f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    compute_contrast_24_host(p, pContrastParams);  // contrast adjustment
-                    // Boundary checks for f32
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR = RPPPIXELCHECKF32(
-                        (srcPtrTemp[0] - contrastCenter) * contrastFactor + contrastCenter);
-                    *dstPtrTempG = RPPPIXELCHECKF32(
-                        (srcPtrTemp[1] - contrastCenter) * contrastFactor + contrastCenter);
-                    *dstPtrTempB = RPPPIXELCHECKF32(
-                        (srcPtrTemp[2] - contrastCenter) * contrastFactor + contrastCenter);
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                compute_contrast_24_host(p, pContrastParams);  // contrast adjustment
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
 
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTempR = (Rpp16f)RPPPIXELCHECKF32(
+                    ((Rpp32f)(srcPtrTemp[0]) - contrastCenter) * contrastFactor + contrastCenter);
+                *dstPtrTempG = (Rpp16f)RPPPIXELCHECKF32(
+                    ((Rpp32f)(srcPtrTemp[1]) - contrastCenter) * contrastFactor + contrastCenter);
+                *dstPtrTempB = (Rpp16f)RPPPIXELCHECKF32(
+                    ((Rpp32f)(srcPtrTemp[2]) - contrastCenter) * contrastFactor + contrastCenter);
 
-        // contrast with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);                 // simd loads
-                    compute_contrast_24_host(p, pContrastParams);  // contrast adjustment
-                    // Boundary checks for f32
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] = RPPPIXELCHECKF32(
-                        (*srcPtrTempR - contrastCenter) * contrastFactor + contrastCenter);
-                    dstPtrTemp[1] = RPPPIXELCHECKF32(
-                        (*srcPtrTempG - contrastCenter) * contrastFactor + contrastCenter);
-                    dstPtrTemp[2] = RPPPIXELCHECKF32(
-                        (*srcPtrTempB - contrastCenter) * contrastFactor + contrastCenter);
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // contrast without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else {
-            Rpp32u alignedLength = bufferLength & ~(vectorIncrementPerChannel - 1);
-            for (int c = 0; c < layoutParams.channelParam; c++) {
-                Rpp32f *srcPtrRow, *dstPtrRow;
-                srcPtrRow = srcPtrChannel;
-                dstPtrRow = dstPtrChannel;
-
-                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                    Rpp32f *srcPtrTemp, *dstPtrTemp;
-                    srcPtrTemp = srcPtrRow;
-                    dstPtrTemp = dstPtrRow;
-
-                    int vectorLoopCount = 0;
-                    for (; vectorLoopCount < alignedLength;
-                         vectorLoopCount += vectorIncrementPerChannel) {
-                        __m256 p[1];
-                        rpp_simd_load(rpp_load8_f32_to_f32_avx, srcPtrTemp, p);  // simd loads
-                        compute_contrast_8_host(p, pContrastParams);  // contrast adjustment
-                        // Boundary checks for f32
-                        rpp_pixel_check_0to1(p, 1);
-                        rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTemp, p);  // simd stores
-                        srcPtrTemp += vectorIncrementPerChannel;
-                        dstPtrTemp += vectorIncrementPerChannel;
-                    }
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                        *dstPtrTemp = RPPPIXELCHECKF32(
-                            (*srcPtrTemp - contrastCenter) * contrastFactor + contrastCenter);
-                        srcPtrTemp++;
-                        dstPtrTemp++;
-                    }
-
-                    srcPtrRow += srcDescPtr->strides.hStride;
-                    dstPtrRow += dstDescPtr->strides.hStride;
-                }
-
-                srcPtrChannel += srcDescPtr->strides.cStride;
-                dstPtrChannel += dstDescPtr->strides.cStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // contrast with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);                 // simd loads
+                compute_contrast_24_host(p, pContrastParams);  // contrast adjustment
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                dstPtrTemp[0] = (Rpp16f)RPPPIXELCHECKF32(
+                    ((Rpp32f)(*srcPtrTempR) - contrastCenter) * contrastFactor + contrastCenter);
+                dstPtrTemp[1] = (Rpp16f)RPPPIXELCHECKF32(
+                    ((Rpp32f)(*srcPtrTempG) - contrastCenter) * contrastFactor + contrastCenter);
+                dstPtrTemp[2] = (Rpp16f)RPPPIXELCHECKF32(
+                    ((Rpp32f)(*srcPtrTempB) - contrastCenter) * contrastFactor + contrastCenter);
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // contrast without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
+    else {
+        Rpp32u alignedLength = bufferLength & ~(vectorIncrementPerChannel - 1);
+        for (int c = 0; c < layoutParams.channelParam; c++) {
+            Rpp16f *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp16f *srcPtrTemp, *dstPtrTemp;
+                srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+                dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+                int vectorLoopCount = 0;
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
+                    __m256 p[1];
+
+                    rpp_simd_load(rpp_load8_f16_to_f32_avx, srcPtrTemp, p);  // simd loads
+                    compute_contrast_8_host(p, pContrastParams);             // contrast adjustment
+                    rpp_pixel_check_0to1(p, 1);
+                    rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTemp, p);  // simd stores
+
+                    srcPtrTemp += vectorIncrementPerChannel;
+                    dstPtrTemp += vectorIncrementPerChannel;
+                }
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    *dstPtrTemp = (Rpp16f)RPPPIXELCHECKF32(
+                        ((Rpp32f)(*srcPtrTemp) - contrastCenter) * contrastFactor + contrastCenter);
+                    srcPtrTemp++;
+                    dstPtrTemp++;
+                }
+            }
+
+            srcPtrChannel += srcDescPtr->strides.cStride;
+            dstPtrChannel += dstDescPtr->strides.cStride;
+        }
+    }
 }
 
 RppStatus contrast_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr,
@@ -441,194 +580,182 @@ RppStatus contrast_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, R
                                        RpptRoiType roiType, RppLayoutParams layoutParams,
                                        rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    Rpp32u intraThreads = GetIntraImageNumThreads(handle, dstDescPtr->n, srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32f contrastFactor = contrastFactorTensor[batchCount];
-        Rpp32f contrastCenter = contrastCenterTensor[batchCount] * ONE_OVER_255;
+        Rpp16f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp16f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp16f *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        contrast_f16_f16_host_impl(
+            srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, contrastFactorTensor[batchCount],
+            contrastCenterTensor[batchCount] * ONE_OVER_255, roi, layoutParams, intraThreads);
+    }
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+    return RPP_SUCCESS;
+}
 
-        Rpp16f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+// Helper function for i8->i8 contrast processing
+inline void contrast_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr, Rpp8s* dstPtrImage,
+                                     RpptDescPtr dstDescPtr, Rpp32f contrastFactor,
+                                     Rpp32f contrastCenter, RpptROI roi,
+                                     RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
-        Rpp32u alignedLength = (bufferLength / 24) * 24;
-        Rpp32u vectorIncrement = 24;
-        Rpp32u vectorIncrementPerChannel = 8;
+    Rpp8s *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
 
-        __m256 pContrastParams[2];
-        pContrastParams[0] = _mm256_set1_ps(contrastFactor);
-        pContrastParams[1] = _mm256_set1_ps(contrastCenter);
+    Rpp32u alignedLength = (bufferLength / 48) * 48;
+    Rpp32u vectorIncrement = 48;
+    Rpp32u vectorIncrementPerChannel = 16;
 
-        // contrast with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp16f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+    __m256 pContrastParams[2];
+    pContrastParams[0] = _mm256_set1_ps(contrastFactor);
+    pContrastParams[1] = _mm256_set1_ps(contrastCenter);
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    // contrast with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8s *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    compute_contrast_24_host(p, pContrastParams);  // contrast adjustment
-                    // Boundary checks for f16
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR = (Rpp16f)RPPPIXELCHECKF32(
-                        ((Rpp32f)(srcPtrTemp[0]) - contrastCenter) * contrastFactor +
-                        contrastCenter);
-                    *dstPtrTempG = (Rpp16f)RPPPIXELCHECKF32(
-                        ((Rpp32f)(srcPtrTemp[1]) - contrastCenter) * contrastFactor +
-                        contrastCenter);
-                    *dstPtrTempB = (Rpp16f)RPPPIXELCHECKF32(
-                        ((Rpp32f)(srcPtrTemp[2]) - contrastCenter) * contrastFactor +
-                        contrastCenter);
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);
+                compute_contrast_48_host(p, pContrastParams);  // contrast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
 
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(
+                    ((Rpp32f)(srcPtrTemp[0]) + 128 - contrastCenter) * contrastFactor +
+                    contrastCenter - 128);
+                *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(
+                    ((Rpp32f)(srcPtrTemp[1]) + 128 - contrastCenter) * contrastFactor +
+                    contrastCenter - 128);
+                *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(
+                    ((Rpp32f)(srcPtrTemp[2]) + 128 - contrastCenter) * contrastFactor +
+                    contrastCenter - 128);
 
-        // contrast with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);                 // simd loads
-                    compute_contrast_24_host(p, pContrastParams);  // contrast adjustment
-                    // Boundary checks for f16
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] = (Rpp16f)RPPPIXELCHECKF32(
-                        ((Rpp32f)(*srcPtrTempR) - contrastCenter) * contrastFactor +
-                        contrastCenter);
-                    dstPtrTemp[1] = (Rpp16f)RPPPIXELCHECKF32(
-                        ((Rpp32f)(*srcPtrTempG) - contrastCenter) * contrastFactor +
-                        contrastCenter);
-                    dstPtrTemp[2] = (Rpp16f)RPPPIXELCHECKF32(
-                        ((Rpp32f)(*srcPtrTempB) - contrastCenter) * contrastFactor +
-                        contrastCenter);
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // contrast without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else {
-            Rpp32u alignedLength = bufferLength & ~(vectorIncrementPerChannel - 1);
-            for (int c = 0; c < layoutParams.channelParam; c++) {
-                Rpp16f *srcPtrRow, *dstPtrRow;
-                srcPtrRow = srcPtrChannel;
-                dstPtrRow = dstPtrChannel;
-
-                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                    Rpp16f *srcPtrTemp, *dstPtrTemp;
-                    srcPtrTemp = srcPtrRow;
-                    dstPtrTemp = dstPtrRow;
-
-                    int vectorLoopCount = 0;
-                    for (; vectorLoopCount < alignedLength;
-                         vectorLoopCount += vectorIncrementPerChannel) {
-                        __m256 p[1];
-
-                        rpp_simd_load(rpp_load8_f16_to_f32_avx, srcPtrTemp, p);  // simd loads
-                        compute_contrast_8_host(p, pContrastParams);  // contrast adjustment
-                        // Boundary checks for f16
-                        rpp_pixel_check_0to1(p, 1);
-                        rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTemp, p);  // simd stores
-
-                        srcPtrTemp += vectorIncrementPerChannel;
-                        dstPtrTemp += vectorIncrementPerChannel;
-                    }
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                        *dstPtrTemp = (Rpp16f)RPPPIXELCHECKF32(
-                            ((Rpp32f)(*srcPtrTemp) - contrastCenter) * contrastFactor +
-                            contrastCenter);
-                        srcPtrTemp++;
-                        dstPtrTemp++;
-                    }
-
-                    srcPtrRow += srcDescPtr->strides.hStride;
-                    dstPtrRow += dstDescPtr->strides.hStride;
-                }
-
-                srcPtrChannel += srcDescPtr->strides.cStride;
-                dstPtrChannel += dstDescPtr->strides.cStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // contrast with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);                 // simd loads
+                compute_contrast_48_host(p, pContrastParams);  // contrast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(
+                    ((Rpp32f)(*srcPtrTempR) + 128 - contrastCenter) * contrastFactor +
+                    contrastCenter - 128);
+                dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(
+                    ((Rpp32f)(*srcPtrTempG) + 128 - contrastCenter) * contrastFactor +
+                    contrastCenter - 128);
+                dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(
+                    ((Rpp32f)(*srcPtrTempB) + 128 - contrastCenter) * contrastFactor +
+                    contrastCenter - 128);
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // contrast without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
+    else {
+        Rpp32u alignedLength = bufferLength & ~15;
+        for (int c = 0; c < layoutParams.channelParam; c++) {
+            Rpp8s *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp8s *srcPtrTemp, *dstPtrTemp;
+                srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+                dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+                int vectorLoopCount = 0;
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
+                    __m256 p[2];
+                    rpp_simd_load(rpp_load16_i8_to_f32_avx, srcPtrTemp, p);  // simd loads
+                    compute_contrast_16_host(p, pContrastParams);            // contrast adjustment
+                    rpp_simd_store(rpp_store16_f32_to_i8_avx, dstPtrTemp, p);  // simd stores
+                    srcPtrTemp += vectorIncrementPerChannel;
+                    dstPtrTemp += vectorIncrementPerChannel;
+                }
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
+                        ((Rpp32f)(*srcPtrTemp) + 128 - contrastCenter) * contrastFactor +
+                        contrastCenter - 128);
+                    srcPtrTemp++;
+                    dstPtrTemp++;
+                }
+            }
+
+            srcPtrChannel += srcDescPtr->strides.cStride;
+            dstPtrChannel += dstDescPtr->strides.cStride;
+        }
+    }
 }
 
 RppStatus contrast_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
@@ -637,184 +764,21 @@ RppStatus contrast_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                                      RpptRoiType roiType, RppLayoutParams layoutParams,
                                      rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    Rpp32u intraThreads = GetIntraImageNumThreads(handle, dstDescPtr->n, srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32f contrastFactor = contrastFactorTensor[batchCount];
-        Rpp32f contrastCenter = contrastCenterTensor[batchCount];
+        Rpp8s* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp8s* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp8s *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
-
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
-
-        Rpp8s *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
-
-        Rpp32u alignedLength = (bufferLength / 48) * 48;
-        Rpp32u vectorIncrement = 48;
-        Rpp32u vectorIncrementPerChannel = 16;
-
-        __m256 pContrastParams[2];
-        pContrastParams[0] = _mm256_set1_ps(contrastFactor);
-        pContrastParams[1] = _mm256_set1_ps(contrastCenter);
-
-        // contrast with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8s *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);
-                    compute_contrast_48_host(p, pContrastParams);  // contrast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(
-                        ((Rpp32f)(srcPtrTemp[0]) + 128 - contrastCenter) * contrastFactor +
-                        contrastCenter - 128);
-                    *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(
-                        ((Rpp32f)(srcPtrTemp[1]) + 128 - contrastCenter) * contrastFactor +
-                        contrastCenter - 128);
-                    *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(
-                        ((Rpp32f)(srcPtrTemp[2]) + 128 - contrastCenter) * contrastFactor +
-                        contrastCenter - 128);
-
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // contrast with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);                 // simd loads
-                    compute_contrast_48_host(p, pContrastParams);  // contrast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    // contrastCenter) * contrastFactor
-                    dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(
-                        ((Rpp32f)(*srcPtrTempR) + 128 - contrastCenter) * contrastFactor +
-                        contrastCenter - 128);
-                    dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(
-                        ((Rpp32f)(*srcPtrTempG) + 128 - contrastCenter) * contrastFactor +
-                        contrastCenter - 128);
-                    dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(
-                        ((Rpp32f)(*srcPtrTempB) + 128 - contrastCenter) * contrastFactor +
-                        contrastCenter - 128);
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // contrast without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else {
-            Rpp32u alignedLength = bufferLength & ~15;
-            for (int c = 0; c < layoutParams.channelParam; c++) {
-                Rpp8s *srcPtrRow, *dstPtrRow;
-                srcPtrRow = srcPtrChannel;
-                dstPtrRow = dstPtrChannel;
-
-                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                    Rpp8s *srcPtrTemp, *dstPtrTemp;
-                    srcPtrTemp = srcPtrRow;
-                    dstPtrTemp = dstPtrRow;
-
-                    int vectorLoopCount = 0;
-                    for (; vectorLoopCount < alignedLength;
-                         vectorLoopCount += vectorIncrementPerChannel) {
-                        __m256 p[2];
-                        rpp_simd_load(rpp_load16_i8_to_f32_avx, srcPtrTemp, p);  // simd loads
-                        compute_contrast_16_host(p, pContrastParams);  // contrast adjustment
-                        rpp_simd_store(rpp_store16_f32_to_i8_avx, dstPtrTemp, p);  // simd stores
-                        srcPtrTemp += vectorIncrementPerChannel;
-                        dstPtrTemp += vectorIncrementPerChannel;
-                    }
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                        *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
-                            ((Rpp32f)(*srcPtrTemp) + 128 - contrastCenter) * contrastFactor +
-                            contrastCenter - 128);
-                        srcPtrTemp++;
-                        dstPtrTemp++;
-                    }
-
-                    srcPtrRow += srcDescPtr->strides.hStride;
-                    dstPtrRow += dstDescPtr->strides.hStride;
-                }
-
-                srcPtrChannel += srcDescPtr->strides.cStride;
-                dstPtrChannel += dstDescPtr->strides.cStride;
-            }
-        }
+        contrast_i8_i8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                 contrastFactorTensor[batchCount], contrastCenterTensor[batchCount],
+                                 roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;

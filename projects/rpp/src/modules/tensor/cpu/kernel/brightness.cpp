@@ -295,7 +295,7 @@ RppStatus brightness_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rp
 
     omp_set_dynamic(0);
 // Outer batch loop: parallelized when intraThreads == 1 (batch-level mode)
-#pragma omp parallel for num_threads(intraThreads == 1 ? handle.GetNumThreads() : 1)
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
@@ -510,7 +510,7 @@ RppStatus brightness_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr,
 
     omp_set_dynamic(0);
 // Outer batch loop: parallelized when intraThreads == 1 (batch-level mode)
-#pragma omp parallel for num_threads(intraThreads == 1 ? handle.GetNumThreads() : 1)
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
@@ -758,7 +758,7 @@ RppStatus brightness_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
 
     omp_set_dynamic(0);
 // Outer batch loop: parallelized when intraThreads == 1 (batch-level mode)
-#pragma omp parallel for num_threads(intraThreads == 1 ? handle.GetNumThreads() : 1)
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
@@ -964,7 +964,7 @@ RppStatus brightness_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rp
 
     omp_set_dynamic(0);
 // Outer batch loop: parallelized when intraThreads == 1 (batch-level mode)
-#pragma omp parallel for num_threads(intraThreads == 1 ? handle.GetNumThreads() : 1)
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
