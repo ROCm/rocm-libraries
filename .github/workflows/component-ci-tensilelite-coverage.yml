@@ -4,9 +4,10 @@ name: "Component CI: TensileLite coverage"
 #
 # This is a lightweight (CPU-only, ~7 min), from-source coverage generator for
 # the TensileLite Python suite. It is deliberately separate from the functional
-# test jobs (which answer "does it work"). This lane only measures coverage: it
+# test jobs (which answer "does it work"). This lane measures coverage - it
 # enforces the whole-project floor and the per-file ratchet and renders the
-# characterization-vs-unit migration card.
+# characterization-vs-unit migration card - and, on pull_request runs only, also
+# guards against blanket `.ambr` golden regeneration (AIHPBLAS-3876).
 #
 # It exists to support the characterization-to-unit refactor and is expected to
 # retire once that conversion is done, so it is intentionally a small, standalone
@@ -34,8 +35,34 @@ jobs:
     container:
       image: ${{ inputs.docker_image }}
     steps:
+      # Full history only on pull_request runs, where the blanket-regeneration
+      # guard below needs to resolve the merge-base between the PR's base and
+      # head shas. Push runs (to develop/release branches) keep the cheap
+      # default shallow clone, since that guard only runs for PRs.
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Numeric 0 is falsy in GitHub Actions expressions, so a bare
+          # `cond && 0 || 1` always collapses to 1 regardless of `cond`. Quoting
+          # both branches as non-empty strings ('0'/'1') keeps them truthy so the
+          # && / || short-circuiting actually works; actions/checkout parses this
+          # input as a string either way.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+
+      # The authoritative CI guard against blanket `.ambr` golden regeneration
+      # (AIHPBLAS-3876/AIHPBLAS-3867 "Lock the net"). Runs first and needs no
+      # ROCm/rocisa/build, so a blanket regeneration fails in seconds instead of
+      # waiting on the ~7 min coverage run below. Unlike the opt-in local
+      # pre-commit hook, this cannot be bypassed with `git commit --no-verify`:
+      # it inspects the PR's actual diff in CI.
+      - name: Guard against blanket .ambr snapshot regeneration
+        if: github.event_name == 'pull_request'
+        shell: bash
+        working-directory: projects/hipblaslt/tensilelite
+        run: |
+          python3 Tensile/Tests/unit/characterization/tools/check_snapshot_diff.py \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}"
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm-linux

@@ -261,22 +261,25 @@ An opt-in local **pre-commit hook** runs the unit + characterization tests affec
      ```
 
      Read every changed line in the `.ambr` diff and explain the behavior change in your PR description. If the change pins or flips a known-wrong behavior, record a new ADR under `adr/` (or supersede the existing one). A golden diff is a reviewed behavior change, not a chore.
-2. **Never** run a bare, suite-wide `pytest --snapshot-update`. It silently rewrites every golden and destroys the net. That is, one could introduce a bug, update the goldens to make the tests green, and thereby *pin the bug* — rendering the tests useless. A CI guard that disallows bulk updates is planned; don't wait for it.
+2. **Never** run a bare, suite-wide `pytest --snapshot-update`. It silently rewrites every golden and destroys the net. That is, one could introduce a bug, update the goldens to make the tests green, and thereby *pin the bug* — rendering the tests useless. A CI guard enforces this (see "Legitimate bulk regeneration" below): it fails a PR that changes more than a small number of `.ambr` files unless the PR also carries the reviewed override.
 3. After recording, re-run the node **without** `--snapshot-update` twice — it must be byte-identical. Churn means the test isn't deterministic; fix it via the `{basename, err}` digest / canonicalization, not by re-recording.
 4. For **stable archs** (gfx908/90a/942) a codegen golden change is a *signal* — treat a digest diff as a suspected compiler/codegen regression and justify it in an **ADR** (and the PR description) before committing the new golden. Newer, still-churning archs may keep a small number of compiler generations side by side.
 
 ### Legitimate bulk regeneration
 
-A real mass update (e.g. an intended change to the snapshot format itself) is allowed, but it must be a **conscious, reviewed act**: do it in its own PR that touches nothing else, and explain why in the description. A planned CI guard will require an explicit label/marker for such PRs.
+A real mass update (e.g. an intended change to the snapshot format itself) is allowed, but it must be a **conscious, reviewed act**: do it in its own PR that touches nothing else, and explain why in the description.
+
+CI enforces this mechanically (`characterization/tools/check_snapshot_diff.py`, AIHPBLAS-3876): a PR that changes more than a small threshold of `.ambr` files fails unless the same PR also adds or updates an ADR under `adr/` (see [`adr/README.md`](adr/README.md)) carrying a `Bulk-Snapshot-Update: yes` line. This is an unbypassable backstop — it runs in CI against the PR's actual diff, so it cannot be skipped with `git commit --no-verify` the way the local pre-commit hook can.
 
 ### Reviewer checklist
 
 - [ ] Every `.ambr` change is scoped to the node(s) the PR intends to change (not a blanket regeneration), and each golden diff is explained in the PR description.
 - [ ] A behavior change that pins or flips a known-wrong golden has a matching ADR under `adr/` (new, or superseding the prior one) with a defect link.
+- [ ] If CI's blanket-regeneration guard required a `Bulk-Snapshot-Update: yes` override, the ADR carrying it actually justifies the *mass update itself* (why a real, reviewed regeneration was necessary), not just the usual behavior-change rationale.
 
 ## Architecture Decision Records (ADRs)
 
-A genuine decision — **pinning a known-wrong behavior**, **accepting a module below the coverage bar** for a structural reason, or **a departure from the add-only rule** — is recorded as an **ADR**: one short, append-only file under [`adr/`](adr/) in [Nygard](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions) form (`Status` / `Context` / `Decision` / `Consequences`), numbered (e.g. `adr/0001-pin-results-only-boolop-crash.md`). When the decision pins a behavior that looks wrong, the ADR carries a `Defect:` tracker link, and that defect tracks the eventual fix. This applies every time one of those three forks comes up, not just the once-per-module cases called out in steps 2 and 4 above — e.g. a one-off add-only departure (deleting verified-dead source) gets an ADR too, even though it isn't part of the per-module loop.
+A genuine decision — **pinning a known-wrong behavior**, **accepting a module below the coverage bar** for a structural reason, **a departure from the add-only rule**, or **a legitimate bulk `.ambr` regeneration** overriding CI's blanket-update guard — is recorded as an **ADR**: one short, append-only file under [`adr/`](adr/) in [Nygard](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions) form (`Status` / `Context` / `Decision` / `Consequences`), numbered (e.g. `adr/0001-pin-results-only-boolop-crash.md`). When the decision pins a behavior that looks wrong, the ADR carries a `Defect:` tracker link, and that defect tracks the eventual fix. This applies every time one of those forks comes up, not just the once-per-module cases called out in steps 2 and 4 above — e.g. a one-off add-only departure (deleting verified-dead source) gets an ADR too, even though it isn't part of the per-module loop.
 
 ADRs are **append-only and superseded, never edited in place**. If a later change flips a pinned-bug golden (the defect is fixed), update the golden in that PR and add a new ADR that supersedes the old one (set the old one's `Status:` to `Superseded by adr/NNNN`). Never fold a corrected or revised decision back into an existing ADR's body — write a new one and supersede.
 
