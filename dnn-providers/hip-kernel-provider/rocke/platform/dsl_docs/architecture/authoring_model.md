@@ -66,8 +66,10 @@ shape set, and replay command.
 
 Document every accepted optimization as a public qualitative case study. Describe
 the workload shape class, candidate levers, commands, selected mechanism, rejected
-mechanisms, and target constraints, *never* publishing measured values or comparative
-performance claims.
+mechanisms, and target constraints. Never publish absolute/raw measured values —
+TFLOP/s, GB/s, tokens/s, latency, absolute throughput. A **relative** speedup factor
+that carries no absolute figure (e.g. 1.2x lift, 0.9x regression, "~15% faster") MAY be
+shared and is the preferred way to convey impact publicly.
 
 Promote reusable optimization knowledge into `dsl_docs/optimization/`. If the
 work discovers a general tactic, decision rule, debugging skill, or reusable
@@ -112,6 +114,35 @@ Concrete contract examples:
   selectors choose 2D vs 3D.
 - `Reduce2DSpec`, `LayerNorm2DSpec`, `RMSNorm2DSpec`, `ElementwiseSpec` — small-op contracts.
 
+**One builder per family — no bespoke shape kernels.** Ship exactly one
+`build_<family>(spec) -> KernelDef` per kernel family. Workload-specific logic belongs in
+**dispatch / heuristics** or in benchmark harnesses under
+[`<library_root>/builders/`](../../../library/builders/) /
+[`<library_root>/benchmarks/`](../../../library/benchmarks/) — never in a new kernel module
+keyed to one shape class. Reject, for example:
+
+- `build_attention_sq8192.py`, `build_gemm_llama70b.py` — a builder named for a model or a
+  fixed size;
+- `if spec.seqlen_q == 8192: return build_other(...)` inside a kernel body — branch on a spec
+  flag or route in dispatch instead.
+
+A harness may hardcode shapes for measurement, but it MUST call the same public `build_*` /
+`run_*_torch` API the dispatcher uses — never fork the IR for one scenario.
+
+**Naming — algorithm and tile tokens, not workload dimensions.** Functions, modules, and spec
+classes name the *operation + algorithm*, not runtime or benchmark geometry:
+
+- Good: `build_unified_attention_2d_tiled`, `AttentionDenseSpec`, `supports_tiled_2d`.
+- Bad: `build_attention_d128_sq4096`, `prefill_qwen3_80b`, `gemm_4096x4096`.
+
+`spec.kernel_name()` (via `kernel_name_join`) MAY include **codegen knobs** that change emitted
+IR — `dtype`, `head_size`, `block_n`, tile/warp geometry, pipeline flags, `ragged`,
+`persistent`. These are algorithm configuration, not workload identity. It MUST NOT include
+runtime/problem sizes baked for one deployment — `batch`, `seqlen_q`, `seqlen_kv`, `M`, `N`,
+`K`, or model/codename tokens; those are launch args or harness constants. Runtime dimensions
+are `b.param(...)` scalars (or pointers + lengths) declared in `*_signature()` (§3), not
+compiled into the kernel symbol.
+
 ## 2. Validate Early
 
 `is_valid_spec(spec) -> (ok, reason)` rejects impossible or unsupported configurations before IR is built. Use `helpers/spec.py::IOSpecRule + validate_io` for the common small-op shape:
@@ -153,6 +184,26 @@ support is determined by each builder's validation checks. If `arch` is
 omitted, the builder applies its own default.
 
 Validation is part of the performance story: many "optimizations" are illegal unless they preserve tile / atom / LDS invariants.
+
+`is_valid_spec` (and `supports_*`, treated the same) is **functional only** — it answers "can
+this kernel be emitted and run correctly?", nothing else. Reject here ONLY when the kernel
+cannot be emitted or would be undefined at runtime:
+
+- impossible tile / atom geometry (divisibility, LDS / register budget, block-size limits);
+- missing `MmaOp` / dtype / arch mismatch (e.g. `arch != "gfx950"` for a gfx950-only body);
+- mutually incompatible spec flags (e.g. `varlen` + `persistent`);
+- boundary modes the IR has no safe path for (unless a dedicated spec flag selects another
+  emitted path, e.g. `ragged=True`).
+
+Do NOT reject here for:
+
+- performance heuristics ("prefer d128", "sq < 256 should use 3D") — put in dispatch / selectors;
+- benchmark-coverage gaps ("not tuned for this head count");
+- policy ("production only enables the GQA-8 combo") — put in dispatch or env gates;
+- duplicating dispatch routing (if `select_path` already chooses 2D vs 3D, tiled validators stay
+  geometry-focused).
+
+When rejecting, state the **hardware / algorithm invariant** in `reason`, not the workload.
 
 ## 3. Build The ABI With IRBuilder Params
 
@@ -402,7 +453,15 @@ identity; do not derive the manifest entry from wave size or a family label.
 Before considering a new builder done:
 
 - contract documented in a spec dataclass with a stable `kernel_name()`;
+- one `build_<family>(spec)` per family — no shape-class-specific builder module and no in-body
+  `seqlen` / `M`-`N`-`K` branch (route in dispatch or use a spec flag);
+- names state the operation and algorithm; `kernel_name()` carries codegen knobs
+  (dtype / head_size / block_n / tile-warp / ragged / persistent), while workload sizes
+  (batch / seqlen / M-N-K / model) stay in runtime `b.param` args and out of every name;
 - `is_valid_spec(spec)` rejects unsupported layouts / dtypes / tile shapes / resources;
+- validation is functional-only: it rejects emit-impossible / undefined configs and leaves
+  perf / policy / coverage / routing opinions to dispatch, naming the hardware/algorithm
+  invariant in `reason`;
 - every runtime predicate is expressed with `scf_if` or `select`, never a Python `if value:`;
 - padding / tail behavior has an OOB-safe load/store path (buffer-rsrc + sentinel);
 - LDS layout and async constraints are explicit (`LdsLayout`);
