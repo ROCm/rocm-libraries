@@ -38,10 +38,17 @@
             }
         },
         {
+            "name": "tilewright",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "origami;tilewright"
+            }
+        },
+        {
             "name": "hipblaslt",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller;origami;hipblas-common;hipblaslt"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller;origami;tilewright;hipblas-common;hipblaslt"
             }
         },
         {

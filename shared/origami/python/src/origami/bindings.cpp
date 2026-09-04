@@ -176,6 +176,7 @@ NB_MODULE(origami, m) {
       .def_rw("gwvw_d", &origami::config_t::gwvw_d)
       .def_rw("vector_width_a", &origami::config_t::vector_width_a)
       .def_rw("vector_width_b", &origami::config_t::vector_width_b)
+      .def_rw("index", &origami::config_t::index)
       // Tensile-specific parameters accessed via variant backend
       .def("tensile",
            static_cast<origami::tensile_params_t& (origami::config_t::*)()>(
@@ -383,7 +384,8 @@ NB_MODULE(origami, m) {
   m.def("compute_number_matrix_instructions",
         &origami::gemm::compute_number_matrix_instructions,
         "Compute the number of matrix instructions required");
-  m.def("arithmetic_intensity", &origami::gemm::arithmetic_intensity, "Compute arithmetic intensity");
+  m.def(
+      "arithmetic_intensity", &origami::gemm::arithmetic_intensity, "Compute arithmetic intensity");
   m.def("emulated_tf32_arithmetic_intensity",
         &origami::gemm::emulated_tf32_arithmetic_intensity,
         "Compute emulated TF32 arithmetic intensity");
@@ -524,4 +526,8 @@ NB_MODULE(origami, m) {
         return origami::gemm::compute_timestep_latency(problem, hardware, config, context);
       },
       "Compute latency per K-complete MT wave (auto-creates context)");
+
+  m.def("compute_number_of_output_tiles",
+        &origami::streamk::compute_number_of_output_tiles,
+        "Compute number of output tiles");
 }

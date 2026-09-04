@@ -72,9 +72,10 @@ namespace TensileLite
                                       "ProblemPredictionLibrary requires non empty "
                                       "mapping index set.");
 
-                    for(std::size_t local_index = 0; local_index < mappingIndices.size(); local_index++)
+                    for(std::size_t local_index = 0; local_index < mappingIndices.size();
+                        local_index++)
                     {
-                        int index = mappingIndices[local_index];
+                        int  index   = mappingIndices[local_index];
                         auto slnIter = ctx->solutions->find(index);
                         if(slnIter == ctx->solutions->end())
                         {
@@ -121,7 +122,7 @@ namespace TensileLite
                                 .hand_optimized_main_loop
                                 = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
                                                                                        : false,
-                                .subtile                   = solution->sizeMapping.useSubtileImpl,
+                                .subtile = solution->sizeMapping.useSubtileImpl,
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
@@ -131,10 +132,43 @@ namespace TensileLite
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .stream_k                  = solution->sizeMapping.streamK,
                                 .index                     = local_index,
+                                .grvw_a                    = solution->sizeMapping.grvwA,
+                                .grvw_b                    = solution->sizeMapping.grvwB,
+                                .gwvw_d                    = solution->sizeMapping.gwvwD,
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);
+
+                            // Pre-build the tilewright config, index-aligned with
+                            // origami_config_list.
+                            lib.tilewright_config_list.emplace_back(
+                                tilewright::hipblaslt::make_config(origami_config));
                         }
+                    }
+
+                    // Resolve a per-library model from this logic file's stem
+                    // (filename minus directory and extension) via the colocated
+                    // tilewright_index, discovered next to this .dat. -1 (no index /
+                    // no match) leaves this library on the base analytical path.
+                    if(ctx != nullptr)
+                    {
+                        std::string stem = ctx->filename;
+                        std::string dir;
+                        std::size_t directoryPos = stem.rfind('/');
+                        if(directoryPos != std::string::npos)
+                        {
+                            dir  = stem.substr(0, directoryPos);
+                            stem = stem.substr(directoryPos + 1);
+                        }
+                        // Strip ALL extensions (logic files are double-extension,
+                        // e.g. ".dat.zlib"); Tensile logic stems contain no '.',
+                        // so the first '.' begins the extension. This yields the
+                        // bare stem that keys the tilewright_index.
+                        std::size_t periodPos = stem.find('.');
+                        if(periodPos != std::string::npos)
+                            stem = stem.substr(0, periodPos);
+                        lib.tilewright_model
+                            = tilewright::hipblaslt::load_model_for_logic(stem, dir);
                     }
                 }
             }

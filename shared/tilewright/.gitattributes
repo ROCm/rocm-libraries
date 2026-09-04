@@ -1,0 +1,4 @@
+# Tilewright ML-recommender weight binaries are large (tens of MB each) and do not
+# delta-compress. Store every .bin under shared/tilewright/ via Git LFS so clones
+# of rocm-libraries only fetch a small pointer unless the file is checked out.
+*.bin filter=lfs diff=lfs merge=lfs -text
