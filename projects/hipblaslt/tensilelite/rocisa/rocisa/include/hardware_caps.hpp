@@ -639,7 +639,8 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     // max allowed is 112 out of 112 , 6 is used by hardware 4 SGPRs are wasted
     rv["MaxSgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 106 : 102;
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
-    rv["PhysicalMaxSgpr"]   = 800;
+    // gfx11 (RDNA) does not have an SGPR-file occupancy limit; use a large value so it never binds.
+    rv["PhysicalMaxSgpr"]   = isaVersion[0] == 11 ? 2048 : 800;
     rv["maxLDSConstOffset"] = 65536;
     rv["GlobalPrefetchSize"] = 256;
 
