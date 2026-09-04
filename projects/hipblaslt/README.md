@@ -297,6 +297,10 @@ You can find more information at the following links:
 * [hipblaslt-test](clients/gtest/README.md)
 * [hipblaslt-bench](clients/benchmarks/README.md)
 
+For the full testing strategy (what gates a pull request, what does not, and why), see
+[TESTING.md](TESTING.md); TensileLite's own testing strategy is documented separately in
+[tensilelite/TESTING.md](tensilelite/TESTING.md).
+
 ## Documentation
 
 Full documentation for hipBLASLt is available at

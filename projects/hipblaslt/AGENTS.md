@@ -112,6 +112,10 @@ JIRA ID : <JIRA key or N/A>
 
 Use the `users/<github-username>/<branch-name>` branch convention and base PRs on `develop`.
 
+For what to put in **Test Plan**/**Test Result** — which suites gate a PR, which are informational,
+and which run nowhere yet — see [`TESTING.md`](TESTING.md) (TensileLite specifics are in
+[`tensilelite/TESTING.md`](tensilelite/TESTING.md)).
+
 ## When working in `tensilelite/`
 
 `tensilelite/` is a self-contained subproject with its own toolchain (tox, invoke, rocisa C++ module). It has its own guide file covering kernel-generation workflow, rocisa, and the three-phase BenchmarkProblems → LibraryLogic → ClientWriter pipeline. Read that file before editing kernel codegen or YAML test logic there — the commands and gotchas (e.g. `tox -e unit` requiring a prior `invoke build-client`) do not apply at the hipBLASLt top level.
