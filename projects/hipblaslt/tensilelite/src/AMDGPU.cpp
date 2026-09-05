@@ -93,6 +93,13 @@ namespace TensileLite
         return (isStandardCUs == 1);
     }
 
+    TENSILELITEHOST_EXPORT bool isMI300A(Hardware const& hardware)
+    {
+        auto const* gpu = dynamic_cast<AMDGPU const*>(&hardware);
+        return gpu != nullptr && gpu->processor == AMDGPU::Processor::gfx942
+               && !gpu->isStandardCU();
+    }
+
     TENSILELITEHOST_EXPORT bool AMDGPU::runsKernelTargeting(AMDGPU::Processor other) const
     {
         if(other > this->processor)

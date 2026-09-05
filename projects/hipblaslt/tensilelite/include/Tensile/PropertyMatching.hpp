@@ -419,6 +419,9 @@ namespace TensileLite
 
             mutable KDTree<int32_t, 2>                                  kdTree;
             std::map<std::tuple<int32_t, int32_t>, std::vector<KBEntry>> kSolutionMap;
+
+            // Set at deserialization; kdTree/kSolutionMap are only populated when true.
+            bool useKdTree = false;
         };
 
         /**
@@ -978,7 +981,7 @@ namespace TensileLite
 
                 Key key = key_orig;
 
-                if(Debug::Instance().gridBasedKDTree())
+                if(this->useKdTree)
                 {
                     // roctxRangePush("KDTree");
                     auto compK = [](KBEntry<Value> const& e, int const N) { return e.k < N; };
@@ -1016,24 +1019,8 @@ kd_tree_batch_1_again:
                             return true;
                         });
 
-                    // Fix C: empty-result M-dominance retry.
-                    //
-                    // The guards above are MARGINAL, not JOINT: they ask "is N past the GLOBAL N
-                    // ceiling?" when the answer that matters is "is N past the N ceiling
-                    // REACHABLE AT THIS M?". On the gfx942 F64 GridBased table N=57344 is
-                    // attained only at cells with M<=1024 (for M>1024 the largest N is 43777), so
-                    // a query at M>=1030 with 43777 < N <= 57344 has no dominating cell, takes the
-                    // strict branch, and matches nothing -- the query then yields no solution at
-                    // all. On the HPL K=576 corpus that is 180 of 6102 shapes carrying 9.42% of
-                    // map FLOP.
-                    //
-                    // Relaxing M rather than N is deliberate: keeping N-dominance snaps such
-                    // queries onto an M=1024-class cell, which is far worse than any N-relaxed
-                    // choice.
-                    //
-                    // Applied ONLY when the strict pass found nothing, so shapes the kd-tree
-                    // already resolves are bit-for-bit unaffected. That scoping is load-bearing:
-                    // an UNCONDITIONAL M-dominance criteria regresses 47 of 65 kd-defined shapes.
+                    // The dominance guards above are marginal, not joint, so a query past the N
+                    // ceiling reachable at its own M matches nothing. Retry on M-dominance alone.
                     if(results.empty())
                     {
                         results = this->kdTree.query(
@@ -1125,27 +1112,10 @@ kd_tree_batch_1_again:
                     if(!bestmatches.empty())
                         return bestmatches;
 
-                    // The kd-tree matched a tuned cell, but every solution reachable from that
-                    // cell was rejected by its own predicates -- e.g. a degenerate free
-                    // dimension (N == 1) failing LeadingFree1SizesGreaterOrEqual, which is
-                    // emitted as GlobalReadVectorWidthB for TLUB problem types.
-                    //
-                    // Re-querying the kd-tree here would not help: the geometric neighbours of
-                    // the matched cell belong to the same kernel family and fail the same
-                    // predicate. Widening a *cell* search cannot escape a *predicate* failure.
-                    // So fall through to the binary path below, which evaluates predicates as
-                    // it walks and keeps widening until it accumulates numSolutions accepted
-                    // matches.
-                    //
-                    // Restore the caller's key first: the b > 1 branch above may have collapsed
-                    // the batch dimension into M or N before retrying the kd query, and the
-                    // binary path must see the problem as the caller described it. With the key
-                    // restored, this fall-through is exactly the path a TENSILE_GRIDBASED_KDTREE=0
-                    // run would have taken.
-                    //
-                    // Reached only when the kd-tree branch would otherwise have returned empty,
-                    // which is already a hard failure upstream -- so shapes the kd-tree resolves
-                    // today are bit-for-bit unaffected.
+                    // Every solution in the matched cell failed its predicates; neighbouring
+                    // cells share the kernel family and would fail the same way. Restore the
+                    // caller's key (the b > 1 branch may have folded batch into M or N) and fall
+                    // through to the binary path, which checks predicates as it widens.
                     key = key_orig;
                 }
 
