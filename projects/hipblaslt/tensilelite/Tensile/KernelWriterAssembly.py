@@ -412,7 +412,15 @@ class KernelWriterAssembly(KernelWriter):
     waves and one on the odd. TDMFuse=1 crosses those pairs, so the scale call
     programs the set B rides and its even member is MXSB. Every other grouping
     answers with the pair's own order.
+
+    Parity follows the tensor, never the argument position: the tail loop hands
+    its pair over in issue order, which SwapGlobalReadOrder/DTV/DTL can reverse,
+    and the prologue that built the descriptors always put the A side on the
+    even waves. Identify the A side by name so a reversed call still programs
+    each set on the waves that read it.
     """
+    if not tPA["tensorChar"].endswith("A"):
+      tPA, tPB = tPB, tPA
     if self.tdmFusePaired(kernel) and tPA["tensorChar"].startswith("MX"):
       return tPB, tPA
     return tPA, tPB
