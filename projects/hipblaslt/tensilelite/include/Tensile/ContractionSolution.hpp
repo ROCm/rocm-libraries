@@ -458,7 +458,7 @@ namespace TensileLite
         bool dpOnly      = false;
         // available: sizeMapping.streamKForceDPOnly param.
         bool forceDPOnly = false;
-        // available: Debug::useStreamKDataParrallel() (TENSILE_STREAMK_DATA_PARALLEL).
+        // available: useStreamKDP() (MI300A default, TENSILE_STREAMK_DATA_PARALLEL override).
         bool streamKDP   = false;
 
         // --- Workspace / partials ---

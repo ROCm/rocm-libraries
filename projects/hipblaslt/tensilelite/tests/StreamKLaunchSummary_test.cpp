@@ -953,7 +953,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
     // among the variables reloadDebugBitsForTest() refreshes, so it can only be
     // cleared before the process starts. Fail loudly rather than silently asserting
     // something else if it is set.
-    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
+    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     auto d = solution.computeStreamKDecisions(problem, env.device);
@@ -1049,7 +1049,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedGridCollapsesToTilesAn
     auto problem = makeGemmProblem(256, 4096, 4096);
     problem.setWorkspaceSize(0); // no workspace at all
 
-    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
+    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     // Anti-vacuity: the pre-reconcile reduction really is parallel. (getSKReduction
@@ -1122,7 +1122,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelFixedGridWorkspaceDpFallbackFires)
     // alone.
     env.device.skFixedGrid = 128;
 
-    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
+    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     ASSERT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::parallel)
@@ -1288,7 +1288,7 @@ TEST(StreamKLaunchSummaryTest, TreeBoundsFallbackWinsGridAttribution)
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
 
-    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
+    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     auto d = solution.computeStreamKDecisions(problem, device);
@@ -1388,7 +1388,7 @@ TEST(StreamKLaunchSummaryTest, FixedGridOverrideWinsGridAttribution)
     device.skDynamicGrid = 0;
     device.skFixedGrid   = 32;
 
-    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
+    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     auto d = solution.computeStreamKDecisions(problem, device);
