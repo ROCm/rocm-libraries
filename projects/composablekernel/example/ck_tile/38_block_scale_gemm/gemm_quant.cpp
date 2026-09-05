@@ -89,8 +89,7 @@ auto gen_lut_key(const ck_tile::ArgParser& arg_parser)
     {
         // RowCol scales are independent of the B layout, so the preshuffle
         // choice selects a different kernel and must be part of the key.
-        params.push_back(arg_parser.get_bool("preshuffleb") ? "preshuffleb"
-                                                            : "non-preshuffleb");
+        params.push_back(arg_parser.get_bool("preshuffleb") ? "preshuffleb" : "non-preshuffleb");
     }
     if(quant_mode != "rowcol" && quant_mode != "tensor")
     {
