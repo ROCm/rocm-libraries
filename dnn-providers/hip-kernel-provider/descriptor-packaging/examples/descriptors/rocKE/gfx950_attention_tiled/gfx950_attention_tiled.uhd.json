@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "4d0a5cf8-2221-427c-a79d-550a60a5245a",
+  "name": "Gfx950AttentionTiled selector",
+  "kind": "native",
+  "payload": "hipkernel.gfx950_attention_tiled.score"
+}

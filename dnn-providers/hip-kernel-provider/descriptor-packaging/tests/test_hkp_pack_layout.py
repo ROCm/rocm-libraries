@@ -559,11 +559,24 @@ def test_example_tree_is_self_consistent():
     ids = [d.id for d in flat.descriptors]
     assert len(ids) == len(set(ids)), "duplicate descriptor ids in the example"
     rel_dirs = {d.rel_dir.as_posix() for d in flat.kdps()}
+    # WIDENED, in the same commit as the descriptors it admits. This assertion exists
+    # to stop the example tree growing real integrations, and adding a row to it is
+    # widening a guardrail rather than passing one -- so it is a known deviation, noted
+    # at step 9, not a routine edit.
+    #
+    # The reason it has to happen at all: `hkp_pack` validates every descriptor under
+    # its source root and hard-fails on any `kind` it does not produce, and the engine
+    # tree's own descriptors are `kind: embedded_source`. So a `packaged` integration
+    # cannot be authored where it belongs (beside its packs/*Native.cpp) and lands
+    # here instead, in a tree that is simultaneously the packager's production source
+    # root and this pinned fixture. That is a packager dialect gap, not a layout
+    # mistake by the integrations listed below.
     assert rel_dirs == {
         "hip/pointwise_add",
         "rocKE/gfx942_tiled_attention",
         "rocKE/gfx942_attention_dense",
         "rocKE/gfx950_attention_dense",
+        "rocKE/gfx950_attention_tiled",
     }
 
 

@@ -260,3 +260,45 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
             *_SdpaFwd_bshd_*.*
     )
 endif()
+
+# The gfx950 TILED-attention engine, at the hand-invoke site.
+#
+# THIS SITE IS NOT THE ONE CI DRIVES. It registers a build-tree target only; the
+# installed CTestTestfile that TheRock's test_runner.py drives is written by the fold
+# in ../CMakeLists.txt, where this engine also has a block. Both exist for the same
+# reason the dense sibling has both: this one is convenient to invoke by hand while
+# developing, that one is the one that defends the engine in CI. Deleting either
+# leaves a real gap.
+#
+# EXPECTED TO BE INERT ON MERGE (decision D2), for the same reason as the sibling
+# block at the CI site: this kernel is structurally paged, and both shared reference
+# executors decline paged KV, so there is nothing for these cases to be checked
+# against until the GpuSdpaFwdPlan block-table repair (D1) lands. The target is
+# correctly pinned now so that repair makes it live without touching this file.
+#
+# Read the result as "N of M dispatched THIS engine, K skipped for a named reason, 0
+# unexplained" -- never as a colour. A pass with N == 0 is a coverage finding, not a
+# success.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+   AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx950_attention_tiled_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        # Exactly as the UED spells it; --test-engine matches the engine's engineName,
+        # which for a descriptor-registered engine comes from the UED's own `name`.
+        ENGINE_NAME hipkernel:Gfx950AttentionTiled
+        INSTALL_SUBDIR hip_kernel_provider
+        # gpu, matching the dense sibling, so this target goes live unchanged once D1's
+        # repair teaches that executor block-table indirection. Pinning the CPU
+        # reference instead would not help: test_sdk's SdpaFwdPlan.hpp declines paged
+        # KV too.
+        REFERENCE_EXECUTOR gpu
+        # The paged bundles this integration authors. Every dense SdpaFwd bundle is
+        # correctly declined -- this engine REQUIRES page tables, the inverse of the
+        # dense engine's rule -- so a wider filter would only add skips that say
+        # nothing about this engine.
+        GTEST_FILTER
+            *_SdpaFwd_paged_*.*
+    )
+endif()

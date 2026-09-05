@@ -273,6 +273,63 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             message(STATUS "gfx950 attention-dense engine not built - skipping its external-integration-check")
         endif()
 
+        # The gfx950 TILED-attention ingestor engine. Registered at this site for the
+        # same reason the dense block above is, and subject to the same load-bearing
+        # ORDERING: it must precede the fold below, which is what writes the staged
+        # add_test() text into the installed CTestTestfile. A block placed after the
+        # fold creates the build-tree target, prints a reassuring "Created ..." line,
+        # and is silently absent from the install tree CI drives.
+        #
+        # THIS TARGET IS EXPECTED TO BE INERT ON MERGE, AND THAT IS DELIBERATE
+        # (decision D2). It pins the right engine by the right name, and there is
+        # currently no bundle it can serve: this kernel is structurally paged and
+        # varlen, and BOTH shared reference executors decline paged KV
+        # (GpuSdpaFwdPlan.hpp and test_sdk's SdpaFwdPlan.hpp), so a paged bundle has
+        # nothing to be checked against and every case reports not-applicable.
+        #
+        # An inert CORRECT target beats a green MISLEADING one. The alternative --
+        # dropping ENGINE_NAME, or pinning a different engine so something runs --
+        # would report a fraction about somebody else's engine. What makes this
+        # target live is the GpuSdpaFwdPlan block-table repair (D1), which is a
+        # bounded gather-then-delegate adapter over the existing dense reference; the
+        # moment it lands, these cases dispatch without touching this block.
+        #
+        # Until then the numeric evidence for this engine comes from rocKE's own
+        # ref_paged_attn (pure torch, 79 scenarios) at stage 8d, reported as a
+        # fraction rather than a colour.
+        if(HIPDNN_ENABLE_KERNEL_INGESTOR
+           AND HIPDNN_ENABLE_SDPA
+           AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE)
+            set(_gfx950_tiled_external_category_args "")
+            if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+                list(APPEND _gfx950_tiled_external_category_args
+                    INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                    TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-attention-tiled-external-integration
+                    ENVIRONMENT ${TEST_ENVIRONMENT}
+                )
+            endif()
+            add_external_integration_test_target(
+                TARGET_NAME    ${PROJECT_NAME}-gfx950-attention-tiled-external-integration-check
+                PLUGIN_TARGET  hip_kernel_provider
+                # Exactly as the UED spells it: --test-engine matches engineName,
+                # which for a descriptor-registered engine comes from the UED's own
+                # `name` field. A mismatch here fails before any case runs.
+                ENGINE_NAME    hipkernel:Gfx950AttentionTiled
+                INSTALL_SUBDIR hip_kernel_provider
+                # gpu, matching the dense sibling, so this target goes live unchanged
+                # when D1's repair teaches that executor block-table indirection.
+                REFERENCE_EXECUTOR gpu
+                # The paged bundles this integration authors. Every dense SdpaFwd
+                # bundle is correctly declined by this engine -- it requires page
+                # tables -- so a wider filter would report skips that say nothing.
+                GTEST_FILTER   *_SdpaFwd_paged_*.*
+                ${_gfx950_tiled_external_category_args}
+            )
+            message(STATUS "Created ${PROJECT_NAME}-gfx950-attention-tiled-external-integration-check target")
+        else()
+            message(STATUS "gfx950 attention-tiled engine not built - skipping its external-integration-check")
+        endif()
+
         # This is a pre-registered CTest test (not a GTest binary), so it is
         # labeled via apply_ctest_category_labels()/HIP_MLOPS_ENGINE_test_categories_external.yaml.
         if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)

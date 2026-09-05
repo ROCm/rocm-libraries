@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "id": "a9e9f29e-4603-4ae8-837f-9a08435c4b46",
+  "name": "hipkernel:Gfx950AttentionTiled",
+  "graph_match": {
+    "native": "hipkernel.gfx950_attention_tiled.graph_match"
+  },
+  "metadata": "da53dd52-6672-4695-956f-9c97880229ed",
+  "heuristic": "4d0a5cf8-2221-427c-a79d-550a60a5245a",
+  "knobs": [
+    "head_size",
+    "block_size",
+    "num_query_heads",
+    "num_kv_heads",
+    "num_seqs",
+    "sliding_window",
+    "num_warps",
+    "block_m_per_warp",
+    "tile_size",
+    "waves_per_eu"
+  ]
+}
