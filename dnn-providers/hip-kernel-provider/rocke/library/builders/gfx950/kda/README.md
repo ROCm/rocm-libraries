@@ -102,6 +102,21 @@ The two requests produce compatible materialized-tile layouts even though the
 prep and scan block sizes differ. Launch `prep` and then `scan` on the same
 stream. An unqualified request still returns `kda_gfx950_chunk_fused`.
 
+### Raw beta ABI
+
+The framework-facing raw prep kernel has separate compile-time beta ABIs.
+BF16 is the default; `fp32_beta_dtype=True` preserves direct FP32 input. Their
+kernel names carry `bbf16` and `bfp32`, respectively.
+
+Both variants accept a strided `[B,T,H]` projection view:
+`beta_stride_batch`, `beta_stride_token`, and `beta_stride_head` are element
+strides in the raw prep signature. The BF16 variant extends each load to FP32;
+both variants then apply sigmoid in FP32.
+
+Prepared chunk-packed prep and the fused kernel retain their original FP32
+beta ABI. Raw callers pass the original tensor and its strides without a
+host-side dtype conversion or contiguous materialization.
+
 ## Tests
 
 The CPU lane validates admission rules and compiles all three builders through

@@ -28,6 +28,7 @@ from kernels.gfx950.kda_chunkwise import (
     is_valid_fused_spec,
     is_valid_scan_spec,
     is_valid_spec,
+    kda_chunk_prep_signature,
     tuned_kda_chunk_scan_spec,
 )
 
@@ -81,6 +82,53 @@ class TestPrepSpec:
         assert ok, why
         assert "raw" in spec.kernel_name()
         assert spec.kernel_name() != KdaChunkPrepSpec().kernel_name()
+
+    def test_raw_beta_abis_are_distinct_and_strided(self):
+        raw_bf16 = KdaChunkPrepSpec(
+            raw_inputs=True,
+            fuse_qk_l2norm=True,
+            fuse_gate=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+        )
+        raw_fp32 = KdaChunkPrepSpec(
+            raw_inputs=True,
+            fp32_beta_dtype=True,
+            fuse_qk_l2norm=True,
+            fuse_gate=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+        )
+        bf16_sig = {
+            arg["name"]: arg["type"] for arg in kda_chunk_prep_signature(raw_bf16)
+        }
+        fp32_sig = {
+            arg["name"]: arg["type"] for arg in kda_chunk_prep_signature(raw_fp32)
+        }
+        prepared_sig = {
+            arg["name"]: arg["type"]
+            for arg in kda_chunk_prep_signature(KdaChunkPrepSpec())
+        }
+
+        assert bf16_sig["beta_ptr"] == "ptr<bf16, global>"
+        assert fp32_sig["beta_ptr"] == "ptr<f32, global>"
+        assert prepared_sig["beta_ptr"] == "ptr<f32, global>"
+        assert "bbf16" in raw_bf16.kernel_name()
+        assert "bfp32" in raw_fp32.kernel_name()
+        assert raw_bf16.kernel_name() != raw_fp32.kernel_name()
+        for name in (
+            "beta_stride_batch",
+            "beta_stride_token",
+            "beta_stride_head",
+        ):
+            assert bf16_sig[name] == "i32"
+            assert fp32_sig[name] == "i32"
+            assert name not in prepared_sig
+
+    def test_fp32_raw_beta_flag_requires_raw_inputs(self):
+        ok, why = is_valid_spec(KdaChunkPrepSpec(fp32_beta_dtype=True), arch=ARCH)
+        assert not ok
+        assert "raw_inputs" in why
 
     def test_lds_within_half_budget(self):
         """The prep kernel's whole optimization story is 2 workgroups per CU."""

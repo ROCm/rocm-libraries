@@ -91,6 +91,18 @@ def _cases() -> dict[str, Callable]:
         ),
         build_kda_chunk_prep,
     )
+    add(
+        "kda_gfx950/split_c32_prep_raw_fusions_beta_fp32",
+        KdaChunkPrepSpec(
+            raw_inputs=True,
+            fp32_beta_dtype=True,
+            fuse_qk_l2norm=True,
+            fuse_gate=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+        ),
+        build_kda_chunk_prep,
+    )
 
     # The default standalone scan is C32/SA32/value_splits=1.
     add("kda_gfx950/split_c32_scan_sa32", KdaChunkScanSpec(), build_kda_chunk_scan)

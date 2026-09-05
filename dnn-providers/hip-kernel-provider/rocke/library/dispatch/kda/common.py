@@ -51,7 +51,8 @@ from rocke.core.arch import ArchTarget
 from rocke.dispatch.core import KernelCandidate, OperatorRequest
 
 FAMILY = "kda_chunkwise"
-KDA_ABI_VERSION = "rocke-kda-chunkwise/v1"
+# v2 gives raw gfx950 beta distinct BF16/FP32 pointer ABIs plus three strides.
+KDA_ABI_VERSION = "rocke-kda-chunkwise/v2"
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,10 @@ class KdaRequest(OperatorRequest):
     per-sequence length; this family has no varlen path, so a ragged batch must
     be padded by the caller. An omitted ``chunk_size`` selects the tuned
     architecture default: 16 on gfx942 and 32 on gfx950.
+
+    The raw/token-major fields describe the framework-facing gfx950 split
+    pipeline. They default off so existing prepared, chunk-packed requests keep
+    their byte-identical specs.
     """
 
     batch: int
@@ -78,6 +83,17 @@ class KdaRequest(OperatorRequest):
     spec_id: str = "auto"
     has_initial_state: bool = False
     store_final_state: bool = True
+    raw_inputs: bool = False
+    fp32_beta_dtype: bool = False
+    token_major_io: bool = False
+    fuse_qk_l2norm: bool = False
+    fuse_gate: bool = False
+    fuse_beta_sigmoid: bool = False
+    has_dt_bias: bool = False
+    lower_bound: float = -5.0
+    # None lets the architecture dispatcher choose its measured geometry.
+    # An integer preserves the explicit override used by tuning/debug tools.
+    value_splits: int | None = None
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -94,6 +110,9 @@ class KdaRequest(OperatorRequest):
             "head_v": int(self.head_v),
             "chunk_size": self.effective_chunk_size,
             "num_chunks": self.num_chunks,
+            "value_splits": (
+                0 if self.value_splits is None else int(self.value_splits)
+            ),
         }
 
     def features(self) -> frozenset[str]:
@@ -140,6 +159,7 @@ KDA_DIM_VOCABULARY = (
     "head_v",
     "chunk_size",
     "num_chunks",
+    "value_splits",
 )
 
 KDA_FEATURES = frozenset({"initial_state", "final_state"})
@@ -156,6 +176,17 @@ def _request_errors(req: OperatorRequest) -> list[str]:
             errors.append(f"{field} must be positive")
     if req.effective_chunk_size <= 0:
         errors.append("chunk_size must be positive")
+    if req.value_splits is not None and int(req.value_splits) not in (1, 2, 4, 8):
+        errors.append("value_splits must be one of (1, 2, 4, 8)")
+    if req.fp32_beta_dtype and not req.raw_inputs:
+        errors.append("fp32_beta_dtype requires raw_inputs")
+    if req.has_dt_bias and not req.fuse_gate:
+        errors.append("has_dt_bias requires fuse_gate")
+    fused_preprocessing = req.fuse_qk_l2norm or req.fuse_gate or req.fuse_beta_sigmoid
+    if fused_preprocessing and not req.raw_inputs:
+        errors.append("fused preprocessing requires raw_inputs")
+    if req.raw_inputs and not fused_preprocessing:
+        errors.append("raw_inputs requires fused preprocessing")
     try:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:

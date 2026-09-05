@@ -328,6 +328,9 @@ class KdaChunkPrepSpec:
     # Default-off raw token-major path: inputs are [B,T,H,D] / [B,T,H] and the
     # producer may fuse the Aiter-equivalent q/k L2 norm, gate, and beta sigmoid.
     raw_inputs: bool = False
+    # Raw beta has two separately compiled ABIs. False is the framework-native
+    # BF16 path; True preserves direct FP32 input without a conversion.
+    fp32_beta_dtype: bool = False
     fuse_qk_l2norm: bool = False
     fuse_gate: bool = False
     fuse_beta_sigmoid: bool = False
@@ -377,7 +380,7 @@ class KdaChunkPrepSpec:
             *self.tile.name_parts(),
         ]
         if self.raw_inputs:
-            parts.append("raw")
+            parts.extend(("raw", "bfp32" if self.fp32_beta_dtype else "bbf16"))
             if self.fuse_qk_l2norm:
                 parts.append("nl2")
             if self.fuse_gate:
@@ -413,6 +416,8 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
 
     if spec.has_dt_bias and not spec.fuse_gate:
         return False, "has_dt_bias requires fuse_gate"
+    if spec.fp32_beta_dtype and not spec.raw_inputs:
+        return False, "fp32_beta_dtype requires raw_inputs=True"
     for flag, name in (
         (spec.fuse_qk_l2norm, "fuse_qk_l2norm"),
         (spec.fuse_gate, "fuse_gate"),
@@ -554,7 +559,19 @@ class _RawTokenAddr:
     """Token-major [B,T,H,D] / [B,T,H] addressing for one chunk tile."""
 
     def __init__(
-        self, b: IRBuilder, *, heads, tseq, nc, chunk, dk, a_log=None, dt_bias=None
+        self,
+        b: IRBuilder,
+        *,
+        heads,
+        tseq,
+        nc,
+        chunk,
+        dk,
+        a_log=None,
+        dt_bias=None,
+        beta_stride_batch=None,
+        beta_stride_token=None,
+        beta_stride_head=None,
     ):
         self.b = b
         self.H = heads
@@ -566,8 +583,15 @@ class _RawTokenAddr:
         self.dt_bias = dt_bias
         self.stride_token_qk = b.mul(heads, b.const_i32(dk))
         self.stride_batch_qk = b.mul(tseq, self.stride_token_qk)
-        self.stride_token_beta = heads
-        self.stride_batch_beta = b.mul(tseq, heads)
+        self.stride_head_beta = (
+            b.const_i32(1) if beta_stride_head is None else beta_stride_head
+        )
+        self.stride_token_beta = (
+            heads if beta_stride_token is None else beta_stride_token
+        )
+        self.stride_batch_beta = (
+            b.mul(tseq, heads) if beta_stride_batch is None else beta_stride_batch
+        )
 
     def _parts(self, tile, row):
         b = self.b
@@ -597,7 +621,7 @@ class _RawTokenAddr:
                 b.mul(batch, self.stride_batch_beta),
                 b.mul(token, self.stride_token_beta),
             ),
-            head,
+            b.mul(head, self.stride_head_beta),
         )
 
     def v_off(self, tile, chunk_row, ev, ev_dim):
@@ -950,7 +974,18 @@ def _emit_stage_issue(ctx: _ChunkCtx, ch):
         staged.append((ctx.q_lds, row, col, qval, 8, valid, "q"))
     if raw is not None:
         bcol = b.select(b.cmp_gt(b.const_i32(C), tid), tid, b.const_i32(C - 1))
-        beta = b.global_load_f32(ctx.beta_ptr, raw.beta_off(tile, bcol))
+        beta_off = raw.beta_off(tile, bcol)
+        if ctx.spec.fp32_beta_dtype:
+            beta = b.global_load_f32(ctx.beta_ptr, beta_off)
+        else:
+            beta = b.cast_to_f32(
+                b.global_load(
+                    ctx.beta_ptr,
+                    beta_off,
+                    ELEM,
+                    align=2,
+                )
+            )
     else:
         bcol = b.select(b.cmp_gt(b.const_i32(C), tid), tid, b.const_i32(C - 1))
         beta = b.global_load_f32(ctx.beta_ptr, b.add(tile_c, bcol))
@@ -1590,12 +1625,13 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
 
         (q, k: ptr<bf16>,      # [NT, C * DK] or raw [B,T,H,D]
          g:    ptr<f32>,       # [NT, C * DK] per-channel log decay, or raw bf16
-         beta: ptr<f32>,       # [NT, C]
+         beta: ptr<f32>,       # [NT,C], or compile-time raw bf16/f32 [B,T,H]
          a_out, gk_out, gq_out, aqk_out, kt_out: ptr<bf16>,
          dec_out: ptr<f32>,    # [NT, DK]
          scale: f32)
 
-    Raw mode adds ``a_log``, optional ``dt_bias``, and ``batch``/``heads``/``tseq``/``nc``.
+    Raw mode adds ``a_log``, optional ``dt_bias``, dimensions, and the three
+    element strides of the potentially non-contiguous beta view.
 
     Grid ``(NT, 1, 1)`` where ``NT = BH * NC``; block ``(block_size, 1, 1)``.
     """
@@ -1617,7 +1653,13 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
     k_ptr = b.param("k_ptr", PtrType(ELEM, "global"), readonly=True, align=16)
     g_elem = ELEM if spec.raw_inputs else F32
     g_ptr = b.param("g_ptr", PtrType(g_elem, "global"), readonly=True, align=16)
-    beta_ptr = b.param("beta_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    beta_elem = F32 if not spec.raw_inputs or spec.fp32_beta_dtype else ELEM
+    beta_ptr = b.param(
+        "beta_ptr",
+        PtrType(beta_elem, "global"),
+        readonly=True,
+        align=2 if spec.raw_inputs and not spec.fp32_beta_dtype else 4,
+    )
     a_ptr = b.param("a_ptr", PtrType(ELEM, "global"), writeonly=True, align=16)
     gk_ptr = b.param("gk_ptr", PtrType(ELEM, "global"), writeonly=True, align=16)
     gq_ptr = b.param("gq_ptr", PtrType(ELEM, "global"), writeonly=True, align=16)
@@ -1636,6 +1678,9 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
         heads = b.param("heads", I32)
         tseq = b.param("tseq", I32)
         nc = b.param("nc", I32)
+        beta_stride_batch = b.param("beta_stride_batch", I32)
+        beta_stride_token = b.param("beta_stride_token", I32)
+        beta_stride_head = b.param("beta_stride_head", I32)
         raw = _RawTokenAddr(
             b,
             heads=heads,
@@ -1645,6 +1690,9 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
             dk=spec.head_k,
             a_log=a_log_ptr,
             dt_bias=dt_bias_ptr,
+            beta_stride_batch=beta_stride_batch,
+            beta_stride_token=beta_stride_token,
+            beta_stride_head=beta_stride_head,
         )
 
     ctx = _ChunkCtx(b, spec, (q_ptr, k_ptr, g_ptr, beta_ptr, scale, raw))
@@ -3072,7 +3120,10 @@ def kda_chunk_prep_signature(spec: KdaChunkPrepSpec):
         .ptr("q_ptr", spec.dtype)
         .ptr("k_ptr", spec.dtype)
         .ptr("g_ptr", "bf16" if spec.raw_inputs else "f32")
-        .ptr("beta_ptr", "f32")
+        .ptr(
+            "beta_ptr",
+            ("f32" if not spec.raw_inputs or spec.fp32_beta_dtype else spec.dtype),
+        )
         .ptr("a_ptr", spec.dtype)
         .ptr("gk_ptr", spec.dtype)
         .ptr("gq_ptr", spec.dtype)
@@ -3089,6 +3140,9 @@ def kda_chunk_prep_signature(spec: KdaChunkPrepSpec):
             .scalar("heads", "i32")
             .scalar("tseq", "i32")
             .scalar("nc", "i32")
+            .scalar("beta_stride_batch", "i32")
+            .scalar("beta_stride_token", "i32")
+            .scalar("beta_stride_head", "i32")
         )
     return sb.build()
 
