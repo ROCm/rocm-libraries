@@ -219,10 +219,34 @@ class TestGeometry(unittest.TestCase):
         self.assertEqual(result.grid, (_BATCH * _HEADS * (_SEQLEN // _CHUNK), 1, 1))
         self.assertEqual(result.block, (256, 1, 1))
 
-    def test_scan_grid_matches_the_fused_grid(self):
-        fused = dispatch_kda(_req()).grid
-        scan = dispatch_kda(_req(algorithm="chunk_scan")).grid
-        self.assertEqual(fused, scan)
+    def test_scan_grid_adds_value_bands_when_underfilled(self):
+        scan = dispatch_kda(_req(algorithm="chunk_scan"))
+        self.assertEqual(scan.spec.value_splits, 4)
+        self.assertEqual(scan.grid, (_BATCH * _HEADS * 4, 1, 1))
+        self.assertEqual(scan.block, (128, 1, 1))
+
+    def test_scan_grid_stays_unsplit_when_saturated(self):
+        scan = dispatch_kda(_req(batch=32, algorithm="chunk_scan"))
+        self.assertEqual(scan.spec.value_splits, 1)
+        self.assertEqual(scan.grid, (32 * _HEADS, 1, 1))
+        self.assertEqual(scan.block, (256, 1, 1))
+
+    def test_scan_grid_uses_two_bands_in_the_midrange(self):
+        scan = dispatch_kda(_req(batch=12, num_heads=12, algorithm="chunk_scan"))
+        self.assertEqual(scan.spec.value_splits, 2)
+        self.assertEqual(scan.grid, (12 * 12 * 2, 1, 1))
+        self.assertEqual((scan.block[0], scan.spec.scan_atom.m), (256, 16))
+
+    def test_scan_and_prep_keep_one_materialized_tile_layout(self):
+        prep = dispatch_kda(_req(algorithm="chunk_prep"))
+        scan = dispatch_kda(_req(algorithm="chunk_scan"))
+        self.assertEqual(scan.spec.prep, prep.spec)
+
+    def test_scan_dispatch_reports_the_optimized_schedule(self):
+        scan = dispatch_kda(_req(algorithm="chunk_scan"))
+        self.assertTrue(scan.spec.prefetch_tiles)
+        self.assertIn("value_splits=4", scan.explanation)
+        self.assertIn("prefetch_tiles=True", scan.explanation)
 
     def test_the_spec_carries_the_requested_head_widths(self):
         spec = dispatch_kda(_req()).spec
@@ -235,7 +259,7 @@ class TestGeometry(unittest.TestCase):
         fused = dispatch_kda(_req()).spec.tile
         scan = dispatch_kda(_req(algorithm="chunk_scan")).spec.tile
         self.assertEqual((fused.block_size, fused.scan_atom_m), (512, 16))
-        self.assertEqual((scan.block_size, scan.scan_atom_m), (256, 0))
+        self.assertEqual((scan.block_size, scan.scan_atom_m), (128, 16))
         self.assertEqual((fused.chunk, scan.chunk), (_CHUNK, _CHUNK))
 
 
@@ -266,10 +290,12 @@ class TestBuild(unittest.TestCase):
             ("chunk_scan", "scan"),
         ):
             with self.subTest(algorithm=algorithm):
-                kernel = dispatch_kda(_req(algorithm=algorithm)).build()
+                result = dispatch_kda(_req(algorithm=algorithm))
+                kernel = result.build()
                 self.assertIn(needle, kernel.name)
                 self.assertIn("dk128", kernel.name)
                 self.assertIn("dv128", kernel.name)
+                self.assertEqual(kernel.name, result.spec.kernel_name())
 
     def test_the_built_kernel_takes_the_declared_signature(self):
         result = dispatch_kda(_req())

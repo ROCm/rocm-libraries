@@ -58,11 +58,15 @@ def main() -> int:
 
     if args.path in ("split", "both"):
         from builders.gfx950.kda import kda_chunk_split as split
-        from kernels.gfx950.kda_chunkwise import KdaChunkScanSpec
+        from kernels.gfx950.kda_chunkwise import tuned_kda_chunk_scan_spec
 
         print("== split ==")
-        spec = KdaChunkScanSpec()
         for batch, heads, tseq in shapes:
+            spec = tuned_kda_chunk_scan_spec(batch * heads)
+            print(
+                f"  scan geometry: value_splits={spec.value_splits} "
+                f"block={spec.tile.block_size} atom={spec.scan_atom.m}"
+            )
             split.bench(
                 spec,
                 batch,

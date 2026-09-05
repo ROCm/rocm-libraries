@@ -266,6 +266,37 @@ and transcendental growth on the raw producer. Profile one **underfilled**
 LDS stalls, and lost prefetch overlap. Revert levers that do not move the
 bottleneck named by ATT.
 
-Do not hard-code a `value_splits` cutover until the sweep shows a stable
-`BH/CU` boundary. Raw monolithic fusion stays gated until the best raw split
-path misses the end-to-end target on filled shapes.
+The cutovers in `tuned_kda_chunk_scan_spec` were encoded only after that sweep
+showed stable `BH/CU` regions; rerun it before carrying them to another
+architecture. Raw monolithic fusion stays gated until the best raw split path
+misses the end-to-end target on filled shapes.
+
+## 9. ATT-driven scan software pipeline
+
+WaveScope attributed the standalone scan's largest waits to the immediate
+HBM-to-LDS tile copies and their rendezvous. Two load schedules move those
+dependencies off the exposed path without allocating a second LDS tile set:
+
+- V is issued before the state mirror and Z product, then consumed by the
+  residual after those operations have covered its latency.
+- Chunk zero is peeled. Each later chunk's materialized tiles are issued while
+  its predecessor computes, held in registers, and committed only after the
+  closing rendezvous retires all reads of the old LDS contents. The next
+  iteration's existing state-publish rendezvous also publishes those writes.
+
+The narrower SA16 schedule delays its tile issue until V retires because its
+larger per-thread load burst otherwise pushes the older V requests back onto
+the critical path. Single-wave and C16 schedules retain immediate staging:
+their prefetched vectors either cross the VGPR occupancy boundary or duplicate
+too much tail traffic.
+
+The same trace also exposed a repeated decay load. Every accumulator slot owned
+by one lane has the same state column for both supported scan atoms, so one
+decay value now scales the whole fragment.
+
+As with the LDS ballast experiment, validate the mechanism before accepting the
+timing: inspect VGPRs and scratch for both schedules, then recapture ATT. A
+successful pipeline must reduce VMEM-wait attribution without introducing
+scratch or dropping the intended resident-wave count. The remaining bottleneck
+after that transition is LDS operand readiness and barrier balance; padding
+sweeps are shape-sensitive and should not be promoted from one trace alone.

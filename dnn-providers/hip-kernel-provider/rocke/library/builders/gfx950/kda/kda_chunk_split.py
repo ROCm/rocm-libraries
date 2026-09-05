@@ -88,11 +88,12 @@ def prep_spec_of(spec: KdaChunkScanSpec, *, raw: bool = False) -> KdaChunkPrepSp
     apart: the scan's staging copies assume exactly the flat per-chunk layouts
     the prep kernel's global sink writes.
 
-    Raw prep keeps the default 256-thread tile builder even when the scan uses a
-    narrower block for ``value_splits > 1``.
+    The producer keeps its valid 256-thread schedule when value splitting gives
+    the scan a narrower block. Raw prep additionally preserves the scan's other
+    experimental tile knobs for focused sweeps.
     """
-    raw_kw = {}
     tile = spec.tile
+    raw_kw = {}
     if raw:
         raw_kw = dict(
             raw_inputs=True,
@@ -103,6 +104,11 @@ def prep_spec_of(spec: KdaChunkScanSpec, *, raw: bool = False) -> KdaChunkPrepSp
             lower_bound=-5.0,
         )
         tile = dataclasses.replace(spec.tile, block_size=256)
+    elif spec.value_splits != 1:
+        # Value splitting is scan-only parallelism.  Keep the producer on its
+        # valid 256-thread schedule and drop the scan atom from its identity;
+        # pads/chunk/tile_atom_m are the fields that define the shared layout.
+        tile = dataclasses.replace(spec.tile, block_size=256, scan_atom_m=0)
     return KdaChunkPrepSpec(
         head_k=spec.head_k,
         head_v=spec.head_v,
@@ -117,9 +123,9 @@ def aligned_split_specs(value_splits: int = 1):
     if value_splits == 8:
         tile = KdaTileSpec(chunk=32, block_size=64, scan_atom_m=16)
     elif value_splits == 4:
-        tile = KdaTileSpec(chunk=32, block_size=64)
+        tile = KdaTileSpec(chunk=32, block_size=128, scan_atom_m=16)
     elif value_splits == 2:
-        tile = KdaTileSpec(chunk=32, block_size=128)
+        tile = KdaTileSpec(chunk=32, block_size=256, scan_atom_m=16)
     else:
         tile = KdaTileSpec(chunk=32, block_size=256)
     scan = KdaChunkScanSpec(
