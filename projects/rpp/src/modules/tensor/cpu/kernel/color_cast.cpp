@@ -54,15 +54,242 @@ inline void compute_color_cast_24_host(__m256* p, __m256 pMul, __m256* pAdd) {
         _mm256_fmadd_ps(_mm256_sub_ps(p[2], pAdd[2]), pMul, pAdd[2]);  // color_cast adjustment Bs
 }
 
+// Helper function for u8->u8 color_cast processing
+inline void color_cast_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDescPtr,
+                                       Rpp8u* dstPtrImage, RpptDescPtr dstDescPtr, Rpp32f rParam,
+                                       Rpp32f gParam, Rpp32f bParam, Rpp32f alphaParam, RpptROI roi,
+                                       RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+    Rpp32u alignedLength = (bufferLength / 48) * 48;
+    Rpp32u vectorIncrement = 48;
+    Rpp32u vectorIncrementPerChannel = 16;
+
+    __m128 pMul = _mm_set1_ps(alphaParam);
+    __m128 pAdd[3];
+    pAdd[0] = _mm_set1_ps(bParam);
+    pAdd[1] = _mm_set1_ps(gParam);
+    pAdd[2] = _mm_set1_ps(rParam);
+
+    Rpp8u *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
+    // Color Cast with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                __m128 p[12];
+
+                rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
+                compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB,
+                               p);  // simd stores
+
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (srcPtrTemp[0] - bParam)) + bParam));
+                *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (srcPtrTemp[1] - gParam)) + gParam));
+                *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (srcPtrTemp[2] - rParam)) + rParam));
+
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
+            }
+        }
+    }
+
+    // Color Cast with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                Rpp8u srcPtrTempR_local[16], srcPtrTempG_local[16], srcPtrTempB_local[16],
+                    dstPtrTemp_local[48];
+                for (int cnt = 0; cnt < 16; cnt++) {
+                    srcPtrTempR_local[cnt] = srcPtrTempR[cnt];
+                    srcPtrTempG_local[cnt] = srcPtrTempG[cnt];
+                    srcPtrTempB_local[cnt] = srcPtrTempB[cnt];
+                }
+
+                __m128 p[12];
+
+                rpp_simd_load(rpp_load48_u8pln3_to_f32pln3, srcPtrTempR_local, srcPtrTempG_local,
+                              srcPtrTempB_local, p);        // simd loads
+                compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3, dstPtrTemp_local, p);  // simd stores
+
+                for (int cnt = 0; cnt < 48; cnt++) dstPtrTemp[cnt] = dstPtrTemp_local[cnt];
+
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                dstPtrTemp[0] = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (*srcPtrTempR - bParam)) + bParam));
+                dstPtrTemp[1] = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (*srcPtrTempG - gParam)) + gParam));
+                dstPtrTemp[2] = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (*srcPtrTempB - rParam)) + rParam));
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Color Cast without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8u *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                Rpp8u srcPtrTemp_local[48], dstPtrTemp_local[48];
+                for (int cnt = 0; cnt < 48; cnt++) srcPtrTemp_local[cnt] = srcPtrTemp[cnt];
+
+                __m128 p[12];
+
+                rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3, srcPtrTemp_local, p);  // simd loads
+                compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3, dstPtrTemp_local, p);  // simd stores
+
+                for (int cnt = 0; cnt < 48; cnt++) dstPtrTemp[cnt] = dstPtrTemp_local[cnt];
+
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                dstPtrTemp[0] = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (srcPtrTemp[0] - bParam)) + bParam));
+                dstPtrTemp[1] = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (srcPtrTemp[1] - gParam)) + gParam));
+                dstPtrTemp[2] = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (srcPtrTemp[2] - rParam)) + rParam));
+
+                srcPtrTemp += 3;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Color Cast without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
+                *dstPtrTempB;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m128 p[12];
+
+                rpp_simd_load(rpp_load48_u8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);                           // simd loads
+                compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB,
+                               p);  // simd stores
+
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (*srcPtrTempR - bParam)) + bParam));
+                *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (*srcPtrTempG - gParam)) + gParam));
+                *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf((alphaParam * (*srcPtrTempB - rParam)) + rParam));
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
+            }
+        }
+    }
+}
+
 RppStatus color_cast_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
                                        RpptDescPtr dstDescPtr, RpptRGB* rgbTensor,
                                        Rpp32f* alphaTensor, RpptROIPtr roiTensorPtrSrc,
                                        RpptRoiType roiType, RppLayoutParams layoutParams,
                                        rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    Rpp32u intraThreads = GetIntraImageNumThreads(handle, dstDescPtr->n, srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
@@ -73,238 +300,240 @@ RppStatus color_cast_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rp
         Rpp32f bParam = rgbTensor[batchCount].B;
         Rpp32f alphaParam = alphaTensor[batchCount];
 
-        Rpp8u *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        Rpp8u* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp8u* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+        color_cast_u8_u8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, rParam, gParam,
+                                   bParam, alphaParam, roi, layoutParams, intraThreads);
+    }
 
-        __m128 pMul = _mm_set1_ps(alphaParam);
-        __m128 pAdd[3];
-        pAdd[0] = _mm_set1_ps(bParam);
-        pAdd[1] = _mm_set1_ps(gParam);
-        pAdd[2] = _mm_set1_ps(rParam);
+    return RPP_SUCCESS;
+}
 
-        Rpp8u *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+// Helper function for f32->f32 color_cast processing
+inline void color_cast_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                         Rpp32f* dstPtrImage, RpptDescPtr dstDescPtr, Rpp32f rParam,
+                                         Rpp32f gParam, Rpp32f bParam, Rpp32f alphaParam,
+                                         RpptROI roi, RppLayoutParams layoutParams,
+                                         Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+    Rpp32u alignedLength = (bufferLength / 12) * 12;
+    Rpp32u vectorIncrement = 12;
+    Rpp32u vectorIncrementPerChannel = 4;
 
-        // Color Cast with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32u alignedLength = (bufferLength / 48) * 48;
+    __m128 pMul = _mm_set1_ps(alphaParam);
+    __m128 pAdd[3];
+    pAdd[0] = _mm_set1_ps(bParam);
+    pAdd[1] = _mm_set1_ps(gParam);
+    pAdd[2] = _mm_set1_ps(rParam);
 
-            Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+    Rpp32f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    // Color Cast with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp32f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 48) {
-                    __m128 p[12];
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                    rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                __m128 p[4];
 
-                    srcPtrTemp += 48;
-                    dstPtrTempR += 16;
-                    dstPtrTempG += 16;
-                    dstPtrTempB += 16;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (srcPtrTemp[0] - bParam)) + bParam));
-                    *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (srcPtrTemp[1] - gParam)) + gParam));
-                    *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (srcPtrTemp[2] - rParam)) + rParam));
+                rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
+                compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f32
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
 
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTempR = RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[0] - bParam)) + bParam);
+                *dstPtrTempG = RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[1] - gParam)) + gParam);
+                *dstPtrTempB = RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[2] - rParam)) + rParam);
 
-        // Color Cast with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32u alignedLength = (bufferLength / 48) * 48;
-
-            Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 16) {
-                    __m128 p[12];
-
-                    rpp_simd_load(rpp_load48_u8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);              // simd loads
-                    compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3, dstPtrTemp, p);  // simd stores
-
-                    srcPtrTempR += 16;
-                    srcPtrTempG += 16;
-                    srcPtrTempB += 16;
-                    dstPtrTemp += 48;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (*srcPtrTempR - bParam)) + bParam));
-                    dstPtrTemp[1] = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (*srcPtrTempG - gParam)) + gParam));
-                    dstPtrTemp[2] = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (*srcPtrTempB - rParam)) + rParam));
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Color Cast without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32u alignedLength = (bufferLength / 48) * 48;
-
-            Rpp8u *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 48) {
-                    __m128 p[12];
-
-                    rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3, dstPtrTemp, p);  // simd stores
-
-                    srcPtrTemp += 48;
-                    dstPtrTemp += 48;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    dstPtrTemp[0] = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (srcPtrTemp[0] - bParam)) + bParam));
-                    dstPtrTemp[1] = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (srcPtrTemp[1] - gParam)) + gParam));
-                    dstPtrTemp[2] = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (srcPtrTemp[2] - rParam)) + rParam));
-
-                    srcPtrTemp += 3;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Color Cast without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32u alignedLength = (bufferLength / 48) * 48;
-
-            Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
-                    *dstPtrTempB;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 16) {
-                    __m128 p[12];
-
-                    rpp_simd_load(rpp_load48_u8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);              // simd loads
-                    compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-
-                    srcPtrTempR += 16;
-                    srcPtrTempG += 16;
-                    srcPtrTempB += 16;
-                    dstPtrTempR += 16;
-                    dstPtrTempG += 16;
-                    dstPtrTempB += 16;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (*srcPtrTempR - bParam)) + bParam));
-                    *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (*srcPtrTempG - gParam)) + gParam));
-                    *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(
-                        std::nearbyintf((alphaParam * (*srcPtrTempB - rParam)) + rParam));
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // Color Cast with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                // Use intermediate buffers like F16 does - note: dst needs 13 elements for SIMD
+                // overrun protection
+                Rpp32f srcPtrTempR_local[4], srcPtrTempG_local[4], srcPtrTempB_local[4],
+                    dstPtrTemp_local[13];
+
+                for (int cnt = 0; cnt < 4; cnt++) {
+                    srcPtrTempR_local[cnt] = srcPtrTempR[cnt];
+                    srcPtrTempG_local[cnt] = srcPtrTempG[cnt];
+                    srcPtrTempB_local[cnt] = srcPtrTempB[cnt];
+                }
+
+                __m128 p[4];
+
+                rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR_local, srcPtrTempG_local,
+                              srcPtrTempB_local, p);        // simd loads
+                compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f32
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_local, p);  // simd stores
+
+                for (int cnt = 0; cnt < 12; cnt++) dstPtrTemp[cnt] = dstPtrTemp_local[cnt];
+
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                dstPtrTemp[0] = RPPPIXELCHECKF32((alphaParam * (*srcPtrTempR - bParam)) + bParam);
+                dstPtrTemp[1] = RPPPIXELCHECKF32((alphaParam * (*srcPtrTempG - gParam)) + gParam);
+                dstPtrTemp[2] = RPPPIXELCHECKF32((alphaParam * (*srcPtrTempB - rParam)) + rParam);
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Color Cast without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp32f *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                Rpp32f srcPtrTemp_local[12], dstPtrTemp_local[12];
+                for (int cnt = 0; cnt < 12; cnt++) srcPtrTemp_local[cnt] = srcPtrTemp[cnt];
+
+                __m128 p[4];
+
+                rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_local, p);  // simd loads
+                compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f32
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_local, p);  // simd stores
+
+                for (int cnt = 0; cnt < 12; cnt++) dstPtrTemp[cnt] = dstPtrTemp_local[cnt];
+
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                dstPtrTemp[0] = RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[0] - bParam)) + bParam);
+                dstPtrTemp[1] = RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[1] - gParam)) + gParam);
+                dstPtrTemp[2] = RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[2] - rParam)) + rParam);
+
+                srcPtrTemp += 3;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Color Cast without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
+                *dstPtrTempB;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m128 p[4];
+
+                rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);                           // simd loads
+                compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f32
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                *dstPtrTempR = RPPPIXELCHECKF32((alphaParam * (*srcPtrTempR - bParam)) + bParam);
+                *dstPtrTempG = RPPPIXELCHECKF32((alphaParam * (*srcPtrTempG - gParam)) + gParam);
+                *dstPtrTempB = RPPPIXELCHECKF32((alphaParam * (*srcPtrTempB - rParam)) + rParam);
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
+            }
+        }
+    }
 }
 
 RppStatus color_cast_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
@@ -313,9 +542,10 @@ RppStatus color_cast_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr,
                                          RpptRoiType roiType, RppLayoutParams layoutParams,
                                          rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    Rpp32u intraThreads = GetIntraImageNumThreads(handle, dstDescPtr->n, srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
@@ -326,246 +556,335 @@ RppStatus color_cast_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr,
         Rpp32f bParam = rgbTensor[batchCount].B * ONE_OVER_255;
         Rpp32f alphaParam = alphaTensor[batchCount];
 
-        Rpp32f *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        Rpp32f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp32f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+        color_cast_f32_f32_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, rParam,
+                                     gParam, bParam, alphaParam, roi, layoutParams, intraThreads);
+    }
 
-        __m128 pMul = _mm_set1_ps(alphaParam);
-        __m128 pAdd[3];
-        pAdd[0] = _mm_set1_ps(bParam);
-        pAdd[1] = _mm_set1_ps(gParam);
-        pAdd[2] = _mm_set1_ps(rParam);
+    return RPP_SUCCESS;
+}
 
-        Rpp32f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+// Helper function for f16->f16 color_cast processing
+inline void color_cast_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                         Rpp16f* dstPtrImage, RpptDescPtr dstDescPtr, Rpp32f rParam,
+                                         Rpp32f gParam, Rpp32f bParam, Rpp32f alphaParam,
+                                         RpptROI roi, RppLayoutParams layoutParams,
+                                         Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
-        // Color Cast with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32u alignedLength = (bufferLength / 12) * 12;
+#if __AVX2__
+    Rpp32u alignedLength = (bufferLength / 24) * 24;
+    Rpp32u vectorIncrement = 24;
+    Rpp32u vectorIncrementPerChannel = 8;
 
-            Rpp32f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+    __m256 pMul;
+    pMul = _mm256_set1_ps(alphaParam);
+    __m256 pAdd[3];
+    pAdd[0] = _mm256_set1_ps(bParam);
+    pAdd[1] = _mm256_set1_ps(gParam);
+    pAdd[2] = _mm256_set1_ps(rParam);
+#else
+    Rpp32u alignedLength = (bufferLength / 12) * 12;
+    Rpp32u vectorIncrement = 12;
+    Rpp32u vectorIncrementPerChannel = 4;
+    __m128 pMul = _mm_set1_ps(alphaParam);
+    __m128 pAdd[3];
+    pAdd[0] = _mm_set1_ps(bParam);
+    pAdd[1] = _mm_set1_ps(gParam);
+    pAdd[2] = _mm_set1_ps(rParam);
+#endif
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    Rpp16f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
 
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 12) {
-                    __m128 p[4];
+    // Color Cast with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp16f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f32
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                    srcPtrTemp += 12;
-                    dstPtrTempR += 4;
-                    dstPtrTempG += 4;
-                    dstPtrTempB += 4;
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#if __AVX2__
+                __m256 p[4];
+
+                rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                compute_color_cast_24_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f16
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+#else
+                Rpp32f srcPtrTemp_ps[12], dstPtrTemp_ps[12];
+
+                for (int cnt = 0; cnt < 12; cnt++)
+                    *(srcPtrTemp_ps + cnt) = (Rpp32f) * (srcPtrTemp + cnt);
+
+                __m128 p[4];
+
+                rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);  // simd loads
+                compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f16
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTemp_ps, dstPtrTemp_ps + 4,
+                               dstPtrTemp_ps + 8, p);  // simd stores
+
+                for (int cnt = 0; cnt < 4; cnt++) {
+                    *(dstPtrTempR + cnt) = (Rpp16f) * (dstPtrTemp_ps + cnt);
+                    *(dstPtrTempG + cnt) = (Rpp16f) * (dstPtrTemp_ps + 4 + cnt);
+                    *(dstPtrTempB + cnt) = (Rpp16f) * (dstPtrTemp_ps + 8 + cnt);
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR =
-                        RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[0] - bParam)) + bParam);
-                    *dstPtrTempG =
-                        RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[1] - gParam)) + gParam);
-                    *dstPtrTempB =
-                        RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[2] - rParam)) + rParam);
-
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+#endif
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTempR =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[0] - bParam)) + bParam);
+                *dstPtrTempG =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[1] - gParam)) + gParam);
+                *dstPtrTempB =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[2] - rParam)) + rParam);
 
-        // Color Cast with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32u alignedLength = (bufferLength / 12) * 12;
-
-            Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 4) {
-                    __m128 p[4];
-
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);              // simd loads
-                    compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f32
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp, p);  // simd stores
-
-                    srcPtrTempR += 4;
-                    srcPtrTempG += 4;
-                    srcPtrTempB += 4;
-                    dstPtrTemp += 12;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] =
-                        RPPPIXELCHECKF32((alphaParam * (*srcPtrTempR - bParam)) + bParam);
-                    dstPtrTemp[1] =
-                        RPPPIXELCHECKF32((alphaParam * (*srcPtrTempG - gParam)) + gParam);
-                    dstPtrTemp[2] =
-                        RPPPIXELCHECKF32((alphaParam * (*srcPtrTempB - rParam)) + rParam);
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Color Cast without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32u alignedLength = (bufferLength / 12) * 12;
-
-            Rpp32f *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 12) {
-                    __m128 p[4];
-
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f32
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp, p);  // simd stores
-
-                    srcPtrTemp += 12;
-                    dstPtrTemp += 12;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    dstPtrTemp[0] =
-                        RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[0] - bParam)) + bParam);
-                    dstPtrTemp[1] =
-                        RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[1] - gParam)) + gParam);
-                    dstPtrTemp[2] =
-                        RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[2] - rParam)) + rParam);
-
-                    srcPtrTemp += 3;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Color Cast without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32u alignedLength = (bufferLength / 12) * 12;
-
-            Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
-                    *dstPtrTempB;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 4) {
-                    __m128 p[4];
-
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);              // simd loads
-                    compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f32
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-
-                    srcPtrTempR += 4;
-                    srcPtrTempG += 4;
-                    srcPtrTempB += 4;
-                    dstPtrTempR += 4;
-                    dstPtrTempG += 4;
-                    dstPtrTempB += 4;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTempR =
-                        RPPPIXELCHECKF32((alphaParam * (*srcPtrTempR - bParam)) + bParam);
-                    *dstPtrTempG =
-                        RPPPIXELCHECKF32((alphaParam * (*srcPtrTempG - gParam)) + gParam);
-                    *dstPtrTempB =
-                        RPPPIXELCHECKF32((alphaParam * (*srcPtrTempB - rParam)) + rParam);
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRowR += srcDescPtr->strides.hStride;
-                dstPtrRowG += srcDescPtr->strides.hStride;
-                dstPtrRowB += srcDescPtr->strides.hStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // Color Cast with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[4];
+
+                rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);              // simd loads
+                compute_color_cast_24_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f16
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+#else
+                Rpp32f srcPtrTemp_ps[12], dstPtrTemp_ps[13];
+
+                for (int cnt = 0; cnt < 4; cnt++) {
+                    *(srcPtrTemp_ps + cnt) = (Rpp32f) * (srcPtrTempR + cnt);
+                    *(srcPtrTemp_ps + 4 + cnt) = (Rpp32f) * (srcPtrTempG + cnt);
+                    *(srcPtrTemp_ps + 8 + cnt) = (Rpp32f) * (srcPtrTempB + cnt);
+                }
+
+                __m128 p[4];
+
+                rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTemp_ps, srcPtrTemp_ps + 4,
+                              srcPtrTemp_ps + 8, p);        // simd loads
+                compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f16
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_ps,
+                               p);  // simd stores
+
+                for (int cnt = 0; cnt < 12; cnt++)
+                    *(dstPtrTemp + cnt) = (Rpp16f) * (dstPtrTemp_ps + cnt);
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                dstPtrTemp[0] =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempR - bParam)) + bParam);
+                dstPtrTemp[1] =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempG - gParam)) + gParam);
+                dstPtrTemp[2] =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempB - rParam)) + rParam);
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Color Cast without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp16f *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#if __AVX2__
+                __m256 p[4];
+
+                rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                compute_color_cast_24_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f16
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+#else
+                Rpp32f srcPtrTemp_ps[12], dstPtrTemp_ps[13];
+
+                for (int cnt = 0; cnt < 12; cnt++)
+                    *(srcPtrTemp_ps + cnt) = (Rpp32f) * (srcPtrTemp + cnt);
+
+                __m128 p[4];
+
+                rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);  // simd loads
+                compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f16
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_ps,
+                               p);  // simd stores
+
+                for (int cnt = 0; cnt < 12; cnt++)
+                    *(dstPtrTemp + cnt) = (Rpp16f) * (dstPtrTemp_ps + cnt);
+#endif
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                dstPtrTemp[0] =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[0] - bParam)) + bParam);
+                dstPtrTemp[1] =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[1] - gParam)) + gParam);
+                dstPtrTemp[2] =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[2] - rParam)) + rParam);
+
+                srcPtrTemp += 3;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Color Cast without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
+                *dstPtrTempB;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[4];
+
+                rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);              // simd loads
+                compute_color_cast_24_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f16
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+#else
+                Rpp32f srcPtrTemp_ps[12], dstPtrTemp_ps[13];
+
+                for (int cnt = 0; cnt < 4; cnt++) {
+                    *(srcPtrTemp_ps + cnt) = (Rpp32f) * (srcPtrTempR + cnt);
+                    *(srcPtrTemp_ps + 4 + cnt) = (Rpp32f) * (srcPtrTempG + cnt);
+                    *(srcPtrTemp_ps + 8 + cnt) = (Rpp32f) * (srcPtrTempB + cnt);
+                }
+
+                __m128 p[4];
+
+                rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTemp_ps, srcPtrTemp_ps + 4,
+                              srcPtrTemp_ps + 8, p);        // simd loads
+                compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
+                // boundary checks for f16
+                rpp_pixel_check_0to1(p, 3);
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTemp_ps, dstPtrTemp_ps + 4,
+                               dstPtrTemp_ps + 8, p);  // simd stores
+
+                for (int cnt = 0; cnt < 4; cnt++) {
+                    *(dstPtrTempR + cnt) = (Rpp16f) * (dstPtrTemp_ps + cnt);
+                    *(dstPtrTempG + cnt) = (Rpp16f) * (dstPtrTemp_ps + 4 + cnt);
+                    *(dstPtrTempB + cnt) = (Rpp16f) * (dstPtrTemp_ps + 8 + cnt);
+                }
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                *dstPtrTempR =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempR - bParam)) + bParam);
+                *dstPtrTempG =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempG - gParam)) + gParam);
+                *dstPtrTempB =
+                    (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempB - rParam)) + rParam);
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
+            }
+        }
+    }
 }
 
 RppStatus color_cast_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr,
@@ -574,9 +893,10 @@ RppStatus color_cast_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
                                          RpptRoiType roiType, RppLayoutParams layoutParams,
                                          rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    Rpp32u intraThreads = GetIntraImageNumThreads(handle, dstDescPtr->n, srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
@@ -587,344 +907,260 @@ RppStatus color_cast_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
         Rpp32f bParam = rgbTensor[batchCount].B * ONE_OVER_255;
         Rpp32f alphaParam = alphaTensor[batchCount];
 
-        Rpp16f *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        Rpp16f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp16f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+        color_cast_f16_f16_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, rParam,
+                                     gParam, bParam, alphaParam, roi, layoutParams, intraThreads);
+    }
 
-#if __AVX2__
-        Rpp32u alignedLength = (bufferLength / 24) * 24;
-        Rpp32u vectorIncrement = 24;
-        Rpp32u vectorIncrementPerChannel = 8;
+    return RPP_SUCCESS;
+}
 
-        __m256 pMul;
-        pMul = _mm256_set1_ps(alphaParam);
-        __m256 pAdd[3];
-        pAdd[0] = _mm256_set1_ps(bParam);
-        pAdd[1] = _mm256_set1_ps(gParam);
-        pAdd[2] = _mm256_set1_ps(rParam);
-#else
-        Rpp32u alignedLength = (bufferLength / 12) * 12;
-        Rpp32u vectorIncrement = 12;
-        Rpp32u vectorIncrementPerChannel = 4;
-        __m128 pMul = _mm_set1_ps(alphaParam);
-        __m128 pAdd[3];
-        pAdd[0] = _mm_set1_ps(bParam);
-        pAdd[1] = _mm_set1_ps(gParam);
-        pAdd[2] = _mm_set1_ps(rParam);
-#endif
+// Helper function for i8->i8 color_cast processing
+inline void color_cast_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr,
+                                       Rpp8s* dstPtrImage, RpptDescPtr dstDescPtr, Rpp32f rParam,
+                                       Rpp32f gParam, Rpp32f bParam, Rpp32f alphaParam, RpptROI roi,
+                                       RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+    Rpp32u alignedLength = (bufferLength / 48) * 48;
+    Rpp32u vectorIncrement = 48;
+    Rpp32u vectorIncrementPerChannel = 16;
 
-        Rpp16f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+    __m128 pMul = _mm_set1_ps(alphaParam);
+    __m128 pAdd[3];
+    pAdd[0] = _mm_set1_ps(bParam);
+    pAdd[1] = _mm_set1_ps(gParam);
+    pAdd[2] = _mm_set1_ps(rParam);
 
-        // Color Cast with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp16f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+    Rpp8s *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    // Color Cast with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8s *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-#if __AVX2__
-                    __m256 p[4];
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                    rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    compute_color_cast_24_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f16
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-#else
-                    Rpp32f srcPtrTemp_ps[12], dstPtrTemp_ps[12];
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                __m128 p[12];
 
-                    for (int cnt = 0; cnt < 12; cnt++)
-                        *(srcPtrTemp_ps + cnt) = (Rpp32f) * (srcPtrTemp + cnt);
+                rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
+                compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB,
+                               p);  // simd stores
 
-                    __m128 p[4];
-
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);  // simd loads
-                    compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f16
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTemp_ps, dstPtrTemp_ps + 4,
-                                   dstPtrTemp_ps + 8, p);  // simd stores
-
-                    for (int cnt = 0; cnt < 4; cnt++) {
-                        *(dstPtrTempR + cnt) = (Rpp16f) * (dstPtrTemp_ps + cnt);
-                        *(dstPtrTempG + cnt) = (Rpp16f) * (dstPtrTemp_ps + 4 + cnt);
-                        *(dstPtrTempB + cnt) = (Rpp16f) * (dstPtrTemp_ps + 8 + cnt);
-                    }
-#endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[0] - bParam)) + bParam);
-                    *dstPtrTempG =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[1] - gParam)) + gParam);
-                    *dstPtrTempB =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[2] - rParam)) + rParam);
-
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                Rpp32f srcPtrTempI8[3];
+                srcPtrTempI8[0] = (Rpp32f)srcPtrTemp[0] + 128;
+                srcPtrTempI8[1] = (Rpp32f)srcPtrTemp[1] + 128;
+                srcPtrTempI8[2] = (Rpp32f)srcPtrTemp[2] + 128;
 
-        // Color Cast with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
+                *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[0] - bParam)) +
+                                                      bParam - 128);
+                *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[1] - gParam)) +
+                                                      gParam - 128);
+                *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[2] - rParam)) +
+                                                      rParam - 128);
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[4];
-
-                    rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);              // simd loads
-                    compute_color_cast_24_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f16
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-#else
-                    Rpp32f srcPtrTemp_ps[12], dstPtrTemp_ps[13];
-
-                    for (int cnt = 0; cnt < 4; cnt++) {
-                        *(srcPtrTemp_ps + cnt) = (Rpp32f) * (srcPtrTempR + cnt);
-                        *(srcPtrTemp_ps + 4 + cnt) = (Rpp32f) * (srcPtrTempG + cnt);
-                        *(srcPtrTemp_ps + 8 + cnt) = (Rpp32f) * (srcPtrTempB + cnt);
-                    }
-
-                    __m128 p[4];
-
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTemp_ps, srcPtrTemp_ps + 4,
-                                  srcPtrTemp_ps + 8, p);        // simd loads
-                    compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f16
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_ps,
-                                   p);  // simd stores
-
-                    for (int cnt = 0; cnt < 12; cnt++)
-                        *(dstPtrTemp + cnt) = (Rpp16f) * (dstPtrTemp_ps + cnt);
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempR - bParam)) + bParam);
-                    dstPtrTemp[1] =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempG - gParam)) + gParam);
-                    dstPtrTemp[2] =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempB - rParam)) + rParam);
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Color Cast without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp16f *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-#if __AVX2__
-                    __m256 p[4];
-
-                    rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    compute_color_cast_24_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f16
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-#else
-                    Rpp32f srcPtrTemp_ps[12], dstPtrTemp_ps[13];
-
-                    for (int cnt = 0; cnt < 12; cnt++)
-                        *(srcPtrTemp_ps + cnt) = (Rpp32f) * (srcPtrTemp + cnt);
-
-                    __m128 p[4];
-
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);  // simd loads
-                    compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f16
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_ps,
-                                   p);  // simd stores
-
-                    for (int cnt = 0; cnt < 12; cnt++)
-                        *(dstPtrTemp + cnt) = (Rpp16f) * (dstPtrTemp_ps + cnt);
-#endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    dstPtrTemp[0] =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[0] - bParam)) + bParam);
-                    dstPtrTemp[1] =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[1] - gParam)) + gParam);
-                    dstPtrTemp[2] =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (srcPtrTemp[2] - rParam)) + rParam);
-
-                    srcPtrTemp += 3;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Color Cast without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
-                    *dstPtrTempB;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[4];
-
-                    rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);              // simd loads
-                    compute_color_cast_24_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f16
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-#else
-                    Rpp32f srcPtrTemp_ps[12], dstPtrTemp_ps[13];
-
-                    for (int cnt = 0; cnt < 4; cnt++) {
-                        *(srcPtrTemp_ps + cnt) = (Rpp32f) * (srcPtrTempR + cnt);
-                        *(srcPtrTemp_ps + 4 + cnt) = (Rpp32f) * (srcPtrTempG + cnt);
-                        *(srcPtrTemp_ps + 8 + cnt) = (Rpp32f) * (srcPtrTempB + cnt);
-                    }
-
-                    __m128 p[4];
-
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTemp_ps, srcPtrTemp_ps + 4,
-                                  srcPtrTemp_ps + 8, p);        // simd loads
-                    compute_color_cast_12_host(p, pMul, pAdd);  // color_cast adjustment
-                    // boundary checks for f16
-                    rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTemp_ps, dstPtrTemp_ps + 4,
-                                   dstPtrTemp_ps + 8, p);  // simd stores
-
-                    for (int cnt = 0; cnt < 4; cnt++) {
-                        *(dstPtrTempR + cnt) = (Rpp16f) * (dstPtrTemp_ps + cnt);
-                        *(dstPtrTempG + cnt) = (Rpp16f) * (dstPtrTemp_ps + 4 + cnt);
-                        *(dstPtrTempB + cnt) = (Rpp16f) * (dstPtrTemp_ps + 8 + cnt);
-                    }
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTempR =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempR - bParam)) + bParam);
-                    *dstPtrTempG =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempG - gParam)) + gParam);
-                    *dstPtrTempB =
-                        (Rpp16f)RPPPIXELCHECKF32((alphaParam * (*srcPtrTempB - rParam)) + rParam);
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRowR += srcDescPtr->strides.hStride;
-                dstPtrRowG += srcDescPtr->strides.hStride;
-                dstPtrRowB += srcDescPtr->strides.hStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // Color Cast with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                Rpp8s srcPtrTempR_local[16], srcPtrTempG_local[16], srcPtrTempB_local[16],
+                    dstPtrTemp_local[48];
+                for (int cnt = 0; cnt < 16; cnt++) {
+                    srcPtrTempR_local[cnt] = srcPtrTempR[cnt];
+                    srcPtrTempG_local[cnt] = srcPtrTempG[cnt];
+                    srcPtrTempB_local[cnt] = srcPtrTempB[cnt];
+                }
+
+                __m128 p[12];
+
+                rpp_simd_load(rpp_load48_i8pln3_to_f32pln3, srcPtrTempR_local, srcPtrTempG_local,
+                              srcPtrTempB_local, p);        // simd loads
+                compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3, dstPtrTemp_local, p);  // simd stores
+
+                for (int cnt = 0; cnt < 48; cnt++) dstPtrTemp[cnt] = dstPtrTemp_local[cnt];
+
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcPtrTempI8[3];
+                srcPtrTempI8[0] = (Rpp32f)*srcPtrTempR + 128;
+                srcPtrTempI8[1] = (Rpp32f)*srcPtrTempG + 128;
+                srcPtrTempI8[2] = (Rpp32f)*srcPtrTempB + 128;
+
+                dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[0] - bParam)) +
+                                                       bParam - 128);
+                dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[1] - gParam)) +
+                                                       gParam - 128);
+                dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[2] - rParam)) +
+                                                       rParam - 128);
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Color Cast without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8s *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                Rpp8s srcPtrTemp_local[48], dstPtrTemp_local[48];
+                for (int cnt = 0; cnt < 48; cnt++) srcPtrTemp_local[cnt] = srcPtrTemp[cnt];
+
+                __m128 p[12];
+
+                rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3, srcPtrTemp_local, p);  // simd loads
+                compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3, dstPtrTemp_local, p);  // simd stores
+
+                for (int cnt = 0; cnt < 48; cnt++) dstPtrTemp[cnt] = dstPtrTemp_local[cnt];
+
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                Rpp32f srcPtrTempI8[3];
+                srcPtrTempI8[0] = (Rpp32f)srcPtrTemp[0] + 128;
+                srcPtrTempI8[1] = (Rpp32f)srcPtrTemp[1] + 128;
+                srcPtrTempI8[2] = (Rpp32f)srcPtrTemp[2] + 128;
+
+                dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[0] - bParam)) +
+                                                       bParam - 128);
+                dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[1] - gParam)) +
+                                                       gParam - 128);
+                dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[2] - rParam)) +
+                                                       rParam - 128);
+
+                srcPtrTemp += 3;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Color Cast without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
+                *dstPtrTempB;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m128 p[12];
+
+                rpp_simd_load(rpp_load48_i8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);                           // simd loads
+                compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB,
+                               p);  // simd stores
+
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcPtrTempI8[3];
+                srcPtrTempI8[0] = (Rpp32f)*srcPtrTempR + 128;
+                srcPtrTempI8[1] = (Rpp32f)*srcPtrTempG + 128;
+                srcPtrTempI8[2] = (Rpp32f)*srcPtrTempB + 128;
+
+                *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[0] - bParam)) +
+                                                      bParam - 128);
+                *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[1] - gParam)) +
+                                                      gParam - 128);
+                *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8((alphaParam * (srcPtrTempI8[2] - rParam)) +
+                                                      rParam - 128);
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
+            }
+        }
+    }
 }
 
 RppStatus color_cast_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
@@ -933,9 +1169,10 @@ RppStatus color_cast_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rp
                                        RpptRoiType roiType, RppLayoutParams layoutParams,
                                        rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    Rpp32u intraThreads = GetIntraImageNumThreads(handle, dstDescPtr->n, srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (intraThreads == 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
@@ -946,255 +1183,11 @@ RppStatus color_cast_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rp
         Rpp32f bParam = rgbTensor[batchCount].B;
         Rpp32f alphaParam = alphaTensor[batchCount];
 
-        Rpp8s *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        Rpp8s* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp8s* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
-
-        __m128 pMul = _mm_set1_ps(alphaParam);
-        __m128 pAdd[3];
-        pAdd[0] = _mm_set1_ps(bParam);
-        pAdd[1] = _mm_set1_ps(gParam);
-        pAdd[2] = _mm_set1_ps(rParam);
-
-        Rpp8s *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
-
-        // Color Cast with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32u alignedLength = (bufferLength / 48) * 48;
-
-            Rpp8s *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 48) {
-                    __m128 p[12];
-
-                    rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-
-                    srcPtrTemp += 48;
-                    dstPtrTempR += 16;
-                    dstPtrTempG += 16;
-                    dstPtrTempB += 16;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    Rpp32f srcPtrTempI8[3];
-                    srcPtrTempI8[0] = (Rpp32f)srcPtrTemp[0] + 128;
-                    srcPtrTempI8[1] = (Rpp32f)srcPtrTemp[1] + 128;
-                    srcPtrTempI8[2] = (Rpp32f)srcPtrTemp[2] + 128;
-
-                    *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[0] - bParam)) + bParam - 128);
-                    *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[1] - gParam)) + gParam - 128);
-                    *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[2] - rParam)) + rParam - 128);
-
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Color Cast with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32u alignedLength = (bufferLength / 48) * 48;
-
-            Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 16) {
-                    __m128 p[12];
-
-                    rpp_simd_load(rpp_load48_i8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);              // simd loads
-                    compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3, dstPtrTemp, p);  // simd stores
-
-                    srcPtrTempR += 16;
-                    srcPtrTempG += 16;
-                    srcPtrTempB += 16;
-                    dstPtrTemp += 48;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcPtrTempI8[3];
-                    srcPtrTempI8[0] = (Rpp32f)*srcPtrTempR + 128;
-                    srcPtrTempI8[1] = (Rpp32f)*srcPtrTempG + 128;
-                    srcPtrTempI8[2] = (Rpp32f)*srcPtrTempB + 128;
-
-                    dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[0] - bParam)) + bParam - 128);
-                    dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[1] - gParam)) + gParam - 128);
-                    dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[2] - rParam)) + rParam - 128);
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Color Cast without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32u alignedLength = (bufferLength / 48) * 48;
-
-            Rpp8s *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 48) {
-                    __m128 p[12];
-
-                    rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3, dstPtrTemp, p);  // simd stores
-
-                    srcPtrTemp += 48;
-                    dstPtrTemp += 48;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    Rpp32f srcPtrTempI8[3];
-                    srcPtrTempI8[0] = (Rpp32f)srcPtrTemp[0] + 128;
-                    srcPtrTempI8[1] = (Rpp32f)srcPtrTemp[1] + 128;
-                    srcPtrTempI8[2] = (Rpp32f)srcPtrTemp[2] + 128;
-
-                    dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[0] - bParam)) + bParam - 128);
-                    dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[1] - gParam)) + gParam - 128);
-                    dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[2] - rParam)) + rParam - 128);
-
-                    srcPtrTemp += 3;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Color Cast without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32u alignedLength = (bufferLength / 48) * 48;
-
-            Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
-                    *dstPtrTempB;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += 16) {
-                    __m128 p[12];
-
-                    rpp_simd_load(rpp_load48_i8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);              // simd loads
-                    compute_color_cast_48_host(p, pMul, pAdd);  // color_cast adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-
-                    srcPtrTempR += 16;
-                    srcPtrTempG += 16;
-                    srcPtrTempB += 16;
-                    dstPtrTempR += 16;
-                    dstPtrTempG += 16;
-                    dstPtrTempB += 16;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcPtrTempI8[3];
-                    srcPtrTempI8[0] = (Rpp32f)*srcPtrTempR + 128;
-                    srcPtrTempI8[1] = (Rpp32f)*srcPtrTempG + 128;
-                    srcPtrTempI8[2] = (Rpp32f)*srcPtrTempB + 128;
-
-                    *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[0] - bParam)) + bParam - 128);
-                    *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[1] - gParam)) + gParam - 128);
-                    *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(
-                        (alphaParam * (srcPtrTempI8[2] - rParam)) + rParam - 128);
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
-            }
-        }
+        color_cast_i8_i8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, rParam, gParam,
+                                   bParam, alphaParam, roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
