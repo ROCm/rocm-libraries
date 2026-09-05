@@ -288,19 +288,48 @@ arch_spec:
 
 sweep:
   block_m:
-    values: [256]
-    verdict: >-
-      NEW as a field with #11627, and it is NOT an axis -- the two questions "is this a
-      matcher field" and "is this a sweep axis" have different answers here and only
-      the first changed. `_DENSE_GEOMETRY = "default"` is hardcoded at
+    values: [256, 128]
+    # `hazard:`, NOT `verdict:` -- the distinction is load-bearing to the tool.
+    # knob_sweep.py treats ANY knob carrying a `verdict` as settled and skips it
+    # (Knob.settled, knob_sweep.py:77-79), because a measured verdict means the
+    # question is closed. This knob's question is now OPEN, so it must not carry
+    # one; `hazard` attaches the same reasoning to a knob that still gets swept.
+    hazard: >-
+      PROMOTED TO AN AXIS 2026-09-04, on measurement. This entry previously read
+      `values: [256]` on the argument that `_DENSE_GEOMETRY = "default"` is hardcoded at
       dispatch/attention/gfx950.py:30, so the factory resolves block_m=256 for every
-      request it serves; per RUNBOOK 4a a knob CONSTANT across every dispatch decision
-      is a value the library ships, not a tuning axis, and sweeping it measures a
-      configuration rocKE would never resolve to. The kernel's own comment
-      (attention_dense.py:164-167) calls bm128 "an explicit 4-wave EXPERIMENT
-      geometry", not a shipping one. It IS in kmd_fields and IS compared in
-      kernelMatches, because a bm128 descriptor must not be evaluated against a
-      256-tile predicate. Promoting it to an axis needs a dispatcher change first.
+      request and per RUNBOOK 4a a dispatcher-constant is a value the library ships
+      rather than a tuning axis. That reasoning is still correct about the DISPATCHER
+      and was wrong as a performance conclusion: it explains why bm128 is untested, not
+      that it is worthless, and the hardcode is a module constant rather than a measured
+      decision.
+
+      What changed: a full multi-engine sweep (Spur job 285, 3 rounds, drift 1.000) put
+      this engine at geomean 0.658 against ASM_SDPA_ENGINE over 52 contested graphs, and
+      the deficit tracks OCCUPANCY almost linearly. `ar_dit b1 hq9 sq1024 skv62208`
+      launches nqb*Hq*B = 4*9*1 = 36 CTAs onto 256 CUs -- 14% of the device -- and
+      measures 0.452; the same family at sq8192 reaches 288 CTAs (112%) and measures
+      0.605. block_m=128 DOUBLES nqb and therefore the CTA count, and at sq4096 it
+      crosses the persistent threshold (144 -> 288). 255 of the 787 shipped variants
+      have work < num_persistent, so this is not a corner case.
+
+      Legality confirmed before promoting, not assumed: AttentionDenseSpec constructs at
+      block_m=128, supports_attention_dense returns (True, ''), and build_attention_dense
+      lowers it through comgr. The two geometries are DISTINCT BINARIES -- kernel_name()
+      interpolates `bm128` -- so an A/B measures two real kernels rather than one kernel
+      under two labels.
+
+      NOT carried over from gfx942, and deliberately so: there block_m is `values: [256]`
+      because the kernel FAULTS at anything else (the causal mask and the P relayout both
+      assume 256). On gfx950 #11627 made it a real spec field with a second shipped
+      geometry, DENSE_TILE_GEOMETRIES["bm128"], described in-source as "an explicit 4-wave
+      experiment geometry". Same field name, opposite verdict; the sibling's exclusion
+      must not be inherited.
+
+      SHIPPING IT NEEDS A DISPATCHER CHANGE TOO. Measuring the axis only needs the
+      descriptors, but for real traffic to reach a bm128 binary the factory must be able
+      to resolve one -- today `_DENSE_GEOMETRY` is a hardcoded string. Sweep first; if the
+      win holds, that hardcode is the follow-up.
 
   lds_v_row_pad:
     values: [32]
