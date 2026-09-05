@@ -483,7 +483,7 @@ launch_surface:
       and getting it wrong indexes the cache with the wrong stride and returns silently
       wrong numbers rather than faulting.
     cpp_mirror: >-
-      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionTiledNative.cpp:pagedKvGeometryFor
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionTiledGeometry.hpp:gfx950TiledPagedKvGeometry
     kmd_fields: [block_size, num_kv_heads, head_size]
     guard: >-
       graph_match derives block_size from K.dim[2] and declines unless it is in
@@ -494,7 +494,7 @@ launch_surface:
       max_seq_len_kv <= page_table_k.dim[1] * K.dim[2] -- free redundancy on the one row
       that fails silently.
     test: >-
-      dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionTiledMatchers.cpp
+      dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionTiledGeometry.cpp
 
   - name: spec_resolution
     python_source: >-
