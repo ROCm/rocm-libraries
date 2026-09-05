@@ -253,6 +253,53 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    if idx == 11:
+        # K-outer B tile + ds_read_tr16_b64 transpose read, 32x32x16 atom.
+        # cshuffle deliberately: the validator rejects 16-bit dtype_d with the
+        # default epilogue, and a rejected config lands as BOTH_REJECTED, which
+        # the gate counts as a pass -- it would compare nothing.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=128,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 12:
+        # Same path on the 16x16x16 atom, where b_frag_len is 4 rather than 8:
+        # one ds_read_tr16_b64 per fragment instead of two. Pins the per-atom
+        # fragment length -- hardcoding 8 reads past the end of the tile.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
     raise SystemExit(f"unknown config index {idx}")
 
 

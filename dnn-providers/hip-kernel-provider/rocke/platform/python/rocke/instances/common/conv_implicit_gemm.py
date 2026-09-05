@@ -496,7 +496,13 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _ab_bytes = (
         _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes
-    _double = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
+    # Only async_dma and unroll_k reach a K-loop that actually alternates between
+    # the two LDS buffers: async_dma takes the SoftwarePipeline branch and
+    # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
+    # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
+    # scheduling hints -- so charging it for a second A/B tile rejected specs for
+    # LDS the kernel never allocates.
+    _double = spec.async_dma or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
@@ -950,7 +956,10 @@ def build_implicit_gemm_conv(
     # write into while the MFMA phase reads from the first. Force
     # double-buffering whenever the pipeline opts into async DMA,
     # regardless of the chosen `compv*` flag.
-    double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
+    # See the LDS budget note in is_valid_*_spec: "compv4" alone does not reach a
+    # buffer-alternating K-loop, so allocating a second tile for it produced a
+    # dead allocation that the LDS pool then stripped anyway.
+    double_buffer = spec.async_dma or spec.unroll_k
     if double_buffer:
         A_smem2 = b.smem_alloc(
             ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
@@ -1083,12 +1092,18 @@ def build_implicit_gemm_conv(
         # writes lane-contiguous LDS at the wave-uniform base computed
         # by AsyncTileLoader. Consumers (the MFMA phase) must place an
         # `s_waitcnt(vmcnt=0)` before the first ds_read.
+        # contig_cols: the tile's col axis is the reduction index (y, x, c) and
+        # only the inner ``c`` is stride-1, so a chunk wider than cpg -- or one
+        # that does not divide it -- would straddle a filter position and fetch
+        # the wrong elements with no diagnostic. Without this the async path is
+        # silently wrong for any cpg that is not a multiple of the chunk width.
         a_loader = AsyncTileLoader.from_tile(
             tile_rows=block_m,
             tile_cols=block_k,
             block_size=threads,
             wave_size=spec.wave_size,
             elem_dtype=ir_dtype_a,
+            contig_cols=p.cpg,
         )
         b_loader = AsyncTileLoader.from_tile(
             tile_rows=block_n,
@@ -1096,6 +1111,7 @@ def build_implicit_gemm_conv(
             block_size=threads,
             wave_size=spec.wave_size,
             elem_dtype=ir_dtype_b,
+            contig_cols=p.cpg,
         )
         a_sync_loader = None
         b_sync_loader = None

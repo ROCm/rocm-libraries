@@ -284,6 +284,30 @@ typedef struct rocke_conv_build_ctx
      * pipeline="wavelet": a_wavelet_loader/b_wavelet_loader are
      *   CoalescedTileLoader sized to num_load_waves * wave_size threads. */
     bool async_dma; /* spec.async_dma (cached)         */
+    /* spec.lds_k_outer (wgrad only). Zeroed by the ctx memset, so the forward
+     * and dgrad drivers keep their exact previous behaviour. */
+    bool lds_k_outer;
+    /* Optional override for the A-operand descriptor on the ASYNC load path.
+     * The sync path already has a_load_override; the async slot had no hook and
+     * always called rocke_conv_a_descriptor, which is the forward descriptor.
+     * NULL keeps that behaviour, so fwd/dgrad are unaffected. */
+    rocke_loads_descriptor_fn a_descriptor_fn;
+    /* Base added to every k offset the k-loop drivers hand to the load phase.
+     * The forward conv passes a bare const_i32(it*block_k); wgrad's Python
+     * emits b.add(k_lo, const_i32(...)) because its slice starts at the
+     * split-K lower bound. NULL keeps the bare-const form, so fwd/dgrad emit
+     * exactly what they emitted before. */
+    rocke_value_t* kloop_k_lo;
+    /* Iteration count for the unrolled / async k-loop drivers. 0 = derive from
+     * the problem's full K_gemm, which is what the forward conv wants. wgrad
+     * must override it: its stub problem carries the UNSLICED wg_K, while the
+     * Python emitter sizes the loop from wg_K_padded()/split_k. They agree only
+     * at split_k == 1, so without this the C engine emits a full-range
+     * reduction under split-K atomics. */
+    int kloop_num_iters;
+    /* Atom edge + fragment length used by the K-outer transpose-read feed. */
+    rocke_value_t* tr_lane_mod4;
+    rocke_value_t* tr_grp16;
     rocke_async_tile_loader_t a_loader; /* async A loader (valid iff async)*/
     rocke_async_tile_loader_t b_loader; /* async B loader                  */
     bool have_async_loaders; /* true => a_loader/b_loader valid */
@@ -367,6 +391,21 @@ rocke_value_t* rocke_conv_emit_smem_load(
 /* _emit_frag_smem_load(b, src, mn_in_atom, k_in_atom, atom_mn_base, k_tile_base,
  * frag_len): one frag_len-wide operand fragment from a row-major LDS tile
  * (8-wide chunked + vec_concat for wide WMMA frags). */
+/* K-outer transpose-read fragment feed. Takes lane and the two hoisted lane
+ * constants directly rather than a build ctx, so both the shared compute phase
+ * (wgrad, A and B) and dgrad's own operand fetch (B only) can call it without
+ * duplicating the lane mapping. See conv_implicit_gemm_conv_compute_phase.cpp. */
+rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  rocke_value_t* tr_lane_mod4,
+                                  rocke_value_t* tr_grp16,
+                                  rocke_value_t* smem,
+                                  rocke_value_t* mn_base,
+                                  rocke_value_t* k_base,
+                                  int mn_atom,
+                                  int n,
+                                  const rocke_type_t* dtype);
+
 rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,
                                               rocke_value_t* src,
                                               rocke_value_t* mn_in_atom,

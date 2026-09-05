@@ -125,6 +125,44 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->chiplet_swizzle = true;
         *arch = "gfx950";
         return 0;
+    case 11:
+        /* K-outer LDS tile + gfx950 ds_read_b64_tr_b16 transpose reads. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 12:
+        /* K-outer + direct load (async_dma). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->dtype_d = "fp32";
+        spec->lds_k_outer = true;
+        spec->async_dma = true;
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 13:
+        /* K-outer with the 16x16x16 atom: 4 MFMA operand elements per lane
+         * rather than 8, so the transpose-read k-stride between lane groups
+         * is 4. Cases 11 and 12 both use 32x32x16 (8 per lane). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_k = 16;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 14:
+        /* pipeline="basic": unrolled global-read/compute overlap loop. Needs a
+         * compile-time trip count, hence the fixed split_k. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->pipeline = "basic";
+        spec->dtype_d = "fp32";
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }
