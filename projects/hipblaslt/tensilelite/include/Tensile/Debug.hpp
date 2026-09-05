@@ -180,7 +180,10 @@ namespace TensileLite
         std::string m_metric              = "";
         int         m_gridbasedTopSols    = 1;
         bool        m_benchmark           = false;
-        bool        m_gridbasedKdTree     = false;
+        // Default on: the grid-based matching library builds a KD-tree over the logic
+        // file's size keys instead of doing a linear scan. Set TENSILE_GRIDBASED_KDTREE=0
+        // to fall back to the linear path.
+        bool        m_gridbasedKdTree     = true;
         bool        m_gridbasedBatchExp   = false;
         bool        m_printMarker         = false;
         bool        m_disableStaggerU     = false;
