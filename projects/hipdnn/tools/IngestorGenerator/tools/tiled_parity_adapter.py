@@ -116,10 +116,11 @@ class TiledAttentionRequest:
     compile_backend: Optional[str] = None
     num_kv_blocks: int = 0
 
-    # --- accepted and discarded ---
-    #: Injected by dispatch_parity.py:171-172 from the profile's `arch:`. Kept as a
-    #: real field so construction succeeds, and never forwarded: rocKE resolves the
-    #: tiled arch through the module-global memo, not through the problem.
+    # --- the target arch ---
+    #: Injected by dispatch_parity.py:171-172 from the profile's `arch:`. Never
+    #: forwarded to the problem (which has no such field -- see failure 1), but NOT
+    #: inert either: it is what `_pin_attention_arch` pins the module memo to. See
+    #: that function for why a host-side tool MUST state the arch explicitly.
     arch: Optional[str] = None
 
     def problem(self):
@@ -140,6 +141,50 @@ class TiledAttentionRequest:
         return UnifiedAttentionProblem(**fields)
 
 
+def _pin_attention_arch(arch: Optional[str]) -> None:
+    """Pin rocKE's memoized attention arch. **Load-bearing, not defensive.**
+
+    `_resolve_attention_arch()` (`attention_unified.py:237-263`) queries the LOCAL
+    DEVICE via `get_device_arch()`, memoizes the answer in a module global, and falls
+    back to `'gfx950'` only when the query FAILS. There is no environment variable.
+
+    **The fallback is not the common case on a dev box, and assuming it was cost this
+    run a diagnosis.** The prior plan recorded that "host tooling works today only
+    because the fallback happens to be our arch" -- that is true only on a machine with
+    no GPU at all. This workstation has a real gfx90a, so `get_device_arch()` SUCCEEDS
+    and returns `'gfx90a'`; the fallback is never reached. Measured:
+
+        get_device_arch() -> 'gfx90a'
+
+    Unpinned, `dispatch_parity.py` therefore resolved **0 of 79** shapes servable --
+    73 declined with "neither path is available on gfx90a" and 6 raised LDS-budget
+    RuntimeErrors against gfx90a's 64 KB cap. Every one of those reads like a real
+    applicability finding about the tiled kernel. It is not: it is this memo.
+
+    Pinning here rather than in a wrapper script is deliberate -- the profile's `arch:`
+    is the single declaration of intent, five tools read it, and any of them that
+    imports this adapter gets the pin for free. A tool that forgot a shell export would
+    otherwise silently measure a different GPU.
+    """
+    if not arch:
+        return
+    from kernels.common import attention_unified
+
+    current = getattr(attention_unified, "_RESOLVED_ATTENTION_ARCH", None)
+    if current == arch:
+        return
+    if current is not None:
+        # Never silently re-pin: specs already built under the old arch would be
+        # inconsistent with those built after, and the resulting set would be a
+        # silent mixture rather than an error.
+        raise RuntimeError(
+            f"attention arch already resolved to {current!r}, cannot re-pin to "
+            f"{arch!r}. Specs built under two arches would silently mix. Run one "
+            f"arch per process."
+        )
+    attention_unified._RESOLVED_ATTENTION_ARCH = arch
+
+
 def tiled_spec_for_request(request: TiledAttentionRequest):
     """The profile's `dispatch:` entry point. Returns the spec rocKE would build.
 
@@ -156,6 +201,11 @@ def tiled_spec_for_request(request: TiledAttentionRequest):
     output is baked unmodified; the override dict is never hand-transcribed and none
     of its 7 fields may be passed to `--knobs`.
     """
+    # BEFORE the import that triggers resolution. `_tiled_spec_from_problem` reaches
+    # `_resolve_attention_arch()` on its first call and memoizes whatever it finds,
+    # so pinning afterwards is too late for the whole run.
+    _pin_attention_arch(request.arch)
+
     from kernels.common.attention_unified import _tiled_spec_from_problem
 
     problem = request.problem()

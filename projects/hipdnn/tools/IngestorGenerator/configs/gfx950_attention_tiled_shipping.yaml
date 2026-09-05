@@ -1,0 +1,269 @@
+dialect: packaged
+authored_subpath: rocKE/gfx950_attention_tiled
+engine:
+  name: hipkernel:Gfx950AttentionTiled
+  knobs:
+  - head_size
+  - block_size
+  - num_query_heads
+  - num_kv_heads
+  - num_seqs
+  - sliding_window
+  - num_warps
+  - block_m_per_warp
+  - tile_size
+  - waves_per_eu
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: block_size
+  type: int
+  default_value: 16
+- name: num_query_heads
+  type: int
+  default_value: 16
+- name: num_kv_heads
+  type: int
+  default_value: 2
+- name: num_seqs
+  type: int
+  default_value: 1
+- name: sliding_window
+  type: int
+  default_value: 0
+- name: num_warps
+  type: int
+  default_value: 4
+- name: block_m_per_warp
+  type: int
+  default_value: 16
+- name: tile_size
+  type: int
+  default_value: 64
+- name: waves_per_eu
+  type: int
+  default_value: 2
+- name: use_sinks
+  type: int
+  default_value: 0
+- name: use_alibi
+  type: int
+  default_value: 0
+- name: has_softcap
+  type: int
+  default_value: 0
+- name: use_qq_bias
+  type: int
+  default_value: 0
+- name: use_kq_lds_pad
+  type: int
+  default_value: 0
+- name: kq_lds_pad_halves
+  type: int
+  default_value: 8
+- name: use_mfma32_skip_legacy_qreg
+  type: int
+  default_value: 0
+- name: use_k_single_buffer
+  type: int
+  default_value: 0
+- name: use_q_direct_reg
+  type: int
+  default_value: 0
+- name: softmax_interleave_mode
+  type: int
+  default_value: 1
+- name: use_mask_phase_split
+  type: int
+  default_value: 0
+- name: use_mfma_32x32
+  type: int
+  default_value: 0
+- name: use_transposed_qk_32x32
+  type: int
+  default_value: 0
+- name: use_transposed_scalar_state
+  type: int
+  default_value: 0
+- name: use_transposed_mask_once
+  type: int
+  default_value: 0
+- name: use_transposed_half_local_pv
+  type: int
+  default_value: 0
+- name: use_transposed_mask_limit
+  type: int
+  default_value: 0
+- name: use_fast_paged_kv_desc
+  type: int
+  default_value: 0
+- name: use_i64_kv_addr
+  type: int
+  default_value: 0
+- name: use_softmax_mfma_interleave
+  type: int
+  default_value: 0
+- name: use_fp8_mfma_qk
+  type: int
+  default_value: 0
+- name: use_fp8_mfma_pv
+  type: int
+  default_value: 0
+- name: use_register_pv
+  type: int
+  default_value: 0
+kernel_source_kind: rocke
+workspace_policy: none
+delegates_to_existing_plan: false
+packs:
+- name: gfx950_attention_tiled
+  arch:
+  - gfx950
+  kernel_defaults:
+    kind: rocke
+    source: kernels/gfx950/attention_tiled_2d.py
+    builder: build_unified_attention_2d_tiled
+  variants:
+  - name: gfx950_attention_tiled_hs{head_size}_bs{block_size}_nqh{num_query_heads}_nkh{num_kv_heads}_{tag}
+    metadata: [dtype, head_size, block_size, num_query_heads, num_kv_heads, num_seqs, sliding_window, num_warps, block_m_per_warp, tile_size, waves_per_eu, use_sinks, use_alibi, has_softcap, use_qq_bias, use_kq_lds_pad, kq_lds_pad_halves, use_mfma32_skip_legacy_qreg, use_k_single_buffer, use_q_direct_reg, softmax_interleave_mode, use_mask_phase_split, use_mfma_32x32, use_transposed_qk_32x32, use_transposed_scalar_state, use_transposed_mask_once, use_transposed_half_local_pv, use_transposed_mask_limit, use_fast_paged_kv_desc, use_i64_kv_addr, use_softmax_mfma_interleave, use_fp8_mfma_qk, use_fp8_mfma_pv, use_register_pv]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, use_alibi, use_qq_bias, num_seqs, num_warps, waves_per_eu, kv_storage_dtype, use_fp8_mfma_qk, use_fp8_mfma_pv, use_v_double_buffer, kv_ring_depth, use_staggered_iter_wait, use_sched_barrier, sched_barrier_mask, use_q_reread, use_register_pv, tile_size, block_m_per_warp, use_mfma_32x32, use_transposed_qk_32x32, use_kq_lds_pad, kq_lds_pad_halves, use_transposed_scalar_state, use_transposed_invariant_hoist, use_transposed_mask_once, use_transposed_half_local_pv, use_mfma32_skip_legacy_qreg, use_transposed_mask_limit, use_grouped_kv2_softmax, use_fast_paged_kv_desc, use_i64_kv_addr, use_early_v_schedule, use_agpr_alloc_zero, use_k_single_buffer, use_q_direct_reg, use_softmax_mfma_interleave, softmax_interleave_mode, softmax_interleave_groups, use_mask_phase_split]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {has_softcap: false, use_qq_bias: false, kv_storage_dtype: null, use_fp8_mfma_qk: false, use_fp8_mfma_pv: false, use_v_double_buffer: false, kv_ring_depth: 2, use_staggered_iter_wait: false, use_sched_barrier: false, sched_barrier_mask: 0, use_q_reread: false, use_register_pv: false, use_transposed_invariant_hoist: false, use_grouped_kv2_softmax: false, use_early_v_schedule: false, use_agpr_alloc_zero: false, softmax_interleave_groups: 4}
+    knob_sets:
+      knobs0:
+      - {tag: dtbf16_sw0_ns1_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v3}
+      - {tag: dtbf16_sw0_ns1_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v4}
+      knobs1:
+      - {tag: dtbf16_sw0_ns1_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v5}
+      knobs2:
+      - {tag: dtfp16_sw0_ns3_nw2_wpe2_krd2_sbm0_ts32_bmpw16_klph8_sim1_sig4_v6}
+      knobs3:
+      - {tag: dtfp16_sw256_ns3_nw1_wpe2_krd2_sbm0_ts32_bmpw16_klph8_sim1_sig4_v8}
+      knobs4:
+      - {tag: dtbf16_sw0_ns2_nw4_wpe4_krd2_sbm0_ts64_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_ufpkd_sim1_sig4_v12}
+      knobs5:
+      - {tag: dtbf16_sw0_ns2_nw4_wpe4_krd2_sbm0_ts64_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_sim1_sig4_v13}
+      knobs6:
+      - {tag: dtbf16_sw0_ns2_nw1_wpe2_krd2_sbm0_ts128_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_uika_sim1_sig4_v14}
+      knobs7:
+      - {tag: dtbf16_sw0_ns2_nw1_wpe2_krd2_sbm0_ts128_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_sim1_sig4_v15}
+      knobs8:
+      - {tag: dtbf16_sw0_ns2_nw1_wpe2_krd2_sbm0_ts128_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_uika_sim1_sig4_v16}
+      knobs9:
+      - {tag: dtbf16_sw0_ns2_nw1_wpe2_krd2_sbm0_ts128_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_sim1_sig4_v17}
+      knobs10:
+      - {tag: dtfp16_sw0_ns1_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_usmi_sim1_sig4_v18}
+      knobs11:
+      - {tag: dtfp16_sw0_ns4_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_sim1_sig4_v19}
+      knobs12:
+      - {tag: dtbf16_sw0_ns2_nw1_wpe2_krd2_sbm0_ts128_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_sim1_sig4_v20}
+      knobs13:
+      - {tag: dtfp16_sw0_ns1_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_usmi_sim1_sig4_v21}
+      knobs14:
+      - {tag: dtfp16_sw0_ns5_nw1_wpe2_krd2_sbm0_ts32_bmpw16_klph8_sim1_sig4_v24}
+      knobs15:
+      - {tag: dtfp16_sw0_ns6_nw1_wpe2_krd2_sbm0_ts128_bmpw16_klph8_sim1_sig4_v26}
+      knobs16:
+      - {tag: dtfp16_sw0_ns4_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_sim1_sig4_v30}
+      knobs17:
+      - {tag: dtfp16_sw0_ns5_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_sim1_sig4_v31}
+      knobs18:
+      - {tag: dtbf16_sw0_ns1_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v32}
+      knobs19:
+      - {tag: dtbf16_sw0_ns2_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v33}
+      knobs20:
+      - {tag: dtbf16_sw0_ns1_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_usmi_sim1_sig4_v34}
+      - {tag: dtbf16_sw0_ns1_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_usmi_sim1_sig4_v35}
+      knobs21:
+      - {tag: dtfp16_sw0_ns64_nw2_wpe2_krd2_sbm0_ts32_bmpw16_klph8_sim1_sig4_v36}
+      knobs22:
+      - {tag: dtfp16_sw0_ns128_nw2_wpe2_krd2_sbm0_ts32_bmpw16_klph8_sim1_sig4_v37}
+      knobs23:
+      - {tag: dtfp16_sw0_ns4_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_sim1_sig4_v38}
+      knobs24:
+      - {tag: dtfp16_sw0_ns2_nw1_wpe2_krd2_sbm0_ts32_bmpw16_klph8_sim1_sig4_v39}
+      knobs25:
+      - {tag: dtfp16_sw0_ua_ns4_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_uthlp_sim1_sig4_v40}
+      - {tag: dtfp16_sw0_ua_ns4_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_uthlp_sim1_sig4_v41}
+      knobs26:
+      - {tag: dtfp16_sw0_ns4_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_sim1_sig4_v42}
+      knobs27:
+      - {tag: dtfp16_sw0_ns4_nw4_wpe2_krd2_sbm0_ts32_bmpw16_klph8_sim1_sig4_v43}
+      knobs28:
+      - {tag: dtfp16_sw0_ns1_nw1_wpe2_krd2_sbm0_ts32_bmpw16_klph8_sim1_sig4_v48}
+      knobs29:
+      - {tag: dtfp16_sw0_ns1_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_usmi_sim1_sig4_v49}
+      - {tag: dtfp16_sw0_ns1_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_usmi_sim1_sig4_v50}
+      knobs30:
+      - {tag: dtfp16_sw0_ns3_nw4_wpe2_krd2_sbm0_ts32_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_sim1_sig4_v51}
+      knobs31:
+      - {tag: dtbf16_us_sw0_ns2_nw4_wpe4_krd2_sbm0_ts64_bmpw32_um3_utq3_klph8_utss_utmo_uthlp_umslq_utml_ufpkd_sim1_sig4_v55}
+      knobs32:
+      - {tag: dtbf16_sw0_ns64_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v57}
+      - {tag: dtbf16_sw0_ns64_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v58}
+      knobs33:
+      - {tag: dtbf16_sw0_ns1_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v59}
+      - {tag: dtbf16_sw0_ns1_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v60}
+      knobs34:
+      - {tag: dtbf16_sw0_ns1_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v61}
+      knobs35:
+      - {tag: dtbf16_sw0_ns1_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v62}
+      knobs36:
+      - {tag: dtbf16_sw0_ns1_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v63}
+      knobs37:
+      - {tag: dtbf16_sw0_ns1_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v64}
+      - {tag: dtbf16_sw0_ns1_nw2_wpe2_krd2_sbm0_ts64_bmpw32_um3_utq3_uklp_klph16_utss_utmo_uthlp_utml_uksb_uqdr_usmi_sim2_sig4_umps_v65}
+      knobs38:
+      - {tag: dtfp16_sw64_ns2_nw1_wpe2_krd2_sbm0_ts32_bmpw16_klph8_sim1_sig4_v68}
+      knobs39:
+      - {tag: dtfp16_sw4096_ns2_nw1_wpe2_krd2_sbm0_ts32_bmpw16_klph8_sim1_sig4_v69}
+      knobs40:
+      - {tag: dtfp16_sw512_ua_ns2_nw1_wpe2_krd2_sbm0_ts32_bmpw16_klph8_sim1_sig4_v70}
+    shapes:
+    - {head_size: 256, block_size: 16, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 2, waves_per_eu: 2, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: true, kq_lds_pad_halves: 16, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: true, use_q_direct_reg: true, use_softmax_mfma_interleave: true, softmax_interleave_mode: 2, use_mask_phase_split: true, knobs: knobs0}
+    - {head_size: 256, block_size: 32, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 2, waves_per_eu: 2, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: true, kq_lds_pad_halves: 16, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: true, use_q_direct_reg: true, use_softmax_mfma_interleave: true, softmax_interleave_mode: 2, use_mask_phase_split: true, knobs: knobs1}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 3, num_warps: 2, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs2}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_sinks: false, sliding_window: 256, use_alibi: false, num_seqs: 3, num_warps: 1, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs3}
+    - {head_size: 64, block_size: 32, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 2, num_warps: 4, waves_per_eu: 4, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: true, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs4}
+    - {head_size: 64, block_size: 32, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 2, num_warps: 4, waves_per_eu: 4, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs5}
+    - {head_size: 128, block_size: 64, num_query_heads: 40, num_kv_heads: 8, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 2, num_warps: 1, waves_per_eu: 2, tile_size: 128, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: true, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs6}
+    - {head_size: 128, block_size: 64, num_query_heads: 28, num_kv_heads: 4, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 2, num_warps: 1, waves_per_eu: 2, tile_size: 128, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs7}
+    - {head_size: 128, block_size: 64, num_query_heads: 24, num_kv_heads: 8, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 2, num_warps: 1, waves_per_eu: 2, tile_size: 128, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: true, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs8}
+    - {head_size: 128, block_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 2, num_warps: 1, waves_per_eu: 2, tile_size: 128, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs9}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 4, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: true, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs10}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 4, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 4, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs11}
+    - {head_size: 128, block_size: 64, num_query_heads: 16, num_kv_heads: 4, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 2, num_warps: 1, waves_per_eu: 2, tile_size: 128, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs12}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 1, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: true, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs13}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 1, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 5, num_warps: 1, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs14}
+    - {head_size: 128, block_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 6, num_warps: 1, waves_per_eu: 2, tile_size: 128, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs15}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 4, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 4, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs16}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 4, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 5, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs17}
+    - {head_size: 256, block_size: 16, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 2, waves_per_eu: 2, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: true, kq_lds_pad_halves: 16, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: true, use_q_direct_reg: true, use_softmax_mfma_interleave: true, softmax_interleave_mode: 2, use_mask_phase_split: true, knobs: knobs18}
+    - {head_size: 256, block_size: 16, num_query_heads: 8, num_kv_heads: 4, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 2, num_warps: 2, waves_per_eu: 2, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: true, kq_lds_pad_halves: 16, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: true, use_q_direct_reg: true, use_softmax_mfma_interleave: true, softmax_interleave_mode: 2, use_mask_phase_split: true, knobs: knobs19}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 4, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: true, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs20}
+    - {head_size: 128, block_size: 16, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 64, num_warps: 2, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs21}
+    - {head_size: 128, block_size: 16, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 128, num_warps: 2, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs22}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 4, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs23}
+    - {head_size: 256, block_size: 16, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 2, num_warps: 1, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs24}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: true, num_seqs: 4, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs25}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 8, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 4, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs26}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 8, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 4, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs27}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 1, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs28}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: true, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs29}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 3, num_warps: 4, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs30}
+    - {head_size: 64, block_size: 32, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, use_sinks: true, sliding_window: 0, use_alibi: false, num_seqs: 2, num_warps: 4, waves_per_eu: 4, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: true, use_transposed_mask_limit: true, use_fast_paged_kv_desc: true, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs31}
+    - {head_size: 256, block_size: 16, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 64, num_warps: 2, waves_per_eu: 2, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: true, kq_lds_pad_halves: 16, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: true, use_q_direct_reg: true, use_softmax_mfma_interleave: true, softmax_interleave_mode: 2, use_mask_phase_split: true, knobs: knobs32}
+    - {head_size: 256, block_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 2, waves_per_eu: 2, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: true, kq_lds_pad_halves: 16, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: true, use_q_direct_reg: true, use_softmax_mfma_interleave: true, softmax_interleave_mode: 2, use_mask_phase_split: true, knobs: knobs33}
+    - {head_size: 256, block_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 2, waves_per_eu: 2, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: true, kq_lds_pad_halves: 16, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: true, use_q_direct_reg: true, use_softmax_mfma_interleave: true, softmax_interleave_mode: 2, use_mask_phase_split: true, knobs: knobs34}
+    - {head_size: 256, block_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 2, waves_per_eu: 2, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: true, kq_lds_pad_halves: 16, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: true, use_q_direct_reg: true, use_softmax_mfma_interleave: true, softmax_interleave_mode: 2, use_mask_phase_split: true, knobs: knobs35}
+    - {head_size: 256, block_size: 64, num_query_heads: 1, num_kv_heads: 1, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 2, waves_per_eu: 2, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: true, kq_lds_pad_halves: 16, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: true, use_q_direct_reg: true, use_softmax_mfma_interleave: true, softmax_interleave_mode: 2, use_mask_phase_split: true, knobs: knobs36}
+    - {head_size: 256, block_size: 16, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, use_sinks: false, sliding_window: 0, use_alibi: false, num_seqs: 1, num_warps: 2, waves_per_eu: 2, tile_size: 64, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_kq_lds_pad: true, kq_lds_pad_halves: 16, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_half_local_pv: true, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: true, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: true, use_q_direct_reg: true, use_softmax_mfma_interleave: true, softmax_interleave_mode: 2, use_mask_phase_split: true, knobs: knobs37}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_sinks: false, sliding_window: 64, use_alibi: false, num_seqs: 2, num_warps: 1, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs38}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_sinks: false, sliding_window: 4096, use_alibi: false, num_seqs: 2, num_warps: 1, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs39}
+    - {head_size: 128, block_size: 16, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_sinks: false, sliding_window: 512, use_alibi: true, num_seqs: 2, num_warps: 1, waves_per_eu: 2, tile_size: 32, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_kq_lds_pad: false, kq_lds_pad_halves: 8, use_transposed_scalar_state: false, use_transposed_mask_once: false, use_transposed_half_local_pv: false, use_mfma32_skip_legacy_qreg: false, use_transposed_mask_limit: false, use_fast_paged_kv_desc: false, use_i64_kv_addr: false, use_k_single_buffer: false, use_q_direct_reg: false, use_softmax_mfma_interleave: false, softmax_interleave_mode: 1, use_mask_phase_split: false, knobs: knobs40}

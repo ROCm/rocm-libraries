@@ -1,0 +1,571 @@
+# TOOL PROFILE for the gfx950 attention_tiled (2D) engine.
+#
+# NOT a generator config. `generate.py` takes a config with `packs:`; this file has none
+# and generate.py correctly rejects it. The `.profile.yaml` suffix is the distinction.
+# Read by the PIPELINE TOOLS -- dispatch_parity.py, knob_sweep.py,
+# verify_variant_sets.py, coverage_gate.py, variant_reachability.py, launch_surface.py,
+# reconcile_applicability.py -- which share it so they cannot disagree about which
+# kernel they are discussing.
+#
+# NOT PORTED BY COPYING SIX VALUES from gfx950_attention_dense.profile.yaml. The two
+# engines share an arch and almost nothing else, and three of the differences are
+# mechanical rather than stylistic -- each was MEASURED, and each would have produced a
+# silent failure if inherited:
+#
+#   * The dense profile points `dispatch`/`request`/`predicate` straight at rocKE
+#     symbols. NONE of the three works here (see the `dispatch:` block), so all three
+#     point at tools/tiled_parity_adapter.py, which translates the calling convention
+#     without restating any rocKE logic.
+#   * The dense kernel's spec is 26 fields; this one is 46, of which 29 are bools and
+#     2 strings -- so 31 of 46 are structurally ineligible to be knobs.
+#   * The dense ABI is CONDITIONALLY EXTENDED (5 kernargs, +1/+2/+3 per feature), which
+#     is what makes its graph_match declines load-bearing. This ABI is a FIXED 18 slots,
+#     all unconditionally declared. The declines here protect variant COVERAGE, not the
+#     ABI -- a genuinely weaker safety argument, recorded rather than inherited.
+#
+# Evidence for every claim: ../../../../mining_tiled.md and ../../../../graph_contract.md.
+
+bundle: gfx950_attention_tiled
+
+provider_root: dnn-providers/hip-kernel-provider
+
+vocabulary:
+  # builder spelling -> the hipDNN enum spelling the MATCHER compares. Copying the
+  # spec's spelling straight across is what made every graph decline on gfx942 while
+  # the engine still loaded and every count reconciled.
+  dtype:
+    bf16: BF16
+    fp16: FP16
+
+# EXPLICITLY EMPTY, not omitted -- the two are different claims and the gate reads them
+# differently. Omitting the key means "nobody asked" and verify_variant_sets reports the
+# policy-twin check as a NOT CHECKED narrowed run.
+#
+# `{}` asserts a checkable fact: this kernel has no knob resolved by a MODULE-LEVEL
+# POLICY FUNCTION of the kind `policies:` can express (a function taking positional spec
+# keys). It emphatically does NOT mean the spec has no derived fields -- 31 of its 46
+# are resolved per-shape by `_tiled_spec_from_problem`, and the D256 cohort gets seven
+# of them overridden wholesale. That resolution is not expressible as a per-knob policy
+# entry, and must not be: the whole point of routing through the production resolver
+# (see `dispatch:`) is that the composition is applied rather than transcribed.
+policies: {}
+
+# ---------------------------------------------------------------------------
+# Stage-1 parity (tools/dispatch_parity.py).
+# ---------------------------------------------------------------------------
+
+arch: gfx950
+slug: gfx950_attention_tiled
+source: kernels/gfx950/attention_tiled_2d.py
+builder: build_unified_attention_2d_tiled
+
+# THE ADAPTER, NOT THE ROCKE SYMBOL -- and this is the one block most likely to be
+# "simplified" back to something that does not work. Two measured reasons:
+#
+#  1. `UnifiedAttentionProblem` CANNOT be `request.class`. dispatch_parity.py:171-172
+#     injects fields["arch"] whenever the profile declares `arch:` (it does, above),
+#     and the dataclass has no arch field:
+#         TypeError: UnifiedAttentionProblem.__init__() got an unexpected
+#                    keyword argument 'arch'
+#     Every shape would land in `rejected` with a TypeError reading like a corpus
+#     defect. Dropping `arch:` is not a fix -- five other tools read it.
+#  2. `supports_native_unified_attention_tiled` takes a PROBLEM; dispatch_parity.py:188
+#     calls predicate(spec, arch=arch). Measured:
+#         predicate(problem) -> (True, 'supported')
+#         predicate(spec)    -> AttributeError: 'UnifiedAttention2DTiledSpec'
+#                                                has no attribute 'use_fp8'
+#
+# The adapter restates NO rocKE logic. The spec still comes from the PRODUCTION wrapper
+# `kernels.common.attention_unified._tiled_spec_from_problem` (decision D5), which adds
+# `_resolve_lds_budget` on top of the builders-layer function -- pointing at the
+# builders layer would bake a pre-LDS-budget spec.
+dispatch:
+  module: tiled_parity_adapter
+  function: tiled_spec_for_request
+
+request:
+  module: tiled_parity_adapter
+  class: TiledAttentionRequest
+  # No `defaults:`. Unlike attention_dense -- which is OPT-IN and needs
+  # algorithm=attention_dense or it declines everything and every decline reconciles
+  # trivially -- the adapter calls the tiled spec factory directly, with no registry
+  # and no algorithm selector in the path.
+  defaults: {}
+
+# The scope gate lives here, and it is WORK THIS INTEGRATION OWES rather than something
+# inherited from rocKE. `supports_native_unified_attention_tiled` answers for the tiled
+# FAMILY, not the 2D PATH: measured over a 12-shape decode grid, 12 of 12 shapes that
+# select_path() routes to "3d" returned (True, 'supported'). Taking it at face value
+# would size a 2D-only set from a corpus containing every 3D shape -- descriptors built
+# for a path this engine does not ship.
+#
+# The wrapper applies rocKE's predicate FIRST (so a genuinely unbuildable shape reports
+# the KERNEL's reason rather than being masked by our scope decision) and the
+# select_path()=="2d" gate second. Decision D4, made mechanical.
+predicate:
+  module: tiled_parity_adapter
+  function: supports_tiled_2d_for_spec
+
+engine:
+  name: hipkernel:Gfx950AttentionTiled
+  # MUST equal the UED `name` byte-for-byte: --test-engine matches engineName, which
+  # for a descriptor-registered engine comes from the UED's own `name` field. A
+  # mismatch fails before any case runs.
+  #
+  # EVERY INT dimension the matcher selects on, not only the tuning ones -- a shape
+  # cannot be selected on a dimension the engine does not expose.
+  #
+  # `dtype` is DELIBERATELY ABSENT despite being a matcher field, and the loader
+  # enforces it: getCustomKnobs silently drops non-int knobs at plan-build time -- no
+  # error, no warning, discovered only against a real device. The matcher still
+  # compares dtype; it just is not a selectable knob. Same for kv_storage_dtype.
+  #
+  # Of the spec's 46 fields, exactly 15 are int-typed (13 bare int + 2 Optional[int]);
+  # the other 31 (29 bool + 2 str) are structurally ineligible. Enumerated from
+  # dataclasses.fields(), not guessed.
+  #
+  # Every name here MUST also be a declared kmd_fields entry -- the loader enforces it
+  # ("engine.knobs names X, which no kmd_fields entry declares"), and rightly: a knob
+  # naming an undeclared field would drop the WHOLE pack at resolveDescriptorSets().
+  #
+  # THREE int-typed spec fields are deliberately NOT knobs and NOT KMD fields:
+  # kv_ring_depth, sched_barrier_mask and softmax_interleave_groups are CONSTANT across
+  # all 52 dispatcher decisions (measured by --report-knobs), so per RUNBOOK 4a they are
+  # values the library ships, not tuning axes. Exposing a dispatcher-constant as a knob
+  # invites an autotuner to explore configurations rocKE would never resolve to.
+  #
+  # And TWO int-typed fields that ARE declared KMD fields are deliberately NOT knobs:
+  # kq_lds_pad_halves and softmax_interleave_mode belong to the seven-field D256
+  # override set. They must reach the CATALOG (so a descriptor states which binary it
+  # describes) but must never be STEERABLE: pinning one off-cohort silently builds a
+  # different binary with a different kernel name and no error. They are int-typed, so
+  # nothing but this decision stops them being exposed. That is the trap.
+  knobs: [head_size, block_size, num_query_heads, num_kv_heads, num_seqs,
+          sliding_window, num_warps, block_m_per_warp, tile_size, waves_per_eu]
+
+kmd_fields:
+  - {name: dtype, type: string}
+  # --- graph-derived shape. graph_contract.md §5 maps each to its hipDNN spelling. ---
+  - {name: head_size, type: int, default_value: 128}
+  # block_size = K.dim[2]. THE derivation this integration turned on (graph_contract.md
+  # §5 G2): the K/V tensor IS the paged container; the page table resolves the block
+  # INDEX, never the block SIZE. Get it wrong and the kernel indexes the KV cache with
+  # the wrong stride and returns silently wrong numbers.
+  - {name: block_size, type: int, default_value: 16}
+  - {name: num_query_heads, type: int, default_value: 16}
+  - {name: num_kv_heads, type: int, default_value: 2}
+  # num_seqs is IR-LIVE and not merely descriptive: it drives spec.binary_search_iters,
+  # a compile-time loop trip count (attention_tiled_2d.py:1252), AND it is kernarg slot
+  # 16, AND it is the +num_seqs slack term in grid.y. kernel_name() does NOT interpolate
+  # it, so two specs differing only here collide on symbol while emitting different
+  # machine code -- legal (uniqueness is (toc_key, symbol)) but it must reach the
+  # catalog or the descriptor cannot state which binary it describes.
+  - {name: num_seqs, type: int, default_value: 1}
+  # sliding_window: the left-context window W, 0 = disabled. Derived from the graph's
+  # left_bound. Changes the emitted KV-loop bound, so it is part of binary identity.
+  - {name: sliding_window, type: int, default_value: 0}
+  # --- geometry the dispatcher resolves per shape ---
+  - {name: num_warps, type: int, default_value: 4}
+  - {name: block_m_per_warp, type: int, default_value: 16}
+  - {name: tile_size, type: int, default_value: 64}
+  - {name: waves_per_eu, type: int, default_value: 2}
+  # --- capability flags, as ints because the KMD has no bool type ---
+  # use_sinks: IN SCOPE and shipped -- unlike the dense engine, which declines it. The
+  # GPU reference declines sinks but the CPU reference computes them, and D1 makes
+  # rocKE's ref_paged_attn (which implements sinks directly) the numeric oracle here.
+  - {name: use_sinks, type: int, default_value: 0}
+  - {name: use_alibi, type: int, default_value: 0}
+  # has_softcap and use_qq_bias: shipped as 0 in EVERY variant, and that is forced
+  # rather than chosen. graph_contract.md §2 enumerates all 41 SdpaAttributes fields:
+  # there is no softcap attribute and no query-query bias attribute, so no graph can
+  # ever request either. They stay in the catalog so the matcher compares them and a
+  # softcap-built binary cannot be selected by a plain graph -- the second layer the
+  # dense engine's varlen/paged fields were added to provide. Reported at stage 9 as a
+  # SCHEMA gap, not an integration gap.
+  - {name: has_softcap, type: int, default_value: 0}
+  - {name: use_qq_bias, type: int, default_value: 0}
+  # --- IR-live flags resolved per shape, including the D256 override cohort ---
+  # These seven are the fields _d256_gfx950_spec_overrides() rewrites for exactly the
+  # D256 cohort. They are in the catalog because the descriptor must state which binary
+  # it describes -- kernel_name() interpolates most of them, and a variant that takes
+  # the KMD default instead of the resolved value describes a DIFFERENT kernel.
+  #
+  # NEVER pass one of these to --knobs. Pinning one off-cohort silently builds a
+  # different binary (7 fields differ, different kernel name, no error). Two of them
+  # (kq_lds_pad_halves, softmax_interleave_mode) are int-typed and would otherwise look
+  # like perfectly good knobs. That is the trap.
+  - {name: use_kq_lds_pad, type: int, default_value: 0}
+  - {name: kq_lds_pad_halves, type: int, default_value: 8}
+  - {name: use_mfma32_skip_legacy_qreg, type: int, default_value: 0}
+  - {name: use_k_single_buffer, type: int, default_value: 0}
+  - {name: use_q_direct_reg, type: int, default_value: 0}
+  - {name: softmax_interleave_mode, type: int, default_value: 1}
+  - {name: use_mask_phase_split, type: int, default_value: 0}
+  # --- the remaining dispatcher-varied IR-live flags (measured to vary across the 52
+  # servable shapes; a field that varies and is not in the catalog is a descriptor
+  # claiming a layout it was not built with) ---
+  - {name: use_mfma_32x32, type: int, default_value: 0}
+  - {name: use_transposed_qk_32x32, type: int, default_value: 0}
+  - {name: use_transposed_scalar_state, type: int, default_value: 0}
+  - {name: use_transposed_mask_once, type: int, default_value: 0}
+  - {name: use_transposed_half_local_pv, type: int, default_value: 0}
+  - {name: use_transposed_mask_limit, type: int, default_value: 0}
+  - {name: use_fast_paged_kv_desc, type: int, default_value: 0}
+  - {name: use_i64_kv_addr, type: int, default_value: 0}
+  - {name: use_softmax_mfma_interleave, type: int, default_value: 0}
+  # --- declined features, in the catalog so a wrongly-built variant is UNSELECTABLE ---
+  # The dense engine learned this the hard way: its varlen/paged fields were absent, so
+  # the matcher was structurally unable to refuse a varlen- or paged-built variant even
+  # in principle, and nothing in the packer or validator cross-checks
+  # kernel_source.spec against metadata either. Every shipped variant carries 0 here.
+  - {name: use_fp8_mfma_qk, type: int, default_value: 0}
+  - {name: use_fp8_mfma_pv, type: int, default_value: 0}
+  - {name: use_register_pv, type: int, default_value: 0}
+
+# Every field the matcher compares. Written from the RESOLVED spec, so a value the
+# dispatcher derived reaches the catalog rather than being defaulted away.
+metadata_fields:
+  - dtype
+  - head_size
+  - block_size
+  - num_query_heads
+  - num_kv_heads
+  - num_seqs
+  - sliding_window
+  - num_warps
+  - block_m_per_warp
+  - tile_size
+  - waves_per_eu
+  - use_sinks
+  - use_alibi
+  - has_softcap
+  - use_qq_bias
+  - use_kq_lds_pad
+  - kq_lds_pad_halves
+  - use_mfma32_skip_legacy_qreg
+  - use_k_single_buffer
+  - use_q_direct_reg
+  - softmax_interleave_mode
+  - use_mask_phase_split
+  - use_mfma_32x32
+  - use_transposed_qk_32x32
+  - use_transposed_scalar_state
+  - use_transposed_mask_once
+  - use_transposed_half_local_pv
+  - use_transposed_mask_limit
+  - use_fast_paged_kv_desc
+  - use_i64_kv_addr
+  - use_softmax_mfma_interleave
+  - use_fp8_mfma_qk
+  - use_fp8_mfma_pv
+  - use_register_pv
+
+# The builder's OWN spec class -- declared rather than omitted so dispatch_parity.py can
+# check every --knobs name against its real fields. Without it, a knob that can only
+# reach the catalog and never the binary would be crossed silently, emitting arms that
+# are the same kernel twice and a sweep that measures exactly 1.000x.
+arch_spec:
+  module: kernels.gfx950.attention_tiled_2d
+  class: UnifiedAttention2DTiledSpec
+
+# ---------------------------------------------------------------------------
+# Stage-3 sweep candidates (tools/knob_sweep.py).
+#
+# `verdict:` = settled, knob_sweep skips it (Knob.settled, knob_sweep.py:77-79).
+# `hazard:`  = still swept, but with the named gate in front.
+#
+# NOTHING IS PROMOTED TO AN AXIS IN v1, and that is a deliberate 4a-3 gate-2 decision:
+# every surviving knob must trace to a measurement, and a knob in the shipping set with
+# no isolation arm behind it is a guess wearing evidence's clothes. The v1 set is
+# dispatcher parity -- every value is one rocKE itself resolved.
+# ---------------------------------------------------------------------------
+
+sweep:
+  head_size:
+    values: [64, 128, 256]
+    verdict: >-
+      A GRAPH dimension (Q.dim[3]), not a tuning knob. Listed so the exclusion reads as
+      considered rather than forgotten.
+
+  block_size:
+    values: [16, 32, 64]
+    verdict: >-
+      A GRAPH dimension -- K.dim[2], the paged container's page size
+      (graph_contract.md §5 G2). The caller's KV cache geometry decides it; we cannot
+      choose it, and a variant compiled for the wrong one indexes the cache with the
+      wrong stride.
+
+  num_seqs:
+    values: [1]
+    verdict: >-
+      A GRAPH dimension (the batch), and simultaneously IR-live via binary_search_iters.
+      Varies across the corpus because callers vary; not an axis we may pin.
+
+  sliding_window:
+    values: [0]
+    verdict: >-
+      A GRAPH feature: W comes from the request's own left bound.
+
+  num_warps:
+    values: [1, 2, 4]
+    hazard: >-
+      DISPATCHER-RESOLVED per shape today (measured: varies over {1,2,4} across the 52
+      servable shapes), so it is excluded automatically for the same reason the dense
+      engine's `persistent` is -- pinning it would build a geometry the library would
+      not have chosen. It is a genuine candidate the moment someone wants a tuning
+      axis, and the domain is bounded by supports_tiled_2d ({1,2,4,8}) intersected with
+      the block_m_per_warp=32 rule ({1,2,4}, the 1024-thread CTA cap). Measure before
+      pinning; do NOT carry the dense engine's knob set across.
+
+  block_m_per_warp:
+    values: [16, 32]
+    hazard: >-
+      Dispatcher-resolved (measured: both values occur). Coupled to num_warps by the
+      CTA cap -- 32 requires num_warps in {1,2,4} -- so the two cannot be swept
+      independently and a naive cross-product is mostly illegal.
+
+  tile_size:
+    values: [32, 64, 128]
+    hazard: >-
+      Dispatcher-resolved (measured: all three occur). Constrained three ways at once:
+      a positive multiple of block_size, an async-DMA payload floor
+      (tile_size*head_size >= num_warps*512), and the wave-uniformity rule. Most of the
+      cross-product is illegal, so an isolation arm must be generated by the dispatcher
+      rather than enumerated by hand.
+
+  waves_per_eu:
+    values: [2, 4]
+    hazard: >-
+      Dispatcher-resolved (measured: both occur). An LLVM occupancy attribute that
+      changes the binary but is NOT interpolated into kernel_name() -- so two arms
+      differing only here produce the same symbol with different machine code. Legal
+      (uniqueness is (toc_key, symbol)) but the arms must be distinguished by toc_key,
+      or a sweep silently measures one binary twice.
+
+  kv_ring_depth:
+    values: [2]
+    verdict: >-
+      SETTLED, and the exclusion has teeth: values in {2,3} raise NotImplementedError,
+      NOT ValueError (mining_tiled.md §1b -- 1 of 62 raises in __post_init__). Any
+      harness catching only ValueError misses it as an uncaught exception rather than a
+      decline.
+
+  kq_lds_pad_halves:
+    values: [8, 16]
+    verdict: >-
+      DO NOT SWEEP. One of the seven fields _d256_gfx950_spec_overrides() rewrites for
+      the D256 cohort. Pinning it off-cohort silently builds a different binary -- 7
+      fields differ and the kernel name changes, with no error. It is int-typed, so
+      --knobs would accept it: that is precisely the trap.
+
+  softmax_interleave_mode:
+    values: [1, 2]
+    verdict: >-
+      DO NOT SWEEP -- the second int-typed member of the D256 override set. Same
+      reasoning as kq_lds_pad_halves.
+
+  softmax_interleave_groups:
+    values: [4]
+    verdict: >-
+      Constant across every dispatch decision (measured), and only live when
+      softmax_interleave_mode == 2, which is itself override-owned.
+
+  sched_barrier_mask:
+    values: [0]
+    verdict: >-
+      Constant across every dispatch decision (measured). Also coupled: the builder
+      raises ValueError at attention_tiled_2d.py:1433 if use_sched_barrier and
+      use_softmax_mfma_interleave are both set, and the latter IS dispatcher-varied --
+      so an independent sweep of this knob would generate specs that fail to build.
+
+# ---------------------------------------------------------------------------
+# Ranking (tools/variant_reachability.py). Declares the SAME ranking the native scorer
+# performs, so the tool checks reachability instead of reporting NO RANKING DECLARED.
+#
+# `tile_size` and not block_size: block_size is a GRAPH dimension (the caller's page
+# size), so it is matched for equality, never ranked -- ranking on it would be ranking
+# on something the graph fixes. tile_size is the KV tile the kernel actually chooses,
+# it is the axis the async-DMA payload floor is written against, and a wider tile means
+# fewer block-table lookups per token. That is a real knob, which is what the skill's
+# carve-out requires: a score returning a CONSTANT is not a placeholder, because it
+# makes ranking arbitrary and hides mis-specialization.
+#
+# HONEST LIMIT, stated rather than discovered later: on the v1 parity set every shape
+# resolves exactly one variant, so no score is ever evaluated and no tie is ever broken.
+# The declaration arms the gate for the first tuning arm rather than defending anything
+# today. The tool models the PRE-AUTOTUNE path only and cannot call the native scorer.
+score:
+  field: tile_size
+  prefer: max
+
+# ---------------------------------------------------------------------------
+# Launch-surface audit (tools/launch_surface.py). One entry per thing Python computes
+# that the C++ engine restates by hand. Nothing in the build, the packer or the
+# validator compares the two halves, and a mismatch does not fail -- the kernel runs and
+# computes something else. Line numbers are anchors for a reader; --check compares field
+# NAMES and file EXISTENCE.
+# ---------------------------------------------------------------------------
+
+launch_surface:
+  - name: grid
+    python_source: >-
+      kernels/common/attention_unified.py:_get_2d_launch_meta (~4058-4103), branch B --
+      grid = (num_kv_heads, total_q // block_q + num_seqs, 1), where
+      block_m = num_warps * block_m_per_warp and
+      block_q = block_m // num_queries_per_kv if num_queries_per_kv <= block_m else 1.
+      THE `+ num_seqs` TERM IS THE VARLEN SLACK: one reserved padding q-block per
+      sequence, so ragged batches need no exact-division block count. Omit it in C++ and
+      the kernel UNDER-LAUNCHES, dropping tail blocks -- output rows never written,
+      which the harness reports as allClose=false with ZERO finite mismatches (never a
+      tolerance problem). The kernel's half of the contract is the binary search at
+      attention_tiled_2d.py:1247-1266, whose invariant (cu_q[i]//BLOCK_Q + i <= target)
+      exactly inverts this construction; both halves must be restated together.
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionTiledGeometry.hpp:gfx950AttentionTiledGeometry
+    kmd_fields: [num_kv_heads, num_query_heads, num_seqs, num_warps, block_m_per_warp]
+    guard: >-
+      gfx950AttentionTiledGeometry throws HIPDNN_PLUGIN_STATUS_BAD_PARAM at prepare() on
+      a non-positive extent, a num_warps outside {1,2,4,8}, a block_m_per_warp outside
+      {16,32}, or the block_m_per_warp=32 / num_warps=8 pair the 1024-thread CTA cap
+      forbids -- rather than launching an empty, negative or over-wide grid.
+    test: >-
+      dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionTiledGeometry.cpp
+
+  - name: block
+    python_source: >-
+      kernels/common/attention_unified.py:_get_2d_launch_meta (~4098-4102) --
+      block = (wave_size * num_warps, 1, 1), wave_size 64 on gfx950 (32 only on
+      gfx1250, which this engine does not ship). NOT a constant: it is 64, 128 or 256
+      threads depending on the variant's own num_warps.
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionTiledGeometry.hpp:gfx950AttentionTiledGeometry
+    kmd_fields: [num_warps]
+    guard: >-
+      the same num_warps validity check as the grid surface; kernelMatches additionally
+      refuses any value outside what supports_tiled_2d admits.
+    test: >-
+      dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionTiledGeometry.cpp
+
+  - name: kernargs
+    python_source: >-
+      kernels/gfx950/attention_tiled_2d.py (~1191-1230) -- EIGHTEEN b.param(...) slots,
+      ALL UNCONDITIONALLY DECLARED, in this order: output, query, key_cache,
+      value_cache, sink, block_tables, seq_lens, alibi_slopes, qq_bias,
+      query_start_len, then the scalars scale, k_scale, v_scale, out_scale, softcap,
+      num_seqs, block_table_stride, qq_bias_stride_0.
+      NOTE the ABI grep in the runbook (`\.ptr\(|\.scalar\(`) returns ZERO here and is a
+      FAILED QUERY, not a zero -- this module declares its ABI with b.param(...).
+      Positive control: the pattern matches in attention_dense_prefill.py:67-70.
+      Seven slots are conditionally CONSUMED by baked flags but always PRESENT, so
+      unlike the dense engine there is no reduced-arity signature and no argument-count
+      hazard. block_table_stride is in ELEMENTS, not bytes (attention_unified.py:4181-4184
+      reads a torch .stride(0)); passing bytes is a 4x indexing error into the KV cache,
+      i.e. silently wrong numbers rather than a fault.
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionTiledNative.cpp:Gfx950AttentionTiledDispatchHandler::launch
+    kmd_fields: [use_sinks, use_alibi, use_qq_bias, has_softcap]
+    guard: >-
+      the slot COUNT is fixed at 18 by the kernel, so no decline is load-bearing for
+      arity here. What the declines protect is COVERAGE -- a graph asking for a
+      capability no shipped variant bakes. Stated plainly because it is a weaker
+      argument than the dense engine's and must not be read as the same one.
+    test: >-
+      dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionTiledMatchers.cpp
+
+  - name: paged_kv_layout
+    python_source: >-
+      kernels/gfx950/attention_tiled_2d.py (~1884-1887, 1936-1945, 2044-2079) -- the KV
+      cache is [num_blocks, block_size, num_kv_heads, head_size] with byte strides
+      (BS*NUM_KV*HD, NUM_KV*HD, HD, 1) * KV_BYTES, and the block table resolves axis 0
+      only: physical_block = block_tables[seq_idx*block_table_stride + tile_idx].
+      THIS IS THE HIGHEST-RISK SURFACE IN THE INTEGRATION -- graph_contract.md §5 G2
+      derives the hipDNN side (block_size = K.dim[2]; the K/V tensor IS the container),
+      and getting it wrong indexes the cache with the wrong stride and returns silently
+      wrong numbers rather than faulting.
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionTiledNative.cpp:pagedKvGeometryFor
+    kmd_fields: [block_size, num_kv_heads, head_size]
+    guard: >-
+      graph_match derives block_size from K.dim[2] and declines unless it is in
+      {16,32,64}; requires K.dim[2] == V.dim[2], K.dim[1] == V.dim[1] == num_kv_heads
+      and K.dim[3] == head_size; requires page_table_k and page_table_v both present,
+      rank-2 and shape-equal (the kernel has ONE block_tables_ptr serving both caches);
+      and where the graph sets max_seq_len_kv, cross-checks
+      max_seq_len_kv <= page_table_k.dim[1] * K.dim[2] -- free redundancy on the one row
+      that fails silently.
+    test: >-
+      dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionTiledMatchers.cpp
+
+  - name: spec_resolution
+    python_source: >-
+      kernels/common/attention_unified.py:_tiled_spec_from_problem (~2756-2767), the
+      PRODUCTION wrapper (decision D5) -- delegates to
+      builders/common/attention_spec_builder.py:_tiled_spec_from_problem and then
+      applies _resolve_lds_budget, which the builders-layer function does not. For the
+      D256 cohort _spec_gfx950_generic ALREADY folds _d256_gfx950_spec_overrides() in
+      via a tail replace(); the composition is idempotent on-cohort and builds a
+      DIFFERENT binary off-cohort.
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionTiledNative.cpp:prepare
+      -- prepare() trusts the KMD's resolved values verbatim; the engine has no path
+      that re-derives what the dispatcher would have chosen.
+    kmd_fields: [num_warps, block_m_per_warp, tile_size, waves_per_eu, use_kq_lds_pad,
+                 kq_lds_pad_halves, use_mfma32_skip_legacy_qreg, use_k_single_buffer,
+                 use_q_direct_reg, softmax_interleave_mode, use_mask_phase_split]
+    # `none` is the honest answer, and --allow-unguarded is NOT the right response.
+    # Re-deriving the resolution in C++ would be a SECOND implementation of the rule --
+    # exactly the drift this file exists to prevent, and exactly what the D256 override
+    # fold makes catastrophic (7 fields, different binary, no error). The defence is
+    # OFFLINE: the descriptors are generated by calling the real production resolver,
+    # so a rule is applied rather than transcribed.
+    guard: none
+    test: projects/hipdnn/tools/IngestorGenerator/tests/test_tiled_dispatch_parity.py
+
+  - name: applicability
+    python_source: >-
+      Three surfaces, not one (mining_tiled.md §1). (a) supports_tiled_2d
+      (attention_tiled_2d.py:895-1020), 15 decline rows -- of which dtype, head_size,
+      block_size and num_queries_per_kv are GRAPH-DERIVABLE and must be mirrored;
+      (b) UnifiedAttention2DTiledSpec.__post_init__ (:477-780), 62 raises, 61 ValueError
+      and 1 NotImplementedError, overwhelmingly SPEC-INTERNAL flag-combination policing;
+      (c) four builder-body raises (:1433, :1868, :2799, :4265) that NEITHER official
+      surface catches. Surface (c) is NOT a graph_match concern -- no graph field
+      reaches it -- so it is a step-5 build gate, correcting the plan's claim that these
+      are Tier-1 matcher rows.
+      The 2D/3D scope gate is OURS, not rocKE's: supports_native_unified_attention_tiled
+      returned (True,'supported') for 12 of 12 measured 3D-routed shapes.
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionTiledNative.cpp:gfx950AttentionTiledGraphMatches
+      and kernelMatches
+    kmd_fields:
+      [dtype, head_size, block_size, num_query_heads, num_kv_heads, num_seqs,
+       sliding_window, use_sinks, use_alibi, has_softcap, use_qq_bias,
+       use_fp8_mfma_qk, use_fp8_mfma_pv, use_register_pv]
+    guard: >-
+      kernelMatches requires strict equality between the graph's derived shape and every
+      shape field, and refuses any variant whose metadata says it was built with a
+      declined capability.
+    test: >-
+      dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionTiledMatchers.cpp
+
+# ---------------------------------------------------------------------------
+# The APPLICABILITY ORACLE (tools/reconcile_applicability.py).
+#
+# THIS GATE IS APPROXIMATE FOR THIS KERNEL, in a way it was not for dense, and the
+# report must say so rather than claim a clean gate it did not earn.
+#
+# rocKE registers eight attention candidates (enumerated, not assumed):
+#   attention_dense x2 (prio 3), d256_decode, wmma_attention_fwd, dense_pipe,
+#   d256_gfx950 (prio 5), unified_2d, unified_3d (prio 10).
+# NONE corresponds to the generic tiled path this engine ports. The closest usable
+# oracle is `unified_2d`.
+#
+# `match: algorithm` and not `family`: ALL EIGHT share family="attention_unified", so
+# matching on family selects everything and the gate would pass by asking nothing.
+#
+# No request.defaults are needed -- unlike attention_dense, unified_2d is not opt-in.
+reference_candidates:
+  module: dispatch.attention
+  function: attention_candidates
+  match: algorithm
+  family: unified_2d
