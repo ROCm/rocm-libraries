@@ -72,15 +72,17 @@ inline constexpr int64_t GFX950_TILED_BLOCK_SIZE_MAX = 64;
 /// num_warps in {1,2,4}, because 8 warps x 32 rows would exceed it.
 inline constexpr int64_t GFX950_TILED_MAX_CTA_THREADS = 1024;
 
-/// True for a `block_size` the kernel can be built for.
-inline constexpr bool gfx950TiledBlockSizeIsLegal(int64_t blockSize)
+/// True for a `block_size` the kernel can be built for. `constexpr` already implies
+/// inline for a function, so spelling both is redundant and this provider treats
+/// readability-redundant-inline-specifier as an error.
+constexpr bool gfx950TiledBlockSizeIsLegal(int64_t blockSize)
 {
     return blockSize == GFX950_TILED_BLOCK_SIZE_MIN || blockSize == GFX950_TILED_BLOCK_SIZE_MID
            || blockSize == GFX950_TILED_BLOCK_SIZE_MAX;
 }
 
 /// True for a `num_warps` in the predicate's own set.
-inline constexpr bool gfx950TiledNumWarpsIsLegal(int64_t numWarps)
+constexpr bool gfx950TiledNumWarpsIsLegal(int64_t numWarps)
 {
     return numWarps == 1 || numWarps == 2 || numWarps == 4 || numWarps == 8;
 }

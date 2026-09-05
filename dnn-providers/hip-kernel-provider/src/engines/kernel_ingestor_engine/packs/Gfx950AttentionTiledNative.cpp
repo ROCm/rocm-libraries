@@ -935,19 +935,16 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
-    // The graph's sink request against the variant's baked flag, in BOTH directions: a
-    // sink graph needs a sink binary (the epilogue's denominator differs), and a
-    // sink binary must not serve a plain graph (it would read the null slot-5 pointer).
-    const auto sink = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, SINK_TOKEN);
-    if(!sink.has_value() || (intField(USE_SINKS_FIELD) != 0) != (*sink != 0))
-    {
-        return false;
-    }
-
     // ABSENT MEANS NOT-BUILT-WITH-IT, which is why this reads through tryGetMetadata
     // rather than getIntMetadata. getIntMetadata THROWS on a missing field -- it does
     // not default -- so comparing a field a descriptor does not carry would turn a
-    // routine non-match into an exception escaping the matcher.
+    // routine non-match into an EXCEPTION ESCAPING THE MATCHER.
+    //
+    // Declared HERE, above the sink comparison, and that placement is the fix for a
+    // real defect these tests caught: the sink check below used to read `use_sinks`
+    // through `intField`, so a descriptor predating the capability fields threw
+    // "kernel ... has no metadata field 'use_sinks'" out of kernelMatches instead of
+    // simply not matching.
     const auto featureIsSet = [&kernel](std::string_view field) {
         const auto value = kernel.tryGetMetadata(std::string(field));
         if(!value.has_value())
@@ -957,6 +954,15 @@ bool kernelMatches(const MatchContext& context,
         const auto* held = std::get_if<int64_t>(&*value);
         return held != nullptr && *held != 0;
     };
+
+    // The graph's sink request against the variant's baked flag, in BOTH directions: a
+    // sink graph needs a sink binary (the epilogue's denominator differs), and a
+    // sink binary must not serve a plain graph (it would read the null slot-5 pointer).
+    const auto sink = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, SINK_TOKEN);
+    if(!sink.has_value() || featureIsSet(USE_SINKS_FIELD) != (*sink != 0))
+    {
+        return false;
+    }
 
     // A variant compiled FOR a declined capability must never be selected.
     //
@@ -1263,14 +1269,25 @@ private:
     const compilation::KpackKernelLoader& _kpackLoader;
 };
 
-} // namespace
-
+/// This pack's kpack module cache, process-lifetime.
+///
+/// INTERNAL LINKAGE, unlike the dense sibling's equivalent, which sits outside the
+/// anonymous namespace. Nothing outside this translation unit names it -- the
+/// IngestorPacks.cpp row references `resetGfx950AttentionTiledModuleCache`, not the
+/// cache itself -- so clang-tidy's misc-use-internal-linkage is right to insist, and
+/// it is enforced as an error on this provider. The dense pack predates the check
+/// reaching that file; this is the shape a new pack should copy.
 compilation::KpackModuleCache& gfx950AttentionTiledKpackModuleCache()
 {
     static compilation::KpackModuleCache s_moduleCache;
     return s_moduleCache;
 }
 
+} // namespace
+
+// OUTSIDE the anonymous namespace, and it must be: the IngestorPacks.cpp `s_packs` row
+// names this function as its `resetModuleCache`, and the .hpp declares it. Hiding it
+// here would compile and then fail to link the splice.
 void resetGfx950AttentionTiledModuleCache()
 {
     gfx950AttentionTiledKpackModuleCache().clear();

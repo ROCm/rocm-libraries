@@ -44,7 +44,7 @@
  *    `block_tables_ptr` and `seq_lens_ptr` unconditionally and has no dense mode, so a
  *    graph WITHOUT them is the decline. Both directions are tested.
  *  - **SEQUENCE LENGTHS ARE NOT COMPARED.** `UnifiedAttention2DTiledSpec` has no
- *    total_q/max_seqlen_*/batch field, so a variant serves any sequence length. A test
+ *    no total_q, max_seqlen_q, max_seqlen_k or batch field, so a variant serves any sequence length. A test
  *    asserting seqlen equality -- which the dense matcher requires -- would here assert
  *    a bug.
  *  - **`block_size` IS DERIVED FROM `K.dims[SEQ_AXIS]`**, because hipDNN has no
@@ -123,7 +123,17 @@ std::vector<int64_t> bhsdStrides(int64_t heads, int64_t sequence, int64_t headSi
 /// A DIFFERENT pattern from bshdStrides, which is why K/V get their own predicate.
 std::vector<int64_t> pagedKvStrides(int64_t pageSize, int64_t kvHeads, int64_t headSize)
 {
-    return {pageSize * kvHeads * headSize, kvHeads * headSize, headSize, 1};
+    // Returned POSITIONALLY, indexed by hipDNN's logical axes (B, H, S, D) -- which for
+    // a paged container carry (num_blocks, num_kv_heads, page_size, head_size). So the
+    // HEAD axis (index 1) gets `head_size` and the SEQ axis (index 2) gets
+    // `kv_heads * head_size`, NOT the other way round.
+    //
+    // Getting this backwards is exactly the bug these tests caught on their first run:
+    // the helper emitted {blk, kvh*hs, hs, 1}, which puts the token stride on the head
+    // axis. Every ACCEPT case then failed while every DECLINE passed -- the signature
+    // of a matcher that declines everything, and the reason to always ship the accept
+    // direction alongside the declines.
+    return {pageSize * kvHeads * headSize, headSize, kvHeads * headSize, 1};
 }
 
 /// Everything a case may vary. Defaults describe the servable graph above; each test
@@ -200,192 +210,207 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     const std::vector<int64_t> oDims{1, spec.numQueryHeads, spec.totalQ, spec.headSizeV};
 
     const auto qStrides = spec.qBhsd ? bhsdStrides(spec.numQueryHeads, spec.totalQ, spec.headSize)
-                                     :
-bshdStrides(spec.numQueryHeads, spec.totalQ, spec.headSize);
-const auto kStrides = spec.kvDenseStrides
-                          ? bshdStrides(spec.numKvHeads, spec.blockSize, spec.headSize)
-                          : pagedKvStrides(spec.blockSize, spec.numKvHeads, spec.headSize);
-const auto vStrides = spec.kvDenseStrides
-                          ? bshdStrides(spec.numKvHeads, spec.blockSize, spec.headSizeV)
-                          : pagedKvStrides(spec.blockSize, spec.numKvHeads, spec.headSizeV);
-const auto oStrides = bshdStrides(spec.numQueryHeads, spec.totalQ, spec.headSizeV);
+                                     : bshdStrides(spec.numQueryHeads, spec.totalQ, spec.headSize);
+    // The WRONG layout for a K/V container is HEAD-MAJOR (bhsd): all tokens of one head
+    // contiguous, heads outermost. `bshdStrides` will NOT do here -- for a paged container
+    // the token-major and container forms are byte-IDENTICAL, so a negative built on it can
+    // never decline and asserts nothing. That vacuity is what the first run of these tests
+    // exposed, and it is the same class of defect as a matcher stuck on `true`.
+    const auto kStrides = spec.kvDenseStrides
+                              ? bhsdStrides(spec.numKvHeads, spec.blockSize, spec.headSize)
+                              : pagedKvStrides(spec.blockSize, spec.numKvHeads, spec.headSize);
+    const auto vStrides = spec.kvDenseStrides
+                              ? bhsdStrides(spec.numKvHeads, spec.blockSize, spec.headSizeV)
+                              : pagedKvStrides(spec.blockSize, spec.numKvHeads, spec.headSizeV);
+    const auto oStrides = bshdStrides(spec.numQueryHeads, spec.totalQ, spec.headSizeV);
 
-// Null, not empty: the field is omitted entirely, so strides() returns nullptr.
-// Applicability runs before anything has validated a caller-supplied graph.
-const std::vector<int64_t>* const qStridesPtr = spec.omitStrides ? nullptr : &qStrides;
-const std::vector<int64_t>* const kStridesPtr = spec.omitStrides ? nullptr : &kStrides;
-const std::vector<int64_t>* const vStridesPtr = spec.omitStrides ? nullptr : &vStrides;
-const std::vector<int64_t>* const oStridesPtr = spec.omitStrides ? nullptr : &oStrides;
+    // Null, not empty: the field is omitted entirely, so strides() returns nullptr.
+    // Applicability runs before anything has validated a caller-supplied graph.
+    const std::vector<int64_t>* const qStridesPtr = spec.omitStrides ? nullptr : &qStrides;
+    const std::vector<int64_t>* const kStridesPtr = spec.omitStrides ? nullptr : &kStrides;
+    const std::vector<int64_t>* const vStridesPtr = spec.omitStrides ? nullptr : &vStrides;
+    const std::vector<int64_t>* const oStridesPtr = spec.omitStrides ? nullptr : &oStrides;
 
-std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-tensors.push_back(data_objects::CreateTensorAttributesDirect(
-    builder, Q_UID, nullptr, spec.dataType, qStridesPtr, &qDims, false));
-tensors.push_back(data_objects::CreateTensorAttributesDirect(
-    builder, K_UID, nullptr, spec.dataType, kStridesPtr, &kDims, false));
-tensors.push_back(data_objects::CreateTensorAttributesDirect(
-    builder, V_UID, nullptr, spec.vDataType.value_or(spec.dataType), vStridesPtr, &vDims, false));
-tensors.push_back(data_objects::CreateTensorAttributesDirect(
-    builder, O_UID, nullptr, spec.dataType, oStridesPtr, &oDims, false));
-
-// The page tables: [num_seqs, max_blocks_per_seq], dense i32 rows. The row stride
-// IS the inner extent unless the case deliberately pads it.
-const std::vector<int64_t> ptDims{spec.numSeqs, spec.maxBlocksPerSeq};
-const std::vector<int64_t> ptStrides{
-    spec.paddedPageTable ? spec.maxBlocksPerSeq + 8 : spec.maxBlocksPerSeq, 1};
-const std::vector<int64_t> ptVDims{
-    spec.numSeqs, spec.mismatchedPageTables ? spec.maxBlocksPerSeq / 2 : spec.maxBlocksPerSeq};
-const std::vector<int64_t> ptVStrides{
-    spec.mismatchedPageTables ? spec.maxBlocksPerSeq / 2 : spec.maxBlocksPerSeq, 1};
-if(spec.withPageTables)
-{
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                 PAGE_TABLE_K_UID,
-                                                                 nullptr,
-                                                                 data_objects::DataType::INT32,
-                                                                 &ptStrides,
-                                                                 &ptDims,
-                                                                 false));
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                 PAGE_TABLE_V_UID,
-                                                                 nullptr,
-                                                                 data_objects::DataType::INT32,
-                                                                 &ptVStrides,
-                                                                 &ptVDims,
-                                                                 false));
-}
-
-// The varlen length vectors: one i32 per sequence.
-const std::vector<int64_t> lenDims{spec.numSeqs};
-const std::vector<int64_t> lenStrides{1};
-if(spec.withSeqLens)
-{
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                 SEQ_LEN_Q_UID,
-                                                                 nullptr,
-                                                                 data_objects::DataType::INT32,
-                                                                 &lenStrides,
-                                                                 &lenDims,
-                                                                 false));
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                 SEQ_LEN_KV_UID,
-                                                                 nullptr,
-                                                                 data_objects::DataType::INT32,
-                                                                 &lenStrides,
-                                                                 &lenDims,
-                                                                 false));
-}
-
-// Sinks: one f32 per query head.
-const std::vector<int64_t> sinkDims{spec.numQueryHeads};
-const std::vector<int64_t> sinkStrides{1};
-if(spec.withSink)
-{
+    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
     tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, SINK_UID, nullptr, data_objects::DataType::FLOAT, &sinkStrides, &sinkDims, false));
-}
+        builder, Q_UID, nullptr, spec.dataType, qStridesPtr, &qDims, false));
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, K_UID, nullptr, spec.dataType, kStridesPtr, &kDims, false));
+    tensors.push_back(
+        data_objects::CreateTensorAttributesDirect(builder,
+                                                   V_UID,
+                                                   nullptr,
+                                                   spec.vDataType.value_or(spec.dataType),
+                                                   vStridesPtr,
+                                                   &vDims,
+                                                   false));
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, O_UID, nullptr, spec.dataType, oStridesPtr, &oDims, false));
 
-const auto attributesFor = [&]() {
-    data_objects::SdpaAttributesBuilder attributesBuilder(builder);
-    attributesBuilder.add_q_tensor_uid(Q_UID);
-    attributesBuilder.add_k_tensor_uid(K_UID);
-    attributesBuilder.add_v_tensor_uid(V_UID);
-    attributesBuilder.add_o_tensor_uid(O_UID);
-
+    // The page tables: [num_seqs, max_blocks_per_seq], dense i32 rows. The row stride
+    // IS the inner extent unless the case deliberately pads it.
+    const std::vector<int64_t> ptDims{spec.numSeqs, spec.maxBlocksPerSeq};
+    const std::vector<int64_t> ptStrides{
+        spec.paddedPageTable ? spec.maxBlocksPerSeq + 8 : spec.maxBlocksPerSeq, 1};
+    const std::vector<int64_t> ptVDims{
+        spec.numSeqs, spec.mismatchedPageTables ? spec.maxBlocksPerSeq / 2 : spec.maxBlocksPerSeq};
+    const std::vector<int64_t> ptVStrides{
+        spec.mismatchedPageTables ? spec.maxBlocksPerSeq / 2 : spec.maxBlocksPerSeq, 1};
     if(spec.withPageTables)
     {
-        attributesBuilder.add_page_table_k_tensor_uid(PAGE_TABLE_K_UID);
-        attributesBuilder.add_page_table_v_tensor_uid(PAGE_TABLE_V_UID);
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
+                                                                     PAGE_TABLE_K_UID,
+                                                                     nullptr,
+                                                                     data_objects::DataType::INT32,
+                                                                     &ptStrides,
+                                                                     &ptDims,
+                                                                     false));
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
+                                                                     PAGE_TABLE_V_UID,
+                                                                     nullptr,
+                                                                     data_objects::DataType::INT32,
+                                                                     &ptVStrides,
+                                                                     &ptVDims,
+                                                                     false));
     }
+
+    // The varlen length vectors: one i32 per sequence.
+    const std::vector<int64_t> lenDims{spec.numSeqs};
+    const std::vector<int64_t> lenStrides{1};
     if(spec.withSeqLens)
     {
-        attributesBuilder.add_seq_len_q_tensor_uid(SEQ_LEN_Q_UID);
-        attributesBuilder.add_seq_len_kv_tensor_uid(SEQ_LEN_KV_UID);
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
+                                                                     SEQ_LEN_Q_UID,
+                                                                     nullptr,
+                                                                     data_objects::DataType::INT32,
+                                                                     &lenStrides,
+                                                                     &lenDims,
+                                                                     false));
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
+                                                                     SEQ_LEN_KV_UID,
+                                                                     nullptr,
+                                                                     data_objects::DataType::INT32,
+                                                                     &lenStrides,
+                                                                     &lenDims,
+                                                                     false));
     }
+
+    // Sinks: one f32 per query head.
+    const std::vector<int64_t> sinkDims{spec.numQueryHeads};
+    const std::vector<int64_t> sinkStrides{1};
     if(spec.withSink)
     {
-        attributesBuilder.add_sink_token_tensor_uid(SINK_UID);
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
+                                                                     SINK_UID,
+                                                                     nullptr,
+                                                                     data_objects::DataType::FLOAT,
+                                                                     &sinkStrides,
+                                                                     &sinkDims,
+                                                                     false));
     }
 
-    if(spec.leftBound.has_value())
-    {
-        attributesBuilder.add_left_bound(*spec.leftBound);
-    }
-    if(spec.rightBound.has_value())
-    {
-        attributesBuilder.add_right_bound(*spec.rightBound);
-    }
-    attributesBuilder.add_diagonal_alignment(spec.alignment);
-    attributesBuilder.add_causal_mask(spec.causalMaskDeprecated);
-    attributesBuilder.add_causal_mask_bottom_right(spec.causalMaskBottomRightDeprecated);
-    if(spec.attnScaleValue.has_value())
-    {
-        attributesBuilder.add_attn_scale_value(*spec.attnScaleValue);
-    }
-    if(spec.maxSeqLenKv.has_value())
-    {
-        attributesBuilder.add_max_seq_len_kv(*spec.maxSeqLenKv);
-    }
+    const auto attributesFor = [&]() {
+        data_objects::SdpaAttributesBuilder attributesBuilder(builder);
+        attributesBuilder.add_q_tensor_uid(Q_UID);
+        attributesBuilder.add_k_tensor_uid(K_UID);
+        attributesBuilder.add_v_tensor_uid(V_UID);
+        attributesBuilder.add_o_tensor_uid(O_UID);
 
-    if(spec.attnMaskUid.has_value())
-    {
-        attributesBuilder.add_attn_mask_tensor_uid(*spec.attnMaskUid);
-    }
-    if(spec.scaleTensorUid.has_value())
-    {
-        attributesBuilder.add_scale_tensor_uid(*spec.scaleTensorUid);
-    }
-    if(spec.blockMaskUid.has_value())
-    {
-        attributesBuilder.add_block_mask_tensor_uid(*spec.blockMaskUid);
-    }
-    if(spec.statsUid.has_value())
-    {
-        attributesBuilder.add_stats_tensor_uid(*spec.statsUid);
-    }
-    if(spec.descaleQUid.has_value())
-    {
-        attributesBuilder.add_descale_q_tensor_uid(*spec.descaleQUid);
-    }
-    if(spec.dropoutProbability.has_value())
-    {
-        attributesBuilder.add_dropout_probability(*spec.dropoutProbability);
-    }
-    if(spec.generateStats.has_value())
-    {
-        attributesBuilder.add_generate_stats(*spec.generateStats);
-    }
-    attributesBuilder.add_alibi_mask(spec.alibiMask);
-    attributesBuilder.add_padding_mask(spec.paddingMask);
-    attributesBuilder.add_mma_core_mode(spec.mmaCoreMode);
-    attributesBuilder.add_implementation(spec.implementation);
-    return attributesBuilder.Finish();
-};
+        if(spec.withPageTables)
+        {
+            attributesBuilder.add_page_table_k_tensor_uid(PAGE_TABLE_K_UID);
+            attributesBuilder.add_page_table_v_tensor_uid(PAGE_TABLE_V_UID);
+        }
+        if(spec.withSeqLens)
+        {
+            attributesBuilder.add_seq_len_q_tensor_uid(SEQ_LEN_Q_UID);
+            attributesBuilder.add_seq_len_kv_tensor_uid(SEQ_LEN_KV_UID);
+        }
+        if(spec.withSink)
+        {
+            attributesBuilder.add_sink_token_tensor_uid(SINK_UID);
+        }
 
-std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                               "sdpa",
-                                               data_objects::DataType::FLOAT,
-                                               data_objects::NodeAttributes::SdpaAttributes,
-                                               attributesFor().Union()));
-if(spec.twoNodes)
-{
+        if(spec.leftBound.has_value())
+        {
+            attributesBuilder.add_left_bound(*spec.leftBound);
+        }
+        if(spec.rightBound.has_value())
+        {
+            attributesBuilder.add_right_bound(*spec.rightBound);
+        }
+        attributesBuilder.add_diagonal_alignment(spec.alignment);
+        attributesBuilder.add_causal_mask(spec.causalMaskDeprecated);
+        attributesBuilder.add_causal_mask_bottom_right(spec.causalMaskBottomRightDeprecated);
+        if(spec.attnScaleValue.has_value())
+        {
+            attributesBuilder.add_attn_scale_value(*spec.attnScaleValue);
+        }
+        if(spec.maxSeqLenKv.has_value())
+        {
+            attributesBuilder.add_max_seq_len_kv(*spec.maxSeqLenKv);
+        }
+
+        if(spec.attnMaskUid.has_value())
+        {
+            attributesBuilder.add_attn_mask_tensor_uid(*spec.attnMaskUid);
+        }
+        if(spec.scaleTensorUid.has_value())
+        {
+            attributesBuilder.add_scale_tensor_uid(*spec.scaleTensorUid);
+        }
+        if(spec.blockMaskUid.has_value())
+        {
+            attributesBuilder.add_block_mask_tensor_uid(*spec.blockMaskUid);
+        }
+        if(spec.statsUid.has_value())
+        {
+            attributesBuilder.add_stats_tensor_uid(*spec.statsUid);
+        }
+        if(spec.descaleQUid.has_value())
+        {
+            attributesBuilder.add_descale_q_tensor_uid(*spec.descaleQUid);
+        }
+        if(spec.dropoutProbability.has_value())
+        {
+            attributesBuilder.add_dropout_probability(*spec.dropoutProbability);
+        }
+        if(spec.generateStats.has_value())
+        {
+            attributesBuilder.add_generate_stats(*spec.generateStats);
+        }
+        attributesBuilder.add_alibi_mask(spec.alibiMask);
+        attributesBuilder.add_padding_mask(spec.paddingMask);
+        attributesBuilder.add_mma_core_mode(spec.mmaCoreMode);
+        attributesBuilder.add_implementation(spec.implementation);
+        return attributesBuilder.Finish();
+    };
+
+    std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
     nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                                   "sdpa2",
+                                                   "sdpa",
                                                    data_objects::DataType::FLOAT,
                                                    data_objects::NodeAttributes::SdpaAttributes,
                                                    attributesFor().Union()));
-}
+    if(spec.twoNodes)
+    {
+        nodes.push_back(data_objects::CreateNodeDirect(builder,
+                                                       "sdpa2",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::NodeAttributes::SdpaAttributes,
+                                                       attributesFor().Union()));
+    }
 
-auto name = builder.CreateString("gfx950_attention_tiled_test");
-auto tensorsVector = builder.CreateVector(tensors);
-auto nodesVector = builder.CreateVector(nodes);
+    auto name = builder.CreateString("gfx950_attention_tiled_test");
+    auto tensorsVector = builder.CreateVector(tensors);
+    auto nodesVector = builder.CreateVector(nodes);
 
-data_objects::GraphBuilder graphBuilder(builder);
-graphBuilder.add_name(name);
-graphBuilder.add_tensors(tensorsVector);
-graphBuilder.add_nodes(nodesVector);
-builder.Finish(graphBuilder.Finish());
-return builder;
+    data_objects::GraphBuilder graphBuilder(builder);
+    graphBuilder.add_name(name);
+    graphBuilder.add_tensors(tensorsVector);
+    graphBuilder.add_nodes(nodesVector);
+    builder.Finish(graphBuilder.Finish());
+    return builder;
 }
 
 /// Resolving the matcher by the symbol name its DESCRIPTORS carry, rather than calling
@@ -480,7 +505,7 @@ bool matchKernel(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
     registerNativeIngestorSymbols();
     const auto graphMatcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
         std::string(GRAPH_MATCHER_SYMBOL));
-    const auto kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatchRegistry::resolve(
+    const auto kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
         std::string(KERNEL_MATCHER_SYMBOL));
 
     auto builder = buildSdpaGraph(graphSpec);
@@ -684,7 +709,7 @@ TEST(Gfx950AttentionTiledMatchers, RequiresSinkFlagToAgreeInBothDirections)
 {
     GraphSpec sinkGraph;
     sinkGraph.withSink = true;
-    KernelSpec plainKernel;
+    const KernelSpec plainKernel;
     KernelSpec sinkKernel;
     sinkKernel.useSinks = 1;
 
@@ -935,7 +960,9 @@ TEST(Gfx950AttentionTiledMatchers, DeclinesVariantsBakedForUnrequestableCapabili
 
 TEST(Gfx950AttentionTiledMatchers, DeclinesFp8BakedVariants)
 {
-    for(auto* field : {&KernelSpec::useFp8MfmaQk, &KernelSpec::useFp8MfmaPv})
+    // A pointer-to-member, spelled out: `auto*` deduces an ordinary pointer and does
+    // not accept `&KernelSpec::field`.
+    for(int64_t KernelSpec::*const field : {&KernelSpec::useFp8MfmaQk, &KernelSpec::useFp8MfmaPv})
     {
         KernelSpec kernel;
         kernel.*field = 1;

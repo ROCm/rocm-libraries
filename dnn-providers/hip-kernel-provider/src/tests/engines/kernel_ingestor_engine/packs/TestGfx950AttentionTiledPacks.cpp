@@ -43,8 +43,8 @@ const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet()
     if(match == sets.end())
     {
         ADD_FAILURE() << "descriptor set 'hipkernel:Gfx950AttentionTiled' is not installed";
-        static const hipdnn_plugin_sdk::ingestor::DescriptorSet empty{};
-        return empty;
+        static const hipdnn_plugin_sdk::ingestor::DescriptorSet s_empty{};
+        return s_empty;
     }
     return *match;
 }
@@ -59,10 +59,19 @@ TEST(TestGfx950AttentionTiledPacks, PackGfx950AttentionTiledShipsItsConfiguredKe
 {
     const auto& set = loadedSet();
     const auto match = std::find_if(set.packs.begin(), set.packs.end(), [](const auto& p) {
-        return p.name == "hipkernel:Gfx950AttentionTiled:gfx950_attention_tiled";
+        // The pack's real name, read from the shipped KDP rather than assumed: it is
+        // the SLUG-scoped form `hipkernel:<slug>`, matching the dense sibling. The
+        // generated stub guessed a doubled `hipkernel:<Engine>:<slug>`, which matches
+        // nothing -- and an ASSERT_NE on find_if's end() is how that surfaces.
+        return p.name == "hipkernel:gfx950_attention_tiled";
     });
     ASSERT_NE(match, set.packs.end());
-    EXPECT_EQ(match->kernels.size(), 48U);
+    // 39, not the 48 servable SHAPES. `UnifiedAttention2DTiledSpec` has no total_q,
+    // max_seqlen_q, max_seqlen_k or batch field, so shapes differing ONLY in sequence
+    // length resolve to the same binary and the generator emits one kernel for them.
+    // The generated stub's 48 was the shape count, which is the number to expect for a
+    // seqlen-specialized kernel like the dense sibling and wrong for this one.
+    EXPECT_EQ(match->kernels.size(), 39U);
 }
 
 TEST(TestGfx950AttentionTiledPacks, ExposesTheConfiguredKnobs)
@@ -123,8 +132,12 @@ TEST(TestGfx950AttentionTiledPacks, EveryKernelNamesItsPacksEmbeddedSource)
     {
         for(const auto& kernel : pack.kernels)
         {
-            EXPECT_EQ(kernel.source.kind,
-                      hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE);
+            // KPACK, not EMBEDDED_SOURCE. This engine is the `packaged` dialect: the
+            // descriptors are authored `kind: rocke` and hkp_pack lowers them through
+            // comgr at BUILD time, rewriting them to `kind: kpack` before the runtime
+            // loader ever sees them. The generated stub defaults to the direct_load
+            // spelling; the dense packaged sibling asserts KPACK for the same reason.
+            EXPECT_EQ(kernel.source.kind, hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK);
         }
     }
 }
