@@ -4,12 +4,14 @@
 #pragma once
 
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <iosfwd>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -19,76 +21,59 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "harness/IReferenceGraphExecutor.hpp"
+#include "harness/BundleMetadata.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/bundle/GraphSession.hpp"
+#include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/LoadedEngine.hpp"
+#include "harness/bundle/OutputComparison.hpp"
+#include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportClaims.hpp"
+#include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
 
-// Output tensors, keyed by uid. Used both for the engine's computed "actual"
-// outputs and for an expected source (golden from disk, or a reference executor's
-// output). Each set is a distinct allocation so engine and reference never write
-// the same buffers.
-using OutputTensors
-    = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+// OutputTensors and ExpectedTensorLookup come from OutputComparison.hpp, which owns
+// the comparison this harness drives.
 
-namespace detail
-{
-std::unordered_map<int64_t, void*> buildVariantPack(
-    TensorMap& inputs,
-    OutputTensors& outputs,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorAttributes,
-    const std::vector<int64_t>& outputTensorUids,
-    bool useDevice);
-}
+// detail::buildVariantPack() lives in VariantPackBuilder.hpp -- both harnesses use
+// it, so it is not this one's to own.
 
-// Verifies a bundle's engine output against an expected source chosen by the
-// verification mode (RFC 0010 §4.4):
-//
-//   actual   = the engine (the system under test), run once into fresh buffers.
-//   expected = golden data from disk, OR a reference executor's output.
-//
-// Auto mode fallback chain: golden → GPU ref → CPU ref → SKIP.
-// When golden outputs are present on disk, the comparison uses them directly
-// and no reference executor is run at all.
-//
-// Memory invariants for running engine + a reference off the same inputs:
-//   * INPUT tensors are read-only by both executors and are NEVER mark*Modified().
-//     The engine's rawDeviceData() uploads host->device (state becomes BOTH
-//     valid); a later CPU-ref rawHostData() therefore sees the host copy still
-//     valid and does NOT download — inputs stay intact across both runs.
-//   * OUTPUT buffers are separate ITensor objects per executor (engineOutputs vs
-//     refOutputs), so the two runs cannot stomp each other. Only output buffers
-//     are mark*Modified().
-//   * Virtual (inter-node) tensors are allocated internally by each executor; the
-//     variant packs we build carry only real (input + output) tensors.
-//
-// TODO(ALMIOPEN-1969 follow-up): Unify graph-init with the non-golden harness.
-//   Stage 1 — Route non-golden ops whose initializeBundle() is plain randomize
-//             (conv, matmul, BN-inference, reduction, rmsnorm-fwd, layernorm,
-//             pointwise) through the fill-inputs switch. Zero behavioral change.
-//   Stage 2 — Migrate remaining ops one at a time: copy the exact
-//             ranges/seeds from each non-golden subclass override
-//             into the corresponding fill function. Delete each override
-//             once its fill fn works.
-//   Stage 3 — Both harnesses share one init pipeline via fillInputs().
+/// Runs one bundle against the engine under test and decides what that says.
+///
+/// Fallback chain: golden → GPU ref → CPU ref → SKIP (RFC 0010 §4.4). Inputs are
+/// read-only (shared); outputs are separate allocations per executor.
+///
+/// **This class has no virtual members.** Everything that needs a GPU, a handle, a
+/// loaded engine plugin, or process-wide state lives behind one of the four
+/// collaborators in HarnessDependencies, so a unit test constructs the real harness
+/// with mocks rather than subclassing it to stub methods out. What is left here is
+/// the part worth testing: which oracle to try, how far the run got, and what that
+/// means for the graph's support claim.
+///
+/// Graph initialisation is still duplicated between this harness and
+/// BundleReferenceValidationHarness; unifying the two is future work.
 class IntegrationBundleVerificationHarness : public ::testing::Test
 {
 public:
-    explicit IntegrationBundleVerificationHarness(bool requiresDevice)
-        : _requiresDevice(requiresDevice)
+    explicit IntegrationBundleVerificationHarness(HarnessDependencies dependencies,
+                                                  std::optional<LoadedEngine> engineUnderTest = {})
+        : _deps(std::move(dependencies))
+        , _engineUnderTest(std::move(engineUnderTest))
     {
     }
 
-    void setBundle(std::shared_ptr<IntegrationTestBundle> bundle, std::filesystem::path path)
+    void setBundle(std::shared_ptr<IntegrationTestBundle> bundle,
+                   std::filesystem::path path,
+                   SupportClaimLocator claimLocator = {})
     {
         _bundle = std::move(bundle);
         _bundlePath = std::move(path);
+        _claimLocator = std::move(claimLocator);
 
         if(_bundle != nullptr && _bundle->metadata.seed.has_value())
         {
@@ -101,11 +86,14 @@ public:
         }
     }
 
-protected:
+    // Public rather than protected: the unit tests drive a real harness directly
+    // instead of subclassing it, so they need to call these. GTest calls them
+    // through the base class either way.
+    //
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
     {
-        if(_requiresDevice)
+        if(_deps.policy.useDevice())
         {
             SKIP_IF_NO_DEVICES();
         }
@@ -117,7 +105,7 @@ protected:
 
         if(auto reason = checkTomlSkip(currentTestName()))
         {
-            GTEST_SKIP() << "[arch " << TestConfig::get().getCurrentArch() << "] " << *reason;
+            GTEST_SKIP() << "[arch " << _deps.policy.arch << "] " << *reason;
         }
 
         applyMetadataGuards();
@@ -126,42 +114,109 @@ protected:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override
     {
-        runComparison();
+        // One from_binary, one ranked query, one applicability answer. Everything
+        // below takes the session as an argument, so nothing re-derives it and
+        // nothing caches it on the harness.
+        GraphSession session = openGraph();
+
+        // Phase 1: read the claim facts before anything can cut the test short. This
+        // has to sit above runComparison(): every mode has an early return that would
+        // otherwise leave the graph's claims undecided while the run exited 0.
+        const auto observation = checkSupportClaims(session);
+        recordClaimCoverage(observation);
+
+        // Phase 2: either a claim already failed, or this bundle gets run.
+        VerificationOutcome outcome;
+        try
+        {
+            if(const auto blocked = claimBlocked(observation))
+            {
+                // A broken claim means the engine will not take the graph, so there is
+                // nothing to compare. Running anyway would execute nothing, leave the
+                // NaN sentinel outputs untouched, and pile a tensor diff on the real
+                // message.
+                outcome = *blocked;
+            }
+            else
+            {
+                outcome = runComparison(session);
+
+                // Kept as a live check because "the test did nothing and went green"
+                // is the failure this harness exists to catch. Only asked on this
+                // path: a blocked claim never reached the depth, and is already a
+                // failure.
+                const VerificationDepth required = bundleRequiredDepth();
+                EXPECT_FALSE(outcome.status == OutcomeStatus::PASSED && outcome.depth < required)
+                    << "test passed without reaching " << toString(required) << " for "
+                    << _bundlePath;
+            }
+        }
+        catch(const std::exception& e)
+        {
+            // This graph was already counted as queried, so a verdict that never
+            // lands leaves the summary short a row and reconciles against nothing.
+            // HARNESS at NOT_REACHED because a throw in here is our bug and proves
+            // nothing about the engine: it must not demote the claim, and it must
+            // not confirm it either.
+            outcome = VerificationOutcome::failed(
+                VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, e.what());
+        }
+
+        // Phase 3: one verdict, then one pass/fail/skip, both from the same outcome.
+        commitClaims(observation.results, outcome);
+        reportOutcome(outcome);
     }
 
-    // Builds the graph, selects an engine, and executes. Throws on unsupported graph (→ SKIP).
-    virtual void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack);
-
-    // Runs the named reference executor. Throws ReferenceCapabilityError on capability miss.
-    virtual void runReferenceExecutor(ReferenceExecutorType type,
-                                      std::unordered_map<int64_t, void*>& variantPack);
-
-    // Constructs the executor object (CpuReferenceGraphExecutorAdapter or
-    // GpuReferenceGraphExecutor) — does not allocate buffers or run anything.
-    // Skipped in auto mode when golden data is present.
-    virtual std::unique_ptr<IReferenceGraphExecutor>
-        makeReferenceExecutor(ReferenceExecutorType type);
-
-    // Returns the active verification mode. Override in tests to inject a mode
-    // without touching the TestConfig singleton.
-    virtual VerificationMode getVerificationMode() const;
-
-    // Skips the test when the bundle's metadata is incompatible with the
-    // current device (VRAM/arch). Virtual so isolated unit tests that don't
-    // exercise hardware guards can override it — production reads from the
-    // TestConfig singleton, which is only initialized by the real test main.
-    virtual void applyMetadataGuards() const;
-
+    /// Exposed so a test can pin the fill recipes a bundle would otherwise carry in
+    /// its metadata.
     InputFillRecipes& inputFillRecipes()
     {
         return _inputFillRecipes;
     }
 
 private:
-    bool _requiresDevice;
-    std::filesystem::path _bundlePath;
-    std::shared_ptr<IntegrationTestBundle> _bundle;
-    InputFillRecipes _inputFillRecipes;
+    // The one place a graph is built and the ranked list is asked for.
+    GraphSession openGraph();
+
+    void applyMetadataGuards() const;
+
+    SupportObservation checkSupportClaims(const GraphSession& session);
+
+    // Applies the coverage rules to the run counters, and fails this test if a
+    // sidecar exists that the query somehow did not reach.
+    void recordClaimCoverage(const SupportObservation& observation);
+
+    // Publishes every verdict, promoting the engine-under-test's accepted claim by
+    // what the run actually achieved. Called exactly once per test.
+    void commitClaims(const std::vector<SupportResult>& results,
+                      const VerificationOutcome& outcome);
+
+    // The only place a gtest disposition is issued. Called exactly once per test,
+    // last, because GTEST_SKIP() and FAIL() both return. Static because the
+    // disposition is a pure function of the outcome.
+    static void reportOutcome(const VerificationOutcome& outcome);
+
+    // Records the bundle as unverifiable and yields the skip outcome for TestBody()
+    // to issue.
+    VerificationOutcome unverifiable(const std::string& reason,
+                                     VerificationDepth reached = VerificationDepth::NOT_REACHED);
+
+    // The single definition of "this graph's claims must be checked": a sidecar
+    // exists, enforcement is on, and an engine was named to check against. Checked
+    // in the same order everywhere so a harness with no injected engine never asks
+    // about the sidecar.
+    bool shouldEnforceClaims() const
+    {
+        return _engineUnderTest.has_value() && !_claimLocator.sidecarPath.empty()
+               && std::filesystem::exists(_claimLocator.sidecarPath)
+               && _deps.policy.enforceSupportClaims;
+    }
+
+    VerificationDepth bundleRequiredDepth() const
+    {
+        return _bundle != nullptr ? requiredDepth(_bundle->metadata.enforcementLevel)
+                                  : VerificationDepth::VERIFIED;
+    }
 
     enum class RefStatus
     {
@@ -175,87 +230,73 @@ private:
         std::string message;
     };
 
-    // ── top-level dispatch ────────────────────────────────────────────────
-    void runComparison();
-    void runGoldenMode();
-    void runExplicitRefMode(ReferenceExecutorType type);
-    void runAutoMode();
-    void runGoldenCheckMode();
+    enum class EngineStatus
+    {
+        RAN, ///< the engine executed the graph; `outputs` holds what it wrote
+        DECLINED, ///< the engine refused the graph
+        ERRORED, ///< the engine broke while compiling or executing
+    };
+    struct EngineRunResult
+    {
+        EngineStatus status = EngineStatus::DECLINED;
+        /// Plans compiled before the engine stopped, so the run reached BUILDABLE
+        /// even though it did not execute.
+        bool plansBuilt = false;
+        std::string message;
+        OutputTensors outputs;
+    };
 
-    // ── inputs ──────────────────────────────────────────────────────────
-    bool ensureInputsAvailable();
+    // Verifies the bundle at the depth its enforcement_level asks for. Only
+    // APPLICABILITY and BUILDABLE come here; FULL takes the comparison path.
+    VerificationOutcome enforceAtLevel(EnforcementLevel level, GraphSession& session);
 
-    // Fills leaf input tensors for the graph when no golden data exists.
-    //
-    // Phase 1 — allocate: walks the graph's tensor list, skips virtual
-    //   (inter-node) and output tensors, allocates a CPU-side buffer for
-    //   each remaining leaf input tensor (shape/dtype from TensorAttributes).
-    //
-    // Phase 2 — fill: calls fillInputs(), which registers each op's default
-    //   fill recipes into _inputFillRecipes and then fills every leaf input
-    //   as FREE (random values) or FIXED (constant value).
-    //
-    // On success, moves the filled tensors into the bundle so downstream
-    // executors (engine, GPU ref, CPU ref) can upload them to the GPU.
-    bool fillBundleInputs();
+    VerificationOutcome runComparison(GraphSession& session);
+    VerificationOutcome runGoldenMode(GraphSession& session);
+    VerificationOutcome runExplicitRefMode(GraphSession& session, ReferenceExecutorType type);
+    VerificationOutcome runAutoMode(GraphSession& session);
 
-    // ── buffer allocation + execution ───────────────────────────────────
-    // allocateSentinelOutputs / buildVariantPack prepare the buffers;
-    // runEngine* / runReference* call the executors and capture results.
-    // Outputs are sentinel-filled (NaN) so an unwritten output element is
-    // caught by allClose rather than masquerading as a computed zero.
+    // nullopt when the inputs are ready; otherwise the outcome to return.
+    std::optional<VerificationOutcome> prepareInputs();
+    std::optional<VerificationOutcome> fillBundleInputs();
+
     OutputTensors allocateSentinelOutputs() const;
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
                                                         bool useDevice) const;
-    // Runs the engine into fresh output buffers. Returns nullopt if the
-    // engine threw (its message is written to `error`) or raised a fatal
-    // GTest failure (in which case `error` is left empty).
-    std::optional<OutputTensors> runEngineCapturingOutputs(std::string& error);
-
-    // Runs the engine and returns its outputs, or nullopt if it could not
-    // run. On nullopt the caller must simply return: this has already
-    // issued the appropriate verdict (a fatal failure propagates as-is,
-    // otherwise the test is SKIPped). Shared preamble for all three modes.
-    std::optional<OutputTensors> runEngineOrSkip();
+    EngineRunResult runEngine(GraphSession& session);
+    VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 
     RefRunResult runReferenceCapturingOutputs(ReferenceExecutorType type,
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
-    static void markOutputsModifiedFor(OutputTensors& outputs, bool device);
 
-    // ── comparison ──────────────────────────────────────────────────────
-    void compareAgainstGolden(OutputTensors& engineOutputs);
-    void compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected);
+    VerificationOutcome compareAgainstGolden(OutputTensors& engineOutputs);
+    VerificationOutcome compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected);
 
-    template <typename ExpectedLookup>
-    void compareEach(OutputTensors& engineOutputs, ExpectedLookup expectedFor);
+    // Resolves tolerances, runs bundle::compareOutputs(), and turns each mismatch it
+    // returns into one failure. The comparison itself owns no gtest state.
+    VerificationOutcome compareAgainst(OutputTensors& engineOutputs,
+                                       const ExpectedTensorLookup& expectedFor);
 
-    void compareOutputTensor(int64_t uid,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                             hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                             hipdnn_data_sdk::utilities::ITensor& expected,
-                             hipdnn_data_sdk::utilities::ITensor& actual,
-                             float atol,
-                             float rtol) const;
+    // VERIFIED either way: the oracle ran and the outputs were examined. A mismatch
+    // carries no message because compareAgainst() has already put one failure per
+    // drifted tensor on the record — the only place in this harness where that is
+    // true, and so the only caller of alreadyReportedFailure().
+    static VerificationOutcome comparisonOutcome(bool allMatched)
+    {
+        return allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
+                          : VerificationOutcome::alreadyReportedFailure(VerificationDepth::VERIFIED,
+                                                                        FailureOrigin::COMPARISON);
+    }
 
-    // ── reporting ───────────────────────────────────────────────────────
-    // Records the bundle path + reason in the process-wide
-    // UnverifiableBundleReport (printed as a summary after all tests),
-    // then GTEST_SKIP()s this test. The reason is a flat human-readable
-    // string — per-tensor details are concatenated into it by the caller
-    // (e.g., fillBundleInputs()), not stored as structured data.
-    void skipUnverifiable(const std::string& reason);
     void recordRefError(const std::string& reason);
     static std::string refLabel(ReferenceExecutorType type);
 
-    static std::string
-        labelFor(int64_t uid, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs);
-
-    // ── tolerances ──────────────────────────────────────────────────────
-    // Default derivation (max-across-nodes, per-op/per-dtype lookup) and the
-    // TOML per-test override are shared with the graph harness via
-    // harness/tolerance/ToleranceResolver.hpp (tolerance::resolveTolerance),
-    // called directly from compareEach.
+    HarnessDependencies _deps;
+    std::optional<LoadedEngine> _engineUnderTest;
+    std::filesystem::path _bundlePath;
+    SupportClaimLocator _claimLocator;
+    std::shared_ptr<IntegrationTestBundle> _bundle;
+    InputFillRecipes _inputFillRecipes;
 };
 
 } // namespace hipdnn_integration_tests::bundle

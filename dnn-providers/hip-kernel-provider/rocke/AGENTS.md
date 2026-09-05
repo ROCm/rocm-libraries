@@ -54,10 +54,16 @@ One-way dependency: **`library → platform` only**; platform never imports
 and may only import *downward*:
 
 ```
-kernels  ->  builders  ->  dispatch  ->  benchmarks
+kernels  ->  dispatch  ->  builders  ->  benchmarks
 ```
 
-Skipping a layer downward is fine (`dispatch` imports `kernels` directly);
+`dispatch` is pure selection policy over `kernels` and imports nothing else. A
+builder is a host-side harness, and a harness that measures anything other than
+the spec dispatch ships is a decoration rather than a gate — so `builders`
+consuming `dispatch.<arch>.*_spec_for_request` is a permanent one-way need, and
+`dispatch` importing `builders` is the direction that would be a cycle.
+
+Skipping a layer downward is fine (`builders` imports `kernels` directly);
 importing at or above your own layer is not. Deferring an upward import into a
 function body does not make it legal — it hides the cycle instead of breaking it.
 `tests/` sits above all four and may import any of them.

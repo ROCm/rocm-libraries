@@ -93,7 +93,12 @@ struct _rocblaslt_handle
     // asic revision
     int asic_rev;
 
+    // GSU (MBSK) reduction flags, and the amax reduction counter. Shared across
+    // streams, indexed by problem, exactly as before.
     void* Synchronizer = nullptr;
+    // Stream-K inter-workgroup flags. Private to a (stream, problem) pair; see
+    // streamKFlagsForStream below.
+    void* StreamKFlags = nullptr;
     // pointer mode ; default mode is host
     rocblaslt_pointer_mode pointer_mode = rocblaslt_pointer_mode_host;
 
@@ -129,6 +134,116 @@ struct _rocblaslt_handle
     bool                  check_numerics_stop_on_first = false;
     // Sticky bypass for scan_D once any caller observes a NaN.
     std::atomic<bool>     check_numerics_short_circuit{false};
+
+    // Kernels treat these buffers as inter-workgroup flags that they set, spin
+    // on, and reset themselves, so a flag region may only be touched by one
+    // kernel at a time. Two GEMMs running concurrently on different streams
+    // would otherwise clear a flag the other was still spinning on, leaving that
+    // workgroup spinning forever with no error reported.
+    //
+    // There are two consumers and they want opposite things, so they get two
+    // buffers rather than one compromise.
+    //
+    // GSU reduction (MBSK) needs synchronizerSizePerWG * numTiles * batch ints,
+    // which runs into the tens of thousands on the shapes it is selected for.
+    // Shrinking that would price MBSK candidates out of selection, so this
+    // region keeps the size and the per-problem-only layout it has always had
+    // and stays shared across streams. Solution selection is therefore
+    // unchanged, and so is the cross-stream exposure of this path: no better
+    // than today, but no worse.
+    static constexpr size_t c_syncGsuSlotElements  = 409600;
+    static constexpr size_t c_syncGsuSlotBytes     = c_syncGsuSlotElements * sizeof(int);
+    static constexpr size_t c_syncGsuSlots         = 16;
+    static constexpr size_t c_syncGsuTotalElements = c_syncGsuSlots * c_syncGsuSlotElements;
+
+    // GSU flag region for `problemIndex`, or null past the last slot. A group
+    // this wide must not run a solution that reads these flags;
+    // SynchronizerSizeCheck and calculateAutoGSU are what ensure that.
+    void* gsuFlagsForProblem(size_t problemIndex) const
+    {
+        if(Synchronizer == nullptr || problemIndex >= c_syncGsuSlots)
+            return nullptr;
+        return static_cast<char*>(Synchronizer) + problemIndex * c_syncGsuSlotBytes;
+    }
+
+    // Stream-K indexes its flags by workgroup id (StreamK.py emits "flag offset
+    // based on CTA index"), so a slot holds one int per Stream-K workgroup and
+    // no more; skGrid is 224 on gfx950, which has 256 CUs. At that size every
+    // stream can afford its own region, which is what closes the deadlock.
+    static constexpr size_t c_syncSkSlotElements = 2048;
+    static constexpr size_t c_syncSkSlotBytes    = c_syncSkSlotElements * sizeof(int);
+    // Problem slots inside one stream's block: grouped GEMM does select Stream-K
+    // solutions, so each problem in a group needs its own region.
+    static constexpr size_t c_syncSkSlotsPerStream = 16;
+    // Distinct streams one handle can serve. A block is claimed on a stream's
+    // first Stream-K matmul and held until the handle is destroyed, so this
+    // bounds distinct streams per handle rather than concurrent ones. PyTorch
+    // draws streams from a fixed pool that tops out at 32 distinct hipStream_t
+    // however many it is asked for, and a 32-way fan-out needs 33 (the streams
+    // plus the default one it forks from); 64 is that working set doubled.
+    static constexpr size_t c_syncSkStreamSlots = 64;
+    // Allocated once at handle creation: allocating device memory mid-run would
+    // break hipGraph capture, and a fixed layout keeps the lookup lock-free.
+    // This table is 8 MiB, on top of the 25 MiB GSU one.
+    static constexpr size_t c_syncSkTotalElements
+        = c_syncSkStreamSlots * c_syncSkSlotsPerStream * c_syncSkSlotElements;
+
+    // Hands back the Stream-K flag region reserved for (`stream`,
+    // `problemIndex`) in `out`. Blocks are claimed lock-free; the scan is over
+    // at most c_syncSkStreamSlots entries and hits on the first comparison once
+    // a stream owns its block.
+    //
+    // Returns rocblaslt_status_internal_error once every block is taken, or for
+    // a problem index past the block. Handing back a shared region instead would
+    // silently reintroduce the cross-stream deadlock this separation exists to
+    // prevent, and the caller would report success while a workgroup spins
+    // forever.
+    rocblaslt_status streamKFlagsForStream(hipStream_t stream, size_t problemIndex, void** out)
+    {
+        *out = nullptr;
+        if(StreamKFlags == nullptr)
+            return rocblaslt_status_success;
+
+        if(problemIndex >= c_syncSkSlotsPerStream)
+            return rocblaslt_status_internal_error;
+
+        // hipStreamPerThread is a sentinel that resolves to a different stream
+        // for every host thread, so every thread would present the same key and
+        // share one block. Key those by thread instead. The legacy null stream
+        // needs no such treatment: it really is one stream shared by all threads.
+        const void* key = static_cast<const void*>(stream);
+        if(stream == hipStreamPerThread)
+        {
+            static thread_local char perThreadKey;
+            key = &perThreadKey;
+        }
+
+        for(size_t i = 0; i < c_syncSkStreamSlots; ++i)
+        {
+            const void* owner = m_skSlotOwner[i].load(std::memory_order_acquire);
+            if(owner == nullptr)
+            {
+                const void* expected = nullptr;
+                // Whoever wins the exchange owns the block; the loser reads back
+                // the winner's key and falls through to the comparison below.
+                owner = m_skSlotOwner[i].compare_exchange_strong(
+                            expected, key, std::memory_order_acq_rel, std::memory_order_acquire)
+                            ? key
+                            : expected;
+            }
+            if(owner == key)
+            {
+                *out = static_cast<char*>(StreamKFlags)
+                       + (i * c_syncSkSlotsPerStream + problemIndex) * c_syncSkSlotBytes;
+                return rocblaslt_status_success;
+            }
+        }
+
+        return rocblaslt_status_internal_error;
+    }
+
+    // Value-initialised so every block starts unowned.
+    std::atomic<const void*> m_skSlotOwner[c_syncSkStreamSlots] = {};
 };
 
 /********************************************************************************

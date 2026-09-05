@@ -9,30 +9,11 @@
 #include <fstream>
 #include <string>
 
-// getpid() below stamps the temp path per process. MSVC ships no <unistd.h>;
-// it spells the same call _getpid() in <process.h>.
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
-
+#include "ScratchDirectory.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 
 using hipdnn_integration_tests::SupportMatrixCollector;
-
-namespace
-{
-/// This process's id. MSVC has no <unistd.h> and spells the call _getpid().
-int currentProcessId()
-{
-#ifdef _WIN32
-    return _getpid();
-#else
-    return ::getpid();
-#endif
-}
-} // namespace
+using hipdnn_integration_tests::scratch::currentProcessId;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 
@@ -113,6 +94,22 @@ TEST_F(TestSupportMatrixCollector, UnknownEngineId)
     // same spelling the backend logs use, so a matrix entry can be grepped for.
     auto engineName = *records[0].supportingEngines.begin();
     EXPECT_EQ(engineName, "0x00000000000F423F");
+}
+
+TEST_F(TestSupportMatrixCollector, EngineIdSuppliedByNameMapRendersAsItsName)
+{
+    auto& collector = SupportMatrixCollector::get();
+    collector.setEnabled(true);
+    collector.setEngineNames({{999999, "hipkernel:Whatever"}});
+    collector.recordGraphSupport("Conv", "ConvFprop fp32", "Test1", {999999});
+
+    auto records = collector.getRecords();
+    ASSERT_EQ(records.size(), 1u);
+    ASSERT_EQ(records[0].supportingEngines.size(), 1u);
+    // The same id the fallback case renders as hexadecimal, so this pins the map lookup
+    // rather than a difference between the two ids.
+    auto engineName = *records[0].supportingEngines.begin();
+    EXPECT_EQ(engineName, "hipkernel:Whatever");
 }
 
 TEST_F(TestSupportMatrixCollector, ResetClearsState)

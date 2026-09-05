@@ -2,10 +2,11 @@ from ..Component import TensorDataMover
 from ..Common.DataType import DataType
 from ..Common import INDEX_CHARS
 from typing import Mapping, Optional
-from rocisa.code import Module
+from rocisa.code import Module, Label
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
-    SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds, VReadfirstlaneB32
-from rocisa.container import sgpr, vgpr, RegisterContainer, MemTokenData
+    SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC1, SCSelectB32, TensorLoadToLds, \
+    VReadfirstlaneB32
+from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
 # from ..KernelWriterAssembly import KernelWriterAssembly
@@ -24,6 +25,37 @@ class TensorDataMoverLoad(TensorDataMover):
 
     def __call__(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping):
         pass
+
+    def gsuIterOffset(self, writer: "KernelWriterAssembly", kernel: Mapping, tc: str, dstSgpr: int | str) -> Module:
+        """Index of the first unroll iteration owned by this GSU group.
+
+        GSUC==0 interleaves the K chunks over the groups, so group g starts at
+        chunk g.  GSUC==1 hands each group one contiguous K block, so group g
+        starts after every iteration claimed by groups 0..g-1.  GlobalReadIncs
+        (Components/GSU.graIncrements) switches its stride on the same bit, so
+        this must agree with it or the group walks the wrong K range.
+
+        Emitted as a branch to keep the GSUC==0 case free of the division.
+        """
+        mod = Module("TDM GSU iter offset")
+        gsucLabel    = Label(writer.labels.getNameInc(f"TDM_GSUC_{tc}"), "")
+        gsucLabelEnd = Label(writer.labels.getNameInc(f"TDM_GSUC_{tc}_End"), "")
+        mod.add(SAndB32(sgpr(dstSgpr), sgpr("GSU"), hex(0x8000), "SCC = (GSUC == 1) ?"))
+        mod.add(SCBranchSCC1(labelName=gsucLabel.getLabelName(), comment="branch if GSUC == 1"))
+        mod.add(SMovB32(sgpr(dstSgpr), sgpr("GSUSumIdx"), "gsuIterOffset = GSUSumIdx"))
+        mod.add(SBranch(gsucLabelEnd.getLabelName()))
+        mod.add(gsucLabel)
+        with writer.allocTmpSgpr(3, tag="TDM_gsuIterOffset") as tmpSgprRes:
+            numIterSgpr = tmpSgprRes.idx + 2
+            mod.add(SLShiftRightB32(dst=sgpr(numIterSgpr), src=sgpr("SizesSum"), \
+                shiftHex=int(log2(kernel["DepthU"])), \
+                comment="numIterL = SizesSum / DepthU(%u)"%kernel["DepthU"]))
+            mod.add(writer.calculateLoopNumIterOffsetGsu(kernel, numIterSgpr, \
+                ContinuousRegister(idx=tmpSgprRes.idx, size=2)))
+            mod.add(SMovB32(sgpr(dstSgpr), sgpr(tmpSgprRes.idx), \
+                "gsuIterOffset = accumulatedNumOfLoopCounterL"))
+        mod.add(gsucLabelEnd)
+        return mod
 
     def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str) -> Module:
         mod = Module()
@@ -93,19 +125,29 @@ class TensorDataMoverLoad(TensorDataMover):
             #add GSU offset
             if kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1:
                 gsuOffsetSgprIdx = waveOffsetSgprIdx
-                mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr("GSUSumIdx"), gsuOffsetBytes, f"gsuOffset = GSUSumIdx * DepthU({depthU}) * bpe({bpe})"))
+                mod.add(self.gsuIterOffset(writer, kernel, tc, gsuOffsetSgprIdx))
+                mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
                 if "MXS" in tc:
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
                 elif tlu:
                     unrollStride = writer.strideRef(tc, unrollSummation[-1])
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
                 mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(gsuOffsetSgprIdx), "+= gsuOffset"))
+                mod.add(SAddCU32(sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx+1), 0, "+= gsuOffset carry"))
             mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
             mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
             if kernel["ProblemType"]["Batched"]:
                 if kernel["ProblemType"]["StridedBatched"]:
+                    batchIdx = sgpr("WorkGroup2")
+                    if (kernel["ProblemType"]["SupportUserArgs"]
+                        and tc in ("A", "B")):
+                        writer.cmpNamedArgTypeEq(
+                            mod, 3, "ArgType == 3 for General Batched GEMM")
+                        mod.add(SCSelectB32(sgpr(waveOffsetSgprIdx), 0, batchIdx,
+                                           "general batch uses an already-dereferenced matrix base"))
+                        batchIdx = sgpr(waveOffsetSgprIdx)
                     batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
-                    mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), sgpr("WorkGroup2"), comment="Batch: Stride*WG"))
+                    mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), batchIdx, comment="Batch: Stride*WG"))
                     with writer.allocTmpSgpr(1, tag="TensorDataMoverLoad_tmpSgprBpe") as bpeTmp:
                         mod.add(scalarMultiply64Bpe(tmpSgprIdx, tmpSgprIdx, bpe, bpeTmp.idx, comment="scale by bpe"))
                     mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
@@ -181,13 +223,15 @@ class TensorDataMoverLoad(TensorDataMover):
             #add GSU offset
             if kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1:
                 gsuOffsetSgprIdx = waveOffsetSgprIdx
-                mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr("GSUSumIdx"), gsuOffsetBytes, f"gsuOffset = GSUSumIdx * DepthU({depthU}) * bpe({bpe})"))
+                mod.add(self.gsuIterOffset(writer, kernel, tc, gsuOffsetSgprIdx))
+                mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
                 if "MXS" in tc:
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
                 elif tlu:
                     unrollStride = writer.strideRef(tc, unrollSummation[-1])
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
                 mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(gsuOffsetSgprIdx), "+= gsuOffset"))
+                mod.add(SAddCU32(sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx+1), 0, "+= gsuOffset carry"))
             if dstGroup0 is not None:
                 mod.add(SAddU32(sgpr(f"{dstGroup0}+2"), sgpr(f"{dstGroup0}+2"), sgpr(tmpSgprIdx), "+= tileOffset(lo)"))
                 mod.add(SAddCU32(sgpr(f"{dstGroup0}+3"), sgpr(f"{dstGroup0}+3"), sgpr(tmpSgprIdx+1), "+= tileOffset(hi)"))
@@ -197,8 +241,16 @@ class TensorDataMoverLoad(TensorDataMover):
 
             if kernel["ProblemType"]["Batched"]:
                 if kernel["ProblemType"]["StridedBatched"]:
+                    batchIdx = sgpr("WorkGroup2")
+                    if (kernel["ProblemType"]["SupportUserArgs"]
+                        and tc in ("A", "B")):
+                        writer.cmpNamedArgTypeEq(
+                            mod, 3, "ArgType == 3 for General Batched GEMM")
+                        mod.add(SCSelectB32(sgpr(waveOffsetSgprIdx), 0, batchIdx,
+                                           "general batch uses an already-dereferenced matrix base"))
+                        batchIdx = sgpr(waveOffsetSgprIdx)
                     batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
-                    mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), sgpr("WorkGroup2"), comment="Batch: Stride*WG"))
+                    mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), batchIdx, comment="Batch: Stride*WG"))
                     with writer.allocTmpSgpr(1, tag="TensorDataMoverLoadWaveSeparated_tmpSgprBpe") as bpeTmp:
                         mod.add(scalarMultiply64Bpe(tmpSgprIdx, tmpSgprIdx, bpe, bpeTmp.idx, comment="scale by bpe"))
                     if dstGroup0 is not None:

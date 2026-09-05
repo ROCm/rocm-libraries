@@ -18,13 +18,13 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
-    , _y(miopen_utils::createBatchnormTensor(tensorMap, attributes.y_tensor_uid()))
-    , _scale(miopen_utils::createBatchnormTensor(tensorMap, attributes.scale_tensor_uid()))
-    , _bias(miopen_utils::createBatchnormTensor(tensorMap, attributes.bias_tensor_uid()))
-    , _estMean(miopen_utils::createBatchnormTensor(tensorMap, attributes.mean_tensor_uid()))
+    : _x(miopen_utils::createPaddedTensor(tensorMap, attributes.x_tensor_uid()))
+    , _y(miopen_utils::createPaddedTensor(tensorMap, attributes.y_tensor_uid()))
+    , _scale(miopen_utils::createPaddedTensor(tensorMap, attributes.scale_tensor_uid()))
+    , _bias(miopen_utils::createPaddedTensor(tensorMap, attributes.bias_tensor_uid()))
+    , _estMean(miopen_utils::createPaddedTensor(tensorMap, attributes.mean_tensor_uid()))
     , _invVariance(
-          miopen_utils::createBatchnormTensor(tensorMap, attributes.inv_variance_tensor_uid()))
+          miopen_utils::createPaddedTensor(tensorMap, attributes.inv_variance_tensor_uid()))
 {
 }
 
@@ -34,17 +34,16 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.x_tensor_uid()))
-    , _y(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.y_tensor_uid()))
-    , _scale(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.scale_tensor_uid()))
-    , _bias(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.bias_tensor_uid()))
-    , _estMean(
-          miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.mean_tensor_uid()))
-    , _invVariance(miopen_utils::createBatchnormTensor(
-          tensorMap, inferenceAttributes.inv_variance_tensor_uid()))
+    : _x(miopen_utils::createPaddedTensor(tensorMap, inferenceAttributes.x_tensor_uid()))
+    , _y(miopen_utils::createPaddedTensor(tensorMap, inferenceAttributes.y_tensor_uid()))
+    , _scale(miopen_utils::createPaddedTensor(tensorMap, inferenceAttributes.scale_tensor_uid()))
+    , _bias(miopen_utils::createPaddedTensor(tensorMap, inferenceAttributes.bias_tensor_uid()))
+    , _estMean(miopen_utils::createPaddedTensor(tensorMap, inferenceAttributes.mean_tensor_uid()))
+    , _invVariance(miopen_utils::createPaddedTensor(tensorMap,
+                                                    inferenceAttributes.inv_variance_tensor_uid()))
     , _optActivation(pointwiseAttributes)
     , _activationOut(
-          miopen_utils::createBatchnormTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
+          miopen_utils::createPaddedTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
 {
 }
 

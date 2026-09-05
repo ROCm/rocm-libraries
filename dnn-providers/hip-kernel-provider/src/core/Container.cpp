@@ -11,6 +11,7 @@
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormPlanBuilder.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormPlanBuilder.hpp"
+#include "engines/hip_mlops_engine/plans/resample/ResampleBwdPlanBuilder.hpp"
 #include "engines/hip_mlops_engine/plans/resample/ResamplePlanBuilder.hpp"
 #endif
 
@@ -51,6 +52,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
         // HIP_MLOPS_ENGINE
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
             {HIP_MLOPS_ENGINE_ID,
+             HIP_MLOPS_ENGINE_NAME,
              [](const device::IDevicePropertyProvider& devicePropertyProvider)
                  -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
                  auto engine = std::make_unique<HipMlopsEngine>(HIP_MLOPS_ENGINE_ID);
@@ -68,6 +70,8 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                      kernelCompiler, devicePropertyProvider));
                  engine->addPlanBuilder(std::make_unique<resample::ResamplePlanBuilder>(
                      kernelCompiler, devicePropertyProvider));
+                 engine->addPlanBuilder(std::make_unique<resample::ResampleBwdPlanBuilder>(
+                     kernelCompiler, devicePropertyProvider));
                  return engine;
              }},
 #endif
@@ -76,6 +80,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
             // Complements ASM_SDPA_ENGINE: handles FP16 on gfx942/gfx950.
             // Performance: 78.98 TFLOPS MI325X, 71.27 TFLOPS MI300X (seq=4096 causal D=128).
             {HIP_FLASH2_ENGINE_ID,
+             HIP_FLASH2_ENGINE_NAME,
              [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
                  -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
                  auto engine = std::make_unique<hip_flash2_engine::HipFlash2Engine>();
@@ -87,6 +92,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
 #ifdef HIPDNN_ENGINE_ASM_SDPA
             // ASM_SDPA_ENGINE
             {ASM_SDPA_ENGINE_ID,
+             ASM_SDPA_ENGINE_NAME,
              [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
                  -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
                  auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>();
@@ -108,6 +114,10 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
             const auto engineId = engineNameToId(set.engine.name);
             definitions.push_back(
                 {engineId,
+                 // The same string the id was hashed from, so the two agree by
+                 // construction and hipDNN's load-time engineNameToId(name) == id check
+                 // cannot be what drops the engine.
+                 set.engine.name,
                  // set aliases discoverDescriptorSets()'s memoized, process-lifetime vector.
                  // Capture by reference: [set] would re-copy a DescriptorSet per engine.
                  [&set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
@@ -162,6 +172,27 @@ uint32_t Container::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint3
     return totalEngines;
 }
 
+hipdnnPluginStatus_t Container::getEngineName(int64_t engineId, const char** name)
+{
+    if(name == nullptr)
+    {
+        // hipDNN never passes null, so reaching this is a defect on the calling side.
+        return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+    }
+
+    for(const auto& engineDefinition : getEngineDefinitions())
+    {
+        if(engineDefinition.id == engineId)
+        {
+            *name = engineDefinition.name.c_str();
+            return HIPDNN_PLUGIN_STATUS_SUCCESS;
+        }
+    }
+
+    // The only penalty-free decline: any other failure status costs the engine.
+    return HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
+}
+
 Container::Container()
     : _devicePropertyProvider(std::make_unique<device::CurrentDevicePropertyProvider>())
 {
@@ -184,7 +215,7 @@ Container::Container()
         // engine that declines everything.
         if(auto engine = engineDefinition.createEngine(*_devicePropertyProvider))
         {
-            _engineManager->addEngine(std::move(engine));
+            _engineManager->addEngine(std::move(engine), engineDefinition.name);
         }
     }
 }
