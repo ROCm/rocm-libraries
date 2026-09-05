@@ -26,7 +26,9 @@ jobs:
     name: "Setup"
     runs-on: ubuntu-24.04
     outputs:
-      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
+      # Use the same TheRock revision as rocm-libraries' Multi-Arch CI so
+      # this focused gfx90a lane exercises its actual math-libs build system.
+      therock_ref: ${{ steps.therock-ref.outputs.ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
       build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
       build_matrix: ${{ steps.matrix.outputs.build_matrix }}
@@ -43,18 +45,15 @@ jobs:
         id: ci-env
         uses: ./.github/actions/ci-env
 
+      - name: Select locked TheRock revision
+        id: therock-ref
+        run: echo "ref=3c4ec014374d4d32243334ef229093fe7b38c5b2" >> "$GITHUB_OUTPUT"
+
       - name: Compute arch matrix
         id: matrix
-        env:
-          IS_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
-          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:asan') }}
         run: |
           build='[{"family":"gfx90a"}]'
           test='[{"family":"gfx90a","runs_on":"linux-gfx90a-gpu-rocm"}]'
-          if [[ "$IS_DISPATCH" == "true" || "$HAS_LABEL" == "true" ]]; then
-            build='[{"family":"gfx90a"},{"family":"gfx942"}]'
-            test='[{"family":"gfx90a","runs_on":"linux-gfx90a-gpu-rocm"},{"family":"gfx942","runs_on":"linux-gfx942-1gpu-core42-ossci-rocm"}]'
-          fi
           echo "build_matrix={\"include\":${build}}" >> "$GITHUB_OUTPUT"
           echo "test_matrix={\"include\":${test}}" >> "$GITHUB_OUTPUT"
 
@@ -63,7 +62,6 @@ jobs:
     needs: setup
     runs-on: ${{ needs.setup.outputs.build_runs_on }}
     timeout-minutes: 600
-    continue-on-error: ${{ matrix.family == 'gfx942' }}
     permissions:
       id-token: write
     strategy:
@@ -120,19 +118,41 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
+          ./TheRock/build_tools/fetch_sources.py \
+            --stage math-libs --jobs 12 --depth 1 \
+            --skip-submodules rocm-libraries
 
-      - name: Configure Projects
+      - name: Configure gfx90a TheRock host-ASAN math-libs
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DhipBLASLt_SANITIZER=HOST_ASAN -Drocprofiler-sdk_CMAKE_ARGS=-DROCPROFILER_BUILD_TESTS=OFF"
+          # Mirrors TheRock's linux-release-host-asan preset while retaining
+          # this workflow's focused single-family build.
+          extra_cmake_options: >-
+            -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../
+            -DTHEROCK_DIST_AMDGPU_FAMILIES=gfx90a
+            -DTHEROCK_ENABLE_ALL=OFF
+            -DTHEROCK_ENABLE_BLAS=ON
+            -DTHEROCK_ENABLE_SPARSE=ON
+            -DTHEROCK_SANITIZER=HOST_ASAN
+            -Damd-llvm_BUILD_TYPE=Release
+            -Dtherock-host-blas_BUILD_TYPE=Release
+            -Dtherock-SuiteSparse_BUILD_TYPE=Release
+            -Damd-llvm_SANITIZER=OFF
+            -Damd-comgr_SANITIZER=HOST_ASAN
+            -Dhipcc_SANITIZER=OFF
+            -Dhipify_SANITIZER=OFF
+            -Daqlprofile_SANITIZER=OFF
+            -Drocprof-trace-decoder_SANITIZER=OFF
+            -Droctracer_SANITIZER=OFF
+            -DTHEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS=ON
+            -Drocprofiler-sdk_CMAKE_ARGS=-DROCPROFILER_BUILD_TESTS=OFF
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build hipBLASLt (ASAN)
-        run: cmake --build TheRock/build --target hipBLASLt -- -k 0
+      - name: Build hipBLASLt through staged hipSPARSELt consumer (HOST_ASAN)
+        run: cmake --build TheRock/build --target hipSPARSELt -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
@@ -141,6 +161,7 @@ jobs:
           echo "------------------------------------"
           for kind in stage dist; do
             find TheRock/build -maxdepth 6 -type d -path "*/math-libs/BLAS/hipBLASLt/${kind}" 2>/dev/null || true
+            find TheRock/build -maxdepth 6 -type d -path "*/math-libs/BLAS/hipSPARSELt/${kind}" 2>/dev/null || true
           done
           find TheRock/build -maxdepth 8 -type f -name "hipblaslt-test" 2>/dev/null || true
           echo "CCache Stats:"
@@ -179,7 +200,6 @@ jobs:
     needs: [setup, build]
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 210
-    continue-on-error: ${{ matrix.family == 'gfx942' }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host
@@ -286,7 +306,6 @@ jobs:
         run: |
           echo "Build (hipBLASLt ASAN, gfx90a-gating): ${BUILD}"
           echo "Test  (hipBLASLt ASAN, gfx90a-gating): ${TEST}"
-          echo "Note: gfx942 is opt-in (ci:asan label) and non-gating."
           if [[ "$BUILD" != "success" || "$TEST" != "success" ]]; then
             echo "::error::hipBLASLt ASAN failed (build=${BUILD} test=${TEST})"
             exit 1
