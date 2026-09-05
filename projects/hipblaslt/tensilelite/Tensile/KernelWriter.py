@@ -11885,7 +11885,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                          comment="mask ArgType domain (bit 8 = TDM wave-parity)"))
       module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=value, comment=comment))
 
-  def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB, zeroTc=None) -> Module:
+  def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
   
   @abc.abstractmethod

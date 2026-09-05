@@ -812,11 +812,9 @@ class KernelWriterAssembly(KernelWriter):
     # Wave-separated TDM copies A/B (and MX) incs into tdm*Incs during setup; main loop
     # uses tdm*Incs only. GlobalReadIncs* are released afterward — do not pin them here,
     # UNLESS stagger code needs them (calculateStagger references GlobalReadIncs for all tensors).
-    # SupportCustomStaggerU alone must not pin GlobalReadIncs: with StaggerU=0
-    # there is no wrap code left to read them.
-    needsStaggerSgprs = kernel["StaggerU"] > 0 or \
-                        (kernel["InternalSupportParams"]["SupportCustomStaggerU"]
-                         and bool(self.states.staggerUCode))
+    # SupportCustomStaggerU pins them even at StaggerU=0, because it is the runtime
+    # value that decides whether the wrap code reads them.
+    needsStaggerSgprs = kernel["StaggerU"] > 0 or kernel["InternalSupportParams"]["SupportCustomStaggerU"]
     if not self.isTdmWaveSeparated(kernel) or needsStaggerSgprs \
        or (self.tdmSeparateABDescriptors(kernel) and not self.tdmFusePaired(kernel)):
       self.removeSgprVarFromPool("GlobalReadIncsA")
@@ -1092,8 +1090,6 @@ class KernelWriterAssembly(KernelWriter):
       fusePaired = self.tdmFusePaired(kernel)
       aliasAB = kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl") \
                  and not fuseAMx and not fusePaired
-      aliasMXS = kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl") \
-                 and not fuseAMx and not fusePaired
       if fusePaired:
         module.add(self.defineSgpr("tdmBGroup0", 4, 4))
         module.add(self.defineSgpr("tdmBGroup1", 8, 4))
@@ -1120,15 +1116,6 @@ class KernelWriterAssembly(KernelWriter):
         if kernel.get("_TDMIterateModeA", False) or kernel.get("_TDMIterateModeB", False):
           module.add(RegSet("s", "sgprtdmBGroup2", "sgprtdmAGroup2"))
           module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmAGroup2"))
-        if kernel["ProblemType"]["MXBlockB"]:
-          module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmMXSAGroup0"))
-          module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmMXSAGroup1"))
-      elif aliasMXS:
-        module.add(self.defineSgpr("tdmBGroup0", 4, 4))
-        module.add(self.defineSgpr("tdmBGroup1", 8, 4))
-        if kernel.get("_TDMIterateModeB", False):
-          module.add(self.defineSgpr("tdmBGroup2", 4, 4))
-          module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmBGroup2"))
         if kernel["ProblemType"]["MXBlockB"]:
           module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmMXSAGroup0"))
           module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmMXSAGroup1"))
@@ -20971,12 +20958,11 @@ class KernelWriterAssembly(KernelWriter):
 
     return mod
 
-  def tdmSetupIncrementWaveSeparated(self, kernel, tpA, tpB, zeroTc=None) -> Module:
+  def tdmSetupIncrementWaveSeparated(self, kernel, tpA, tpB) -> Module:
     mod = Module()
     tcA: str = tpA["tensorChar"]
     tcB: str = tpB["tensorChar"]
     incSgprName = f"tdm{tcA}{tcB}Incs"
-    # zeroTc is unused; decoupled PGR advances both tensors and moves the fill.
     # Separate descriptors use per-tensor GlobalReadIncs; shared sets select one inc.
     if self.tdmFuseAMx(kernel):
       # The A/B call already wrote the shared increment for all four waves and this
@@ -21008,8 +20994,8 @@ class KernelWriterAssembly(KernelWriter):
                           sgpr("GlobalReadIncsMXSB")))
       return mod
     #TODO: should not directly use GRIA and GRIB
-    srcOdd = 0 if zeroTc == tcB else self.globalReadIncsOperand(tcB, self.states.unrollIdx)
-    srcEven = 0 if zeroTc == tcA else self.globalReadIncsOperand(tcA, self.states.unrollIdx)
+    srcOdd = self.globalReadIncsOperand(tcB, self.states.unrollIdx)
+    srcEven = self.globalReadIncsOperand(tcA, self.states.unrollIdx)
     # s_cselect_b32 accepts at most one literal, so when both increments are
     # compile-time constants stage the even-wave one in the destination first.
     if not isinstance(srcOdd, RegisterContainer) and not isinstance(srcEven, RegisterContainer):
