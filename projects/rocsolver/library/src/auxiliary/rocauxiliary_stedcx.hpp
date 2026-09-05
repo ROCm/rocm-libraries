@@ -306,11 +306,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
     if(n <= 1)
         return rocblas_status_success;
 
-//printf("\n-----------INPUTS--------------\n");
-//print_device_matrix(std::cout,"D",1,n,D,1);
-//print_device_matrix(std::cout,"E",1,n-1,E,1);
-
-    // find values and vectors with divide & conquer
+    // Compute values and vectors with divide & conquer
     constexpr bool ISBATCHED = BATCHED || STRIDED;
     rocblas_int ldt = n;
     rocblas_stride strideT = n * n;
@@ -321,29 +317,19 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
             in the future. **/  
     /** TODO: at the last level of the merge tree, we could skip computations of
             eigen values and vectors that are out of the desired range. Whether this could be
-            exploited somehow to improve performance must be explored in the future. **/
+            exploited somehow to improve performance must be explored in the future. The new stedc
+            code will allow to do this easily as values are always ordered during the merging process.
+            Runing the stedcx_select_kernel would not be necessary.**/
     rocsolver_stedc_template<false, ISBATCHED, T>(
         handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, 
         tmpT, 0, ldt, strideT, info, batch_count, work_stack, tempvect, 
         tempgemm, tmpz, splits, workArr);        
-
-
-
-//printf("\n-----------AFTER D&C--------------\n");
-//print_device_matrix(std::cout,"D",1,n,D,1);
-//print_device_matrix(std::cout,"E",1,n-1,E,1);
-//print_device_matrix(std::cout,"tmpT",n,n,tmpT,ldt);
 
     // Discard values and vectors out of range
     rocblas_int nblocks = ceildiv(n, BS2); 
     ROCSOLVER_LAUNCH_KERNEL((stedcx_select_kernel<T>), dim3(nblocks, nblocks, batch_count), dim3(BS2, BS2), 0,
                             stream, evect, erange, n, vl, vu, il, iu, D, strideD, nev, W, strideW, 
                             C, shiftC, ldc, strideC, tmpT, ldt, strideT, batch_count);
-
-//printf("\n-----------AFTER SYNTHESIS--------------\n");
-//print_device_matrix(std::cout,"nev",1,1,nev,1);
-//print_device_matrix(std::cout,"W",1,n,W,1);
-//print_device_matrix(std::cout,"C",n,n,C,ldc);
 
     return rocblas_status_success;
 }
