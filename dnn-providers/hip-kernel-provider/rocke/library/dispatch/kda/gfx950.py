@@ -106,7 +106,21 @@ def _fused_tile(req: KdaRequest) -> KdaTileSpec:
 
 
 def _split_tile(req: KdaRequest) -> KdaTileSpec:
-    return dataclasses.replace(_SPLIT_TILE, chunk=req.effective_chunk_size)
+    value_splits = 1 if req.value_splits is None else int(req.value_splits)
+    if value_splits == 8:
+        block_size, scan_atom_m = 64, 16
+    elif value_splits == 4:
+        block_size, scan_atom_m = 128, 16
+    elif value_splits == 2:
+        block_size, scan_atom_m = 256, 16
+    else:
+        block_size, scan_atom_m = 256, 0
+    return dataclasses.replace(
+        _SPLIT_TILE,
+        chunk=req.effective_chunk_size,
+        block_size=block_size,
+        scan_atom_m=scan_atom_m,
+    )
 
 
 def _fused_spec(req: OperatorRequest) -> KdaChunkFusedSpec:
@@ -123,18 +137,28 @@ def _fused_spec(req: OperatorRequest) -> KdaChunkFusedSpec:
 
 def _prep_spec(req: OperatorRequest) -> KdaChunkPrepSpec:
     assert isinstance(req, KdaRequest)
+    tile = _split_tile(req)
+    if req.raw_inputs:
+        tile = dataclasses.replace(tile, block_size=256)
     return KdaChunkPrepSpec(
         head_k=int(req.head_k),
         head_v=int(req.head_v),
         dtype=req.dtype.lower(),
-        tile=_split_tile(req),
+        tile=tile,
+        raw_inputs=bool(req.raw_inputs),
+        fp32_beta_dtype=bool(req.fp32_beta_dtype),
+        fuse_qk_l2norm=bool(req.fuse_qk_l2norm),
+        fuse_gate=bool(req.fuse_gate),
+        fuse_beta_sigmoid=bool(req.fuse_beta_sigmoid),
+        has_dt_bias=bool(req.has_dt_bias),
+        lower_bound=float(req.lower_bound),
     )
 
 
 def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:
     """Select the pipelined scan and its measured value-band geometry."""
     assert isinstance(req, KdaRequest)
-    return tuned_kda_chunk_scan_spec(
+    spec = tuned_kda_chunk_scan_spec(
         req.workgroups,
         head_k=int(req.head_k),
         head_v=int(req.head_v),
@@ -142,6 +166,27 @@ def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:
         chunk=req.effective_chunk_size,
         has_initial_state=bool(req.has_initial_state),
         store_final_state=bool(req.store_final_state),
+        token_major_io=bool(req.token_major_io),
+    )
+    if req.value_splits is not None:
+        spec = dataclasses.replace(
+            spec,
+            tile=_split_tile(req),
+            value_splits=int(req.value_splits),
+        )
+    return spec
+
+
+def _uses_split_contract(req: KdaRequest) -> bool:
+    return (
+        req.raw_inputs
+        or req.fp32_beta_dtype
+        or req.token_major_io
+        or req.fuse_qk_l2norm
+        or req.fuse_gate
+        or req.fuse_beta_sigmoid
+        or req.has_dt_bias
+        or (req.value_splits is not None and int(req.value_splits) != 1)
     )
 
 
@@ -158,7 +203,14 @@ def _scan_validator(spec: KdaChunkScanSpec, arch: str) -> Tuple[bool, str]:
     ok, why = is_valid_scan_spec(spec, arch=arch)
     if not ok:
         return False, why
-    ok, why = is_valid_spec(spec.prep, arch=arch)
+    prep = spec.prep
+    if spec.token_major_io:
+        # Raw token-major prep retains its valid 256-thread producer schedule
+        # even when value splitting gives the scan a narrower workgroup.
+        prep = dataclasses.replace(
+            prep, tile=dataclasses.replace(prep.tile, block_size=256)
+        )
+    ok, why = is_valid_spec(prep, arch=arch)
     if not ok:
         return False, f"tile builder for this scan is unbuildable: {why}"
     return True, "ok"
@@ -183,6 +235,8 @@ def _make_candidate(
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, KdaRequest)
+        if algorithm == "chunk_fused" and _uses_split_contract(req):
+            return False, "the fused kernel does not implement the raw split contract"
         if (
             opt_in_reason
             and req.algorithm.strip().lower() != algorithm

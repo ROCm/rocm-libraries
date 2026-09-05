@@ -136,6 +136,13 @@ The prep phase remains B256 and does not inherit scan-only `block_size` or
 and padding, so it remains layout-compatible with every selected scan
 geometry.
 
+Raw prep has BF16 and FP32 compile-time beta variants, both with explicit
+batch, token, and head element strides. This permits a framework to pass either
+strided projection view directly. The BF16 path extends each load to FP32; both
+paths evaluate sigmoid and store the result in the same FP32 LDS tile.
+Prepared chunk-packed prep and the fused composition continue to consume FP32
+beta through their original ABI.
+
 `dispatch_kda(..., algorithm="chunk_scan")` returns this tuned scan spec,
 builder, multiplied grid, block size, and ABI signature. The split composition
 still requires a preceding `chunk_prep` dispatch on the same stream; `auto`

@@ -275,9 +275,9 @@ def test_c32_tile_phase_16x16_panels_agree_to_one_ulp():
             f"{name} differs by {diff:.3e} ({diff / scale:.3e} of peak), "
             "more than atom accumulation order can explain"
         )
-        assert (
-            frac <= 0.10
-        ), f"{name}: {frac:.1%} of elements differ; panel indexing is suspect"
+        assert frac <= 0.10, (
+            f"{name}: {frac:.1%} of elements differ; panel indexing is suspect"
+        )
 
 
 def test_c16_fused_matches_token_serial_oracle():
@@ -343,7 +343,7 @@ def test_scan_rejects_a_spec_it_cannot_emit():
         split.make_launcher(KdaChunkScanSpec(head_v=64))
 
 
-def _make_raw_inputs(B, H, T, DK, DV, gate_low=-0.5, seed=0):
+def _make_raw_inputs(B, H, T, DK, DV, gate_low=-0.5, seed=0, *, fp32_beta=False):
     import torch
 
     gen = torch.Generator(device="cuda").manual_seed(seed)
@@ -352,7 +352,8 @@ def _make_raw_inputs(B, H, T, DK, DV, gate_low=-0.5, seed=0):
     k = torch.randn(B, T, H, DK, dtype=torch.bfloat16, **kw)
     v = (torch.randn(B, T, H, DV, dtype=torch.float32, **kw) * 0.2).bfloat16()
     g = (gate_low * torch.rand(B, T, H, DK, dtype=torch.float32, **kw)).bfloat16()
-    beta = torch.randn(B, T, H, dtype=torch.float32, **kw)
+    beta_dtype = torch.float32 if fp32_beta else torch.bfloat16
+    beta = torch.randn(B, T, H, dtype=beta_dtype, **kw)
     a_log = torch.randn(H, dtype=torch.float32, device="cuda", generator=gen) * 0.1
     dt_bias = (
         torch.randn(H * DK, dtype=torch.float32, device="cuda", generator=gen) * 0.01
@@ -381,6 +382,34 @@ def test_raw_split_matches_aligned_oracle(gate_low):
         / (s_ref.abs().max().item() + 1e-30),
     )
     assert worst <= TOL, f"gate {gate_low}: worst rel {worst:.3e}"
+
+
+@pytest.mark.parametrize("fp32_beta", [False, True])
+def test_raw_split_accepts_strided_beta(fp32_beta):
+    """The framework projection view reaches the raw prep kernel without a copy."""
+    import torch
+
+    from builders.gfx950.kda import kda_chunk_split as split
+
+    B, H, T = 1, 4, 256
+    scan, _ = split.aligned_split_specs(1)
+    q, k, v, g, beta, a_log, dt_bias = _make_raw_inputs(
+        B, H, T, 128, 128, fp32_beta=fp32_beta
+    )
+    beta_storage = torch.empty(B, T, 2 * H, dtype=beta.dtype, device="cuda")
+    beta_storage[..., ::2].copy_(beta)
+    beta_view = beta_storage[..., ::2]
+    assert not beta_view.is_contiguous()
+
+    o_got, ht_got = split.launch_raw(scan, q, k, v, g, beta_view, a_log, dt_bias)
+    torch.cuda.synchronize()
+    o_ref, s_ref = split.ref_aligned_raw(
+        q, k, v, g, beta_view, a_log, dt_bias, 128**-0.5
+    )
+    o_ref = o_ref.permute(0, 2, 1, 3)
+
+    assert torch.allclose(o_got.float(), o_ref.float(), rtol=0, atol=3e-2)
+    assert torch.allclose(ht_got.float(), s_ref.float(), rtol=0, atol=3e-2)
 
 
 @pytest.mark.parametrize(

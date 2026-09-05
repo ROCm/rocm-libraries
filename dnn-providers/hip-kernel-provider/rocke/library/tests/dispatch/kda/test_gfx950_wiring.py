@@ -45,6 +45,20 @@ def _req(**kw) -> KdaRequest:
     return KdaRequest(**base)
 
 
+def _raw_split_req(algorithm: str, **kw) -> KdaRequest:
+    base = {
+        "algorithm": algorithm,
+        "raw_inputs": True,
+        "token_major_io": True,
+        "fuse_qk_l2norm": True,
+        "fuse_gate": True,
+        "fuse_beta_sigmoid": True,
+        "has_dt_bias": True,
+    }
+    base.update(kw)
+    return _req(**base)
+
+
 def _candidate(name: str):
     return KDA_REGISTRY.get(name)
 
@@ -105,6 +119,25 @@ class TestRouting(unittest.TestCase):
                 self.assertFalse(ok)
                 self.assertIn("opt-in", why)
 
+    def test_raw_token_major_contract_selects_the_split_halves(self):
+        prep = dispatch_kda(_raw_split_req("chunk_prep", value_splits=4))
+        scan = dispatch_kda(_raw_split_req("chunk_scan", value_splits=4))
+
+        self.assertTrue(prep.spec.raw_inputs)
+        self.assertTrue(prep.spec.fuse_qk_l2norm)
+        self.assertTrue(prep.spec.fuse_gate)
+        self.assertTrue(prep.spec.fuse_beta_sigmoid)
+        self.assertTrue(prep.spec.has_dt_bias)
+        self.assertEqual(prep.spec.tile.block_size, 256)
+        self.assertTrue(scan.spec.token_major_io)
+        self.assertEqual(scan.spec.value_splits, 4)
+        self.assertEqual(scan.spec.tile.block_size, 128)
+
+    def test_fused_kernel_rejects_the_raw_split_contract(self):
+        ok, why = _candidate(_FUSED).admits(_raw_split_req("chunk_fused"))
+        self.assertFalse(ok)
+        self.assertIn("raw split contract", why)
+
     def test_sweep_space_offers_only_what_is_reachable(self):
         # auto routes to fused alone, so the sweep space is one spec -- not the
         # three it would be if the opt-in gate were advisory.
@@ -145,6 +178,25 @@ class TestCapabilityGates(unittest.TestCase):
 
     def test_an_unsupported_chunk_length_is_rejected(self):
         self.assertFalse(_candidate(_FUSED).admits(_req(chunk_size=64))[0])
+
+    def test_an_unsupported_value_split_is_rejected(self):
+        ok, why = _candidate(_SCAN).admits(_raw_split_req("chunk_scan", value_splits=3))
+        self.assertFalse(ok)
+        self.assertIn("value_splits", why)
+
+    def test_raw_inputs_require_fused_preprocessing(self):
+        ok, why = _candidate(_PREP).admits(
+            _req(algorithm="chunk_prep", raw_inputs=True)
+        )
+        self.assertFalse(ok)
+        self.assertIn("raw_inputs", why)
+
+    def test_fp32_beta_dtype_requires_raw_inputs(self):
+        ok, why = _candidate(_PREP).admits(
+            _req(algorithm="chunk_prep", fp32_beta_dtype=True)
+        )
+        self.assertFalse(ok)
+        self.assertIn("fp32_beta_dtype", why)
 
     def test_the_split_path_can_serve_a_problem_that_wants_a_final_state(self):
         # Regression: withholding the state features from the tile builder made
@@ -280,6 +332,32 @@ class TestSignatures(unittest.TestCase):
                 result = dispatch_kda(_req(algorithm=algorithm))
                 expected = [a["name"] for a in signature_fn(result.spec)]
                 self.assertEqual([a["name"] for a in result.signature], expected)
+
+    def test_raw_beta_signatures_are_distinct_and_strided(self):
+        bf16 = dispatch_kda(_raw_split_req("chunk_prep"))
+        fp32 = dispatch_kda(_raw_split_req("chunk_prep", fp32_beta_dtype=True))
+        prep_names = [arg["name"] for arg in bf16.signature]
+        bf16_types = {arg["name"]: arg["type"] for arg in bf16.signature}
+        fp32_types = {arg["name"]: arg["type"] for arg in fp32.signature}
+
+        self.assertEqual(
+            prep_names[-9:],
+            [
+                "a_log_ptr",
+                "dt_bias_ptr",
+                "batch",
+                "heads",
+                "tseq",
+                "nc",
+                "beta_stride_batch",
+                "beta_stride_token",
+                "beta_stride_head",
+            ],
+        )
+        self.assertEqual(bf16_types["beta_ptr"], "ptr<bf16, global>")
+        self.assertEqual(fp32_types["beta_ptr"], "ptr<f32, global>")
+        self.assertNotEqual(bf16.spec.kernel_name(), fp32.spec.kernel_name())
+        self.assertNotEqual(bf16.kernel_id.spec_hash, fp32.kernel_id.spec_hash)
 
 
 class TestBuild(unittest.TestCase):

@@ -129,10 +129,16 @@ def run_prep(
         "scale": float(scale),
     }
     if spec.raw_inputs:
+        beta_dtype = torch.float32 if spec.fp32_beta_dtype else torch.bfloat16
+        if beta.dtype != beta_dtype:
+            raise ValueError(f"raw beta must be {beta_dtype}, got {beta.dtype}")
+        if beta.ndim != 3:
+            raise ValueError(f"raw beta must have shape [B,T,H], got rank {beta.ndim}")
         if dt_bias is None:
             dt_bias = torch.zeros(
                 heads * spec.head_k, dtype=torch.float32, device=q.device
             )
+        beta_stride_batch, beta_stride_token, beta_stride_head = beta.stride()
         args.update(
             {
                 "a_log_ptr": a_log,
@@ -141,6 +147,9 @@ def run_prep(
                 "heads": int(heads),
                 "tseq": int(tseq),
                 "nc": int(nc),
+                "beta_stride_batch": int(beta_stride_batch),
+                "beta_stride_token": int(beta_stride_token),
+                "beta_stride_head": int(beta_stride_head),
             }
         )
     launcher(args, config=cfg)

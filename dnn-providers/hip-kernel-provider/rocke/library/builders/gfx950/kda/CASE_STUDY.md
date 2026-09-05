@@ -237,6 +237,10 @@ raw producer on the split path:
 - `KdaChunkPrepSpec.raw_inputs` plus fused `q/k` L2 norm, `lower_bound *
   sigmoid(exp(A_log) * (g + dt_bias))`, and `sigmoid(beta)` at the load/commit
   seam. Prepared chunk-packed signatures stay byte-identical when raw mode is off.
+- Raw beta has separate BF16 and FP32 compile-time prep ABIs. Both carry the
+  `[B,T,H]` element strides and apply sigmoid in FP32; only the BF16 variant
+  extends the load. This removes framework-side conversion and materialization
+  while preserving direct FP32 input for callers that already own it.
 - `KdaChunkScanSpec.value_splits in {1,2,4,8}` launches `(BH * value_splits)`
   workgroups with disjoint V/state slices, mirroring FlashKDA K2's independent
   `ceil(V/BW)` grid dimension.

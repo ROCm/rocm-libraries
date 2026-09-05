@@ -73,6 +73,13 @@ the host builders.
 
 The standalone benchmark scenario is `benchmarks.gfx950.kda.benchmark_chunkwise`.
 
+For the raw gfx950 split contract, `q`, `k`, and `g` are BF16. Beta has
+separate BF16-default and `fp32_beta_dtype=True` compile-time variants.
+`beta_ptr` is accompanied by batch, token, and head element strides so either
+strided `[B,T,H]` view can be passed without materialization. The BF16 prep
+kernel extends beta to FP32 before applying its fused sigmoid; the FP32 raw,
+prepared chunk-packed, and fused paths load FP32 directly.
+
 ## gfx942 implementation
 
 Kimi Delta Attention prefill: a **gated delta-rule linear recurrence**, not

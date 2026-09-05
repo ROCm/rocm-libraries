@@ -2143,6 +2143,18 @@ def cases():
                 "has_dt_bias": True,
             },
         ),
+        (
+            "prep_raw_beta_fp32",
+            "prep",
+            {
+                "raw_inputs": True,
+                "fp32_beta_dtype": True,
+                "fuse_qk_l2norm": True,
+                "fuse_gate": True,
+                "fuse_beta_sigmoid": True,
+                "has_dt_bias": True,
+            },
+        ),
         ("scan_default", "scan", {}),
         (
             "scan_h0_noht",

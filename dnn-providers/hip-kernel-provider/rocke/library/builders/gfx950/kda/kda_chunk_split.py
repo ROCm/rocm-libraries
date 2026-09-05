@@ -81,7 +81,12 @@ def make_launcher(spec: KdaChunkScanSpec) -> KernelLauncher:
     return _LAUNCHER_CACHE[key]
 
 
-def prep_spec_of(spec: KdaChunkScanSpec, *, raw: bool = False) -> KdaChunkPrepSpec:
+def prep_spec_of(
+    spec: KdaChunkScanSpec,
+    *,
+    raw: bool = False,
+    fp32_beta_dtype: bool = False,
+) -> KdaChunkPrepSpec:
     """The tile builder that produces this scan's inputs.
 
     Both halves are derived from one scan spec so the tile layouts cannot drift
@@ -97,6 +102,7 @@ def prep_spec_of(spec: KdaChunkScanSpec, *, raw: bool = False) -> KdaChunkPrepSp
     if raw:
         raw_kw = dict(
             raw_inputs=True,
+            fp32_beta_dtype=fp32_beta_dtype,
             fuse_qk_l2norm=True,
             fuse_gate=True,
             fuse_beta_sigmoid=True,
@@ -208,7 +214,11 @@ def run_split(
     No fence between them: they run in FIFO order on the same stream, so the
     scan already sees the tiles the prep kernel wrote.
     """
-    pspec = prep_spec_of(spec, raw=raw)
+    pspec = prep_spec_of(
+        spec,
+        raw=raw,
+        fp32_beta_dtype=raw and beta.dtype == torch.float32,
+    )
     prep_mod.run_prep(
         pspec,
         q,
@@ -260,7 +270,14 @@ def run_raw_split(
     C = spec.tile.chunk
     BH, NC = batch * heads, tseq // C
     nt = BH * NC
-    ws = prep_mod.alloc_tiles(nt, prep_spec_of(spec, raw=True))
+    ws = prep_mod.alloc_tiles(
+        nt,
+        prep_spec_of(
+            spec,
+            raw=True,
+            fp32_beta_dtype=beta.dtype == torch.float32,
+        ),
+    )
     run_split(
         spec,
         q,
