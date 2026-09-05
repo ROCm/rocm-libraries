@@ -65,6 +65,10 @@ ArchPlatformMap parseArchPlatformMap(const nlohmann::json& supportObj, std::stri
     ArchPlatformMap archMap;
     for(const auto& [arch, platformsJson] : supportObj.items())
     {
+        if(arch.empty())
+        {
+            throw std::runtime_error(withSource(source, "empty arch key"));
+        }
         if(!platformsJson.is_array())
         {
             throw std::runtime_error(
@@ -215,6 +219,10 @@ SupportClaims parseSupportClaimsJson(const nlohmann::json& json, std::string_vie
 
         for(const auto& [engine, archObj] : json.at("claims").items())
         {
+            if(engine.empty())
+            {
+                throw std::runtime_error(withSource(source, "empty engine name in claims"));
+            }
             result.claims[engine] = parseArchPlatformMap(archObj, source);
         }
     }
@@ -241,6 +249,10 @@ SweepSupportClaims parseSweepSupportClaimsJson(const nlohmann::json& json, std::
 
         for(const auto& [engine, groupsJson] : json.at("claims").items())
         {
+            if(engine.empty())
+            {
+                throw std::runtime_error(withSource(source, "empty engine name in claims"));
+            }
             if(!groupsJson.is_array())
             {
                 throw std::runtime_error(withSource(
@@ -284,6 +296,11 @@ SweepSupportClaims parseSweepSupportClaimsJson(const nlohmann::json& json, std::
                     }
 
                     auto caseId = caseIdJson.get<std::string>();
+                    if(caseId.empty())
+                    {
+                        throw std::runtime_error(withSource(
+                            source, "engine '" + engine + "' claim group has an empty case id"));
+                    }
                     if(!seenCaseIds.insert(caseId).second)
                     {
                         std::string message = "case '";
@@ -330,7 +347,7 @@ namespace
 
 nlohmann::json readJsonFile(const std::filesystem::path& path)
 {
-    std::ifstream file(path);
+    std::ifstream file(path, std::ios::binary);
     if(!file)
     {
         throw std::runtime_error("Could not open support claims file: " + path.string());

@@ -523,4 +523,136 @@ TEST(TestSupportClaimWriter, AllEnginesDeclinedCreatesNoSidecar)
     EXPECT_TRUE(summary.errors.empty());
 }
 
+// ---------------------------------------------------------------------------
+// observationDefect: remaining branches (empty engine, platform, sidecar path)
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimWriter, EmptyEngineNameObservationIsRefusedAndLeavesFileUntouched)
+{
+    const ScopedDirectory dir = makeDir("test_writer_");
+    const auto bundlePath = dir.path() / "Small.json";
+    const auto sidecarPath = dir.path() / "Small.support.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "", "gfx942", "linux", true),
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    const auto summary = writeObservedSupportClaims(observations);
+
+    EXPECT_FALSE(std::filesystem::exists(sidecarPath));
+    ASSERT_EQ(summary.errors.size(), 1u);
+    EXPECT_NE(summary.errors[0].find("empty engine name"), std::string::npos);
+}
+
+TEST(TestSupportClaimWriter, EmptyPlatformObservationIsRefusedAndLeavesFileUntouched)
+{
+    const ScopedDirectory dir = makeDir("test_writer_");
+    const auto bundlePath = dir.path() / "Small.json";
+    const auto sidecarPath = dir.path() / "Small.support.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "", true),
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    const auto summary = writeObservedSupportClaims(observations);
+
+    EXPECT_FALSE(std::filesystem::exists(sidecarPath));
+    ASSERT_EQ(summary.errors.size(), 1u);
+    EXPECT_NE(summary.errors[0].find("empty platform"), std::string::npos);
+}
+
+TEST(TestSupportClaimWriter, EmptySidecarPathObservationIsRefusedAndLeavesFileUntouched)
+{
+    const ScopedDirectory dir = makeDir("test_writer_");
+    const auto bundlePath = dir.path() / "Small.json";
+
+    ObservedGraphSupport defective;
+    defective.claimLocator.sidecarPath = "";
+    defective.claimLocator.diagnosticPath = "<empty>";
+    defective.engineName = "MIOPEN_ENGINE";
+    defective.arch = "gfx942";
+    defective.platform = "linux";
+    defective.engineIsSupported = true;
+
+    const std::vector<ObservedGraphSupport> observations = {
+        defective,
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    const auto summary = writeObservedSupportClaims(observations);
+
+    ASSERT_EQ(summary.errors.size(), 1u);
+    EXPECT_NE(summary.errors[0].find("empty sidecar path"), std::string::npos);
+    EXPECT_EQ(summary.filesWritten, 1u);
+}
+
+// ---------------------------------------------------------------------------
+// Skipped bundle: unobserved sidecar preserved while sibling is written
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimWriter, UnobservedBundleSidecarIsPreservedWhenSiblingIsWritten)
+{
+    const ScopedDirectory dir = makeDir("test_writer_");
+    const auto bundlePathA = dir.path() / "A.json";
+    const auto sidecarPathA = dir.path() / "A.support.json";
+    const auto sidecarPathB = dir.path() / "B.support.json";
+
+    nlohmann::json existingJsonA;
+    existingJsonA["version"] = 1;
+    existingJsonA["claims"]["OLD_ENGINE"]["gfx90a"] = nlohmann::json::array({"linux"});
+    std::ofstream(sidecarPathA, std::ios::binary) << dumpCanonical(existingJsonA);
+
+    nlohmann::json existingJsonB;
+    existingJsonB["version"] = 1;
+    existingJsonB["claims"]["UNTOUCHED_ENGINE"]["gfx942"] = nlohmann::json::array({"linux"});
+    const auto seedB = dumpCanonical(existingJsonB);
+    std::ofstream(sidecarPathB, std::ios::binary) << seedB;
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePathA, "NEW_ENGINE", "gfx942", "linux", true),
+    };
+
+    const auto summary = writeObservedSupportClaims(observations);
+
+    EXPECT_EQ(summary.filesWritten, 1u);
+    EXPECT_TRUE(summary.errors.empty());
+    EXPECT_EQ(readFile(sidecarPathB), seedB);
+}
+
+// ---------------------------------------------------------------------------
+// Write failure: read-only directory triggers OpenFailed
+// WriteFailed is not covered — triggering rename failure requires cross-device
+// or disk-full conditions that are not reliably testable without filesystem
+// mocking.
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimWriter, ReadOnlyDirectoryReportsOpenFailedAndSkips)
+{
+    const ScopedDirectory dir = makeDir("test_writer_");
+    const auto subdir = dir.path() / "readonly";
+    std::filesystem::create_directories(subdir);
+
+    const auto bundlePath = subdir / "Small.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::filesystem::permissions(subdir,
+                                 std::filesystem::perms::owner_read
+                                     | std::filesystem::perms::owner_exec,
+                                 std::filesystem::perm_options::replace);
+
+    const auto summary = writeObservedSupportClaims(observations);
+
+    std::filesystem::permissions(
+        subdir, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+
+    ASSERT_EQ(summary.errors.size(), 1u);
+    EXPECT_NE(summary.errors[0].find("could not open"), std::string::npos);
+    EXPECT_EQ(summary.filesSkipped, 1u);
+}
+
 // NOLINTEND(readability-identifier-naming)

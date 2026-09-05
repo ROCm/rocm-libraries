@@ -17,12 +17,8 @@
 #include "harness/bundle/SupportClaims.hpp"
 
 using hipdnn_frontend::ErrorCode;
-using hipdnn_integration_tests::bundle::GraphSession;
-using hipdnn_integration_tests::bundle::IntegrationBundleVerificationHarness;
-using hipdnn_integration_tests::bundle::LoadedEngine;
-using hipdnn_integration_tests::bundle::ObservedGraphSupport;
-using hipdnn_integration_tests::bundle::RankedEngines;
-using hipdnn_integration_tests::bundle::singleGraphClaimLocator;
+using namespace hipdnn_integration_tests::bundle;
+using namespace hipdnn_integration_tests::bundle::testing_support;
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -46,7 +42,8 @@ GraphSession resolvedSession(const std::vector<int64_t>& rankedIds)
 GraphSession unresolvedSession()
 {
     GraphSession session;
-    session.engines.status = hipdnn_frontend::Error{ErrorCode::INTERNAL_ERROR, "backend timed out"};
+    session.engines.status
+        = hipdnn_frontend::Error{ErrorCode::HIPDNN_BACKEND_ERROR, "backend timed out"};
     return session;
 }
 
