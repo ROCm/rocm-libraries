@@ -28,6 +28,15 @@ ordinary TensileLite builds and tests do not depend on them.
 4. Do not push, edit pull requests, or update external trackers unless the user
    explicitly authorizes that action.
 
+## Choose the next target
+
+When the user has not selected a module, read
+[references/prioritization.md](references/prioritization.md). First make a
+fixed list of modules to compare. Use measured test coverage, mutation results,
+and run time. Mark missing measurements instead of inventing values. Record
+which module a person selected and why. Do not present a weighted score as
+objective fact unless the team has reviewed its inputs and formula.
+
 ## Run one investigation
 
 1. Define the slice, following
