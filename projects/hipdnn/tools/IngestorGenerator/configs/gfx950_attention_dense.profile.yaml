@@ -319,12 +319,30 @@ sweep:
       interpolates `bm128` -- so an A/B measures two real kernels rather than one kernel
       under two labels.
 
-      NOT carried over from gfx942, and deliberately so: there block_m is `values: [256]`
-      because the kernel FAULTS at anything else (the causal mask and the P relayout both
-      assume 256). On gfx950 #11627 made it a real spec field with a second shipped
-      geometry, DENSE_TILE_GEOMETRIES["bm128"], described in-source as "an explicit 4-wave
-      experiment geometry". Same field name, opposite verdict; the sibling's exclusion
-      must not be inherited.
+      CORROBORATED BY gfx942, which already ships this as a swept axis -- and the
+      "kernel FAULTS at other values" line this entry used to carry was WRONG, in a way
+      worth recording because it was quoted as a reason not to look. Two facts settle it:
+
+        * `gfx942_attention_dense_C_merged.yaml`, the SHIPPED gfx942 set, spreads
+          block_m over THREE values -- 256 in 37 knob_sets, 128 in 19, 64 in 18. A
+          sibling arch is already sweeping the axis this file called a baked constant.
+        * The gfx942 kernel says so directly (kernels/gfx942/attention_dense.py:95-99):
+          "contrary to the gfx950 sibling's 'kernel FAULTS at other values' comment,
+          every BLOCK_M use in THIS body is parametric (the invariant is
+          BLOCK_M == 32 * WAVES)". It names this file's claim and contradicts it.
+
+      The gfx942 note is also the best prior on what to EXPECT here: shrinking block_m
+      "adds CTAs without adding a CTA/CU -- LDS is BLOCK_M-invariant -- and costs VGPRs
+      on the K-side DMA addressing, so it is a modest win on two of four shapes and a
+      loss elsewhere". So the hypothesis under test is NOT "bm128 is faster"; it is
+      "bm128 wins where occupancy is the binding constraint and loses where it is not",
+      which is exactly what the occupancy spread above predicts and what a per-shape
+      split will show.
+
+      DOMAIN IS {128, 256} HERE, NOT gfx942's THREE. Verified rather than copied:
+      block_m=64 raises "gfx950 block_m must be one of [128, 256], got 64" from the
+      predicate. So the sibling's axis transfers but its domain does not -- the exact
+      both-directions error the runbook warns about when inheriting a knob set.
 
       SHIPPING IT NEEDS A DISPATCHER CHANGE TOO. Measuring the axis only needs the
       descriptors, but for real traffic to reach a bm128 binary the factory must be able
