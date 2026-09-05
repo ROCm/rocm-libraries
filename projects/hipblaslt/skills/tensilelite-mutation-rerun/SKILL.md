@@ -59,9 +59,12 @@ ordinary TensileLite builds and tests do not depend on them.
 
 ## Report the outcome
 
-Record the source commit, container image, mutmut version, selected source and
-tests, complete result counts, characterization tests added, and any unresolved
-survivors or infrastructure failures. End with one explicit state:
+Follow [references/reporting.md](references/reporting.md). Build the report from
+saved mutmut output, the complete review table, verifier output, and the
+restoration result, keeping mutmut's original statuses separate from review
+decisions. Record the source commit, container image, mutmut version, selected
+source and tests, complete result counts, characterization tests added, and any
+unresolved survivors or infrastructure failures. End with one explicit state:
 
 - **Unresolved survivor:** the exact mutation has not yet been classified;
   preserve its ID and evidence without calling it a coverage gap.
