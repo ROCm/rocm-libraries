@@ -86,26 +86,26 @@ try
     bool optim_mem;
     size_t size_work1, size_work2, size_work3, size_work4, size_work5, size_work6_ifail;
     // extra requirements for calling SYEVX/HEEVX
-    size_t size_D, size_E, size_iblock, size_isplit, size_tau;
+    size_t size_tmpT, size_D, size_E, size_iblock, size_isplit, size_tau;
     // extra requirements for calling POTRF and SYEVX/HEEVX
     size_t size_work7_workArr;
     // size of temporary info array
     size_t size_iinfo;
     rocsolver_sygvdx_hegvdx_getMemorySize<true, false, T, S>(
-        itype, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
+        itype, evect, uplo, n, batch_count, &size_scalars, &size_tmpT, &size_work1, &size_work2, &size_work3,
         &size_work4, &size_work5, &size_work6_ifail, &size_D, &size_E, &size_iblock, &size_isplit,
         &size_tau, &size_work7_workArr, &size_iinfo, &optim_mem);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(
-            handle, size_scalars, size_work1, size_work2, size_work3, size_work4, size_work5,
+            handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3, size_work4, size_work5,
             size_work6_ifail, size_D, size_E, size_iblock, size_isplit, size_tau,
             size_work7_workArr, size_iinfo);
 
     // memory workspace allocation
-    void *scalars, *work1, *work2, *work3, *work4, *work5, *work6_ifail, *D, *E, *iblock, *isplit,
+    void *scalars, *tmpT, *work1, *work2, *work3, *work4, *work5, *work6_ifail, *D, *E, *iblock, *isplit,
         *tau, *work7_workArr, *iinfo;
-    rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3, size_work4,
+    rocblas_device_malloc mem(handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3, size_work4,
                               size_work5, size_work6_ifail, size_D, size_E, size_iblock,
                               size_isplit, size_tau, size_work7_workArr, size_iinfo);
 
@@ -113,26 +113,27 @@ try
         return rocblas_status_memory_error;
 
     scalars = mem[0];
-    work1 = mem[1];
-    work2 = mem[2];
-    work3 = mem[3];
-    work4 = mem[4];
-    work5 = mem[5];
-    work6_ifail = mem[6];
-    D = mem[7];
-    E = mem[8];
-    iblock = mem[9];
-    isplit = mem[10];
-    tau = mem[11];
-    work7_workArr = mem[12];
-    iinfo = mem[13];
+    tmpT = mem[1];
+    work1 = mem[2];
+    work2 = mem[3];
+    work3 = mem[4];
+    work4 = mem[5];
+    work5 = mem[6];
+    work6_ifail = mem[7];
+    D = mem[8];
+    E = mem[9];
+    iblock = mem[10];
+    isplit = mem[11];
+    tau = mem[12];
+    work7_workArr = mem[13];
+    iinfo = mem[14];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
     // execution
     return rocsolver_sygvdx_hegvdx_template<true, false, T>(
         handle, itype, evect, erange, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, vl,
-        vu, il, iu, nev, W, strideW, Z, shiftZ, ldz, strideZ, info, batch_count, (T*)scalars, work1,
+        vu, il, iu, nev, W, strideW, Z, shiftZ, ldz, strideZ, info, batch_count, (T*)scalars, (T*)tmpT, work1,
         work2, work3, work4, work5, (rocblas_int*)work6_ifail, (S*)D, (S*)E, (rocblas_int*)iblock,
         (rocblas_int*)isplit, (T*)tau, work7_workArr, (rocblas_int*)iinfo, optim_mem);
 }

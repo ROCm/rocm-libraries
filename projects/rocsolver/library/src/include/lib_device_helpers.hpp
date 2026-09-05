@@ -1678,4 +1678,108 @@ __host__ __device__ void get_v_index(I n, I kd, I sweep, I task, I& vi, I& vj)
     vj = vi + r * kd; // col within V array
 }
 
+
+//------------------------------------------------------------------------------
+/** BISEARCH implements a binary search to find the position of 'val' in a sorted array 'X'.
+    If STRICT = true, it returns the number of elements in 'X' that are strictly smaller than 'val'
+    If STRICT = false, it returns the number of elements in 'X' that are smaller than or
+    equal to 'val' **/
+template <typename T>
+__device__ __host__ rocblas_int bisearch(T val, T* X, rocblas_int n, bool STRICT, bool REVERSE)
+{
+    rocblas_int d = 1;
+    rocblas_int u = n;
+    rocblas_int m;
+    T test;
+
+    // quick return
+    if(n == 0)
+        return 0;
+
+    if(REVERSE)
+    {
+        if(STRICT)
+        {
+            // while there is still an interval to search
+            while(d != u)
+            {
+                // find middle point in the interval [d, u]
+                m = (u - d - 1) / 2 + 1 + d;
+                test = X[n - m];
+
+                // correct interval accordingly
+                if(test >= val)
+                    u = m - 1;
+                else
+                    d = m;
+            }
+            // return result
+            test = X[n - d];
+            return test >= val ? 0 : d;
+        }
+        else
+        {
+            // while there is still an interval to search
+            while(d != u)
+            {
+                // find middle point in the interval [d, u]
+                m = (u - d - 1) / 2 + 1 + d;
+                test = X[n - m];
+
+                // correct interval accordingly
+                if(test > val)
+                    u = m - 1;
+                else
+                    d = m;
+            }
+            // return result
+            test = X[n - d];
+            return test > val ? 0 : d;
+        }
+    }
+
+    else
+    {
+        if(STRICT)
+        {
+            // while there is still an interval to search
+            while(d != u)
+            {
+                // find middle point in the interval [d, u]
+                m = (u - d - 1) / 2 + 1 + d;
+                test = X[m - 1];
+
+                // correct interval accordingly
+                if(test >= val)
+                    u = m - 1;
+                else
+                    d = m;
+            }
+            // return result
+            test = X[d - 1];
+            return test >= val ? 0 : d;
+        }
+        else
+        {
+            // while there is still an interval to search
+            while(d != u)
+            {
+                // find middle point in the interval [d, u]
+                m = (u - d - 1) / 2 + 1 + d;
+                test = X[m - 1];
+
+                // correct interval accordingly
+                if(test > val)
+                    u = m - 1;
+                else
+                    d = m;
+            }
+            // return result
+            test = X[d - 1];
+            return test > val ? 0 : d;
+        }
+    }
+}
+
+
 ROCSOLVER_END_NAMESPACE

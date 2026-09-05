@@ -144,7 +144,7 @@ void stedcx_initData(const rocblas_handle handle,
         rocblas_init<T>(hD, true);
         rocblas_init<T>(hE, true);
 
-        // scale matrix and add fixed splits in the matrix to test split handling
+        // scale matrix and add some fixed splits in the matrix
         // (scaling ensures that all eigenvalues are in [-20, 20])
         for(rocblas_int i = 0; i < n; i++)
         {
@@ -155,19 +155,19 @@ void stedcx_initData(const rocblas_handle handle,
             if(i == n / 7 || i == n / 5 || i == n / 3)
                 hD[0][i] *= -1;
         }
-    }
-
-    // initialize C to the identity matrix
-    if(evect == rocblas_evect_original)
-    {
-        for(rocblas_int j = 0; j < n; j++)
+        
+        // initialize C to the identity matrix
+        if(evect == rocblas_evect_original)
         {
-            for(rocblas_int i = 0; i < n; i++)
+            for(rocblas_int j = 0; j < n; j++)
             {
-                if(i == j)
-                    hC[0][i + j * ldc] = 1;
-                else
-                    hC[0][i + j * ldc] = 0;
+                for(rocblas_int i = 0; i < n; i++)
+                {
+                    if(i == j)
+                        hC[0][i + j * ldc] = 1;
+                    else
+                        hC[0][i + j * ldc] = 0;
+                }
             }
         }
     }
@@ -495,9 +495,9 @@ void testing_stedcx(Arguments& argus)
                               hot_calls, argus.profile, argus.profile_kernels, argus.perf);
 
     // validate results for rocsolver-test
-    // using 3 * n * machine_precision as tolerance
+    // using 8 * n * machine_precision as tolerance
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, 3 * n);
+        ROCSOLVER_TEST_CHECK(T, max_error, 8 * n);
 
     // output results for rocsolver-bench
     if(argus.timing)

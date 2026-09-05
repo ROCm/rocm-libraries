@@ -35,9 +35,6 @@ ROCSOLVER_BEGIN_NAMESPACE
  *    syevdx/heevdx_inplace is not intended for inclusion in the public API. It
  *    exists to provide a syevdx/heevdx method with a signature identical to
  *    the cuSOLVER implementation, for use exclusively in hipSOLVER.
- *
- *    TODO: The current implementation is based on syevx. It will need to be
- *    updated to syevdx at a later date.
  * ===========================================================================
  */
 
@@ -86,23 +83,23 @@ try
     // size of reusable workspaces (for calling SYTRD/HETRD, STEBZ, STEIN, and ORMTR/UNMTR)
     size_t size_work1, size_work2, size_work3, size_work4, size_work5, size_work6_ifail;
     // size for temporary arrays
-    size_t size_D, size_E, size_iblock, size_isplit_map, size_tau, size_nev, size_nsplit_workArr;
+    size_t size_tmpT, size_D, size_E, size_iblock, size_isplit_map, size_tau, size_nev, size_nsplit_workArr;
 
     rocsolver_syevdx_heevdx_inplace_getMemorySize<false, T, S>(
-        evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
+        evect, uplo, n, batch_count, &size_scalars, &size_tmpT, &size_work1, &size_work2, &size_work3,
         &size_work4, &size_work5, &size_work6_ifail, &size_D, &size_E, &size_iblock,
         &size_isplit_map, &size_tau, &size_nev, &size_nsplit_workArr);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(
-            handle, size_scalars, size_work1, size_work2, size_work3, size_work4, size_work5,
+            handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3, size_work4, size_work5,
             size_work6_ifail, size_D, size_E, size_iblock, size_isplit_map, size_tau, size_nev,
             size_nsplit_workArr);
 
     // memory workspace allocation
-    void *scalars, *work1, *work2, *work3, *work4, *work5, *work6_ifail, *D, *E, *iblock,
+    void *scalars, *tmpT, *work1, *work2, *work3, *work4, *work5, *work6_ifail, *D, *E, *iblock,
         *isplit_map, *tau, *d_nev, *nsplit_workArr;
-    rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3, size_work4,
+    rocblas_device_malloc mem(handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3, size_work4,
                               size_work5, size_work6_ifail, size_D, size_E, size_iblock,
                               size_isplit_map, size_tau, size_nev, size_nsplit_workArr);
 
@@ -110,26 +107,27 @@ try
         return rocblas_status_memory_error;
 
     scalars = mem[0];
-    work1 = mem[1];
-    work2 = mem[2];
-    work3 = mem[3];
-    work4 = mem[4];
-    work5 = mem[5];
-    work6_ifail = mem[6];
-    D = mem[7];
-    E = mem[8];
-    iblock = mem[9];
-    isplit_map = mem[10];
-    tau = mem[11];
-    d_nev = mem[12];
-    nsplit_workArr = mem[13];
+    tmpT = mem[1];
+    work1 = mem[2];
+    work2 = mem[3];
+    work3 = mem[4];
+    work4 = mem[5];
+    work5 = mem[6];
+    work6_ifail = mem[7];
+    D = mem[8];
+    E = mem[9];
+    iblock = mem[10];
+    isplit_map = mem[11];
+    tau = mem[12];
+    d_nev = mem[13];
+    nsplit_workArr = mem[14];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
     // execution
     return rocsolver_syevdx_heevdx_inplace_template<false, false, T>(
         handle, evect, erange, uplo, n, A, shiftA, lda, strideA, vl, vu, il, iu, abstol, h_nev, W,
-        strideW, info, batch_count, (T*)scalars, work1, work2, work3, work4, work5,
+        strideW, info, batch_count, (T*)scalars, (T*)tmpT, work1, work2, work3, work4, work5,
         (rocblas_int*)work6_ifail, (S*)D, (S*)E, (rocblas_int*)iblock, (rocblas_int*)isplit_map,
         (T*)tau, (rocblas_int*)d_nev, nsplit_workArr);
 }

@@ -101,6 +101,7 @@ void rocsolver_sygvdx_hegvdx_getMemorySize(const rocblas_eform itype,
                                            const rocblas_int n,
                                            const rocblas_int batch_count,
                                            size_t* size_scalars,
+                                           size_t* size_tmpT,
                                            size_t* size_work1,
                                            size_t* size_work2,
                                            size_t* size_work3,
@@ -117,25 +118,24 @@ void rocsolver_sygvdx_hegvdx_getMemorySize(const rocblas_eform itype,
                                            bool* optim_mem)
 {
     // if quick return no need of workspace
+    *size_scalars = 0;
+    *size_tmpT = 0;
+    *size_work1 = 0;
+    *size_work2 = 0;
+    *size_work3 = 0;
+    *size_work4 = 0;
+    *size_work5 = 0;
+    *size_work6_ifail = 0;
+    *size_D = 0;
+    *size_E = 0;
+    *size_iblock = 0;
+    *size_isplit = 0;
+    *size_tau = 0;
+    *size_work7_workArr = 0;
+    *size_iinfo = 0;
+    *optim_mem = true;
     if(n == 0 || batch_count == 0)
-    {
-        *size_scalars = 0;
-        *size_work1 = 0;
-        *size_work2 = 0;
-        *size_work3 = 0;
-        *size_work4 = 0;
-        *size_work5 = 0;
-        *size_work6_ifail = 0;
-        *size_D = 0;
-        *size_E = 0;
-        *size_iblock = 0;
-        *size_isplit = 0;
-        *size_tau = 0;
-        *size_work7_workArr = 0;
-        *size_iinfo = 0;
-        *optim_mem = true;
         return;
-    }
 
     bool opt1, opt2, opt3 = true;
     size_t unused, temp1, temp2, temp3, temp4, temp5;
@@ -156,7 +156,7 @@ void rocsolver_sygvdx_hegvdx_getMemorySize(const rocblas_eform itype,
 
     // requirements for calling SYEVDX/HEEVDX
     rocsolver_syevdx_heevdx_getMemorySize<BATCHED, T, S>(
-        evect, uplo, n, batch_count, &unused, &temp1, &temp2, &temp3, &temp4, size_work5,
+        evect, uplo, n, batch_count, &unused, size_tmpT, &temp1, &temp2, &temp3, &temp4, size_work5,
         size_work6_ifail, size_D, size_E, size_iblock, size_isplit, size_tau, &temp5);
     *size_work1 = std::max(*size_work1, temp1);
     *size_work2 = std::max(*size_work2, temp2);
@@ -213,6 +213,7 @@ rocblas_status rocsolver_sygvdx_hegvdx_template(rocblas_handle handle,
                                                 rocblas_int* info,
                                                 const rocblas_int batch_count,
                                                 T* scalars,
+                                                T* tmpT,
                                                 void* work1,
                                                 void* work2,
                                                 void* work3,
@@ -277,7 +278,7 @@ rocblas_status rocsolver_sygvdx_hegvdx_template(rocblas_handle handle,
 
     rocsolver_syevdx_heevdx_template<BATCHED, STRIDED, T>(
         handle, evect, erange, uplo, n, A, shiftA, lda, strideA, vl, vu, il, iu, nev, W, strideW, Z,
-        shiftZ, ldz, strideZ, iinfo, batch_count, scalars, work1, work2, work3, work4, work5,
+        shiftZ, ldz, strideZ, iinfo, batch_count, scalars, tmpT, work1, work2, work3, work4, work5,
         work6_ifail, D, E, iblock, isplit, tau, (T**)work7_workArr);
 
     // combine info from POTRF with info from SYEVDX/HEEVDX
