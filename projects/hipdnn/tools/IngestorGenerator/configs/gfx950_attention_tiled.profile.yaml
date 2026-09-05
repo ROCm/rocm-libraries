@@ -569,3 +569,25 @@ reference_candidates:
   function: attention_candidates
   match: algorithm
   family: unified_2d
+
+# The REFERENCE's request class, which is deliberately NOT the `request:` block above.
+#
+# The two sides of stage 9 want different objects and neither duck-types into the
+# other: dispatch_parity needs `TiledAttentionRequest` (the problem-layer vocabulary
+# the tiled spec factory takes), while rocKE's candidates `isinstance`-check theirs and
+# refuse anything else with "expected AttentionRequest, got X".
+#
+# That refusal is per-shape and is recorded as a DECLINE, so pointing the oracle at the
+# adapter makes the tool print `RECONCILED: every decline is one the reference makes
+# too` having never consulted the reference at all. Measured: all 71 shapes
+# "reconciled" that way, first against a missing `normalized`, then a missing `dims`,
+# then the isinstance check -- three different failures, one indistinguishable output.
+#
+# `via` names the translator that maps a corpus row into a real AttentionRequest, so
+# the mapping lives in this integration's adapter rather than being guessed by the tool.
+reference_request:
+  module: tiled_parity_adapter
+  class: TiledAttentionRequest
+  via:
+    module: tiled_parity_adapter
+    function: reference_request_for_shape

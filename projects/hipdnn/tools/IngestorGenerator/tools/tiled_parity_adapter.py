@@ -53,6 +53,7 @@ from typing import Optional, Tuple
 
 __all__ = [
     "TiledAttentionRequest",
+    "reference_request_for_shape",
     "tiled_spec_for_request",
     "supports_tiled_2d_for_spec",
     "problem_for_spec",
@@ -122,6 +123,72 @@ class TiledAttentionRequest:
     #: inert either: it is what `_pin_attention_arch` pins the module memo to. See
     #: that function for why a host-side tool MUST state the arch explicitly.
     arch: Optional[str] = None
+
+    def as_attention_request(self):
+        """This row as rocKE's own `AttentionRequest`, for the stage-9 oracle.
+
+        `reconcile_applicability.py` hands the request straight to rocKE's candidate
+        registry, which expects the FULL `AttentionRequest` protocol -- `normalized()`
+        for the request hash (dispatch/attention/__init__.py:66), `dims()`, and more.
+        Adding those one at a time as each AttributeError surfaced was the wrong shape:
+        the reference wants a real request object, so build one.
+
+        **Why this matters more than it looks.** Every missing attribute comes back to
+        the reconciler as a per-shape refusal *string*, which it records as "the
+        reference declines this shape too". So all 71 shapes reconciled, it printed
+        `RECONCILED: every decline is one the reference makes too`, and the oracle had
+        never actually run. A gate that passes by asking nothing -- exactly what the
+        runbook warns about, and indistinguishable from a real pass in the output.
+
+        The mapping inverts `AttentionRequest._problem()` (common.py:225-243):
+        `total_q = batch * seqlen_q` and `num_seqs = batch`, so a UNIFORM batch maps
+        back exactly. For a genuinely ragged corpus row it cannot -- `AttentionRequest`
+        has no per-sequence lengths -- so the aggregate shape is used, which is what
+        the reference's own applicability rules read anyway.
+        """
+        from dispatch.attention.common import AttentionRequest
+
+        seqlen_q = max(1, self.total_q // max(1, self.num_seqs))
+        return AttentionRequest(
+            batch=self.num_seqs,
+            nhead_q=self.num_query_heads,
+            nhead_k=self.num_kv_heads,
+            seqlen_q=seqlen_q,
+            seqlen_k=self.max_seqlen_k,
+            hdim_q=self.head_size,
+            hdim_v=self.head_size,
+            arch=self.arch or "gfx950",
+            dtype=self.dtype,
+            kv_block_size=self.block_size,
+            sliding_window=self.sliding_window,
+            use_sinks=self.use_sinks,
+            use_fp8=self.use_fp8,
+            fp8_fnuz=self.fp8_fnuz,
+            target_ctas=self.target_ctas,
+        )
+
+    # --- rocKE AttentionRequest protocol, delegated -------------------------
+    # The stage-9 oracle (reconcile_applicability.py) constructs the profile's
+    # `request.class` and hands it straight to rocKE's candidate registry, which
+    # expects the full AttentionRequest surface. Delegating is deliberate: each
+    # method reimplemented here would be a second copy of a rule that already
+    # exists, which is the drift this whole adapter exists to avoid.
+    def normalized(self) -> dict:
+        return self.as_attention_request().normalized()
+
+    def dims(self) -> dict:
+        return self.as_attention_request().dims()
+
+    def __getattr__(self, name):
+        """Anything else the registry reads, answered by the real request.
+
+        Only reached for attributes this dataclass does NOT define -- Python calls
+        `__getattr__` after normal lookup fails -- so the fields above always win and
+        this cannot silently shadow one.
+        """
+        if name.startswith("_") or name == "as_attention_request":
+            raise AttributeError(name)
+        return getattr(self.as_attention_request(), name)
 
     def problem(self):
         """The `UnifiedAttentionProblem` this row denotes.
@@ -263,3 +330,48 @@ def supports_tiled_2d_for_spec(spec, arch: Optional[str] = None) -> Tuple[bool, 
         )
 
     return True, "supported by tiled 2D on the 2D-routed path"
+
+
+def reference_request_for_shape(fields: dict):
+    """A corpus row -> rocKE's own `AttentionRequest`, for the stage-9 oracle.
+
+    Declared as the profile's `reference_request.via`. It exists because the two sides
+    of stage 9 want DIFFERENT request objects and neither can be duck-typed into the
+    other:
+
+      * the generator side needs `TiledAttentionRequest`, whose vocabulary is
+        `UnifiedAttentionProblem`'s (total_q, num_seqs, block_size, ...);
+      * the reference side needs a real `AttentionRequest`, because rocKE's candidates
+        `isinstance`-check their argument and refuse anything else with
+        "expected AttentionRequest, got X".
+
+    That refusal arrives per shape and is recorded as a decline, so a profile that
+    points the oracle at the adapter reports `RECONCILED` having never asked the
+    reference anything. This function is what makes the stage-9 gate real.
+
+    The mapping inverts `AttentionRequest._problem()` (common.py:225-243), which
+    hard-codes `total_q = batch * seqlen_q` and `num_seqs = batch`. A uniform batch
+    therefore round-trips exactly; a ragged row cannot, since `AttentionRequest` has no
+    per-sequence lengths, so the aggregate shape is used -- which is what the
+    reference's applicability rules read anyway.
+    """
+    from dispatch.attention.common import AttentionRequest
+
+    num_seqs = int(fields.get("num_seqs") or 1)
+    total_q = int(fields.get("total_q") or num_seqs)
+    return AttentionRequest(
+        batch=num_seqs,
+        nhead_q=int(fields["num_query_heads"]),
+        nhead_k=int(fields["num_kv_heads"]),
+        seqlen_q=max(1, total_q // max(1, num_seqs)),
+        seqlen_k=int(fields["max_seqlen_k"]),
+        hdim_q=int(fields["head_size"]),
+        hdim_v=int(fields["head_size"]),
+        arch=str(fields.get("arch") or "gfx950"),
+        dtype=str(fields["dtype"]),
+        kv_block_size=int(fields["block_size"]),
+        sliding_window=int(fields.get("sliding_window") or 0),
+        use_sinks=bool(fields.get("use_sinks")),
+        use_fp8=bool(fields.get("use_fp8")),
+        fp8_fnuz=bool(fields.get("fp8_fnuz")),
+    )
