@@ -28,6 +28,7 @@ from kernels.gfx950.kda_chunkwise import (
     is_valid_fused_spec,
     is_valid_scan_spec,
     is_valid_spec,
+    tuned_kda_chunk_scan_spec,
 )
 
 ARCH = "gfx950"
@@ -225,6 +226,27 @@ class TestScanSpec:
     def test_token_major_flag_reaches_name(self):
         spec = KdaChunkScanSpec(token_major_io=True)
         assert "tm" in spec.kernel_name()
+
+    def test_prefetch_opt_out_reaches_name(self):
+        assert "nopf" in KdaChunkScanSpec(prefetch_tiles=False).kernel_name()
+        assert "nopf" not in KdaChunkScanSpec().kernel_name()
+
+    @pytest.mark.parametrize(
+        "workgroups,value_splits,block,scan_atom_m",
+        [
+            (96, 4, 128, 16),
+            (97, 2, 256, 16),
+            (192, 2, 256, 16),
+            (193, 1, 256, 0),
+        ],
+    )
+    def test_tuned_k3_geometry(self, workgroups, value_splits, block, scan_atom_m):
+        spec = tuned_kda_chunk_scan_spec(workgroups)
+        assert spec.value_splits == value_splits
+        assert spec.tile.block_size == block
+        assert spec.tile.scan_atom_m == scan_atom_m
+        assert is_valid_scan_spec(spec, arch=ARCH)[0]
+        assert is_valid_spec(spec.prep, arch=ARCH)[0]
 
     def test_raw_prep_preserves_scan_tile_knobs(self):
         pytest.importorskip("torch")

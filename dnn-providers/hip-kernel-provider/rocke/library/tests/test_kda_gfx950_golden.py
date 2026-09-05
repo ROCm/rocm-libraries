@@ -49,6 +49,7 @@ def _cases() -> dict[str, Callable]:
         build_kda_chunk_fused,
         build_kda_chunk_prep,
         build_kda_chunk_scan,
+        tuned_kda_chunk_scan_spec,
     )
 
     cases: dict[str, Callable] = {}
@@ -93,6 +94,16 @@ def _cases() -> dict[str, Callable]:
 
     # The default standalone scan is C32/SA32/value_splits=1.
     add("kda_gfx950/split_c32_scan_sa32", KdaChunkScanSpec(), build_kda_chunk_scan)
+    add(
+        "kda_gfx950/split_c32_scan_no_prefetch",
+        KdaChunkScanSpec(prefetch_tiles=False),
+        build_kda_chunk_scan,
+    )
+    add(
+        "kda_gfx950/split_c32_scan_tuned_vs4",
+        tuned_kda_chunk_scan_spec(96),
+        build_kda_chunk_scan,
+    )
     add(
         "kda_gfx950/split_c16_scan_sa16",
         KdaChunkScanSpec(tile=c16),
@@ -229,8 +240,7 @@ def test_kda_gfx950_ir_matches_golden():
         got, nbytes = _sha_for(build, flavor)
         if got != want:
             drift.append(
-                f"{cid}: {want} -> {got} "
-                f"({recorded[cid]['bytes']} -> {nbytes} bytes)"
+                f"{cid}: {want} -> {got} ({recorded[cid]['bytes']} -> {nbytes} bytes)"
             )
     assert not drift, "gfx950 KDA LLVM IR drift vs golden:\n  " + "\n  ".join(drift)
 

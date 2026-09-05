@@ -110,13 +110,20 @@ def dispatch_kda(req: KdaRequest, *, ranker: Ranker | None = None) -> DispatchRe
     candidate = KDA_REGISTRY.select(req, ranker=ranker or priority_ranker)
     spec = candidate.select_spec(req)
     kid = _kernel_id(req, candidate, spec)
+    grid = candidate.grid(spec, req)
+    block = candidate.block(spec)
+    geometry = [f"grid={grid} block={block}"]
+    if hasattr(spec, "value_splits"):
+        geometry.append(f"value_splits={spec.value_splits}")
+    if hasattr(spec, "prefetch_tiles"):
+        geometry.append(f"prefetch_tiles={spec.prefetch_tiles}")
     return DispatchResult(
         request=req,
         candidate=candidate,
         spec=spec,
         kernel_id=kid,
-        grid=candidate.grid(spec, req),
-        block=candidate.block(spec),
+        grid=grid,
+        block=block,
         signature=tuple(candidate.signature(spec)),
         explanation=(
             f"selected {candidate.name} ({candidate.algorithm}) on {req.arch}",
@@ -124,6 +131,7 @@ def dispatch_kda(req: KdaRequest, *, ranker: Ranker | None = None) -> DispatchRe
             f"spec_id={candidate.spec_id}",
             f"v_partitions={req.v_partitions} workgroups={req.workgroups}",
             f"chunks={req.num_chunks}",
+            *geometry,
             f"spec_hash={kid.spec_hash}",
             f"request_hash={kid.request_hash}",
         ),

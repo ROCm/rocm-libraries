@@ -7,9 +7,15 @@ chunkwise gated delta-rule linear-attention prefill:
 - `kda_chunk_split.py` materializes those tiles, then runs the serial state scan.
 - `kda_chunk_fused.py` builds and consumes the tiles in one workgroup.
 
-The split path is the default composition. The fused path is retained as an
-alternative schedule and as an independent cross-check. Both builders accept
-an optional non-zero initial state and can store the final state.
+The builder-local performance path is the split composition. The fused path is
+retained as an alternative schedule and as an independent cross-check. Both
+builders accept an optional non-zero initial state and can store the final
+state.
+
+The dispatcher exposes all three emitted kernels. Its `auto` policy remains
+the fused kernel because one dispatch result cannot yet represent the split
+path's workspace and ordered pair of launches. Callers selecting the split
+path must request and launch `chunk_prep` followed by `chunk_scan`.
 
 ## Run the builders
 
@@ -30,8 +36,71 @@ The reusable benchmark scenario runs both compositions:
 python -m benchmarks.gfx950.kda.benchmark_chunkwise --path both
 ```
 
-This family is currently builder-only. It is intentionally not registered in
+The split benchmark selects the scan geometry from `batch * heads`, matching
 the dispatcher.
+
+## Optimized scan schedule
+
+The standalone scan is software-pipelined without a second LDS tile set:
+
+- V loads are issued before publishing the state mirror and computing `Z`, so
+  those operations cover the V-memory latency.
+- Chunk zero is staged before the loop. A C32 scan with at least two waves
+  issues the next chunk's materialized tiles while the current chunk computes,
+  holds them in registers, and commits them only after the current LDS reads
+  retire.
+- The SA16 schedule delays that tile issue until V has retired, avoiding
+  competition between the larger prefetch burst and the current residual.
+- One decay value is loaded per lane and state-column tile, then reused for all
+  accumulator slots owned by that lane.
+
+`KdaChunkScanSpec.prefetch_tiles` defaults on. Setting it to `False` retains the
+immediate staging path and adds `nopf` to the kernel name for controlled A/B
+testing. C16 and single-wave schedules keep immediate staging automatically
+because the prefetched vectors would cost more occupancy or tail traffic than
+they hide.
+
+For the Kimi K3 contract (`bf16`, `DK=DV=128`, `C=32`),
+`tuned_kda_chunk_scan_spec(workgroups)` selects:
+
+- four value bands with a 128-thread SA16 scan through 96 recurrence streams;
+- two value bands with a 256-thread SA16 scan through 192 streams;
+- the unsplit 256-thread SA32 scan above 192 streams.
+
+The prep kernel stays on its independent 256-thread schedule. Value splitting
+changes only scan ownership and grid size; every workgroup writes a disjoint
+V/state band.
+
+## Dispatcher
+
+`dispatch.kda` registers the fused kernel and both ordered split phases:
+
+```python
+from dispatch.kda import KdaRequest, dispatch_kda
+
+common = dict(
+    batch=1,
+    num_heads=12,
+    seqlen=4096,
+    head_k=128,
+    head_v=128,
+    chunk_size=32,
+    dtype="bf16",
+    arch="gfx950",
+)
+
+prep = dispatch_kda(KdaRequest(**common, algorithm="chunk_prep"))
+scan = dispatch_kda(KdaRequest(**common, algorithm="chunk_scan"))
+
+assert prep.candidate.name == "kda_gfx950_chunk_prep"
+assert scan.candidate.name == "kda_gfx950_chunk_scan"
+assert scan.spec.value_splits == 4
+assert scan.grid == (1 * 12 * 4, 1, 1)
+```
+
+The two requests produce compatible materialized-tile layouts even though the
+prep and scan block sizes differ. Launch `prep` and then `scan` on the same
+stream. An unqualified request still returns `kda_gfx950_chunk_fused`.
 
 ## Tests
 
@@ -39,7 +108,9 @@ The CPU lane validates admission rules and compiles all three builders through
 comgr when available:
 
 ```bash
-python -m pytest tests/test_kda_chunkwise_spec.py
+python -m pytest \
+  tests/test_kda_chunkwise_spec.py \
+  tests/dispatch/kda/test_gfx950_wiring.py
 ```
 
 The GPU lane requires a gfx950 device and checks the tile oracle, both

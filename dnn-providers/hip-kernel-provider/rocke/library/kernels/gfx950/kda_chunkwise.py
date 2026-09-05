@@ -27,7 +27,7 @@ and a serial walk over chunks carrying the state ``S`` (DK x DV) in fp32
 
     Vt = A (V - GK S)
     O  = GQ S + Aqk Vt
-    S  = Diag(dec) S + Kt^T Vt
+    S  = Diag(dec) S + Kt Vt
 
 Only ``S`` is serial, so the tile construction above is one workgroup per chunk
 and fully parallel over the sequence.
@@ -79,7 +79,7 @@ either way.
 from __future__ import annotations
 
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Tuple
 
 from rocke.core.ir import BF16, F32, I8, I32, IRBuilder, KernelDef, PtrType
@@ -430,7 +430,7 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
     t = spec.tile
     if t.tile_atom_m not in _SCAN_ATOMS:
         return False, (
-            f"unsupported tile_atom_m {t.tile_atom_m}; " f"have {sorted(_SCAN_ATOMS)}"
+            f"unsupported tile_atom_m {t.tile_atom_m}; have {sorted(_SCAN_ATOMS)}"
         )
     atom = spec.atom
     if t.chunk not in KDA_CHUNK_SIZES:
@@ -448,8 +448,7 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
         )
     if spec.head_k % atom.k:
         return False, (
-            f"head_k ({spec.head_k}) must be a multiple of the MFMA K step "
-            f"({atom.k})"
+            f"head_k ({spec.head_k}) must be a multiple of the MFMA K step ({atom.k})"
         )
     solve_atom = MfmaAtom.bf16_16x16x32() if t.chunk == 16 else MfmaAtom.bf16_32x32x16()
     if t.chunk + t.pad_cb < solve_atom.k:
@@ -1805,7 +1804,7 @@ def _check_scan_partition(
         )
     if head_k % atom.n:
         return False, (
-            f"head_k ({head_k}) must be a multiple of the atom N extent " f"({atom.n})"
+            f"head_k ({head_k}) must be a multiple of the atom N extent ({atom.n})"
         )
     if t.chunk < atom.k and t.chunk + t.pad_cb < atom.k:
         return False, (
@@ -1906,6 +1905,7 @@ class _ScanCtx:
         v_row_base=0,
         ev_stride=None,
         io=None,
+        prefetch_v: bool = False,
     ):
         self.b = b
         self.ex2 = ex2
@@ -1915,6 +1915,7 @@ class _ScanCtx:
         self.EV_stride = head_v if ev_stride is None else ev_stride
         self.v_row_base = v_row_base
         self.io = io
+        self.prefetch_v = prefetch_v
         self.BLOCK = block_size
         self.ELEM = elem
         (
@@ -2075,7 +2076,14 @@ class _ScanCtx:
                 )
 
 
-def _emit_scan_body(sc: _ScanCtx, state, tile, *, prefetch: "_InputPrefetch" = None):
+def _emit_scan_body(
+    sc: _ScanCtx,
+    state,
+    tile,
+    *,
+    prefetch: "_InputPrefetch" = None,
+    tile_prefetch=None,
+):
     """One chunk of the state recurrence; returns the updated state.
 
     .. code-block:: text
@@ -2084,7 +2092,7 @@ def _emit_scan_body(sc: _ScanCtx, state, tile, *, prefetch: "_InputPrefetch" = N
         R^T  = V^T - Z^T                   EV x C   (in-register)
         V~^T = R^T A^T                     EV x C
         O    = GQ S + Aqk V~               C x EV
-        S^T <- Diag(dec) S^T + V~^T Kt^T   EV x DK
+        S^T <- S^T Diag(dec) + V~^T Kt^T   EV x DK
 
     Working transposed keeps every product in ``A B^T`` form with the
     contraction on the fastest axis, so no operand ever needs an LDS transpose.
@@ -2099,9 +2107,48 @@ def _emit_scan_body(sc: _ScanCtx, state, tile, *, prefetch: "_InputPrefetch" = N
     NC_T = sc.NC_T
     srow = b.add(wrow, lane_m)  # this wave's S^T operand row
 
+    def cidx(jt, col):
+        """Global chunk index of ``col`` inside chunk-extent tile ``jt``."""
+        return col if jt == 0 else b.add(b.const_i32(jt * atom.m), col)
+
     # Issued before anything else in the scan so the whole body covers the HBM
     # latency; the staging tiles are already dead by here.
     issued = prefetch.issue() if prefetch is not None else None
+
+    # The standalone scan reads V from HBM.  Issue those loads before publishing
+    # the state so that the mirror stores, rendezvous, and Z MFMAs cover their
+    # latency.  ATT otherwise places an exposed vmcnt drain immediately before
+    # every residual group.  The fused 256-thread schedule deliberately keeps
+    # its old late-load path: carrying these vectors there was measured to lose.
+    issued_v = None
+    if sc.prefetch_v and sc.v_lds is None:
+        issued_v = []
+        for jt in range(NC_T):
+            jt_values = []
+            for grp in range(CPL // 4):
+                row0, col = sc.slot(4 * grp)
+                cg = cidx(jt, col)
+                jt_values.append(
+                    b.global_load_vN(
+                        sc.v_ptr,
+                        sc.v_global(tile, cg, b.add(wrow, row0)),
+                        ELEM,
+                        4,
+                    )
+                )
+            issued_v.append(jt_values)
+
+    # Materialized scan tiles are much larger than V and remain live until the
+    # end of the body.  Their prefetch therefore issues here but commits only
+    # after the closing LDS rendezvous has retired every read of the current
+    # tiles.  The next iteration's publish-state rendezvous makes those writes
+    # visible, so this adds neither a second LDS buffer nor another barrier.
+    # SA16 value-split scans have twice as many per-thread tile loads.  Issuing
+    # that larger burst here delays the older V loads at the residual use, so
+    # defer it until V has retired.  SA32 keeps the longer prefetch distance.
+    issued_tiles = None
+    if tile_prefetch is not None and atom.m == 32:
+        issued_tiles = tile_prefetch.issue()
 
     # C=16 uses the 16x16x32 atom. V~/residual has only 16 real chunk columns,
     # so zero the padded K half before any of the three C-contracted products.
@@ -2139,10 +2186,6 @@ def _emit_scan_body(sc: _ScanCtx, state, tile, *, prefetch: "_InputPrefetch" = N
     # the third, so tiling it both ways needs a square atom.
     assert atom.m == atom.n, "chunk-extent tiling needs a square atom"
 
-    def cidx(jt, col):
-        """Global chunk index of ``col`` inside chunk-extent tile ``jt``."""
-        return col if jt == 0 else b.add(b.const_i32(jt * atom.m), col)
-
     # ---- Z^T = S^T GK^T, then R^T = V^T - Z^T into the V~ tile ----------
     acc_z = [
         sc.gemm(sc.stb_lds, srow, sc.gk_lds, sc.crow(jt), sc.KS_DK, atom.zero_acc(b))
@@ -2160,6 +2203,8 @@ def _emit_scan_body(sc: _ScanCtx, state, tile, *, prefetch: "_InputPrefetch" = N
             cg = cidx(jt, col)
             if sc.v_lds is not None:
                 vvec = _ld(b, sc.v_lds, cg, b.add(wrow, row0), dtype=ELEM, n=4)
+            elif issued_v is not None:
+                vvec = issued_v[jt][grp]
             else:
                 vvec = b.global_load_vN(
                     sc.v_ptr,
@@ -2182,6 +2227,8 @@ def _emit_scan_body(sc: _ScanCtx, state, tile, *, prefetch: "_InputPrefetch" = N
                     n=1,
                 )
     b.sync_lds_only()
+    if tile_prefetch is not None and issued_tiles is None:
+        issued_tiles = tile_prefetch.issue()
 
     # ---- V~^T = R^T A^T -------------------------------------------------
     # Contracts over the full chunk extent, so every tile reads the whole
@@ -2233,27 +2280,26 @@ def _emit_scan_body(sc: _ScanCtx, state, tile, *, prefetch: "_InputPrefetch" = N
                 1,
             )
 
-    # ---- S^T <- Diag(dec) S^T + V~^T Kt^T -------------------------------
+    # ---- S^T <- S^T Diag(dec) + V~^T Kt^T -------------------------------
     # dec is the whole-chunk decay per k channel, i.e. the state's column
-    # index, so it is read once per accumulator slot.
+    # index.  Every accumulator slot owned by a lane has the same column for
+    # both supported scan atoms, so one LDS read scales the whole fragment.
     new_state = []
+    _, decay_col = sc.slot(0)
     for ti in range(sc.NS):
-        scaled = []
-        for i in range(CPL):
-            _, col = sc.slot(i)
-            d = b.vec_extract(
-                _ld(
-                    b,
-                    sc.dec_lds,
-                    b.add(b.const_i32(ti * atom.n), col),
-                    dtype=F32,
-                    n=1,
-                ),
-                0,
-            )
-            if sc.dec_is_log:
-                d = sc.ex2(d)
-            scaled.append(b.fmul(b.vec_extract(state[ti], i), d))
+        d = b.vec_extract(
+            _ld(
+                b,
+                sc.dec_lds,
+                b.add(b.const_i32(ti * atom.n), decay_col),
+                dtype=F32,
+                n=1,
+            ),
+            0,
+        )
+        if sc.dec_is_log:
+            d = sc.ex2(d)
+        scaled = [b.fmul(b.vec_extract(state[ti], i), d) for i in range(CPL)]
         acc = sc.gemm(
             sc.vn_lds,
             b.add(wrow, lane_m),
@@ -2264,6 +2310,8 @@ def _emit_scan_body(sc: _ScanCtx, state, tile, *, prefetch: "_InputPrefetch" = N
         )
         new_state.append(acc)
     b.sync_lds_only()
+    if tile_prefetch is not None:
+        tile_prefetch.commit(issued_tiles)
     return new_state
 
 
@@ -2292,7 +2340,7 @@ def build_kda_chunk_fused(spec: KdaChunkFusedSpec, arch: str = "gfx950") -> Kern
         R^T  = V^T - Z^T                   EV x C   (in-register, see below)
         V~^T = R^T A^T                     EV x C
         O    = GQ S + Aqk V~               C x EV
-        S^T <- Diag(dec) S^T + V~^T Kt^T   EV x DK
+        S^T <- S^T Diag(dec) + V~^T Kt^T   EV x DK
 
     Working transposed is what keeps this cheap: every product is then
     ``A B^T`` with the contraction on the fastest axis, so no operand ever
@@ -2487,6 +2535,12 @@ class KdaChunkScanSpec:
     value_splits: int = 1
     # Read/write token-major [B,T,H,D] tensors instead of chunk-packed views.
     token_major_io: bool = False
+    # Issue the next chunk's materialized tiles across the current scan body,
+    # then reuse the same LDS allocations after their current contents die.
+    # The builder applies this only to C32 schedules with at least two waves;
+    # narrower blocks cannot carry the prefetched vectors without losing
+    # occupancy.
+    prefetch_tiles: bool = True
     name: str = "rocke_kda_chunk_scan"
 
     @property
@@ -2497,11 +2551,18 @@ class KdaChunkScanSpec:
         copies assume exactly the layouts that builder's global sink writes:
         two specs that could drift apart would drift into a silent misread.
         """
+        tile = self.tile
+        if self.value_splits != 1:
+            # The scan's smaller block and narrower atom manufacture recurrence
+            # parallelism; the independent tile producer keeps its 256-thread
+            # schedule.  Only the pads/chunk/tile atom define their shared HBM
+            # layout, so discard scan-only geometry here.
+            tile = replace(tile, block_size=256, scan_atom_m=0)
         return KdaChunkPrepSpec(
             head_k=self.head_k,
             head_v=self.head_v,
             dtype=self.dtype,
-            tile=self.tile,
+            tile=tile,
         )
 
     @property
@@ -2553,7 +2614,48 @@ class KdaChunkScanSpec:
             parts += (f"vs{self.value_splits}",)
         if self.token_major_io:
             parts += ("tm",)
+        if not self.prefetch_tiles:
+            parts += ("nopf",)
         return kernel_name_join(self.name, *parts)
+
+
+def tuned_kda_chunk_scan_spec(
+    workgroups: int,
+    *,
+    head_k: int = 128,
+    head_v: int = 128,
+    dtype: str = "bf16",
+    chunk: int = 32,
+    has_initial_state: bool = False,
+    store_final_state: bool = True,
+    token_major_io: bool = False,
+) -> KdaChunkScanSpec:
+    """Return the measured gfx950 scan geometry for a recurrence-stream count.
+
+    The Kimi K3 shape (DK=DV=128, C=32) is grid-starved below one workgroup per
+    CU.  Four value bands win through 96 streams, two narrower-atom bands win
+    through 192, and the unsplit scan wins once the base grid is saturated.
+    Other contracts retain the conservative default geometry.
+    """
+    tile = KdaTileSpec(chunk=chunk)
+    value_splits = 1
+    if head_k == 128 and head_v == 128 and dtype.lower() == "bf16" and chunk == 32:
+        if int(workgroups) <= 96:
+            tile = replace(tile, block_size=128, scan_atom_m=16)
+            value_splits = 4
+        elif int(workgroups) <= 192:
+            tile = replace(tile, block_size=256, scan_atom_m=16)
+            value_splits = 2
+    return KdaChunkScanSpec(
+        head_k=head_k,
+        head_v=head_v,
+        dtype=dtype,
+        tile=tile,
+        has_initial_state=has_initial_state,
+        store_final_state=store_final_state,
+        value_splits=value_splits,
+        token_major_io=token_major_io,
+    )
 
 
 def is_valid_scan_spec(
@@ -2567,8 +2669,7 @@ def is_valid_scan_spec(
 
     if spec.value_splits not in _RAW_VALUE_SPLITS:
         return False, (
-            f"value_splits must be one of {_RAW_VALUE_SPLITS}, "
-            f"got {spec.value_splits}"
+            f"value_splits must be one of {_RAW_VALUE_SPLITS}, got {spec.value_splits}"
         )
     if spec.head_v % spec.value_splits:
         return False, (
@@ -2671,6 +2772,7 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
     PDK, PCB = DK + t.pad_dk, C + t.pad_cb
     ELEM = _DTYPE_IR[spec.dtype]
     atom = spec.scan_atom
+    pipeline_tiles = spec.prefetch_tiles and C == 32 and BLOCK >= 128
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = BLOCK
@@ -2743,6 +2845,7 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
         v_row_base=v_row_base,
         ev_stride=EV,
         io=io,
+        prefetch_v=True,
     )
 
     state_base = b.add(
@@ -2781,16 +2884,8 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
                     8,
                 )
 
-    loop = b.scf_for_iter(
-        b.const_i32(0),
-        nc,
-        b.const_i32(1),
-        [(f"s{ti}", s_init[ti]) for ti in range(sc.NS)],
-        iv_name="chunk",
-        elide_trailing_barrier=False,
-    )
-    with loop as (n, carried):
-        tile = b.add(b.mul(bh, nc), n)
+    def stage_all(tile):
+        """Stage one complete materialized chunk with immediate load-to-LDS copies."""
         cd = b.mul(tile, b.const_i32(C * DK))
         cc = b.mul(tile, b.const_i32(C * C))
         stage(gk_ptr, gk_lds, C, DK, cd)
@@ -2808,8 +2903,131 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
                 ),
                 4,
             )
+
+    def issue_stage(src, rows, cols, base):
+        """Issue a tile's HBM loads now and return values for a later LDS commit."""
+        n_slot = rows * cols // 8
+        issued = []
+        for i in range(max(1, n_slot // BLOCK)):
+            vidx = b.add(tid, b.const_i32(i * BLOCK))
+            # A value issued under scf.if cannot escape to the late commit.
+            # Clamp inactive lanes to the final valid vector instead, then
+            # predicate their LDS writes in commit_stage.  The pipelined
+            # schedules keep this duplication smaller than the latency hidden.
+            safe = (
+                vidx
+                if n_slot >= BLOCK
+                else b.select(
+                    b.cmp_gt(b.const_i32(n_slot), vidx),
+                    vidx,
+                    b.const_i32(n_slot - 1),
+                )
+            )
+            off = b.mul(safe, b.const_i32(8))
+            issued.append(
+                (
+                    vidx,
+                    off,
+                    b.global_load_vN(src, b.add(base, off), ELEM, 8),
+                )
+            )
+        return issued
+
+    def commit_stage(dst, cols, n_slot, issued):
+        """Commit values from :func:`issue_stage` after the old tile is dead."""
+        for vidx, off, value in issued:
+            guard = (
+                nullcontext()
+                if n_slot >= BLOCK
+                else b.scf_if(b.cmp_gt(b.const_i32(n_slot), vidx))
+            )
+            with guard:
+                b.smem_store_vN(
+                    dst,
+                    [b.div(off, b.const_i32(cols)), b.mod(off, b.const_i32(cols))],
+                    value,
+                    8,
+                )
+
+    class _TilePrefetch:
+        """Register-held next-chunk loads that reuse the current chunk's LDS."""
+
+        def __init__(self, tile):
+            self.tile = tile
+
+        def issue(self):
+            cd = b.mul(self.tile, b.const_i32(C * DK))
+            cc = b.mul(self.tile, b.const_i32(C * C))
+            dec_slot = DK // 4
+            dec_vidx = tid
+            dec_safe = b.select(
+                b.cmp_gt(b.const_i32(dec_slot), dec_vidx),
+                dec_vidx,
+                b.const_i32(dec_slot - 1),
+            )
+            dec_col4 = b.mul(dec_safe, b.const_i32(4))
+            return (
+                issue_stage(gk_ptr, C, DK, cd),
+                issue_stage(gq_ptr, C, DK, cd),
+                issue_stage(kt_ptr, DK, C, cd),
+                issue_stage(a_ptr, C, C, cc),
+                issue_stage(aqk_ptr, C, C, cc),
+                (
+                    dec_vidx,
+                    dec_col4,
+                    b.global_load_vN(
+                        dec_ptr,
+                        b.add(b.mul(self.tile, b.const_i32(DK)), dec_col4),
+                        F32,
+                        4,
+                    ),
+                ),
+            )
+
+        def commit(self, issued):
+            gk, gq, kt, aa, aqk, dec = issued
+            commit_stage(gk_lds, DK, C * DK // 8, gk)
+            commit_stage(gq_lds, DK, C * DK // 8, gq)
+            commit_stage(kt_lds, C, DK * C // 8, kt)
+            commit_stage(ab_lds, C, C * C // 8, aa)
+            commit_stage(aqb_lds, C, C * C // 8, aqk)
+            dec_vidx, dec_col4, dec_value = dec
+            with b.scf_if(b.cmp_gt(b.const_i32(DK // 4), dec_vidx)):
+                b.smem_store_vN(dec_lds, [dec_col4], dec_value, 4)
+
+    if pipeline_tiles:
+        # Peel chunk zero.  Every later chunk is loaded by its predecessor.
+        stage_all(b.mul(bh, nc))
         b.sync_lds_only()
-        b.scf_yield(*_emit_scan_body(sc, list(carried), tile))
+
+    loop = b.scf_for_iter(
+        b.const_i32(0),
+        nc,
+        b.const_i32(1),
+        [(f"s{ti}", s_init[ti]) for ti in range(sc.NS)],
+        iv_name="chunk",
+        elide_trailing_barrier=False,
+    )
+    with loop as (n, carried):
+        tile = b.add(b.mul(bh, nc), n)
+        tile_prefetch = None
+        if pipeline_tiles:
+            # Clamp the last iteration to a valid tile.  One redundant prefetch
+            # is cheaper than a divergent branch in every recurrence stream.
+            nxt = b.add(n, b.const_i32(1))
+            nxt = b.select(b.cmp_gt(nc, nxt), nxt, n)
+            tile_prefetch = _TilePrefetch(b.add(b.mul(bh, nc), nxt))
+        else:
+            stage_all(tile)
+            b.sync_lds_only()
+        b.scf_yield(
+            *_emit_scan_body(
+                sc,
+                list(carried),
+                tile,
+                tile_prefetch=tile_prefetch,
+            )
+        )
 
     if spec.store_final_state:
         sc.store_state(ht_ptr, state_base, loop.results)
@@ -2896,4 +3114,5 @@ __all__ = [
     "kda_chunk_prep_signature",
     "kda_chunk_scan_grid",
     "kda_chunk_scan_signature",
+    "tuned_kda_chunk_scan_spec",
 ]

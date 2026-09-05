@@ -18,12 +18,11 @@ compilable with its own grid and ABI:
 The split halves are opt-in and must be launched in that order; see
 :mod:`.common` for why there is no automatic fused/split routing yet.
 
-The two paths do not share a tile schedule, and neither is transcribed here.
-The fused kernel carries its own tuned one (a 512-thread panel mapping over
-wider row pitches, which is what keeps eight waves resident while the state
-lives in registers); the split scan is deliberately capped so two workgroups
-fit per CU. Each candidate therefore starts from its own spec's default tile
-and overrides only the requested chunk.
+The two paths do not share a tile schedule. The fused kernel carries its own
+tuned 512-thread panel mapping; the split scan uses the kernel-owned measured
+geometry selector to add value-band workgroups when ``batch * heads`` leaves
+gfx950 underfilled. Every scan geometry remains capped so at least two
+workgroups fit per CU.
 """
 
 from __future__ import annotations
@@ -50,6 +49,7 @@ from kernels.gfx950.kda_chunkwise import (
     kda_chunk_prep_signature,
     kda_chunk_scan_grid,
     kda_chunk_scan_signature,
+    tuned_kda_chunk_scan_spec,
 )
 from rocke.dispatch.core import (
     CandidateRegistry,
@@ -132,12 +132,14 @@ def _prep_spec(req: OperatorRequest) -> KdaChunkPrepSpec:
 
 
 def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:
+    """Select the pipelined scan and its measured value-band geometry."""
     assert isinstance(req, KdaRequest)
-    return KdaChunkScanSpec(
+    return tuned_kda_chunk_scan_spec(
+        req.workgroups,
         head_k=int(req.head_k),
         head_v=int(req.head_v),
         dtype=req.dtype.lower(),
-        tile=_split_tile(req),
+        chunk=req.effective_chunk_size,
         has_initial_state=bool(req.has_initial_state),
         store_final_state=bool(req.store_final_state),
     )
@@ -308,7 +310,10 @@ def _scan_candidate() -> KernelCandidate:
     """Split path phase 2: the state scan over materialized tiles.
 
     Consumes what ``kda_gfx950_chunk_prep`` wrote, so it is only meaningful
-    after that kernel has run on the same problem.
+    after that kernel has run on the same problem. ``_scan_spec`` derives the
+    adaptive value split from the request's recurrence-stream count, while the
+    builder enables the register-held next-chunk pipeline for eligible C32
+    schedules.
     """
     return _make_candidate(
         name="kda_gfx950_chunk_scan",
