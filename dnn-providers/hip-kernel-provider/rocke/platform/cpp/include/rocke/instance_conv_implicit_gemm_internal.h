@@ -391,6 +391,21 @@ rocke_value_t* rocke_conv_emit_smem_load(
 /* _emit_frag_smem_load(b, src, mn_in_atom, k_in_atom, atom_mn_base, k_tile_base,
  * frag_len): one frag_len-wide operand fragment from a row-major LDS tile
  * (8-wide chunked + vec_concat for wide WMMA frags). */
+/* K-outer transpose-read fragment feed. Takes lane and the two hoisted lane
+ * constants directly rather than a build ctx, so both the shared compute phase
+ * (wgrad, A and B) and dgrad's own operand fetch (B only) can call it without
+ * duplicating the lane mapping. See conv_implicit_gemm_conv_compute_phase.cpp. */
+rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  rocke_value_t* tr_lane_mod4,
+                                  rocke_value_t* tr_grp16,
+                                  rocke_value_t* smem,
+                                  rocke_value_t* mn_base,
+                                  rocke_value_t* k_base,
+                                  int mn_atom,
+                                  int n,
+                                  const rocke_type_t* dtype);
+
 rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,
                                               rocke_value_t* src,
                                               rocke_value_t* mn_in_atom,

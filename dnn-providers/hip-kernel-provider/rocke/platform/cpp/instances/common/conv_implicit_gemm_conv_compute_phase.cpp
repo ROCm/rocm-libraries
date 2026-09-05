@@ -71,14 +71,16 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
  * 16x16x16 atom read k rows 8..27 of a 16-row tile -- past the end of the
  * K-outer tile. The emitted IR is unchanged for the two 8-element atoms.
  * Mirrors _tr_frag() in conv_implicit_gemm_wgrad.py. */
-static rocke_value_t* conv_tr_frag(rocke_ir_builder_t* b,
-                                   rocke_conv_build_ctx_t* ctx,
-                                   rocke_value_t* smem,
-                                   rocke_value_t* mn_base,
-                                   rocke_value_t* k_base,
-                                   int mn_atom,
-                                   int n,
-                                   const rocke_type_t* dtype)
+rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  rocke_value_t* tr_lane_mod4,
+                                  rocke_value_t* tr_grp16,
+                                  rocke_value_t* smem,
+                                  rocke_value_t* mn_base,
+                                  rocke_value_t* k_base,
+                                  int mn_atom,
+                                  int n,
+                                  const rocke_type_t* dtype)
 {
     /* Every operand is sequenced into a temporary: Python evaluates these
      * builder calls strictly left-to-right (innermost first) and C argument
@@ -86,19 +88,19 @@ static rocke_value_t* conv_tr_frag(rocke_ir_builder_t* b,
     rocke_value_t* c_mn = rocke_b_const_i32(b, mn_atom);
 
     /* col = mn_base + (((lane % MN) / 16) * 16 + tr_lane_mod4) */
-    rocke_value_t* lane_mod_mn = rocke_b_mod(b, ctx->lane, c_mn);
+    rocke_value_t* lane_mod_mn = rocke_b_mod(b, lane, c_mn);
     rocke_value_t* c16a = rocke_b_const_i32(b, 16);
     rocke_value_t* grp = rocke_b_div(b, lane_mod_mn, c16a);
     rocke_value_t* c16b = rocke_b_const_i32(b, 16);
     rocke_value_t* col_mul = rocke_b_mul(b, grp, c16b);
-    rocke_value_t* col_inner = rocke_b_add(b, col_mul, ctx->tr_lane_mod4);
+    rocke_value_t* col_inner = rocke_b_add(b, col_mul, tr_lane_mod4);
     rocke_value_t* col = rocke_b_add(b, mn_base, col_inner);
 
     /* row0 = k_base + ((lane / MN) * n + tr_grp16) */
-    rocke_value_t* lane_div_mn = rocke_b_div(b, ctx->lane, c_mn);
+    rocke_value_t* lane_div_mn = rocke_b_div(b, lane, c_mn);
     rocke_value_t* c_n = rocke_b_const_i32(b, n);
     rocke_value_t* row_mul = rocke_b_mul(b, lane_div_mn, c_n);
-    rocke_value_t* row_inner = rocke_b_add(b, row_mul, ctx->tr_grp16);
+    rocke_value_t* row_inner = rocke_b_add(b, row_mul, tr_grp16);
     rocke_value_t* row0 = rocke_b_add(b, k_base, row_inner);
 
     rocke_value_t* out = NULL;
@@ -283,8 +285,16 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                 rocke_value_t* mn_c = rocke_b_const_i32(b, mi * spec->warp_tile_m);
                 rocke_value_t* mn_base = rocke_b_add(b, warp_m_off, mn_c);
                 rocke_value_t* k_c = rocke_b_const_i32(b, kk * spec->warp_tile_k);
-                a_rows[mi] = conv_tr_frag(
-                    b, ctx, A_src, mn_base, k_c, spec->warp_tile_m, ctx->a_per_lane, NULL);
+                a_rows[mi] = rocke_conv_tr_frag(b,
+                                                ctx->lane,
+                                                ctx->tr_lane_mod4,
+                                                ctx->tr_grp16,
+                                                A_src,
+                                                mn_base,
+                                                k_c,
+                                                spec->warp_tile_m,
+                                                ctx->a_per_lane,
+                                                NULL);
                 continue;
             }
             /* a_row = warp_m_off + (mi*warp_tile_m + m_in_atom) */
@@ -317,8 +327,16 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                 rocke_value_t* mn_c = rocke_b_const_i32(b, ni * spec->warp_tile_n);
                 rocke_value_t* mn_base = rocke_b_add(b, warp_n_off, mn_c);
                 rocke_value_t* k_c = rocke_b_const_i32(b, kk * spec->warp_tile_k);
-                b_cols[ni] = conv_tr_frag(
-                    b, ctx, B_src, mn_base, k_c, spec->warp_tile_n, ctx->b_per_lane, NULL);
+                b_cols[ni] = rocke_conv_tr_frag(b,
+                                                ctx->lane,
+                                                ctx->tr_lane_mod4,
+                                                ctx->tr_grp16,
+                                                B_src,
+                                                mn_base,
+                                                k_c,
+                                                spec->warp_tile_n,
+                                                ctx->b_per_lane,
+                                                NULL);
                 continue;
             }
             /* b_row = warp_n_off + (ni*warp_tile_n + n_in_atom) */

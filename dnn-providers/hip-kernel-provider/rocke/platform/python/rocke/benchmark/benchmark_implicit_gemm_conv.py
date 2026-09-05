@@ -98,6 +98,9 @@ class Result:
     vec_a: int = 1
     vec_b: int = 1
     vec_c: int = 1
+    # wgrad only: async_dma is a swept axis, so the ranked table has to
+    # distinguish the two legs. False for fwd/dgrad, which do not sweep it.
+    async_dma: bool = False
     passed: bool | None = None  # None when --verify was not requested
 
 
@@ -1479,6 +1482,18 @@ def _build_dgrad_one(args_tuple):
 
     spec = DgradConvSpec(
         problem=problem,
+        # Deduced per combo, not a run-level flag: warp_tile_mn is itself a
+        # sweep axis, and the predicate keys on it. Mirrors the wgrad caller.
+        # The M-outer path keeps coverage through the in-process A/B tests in
+        # tests/instances/test_conv_dgrad_correctness.py, which construct both
+        # layouts directly rather than going through this driver.
+        lds_k_outer=DgradConvSpec.default_lds_k_outer(
+            arch=arch,
+            dtype_b=dtype,
+            warp_tile_n=warp_tile_mn,
+            cpg=problem.cpg,
+            wave_size=target.wave_size,
+        ),
         name="rocke_bench_igemm_dgrad",
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
         tile_m=tile_m,
@@ -2320,6 +2335,7 @@ def _run_wgrad_sweep(
                     pipeline=pipeline,
                     epilogue=epilogue,
                     split_k=_launch_sk,
+                    async_dma=_async_dma,
                     ms=ms,
                     tflops=cur_tflops,
                     gbps=cur_gbps,
@@ -2391,6 +2407,7 @@ def _run_wgrad_sweep(
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
             f"{r.pipeline}/{r.epilogue} spk{r.split_k}"
+            f"{' async' if r.async_dma else ''}"
         )
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
 

@@ -431,27 +431,34 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
-    /* The basic loop is unrolled at build time, one full load+mfma body per K
+    /* Both loops are unrolled at build time, one full load+mfma body per K
      * iteration, so a deep reduction explodes compile time and code size. A
-     * build-practicality bound, not a hardware one. Mirrors Python. */
-    if(s->pipeline && strcmp(s->pipeline, "basic") == 0)
+     * build-practicality bound, not a hardware one. This used to guard 'basic'
+     * only, which left async uncapped and let a low split-K degree unroll five
+     * figures of bodies into one kernel. Mirrors Python. */
     {
-        const int spk = (s->split_k > 1) ? s->split_k : 1;
-        const int slice_k = rocke_wgrad_conv_spec_wg_K_padded(s) / spk;
-        const int k_iters = (slice_k + s->tile_k - 1) / s->tile_k;
-        if(k_iters > ROCKE_MAX_BASIC_K_ITERS)
+        const bool is_basic = s->pipeline && strcmp(s->pipeline, "basic") == 0;
+        if(is_basic || s->async_dma)
         {
-            if(reason && reason_cap)
-                snprintf(reason,
-                         reason_cap,
-                         "pipeline='basic' would unroll to %d K iterations "
-                         "(slice_k=%d, tile_k=%d), over the %d limit; "
-                         "raise split_k or tile_k",
-                         k_iters,
-                         slice_k,
-                         s->tile_k,
-                         ROCKE_MAX_BASIC_K_ITERS);
-            return false;
+            const char* label = is_basic ? "pipeline='basic'" : "async_dma";
+            const int spk = (s->split_k > 1) ? s->split_k : 1;
+            const int slice_k = rocke_wgrad_conv_spec_wg_K_padded(s) / spk;
+            const int k_iters = (slice_k + s->tile_k - 1) / s->tile_k;
+            if(k_iters > ROCKE_MAX_UNROLLED_K_ITERS)
+            {
+                if(reason && reason_cap)
+                    snprintf(reason,
+                             reason_cap,
+                             "%s would unroll to %d K iterations "
+                             "(slice_k=%d, tile_k=%d), over the %d limit; "
+                             "raise split_k or tile_k",
+                             label,
+                             k_iters,
+                             slice_k,
+                             s->tile_k,
+                             ROCKE_MAX_UNROLLED_K_ITERS);
+                return false;
+            }
         }
     }
 

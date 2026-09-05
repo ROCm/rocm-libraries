@@ -183,10 +183,10 @@ int rocke_wgrad_conv_spec_wg_N(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 /* spec.wg_K: output spatial positions (N * Ho * Wo [* Do]). */
 int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
-/* Max K iterations the pipeline="basic" loop may unroll to. Build-practicality
- * bound (code size / compile time), not a hardware limit. Mirrors
- * _MAX_BASIC_K_ITERS in conv_implicit_gemm_wgrad.py. */
-#define ROCKE_MAX_BASIC_K_ITERS 128
+/* Max K iterations the Python-unrolled loops (pipeline="basic" and async_dma)
+ * may unroll to. Build-practicality bound (code size / compile time), not a
+ * hardware limit. Mirrors _MAX_UNROLLED_K_ITERS in conv_implicit_gemm_wgrad.py. */
+#define ROCKE_MAX_UNROLLED_K_ITERS 128
 
 /* spec.wg_K_padded(): wg_K rounded up to tile_k * split_k. */
 int rocke_wgrad_conv_spec_wg_K_padded(const rocke_implicit_gemm_conv_wgrad_spec_t* s);

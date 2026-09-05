@@ -666,7 +666,9 @@ class WgradConvSpec:
 # this gates both the selection policy and the arch-aware validator.
 _LDS_K_OUTER_ARCH = "gfx950"
 
-_MAX_BASIC_K_ITERS = 128
+# Cap on the K-iteration count of the Python-unrolled loops
+# (pipeline='basic' and async_dma). Mirrors ROCKE_MAX_UNROLLED_K_ITERS.
+_MAX_UNROLLED_K_ITERS = 128
 
 
 def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
@@ -811,17 +813,23 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     if spec.pipeline == "basic" and spec.async_dma:
         return False, "pipeline='basic' is incompatible with async_dma=True"
 
-    if spec.pipeline == "basic":
-        # The basic loop is unrolled in Python, one full load+mfma body per K
-        # iteration, so a deep reduction would explode compile time and code
-        # size. The cap is a build-practicality bound, not a hardware one.
+    if spec.pipeline == "basic" or spec.async_dma:
+        # Both loops are unrolled in Python, one full load+mfma body per K
+        # iteration, so a deep reduction explodes compile time and code size.
+        # The cap is a build-practicality bound, not a hardware one.
+        #
+        # This used to guard 'basic' only, which left async uncapped. A deep
+        # reduction at a low split-K degree then unrolled five figures of
+        # bodies into one kernel; a sweep that reached those specs exhausted
+        # host memory during the IR build rather than failing validation.
+        _label = "pipeline='basic'" if spec.pipeline == "basic" else "async_dma"
         _slice_k = spec.wg_K_padded() // max(spec.split_k, 1)
         _k_iters = (_slice_k + spec.tile_k - 1) // spec.tile_k
-        if _k_iters > _MAX_BASIC_K_ITERS:
+        if _k_iters > _MAX_UNROLLED_K_ITERS:
             return False, (
-                f"pipeline='basic' would unroll to {_k_iters} K iterations "
+                f"{_label} would unroll to {_k_iters} K iterations "
                 f"(slice_k={_slice_k}, tile_k={spec.tile_k}), over the "
-                f"{_MAX_BASIC_K_ITERS} limit; raise split_k or tile_k"
+                f"{_MAX_UNROLLED_K_ITERS} limit; raise split_k or tile_k"
             )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
