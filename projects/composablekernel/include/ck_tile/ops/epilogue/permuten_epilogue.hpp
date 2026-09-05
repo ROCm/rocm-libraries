@@ -60,7 +60,7 @@ struct PermuteNEpilogueProblem
 };
 
 // ---------------------------------------------------------------------------
-// [kernel_tune pilot 2026-09] Lane -> (m, n) store mapping of this epilogue.
+// Lane -> (m, n) store mapping of this epilogue.
 //
 // The store distribution (IntrThreadShuffleEncode below) decomposes the block
 // tile as
@@ -139,20 +139,6 @@ struct PermuteNEpilogue
     static constexpr index_t NumDTensor    = Problem::NumDTensor;
     static constexpr index_t MRepeat       = kMPerBlock / (MPerXdl * MWave);
     static constexpr index_t NRepeat       = kNPerBlock / (NPerXdl * NWave);
-
-    struct ScaleThreadBufferIndices
-    {
-        index_t m;
-        index_t n;
-    };
-
-    CK_TILE_HOST_DEVICE static constexpr ScaleThreadBufferIndices
-    GetScaleThreadBufferIndices(index_t m_lane, index_t n_idx)
-    {
-        return {m_lane * NRepeat, n_idx};
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr index_t GetScaleMWindowStep() { return MPerIteration; }
 
     CDElementwise elfunc_;
 
@@ -384,25 +370,23 @@ struct PermuteNEpilogue
                     }
                     else if constexpr(has_scales && !has_scalar_scales)
                     {
-                        // [kernel_tune pilot fix] Indexing both scale tiles at
-                        // [dst] applies WRONG per-token scales: the tiles are
+                        // Indexing both scale tiles at [dst] applies wrong
+                        // per-token scales: the tiles are
                         // loaded through the same distribution as the store,
                         // but stepping the n2 Y-coordinate across scale_m's
                         // length-1 N dimension carries into its M coordinate.
-                        // Measured on gfx950 (see ATTEMPTS.md, probe a2probe2):
-                        //   sm delivered at (y0=m2, y1=n2) = scale_m[m + n2]
+                        // The scale values delivered by the distribution are:
+                        //   sm at (y0=m2, y1=n2) = scale_m[m + n2]
                         //   (wrapped within the current MWave*MPerXdl window),
                         //   sn delivered at (y0=m2, y1=n2) = scale_n[n].
                         // scale_m does not depend on n and its n2=0 slot is
                         // always correct, so gather sm at (m2, n2=0). scale_n
                         // does not depend on m; gather it at (m2=0, n2) for the
                         // same robustness.
-                        const auto scale_indices = GetScaleThreadBufferIndices(m_lane, n_idx);
                         const auto sm =
-                            static_cast<float>(sm_tile.get_thread_buffer()[scale_indices.m]);
-                        const auto sn =
-                            static_cast<float>(sn_tile.get_thread_buffer()[scale_indices.n]);
-                        v = static_cast<AccDataType>(v * sm * sn);
+                            static_cast<float>(sm_tile.get_thread_buffer()[m_lane * NRepeat]);
+                        const auto sn = static_cast<float>(sn_tile.get_thread_buffer()[n_idx]);
+                        v             = static_cast<AccDataType>(v * sm * sn);
                     }
 
                     c_out_tensor.get_thread_buffer()[dst] = type_convert<ODataType>(v);
@@ -425,15 +409,15 @@ struct PermuteNEpilogue
             static_for<0, NumDTensor, 1>{}([&](auto idx) {
                 move_tile_window(d_dram_windows[idx], {number<MPerXdl * MWave>{}, number<0>{}});
             });
-            // [kernel_tune pilot fix] scale_m is M-indexed (per-token); its
-            // window must track the output rows across MRepeat iterations,
+            // scale_m is M-indexed (per-token); its window must track the
+            // output rows across MRepeat iterations,
             // otherwise every iteration re-reads rows [0, MPerXdl*MWave) and
             // MTile > MWave*MPerXdl silently applies wrong per-token scales.
             // scale_n's view has M-stride 0 (it is N-indexed), so it does not
             // need to move.
             if constexpr(has_scales && !has_scalar_scales)
             {
-                move_tile_window(scale_m_window, {number<GetScaleMWindowStep()>{}, number<0>{}});
+                move_tile_window(scale_m_window, {number<MPerXdl * MWave>{}, number<0>{}});
             }
         });
     }
