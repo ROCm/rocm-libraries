@@ -52,6 +52,7 @@ from Tensile.Common.ValidParameters import validParameters, \
                                             normalizeSwInstructionPrefetch, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
+from Tensile.SolutionStructs.DtvbKTail import applyDtvbKTailAssert
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.SolutionStructs.segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
@@ -1577,10 +1578,10 @@ class Solution(collections.abc.Mapping):
         # Use AssertSummationElementMultiple (BoundSizeMultiple in predicates) to exclude failed tail-loop cases
         state["AssertSummationElementMultiple"] = max(state["AssertSummationElementMultiple"], state["DepthU"])
 
-    # for DTVB, does not work with NN and Tail-loop
-    if tc == 'B' and (not state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):
-        # Use AssertSummationElementMultiple (BoundSizeMultiple in predicates) to exclude failed tail-loop cases
-        state["AssertSummationElementMultiple"] = max(state["AssertSummationElementMultiple"], state["DepthU"])
+    # DTVB tail-loop global loads over-read B when K is not a multiple of
+    # DepthU (gfx1200 VM-fault at the next 2MB VRAM page). The old guard
+    # only covered NN; NT (Ailk_Bjlk / LoRA dgrad) hits the same over-read.
+    applyDtvbKTailAssert(state, tc)
 
     # Does not work with DirectToLDS
     # -> this will be checked after DirectToLDS doable check is done
