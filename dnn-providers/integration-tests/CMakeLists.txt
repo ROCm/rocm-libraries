@@ -148,9 +148,7 @@ if(Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_verify_support_claims.py
     )
-    # Not routed through _apply_provider_ctest_category_labels because the
-    # support-claim verifier is not listed in test_categories_external.yaml.
-    set_tests_properties(hipdnn_support_claim_verifier_python_tests PROPERTIES LABELS "unit_test;quick")
+    set(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST hipdnn_support_claim_verifier_python_tests)
 endif()
 
 
@@ -275,6 +273,9 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     # (it is registered directly above, not by _create_test_name_validation_target_internal).
     if(HIPDNN_IT_BUNDLE_VERIFIER_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_VERIFIER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST})
     endif()
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")

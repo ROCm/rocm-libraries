@@ -24,7 +24,7 @@ namespace hipdnn_integration_tests::bundle::test_utils
 
 inline std::string readFile(const std::filesystem::path& filePath)
 {
-    std::ifstream file(filePath);
+    std::ifstream file(filePath, std::ios::binary);
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 

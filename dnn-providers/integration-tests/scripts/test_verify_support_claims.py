@@ -16,7 +16,9 @@ from verify_support_claims import verify_all
 
 def _write_json(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
+    path.write_bytes(
+        (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +55,8 @@ class TestSingleGraphSchema(unittest.TestCase):
             {"version": 2, "claims": {}},
         )
         errors = verify_all(self.bundle_root)
-        self.assertTrue(any("version must be 1" in e for e in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("version must be 1", errors[0])
 
     def test_invalid_platform_fails(self) -> None:
         _write_json(self.bundle_root / "A" / "Small.json", {})
@@ -65,7 +68,8 @@ class TestSingleGraphSchema(unittest.TestCase):
             },
         )
         errors = verify_all(self.bundle_root)
-        self.assertTrue(any("invalid platform" in e for e in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("invalid platform", errors[0])
 
     def test_empty_claims_passes(self) -> None:
         _write_json(self.bundle_root / "A" / "Small.json", {})
@@ -82,7 +86,8 @@ class TestSingleGraphSchema(unittest.TestCase):
             {"version": 1, "claims": None},
         )
         errors = verify_all(self.bundle_root)
-        self.assertTrue(any("got null" in e for e in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("got null", errors[0])
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +155,8 @@ class TestSweepSchema(unittest.TestCase):
             },
         )
         errors = verify_all(self.bundle_root)
-        self.assertTrue(any("duplicate case id" in e for e in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("duplicate case id", errors[0])
 
     def test_missing_cases_array_fails(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
@@ -166,7 +172,8 @@ class TestSweepSchema(unittest.TestCase):
             },
         )
         errors = verify_all(self.bundle_root)
-        self.assertTrue(any("non-empty 'cases' array" in e for e in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("non-empty 'cases' array", errors[0])
 
     def test_missing_support_object_fails(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
@@ -182,7 +189,8 @@ class TestSweepSchema(unittest.TestCase):
             },
         )
         errors = verify_all(self.bundle_root)
-        self.assertTrue(any("missing 'support' object" in e for e in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("missing 'support' object", errors[0])
 
     def test_null_claims_fails(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
@@ -195,7 +203,8 @@ class TestSweepSchema(unittest.TestCase):
             {"version": 1, "claims": None},
         )
         errors = verify_all(self.bundle_root)
-        self.assertTrue(any("got null" in e for e in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("got null", errors[0])
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +256,8 @@ class TestEnforcementLevel(unittest.TestCase):
             },
         )
         errors = verify_all(self.bundle_root)
-        self.assertTrue(any("invalid enforcement_level" in e for e in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("invalid enforcement_level", errors[0])
 
     def test_valid_enforcement_level_passes(self) -> None:
         for level in ("applicability", "buildable", "full"):
@@ -305,7 +315,9 @@ class TestSweepCaseIds(unittest.TestCase):
             },
         )
         errors = verify_all(self.bundle_root)
-        self.assertTrue(any("c_nonexistent" in e and "not found" in e for e in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("c_nonexistent", errors[0])
+        self.assertIn("not found", errors[0])
 
     def test_valid_case_ids_pass(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
@@ -354,7 +366,8 @@ class TestOrphanedSidecars(unittest.TestCase):
             {"version": 1, "claims": {}},
         )
         errors = verify_all(self.bundle_root)
-        self.assertTrue(any("orphaned sidecar" in e for e in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("orphaned sidecar", errors[0])
 
     def test_orphaned_sweep_support_json_fails(self) -> None:
         _write_json(
@@ -362,7 +375,8 @@ class TestOrphanedSidecars(unittest.TestCase):
             {"version": 1, "claims": {}},
         )
         errors = verify_all(self.bundle_root)
-        self.assertTrue(any("not a sweep root" in e for e in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("not a sweep root", errors[0])
 
     def test_sweep_support_json_with_sweep_json_passes(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
@@ -375,6 +389,30 @@ class TestOrphanedSidecars(unittest.TestCase):
             {"version": 1, "claims": {}},
         )
         self.assertEqual(verify_all(self.bundle_root), [])
+
+
+# ---------------------------------------------------------------------------
+# Canonical form
+# ---------------------------------------------------------------------------
+
+
+class TestCanonicalForm(unittest.TestCase):
+    def setUp(self) -> None:
+        self.bundle_root = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.bundle_root, ignore_errors=True)
+
+    def test_non_canonical_bytes_detected(self) -> None:
+        (self.bundle_root / "A").mkdir(parents=True)
+        (self.bundle_root / "A" / "Small.json").write_bytes(b"{}")
+        non_canonical = json.dumps({"version": 1, "claims": {}}, indent=2)
+        (self.bundle_root / "A" / "Small.support.json").write_bytes(
+            non_canonical.encode("utf-8")
+        )
+        errors = verify_all(self.bundle_root)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("not in canonical form", errors[0])
 
 
 # ---------------------------------------------------------------------------

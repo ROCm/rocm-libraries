@@ -47,6 +47,9 @@ def _validate_arch_platform_map(
         _error(path, f"{context}: support must be an object", errors)
         return
     for arch, platforms in data.items():
+        if not arch:
+            _error(path, f"{context}: empty arch key", errors)
+            continue
         if not isinstance(platforms, list):
             _error(
                 path,
@@ -87,6 +90,9 @@ def validate_single_graph_schema(data: dict, path: Path, errors: List[str]) -> N
         _error(path, "claims must be an object", errors)
         return
     for engine_name, arch_map in claims.items():
+        if not engine_name:
+            _error(path, "empty engine name in claims", errors)
+            continue
         _validate_arch_platform_map(arch_map, path, f"claims.{engine_name}", errors)
 
 
@@ -106,6 +112,9 @@ def validate_sweep_schema(data: dict, path: Path, errors: List[str]) -> None:
         _error(path, "claims must be an object", errors)
         return
     for engine_name, groups in claims.items():
+        if not engine_name:
+            _error(path, "empty engine name in claims", errors)
+            continue
         if not isinstance(groups, list):
             _error(
                 path,
@@ -131,6 +140,8 @@ def validate_sweep_schema(data: dict, path: Path, errors: List[str]) -> None:
                             f" got {type(case_id).__name__}",
                             errors,
                         )
+                    elif not case_id:
+                        _error(path, f"{ctx}: empty case id", errors)
                     elif case_id in seen_case_ids:
                         _error(
                             path,
@@ -170,7 +181,7 @@ def check_enforcement_level_single(support_path: Path, errors: List[str]) -> Non
     if not meta_path.exists():
         return
     try:
-        with open(meta_path) as f:
+        with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
         _error(meta_path, f"cannot read metadata: {exc}", errors)
@@ -190,7 +201,7 @@ def check_enforcement_level_sweep(support_path: Path, errors: List[str]) -> None
     if not sweep_path.exists():
         return
     try:
-        with open(sweep_path) as f:
+        with open(sweep_path, encoding="utf-8") as f:
             sweep = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
         _error(sweep_path, f"cannot read sweep: {exc}", errors)
@@ -226,7 +237,7 @@ def check_sweep_case_ids(
         )
         return
     try:
-        with open(sweep_path) as f:
+        with open(sweep_path, encoding="utf-8") as f:
             sweep = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
         _error(sweep_path, f"cannot read sweep: {exc}", errors)
@@ -282,7 +293,7 @@ def is_sweep_sidecar(path: Path) -> bool:
 
 def check_canonical_form(support_path: Path, data: object, errors: List[str]) -> None:
     canonical = json.dumps(data, indent=2, sort_keys=True) + "\n"
-    raw = support_path.read_text(encoding="utf-8")
+    raw = support_path.read_bytes().decode("utf-8")
     if raw != canonical:
         _error(support_path, "not in canonical form (re-run the writer)", errors)
 
@@ -294,7 +305,7 @@ def verify_all(bundle_root: Path) -> List[str]:
 
     for support_path in sorted(bundle_root.rglob("*.support.json")):
         try:
-            with open(support_path) as f:
+            with open(support_path, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as exc:
             _error(support_path, f"invalid JSON: {exc}", errors)
@@ -310,7 +321,7 @@ def verify_all(bundle_root: Path) -> List[str]:
 
     for support_path in sorted(bundle_root.rglob("support.json")):
         try:
-            with open(support_path) as f:
+            with open(support_path, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as exc:
             _error(support_path, f"invalid JSON: {exc}", errors)

@@ -251,16 +251,32 @@ WriteOutcome writeIfChanged(const std::filesystem::path& filePath, const std::st
         }
     }
 
-    std::ofstream outputFile(filePath, std::ios::binary);
-    if(!outputFile)
+    auto tempPath = filePath;
+    tempPath += ".tmp";
+
     {
-        return WriteOutcome::OpenFailed;
+        std::ofstream outputFile(tempPath, std::ios::binary);
+        if(!outputFile)
+        {
+            return WriteOutcome::OpenFailed;
+        }
+        outputFile << newContent;
+        outputFile.close();
+        if(!outputFile)
+        {
+            std::filesystem::remove(tempPath);
+            return WriteOutcome::WriteFailed;
+        }
     }
-    outputFile << newContent;
-    if(!outputFile)
+
+    std::error_code ec;
+    std::filesystem::rename(tempPath, filePath, ec);
+    if(ec)
     {
+        std::filesystem::remove(tempPath);
         return WriteOutcome::WriteFailed;
     }
+
     return WriteOutcome::Written;
 }
 
@@ -343,6 +359,8 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
         case WriteOutcome::WriteFailed:
             summary.errors.push_back("write failed: " + sidecarPath.string());
             ++summary.filesSkipped;
+            break;
+        default:
             break;
         }
     }
