@@ -104,6 +104,22 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   return key + cof + dn
 
 
+# Should a parameter absent from the solution state still appear in the kernel name?
+#
+# False (current): absent keys are omitted. This keeps legacy kernel names and
+# characterization snapshots unchanged when a parameter is off.
+#
+# True: name every key in getRequiredParametersMin, using _ABSENT_KEY_LEVEL for
+# omitted keys. That renames 51 snapshot files with no assembly change.
+#
+# PGRA/PGRB at level 0 must not name the scalar PrefetchGlobalRead: legacy PGR=1
+# and decoupled (1,1) would both read PGRA1_PGRB1 despite different LDS layouts.
+#
+# Flipping _NAME_ABSENT_KEYS requires regenerating characterization snapshots.
+_NAME_ABSENT_KEYS = False
+_ABSENT_KEY_LEVEL = {"PrefetchGlobalReadA": 0, "PrefetchGlobalReadB": 0}
+
+
 @lru_cache(maxsize=None)
 def getParameterNameAbbreviation( name: str ):
   return ''.join(c for c in name if c.isupper())
@@ -214,10 +230,30 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
+  # Only name LDSSegmentInterleave when applied (==1), so the applied kernel is distinct from its
+  # baseline twin without tagging every other kernel. Same idiom as WorkGroupMappingXCC above.
+  if state.get("LDSSegmentInterleave") == 1:
+    requiredParametersTemp.add("LDSSegmentInterleave")
+
+  # Name TDMFuse only when nonzero: 0 leaves defineTdmSgprs's default grouping.
+  # TDMF0 would rename legacy kernels without asserting a real difference.
+  if state.get("TDMFuse", 0):
+    requiredParametersTemp.add("TDMFuse")
+  else:
+    requiredParametersTemp.discard("TDMFuse")
+
+  # LDSSegmentInterleave and TDMFuse opt in above.
+  # PGRA/PGRB use _ABSENT_KEY_LEVEL when _NAME_ABSENT_KEYS is True.
   for key in sorted(requiredParametersTemp):
-    if key not in state or key == "CustomKernelName":
+    if key == "CustomKernelName":
       continue
-    components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
+    if key in state:
+      value = state[key]
+    elif _NAME_ABSENT_KEYS and key in _ABSENT_KEY_LEVEL:
+      value = _ABSENT_KEY_LEVEL[key]
+    else:
+      continue
+    components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, value)}')
 
   state["GlobalSplitU"] = gsuBackup
   state["ProblemType"]["GroupedGemm"] = ggBackup

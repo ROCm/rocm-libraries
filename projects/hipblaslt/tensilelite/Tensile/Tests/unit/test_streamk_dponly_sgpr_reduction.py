@@ -138,6 +138,23 @@ class _SKWriter:
     def s_mul_u64_u32(self, *args, **kwargs):
         return Module("s_mul_u64_u32 stub")
 
+    # These test kernels carry StreamK keys only; an absent TDM key means off.
+    def isTdmWaveSeparated(self, kernel):
+        return bool(
+            kernel.get("enableTDMA")
+            and kernel.get("enableTDMB")
+            and kernel.get("NumWaves", 1) > 1
+        )
+
+    def tdmFuseAMx(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFuseAMx(self, kernel)
+
+    def tdmFusePaired(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFusePaired(self, kernel)
+
+    def _tdmPairedParityOrder(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
+
 
 def _sk_common_kernel(dp_only):
     return {

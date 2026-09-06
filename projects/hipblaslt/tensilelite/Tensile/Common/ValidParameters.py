@@ -334,6 +334,11 @@ validParameters = { # we need to make sure this matches develop
     # normal/DTL/DTV should be same for A and B to swap GR order
     # (normalA + normalB) or (DTLA + DTLB) or (DTVA + DTVB)
     "SwapGlobalReadOrder": [0, 1],
+    # PrefetchGlobalRead = -1: auto max-LDS pair (same as PrefetchGlobalReadA/B = -1).
+    # Start at PrefetchGlobalRead if it is >= 2, else 2 when the scalar is also -1.
+    # PrefetchGlobalReadA/B must both be set or both omitted.
+    #   (k, k)     -- PrefetchGlobalRead=k (equal pair is not decoupled)
+    #   (0, 1)/(1, 0) -- rejected (both single-buffered)
     # PrefetchGlobalRead = 1:
     # Requires 2X LDS space, and VGPRs for buffering data on way into LDS
     #   prefetch / double-buffer reads from global memory -> vgprs -> lds.
@@ -346,7 +351,9 @@ validParameters = { # we need to make sure this matches develop
     # DirectToLds only. Do PGR times prefetch global read before main loop.
     # Need to allocate PGR+1 or PGR LDS buffer
     # Allocating PGR+1 LDS buffer is better for instruction scheduling.
-    "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
+    "PrefetchGlobalRead": [-1, 0, 1, 2] + list(range(3,16 + 1)),
+    "PrefetchGlobalReadA": [-1, 0, 1, 2] + list(range(3,16 + 1)),
+    "PrefetchGlobalReadB": [-1, 0, 1, 2] + list(range(3,16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
     # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).
@@ -1192,6 +1199,17 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
+    # TDMFuse -- which tensors share one TDM descriptor set per tensor_load_to_lds.
+    # Fused means one rocisa::TensorLoadToLds descriptor programmed per wave,
+    # not two heterogeneous regions in one instruction.
+    #
+    #   0  default. Leave grouping to defineTdmSgprs (usually {A,B}+{MXSA,MXSB}
+    #      when NumWaves>1). Hidden from the kernel name.
+    #   1  {MXSA,A} + {MXSB,B}, crossed parity. NumWaves>1.
+    #   2  {A,MXSA,MXSB} + {B}, 1/1/2 wave split. NumWaves==4.
+    #
+    # TDMSplit is orthogonal: halves each load without changing descriptor sharing.
+    "TDMFuse": [0, 1, 2],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default
