@@ -349,13 +349,34 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
         return MaskType::SLIDING_WINDOW;
     }
 
-    if(topLeftDeprecated)
+    // THE DEPRECATED BOOLEANS SAY "CAUSAL", NOT "TOP-LEFT".
+    //
+    // cuDNN's set_causal_mask() is a deprecated SETTER for the modern fields, not
+    // a parallel flag: it sets diagonal_alignment=TOP_LEFT and right_bound=0.
+    // set_causal_mask_bottom_right() does the same with BOTTOM_RIGHT. So the
+    // boolean records that a mask is causal; WHICH DIAGONAL is what
+    // diagonal_alignment states, and an explicit value for it must win.
+    //
+    // Returning TOP_LEFT here unconditionally -- as this function did, mirroring
+    // SdpaPlanUtils.hpp::getMaskType -- discards that field. Real producers set
+    // both: cuDNN-frontend's attention_inference benchmark configs mark chunked
+    // prefill `causal_mask: true` with `diagonal_alignment: BOTTOM_RIGHT`,
+    // deliberately leaving causal_mask_bottom_right false, because top-left
+    // alignment for a chunk at the end of a long cache would let it see none of
+    // the cache. 116 of that suite's 428 graphs are in that class and every one
+    // has Sq != Skv, which is exactly where the two conventions differ.
+    //
+    // Serving those as top-left is a silent wrong answer, and it hid behind the
+    // Sq != Skv guard in dispatch: that guard is correct and never fired, because
+    // the graph had already been misclassified here.
+    //
+    // Full analysis: Knowledge/hipdnn/sdpa-mask-attribute-precedence.md
+    if(topLeftDeprecated || bottomRightDeprecated)
     {
-        return MaskType::TOP_LEFT_CAUSAL;
-    }
-    if(bottomRightDeprecated)
-    {
-        return MaskType::BOTTOM_RIGHT_CAUSAL;
+        const bool bottomRight
+            = bottomRightDeprecated
+              || attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+        return bottomRight ? MaskType::BOTTOM_RIGHT_CAUSAL : MaskType::TOP_LEFT_CAUSAL;
     }
 
     if(right == UNBOUNDED)

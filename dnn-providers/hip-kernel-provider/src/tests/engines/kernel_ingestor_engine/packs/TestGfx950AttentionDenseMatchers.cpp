@@ -528,6 +528,44 @@ TEST(TestGfx950AttentionDenseGraphMatch, AcceptsBottomRightCausalWhenSeqLensMatc
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
 
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBottomRightWhenDeprecatedCausalAlsoSet)
+{
+    // THE PRODUCTION ENCODING, and the one that was served wrongly.
+    //
+    // cuDNN's set_causal_mask() is a deprecated SETTER for the modern fields, not a
+    // parallel flag -- it sets diagonal_alignment=TOP_LEFT and right_bound=0. So a
+    // graph carrying `causal_mask: true` says "causal"; WHICH diagonal is what
+    // diagonal_alignment states.
+    //
+    // cuDNN-frontend's attention_inference benchmark configs emit exactly this for
+    // chunked prefill: causal_mask=true, diagonal_alignment=BOTTOM_RIGHT,
+    // causal_mask_bottom_right deliberately left false. 116 of that suite's 428
+    // graphs, every one with Sq != Skv.
+    //
+    // maskTypeFor previously returned TOP_LEFT on the boolean without reading the
+    // alignment, so the guard tested above never fired and these were served with
+    // the wrong triangle -- no error, plausible numbers. This is the regression
+    // test for that: the boolean must not mask the explicit field.
+    GraphSpec spec;
+    spec.seqLenKv = SEQ * 2;
+    spec.causalMaskDeprecated = true;
+    spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, AcceptsTopLeftWhenDeprecatedCausalSetAndAlignmentAgrees)
+{
+    // The complement, so the fix above cannot be "decline everything causal".
+    // causal_mask=true with TOP_LEFT alignment is the overwhelmingly common
+    // spelling (304 of those same 428 graphs) and must keep working at Sq != Skv,
+    // where top-left is well defined and is what the kernel implements.
+    GraphSpec spec;
+    spec.seqLenKv = SEQ * 2;
+    spec.causalMaskDeprecated = true;
+    spec.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+}
+
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedHeadSize)
 {
     // D=256 belongs to the gfx950_d256 sibling candidate. __post_init__ requires
