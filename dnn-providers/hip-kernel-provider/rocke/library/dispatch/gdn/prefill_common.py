@@ -52,6 +52,14 @@ class GdnPrefillRequest(OperatorRequest):
     each reading the key head ``head // kv_group``. ``kv_group = 1`` is MHA.
     The field names mirror :class:`GdnDecodeRequest` so the two GDN operators
     can share one request lineage when the families are consolidated.
+
+    Supported decay range (accepted limit, 2026-09-04): the GDN gate
+    ``-exp(A_log)*softplus(a+dt_bias)`` is unbounded, but the chunkwise decay
+    stabilization is sized for the KDA ``gate_lower_bound=-5`` reference
+    (~160 nats over a 32-token chunk). A head whose per-token decay is steeper
+    degrades (one head, silently). Trained GDN keeps ``exp(A_log)*dt`` small, well
+    inside this; steeper decay is out of range by design. See the vault "KNOWN
+    NUMERICAL LIMIT" note (option (c), nested chunking, is the backlog fix).
     """
 
     batch: int

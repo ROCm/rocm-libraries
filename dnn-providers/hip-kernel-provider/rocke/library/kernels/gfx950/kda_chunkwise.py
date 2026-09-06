@@ -49,6 +49,18 @@ reconstructs the ratio exactly. Every exponential is additionally clamped to the
 fp32 exp2 range. The cumulative sum is kept scaled by ``log2(e)`` throughout so
 the hardware ``v_exp_f32`` (base 2) is used directly with no extra multiply.
 
+The ``gate_kind="gdn"`` gate (``-exp(A_log) * softplus(a + dt_bias)``) is
+**unbounded**, unlike the KDA gate (``lower_bound * sigmoid(...)``, always in
+``(lower_bound, 0)``). If a head's per-token decay is steeper than the reference
+``gate_lower_bound = -5`` (~160 nats over a 32-token chunk), the midpoint
+factoring above exceeds the clamped fp32 ``exp2`` range and no longer
+reconstructs the ratio, so that single (steepest-decay) head's output degrades.
+This is the accepted supported envelope: trained GDN keeps ``exp(A_log) * dt``
+small (real ``dt = softplus(...)`` ~1e-3..1e-1, so <~1.6/token), well inside it,
+and the split-path GDN parity is validated within it. Decay steeper than -5/token
+is out of range by design (accepted 2026-09-04); covering it would need nested
+chunking or per-token rescaling. See the vault "KNOWN NUMERICAL LIMIT" note.
+
 Layout
 ------
 Inputs arrive already packed by chunk: ``tile = bh * NC + n`` indexes a chunk of
