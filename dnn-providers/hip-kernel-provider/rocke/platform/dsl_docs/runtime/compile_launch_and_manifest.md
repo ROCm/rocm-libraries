@@ -250,7 +250,7 @@ launch_kernel(
 
 This is the recipe for converting any multi-phase instance (moe_sorting's three builders, fused_moe's gather / silu_mul / topk_weighted_reduce, etc.) into a CK-style chain.
 
-## WorkspacePool
+## Workspace pools
 
 ```python
 from rocke.runtime.launcher import WorkspacePool, WorkspaceSpec
@@ -286,6 +286,32 @@ Behavior:
 The pool fixes the workspace-lifetime race: `torch.empty(..., device=q.device)` returns to the caching allocator when the dispatch frame returns; raw HIP launches don't see that, so the allocator can hand the storage to another kernel mid-flight. Pool-owned tensors outlive the dispatch.
 
 `WorkspacePool.required_nbytes(specs)` reports total spec bytes; `capacity_nbytes()` reports current physical capacity.
+
+Named slots are unsuitable for concurrent, unconstrained serving shapes: a
+slot is not exclusive and retains its largest capacity. Use the bounded
+event-safe lease pool instead:
+
+```python
+from rocke.runtime import WorkspaceLeasePool
+
+pool = WorkspaceLeasePool(
+    max_bytes=2 * 1024**3,
+    max_cached_bytes=1024**3,
+    max_entries=4,
+    allocator=framework_allocator,
+)
+lease = pool.acquire(specs)
+summary = launch_pipeline(lease.tensors, stream=stream, record_event=True)
+lease.release_after_event(summary.completion_event)
+```
+
+`release_after_event` borrows the Runtime-owned event already recorded after
+the final workspace consumer; `release_after(stream)` can record a separate
+pool-owned event when necessary.
+Acquisition only reuses entries whose events have completed; otherwise it
+allocates within the bound or raises `WorkspacePoolExhausted`. See
+[`../architecture/workspace_management.md`](../architecture/workspace_management.md)
+for ownership, state transitions, backpressure, and the KDA plan.
 
 ## DeviceMem
 

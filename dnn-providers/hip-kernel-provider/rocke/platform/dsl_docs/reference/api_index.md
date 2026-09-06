@@ -196,6 +196,7 @@ make_simple_op_manifest
 KernelLauncher, PipelineLauncher
 LaunchConfig, LaunchSummary
 WorkspaceSpec, WorkspacePool
+WorkspaceLease, WorkspaceLeasePool, WorkspacePoolExhausted
 DeviceMem
 time_launches, no_fence
 synchronize_and_release

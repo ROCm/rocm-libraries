@@ -313,12 +313,22 @@ class Module:
 @dataclass
 class Event:
     handle: _HipEventHandle
+    _completed: bool = False
+    _destroyed: bool = False
 
     def record(self, stream: int = 0) -> None:
+        if self._destroyed:
+            raise RuntimeError("cannot record a destroyed HIP event")
         _check(_hipEventRecord(self.handle, ctypes.c_void_p(stream)), "hipEventRecord")
+        self._completed = False
 
     def synchronize(self) -> None:
+        if self._destroyed:
+            if self._completed:
+                return
+            raise RuntimeError("cannot synchronize a destroyed HIP event")
         _check(_hipEventSynchronize(self.handle), "hipEventSynchronize")
+        self._completed = True
 
     def query(self) -> bool:
         """Non-blocking poll: return True iff the recorded work has completed.
@@ -328,8 +338,11 @@ class Event:
         :meth:`Runtime._reap_completed` to drop bucket entries whose
         kernels have finished without blocking.
         """
+        if self._destroyed:
+            return self._completed
         s = _hipEventQuery(self.handle)
         if s == HIP_SUCCESS:
+            self._completed = True
             return True
         if s == HIP_ERROR_NOT_READY:
             return False
@@ -345,7 +358,11 @@ class Event:
         return float(ms.value)
 
     def destroy(self) -> None:
+        if self._destroyed:
+            return
         _check(_hipEventDestroy(self.handle), "hipEventDestroy")
+        self._completed = True
+        self._destroyed = True
 
 
 class Runtime:

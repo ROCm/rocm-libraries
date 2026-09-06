@@ -73,6 +73,11 @@ the host builders.
 
 The standalone benchmark scenario is `benchmarks.gfx950.kda.benchmark_chunkwise`.
 
+`kda_workspace_plan()` declares the split intermediates. Framework integrations
+own a bounded `WorkspaceLeasePool`, acquire the plan before prep, and release
+the lease against a HIP event recorded after scan. See
+[`../architecture/workspace_management.md`](../architecture/workspace_management.md).
+
 For the raw gfx950 split contract, `q`, `k`, and `g` are BF16. Beta has
 separate BF16-default and `fp32_beta_dtype=True` compile-time variants.
 `beta_ptr` is accompanied by batch, token, and head element strides so either

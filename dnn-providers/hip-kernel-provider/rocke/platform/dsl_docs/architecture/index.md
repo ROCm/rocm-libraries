@@ -11,6 +11,8 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
   workflow and the reusable helper/core boundaries.
 - [`kernel_taxonomy.md`](kernel_taxonomy.md) — which primitive families current
   kernels use and why.
+- [`workspace_management.md`](workspace_management.md) — declarative workspace
+  plans, framework-owned allocation, and bounded event-safe leases.
 
 ## IR and engines
 

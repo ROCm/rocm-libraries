@@ -117,6 +117,20 @@ Prepared chunk-packed prep and the fused kernel retain their original FP32
 beta ABI. Raw callers pass the original tensor and its strides without a
 host-side dtype conversion or contiguous materialization.
 
+### Workspace ownership
+
+`kda_workspace_plan()` describes the BF16 tile pool and FP32 decay allocation,
+then binds leased tensors to `A/GK/GQ/Aqk/Kt/dec` views. Serving integrations
+should use `WorkspaceLeasePool`, not permanent named slots: acquire before
+prep, launch prep and scan on one stream with a completion event, and pass the
+scan's `LaunchSummary.completion_event` to `lease.release_after_event()`.
+
+The vLLM engine owns its pool and allocator. Its default bounds are controlled
+by `ROCKE_KDA_WORKSPACE_MAX_BYTES` (2 GiB),
+`ROCKE_KDA_WORKSPACE_MAX_CACHED_BYTES` (1 GiB), and
+`ROCKE_KDA_WORKSPACE_MAX_ENTRIES` (4). Exhaustion returns to the existing
+unsupported-request fallback instead of allocating without a bound.
+
 ## Tests
 
 The CPU lane validates admission rules and compiles all three builders through
