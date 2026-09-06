@@ -452,7 +452,8 @@ namespace TensileLite
         // --- DP-only ---
         // The three flags below distinguish the source of a data-parallel-only launch:
         //   forceDPOnly              -> sizeMapping.streamKForceDPOnly compile-time param
-        //   streamKDP                -> TENSILE_STREAMK_DATA_PARALLEL debug override
+        //   streamKDP                -> DP mode: on by default on MI300A, else off;
+        //                               TENSILE_STREAMK_DATA_PARALLEL overrides either way
         //   workspaceDPFallbackFired -> runtime workspace-insufficient (below)
         // recomputed: OR of the three DP triggers above.
         bool dpOnly      = false;

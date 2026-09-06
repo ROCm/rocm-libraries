@@ -419,8 +419,8 @@ namespace TensileLite
         return static_cast<int>(l) >= static_cast<int>(r);
     }
 
-    /// True for MI300A. gfx942 covers MI300A (228 CUs) and MI300X/MI325X (304, the standard
-    /// count for the arch), so a non-standard CU count on gfx942 identifies the APU.
+    /// True for an unpartitioned MI300A, identified as gfx942 at 228 CUs. Other gfx942 parts
+    /// and partitions (MI300X/MI325X/MI308X, CPX/DPX) report different counts and are excluded.
     TENSILELITEHOST_EXPORT bool isMI300A(Hardware const& hardware);
 
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, AMDGPU::Processor p);

@@ -5847,16 +5847,16 @@ namespace TensileLite
             gridChangedBy = "fixedGrid";
 
         // Which mechanism (if any) makes this launch data-parallel-only. More than
-        // one can be set at once (e.g. the debug override on a force-DP-only
-        // kernel), so the ladder reports the most specific explanation first:
-        // the compile-time kernel param, then the process-wide debug override,
-        // then the runtime workspace fallback -- from "this kernel is always DP"
-        // to "this particular launch had to give up on StreamK".
+        // one can be set at once (e.g. DP mode on a force-DP-only kernel), so the
+        // ladder reports the most specific explanation first: the compile-time
+        // kernel param, then the process-wide DP mode, then the runtime workspace
+        // fallback -- from "this kernel is always DP" to "this particular launch
+        // had to give up on StreamK".
         const char* dpOnlySource = "none";
         if(d.forceDPOnly)
             dpOnlySource = "forceDPOnly(param)";
         else if(d.streamKDP)
-            dpOnlySource = "streamKDP(debug)";
+            dpOnlySource = "streamKDP(arch-default|env)";
         else if(d.workspaceDPFallbackFired)
             dpOnlySource = "workspaceDP(runtime)";
 
