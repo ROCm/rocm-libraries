@@ -34,6 +34,7 @@ struct GraphTestCase
     int64_t seqKv = 128;
 
     std::optional<float> attnScale;
+    bool withStats = false;
 
     std::string name;
     std::string arch;
@@ -101,11 +102,16 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config);
 
 /**
  * @brief Wraps a kernel config in a GraphTestCase descriptor with default dimensions.
+ *
+ * @param config The kernel configuration
+ * @param withStats When true, sets the withStats flag on the test case
  */
-GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config);
+GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats = false);
 
 /**
  * @brief Builds the SDPA forward graph topology described by a GraphTestCase.
+ *
+ * Uses testCase.withStats to determine whether to enable stats output.
  */
 std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTestCase& testCase);
 
@@ -116,17 +122,19 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
  *
  * @tparam ConfigType The config type
  * @param configMap The map of all configs
+ * @param withStats When true, generates stats-enabled test cases
  * @return Vector of GraphTestCase descriptors for each config
  */
 template <typename ConfigType>
 std::vector<GraphTestCase>
-    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap)
+    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap,
+                                bool withStats = false)
 {
     std::vector<GraphTestCase> testCases;
     testCases.reserve(configMap.size());
     for(const auto& [key, config] : configMap)
     {
-        testCases.push_back(configToTestCase(config));
+        testCases.push_back(configToTestCase(config, withStats));
     }
     return testCases;
 }

@@ -11,10 +11,15 @@
 # difference below was introspected from the real dataclass and the real factory rather
 # than assumed from the sibling:
 #
-#   * The gfx950 builder's spec IS the shared `AttentionDenseSpec` (26 fields as of
-#     ROCm/rocm-libraries#11627; 23 before it). gfx942's is a 30-field SUBCLASS. Five
-#     of its extras -- iglp, lds_row_pad, use_cfvst, use_exp2_fast, use_v_swizzle --
-#     are still gfx942-private and do not exist here.
+#   * The gfx950 builder's spec is `Gfx950AttentionDenseSpec`, a 26-field SUBCLASS of
+#     the 24-field shared `AttentionDenseSpec` base in `kernels.common`. Its two
+#     private extras are `lds_v_row_pad` and `wide_lds_dma`. gfx942's is a 30-field
+#     sibling subclass whose six extras -- iglp, lds_row_pad, use_cfvst, use_exp2_fast,
+#     use_v_swizzle, v_row_pad -- do not exist here.
+#
+#     BEFORE #11627 merged (ca4ffa03f7e) gfx950 took the shared class DIRECTLY and only
+#     gfx942 subclassed it. Review made both arches subclasses of a common base, so
+#     "gfx950 IS the shared spec" -- which this file used to say -- is no longer true.
 #   * There is therefore NO `policies:` block. `_use_exp2_fast` does not exist in the
 #     gfx950 module; the tri-state that cost five measurement sweeps on gfx942 has no
 #     counterpart on this kernel. An empty policies map is correct, not an omission.
@@ -58,10 +63,10 @@ vocabulary:
 # EXPLICITLY EMPTY, not omitted -- the two are different claims and the gate reads
 # them differently. Omitting the key means "nobody asked", and verify_variant_sets
 # reports metadata-matches-binary as a NOT CHECKED narrowed run. Writing `{}` asserts
-# that this kernel HAS no policy-owned knob, which is a checkable fact: gfx950's
-# builder takes the shared AttentionDenseSpec, and every tri-state on the gfx942
-# sibling (use_exp2_fast, use_cfvst, use_v_swizzle, v_row_pad) is a field of its
-# private subclass, which does not exist here. `_use_exp2_fast` is not defined in the
+# that this kernel HAS no policy-owned knob, which is a checkable fact: every tri-state
+# on the gfx942 sibling (use_exp2_fast, use_cfvst, use_v_swizzle, v_row_pad) is a field
+# of ITS private subclass, and none is a field of `Gfx950AttentionDenseSpec` or of the
+# shared base it derives from. `_use_exp2_fast` is not defined in the
 # gfx950 module at all. So the policy-twin check is vacuous for this kernel rather
 # than skipped, and the gate should say so rather than warn.
 policies: {}
@@ -272,7 +277,16 @@ metadata_fields:
 # kernel twice.
 arch_spec:
   module: kernels.gfx950.attention_dense
-  class: AttentionDenseSpec
+  # NAME THE ARCH CLASS, NOT THE ALIAS. #11627 as merged (ca4ffa03f7e) renamed this
+  # to `Gfx950AttentionDenseSpec` on a shared `_AttentionDenseSpecBase`, matching the
+  # gfx942 side, and left `AttentionDenseSpec = Gfx950AttentionDenseSpec` at
+  # attention_dense.py:233 for back-compat. The alias resolves to the SAME object
+  # today, so both spellings load -- which is exactly why this is worth pinning: a
+  # back-compat alias is a thing that gets deleted, and the day it does, the failure
+  # is a config that names a class the module no longer has. `introspect()` already
+  # reports the real name (spec_class: Gfx950AttentionDenseSpec); this makes the
+  # profile agree with it.
+  class: Gfx950AttentionDenseSpec
 
 # ---------------------------------------------------------------------------
 # Stage-3 sweep candidates (tools/knob_sweep.py).
@@ -313,7 +327,7 @@ sweep:
       crosses the persistent threshold (144 -> 288). 255 of the 787 shipped variants
       have work < num_persistent, so this is not a corner case.
 
-      Legality confirmed before promoting, not assumed: AttentionDenseSpec constructs at
+      Legality confirmed before promoting, not assumed: Gfx950AttentionDenseSpec constructs at
       block_m=128, supports_attention_dense returns (True, ''), and build_attention_dense
       lowers it through comgr. The two geometries are DISTINCT BINARIES -- kernel_name()
       interpolates `bm128` -- so an A/B measures two real kernels rather than one kernel
@@ -616,7 +630,7 @@ launch_surface:
       gate that RECONSTRUCTS the spec and reports its ValueError, and, since #11627,
       THREE tile rules of its own that the spec does not carry: block_m in {128, 256},
       block_m % block_n == 0, and block_n % num_waves == 0 (num_waves = block_m // 32).
-      The rest of the constraint table is AttentionDenseSpec.__post_init__ (~264-480):
+      The rest of the constraint table is Gfx950AttentionDenseSpec.__post_init__ (~264-480):
       head_size in (64, 128), seqlen_q % block_m and seqlen_kv % block_n unless ragged,
       GQA divisibility, sliding_window requires causal and W % block_n == 0,
       waves_per_eu in [1, 8], and the wide_lds_dma precondition block (~431-446). Two

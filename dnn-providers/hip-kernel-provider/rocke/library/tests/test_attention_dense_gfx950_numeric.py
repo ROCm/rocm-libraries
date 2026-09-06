@@ -365,8 +365,9 @@ class TestDenseGqaPairVariants:
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
-    def test_wide_dma_mha_numeric(self):
-        """The layout remains correct without grouped-query reuse."""
+    @pytest.mark.parametrize("block_m", (256, 128), ids=("bm256", "bm128"))
+    def test_wide_dma_mha_numeric(self, block_m):
+        """Both wide-DMA line-pass geometries work without GQA reuse."""
         import torch
 
         B, S, H, D = 1, 512, 16, 128
@@ -385,6 +386,7 @@ class TestDenseGqaPairVariants:
             head_size=D,
             causal=True,
             dtype="fp16",
+            block_m=block_m,
             block_n=64,
             persistent=True,
             num_persistent=32,

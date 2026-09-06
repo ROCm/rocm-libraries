@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import os
@@ -31,9 +32,11 @@ sys.path.insert(0, _RK + "/library")
 
 import torch  # noqa: E402
 
+from dispatch.attention import AttentionRequest, dense_spec_for_request  # noqa: E402
+from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES  # noqa: E402
 from kernels.gfx950.attention_dense import (  # noqa: E402
-    AttentionDenseSpec,
-    DENSE_TILE_GEOMETRIES,
+    GFX950_DENSE_LAYOUTS,
+    Gfx950AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
     build_attention_dense,
@@ -52,7 +55,7 @@ _TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 _TOL = 2e-2
 
 
-def _make_launcher(spec: AttentionDenseSpec):
+def _make_launcher(spec: Gfx950AttentionDenseSpec):
     """kernel-spec generation + compilation + ABI signature -> cached launcher."""
     ok, why = supports_attention_dense(spec)
     if not ok:
@@ -79,7 +82,7 @@ def _make_launcher(spec: AttentionDenseSpec):
     return KernelLauncher(hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig)
 
 
-def _launch_config(spec: AttentionDenseSpec, stream) -> LaunchConfig:
+def _launch_config(spec: Gfx950AttentionDenseSpec, stream) -> LaunchConfig:
     return LaunchConfig(
         grid=attention_dense_grid(spec),
         block=attention_dense_block(spec),
@@ -87,7 +90,7 @@ def _launch_config(spec: AttentionDenseSpec, stream) -> LaunchConfig:
     )
 
 
-def _causal_flops(spec: AttentionDenseSpec) -> int:
+def _causal_flops(spec: Gfx950AttentionDenseSpec) -> int:
     B, Sq, Skv = spec.batch, spec.seqlen_q, spec.seqlen_kv
     Hq, D = spec.num_query_heads, spec.head_size
     W = spec.sliding_window
@@ -99,38 +102,45 @@ def _causal_flops(spec: AttentionDenseSpec) -> int:
     return 2 * 2 * B * Hq * D * Sq * Skv
 
 
-def make_spec_from_shape(shape: dict[str, Any]) -> AttentionDenseSpec:
-    """Build a validated ``AttentionDenseSpec`` from a benchmark shape mapping."""
-    defaults = DENSE_TILE_GEOMETRIES["default"]
-    geometry = {
-        "block_m": int(shape.get("block_m", defaults["block_m"])),
-        "block_n": int(shape.get("block_n", defaults["block_n"])),
-        "lds_v_row_pad": int(shape.get("lds_v_row_pad", defaults["lds_v_row_pad"])),
-    }
-    return AttentionDenseSpec(
+def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
+    """Resolve the gfx950 dispatch spec, then apply explicit harness overrides."""
+    req = AttentionRequest(
         batch=int(shape.get("batch", 1)),
+        nhead_q=int(shape["num_query_heads"]),
+        nhead_k=int(shape["num_kv_heads"]),
         seqlen_q=int(shape["seqlen_q"]),
-        seqlen_kv=int(shape.get("seqlen_kv", shape["seqlen_q"])),
-        num_query_heads=int(shape["num_query_heads"]),
-        num_kv_heads=int(shape["num_kv_heads"]),
-        head_size=int(shape["head_size"]),
-        causal=bool(shape.get("causal", True)),
+        seqlen_k=int(shape.get("seqlen_kv", shape["seqlen_q"])),
+        hdim_q=int(shape["head_size"]),
+        hdim_v=int(shape["head_size"]),
+        arch="gfx950",
+        mask_type=1 if bool(shape.get("causal", True)) else 0,
         dtype=str(shape.get("dtype", "fp16")),
-        **geometry,
-        waves_per_eu=int(shape.get("waves_per_eu", 2)),
-        persistent=bool(shape.get("persistent", False)),
-        num_persistent=int(shape.get("num_persistent", 256)),
-        interleave=bool(shape.get("interleave", False)),
+        algorithm="attention_dense",
+        spec_id="gfx950_attention_dense",
+        dense_persistent="on" if bool(shape.get("persistent", False)) else "off",
+        dense_num_persistent=int(shape.get("num_persistent", 256)),
+        dense_persist_decode=str(shape.get("persist_decode", "auto")),
         sliding_window=int(shape.get("sliding_window", 0)),
         use_sinks=bool(shape.get("use_sinks", False)),
-        lazy_rescale=bool(shape.get("lazy_rescale", True)),
-        persist_decode=str(shape.get("persist_decode", "auto")),
-        wide_lds_dma=bool(shape.get("wide_lds_dma", False)),
     )
+    spec = dense_spec_for_request(req)
+    coercers = {
+        "block_m": int,
+        "block_n": int,
+        "lds_v_row_pad": int,
+        "waves_per_eu": int,
+        "interleave": bool,
+        "lazy_rescale": bool,
+        "wide_lds_dma": bool,
+    }
+    overrides = {
+        name: coerce(shape[name]) for name, coerce in coercers.items() if name in shape
+    }
+    return dataclasses.replace(spec, **overrides)
 
 
 def run_benchmark(
-    spec: AttentionDenseSpec,
+    spec: Gfx950AttentionDenseSpec,
     *,
     warmup: int = 15,
     iters: int = 50,
@@ -153,7 +163,7 @@ def run_benchmark(
 
 
 def run(
-    spec: AttentionDenseSpec,
+    spec: Gfx950AttentionDenseSpec,
     *,
     warmup: int = 15,
     iters: int = 50,
@@ -264,6 +274,7 @@ def run(
 def main():
     ap = argparse.ArgumentParser()
     defaults = DENSE_TILE_GEOMETRIES["default"]
+    layout = GFX950_DENSE_LAYOUTS["default"]
     ap.add_argument(
         "--block-m",
         "--bm",
@@ -283,7 +294,7 @@ def main():
         "--vpad",
         dest="lds_v_row_pad",
         type=int,
-        default=defaults["lds_v_row_pad"],
+        default=layout["lds_v_row_pad"],
         help="D128 V-row LDS padding in bf16 elements",
     )
     ap.add_argument("--wpe", type=int, default=2, help="waves_per_eu")
@@ -370,7 +381,7 @@ def main():
         return 0 if result["ok"] else 2
 
     for sq in (256, 512, 2048, 8192):
-        spec = AttentionDenseSpec(
+        spec = Gfx950AttentionDenseSpec(
             batch=1,
             seqlen_q=sq,
             seqlen_kv=sq,

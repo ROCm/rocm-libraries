@@ -101,7 +101,7 @@ jobs:
           & "$env:VENV_PATH\Scripts\Activate.ps1"
 
           Write-Host "Installing ROCm wheels from multi-arch nightlies (device: $env:DEVICE_TARGET)"
-          pip install --index-url "https://rocm.nightlies.amd.com/whl-multi-arch/" "rocm[libraries,devel,device-$env:DEVICE_TARGET]"
+          pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$env:DEVICE_TARGET]"
           if ($LASTEXITCODE -ne 0) { throw "Failed to install ROCm wheels" }
 
           Write-Host "Initializing ROCm SDK"
@@ -333,7 +333,7 @@ jobs:
           source "$VENV_PATH/bin/activate"
 
           echo "Installing ROCm wheels from multi-arch nightlies (device: $DEVICE_TARGET)"
-          pip install --index-url "https://rocm.nightlies.amd.com/whl-multi-arch/" "rocm[libraries,devel,device-$DEVICE_TARGET]"
+          pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$DEVICE_TARGET]"
 
           # rocm_kpack is used from a source tree, so pip never resolves the
           # msgpack/zstandard it declares. The descriptor-packaging tool imports

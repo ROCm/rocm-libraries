@@ -40,7 +40,7 @@ config (grid / decode / V-pad / lazy):
 Clock-invariant deltas (the load-bearing part): hkv/qb ~1.04x, V-pad 0->32 ~+5%,
 lazy ~+2%. Shape (batch/seqlen/heads/head_dim) is baked at build time (dense,
 compile-time-sized ABI); query/KV tile geometry, LDS V-row padding, occupancy hint,
-and persistent knobs live on ``AttentionDenseSpec``. Lazy online-softmax rescale
+and persistent knobs live on ``Gfx950AttentionDenseSpec``. Lazy online-softmax rescale
 (skip the O/l rescale when every lane's tile-max is within 8 log2 of the running max)
 is ALWAYS-ON by default
 (``lazy_rescale=True``): parity-identical (1.46e-3) and ~+2%.
@@ -72,31 +72,27 @@ the experiment's ``plan.md`` for their measured results.
 """
 
 from contextlib import nullcontext as _nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as _dataclass_fields
 from types import MappingProxyType
 from typing import Optional, Tuple
 
-from rocke.core.ir import IRBuilder, KernelDef, PtrType, BF16, F16, F32, I32, I64
+from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64
 from rocke.helpers.attention import mfma_32x32x16_for_dtype, pv32_v_load_paired
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
-from rocke.helpers.spec import kernel_name_join
+from kernels.common.attention_dense_spec import (
+    AttentionDenseSpec as _AttentionDenseSpecBase,
+    DENSE_TILE_GEOMETRIES,
+    attention_dense_cache_key,
+)
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
 
 LOG2E = 1.4426950408889634
-_DTYPE_IR = {"bf16": BF16, "fp16": F16}
 
-# Named tile-geometry presets. Every IR-live geometry value is copied onto the
-# immutable AttentionDenseSpec; the dictionaries are host-side construction
-# conveniences only and are never consulted while emitting a kernel.
-DENSE_TILE_GEOMETRIES = MappingProxyType(
-    {
-        "default": MappingProxyType(
-            {"block_m": 256, "block_n": 64, "lds_v_row_pad": 32}
-        ),
-        "bm128": MappingProxyType({"block_m": 128, "block_n": 64, "lds_v_row_pad": 32}),
-    }
+# gfx950 LDS layout policy is separate from shared query/KV tile geometry.
+GFX950_DENSE_LAYOUTS = MappingProxyType(
+    {"default": MappingProxyType({"lds_v_row_pad": 32})}
 )
-_DEFAULT_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
+_DEFAULT_GFX950_LAYOUT = GFX950_DENSE_LAYOUTS["default"]
 
 # Baked pipeline constants (NOT tunable knobs — these are load-bearing):
 #   _NBUF=2 double-buffer (NBUF=3 is a measured dead end: 256 VGPR + 58 spills).
@@ -115,319 +111,25 @@ _LAZY_RESCALE_THRESHOLD = 8.0
 
 
 @dataclass(frozen=True)
-class AttentionDenseSpec:
-    """Compile-time spec for the dense flash-attention prefill kernel.
+class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
+    """gfx950 dense-attention spec and architecture-specific codegen policy."""
 
-    Functional fields (batch / seqlen / heads / head_size / causal / dtype) and tile
-    geometry are baked into the kernel as constants — this is a dense,
-    statically-sized ABI. Every IR-live geometry choice belongs to this immutable
-    spec so codegen does not depend on process-global environment state.
-    """
-
-    # --- functional (compile-time shape) ---
-    batch: int
-    seqlen_q: int
-    seqlen_kv: int
-    num_query_heads: int
-    num_kv_heads: int
-    head_size: int
-    causal: bool = True
-    dtype: str = "bf16"
-    # sliding_window: left-context window W. 0 = disabled (full causal, the
-    #   byte-identical always-on path). When W>0 each query token q attends to
-    #   keys k in [q-W+1, q] (causal AND within-window). The valid KV region per
-    #   256-row block is a slope-1 parallelogram band, so the KV loop is pruned
-    #   to ~(W/block_n + block_m/block_n) tiles instead of the full causal
-    #   triangle. Requires causal=True and W % block_n == 0.
-    sliding_window: int = 0
-    # ragged: separate kernel path for sequence lengths that are NOT a multiple
-    #   of the tile geometry (seqlen_q % 256 != 0 and/or seqlen_kv % block_n != 0).
-    #   Instead of host-side zero-padding (which we cannot do), the boundary tiles
-    #   are padded ON-CHIP: OOB query rows load as 0 via a bounds-checked buffer
-    #   load (register pad), OOB key rows load as 0 into LDS (LDS pad), the ceil'd
-    #   grid covers the partial last query block, and the partial O rows are
-    #   dropped by a guarded store. Causal masking already excludes the padded
-    #   keys (their token index >= seqlen_kv > every real query), so causal needs
-    #   NO extra key mask; non-causal adds a ktok<seqlen_kv key mask. Self-
-    #   attention only (seqlen_q == seqlen_kv). 0-cost when False: the aligned
-    #   kernel is emitted unchanged (byte-identical IR).
-    ragged: bool = False
-    # varlen: packed variable-length batch. Q/K/V/O are packed [total_tok, H, D]
-    #   and per-sequence boundaries come from cu_seqlens_q/cu_seqlens_kv (int32
-    #   [batch+1]) at runtime. seqlen_q/seqlen_kv are the MAX lengths (grid
-    #   sizing); each sequence's length must be a multiple of block_m (q) and
-    #   block_n (kv). Self-attention only (per-seq seqlen_q == seqlen_kv). Not
-    #   supported with persistent. 0-cost when False (dense uniform path).
-    varlen: bool = False
-
-    # --- validated tile geometry / performance knobs ---
-    # block_m: query rows per CTA. 256 is the shipped 8-wave geometry; 128 is
-    #   retained as an explicit 4-wave experiment geometry. Keeping it on the
-    #   spec makes grid sizing, work-item decode, codegen, and kernel identity
-    #   agree without process-global environment state.
-    block_m: int = _DEFAULT_TILE_GEOMETRY["block_m"]
-    # block_n: KV tile length. 64 (66 KB LDS, WPE-tunable) and 128 (135 KB LDS, pins
-    #   the 256-VGPR cap) both match ~peak; 64 is strictly more resource-efficient.
-    block_n: int = _DEFAULT_TILE_GEOMETRY["block_n"]
-    # lds_v_row_pad: V-row padding in bf16 elements on the D128 path. It is
-    #   IR-live and therefore part of both the spec and non-default kernel name.
-    #   D64 packs two rows per DMA instruction and ignores this per-row pad.
-    lds_v_row_pad: int = _DEFAULT_TILE_GEOMETRY["lds_v_row_pad"]
-    # waves_per_eu: occupancy hint. 2 is a free win (tighter allocation, still 2
-    #   waves/SIMD); 3 is a measured trap (VGPR<=170 forces spills -> -20%).
-    waves_per_eu: int = 2
-    # lds_k_group_pad: bf16 elements of K padding between DMA row-GROUPS, on the
-    #   packed head_size<128 path only (ignored at 128, which pads per row via
-    #   _LDS_PAD). The async DMA writes 128//head_size rows contiguously, so a
-    #   per-row pad is impossible there -- but the pad can sit BETWEEN groups and
-    #   still break the QK ds_read_b128 bank pattern. A wave64 b128 read moves
-    #   1024 B while LDS delivers 64 banks x 4 B = 256 B/cycle, so 4 lanes per
-    #   bank is the conflict-free floor. Aggregated over all 64 lanes (4 dwords
-    #   each): unpadded D=64 touches 16 of 64 banks at 16 lanes deep; a group pad
-    #   of 8, 16 or 24 reaches all 64 banks at that floor; 32 falls back to 32
-    #   banks at 8 deep. The whole-wave model does not separate 8/16/24, but a
-    #   16-lane phase (16 x 4 dwords = one full 64-bank sweep) does: pad 8 gives
-    #   16 distinct start banks, pad 16 repeats each twice -- hence 8, which is
-    #   also the cheaper of the two in LDS. Must be a non-negative multiple of 8
-    #   elements (16 B) because smem_load_vN stamps `align 16` on the n=8 read
-    #   unconditionally, so an 8-byte-aligned pitch would keep the ds_read_b128
-    #   while silently breaking its alignment contract. 0 reproduces the old
-    #   unpadded layout for A/B.
-    lds_k_group_pad: int = 8
-    # persistent: emit the grid-stride PERSISTENT variant instead of one CTA per
-    #   (query-block, head, batch). A 1-D grid of ``num_persistent`` long-lived CTAs
-    #   grid-strides over the W = (seqlen_q//256)*Hq*B work items, so the per-CTA
-    #   launch/dispatch + scalar setup + K/V-prime cold-start (~4.5 tile-equivalents,
-    #   plan.md "CAUSAL GAP = FIXED-COST AMORTIZATION") is paid once per CU instead of
-    #   once per query-block. Inner compute is byte-identical to the default path.
-    #   Measured MI355X Sq=8192 causal: 512 -> 853 TFLOPS (+70%), 0 spill, err 1.46e-3.
-    persistent: bool = False
-    # num_persistent: number of long-lived CTAs when ``persistent``. 256 = exactly one
-    #   8-wave block per CU on MI355X (256 CUs) at 2 waves/SIMD; larger oversubscribes
-    #   the CUs -> a serialized 2nd block -> tail loss (304 measured -20%).
-    num_persistent: int = 256
-    # interleave: boustrophedon query-block ordering that reverses qb on alternating
-    #   (hq,bt) planes to spread the triangular causal load across CTAs. A large-Sq
-    #   lever (helps Sq>=16384) that slightly hurts small Sq; only used when persistent.
-    interleave: bool = False
-    # persist_decode: work-item -> (qb, hq, bt) decode for the persistent grid.
-    #   "qb_major" (default): wi = qb*(Hq*B) + hq*B + bt. Balances the triangular
-    #     causal load across CTAs, but every 256-CTA grid-stride phase spans ALL
-    #     kv-heads at once -> large L2 footprint (measured 57% L2 hit @ GQA-8).
-    #   "hkv_major": wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt, with blk
-    #     folded to a low/high-paired qb. Concentrates each grid-stride phase on
-    #     ~1 kv-head so the shared GQA K/V stays L2-resident across its gqa query
-    #     heads (measured L2 hit 57% -> 93%, HBM misses 5.9x lower, matching the
-    #     non-persistent grid). Only balances the causal triangle when each CTA
-    #     grid-strides across BOTH halves of a kv-head, i.e. gqa*NQB*B >= 2*NP;
-    #     otherwise each CTA gets a fixed qb (severe imbalance) -> slower.
-    #   "gqa_pair": when NP=NQB*Hkv*B, pair complementary low/high qbs and
-    #     split the local GQA heads across two neighboring CTAs. Each CTA gets
-    #     identical causal work while reusing one K/V head across consecutive
-    #     query heads. On Llama-3-8B fp16 prefill this raised L2 hit 32% -> 65%
-    #     and paired throughput 1.1596x on MI355X.
-    #   "gqa_pair_2phase": for W=2*NP, map gqa neighboring CTAs to one
-    #     (low-qb, high-qb, hkv, batch) group. Each CTA owns one local query
-    #     head and processes complementary qbs in its two grid-stride phases.
-    #   "auto" (default): hkv_major when it is balance-safe AND GQA
-    #     (gqa>1 and gqa*NQB*B >= 2*num_persistent), else qb_major. Strictly >=
-    #     qb_major (falls back where hkv_major would lose).
-    persist_decode: str = "auto"
-    # lazy_rescale: adaptive online-softmax rescale. Keep the running max as a
-    #   LAZY max that only re-anchors when a tile's max exceeds it by > 8 (log2);
-    #   when every lane is within 8 (wave_all vote) skip the O/l rescale entirely
-    #   (a 0/1-trip scf.for compiles the skip to a wave-uniform scalar branch),
-    #   cutting the per-tile VALU between the QK and PV MFMA clusters (raises
-    #   MFMA utilization). P is then bounded by exp2(8)=256 (safe for fp32 accum
-    #   / bf16 P) rather than <=1, so this is a numerically APPROXIMATE lever
-    #   (still within bf16/fp16 tolerance). ALWAYS-ON by default (parity-identical
-    #   at 1.46e-3, ~+2% TFLOPS); set False only to disable for A/B.
-    lazy_rescale: bool = True
-    # paged: read K/V from a paged cache [num_blocks, block_size, num_kv_heads,
-    #   head_size] via block_tables indirection instead of contiguous memory.
-    #   Single-sequence only in this revision. 0-cost when False (byte-identical IR).
-    paged: bool = False
-    # block_size: KV cache PAGE size (tokens per physical block). Distinct from
-    #   block_n (the compute KV tile). Required >0 and must divide block_n when paged.
-    block_size: int = 0
-    # num_kv_blocks: total physical blocks in the paged cache (key_cache.shape[0]).
-    #   Bounds the paged buffer resource. Required >0 when paged.
-    num_kv_blocks: int = 0
-    # use_sinks: A per-query-head learned scalar logit that participates in the softmax
-    # denominator but has no value vector, acting as a repository for unnecessary attention mass.
-    use_sinks: bool = False
-    # wide_lds_dma: gfx950 16-byte-per-lane buffer-to-LDS DMA with a slab-padded
-    # K/V layout, IGLP-1 loop scheduling, and K-major PV traversal. Restricted
-    # to the validated aligned persistent D128/BN64 path.
+    lds_v_row_pad: int = _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]
     wide_lds_dma: bool = False
 
+    def supported_persist_decodes(self) -> frozenset[str]:
+        return super().supported_persist_decodes() | {
+            "gqa_pair",
+            "gqa_pair_2phase",
+        }
+
     def __post_init__(self) -> None:
-        if self.dtype not in _DTYPE_IR:
-            raise ValueError(
-                f"dtype must be one of {sorted(_DTYPE_IR)}, got {self.dtype}"
-            )
-        if self.block_m <= 0:
-            raise ValueError(f"block_m must be positive, got {self.block_m}")
+        super().__post_init__()
         if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
             raise ValueError(
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
                 f"elements (16 bytes), got {self.lds_v_row_pad}"
             )
-        # head_size must be 64 or 128: the QK/PV MFMA tiling needs a multiple of
-        # 32, and the async K/V DMA (64 lanes x 2 bf16 = 128 elems/instr) needs
-        # 128 % head_size == 0 so it packs a whole number of rows per instr.
-        if self.head_size not in (64, 128):
-            raise ValueError(f"head_size must be 64 or 128, got {self.head_size}")
-        # A group pitch that is not 16-byte aligned would keep the QK
-        # ds_read_b128 while breaking its alignment contract (smem_load_vN stamps
-        # `align 16` on the n=8 read unconditionally) -- wrong data or a fault,
-        # silently. Checked for every head size so an unused value cannot go
-        # stale and then bite when head_size changes.
-        if self.lds_k_group_pad < 0 or self.lds_k_group_pad % 8 != 0:
-            raise ValueError(
-                "lds_k_group_pad must be a non-negative multiple of 8 bf16 "
-                "elements (16 bytes) so the K group pitch stays "
-                f"ds_read_b128-aligned, got {self.lds_k_group_pad}"
-            )
-        if self.block_n % 32 != 0:
-            raise ValueError(f"block_n must be a multiple of 32, got {self.block_n}")
-        if self.ragged:
-            if self.seqlen_q <= 0 or self.seqlen_kv <= 0:
-                raise ValueError("ragged requires positive seqlen_q/seqlen_kv")
-            if self.seqlen_q != self.seqlen_kv:
-                raise ValueError(
-                    "ragged is self-attention only (seqlen_q == seqlen_kv), got "
-                    f"{self.seqlen_q} != {self.seqlen_kv}"
-                )
-            if self.varlen:
-                raise ValueError("ragged is not supported with varlen")
-            if self.sliding_window > 0:
-                raise ValueError("ragged is not supported with sliding_window")
-        else:
-            if self.seqlen_q % self.block_m != 0:
-                raise ValueError(
-                    f"seqlen_q must be a multiple of block_m={self.block_m}, "
-                    f"got {self.seqlen_q}"
-                )
-            if self.seqlen_kv % self.block_n != 0:
-                raise ValueError(
-                    f"seqlen_kv must be a multiple of block_n={self.block_n}, got {self.seqlen_kv}"
-                )
-        if self.num_kv_heads == 0 or self.num_query_heads % self.num_kv_heads != 0:
-            raise ValueError(
-                f"num_query_heads ({self.num_query_heads}) must be a positive multiple "
-                f"of num_kv_heads ({self.num_kv_heads})"
-            )
-        if self.block_n % 32 != 0 or self.block_n <= 0:
-            raise ValueError(
-                f"block_n must be a positive multiple of 32, got {self.block_n}"
-            )
-        if self.persistent and self.num_persistent <= 0:
-            raise ValueError(
-                f"num_persistent must be positive, got {self.num_persistent}"
-            )
-        if self.persist_decode not in (
-            "qb_major",
-            "hkv_major",
-            "gqa_pair",
-            "gqa_pair_2phase",
-            "auto",
-        ):
-            raise ValueError(
-                "persist_decode must be 'qb_major', 'hkv_major', 'gqa_pair', "
-                f"'gqa_pair_2phase', or 'auto', got {self.persist_decode}"
-            )
-        if self.sliding_window < 0:
-            raise ValueError(f"sliding_window must be >= 0, got {self.sliding_window}")
-        if self.sliding_window > 0:
-            if not self.causal:
-                raise ValueError("sliding_window>0 requires causal=True")
-            if self.sliding_window % self.block_n != 0:
-                raise ValueError(
-                    f"sliding_window ({self.sliding_window}) must be a multiple of "
-                    f"block_n={self.block_n}"
-                )
-        if self.varlen:
-            if self.persistent:
-                raise ValueError("varlen is not supported with persistent=True")
-            if not self.causal:
-                raise ValueError("varlen requires causal=True")
-        if self.waves_per_eu < 1 or self.waves_per_eu > 8:
-            raise ValueError(
-                f"waves_per_eu must be in [1, 8], got {self.waves_per_eu} "
-                "(note: 3+ caps VGPRs at <=170 and causes spills on this kernel)"
-            )
-        if self.paged:
-            # --- Hard layout / hardware invariants (permanent contract) ---
-            if self.block_size <= 0:
-                raise ValueError("paged=True requires block_size > 0")
-            if self.block_size & (self.block_size - 1) != 0:
-                raise ValueError(
-                    f"paged block_size ({self.block_size}) must be a power of two so "
-                    "the per-page div/mod lower to shift/mask (production page sizes "
-                    "are 16/32); non-power-of-two is correct but pays magic-number "
-                    "address math"
-                )
-            if self.block_n % self.block_size != 0:
-                raise ValueError(
-                    f"block_n ({self.block_n}) must be a multiple of page "
-                    f"block_size ({self.block_size})"
-                )
-            rows_per_wave = (
-                self.block_n // self.num_waves
-            )  # per-wave K/V rows; fit 1 page
-            if self.block_size < rows_per_wave or self.block_size % rows_per_wave != 0:
-                raise ValueError(
-                    f"paged block_size ({self.block_size}) must be >= and a multiple of "
-                    f"ROWS_PER_WAVE ({rows_per_wave} = block_n/{self.num_waves}) so each "
-                    f"wave's K/V rows stay within one page"
-                )
-            if self.num_kv_blocks <= 0:
-                raise ValueError("paged=True requires num_kv_blocks > 0")
-            cache_bytes = (
-                self.num_kv_blocks
-                * self.block_size
-                * self.num_kv_heads
-                * self.head_size
-                * 2
-            )
-            if (
-                cache_bytes > 2**31 - 1
-            ):  # i32 byte-offset limit; i64 paging not yet impl.
-                raise ValueError(
-                    f"paged cache {cache_bytes} B exceeds i32 addressing (2 GiB); "
-                    "i64 paging not yet implemented"
-                )
-            # --- Not-yet-implemented shortcuts (deferred scope, NOT a permanent
-            #     contract; see the dense-paged design future-scope list). The paged
-            #     mechanism is general -- these cohorts are simply unverified so far and
-            #     are loud-rejected until each is validated on gfx950. Raised as
-            #     ValueError so supports_*() reports "unsupported" rather than faulting.
-            if self.batch != 1:
-                raise ValueError("paged multi-sequence (batch>1) not yet implemented")
-            if self.varlen:
-                raise ValueError("paged varlen not yet implemented (single-seq only)")
-            if self.persistent:
-                raise ValueError(
-                    "paged + persistent not yet implemented "
-                    "(persistent builder is contiguous-only)"
-                )
-            if self.head_size != 128:
-                raise ValueError("paged not yet implemented for head_size != 128")
-            # forward guard: unreachable while _DTYPE_IR == {fp16, bf16} (both
-            # validated); fires if a future dtype is added there before paged-validation.
-            if self.dtype not in ("fp16", "bf16"):
-                raise ValueError(
-                    f"paged not yet implemented for dtype={self.dtype} (fp16/bf16 only)"
-                )
-            if self.sliding_window <= 0:
-                raise ValueError(
-                    "paged not yet implemented for plain-causal (sliding_window>0 only)"
-                )
-        if self.use_sinks and self.paged:
-            raise ValueError("use_sinks is not yet supported with paged KV")
-        if self.use_sinks and self.varlen:
-            raise ValueError("use_sinks is not yet supported with varlen")
         if self.wide_lds_dma:
             if not self.persistent:
                 raise ValueError("wide_lds_dma requires persistent=True")
@@ -439,13 +141,14 @@ class AttentionDenseSpec:
                 )
             if (
                 self.lds_k_group_pad != 8
-                or self.lds_v_row_pad != _DEFAULT_TILE_GEOMETRY["lds_v_row_pad"]
+                or self.lds_v_row_pad != _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]
             ):
                 raise ValueError(
                     "wide_lds_dma requires K/V slab padding of 8/32 elements"
                 )
+
         if self.persist_decode == "gqa_pair":
-            gqa = self.num_query_heads // self.num_kv_heads
+            gqa = self.num_queries_per_kv
             nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
             expected_np = nqb * self.num_kv_heads * self.batch
             if not self.persistent or not self.causal:
@@ -462,7 +165,7 @@ class AttentionDenseSpec:
                     f"({expected_np}), got {self.num_persistent}"
                 )
         if self.persist_decode == "gqa_pair_2phase":
-            gqa = self.num_query_heads // self.num_kv_heads
+            gqa = self.num_queries_per_kv
             nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
             expected_np = nqb * self.num_kv_heads * self.batch * gqa // 2
             if not self.persistent or not self.causal:
@@ -480,26 +183,11 @@ class AttentionDenseSpec:
                 )
 
     @property
-    def num_waves(self) -> int:
-        return self.block_m // 32
-
-    @property
-    def dtype_ir(self):
-        return _DTYPE_IR[self.dtype]
-
-    @property
-    def num_queries_per_kv(self) -> int:
-        return self.num_query_heads // self.num_kv_heads
-
-    @property
     def resolved_persist_decode(self) -> str:
-        """Resolve ``auto`` to a balance-safe GQA-local mapping or qb_major."""
         if self.persist_decode != "auto":
             return self.persist_decode
-        gqa = self.num_query_heads // self.num_kv_heads
-        nqb = (
-            self.seqlen_q + self.block_m - 1
-        ) // self.block_m  # ceil (ragged partial)
+        gqa = self.num_queries_per_kv
+        nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
         aligned_causal = (
             self.persistent
             and self.causal
@@ -508,9 +196,6 @@ class AttentionDenseSpec:
             and not self.paged
             and self.sliding_window == 0
         )
-        # Pair mappings are selected by their load-balance equations rather
-        # than a model-name/shape allowlist. Prefer the one-phase mapping when
-        # both equations hold (GQA=2); it has the shorter work-item lifetime.
         if aligned_causal and nqb % 2 == 0 and gqa % 2 == 0:
             pair_np = nqb * self.num_kv_heads * self.batch
             if self.num_persistent == pair_np:
@@ -519,63 +204,33 @@ class AttentionDenseSpec:
             two_phase_np = nqb * self.num_kv_heads * self.batch * gqa // 2
             if self.num_persistent == two_phase_np:
                 return "gqa_pair_2phase"
-        per_hkv = gqa * nqb * self.batch
-        if gqa > 1 and per_hkv >= 2 * self.num_persistent:
-            return "hkv_major"
-        return "qb_major"
+        return super().resolved_persist_decode
 
-    def kernel_name(self) -> str:
-        parts = [
-            "rocke_attention_dense",
-            f"d{self.head_size}",
-            f"hq{self.num_query_heads}",
-            f"kv{self.num_kv_heads}",
-            f"bn{self.block_n}",
-            self.dtype,
-        ]
-        if self.block_m != _DEFAULT_TILE_GEOMETRY["block_m"]:
-            parts.append(f"bm{self.block_m}")
-        # The K group pad changes the emitted layout, so it has to be part of the
-        # kernel identity or two kernels that differ only in pad share a symbol
-        # name (and a launcher-cache entry). Only live on the packed path, so the
-        # head_size=128 name is unchanged.
-        if 128 // self.head_size > 1:
-            parts.append(f"kpad{self.lds_k_group_pad}")
-        elif self.lds_v_row_pad != _DEFAULT_TILE_GEOMETRY["lds_v_row_pad"]:
-            parts.append(f"vpad{self.lds_v_row_pad}")
-        parts += [
-            f"sq{self.seqlen_q}",
-            f"sk{self.seqlen_kv}",
-            "causal" if self.causal else "full",
-        ]
-        if self.ragged:
-            parts.append("ragged")
-        if self.sliding_window > 0:
-            parts.append(f"swa{self.sliding_window}")
-        if self.use_sinks:
-            parts.append("sinks")
-        if self.varlen:
-            parts.append("varlen")
-        if self.paged:
-            parts.append(f"pgd{self.block_size}")
-            parts.append(
-                f"nb{self.num_kv_blocks}"
-            )  # IR-live: sets the paged rsrc bound
-        if self.lazy_rescale:
-            parts.append("lazyrs")
+    def _layout_name_parts(self) -> tuple[str, ...]:
+        if (
+            self.head_size == 128
+            and self.lds_v_row_pad != _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]
+        ):
+            return (f"vpad{self.lds_v_row_pad}",)
+        return ()
+
+    def _algorithm_name_parts(self) -> tuple[str, ...]:
+        parts = list(super()._algorithm_name_parts())
         if self.wide_lds_dma:
             parts.append("wdma")
-        if self.persistent:
-            parts.append(f"persist{self.num_persistent}")
-            if self.resolved_persist_decode == "hkv_major":
-                parts.append("hkvmaj")
-            elif self.resolved_persist_decode == "gqa_pair":
-                parts.append("gqapair")
-            elif self.resolved_persist_decode == "gqa_pair_2phase":
-                parts.append("gqapair2")
-            if self.interleave:
-                parts.append("intl")
-        return kernel_name_join(*parts)
+        return tuple(parts)
+
+    def _persist_decode_name_part(self) -> str:
+        return {
+            "hkv_major": "hkvmaj",
+            "gqa_pair": "gqapair",
+            "gqa_pair_2phase": "gqapair2",
+        }.get(self.resolved_persist_decode, "")
+
+
+# Compatibility name for existing gfx950 callers. Cross-architecture code must
+# import the neutral base from kernels.common.attention_dense_spec instead.
+AttentionDenseSpec = Gfx950AttentionDenseSpec
 
 
 def supports_attention_dense(
@@ -584,8 +239,18 @@ def supports_attention_dense(
     """Return (ok, reason). The kernel is gfx950-only and dense (no paging/bias)."""
     if arch != "gfx950":
         return False, f"attention_dense is gfx950-only (got {arch})"
+    if not isinstance(spec, Gfx950AttentionDenseSpec):
+        return False, (
+            "gfx950 attention_dense requires Gfx950AttentionDenseSpec, got "
+            f"{type(spec).__name__}"
+        )
     try:
-        AttentionDenseSpec(**{f.name: getattr(spec, f.name) for f in spec.__dataclass_fields__.values()})  # type: ignore[attr-defined]
+        Gfx950AttentionDenseSpec(
+            **{
+                f.name: getattr(spec, f.name)
+                for f in _dataclass_fields(Gfx950AttentionDenseSpec)
+            }
+        )
     except ValueError as e:
         return False, str(e)
     supported_block_m = {
@@ -2500,14 +2165,9 @@ def run_attention_dense_torch(
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    # `batch` and `waves_per_eu` are baked into the kernel (K/V buffer extents /
-    # persistent work-item count W = NQB*Hq*B, and the amdgpu-waves-per-eu
-    # register-file hint respectively) but are NOT part of kernel_name(), so they
-    # must be part of the cache key: otherwise two specs differing only in either
-    # field collide and the second silently reuses the first binary. Keying here
-    # rather than widening kernel_name() keeps the emitted IR (and its hash)
-    # untouched.
-    key = (spec.kernel_name(), spec.batch, spec.waves_per_eu)
+    # The concrete frozen spec is the cache identity. New IR-live fields cannot
+    # silently collide merely because kernel_name() forgot to append a token.
+    key = attention_dense_cache_key(spec, arch=arch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
         art = compile_kernel(

@@ -4,7 +4,7 @@ Productized dense causal flash-attention prefill kernel for gfx950, authored in 
 rocke IR DSL. Forward-only, bf16/fp16, head_dim 64/128, MHA or GQA.
 
 - Kernel: [`kernels/gfx950/attention_dense.py`](../../../../kernels/gfx950/attention_dense.py)
-  (`AttentionDenseSpec`, `build_attention_dense`, `supports_attention_dense`)
+  (`Gfx950AttentionDenseSpec`, `build_attention_dense`, `supports_attention_dense`)
 - Host builder / launcher (this dir): `attention_dense_prefill.py`
 
 ## Baked-in levers (always-on, no env gates)
@@ -34,7 +34,7 @@ and `lds_k_group_pad`; persistent scheduling knobs are `num_persistent`,
 
 ## Persistent (grid-stride) mode
 
-`AttentionDenseSpec(persistent=True, num_persistent=256)` emits a persistent variant:
+`Gfx950AttentionDenseSpec(persistent=True, num_persistent=256)` emits a persistent variant:
 a 1-D grid of `num_persistent` long-lived CTAs grid-strides over the
 `W = (seqlen_q // 256) * Hq * B` work items, so the per-CTA launch/dispatch + scalar
 setup + K/V-prime cold-start is amortized once per CU instead of once per query-block.
@@ -163,9 +163,12 @@ python attention_dense_prefill.py --persistent --persist-decode gqa_pair --wide-
 Programmatic:
 
 ```python
-from kernels.gfx950.attention_dense import AttentionDenseSpec, build_attention_dense
+from kernels.gfx950.attention_dense import (
+    Gfx950AttentionDenseSpec,
+    build_attention_dense,
+)
 
-spec = AttentionDenseSpec(
+spec = Gfx950AttentionDenseSpec(
     batch=1, seqlen_q=8192, seqlen_kv=8192,
     num_query_heads=128, num_kv_heads=8, head_size=128,
     causal=True, dtype="bf16",
@@ -203,7 +206,7 @@ request either pair mapping explicitly.
 
 ## Tuning — lds_k_group_pad
 
-`AttentionDenseSpec.lds_k_group_pad` pads each K row-group in LDS to break
+`Gfx950AttentionDenseSpec.lds_k_group_pad` pads each K row-group in LDS to break
 bank conflicts on the `do_qk` K reads. The pad must be a multiple of 8:
 `smem_load_vN` stamps align 16 unconditionally, so an 8-byte-aligned pitch
 preserves `ds_read_b128` alignment. `__post_init__` enforces the invariant.
