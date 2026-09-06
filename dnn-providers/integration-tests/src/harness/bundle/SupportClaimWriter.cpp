@@ -265,9 +265,13 @@ std::filesystem::path makeTempPath(const std::filesystem::path& filePath)
     return tempPath;
 }
 
+// error_code overloads throughout: an unreadable path must skip one sidecar,
+// not unwind past the caller's summary and abandon every target after it.
 WriteOutcome writeIfChanged(const std::filesystem::path& filePath, const std::string& newContent)
 {
-    if(std::filesystem::exists(filePath))
+    std::error_code ec;
+
+    if(std::filesystem::exists(filePath, ec))
     {
         std::ifstream existingFile(filePath, std::ios::binary);
         if(existingFile)
@@ -293,16 +297,15 @@ WriteOutcome writeIfChanged(const std::filesystem::path& filePath, const std::st
         outputFile.close();
         if(!outputFile)
         {
-            std::filesystem::remove(tempPath);
+            std::filesystem::remove(tempPath, ec);
             return WriteOutcome::WriteFailed;
         }
     }
 
-    std::error_code ec;
     std::filesystem::rename(tempPath, filePath, ec);
     if(ec)
     {
-        std::filesystem::remove(tempPath);
+        std::filesystem::remove(tempPath, ec);
         return WriteOutcome::WriteFailed;
     }
 
@@ -363,22 +366,25 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
         {
             claims.apply(observation);
         }
-        summary.observationsApplied += sidecarObservations.size();
 
         // Every engine declined and there is no file to correct: writing one
         // would check in a sidecar that claims nothing.
-        if(claims.empty() && !std::filesystem::exists(sidecarPath))
+        std::error_code ec;
+        if(claims.empty() && !std::filesystem::exists(sidecarPath, ec))
         {
             ++summary.filesSkipped;
             continue;
         }
 
+        // Counted per outcome, so the number says what reached a file.
         switch(writeIfChanged(sidecarPath, claims.serialize(isSweep)))
         {
         case WriteOutcome::Written:
+            summary.observationsApplied += sidecarObservations.size();
             ++summary.filesWritten;
             break;
         case WriteOutcome::Unchanged:
+            summary.observationsApplied += sidecarObservations.size();
             ++summary.filesUnchanged;
             break;
         case WriteOutcome::OpenFailed:

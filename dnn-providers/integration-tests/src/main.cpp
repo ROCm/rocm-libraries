@@ -468,12 +468,24 @@ int main(int argc, char** argv) noexcept
             const std::size_t graphsObserved = observationLog.graphsObserved();
             const std::size_t graphsUnobserved = observationLog.graphsUnobserved();
 
+            const std::size_t graphsRegistered
+                = hipdnn_integration_tests::bundle::supportClaimCoverage().graphsFound;
+
+            // A graph SetUp() skipped is in neither counter; the gap is the
+            // sidecars this run left untouched without noticing.
+            const std::size_t graphsNeverReached
+                = graphsRegistered > graphsObserved + graphsUnobserved
+                      ? graphsRegistered - graphsObserved - graphsUnobserved
+                      : 0;
+
             if(graphsObserved == 0 && graphsUnobserved == 0)
             {
-                // Nothing was even attempted, so the filter is the suspect.
                 std::cerr << "\n--write-support-claims: no graphs were observed; "
                              "nothing was written.\n"
-                             "Check --gtest_filter and --test-article.\n";
+                             "Usual causes:\n"
+                             "  - no --test-engine was given, so there is no engine to observe\n"
+                             "  - the GPU or the engine plugin failed to load\n"
+                             "  - a --gtest_filter or --test-article selected no graphs\n";
                 exitCode = 1;
             }
             else
@@ -488,8 +500,10 @@ int main(int argc, char** argv) noexcept
                 // cells, so it runs a multiple of the graph count and cannot
                 // serve as its own denominator.
                 std::cerr << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
-                          << "  graphs observed: " << graphsObserved
-                          << "  not observed: " << graphsUnobserved << "\n"
+                          << "  graphs registered: " << graphsRegistered
+                          << "  observed: " << graphsObserved
+                          << "  not observed: " << graphsUnobserved
+                          << "  never reached: " << graphsNeverReached << "\n"
                           << "  observations: " << writeSummary.observationsApplied
                           << "  written: " << writeSummary.filesWritten
                           << "  unchanged: " << writeSummary.filesUnchanged
@@ -503,16 +517,24 @@ int main(int argc, char** argv) noexcept
                                  "above for which, and re-run them.\n";
                 }
 
+                if(graphsNeverReached > 0)
+                {
+                    std::cerr << "  " << graphsNeverReached
+                              << " graph(s) never reached the observer, so their claims are "
+                                 "stale.\n"
+                                 "  A [[test_skips]] entry, an arch or VRAM guard, or a missing "
+                                 "device skips\n"
+                                 "  a bundle in SetUp, before anything can be observed.\n";
+                }
+
                 for(const auto& error : writeSummary.errors)
                 {
                     std::cerr << "  ERROR: " << error << "\n";
                 }
 
-                // Arch and VRAM filtering happens in SetUp, before the observer,
-                // so a graph that got this far and yielded nothing is a defect
-                // and a partial authoring run fails. What it did write is still
+                // A partial authoring run fails. What it did write is still
                 // correct -- the exit code says "not finished", not "discard".
-                if(!writeSummary.errors.empty() || graphsUnobserved > 0)
+                if(!writeSummary.errors.empty() || graphsUnobserved > 0 || graphsNeverReached > 0)
                 {
                     exitCode = 1;
                 }
