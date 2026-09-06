@@ -299,6 +299,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         # dense engine's rule -- so a wider filter would only add skips that say
         # nothing about this engine.
         GTEST_FILTER
-            *_SdpaFwd_paged_*.*
+            *SdpaFwd_paged*
     )
 endif()

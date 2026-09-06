@@ -322,7 +322,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 # The paged bundles this integration authors. Every dense SdpaFwd
                 # bundle is correctly declined by this engine -- it requires page
                 # tables -- so a wider filter would report skips that say nothing.
-                GTEST_FILTER   *_SdpaFwd_paged_*.*
+                GTEST_FILTER   *SdpaFwd_paged*
                 ${_gfx950_tiled_external_category_args}
             )
             message(STATUS "Created ${PROJECT_NAME}-gfx950-attention-tiled-external-integration-check target")

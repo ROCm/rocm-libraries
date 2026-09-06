@@ -1,16 +1,42 @@
 {
   "nodes": [
     {
+      "name": "",
       "type": "SdpaAttributes",
-      "attributes": {
+      "compute_data_type": "float",
+      "inputs": {
         "q_tensor_uid": 1,
         "k_tensor_uid": 2,
         "v_tensor_uid": 3,
-        "o_tensor_uid": 4,
-        "page_table_k_tensor_uid": 5,
-        "page_table_v_tensor_uid": 6,
+        "attn_mask_tensor_uid": null,
+        "scale_tensor_uid": null,
         "seq_len_q_tensor_uid": 7,
         "seq_len_kv_tensor_uid": 8,
+        "seed_tensor_uid": null,
+        "offset_tensor_uid": null,
+        "dropout_mask_tensor_uid": null,
+        "dropout_scale_tensor_uid": null,
+        "page_table_k_tensor_uid": 5,
+        "page_table_v_tensor_uid": 6,
+        "block_mask_tensor_uid": null,
+        "sink_token_tensor_uid": null,
+        "descale_q_tensor_uid": null,
+        "descale_k_tensor_uid": null,
+        "descale_v_tensor_uid": null,
+        "descale_s_tensor_uid": null,
+        "scale_s_tensor_uid": null,
+        "scale_o_tensor_uid": null
+      },
+      "outputs": {
+        "o_tensor_uid": 4,
+        "stats_tensor_uid": null,
+        "max_tensor_uid": null,
+        "sum_exp_tensor_uid": null,
+        "rng_dump_tensor_uid": null,
+        "amax_s_tensor_uid": null,
+        "amax_o_tensor_uid": null
+      },
+      "attributes": {
         "generate_stats": null,
         "alibi_mask": false,
         "padding_mask": false,
@@ -43,7 +69,8 @@
         2048,
         1
       ],
-      "data_type": "float16"
+      "data_type": "float16",
+      "virtual": false
     },
     {
       "name": "K",
@@ -60,7 +87,8 @@
         256,
         1
       ],
-      "data_type": "float16"
+      "data_type": "float16",
+      "virtual": false
     },
     {
       "name": "V",
@@ -77,7 +105,8 @@
         256,
         1
       ],
-      "data_type": "float16"
+      "data_type": "float16",
+      "virtual": false
     },
     {
       "name": "O",
@@ -94,7 +123,8 @@
         2048,
         1
       ],
-      "data_type": "float16"
+      "data_type": "float16",
+      "virtual": false
     },
     {
       "name": "PAGE_TABLE_K",
@@ -107,7 +137,8 @@
         32,
         1
       ],
-      "data_type": "int32"
+      "data_type": "int32",
+      "virtual": false
     },
     {
       "name": "PAGE_TABLE_V",
@@ -120,7 +151,8 @@
         32,
         1
       ],
-      "data_type": "int32"
+      "data_type": "int32",
+      "virtual": false
     },
     {
       "name": "SEQ_LEN_Q",
@@ -131,7 +163,8 @@
       "strides": [
         1
       ],
-      "data_type": "int32"
+      "data_type": "int32",
+      "virtual": false
     },
     {
       "name": "SEQ_LEN_KV",
@@ -142,7 +175,8 @@
       "strides": [
         1
       ],
-      "data_type": "int32"
+      "data_type": "int32",
+      "virtual": false
     }
   ],
   "io_data_type": "float16",
