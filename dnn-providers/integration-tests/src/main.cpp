@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -160,7 +162,9 @@ int main(int argc, char** argv) noexcept
                   "Requires --test-article and --golden-data-dir (mode B: all "
                   "engines, or mode C with --test-engine). Implies --allow-bundles, "
                   "since bundles are what carry the claims. Idempotent: no support "
-                  "change = zero git diff.");
+                  "change = zero git diff. Run one at a time: concurrent "
+                  "--write-support-claims runs against the same bundle tree race "
+                  "on the sidecars and the last writer wins.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -322,10 +326,16 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        if(opts.writeSupportClaims && !opts.goldenDataDir.has_value())
+        // Only that a directory was named -- "is this the source tree" is not
+        // decidable, a build directory is just a directory. The env var is the
+        // documented alternative to the flag, so it satisfies this too.
+        if(opts.writeSupportClaims && !opts.goldenDataDir.has_value()
+           && std::getenv("HIPDNN_TEST_GOLDEN_DATA_DIR") == nullptr)
         {
-            std::cerr << "--write-support-claims requires --golden-data-dir so that "
-                      << "sidecars land in the source tree, not in a build artifact.\n";
+            std::cerr << "--write-support-claims requires a bundle data directory: pass "
+                      << "--golden-data-dir or set HIPDNN_TEST_GOLDEN_DATA_DIR.\n"
+                      << "Point it at the source tree -- sidecars written into a build "
+                      << "directory are lost on the next clean build.\n";
             return 1;
         }
 
@@ -454,8 +464,13 @@ int main(int argc, char** argv) noexcept
 
         if(hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
         {
-            if(hipdnn_integration_tests::bundle::SupportObservationLog::get().empty())
+            auto& observationLog = hipdnn_integration_tests::bundle::SupportObservationLog::get();
+            const std::size_t graphsObserved = observationLog.graphsObserved();
+            const std::size_t graphsUnobserved = observationLog.graphsUnobserved();
+
+            if(graphsObserved == 0 && graphsUnobserved == 0)
             {
+                // Nothing was even attempted, so the filter is the suspect.
                 std::cerr << "\n--write-support-claims: no graphs were observed; "
                              "nothing was written.\n"
                              "Check --gtest_filter and --test-article.\n";
@@ -463,20 +478,41 @@ int main(int argc, char** argv) noexcept
             }
             else
             {
+                // Safe to run even when every graph failed: the writer groups by
+                // sidecar, so no observations means no targets and no writes.
                 const auto writeSummary
                     = hipdnn_integration_tests::bundle::writeObservedSupportClaims(
-                        hipdnn_integration_tests::bundle::SupportObservationLog::get().all());
+                        observationLog.all());
+
+                // The graph counts lead: "observations" counts engine-by-graph
+                // cells, so it runs a multiple of the graph count and cannot
+                // serve as its own denominator.
                 std::cerr << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
+                          << "  graphs observed: " << graphsObserved
+                          << "  not observed: " << graphsUnobserved << "\n"
                           << "  observations: " << writeSummary.observationsApplied
                           << "  written: " << writeSummary.filesWritten
                           << "  unchanged: " << writeSummary.filesUnchanged
                           << "  skipped: " << writeSummary.filesSkipped
                           << "  errors: " << writeSummary.errors.size() << "\n";
+
+                if(graphsUnobserved > 0)
+                {
+                    std::cerr << "  claims for the " << graphsUnobserved
+                              << " unobserved graph(s) were left as-is; see the warnings "
+                                 "above for which, and re-run them.\n";
+                }
+
                 for(const auto& error : writeSummary.errors)
                 {
                     std::cerr << "  ERROR: " << error << "\n";
                 }
-                if(!writeSummary.errors.empty())
+
+                // Arch and VRAM filtering happens in SetUp, before the observer,
+                // so a graph that got this far and yielded nothing is a defect
+                // and a partial authoring run fails. What it did write is still
+                // correct -- the exit code says "not finished", not "discard".
+                if(!writeSummary.errors.empty() || graphsUnobserved > 0)
                 {
                     exitCode = 1;
                 }

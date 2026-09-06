@@ -10,6 +10,12 @@
 
 #include <nlohmann/json.hpp>
 
+// geteuid() below; MSVC ships no <unistd.h>, and the one test that needs it
+// skips on Windows anyway.
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 #include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 
@@ -630,6 +636,20 @@ TEST(TestSupportClaimWriter, UnobservedBundleSidecarIsPreservedWhenSiblingIsWrit
 
 TEST(TestSupportClaimWriter, ReadOnlyDirectoryReportsOpenFailedAndSkips)
 {
+    // Both skips are the same limitation: the test needs the write to be denied,
+    // and here it would not be. Windows maps a directory's read-only bit to
+    // FILE_ATTRIBUTE_READONLY, which it then ignores for files created inside;
+    // root bypasses the mode bits outright, which is the normal case in a CI
+    // container. Either way the open succeeds and the assertions below are
+    // asserting the wrong thing, not a weaker thing.
+#ifdef _WIN32
+    GTEST_SKIP() << "a read-only directory does not block file creation on Windows";
+#else
+    if(geteuid() == 0)
+    {
+        GTEST_SKIP() << "root bypasses the directory permissions this test relies on";
+    }
+
     const ScopedDirectory dir = makeDir("test_writer_");
     const auto subdir = dir.path() / "readonly";
     std::filesystem::create_directories(subdir);
@@ -653,6 +673,7 @@ TEST(TestSupportClaimWriter, ReadOnlyDirectoryReportsOpenFailedAndSkips)
     ASSERT_EQ(summary.errors.size(), 1u);
     EXPECT_NE(summary.errors[0].find("could not open"), std::string::npos);
     EXPECT_EQ(summary.filesSkipped, 1u);
+#endif
 }
 
 // NOLINTEND(readability-identifier-naming)

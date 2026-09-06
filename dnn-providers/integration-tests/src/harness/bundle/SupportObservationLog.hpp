@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <iterator>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -47,7 +49,7 @@ struct ObservedGraphSupport
 // "unsupported" and must never null an existing claim. The type cannot express
 // this -- the guard is the early return in
 // IntegrationBundleVerificationHarness::observeSupportOnly(), which is the only
-// production caller of record().
+// production source of the vectors passed to recordGraph().
 class SupportObservationLog
 {
 public:
@@ -62,10 +64,22 @@ public:
     SupportObservationLog(SupportObservationLog&&) = delete;
     SupportObservationLog& operator=(SupportObservationLog&&) = delete;
 
-    void record(ObservedGraphSupport observation)
+    // Files one graph's worth of observations, empty included. An empty vector is
+    // not a "no" from the engines -- that arrives as cells carrying
+    // engineIsSupported=false. It means no answer at all, which leaves stale
+    // claims in place, so it is counted rather than dropped.
+    void recordGraph(std::vector<ObservedGraphSupport> observations)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        _observations.push_back(std::move(observation));
+        if(observations.empty())
+        {
+            ++_graphsUnobserved;
+            return;
+        }
+        ++_graphsObserved;
+        _observations.insert(_observations.end(),
+                             std::make_move_iterator(observations.begin()),
+                             std::make_move_iterator(observations.end()));
     }
 
     std::vector<ObservedGraphSupport> all() const
@@ -74,16 +88,26 @@ public:
         return _observations;
     }
 
-    bool empty() const
+    // Graphs, not cells: _observations.size() runs a multiple of this.
+    std::size_t graphsObserved() const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        return _observations.empty();
+        return _graphsObserved;
+    }
+
+    // Graphs that yielded nothing; observeSupportOnly WARNs which ones.
+    std::size_t graphsUnobserved() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return _graphsUnobserved;
     }
 
     void reset()
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         _observations.clear();
+        _graphsObserved = 0;
+        _graphsUnobserved = 0;
     }
 
 private:
@@ -91,6 +115,8 @@ private:
 
     mutable std::mutex _mutex;
     std::vector<ObservedGraphSupport> _observations;
+    std::size_t _graphsObserved = 0;
+    std::size_t _graphsUnobserved = 0;
 };
 
 } // namespace hipdnn_integration_tests::bundle

@@ -17,7 +17,9 @@ from verify_support_claims import verify_all
 def _write_json(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(
-        (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        (json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode(
+            "utf-8"
+        )
     )
 
 
@@ -57,6 +59,16 @@ class TestSingleGraphSchema(unittest.TestCase):
         errors = verify_all(self.bundle_root)
         self.assertEqual(len(errors), 1)
         self.assertIn("version must be 1", errors[0])
+
+    def test_non_utf8_sidecar_reports_an_error(self) -> None:
+        # A hook that dies with a traceback tells the committer nothing about
+        # which file is bad.
+        _write_json(self.bundle_root / "A" / "Small.json", {})
+        bad = self.bundle_root / "A" / "Small.support.json"
+        bad.write_bytes(b'{"version": 1, "claims": {"\xff\xfe": {}}}')
+        errors = verify_all(self.bundle_root)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("not valid UTF-8", errors[0])
 
     def test_invalid_platform_fails(self) -> None:
         _write_json(self.bundle_root / "A" / "Small.json", {})

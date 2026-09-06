@@ -124,7 +124,6 @@ public:
         {
             observeAndRecordSupport(session);
             GTEST_SKIP() << "support-claim authoring run (--write-support-claims)";
-            return;
         }
 
         // Enforcement + verification only below this point.

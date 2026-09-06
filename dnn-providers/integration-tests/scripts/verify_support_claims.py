@@ -183,7 +183,7 @@ def check_enforcement_level_single(support_path: Path, errors: List[str]) -> Non
     try:
         with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         _error(meta_path, f"cannot read metadata: {exc}", errors)
         return
     level = meta.get("enforcement_level")
@@ -203,7 +203,7 @@ def check_enforcement_level_sweep(support_path: Path, errors: List[str]) -> None
     try:
         with open(sweep_path, encoding="utf-8") as f:
             sweep = json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         _error(sweep_path, f"cannot read sweep: {exc}", errors)
         return
     cases = sweep.get("cases", [])
@@ -239,7 +239,7 @@ def check_sweep_case_ids(
     try:
         with open(sweep_path, encoding="utf-8") as f:
             sweep = json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         _error(sweep_path, f"cannot read sweep: {exc}", errors)
         return
     valid_ids = set()
@@ -292,7 +292,7 @@ def is_sweep_sidecar(path: Path) -> bool:
 
 
 def check_canonical_form(support_path: Path, data: object, errors: List[str]) -> None:
-    canonical = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    canonical = json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     raw = support_path.read_bytes().decode("utf-8")
     if raw != canonical:
         _error(support_path, "not in canonical form (re-run the writer)", errors)
@@ -310,6 +310,9 @@ def verify_all(bundle_root: Path) -> List[str]:
         except json.JSONDecodeError as exc:
             _error(support_path, f"invalid JSON: {exc}", errors)
             continue
+        except UnicodeDecodeError as exc:
+            _error(support_path, f"not valid UTF-8: {exc}", errors)
+            continue
         except OSError as exc:
             _error(support_path, f"cannot read: {exc}", errors)
             continue
@@ -325,6 +328,9 @@ def verify_all(bundle_root: Path) -> List[str]:
                 data = json.load(f)
         except json.JSONDecodeError as exc:
             _error(support_path, f"invalid JSON: {exc}", errors)
+            continue
+        except UnicodeDecodeError as exc:
+            _error(support_path, f"not valid UTF-8: {exc}", errors)
             continue
         except OSError as exc:
             _error(support_path, f"cannot read: {exc}", errors)
