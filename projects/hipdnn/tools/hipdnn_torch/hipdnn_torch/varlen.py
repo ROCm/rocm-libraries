@@ -160,65 +160,52 @@ class VarlenSdpaOverride(OpOverride):
         o_t.set_output(True)
         return g
 
-    # -- call ---------------------------------------------------------------
-    def _call(
+    # -- shared paged entry point -------------------------------------------
+    def run_paged(
         self,
-        real,
         query,
         key,
         value,
         cu_seq_q,
-        cu_seq_k,
-        max_q,
         max_k,
         *,
-        return_aux=None,
         scale=None,
-        window_size=(-1, -1),
+        window=(-1, -1),
         seqused_k=None,
         block_table=None,
         num_splits=None,
+        census_key=None,
     ):
-        def _native():
-            return real(
-                query,
-                key,
-                value,
-                cu_seq_q,
-                cu_seq_k,
-                max_q,
-                max_k,
-                return_aux=return_aux,
-                scale=scale,
-                window_size=window_size,
-                seqused_k=seqused_k,
-                block_table=block_table,
-                num_splits=num_splits,
-            )
+        """Map a paged varlen call onto hipDNN and execute it.
 
+        Returns the packed ``[total_q, H, Dv]`` output, or **None** when the call
+        is not served -- in which case the reason has already been counted and the
+        caller should fall back to its own native path. Returning None rather than
+        raising keeps the two routes' fallbacks identical: the ATen route has a
+        different native call than the wrapper route, so only the caller can make
+        it.
+
+        Shared by :meth:`_call` (the ``varlen_attn`` monkeypatch) and
+        :class:`~hipdnn_torch.varlen_aten.AtenVarlenRoute` (the dispatcher
+        registration) so the mapping cannot drift between them."""
         torch = self.state.torch
         try:
             total_q, hq, d = (int(x) for x in query.shape)
             hkv = int(key.shape[-2])
         except Exception:  # noqa: BLE001 -- exotic call site, let native have it
-            return _native()
-        census_key = (
-            f"Tq={total_q},Hq={hq},Hkv={hkv},D={d},dtype={self._tok(query.dtype)}"
-        )
+            return None
+        if census_key is None:
+            census_key = (
+                f"Tq={total_q},Hq={hq},Hkv={hkv},D={d},dtype={self._tok(query.dtype)}"
+            )
 
         ok, reason = self._gate(query, block_table, seqused_k, num_splits)
         if not ok:
             self.note_native(census_key, reason)
-            return _native()
-
-        # return_aux asks for the log-sumexp alongside the output. The graph is
-        # built without a stats output (the matcher declines one), so rather than
-        # return a silently wrong aux value, decline the call.
-        if return_aux is not None and getattr(return_aux, "lse", False):
-            self.note_native(census_key, "return_aux.lse not served by the graph")
-            return _native()
+            return None
 
         try:
+            window_size = tuple(window)
             eff_scale = float(scale) if scale is not None else 1.0 / math.sqrt(d)
 
             # --- lengths, not offsets ---------------------------------------
@@ -318,11 +305,81 @@ class VarlenSdpaOverride(OpOverride):
             return o
         except NotApplicable as na:
             self.note_native(census_key, str(na))
-            return _native()
+            return None
         except Exception as ex:  # noqa: BLE001 -- never break the model
             self.note_native(
                 census_key,
                 f"exception: {type(ex).__name__}: {ex}",
                 level=logging.WARNING,
             )
+            return None
+
+    # -- call ---------------------------------------------------------------
+    def _call(
+        self,
+        real,
+        query,
+        key,
+        value,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        max_k,
+        *,
+        return_aux=None,
+        scale=None,
+        window_size=(-1, -1),
+        seqused_k=None,
+        block_table=None,
+        num_splits=None,
+    ):
+        def _native():
+            return real(
+                query,
+                key,
+                value,
+                cu_seq_q,
+                cu_seq_k,
+                max_q,
+                max_k,
+                return_aux=return_aux,
+                scale=scale,
+                window_size=window_size,
+                seqused_k=seqused_k,
+                block_table=block_table,
+                num_splits=num_splits,
+            )
+
+        # return_aux asks for the log-sumexp alongside the output. The graph is
+        # built without a stats output (the matcher declines one), so rather than
+        # return a silently wrong aux value, decline the call.
+        if return_aux is not None and getattr(return_aux, "lse", False):
+            self.note_native(
+                self._census_key(query, key),
+                "return_aux.lse not served by the graph",
+            )
             return _native()
+
+        out = self.run_paged(
+            query,
+            key,
+            value,
+            cu_seq_q,
+            max_k,
+            scale=scale,
+            window=window_size,
+            seqused_k=seqused_k,
+            block_table=block_table,
+            num_splits=num_splits,
+        )
+        return _native() if out is None else out
+
+    def _census_key(self, query, key):
+        try:
+            total_q, hq, d = (int(x) for x in query.shape)
+            return (
+                f"Tq={total_q},Hq={hq},Hkv={int(key.shape[-2])},D={d},"
+                f"dtype={self._tok(query.dtype)}"
+            )
+        except Exception:  # noqa: BLE001 -- census must never break dispatch
+            return "varlen"

@@ -32,6 +32,7 @@ from .linear import LinearOverride
 from .rmsnorm import RmsNormOverride
 from .sdpa import SdpaOverride
 from .varlen import VarlenSdpaOverride
+from .varlen_aten import AtenVarlenRoute
 
 log = logging.getLogger("hipdnn_torch")
 log.addHandler(logging.NullHandler())  # library default: no output unless asked
@@ -59,6 +60,7 @@ _ALL = tuple(o for o in _OVERRIDES if o not in _OPTIONAL)
 
 __all__ = [
     "install",
+    "AtenVarlenRoute",
     "uninstall",
     "reset",
     "report",
