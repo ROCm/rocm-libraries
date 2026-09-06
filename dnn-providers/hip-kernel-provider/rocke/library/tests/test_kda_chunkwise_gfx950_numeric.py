@@ -275,9 +275,9 @@ def test_c32_tile_phase_16x16_panels_agree_to_one_ulp():
             f"{name} differs by {diff:.3e} ({diff / scale:.3e} of peak), "
             "more than atom accumulation order can explain"
         )
-        assert frac <= 0.10, (
-            f"{name}: {frac:.1%} of elements differ; panel indexing is suspect"
-        )
+        assert (
+            frac <= 0.10
+        ), f"{name}: {frac:.1%} of elements differ; panel indexing is suspect"
 
 
 def test_c16_fused_matches_token_serial_oracle():
@@ -434,6 +434,35 @@ def test_value_splits_agree_with_vs1(value_splits, block, scan_atom_m):
     torch.cuda.synchronize()
     assert torch.allclose(o0.float(), o1.float(), rtol=0, atol=3e-2)
     assert torch.allclose(ht0.float(), ht1.float(), rtol=0, atol=3e-2)
+
+
+def test_value_split_token_major_h0_staging_matches_oracle():
+    """The production vs4 path must preserve every h0 value-band slice."""
+    import torch
+
+    from builders.gfx950.kda import kda_chunk_split as split
+    from kernels.gfx950.kda_chunkwise import tuned_kda_chunk_scan_spec
+
+    B, H, T, DK, DV = 1, 4, 256, 128, 128
+    q, k, v, g, beta, a_log, dt_bias = _make_raw_inputs(B, H, T, DK, DV)
+    h0 = torch.randn(B, H, DK, DV, dtype=torch.float32, device="cuda") * 0.1
+    spec = tuned_kda_chunk_scan_spec(
+        B * H,
+        has_initial_state=True,
+        token_major_io=True,
+    )
+    assert spec.value_splits == 4
+    assert spec.stages_h0_in_lds
+
+    o_got, ht_got = split.launch_raw(spec, q, k, v, g, beta, a_log, dt_bias, h0=h0)
+    torch.cuda.synchronize()
+    o_ref, s_ref = split.ref_aligned_raw(
+        q, k, v, g, beta, a_log, dt_bias, DK**-0.5, h0=h0
+    )
+    o_ref = o_ref.permute(0, 2, 1, 3)
+
+    assert torch.allclose(o_got.float(), o_ref.float(), rtol=0, atol=3e-2)
+    assert torch.allclose(ht_got.float(), s_ref.float(), rtol=0, atol=3e-2)
 
 
 def test_dispatched_specs_match_the_token_serial_oracle():

@@ -53,8 +53,29 @@ def main() -> int:
     )
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--iters", type=int, default=30)
+    parser.add_argument("--samples", type=int, default=5)
+    parser.add_argument(
+        "--production-ablation",
+        action="store_true",
+        help="run the exact B1/H12/T4096 packed/token x h0 scan matrix",
+    )
     args = parser.parse_args()
     shapes = _shapes(args.shapes)
+
+    if args.production_ablation:
+        if args.samples <= 0:
+            parser.error("--samples must be positive")
+        from builders.gfx950.kda import kda_chunk_split as split
+
+        split.bench_scan_ablation(
+            1,
+            12,
+            4096,
+            warmup=args.warmup,
+            iters=args.iters,
+            samples=args.samples,
+        )
+        return 0
 
     if args.path in ("split", "both"):
         from builders.gfx950.kda import kda_chunk_split as split

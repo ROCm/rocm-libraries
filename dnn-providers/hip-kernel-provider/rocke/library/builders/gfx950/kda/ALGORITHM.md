@@ -93,6 +93,13 @@ Both compositions support a supplied initial state `h0` and an optional final
 state `ht`. The numeric tests compare this state-carrying path with the
 un-chunked token-serial reference above.
 
+For the underfilled value-split scan, `h0` is cooperatively copied into an FP32
+LDS slice before chunk zero is staged. Chunk zero is peeled, and its accumulator
+seed is loaded from LDS only after the materialized operands are ready. This
+keeps the global-load values out of the tile-prefetch live range. Larger value
+slices retain direct accumulator loads when the extra FP32 slice would exceed
+the two-workgroup LDS budget.
+
 ## Standalone scan software pipeline
 
 Immediate HBM-to-LDS copies expose their memory dependency at the beginning of
@@ -109,6 +116,12 @@ work while retaining a single LDS tile set:
    read of the current LDS contents.
 5. Commit the register-held next tiles into those same LDS allocations. The
    next iteration's existing state-publish rendezvous makes the writes visible.
+
+Residual and `Vt` rows are disjoint between value-band waves. Their two internal
+phase boundaries therefore use `lgkmcnt(0)` without a workgroup barrier; the
+barriers surrounding shared materialized-tile reuse remain. Decay scaling for
+all state tiles is emitted before the state-update MFMAs, shortening the
+loop-carried live range without changing per-accumulator arithmetic order.
 
 The final iteration clamps its prefetch address to the current tile. This
 performs one redundant valid prefetch instead of introducing a divergent tail
@@ -130,6 +143,12 @@ four bands through 96 recurrence streams, two bands through 192 streams, and
 one band above that. The corresponding scan schedules are B128/SA16,
 B256/SA16, and B256/SA32. These cutovers are implemented by
 `tuned_kda_chunk_scan_spec` and are shared by the benchmark and dispatcher.
+The underfilled B128/SA16 schedule uses `pad_dk=16`, `pad_cb=0`, and wave-local
+intermediate synchronization.
+
+Token-major V/O addressing binds batch and head once per scan workgroup. The
+chunk loop then forms only `chunk * C + row`; it does not recover `(batch,
+head, chunk)` with div/mod at every V load and O store.
 
 The prep phase remains B256 and does not inherit scan-only `block_size` or
 `scan_atom_m`. Its flat global tile format depends on the logical dimensions

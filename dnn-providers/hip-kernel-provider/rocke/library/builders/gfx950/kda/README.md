@@ -39,6 +39,13 @@ python -m benchmarks.gfx950.kda.benchmark_chunkwise --path both
 The split benchmark selects the scan geometry from `batch * heads`, matching
 the dispatcher.
 
+The production B1/H12/T4096 scan matrix has a stable median-mode entry point:
+
+```bash
+python -m benchmarks.gfx950.kda.benchmark_chunkwise \
+  --production-ablation --warmup 20 --iters 100 --samples 5
+```
+
 ## Optimized scan schedule
 
 The standalone scan is software-pipelined without a second LDS tile set:
@@ -53,6 +60,11 @@ The standalone scan is software-pipelined without a second LDS tile set:
   competition between the larger prefetch burst and the current residual.
 - One decay value is loaded per lane and state-column tile, then reused for all
   accumulator slots owned by that lane.
+- Underfilled value-split scans stage FP32 `h0` in LDS and peel chunk zero so
+  initial-state loads do not overlap the steady-state tile-prefetch live range.
+- Their token-major batch/head base is computed once per workgroup. Residual
+  and Vt phase boundaries use wave-local waits because value bands are
+  disjoint; shared tile-reuse boundaries retain workgroup barriers.
 
 `KdaChunkScanSpec.prefetch_tiles` defaults on. Setting it to `False` retains the
 immediate staging path and adds `nopf` to the kernel name for controlled A/B
@@ -63,7 +75,8 @@ they hide.
 For the Kimi K3 contract (`bf16`, `DK=DV=128`, `C=32`),
 `tuned_kda_chunk_scan_spec(workgroups)` selects:
 
-- four value bands with a 128-thread SA16 scan through 96 recurrence streams;
+- four value bands with a 128-thread SA16, PDK16/PCB0, wave-local scan through
+  96 recurrence streams;
 - two value bands with a 256-thread SA16 scan through 192 streams;
 - the unsplit 256-thread SA32 scan above 192 streams.
 
