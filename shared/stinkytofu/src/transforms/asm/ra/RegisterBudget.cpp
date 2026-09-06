@@ -23,6 +23,7 @@
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 #include <algorithm>
+#include <optional>
 
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
@@ -61,17 +62,26 @@ uint32_t highestRegisterCount(const Function& function, RegType regClass) {
     return count;
 }
 
-uint32_t requiredSgprCount(const Function& function, int numSgprPreload,
-                           const std::array<int, 3>& workgroupIds) {
-    const uint32_t used = highestRegisterCount(function, RegType::S);
-
+uint32_t dispatchFilledSgprCount(int numSgprPreload, const std::array<int, 3>& workgroupIds) {
     // The kernarg segment pointer occupies two, matching the `numSgprPreload + 2`
     // the descriptor emits as .amdhsa_user_sgpr_count.
-    uint32_t abi = numSgprPreload > 0 ? static_cast<uint32_t>(numSgprPreload) + 2u : 0u;
+    uint32_t filled = numSgprPreload > 0 ? static_cast<uint32_t>(numSgprPreload) + 2u : 0u;
     for (int enabled : workgroupIds) {
-        if (enabled > 0) ++abi;
+        if (enabled > 0) ++filled;
     }
-    return std::max(used, abi);
+    return filled;
+}
+
+std::optional<uint32_t> settledDispatchFilledSgprCount(int numSgprPreload,
+                                                       const std::array<int, 3>& workgroupIds) {
+    if (numSgprPreload <= 0) return std::nullopt;
+    return dispatchFilledSgprCount(numSgprPreload, workgroupIds);
+}
+
+uint32_t requiredSgprCount(const Function& function, int numSgprPreload,
+                           const std::array<int, 3>& workgroupIds) {
+    return std::max(highestRegisterCount(function, RegType::S),
+                    dispatchFilledSgprCount(numSgprPreload, workgroupIds));
 }
 
 }  // namespace stinkytofu
