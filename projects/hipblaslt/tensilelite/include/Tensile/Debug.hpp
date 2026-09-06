@@ -100,6 +100,8 @@ namespace TensileLite
         bool skipKernelLaunch() const;
 
         // TENSILE_STREAMK_DATA_PARALLEL: -1 = unset (per-arch default), 0 = off, 1 = on.
+        // The environment variable uses this same encoding, so an explicit -1 is equivalent
+        // to leaving it unset. Any other non-zero integer is on; non-numeric is ignored.
         int streamKDataParallelOverride() const;
 
         // SK5 hybrid mode debug override.
@@ -127,6 +129,7 @@ namespace TensileLite
         bool printStreamKGridInfo() const;
 
         // TENSILE_GRIDBASED_KDTREE: -1 = unset (per-arch default), 0 = off, 1 = on.
+        // Same encoding as the environment variable; see streamKDataParallelOverride().
         int gridBasedKDTreeOverride() const;
 
         bool gridBasedBatchExp() const;

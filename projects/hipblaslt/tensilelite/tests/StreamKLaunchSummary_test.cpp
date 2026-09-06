@@ -1127,7 +1127,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedUniformOrderReconciles
     problem.setWorkspaceSize(0); // no workspace at all
     problem.setParams().setUniformSummationOrder(true);
 
-    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
+    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     // Anti-vacuity: the pre-reconcile reduction really is parallel. With the mode on,
