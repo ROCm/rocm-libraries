@@ -664,6 +664,59 @@ TEST(Gfx950AttentionTiledMatchers, AcceptsTheDeprecatedCausalBooleanSpelling)
     EXPECT_TRUE(matchGraph(graph).has_value());
 }
 
+/// THE PRODUCTION CHUNKED-PREFILL ENCODING MUST NOT BE SERVED AS TOP-LEFT.
+///
+/// `causal_mask: true` + `diagonal_alignment: BOTTOM_RIGHT`, with the legacy
+/// bottom-right boolean deliberately false, is what cuDNN-frontend's
+/// attention_inference configs emit for chunked prefill -- 116 of that suite's 428
+/// graphs, every one at Sq != Skv.
+///
+/// Before the precedence fix this classified TOP_LEFT_CAUSAL and was ACCEPTED: the
+/// wrong triangle, no error, plausible numbers. The BOTTOM_RIGHT decline in
+/// graph_match never fired because it sits downstream of the classification.
+///
+/// This test fails on the old behaviour, which is the only reason it is worth having.
+TEST(Gfx950AttentionTiledMatchers, DeclinesTheProductionBottomRightCausalEncoding)
+{
+    GraphSpec graph;
+    graph.causalMaskDeprecated = true;
+    graph.causalMaskBottomRightDeprecated = false;
+    graph.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    graph.leftBound = std::nullopt;
+    graph.rightBound = std::nullopt;
+    EXPECT_FALSE(matchGraph(graph).has_value())
+        << "causal_mask + BOTTOM_RIGHT is a bottom-right graph; serving it as top-left "
+           "attends the wrong triangle and reports nothing";
+}
+
+/// The complementary direction, and the reason the fix is surgical rather than a
+/// blanket decline: the COMMON spelling -- 304 of those same 428 graphs -- must still
+/// be served. A fix that declined both would trade a wrong answer for lost coverage.
+TEST(Gfx950AttentionTiledMatchers, StillServesCausalMaskWithExplicitTopLeft)
+{
+    GraphSpec graph;
+    graph.causalMaskDeprecated = true;
+    graph.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
+    graph.leftBound = std::nullopt;
+    graph.rightBound = std::nullopt;
+    EXPECT_TRUE(matchGraph(graph).has_value());
+}
+
+/// A bounded left edge still wins over the booleans: this is a WINDOW, whichever
+/// diagonal the alignment names. Guards against the precedence fix accidentally
+/// promoting the boolean above the window derivation.
+TEST(Gfx950AttentionTiledMatchers, WindowStillWinsOverTheBooleanAndAlignment)
+{
+    GraphSpec graph;
+    graph.causalMaskDeprecated = true;
+    graph.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    graph.leftBound = 63;
+    graph.rightBound = 0;
+    KernelSpec kernel;
+    kernel.slidingWindow = 64;
+    EXPECT_TRUE(matchKernel(graph, kernel));
+}
+
 /// A graph setting a boolean AND a real bound is asking for a WINDOW; reporting it as
 /// plain causal silently discards the band.
 TEST(Gfx950AttentionTiledMatchers, TreatsABoundedLeftEdgeAsAWindowDespiteTheBoolean)

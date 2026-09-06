@@ -402,13 +402,39 @@ std::optional<DerivedMask> maskTypeFor(const data_objects::SdpaAttributes& attri
         return DerivedMask{MaskType::SLIDING_WINDOW, left + 1};
     }
 
-    if(topLeftDeprecated)
+    // THE DEPRECATED BOOLEANS SAY "CAUSAL", NOT "TOP-LEFT".
+    //
+    // cuDNN's set_causal_mask() is a deprecated SETTER for the modern fields, not a
+    // parallel flag: it sets diagonal_alignment=TOP_LEFT and right_bound=0, and
+    // set_causal_mask_bottom_right() does the same with BOTTOM_RIGHT. So the boolean
+    // records that a mask IS causal; WHICH DIAGONAL is what diagonal_alignment states,
+    // and an explicit value for it must win.
+    //
+    // Returning TOP_LEFT here unconditionally -- as this function did, mirroring
+    // SdpaPlanUtils.hpp::getMaskType -- discards that field. Real producers set both:
+    // cuDNN-frontend's attention_inference configs mark chunked prefill
+    // `causal_mask: true` with `diagonal_alignment: BOTTOM_RIGHT`, deliberately
+    // leaving causal_mask_bottom_right false. 116 of that suite's 428 graphs are in
+    // that class, every one with Sq != Skv -- exactly where the conventions differ.
+    //
+    // THIS BIT HARDER HERE THAN ON THE DENSE SIBLING. There, a downstream
+    // `Sq != Skv` dispatch guard would have caught part of it. This engine DECLINES
+    // BOTTOM_RIGHT outright in graph_match, but that decline is downstream of the
+    // classification and so never fired: a bottom-right graph was classified
+    // TOP_LEFT, accepted, and served with the wrong triangle. Silent wrong answer.
+    // With this fix the same graph classifies BOTTOM_RIGHT and is declined --
+    // a correct, debuggable outcome.
+    //
+    // Ported from the dense engine's fix (a16546383e2). This is the FOURTH copy of
+    // the derivation: the shared SdpaPlanUtils.hpp and the gfx942 pack still carry
+    // the defect, and are handed to the ASM authors.
+    if(topLeftDeprecated || bottomRightDeprecated)
     {
-        return DerivedMask{MaskType::TOP_LEFT_CAUSAL, 0};
-    }
-    if(bottomRightDeprecated)
-    {
-        return DerivedMask{MaskType::BOTTOM_RIGHT_CAUSAL, 0};
+        const bool bottomRight
+            = bottomRightDeprecated
+              || attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+        return bottomRight ? DerivedMask{MaskType::BOTTOM_RIGHT_CAUSAL, 0}
+                           : DerivedMask{MaskType::TOP_LEFT_CAUSAL, 0};
     }
 
     if(right == UNBOUNDED)
