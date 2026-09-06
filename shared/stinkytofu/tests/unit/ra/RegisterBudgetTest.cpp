@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
 
 #include "AllocationTestUtils.hpp"
 #include "stinkytofu/core/Function.hpp"
@@ -99,4 +100,13 @@ TEST_F(RegisterBudgetTest, NoPreloadMeansNoKernargPointerToAccountFor) {
     // numSgprPreload of 0 suppresses the .amdhsa_user_sgpr_count line entirely,
     // so there is no +2 to carry either.
     EXPECT_EQ(requiredSgprCount(*func, /*numSgprPreload=*/0, {1, 1, 1}), 3u);
+}
+
+TEST(SettledDispatchFilledSgprCountTest, TheLineIsThePreloadedFloorOrNothingAtAll) {
+    EXPECT_EQ(settledDispatchFilledSgprCount(/*numSgprPreload=*/27, {1, 1, 1}), 32u);
+
+    // With no preload the floor above drops the kernarg segment pointer, which
+    // requiredSgprCount can absorb and a pin boundary cannot: reading 3 when the
+    // pointer does take s[0:1] would free s3 and s4, which the dispatch wrote.
+    EXPECT_EQ(settledDispatchFilledSgprCount(/*numSgprPreload=*/0, {1, 1, 1}), std::nullopt);
 }
