@@ -17,9 +17,13 @@
 #include <shlwapi.h>
 // clang-format on
 
+// MSVC ships no <unistd.h>; it spells getpid() as _getpid() in <process.h>.
+#include <process.h>
+
 #elif defined(__linux__)
 
 #include <fnmatch.h>
+#include <unistd.h>
 
 #else
 
@@ -39,6 +43,21 @@ inline std::string currentPlatform()
     return "windows";
 #elif defined(__linux__)
     return "linux";
+#endif
+}
+
+/// This process's id. Used to stamp a name no sibling process can draw.
+///
+/// tests/ScratchDirectory.hpp carries its own copy under `scratch::`. Five lines
+/// of #ifdef are cheaper to repeat than to make that test-only header include
+/// this one, which would pull <windows.h> into every test translation unit that
+/// wants a scratch directory.
+inline int currentProcessId()
+{
+#ifdef _WIN32
+    return _getpid();
+#elif defined(__linux__)
+    return ::getpid();
 #endif
 }
 

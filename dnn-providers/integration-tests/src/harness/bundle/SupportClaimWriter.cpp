@@ -4,6 +4,8 @@
 #include "harness/bundle/SupportClaimWriter.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -12,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/PlatformUtils.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -235,6 +238,33 @@ enum class WriteOutcome
     WriteFailed,
 };
 
+// The scratch file `writeIfChanged` streams into before renaming it over the
+// sidecar. The name has to be this process's alone: a fixed ".tmp" suffix is one
+// name every concurrent authoring run would pick, so two of them interleave
+// their writes into a single file and whichever renames first publishes the
+// other's half-written bytes. The result still parses as JSON, so nothing
+// downstream flags it.
+//
+// The pid does the work -- the OS hands no two live processes the same one. The
+// clock is for the case the pid cannot cover: two machines sharing a checkout
+// over NFS draw from separate pid spaces and can collide, and a timestamp makes
+// that need them to also start within a clock tick of each other.
+//
+// This bounds corruption, not lost updates: concurrent runs still race on the
+// rename and the last writer wins. That is why --write-support-claims documents
+// itself as one-at-a-time, and why the sidecars are checked in -- a lost update
+// shows up as a short `git diff` before it can be pushed.
+std::filesystem::path makeTempPath(const std::filesystem::path& filePath)
+{
+    const auto stamp
+        = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())
+          ^ (static_cast<uint64_t>(currentProcessId()) << 32U);
+
+    auto tempPath = filePath;
+    tempPath += "." + std::to_string(stamp) + ".tmp";
+    return tempPath;
+}
+
 WriteOutcome writeIfChanged(const std::filesystem::path& filePath, const std::string& newContent)
 {
     if(std::filesystem::exists(filePath))
@@ -251,8 +281,7 @@ WriteOutcome writeIfChanged(const std::filesystem::path& filePath, const std::st
         }
     }
 
-    auto tempPath = filePath;
-    tempPath += ".tmp";
+    const auto tempPath = makeTempPath(filePath);
 
     {
         std::ofstream outputFile(tempPath, std::ios::binary);
@@ -359,8 +388,6 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
         case WriteOutcome::WriteFailed:
             summary.errors.push_back("write failed: " + sidecarPath.string());
             ++summary.filesSkipped;
-            break;
-        default:
             break;
         }
     }

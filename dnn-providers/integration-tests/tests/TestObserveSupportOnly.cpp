@@ -11,10 +11,12 @@
 #include <hipdnn_frontend/Error.hpp>
 
 #include "HarnessTestSupport.hpp"
+#include "SupportClaimTestUtils.hpp"
 #include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/SupportClaims.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
 
 using hipdnn_frontend::ErrorCode;
 using namespace hipdnn_integration_tests::bundle;
@@ -120,6 +122,38 @@ TEST_F(TestObserveSupportOnly, CarriesArchAndPlatformFromPolicy)
     EXPECT_EQ(observations[0].arch, "gfx942");
     EXPECT_EQ(observations[0].platform, "linux");
     EXPECT_FALSE(observations[0].engineIsSupported);
+}
+
+// The log is a process-wide singleton, so each test starts from a known state
+// rather than inheriting whatever the previous one filed.
+class TestSupportObservationLogAccounting : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        SupportObservationLog::get().reset();
+    }
+    void TearDown() override
+    {
+        SupportObservationLog::get().reset();
+    }
+};
+
+// One graph, two engines, two cells: the reason the summary cannot use the
+// observation count as its own denominator without overstating coverage.
+TEST_F(TestSupportObservationLogAccounting, ObservedAndUnobservedGraphsAreCountedSeparately)
+{
+    auto& log = SupportObservationLog::get();
+    log.recordGraph(
+        {test_utils::singleGraphObservation("dir/good.json", "ENGINE_A", "gfx942", "linux", true),
+         test_utils::singleGraphObservation(
+             "dir/good.json", "ENGINE_B", "gfx942", "linux", false)});
+    log.recordGraph({});
+    log.recordGraph({});
+
+    EXPECT_EQ(log.graphsObserved(), 1u);
+    EXPECT_EQ(log.graphsUnobserved(), 2u);
+    EXPECT_EQ(log.all().size(), 2u);
 }
 
 } // namespace

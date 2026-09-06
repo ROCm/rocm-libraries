@@ -241,10 +241,10 @@ std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeS
 
 void IntegrationBundleVerificationHarness::observeAndRecordSupport(const GraphSession& session)
 {
-    for(auto& obs : observeSupportOnly(session, LoadedEngineTable::get().all()))
-    {
-        SupportObservationLog::get().record(std::move(obs));
-    }
+    // Handed over whole, empty result included -- the early returns above leave a
+    // graph this run cannot refresh, and the log counts those for the summary.
+    SupportObservationLog::get().recordGraph(
+        observeSupportOnly(session, LoadedEngineTable::get().all()));
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSession& session)

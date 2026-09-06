@@ -151,7 +151,6 @@ if(Python3_FOUND)
     set(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST hipdnn_support_claim_verifier_python_tests)
 endif()
 
-
 # Install integration test bundles so installed tests can find them at
 # <exe_dir>/../lib/integration-test-bundles/
 install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/integration-test-bundles"
