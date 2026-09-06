@@ -31,6 +31,7 @@ from .layernorm import LayerNormOverride
 from .linear import LinearOverride
 from .rmsnorm import RmsNormOverride
 from .sdpa import SdpaOverride
+from .varlen import VarlenSdpaOverride
 
 log = logging.getLogger("hipdnn_torch")
 log.addHandler(logging.NullHandler())  # library default: no output unless asked
@@ -45,9 +46,16 @@ _OVERRIDES = {
     "gelu": GeluOverride(),
     "conv2d": Conv2dFpropOverride(),
     "conv3d": Conv3dFpropOverride(),
+    "varlen": VarlenSdpaOverride(),
 }
 
-_ALL = tuple(_OVERRIDES)
+# Ops excluded from the default install set. ``varlen`` patches
+# ``torch.nn.attention.varlen``, which only exists on newer torch builds, so
+# installing it by default would turn a routine ``install()`` into an ImportError
+# on every older wheel. Ask for it explicitly: ``install(["varlen"])``.
+_OPTIONAL = ("varlen",)
+
+_ALL = tuple(o for o in _OVERRIDES if o not in _OPTIONAL)
 
 __all__ = [
     "install",
