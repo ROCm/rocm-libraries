@@ -65,6 +65,26 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    ```
    Add `-DROCM_PATH=<path>` when a ROCm path is resolved or provided. On Windows also add `-DCMAKE_PROGRAM_PATH=<clang-path>` and `-DGPU_TARGETS=<arch>`.
 
+   **Use the preset.** It carries the `rocm-clang.cmake` toolchain and the component
+   list. Hand-rolling `-DCMAKE_CXX_COMPILER=...` and `-DROCM_LIBS_ENABLE_COMPONENTS=...`
+   instead is the common way to lose half an hour: without the toolchain the host
+   compiler falls back to system GCC, and the build then fails with dozens of `-Werror`
+   diagnostics (`-Wshadow`, `-Wparentheses`, unrecognised `-Wno-error=` flags) in files
+   you never touched, which reads as broken source rather than a wrong compiler.
+
+   **Generic-kernel-ingestor / rocKE builds** need flags no preset sets, because they
+   are off by default:
+
+   | Flag | Default | Needed when |
+   |---|---|---|
+   | `HIPDNN_ENABLE_KERNEL_INGESTOR` | OFF | Any descriptor-backed engine. Also gates `hipdnn_validate_descriptors`, which is why that binary is usually absent. |
+   | `HIPDNN_ENABLE_SDPA` | OFF | Any attention graph. This is the **frontend**: with it off the SDPA API is `#ifdef`-compiled out and plans silently DECLINE. Must be ON for both the SDK and the provider. |
+   | `ENABLE_ASM_SDPA_ENGINE` | ON | Turn **OFF** to stop the incumbent ASM engine winning attention graphs when you are testing a new one. |
+   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | rocKE kernels. |
+   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | unset | The authored descriptor tree `hkp_pack` packs. Unset means the production packaging path stays dormant and ships nothing, silently. |
+   | `HIPKERNELPROVIDER_KPACK_PYTHON_DIR` | unset | Directory **containing** `rocm_kpack/`. |
+   | `Python3_EXECUTABLE` | system | Must itself import `msgpack` and `zstandard` — the packager *runs* this interpreter. Distinct from the flag above, which only locates the package. The failure names `/usr/bin/python3`, not the variable you set, so point it at a venv holding all three. |
+
 7. Build with output redirected to a log:
    ```bash
    cmake --build <build-dir> > <log> 2>&1
@@ -91,6 +111,13 @@ Summarize:
 
 ## Notes
 
+- **Build speed — comgr cache location.** When the build packs kernels (the
+  hip-kernel-provider's descriptor packaging), the dominant cost is lowering each kernel
+  through `libamd_comgr`, which caches results at `~/.cache/comgr` by default. If the home
+  directory is on a network filesystem, every lookup is a network round trip and packing
+  slows by an order of magnitude — a *cold* cache on local storage beats a *warm* one on a
+  network home by more than 10x. Export `AMD_COMGR_CACHE_DIR` to a RAM disk or local disk
+  (e.g. `/tmp/comgr-cache`) before building.
 - `scripts/windows_rocm_setup.py` and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is left in place for interactive users and `tools/dnn-benchmarking/setup.ps1`. Keep the two in sync.
 - `comgr_stage.py` only does work on Windows; it stages the wheel's `amd_comgr.dll` app-local and emits a diagnostic when `C:\Windows\System32\amd_comgr.dll` is present (it shadows PATH and is why the app-local copy is needed).
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.

@@ -12,6 +12,7 @@
   - [Address Sanitizer Build](#address-sanitizer-build)
   - [Disabling JSON Support](#disabling-json-support)
   - [Kernel packing (rocm_kpack)](#kernel-packing-rocm_kpack)
+  - [comgr compilation cache (build speed)](#comgr-compilation-cache-build-speed)
   - [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix)
   - [Clang Tools](#clang-tools)
 - [Build Targets](#build-targets)
@@ -369,6 +370,52 @@ Configure prints `kpack: using rocm_kpack from <dir>` on success. Two failures r
   tree staged for a different Python, or one whose `msgpack`/`zstandard` are missing. Install the
   dependencies for this interpreter, or point `-DPython3_EXECUTABLE` at the one they were built
   for.
+
+### comgr compilation cache (build speed)
+
+Every rocKE kernel packed by the hip-kernel-provider is lowered in-process through
+`libamd_comgr`, which keeps an on-disk cache of its compilation results. **Where that cache
+lives is the single largest factor in descriptor-packaging build time** — larger than the
+worker count, and larger than whether the cache is warm.
+
+> [!IMPORTANT]
+> The default location is **`~/.cache/comgr`**. If your home directory is on a network
+> filesystem (NFS, or any mounted share), every cache probe and write becomes a network
+> round trip, and packing slows down by an order of magnitude. Point the cache at a
+> **RAM disk or local disk** instead.
+
+```bash
+# Anywhere on fast local storage. A tmpfs/RAM disk is ideal; a local SSD is fine.
+export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache
+```
+
+Measured on one machine packing a 2,711-kernel gfx942 descriptor set with 32 workers, varying
+only the cache location and whether it was already populated:
+
+| Cache location | State | Wall time |
+|---|---|---|
+| Local (tmpfs) | Populated | **13 s** |
+| Local (tmpfs) | Empty | 47 s |
+| Network home (`~/.cache/comgr`) | Populated | 597 s |
+
+A *cold* cache on local storage beat a *warm* cache on the network home by more than 10x, so
+on a network home the cache costs more than it saves. The numbers are illustrative of the
+ratio, not a benchmark of any particular machine.
+
+Related variables, both read by comgr itself rather than by hipDNN:
+
+| Variable | Effect |
+|---|---|
+| `AMD_COMGR_CACHE_DIR` | Cache location. Defaults to `~/.cache/comgr`. |
+| `AMD_COMGR_CACHE` | Set to `0` to disable caching entirely. Unset means **enabled**. |
+
+Disabling the cache is a diagnostic, not a fix: it makes every build pay full compilation
+cost. Relocating it is what you want. Note that a cache on local disk is also per-machine and
+per-container, so a fresh CI runner or a rebuilt container always starts cold.
+
+Kernel compilation normally dominates, which is why the cache matters so much and why
+`HKP_PACK_JOBS` (worker count, defaulting to `min(32, ncpu)`) is the other lever worth
+touching.
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 

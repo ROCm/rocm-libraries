@@ -13,10 +13,10 @@ const std::vector<IngestorPack>& ingestorPacks()
     // Function-local static: entries are plain function pointers, so this cannot fail
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
-        {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
+        {"hipkernel:Pointwise", &registerPointwiseSymbols, true, &resetPointwiseModuleCache},
         // No kpack archive: its kernels are embedded_source, so there is no module to
         // drop and nothing for a reset to do.
-        {"hipkernel:ConvFwd", &registerConvFwdSymbols, nullptr},
+        {"hipkernel:ConvFwd", &registerConvFwdSymbols, false, nullptr},
     };
     return s_packs;
 }
