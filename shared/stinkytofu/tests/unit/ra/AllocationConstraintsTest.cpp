@@ -24,9 +24,11 @@
 
 #include <algorithm>
 #include <memory>
+#include <span>
 
 #include "AllocationTestUtils.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 
 using namespace stinkytofu;
@@ -45,6 +47,18 @@ class AllocationConstraintsTest : public ::testing::Test {
         return func->createBasicBlock(label);
     }
 
+    /// s40 = s_mov_b32(s\p source), where \p source is read before anything
+    /// writes it and so lifts to a live-in. Returns its value ID.
+    SSAValueID scalarLiveIn(BasicBlock& entry, uint32_t source) {
+        AsmIRBuilder builder(entry, kRaTestArch);
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::s_mov_b32, kRaTestArch));
+        mov->addDestReg(StinkyRegister("s", 40, 1));
+        mov->addSrcReg(StinkyRegister("s", source, 1));
+        if (!liftForAllocation(*func)) return kInvalidSSAValueID;
+        const StinkySSAValue* value = ssaSourceValue(*mov, 0);
+        return value == nullptr ? kInvalidSSAValueID : value->valueId();
+    }
+
     std::unique_ptr<Function> func;
 };
 
@@ -61,6 +75,14 @@ bool hasAffinity(const AllocationConstraints& constraints, SSAValueID id) {
     }
     return false;
 }
+
+bool isUndefinedLiveIn(const AllocationConstraints& constraints, SSAValueID id) {
+    const std::span<const SSAValueID> undefined = constraints.undefinedLiveIns();
+    return std::find(undefined.begin(), undefined.end(), id) != undefined.end();
+}
+
+/// s0-s31, what .amdhsa_user_sgpr_count 29 plus three workgroup ids fills.
+constexpr uint64_t kDispatchFills = 32;
 
 }  // namespace
 
@@ -120,4 +142,37 @@ TEST_F(AllocationConstraintsTest, MergeIsAnAffinitySet) {
         << setup.constraints().toString();
     EXPECT_FALSE(setup.constraints().affinitySets().empty());
     EXPECT_GE(setup.constraints().affinitySets().front().members.size(), 2u);
+}
+
+TEST_F(AllocationConstraintsTest, LiveInTheDispatchFilledIsPinned) {
+    func->setMetaData(kSigDispatchFilledSgprsMetaKey, kDispatchFills);
+    const SSAValueID liveIn = scalarLiveIn(*block("entry"), /*source=*/8);
+    ASSERT_NE(liveIn, kInvalidSSAValueID);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_TRUE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
+    EXPECT_FALSE(isUndefinedLiveIn(setup.constraints(), liveIn));
+}
+
+TEST_F(AllocationConstraintsTest, LiveInAboveWhatTheDispatchFillsIsUndefinedAndFree) {
+    // Nothing wrote s100, so it holds nothing and any register serves it equally.
+    func->setMetaData(kSigDispatchFilledSgprsMetaKey, kDispatchFills);
+    const SSAValueID liveIn = scalarLiveIn(*block("entry"), /*source=*/100);
+    ASSERT_NE(liveIn, kInvalidSSAValueID);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_FALSE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
+    EXPECT_TRUE(isUndefinedLiveIn(setup.constraints(), liveIn))
+        << setup.constraints().toString();
+}
+
+TEST_F(AllocationConstraintsTest, WithoutTheBoundaryEveryLiveInStaysPinned) {
+    // No metadata, as a .stir file or this suite leaves it. Unknown pins: not
+    // knowing what the dispatch filled is no licence to move a register it did.
+    const SSAValueID liveIn = scalarLiveIn(*block("entry"), /*source=*/100);
+    ASSERT_NE(liveIn, kInvalidSSAValueID);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_TRUE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
+    EXPECT_TRUE(setup.constraints().undefinedLiveIns().empty());
 }
