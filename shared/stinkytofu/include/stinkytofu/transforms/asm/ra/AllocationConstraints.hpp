@@ -98,6 +98,16 @@ class AllocationConstraints {
     /// code rather than a slower kernel.
     bool isPinned(SSAValueID id) const;
 
+    /// Scalar live-ins left unpinned: read before anything defines them, but
+    /// above where the dispatch stops writing, so they arrive holding nothing.
+    ///
+    /// Exposed rather than merely acted on, because "nothing defines it" and "it
+    /// is undefined" differ by whether lifting saw every definition, so a run
+    /// that moves one should be able to say which.
+    std::span<const SSAValueID> undefinedLiveIns() const {
+        return undefinedLiveIns_;
+    }
+
     std::span<const TupleRun> tupleRuns() const {
         return tupleRuns_;
     }
@@ -113,6 +123,7 @@ class AllocationConstraints {
     std::vector<RegType> classByValue_;
     std::vector<std::optional<RegKey>> hintByValue_;
     std::vector<bool> pinnedByValue_;
+    std::vector<SSAValueID> undefinedLiveIns_;
     std::vector<TupleRun> tupleRuns_;
     std::vector<AffinitySet> affinitySets_;
 };
