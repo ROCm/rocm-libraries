@@ -90,9 +90,7 @@ def value_splits_for(batch_heads: int) -> int:
 
 
 def _scan_tile(req: GdnPrefillRequest, value_splits: int) -> KdaTileSpec:
-    return KdaTileSpec(
-        chunk=req.effective_chunk_size, **_SPLIT_TILE[value_splits]
-    )
+    return KdaTileSpec(chunk=req.effective_chunk_size, **_SPLIT_TILE[value_splits])
 
 
 def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:

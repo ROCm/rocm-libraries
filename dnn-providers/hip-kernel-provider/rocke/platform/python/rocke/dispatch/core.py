@@ -412,7 +412,10 @@ def selector_matches(
     algorithm = str(getattr(request, "algorithm", "auto")).strip().lower()
     spec_id = str(getattr(request, "spec_id", "auto")).strip().lower()
     if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {request.algorithm!r} != {candidate.algorithm!r}"
+        return (
+            False,
+            f"request algorithm {request.algorithm!r} != {candidate.algorithm!r}",
+        )
     if spec_id not in ("auto", candidate.spec_id):
         return False, f"request spec_id {request.spec_id!r} != {candidate.spec_id!r}"
     return True, "ok"
@@ -438,6 +441,7 @@ def make_kernel_id(
         request_hash=stable_json_hash(request.normalized(), n=16),
         spec_hash=stable_json_hash(asdict(spec), n=16),
     )
+
 
 Ranker = Callable[
     [OperatorRequest, Sequence[KernelCandidate]], Sequence[KernelCandidate]

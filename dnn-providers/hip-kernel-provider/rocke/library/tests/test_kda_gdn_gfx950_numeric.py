@@ -40,9 +40,9 @@ def test_gdn_split_parity(Hv, Hk, gate_low, with_h0):
     from builders.gfx950.kda.gdn_prefill import check_gdn
 
     worst = check_gdn(2, Hv, Hk, 256, 128, 128, gate_low=gate_low, with_h0=with_h0)
-    assert worst < 3e-2, (
-        f"GDN split Hv{Hv}/Hk{Hk} gate{gate_low} h0={with_h0}: rel {worst}"
-    )
+    assert (
+        worst < 3e-2
+    ), f"GDN split Hv{Hv}/Hk{Hk} gate{gate_low} h0={with_h0}: rel {worst}"
 
 
 @pytest.mark.gpu

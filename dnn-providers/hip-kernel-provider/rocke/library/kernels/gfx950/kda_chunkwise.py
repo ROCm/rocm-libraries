@@ -608,7 +608,16 @@ class _RawTokenAddr:
     """Token-major [B,T,H,D] / [B,T,H] addressing for one chunk tile."""
 
     def __init__(
-        self, b: IRBuilder, *, heads, tseq, nc, chunk, dk, a_log=None, dt_bias=None,
+        self,
+        b: IRBuilder,
+        *,
+        heads,
+        tseq,
+        nc,
+        chunk,
+        dk,
+        a_log=None,
+        dt_bias=None,
         kv_group=1,
     ):
         self.b = b

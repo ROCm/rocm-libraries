@@ -73,7 +73,7 @@ def ref_gdn_raw(q, k, v, a, beta, a_log, dt_bias, scale, kv_group, h0=None):
     kn = F.normalize(k.float(), dim=-1)[:, :, kidx, :]
     x = a.float() + dt_bias.float()[None, None, :]  # [B,T,Hv]
     sp = torch.where(x > 20.0, x, torch.log1p(torch.exp(x)))
-    gate = (-torch.exp(a_log.float())[None, None, :] * sp)  # [B,T,Hv]
+    gate = -torch.exp(a_log.float())[None, None, :] * sp  # [B,T,Hv]
     gate = gate[..., None].expand(B, T, Hv, DK)  # broadcast to DK
     bb = torch.sigmoid(beta.float())  # [B,T,Hv]
     qbh = qn.permute(0, 2, 1, 3).to(torch.bfloat16)
@@ -114,11 +114,32 @@ def launch_gdn(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0=None):
     if h0 is not None:
         h0t = h0.transpose(-1, -2).contiguous().view(B * Hv, DV, DK)
     prep_mod.run_prep(
-        prep, q, k, a, beta, ws, DK**-0.5,
-        batch=B, heads=Hv, tseq=T, nc=NC, a_log=a_log, dt_bias=dt_bias,
+        prep,
+        q,
+        k,
+        a,
+        beta,
+        ws,
+        DK**-0.5,
+        batch=B,
+        heads=Hv,
+        tseq=T,
+        nc=NC,
+        a_log=a_log,
+        dt_bias=dt_bias,
     )
     split_mod.run_scan(
-        scan, ws, v, o, ht, BH, NC, h0=h0t, batch=B, heads=Hv, tseq=T,
+        scan,
+        ws,
+        v,
+        o,
+        ht,
+        BH,
+        NC,
+        h0=h0t,
+        batch=B,
+        heads=Hv,
+        tseq=T,
     )
     return o, ht.view(B, Hv, DV, DK).transpose(-1, -2)
 
@@ -135,7 +156,9 @@ def check_gdn(B, Hv, Hk, T, DK, DV, gate_low=-0.5, with_h0=False, seed=0, specs=
     scan, prep = gdn_specs(DK, DV, kv_group, with_h0) if specs is None else specs
     o, ht = launch_gdn(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0=h0)
     torch.cuda.synchronize()
-    o_ref, s_ref = ref_gdn_raw(q, k, v, a, beta, a_log, dt_bias, DK**-0.5, kv_group, h0=h0)
+    o_ref, s_ref = ref_gdn_raw(
+        q, k, v, a, beta, a_log, dt_bias, DK**-0.5, kv_group, h0=h0
+    )
     worst = 0.0
     for got, ref in ((o.permute(0, 2, 1, 3).float(), o_ref), (ht.float(), s_ref)):
         rel = (got - ref).abs().max() / ref.abs().max().clamp_min(1e-6)
@@ -151,7 +174,9 @@ def main() -> int:
     for Hv, Hk in ((4, 4), (8, 4)):
         for gate_low in (-0.5, -5.0):
             for with_h0 in (False, True):
-                w = check_gdn(2, Hv, Hk, 256, 128, 128, gate_low=gate_low, with_h0=with_h0)
+                w = check_gdn(
+                    2, Hv, Hk, 256, 128, 128, gate_low=gate_low, with_h0=with_h0
+                )
                 worst = max(worst, w)
                 tag = f"Hv{Hv}/Hk{Hk} gate[{gate_low},0] h0={with_h0}"
                 print(f"  {tag:32s} rel={w:.3e} {'PASS' if w <= TOL else 'FAIL'}")
