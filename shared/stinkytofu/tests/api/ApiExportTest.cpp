@@ -61,6 +61,7 @@
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
+#include "stinkytofu/transforms/asm/FlattenCFGPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
@@ -258,6 +259,7 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createWaitAwareScheduleRepairPass(), nullptr);
     EXPECT_NE(createBuildUseDefChainPass(true, false), nullptr);
     EXPECT_NE(createCFGBuilderPass(), nullptr);
+    EXPECT_NE(createFlattenCFGPass(), nullptr);
     EXPECT_NE(createStinkyUnreachableBlockElimPass(), nullptr);
     EXPECT_NE(createLiftAsmRegistersToSSAPass(), nullptr);
     EXPECT_NE(createRemoveDefUseAnalysisPass(), nullptr);

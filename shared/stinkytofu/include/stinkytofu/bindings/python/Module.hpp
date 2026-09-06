@@ -92,6 +92,7 @@
     X(TDMLoadWaveSync, bool)                      \
     X(PrefetchGlobalRead, int)                    \
     X(PrefetchLocalRead, int)                     \
+    X(RegisterAllocation, int)                    \
     X(RemoveInstructions, std::string)            \
     X(CloneList, std::vector<CloneSpec>)          \
     X(DsReadQueueDepth, int)                      \
@@ -290,6 +291,19 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      */
     std::optional<std::pair<IntrusiveListIterator<IRBase>, IntrusiveListIterator<IRBase>>>
     findGroupRange(const std::string& groupName) const;
+
+    /**
+     * @brief Clear every group whose boundary instruction lives in \p blocks
+     *
+     * Bounds are raw nodes, so this must run before the delete, not after:
+     * reading a freed node to ask whether it is still listed is undefined. A
+     * group that loses a boundary is cleared, so findGroupRange() reports
+     * nothing rather than a dead range.
+     *
+     * @param blocks Blocks the caller is about to delete
+     * @return Names of the groups cleared, sorted, for the caller to report
+     */
+    std::vector<std::string> invalidateGroupsInBlocks(const std::vector<BasicBlock*>& blocks);
 
     /**
      * @brief Update the group ranges
