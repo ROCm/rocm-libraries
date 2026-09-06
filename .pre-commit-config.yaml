@@ -142,6 +142,13 @@ repos:
         files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
         pass_filenames: false
 
+      - id: verify-support-claims
+        name: Verify support-claim sidecars (RFC 0015)
+        entry: python dnn-providers/integration-tests/scripts/verify_support_claims.py
+        language: python
+        pass_filenames: false
+        always_run: true
+
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)
         entry: python projects/miopen/test/utils/gtest_formating_checks.py

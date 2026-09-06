@@ -65,6 +65,10 @@ ArchPlatformMap parseArchPlatformMap(const nlohmann::json& supportObj, std::stri
     ArchPlatformMap archMap;
     for(const auto& [arch, platformsJson] : supportObj.items())
     {
+        if(arch.empty())
+        {
+            throw std::runtime_error(withSource(source, "empty arch key"));
+        }
         if(!platformsJson.is_array())
         {
             throw std::runtime_error(
@@ -89,6 +93,23 @@ ArchPlatformMap parseArchPlatformMap(const nlohmann::json& supportObj, std::stri
         archMap[arch] = std::move(platforms);
     }
     return archMap;
+}
+
+// Inverse of parseArchPlatformMap(). Sorted arch keys and sorted platform
+// arrays are guaranteed by the std::map / std::set backing types, which is what
+// makes the emitted JSON canonical without an explicit sort.
+nlohmann::json archPlatformMapToJson(const ArchPlatformMap& archMap)
+{
+    nlohmann::json obj = nlohmann::json::object();
+    for(const auto& [arch, platforms] : archMap)
+    {
+        obj[arch] = nlohmann::json::array();
+        for(const auto& platform : platforms)
+        {
+            obj[arch].push_back(platform);
+        }
+    }
+    return obj;
 }
 
 } // namespace
@@ -198,6 +219,10 @@ SupportClaims parseSupportClaimsJson(const nlohmann::json& json, std::string_vie
 
         for(const auto& [engine, archObj] : json.at("claims").items())
         {
+            if(engine.empty())
+            {
+                throw std::runtime_error(withSource(source, "empty engine name in claims"));
+            }
             result.claims[engine] = parseArchPlatformMap(archObj, source);
         }
     }
@@ -224,6 +249,10 @@ SweepSupportClaims parseSweepSupportClaimsJson(const nlohmann::json& json, std::
 
         for(const auto& [engine, groupsJson] : json.at("claims").items())
         {
+            if(engine.empty())
+            {
+                throw std::runtime_error(withSource(source, "empty engine name in claims"));
+            }
             if(!groupsJson.is_array())
             {
                 throw std::runtime_error(withSource(
@@ -267,6 +296,11 @@ SweepSupportClaims parseSweepSupportClaimsJson(const nlohmann::json& json, std::
                     }
 
                     auto caseId = caseIdJson.get<std::string>();
+                    if(caseId.empty())
+                    {
+                        throw std::runtime_error(withSource(
+                            source, "engine '" + engine + "' claim group has an empty case id"));
+                    }
                     if(!seenCaseIds.insert(caseId).second)
                     {
                         std::string message = "case '";
@@ -295,12 +329,25 @@ std::filesystem::path supportJsonPath(const std::filesystem::path& bundleJsonPat
     return bundleJsonPath.parent_path() / (bundleJsonPath.stem().string() + ".support.json");
 }
 
+SupportClaimLocator singleGraphClaimLocator(const std::filesystem::path& bundleJsonPath)
+{
+    return {supportJsonPath(bundleJsonPath), /*caseId=*/{}, bundleJsonPath.string()};
+}
+
+SupportClaimLocator sweepCaseClaimLocator(const std::filesystem::path& sweepJsonPath,
+                                          const std::string& caseId)
+{
+    return {sweepJsonPath.parent_path() / "support.json",
+            caseId,
+            sweepJsonPath.string() + "#" + caseId};
+}
+
 namespace
 {
 
 nlohmann::json readJsonFile(const std::filesystem::path& path)
 {
-    std::ifstream file(path);
+    std::ifstream file(path, std::ios::binary);
     if(!file)
     {
         throw std::runtime_error("Could not open support claims file: " + path.string());
@@ -344,6 +391,47 @@ std::optional<SweepSupportClaims> loadSweepSupportClaims(const std::filesystem::
         return std::nullopt;
     }
     return loadSweepSupportClaimsFromPath(path);
+}
+
+nlohmann::json toJson(const SupportClaims& claims)
+{
+    nlohmann::json obj = nlohmann::json::object();
+    obj["version"] = claims.version;
+    obj["claims"] = nlohmann::json::object();
+    for(const auto& [engine, archMap] : claims.claims)
+    {
+        obj["claims"][engine] = archPlatformMapToJson(archMap);
+    }
+    return obj;
+}
+
+nlohmann::json toJson(const SweepSupportClaims& claims)
+{
+    nlohmann::json obj = nlohmann::json::object();
+    obj["version"] = claims.version;
+    obj["claims"] = nlohmann::json::object();
+    for(const auto& [engine, groups] : claims.claims)
+    {
+        auto groupsArray = nlohmann::json::array();
+        for(const auto& group : groups)
+        {
+            nlohmann::json groupObj = nlohmann::json::object();
+            groupObj["cases"] = nlohmann::json::array();
+            for(const auto& caseId : group.cases)
+            {
+                groupObj["cases"].push_back(caseId);
+            }
+            groupObj["support"] = archPlatformMapToJson(group.support);
+            groupsArray.push_back(std::move(groupObj));
+        }
+        obj["claims"][engine] = std::move(groupsArray);
+    }
+    return obj;
+}
+
+std::string dumpCanonical(const nlohmann::json& json)
+{
+    return json.dump(2) + "\n";
 }
 
 } // namespace hipdnn_integration_tests::bundle

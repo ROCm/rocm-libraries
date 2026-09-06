@@ -10,6 +10,7 @@
 
 #include "harness/BundleMetadata.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
@@ -21,7 +22,9 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
+#include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/input-init/FillInputs.hpp"
@@ -200,6 +203,48 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
                                            "[rung=buildable] " + built.message);
     }
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
+}
+
+std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeSupportOnly(
+    const GraphSession& session, const std::vector<LoadedEngine>& engines)
+{
+    if(!session.buildError.empty())
+    {
+        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: from_binary failed for " << _bundlePath << ": "
+                                                                             << session.buildError);
+        return {};
+    }
+
+    if(!isResolved(session.engines.status.get_code()))
+    {
+        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: unresolved query for "
+                               << _bundlePath << ": " << session.engines.status.get_message());
+        return {};
+    }
+
+    const std::string arch = baseArchToken(_deps.policy.arch);
+    const auto& rankedIds = session.engines.rankedIds;
+
+    std::vector<ObservedGraphSupport> observations;
+
+    for(const auto& engine :
+        _engineUnderTest ? std::vector<LoadedEngine>{*_engineUnderTest} : engines)
+    {
+        const bool engineIsSupported
+            = std::find(rankedIds.begin(), rankedIds.end(), engine.id) != rankedIds.end();
+        observations.push_back(
+            {_claimLocator, engine.name, arch, _deps.policy.platform, engineIsSupported});
+    }
+
+    return observations;
+}
+
+void IntegrationBundleVerificationHarness::observeAndRecordSupport(const GraphSession& session)
+{
+    // Handed over whole, empty result included -- the early returns above leave a
+    // graph this run cannot refresh, and the log counts those for the summary.
+    SupportObservationLog::get().recordGraph(
+        observeSupportOnly(session, LoadedEngineTable::get().all()));
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSession& session)

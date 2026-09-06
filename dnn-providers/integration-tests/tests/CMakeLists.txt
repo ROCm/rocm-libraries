@@ -15,6 +15,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/ProductionPolicy.cpp
     ../src/harness/bundle/ReferenceOpCoverage.cpp
     ../src/harness/bundle/SupportClaimReport.cpp
+    ../src/harness/bundle/SupportClaimWriter.cpp
     ../src/harness/bundle/SupportClaims.cpp
     ../src/harness/bundle/SupportVerdict.cpp
     ../src/harness/bundle/VariantPackBuilder.cpp
@@ -49,6 +50,9 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestSupportClaimReport.cpp
     TestSupportClaimEnforcement.cpp
     TestEnforcementRungs.cpp
+    TestSupportClaimRoundTrip.cpp
+    TestSupportClaimWriter.cpp
+    TestObserveSupportOnly.cpp
     TestSupportVerdict.cpp
     TestUnpinnedRunEnforcement.cpp
     TestBundleReferenceValidationHarness.cpp

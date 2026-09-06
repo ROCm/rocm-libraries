@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -27,6 +29,8 @@
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportClaimWriter.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
@@ -151,6 +155,16 @@ int main(int argc, char** argv) noexcept
             .help("Enforce engine support claims from .support.json sidecars. "
                   "A broken claim (engine no longer supports a claimed graph) becomes "
                   "a test FAIL instead of a silent SKIP.");
+        parser.add_argument("--write-support-claims")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Observe live engine support and write .support.json sidecars. "
+                  "Requires --test-article and --golden-data-dir (mode B: all "
+                  "engines, or mode C with --test-engine). Implies --allow-bundles, "
+                  "since bundles are what carry the claims. Idempotent: no support "
+                  "change = zero git diff. Run one at a time: concurrent "
+                  "--write-support-claims runs against the same bundle tree race "
+                  "on the sidecars and the last writer wins.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -303,6 +317,35 @@ int main(int argc, char** argv) noexcept
         opts.verificationMode = verificationMode;
         opts.captureDir = std::move(captureDir);
         opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
+        opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
+
+        if(opts.writeSupportClaims && !opts.articlePath.has_value())
+        {
+            std::cerr << "--write-support-claims requires --test-article (mode B or C).\n"
+                      << "Mode A (auto-select) cannot generate support claims.\n";
+            return 1;
+        }
+
+        // Only that a directory was named -- "is this the source tree" is not
+        // decidable, a build directory is just a directory. The env var is the
+        // documented alternative to the flag, so it satisfies this too.
+        if(opts.writeSupportClaims && !opts.goldenDataDir.has_value()
+           && std::getenv("HIPDNN_TEST_GOLDEN_DATA_DIR") == nullptr)
+        {
+            std::cerr << "--write-support-claims requires a bundle data directory: pass "
+                      << "--golden-data-dir or set HIPDNN_TEST_GOLDEN_DATA_DIR.\n"
+                      << "Point it at the source tree -- sidecars written into a build "
+                      << "directory are lost on the next clean build.\n";
+            return 1;
+        }
+
+        if(opts.writeSupportClaims && opts.enforceSupportClaims)
+        {
+            std::cerr << "--write-support-claims and --enforce-support-claims are "
+                      << "mutually exclusive.\n";
+            return 1;
+        }
+
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
@@ -419,7 +462,87 @@ int main(int argc, char** argv) noexcept
 
         int exitCode = result;
 
-        if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
+        if(hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
+        {
+            auto& observationLog = hipdnn_integration_tests::bundle::SupportObservationLog::get();
+            const std::size_t graphsObserved = observationLog.graphsObserved();
+            const std::size_t graphsUnobserved = observationLog.graphsUnobserved();
+
+            const std::size_t graphsRegistered
+                = hipdnn_integration_tests::bundle::supportClaimCoverage().graphsFound;
+
+            // A graph SetUp() skipped is in neither counter; the gap is the
+            // sidecars this run left untouched without noticing.
+            const std::size_t graphsNeverReached
+                = graphsRegistered > graphsObserved + graphsUnobserved
+                      ? graphsRegistered - graphsObserved - graphsUnobserved
+                      : 0;
+
+            if(graphsObserved == 0 && graphsUnobserved == 0)
+            {
+                std::cerr << "\n--write-support-claims: no graphs were observed; "
+                             "nothing was written.\n"
+                             "Usual causes:\n"
+                             "  - no --test-engine was given, so there is no engine to observe\n"
+                             "  - the GPU or the engine plugin failed to load\n"
+                             "  - a --gtest_filter or --test-article selected no graphs\n";
+                exitCode = 1;
+            }
+            else
+            {
+                // Safe to run even when every graph failed: the writer groups by
+                // sidecar, so no observations means no targets and no writes.
+                const auto writeSummary
+                    = hipdnn_integration_tests::bundle::writeObservedSupportClaims(
+                        observationLog.all());
+
+                // The graph counts lead: "observations" counts engine-by-graph
+                // cells, so it runs a multiple of the graph count and cannot
+                // serve as its own denominator.
+                std::cerr << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
+                          << "  graphs registered: " << graphsRegistered
+                          << "  observed: " << graphsObserved
+                          << "  not observed: " << graphsUnobserved
+                          << "  never reached: " << graphsNeverReached << "\n"
+                          << "  observations: " << writeSummary.observationsApplied
+                          << "  written: " << writeSummary.filesWritten
+                          << "  unchanged: " << writeSummary.filesUnchanged
+                          << "  skipped: " << writeSummary.filesSkipped
+                          << "  errors: " << writeSummary.errors.size() << "\n";
+
+                if(graphsUnobserved > 0)
+                {
+                    std::cerr << "  claims for the " << graphsUnobserved
+                              << " unobserved graph(s) were left as-is; see the warnings "
+                                 "above for which, and re-run them.\n";
+                }
+
+                if(graphsNeverReached > 0)
+                {
+                    std::cerr << "  " << graphsNeverReached
+                              << " graph(s) never reached the observer, so their claims are "
+                                 "stale.\n"
+                                 "  A [[test_skips]] entry, an arch or VRAM guard, or a missing "
+                                 "device skips\n"
+                                 "  a bundle in SetUp, before anything can be observed.\n";
+                }
+
+                for(const auto& error : writeSummary.errors)
+                {
+                    std::cerr << "  ERROR: " << error << "\n";
+                }
+
+                // A partial authoring run fails. What it did write is still
+                // correct -- the exit code says "not finished", not "discard".
+                if(!writeSummary.errors.empty() || graphsUnobserved > 0 || graphsNeverReached > 0)
+                {
+                    exitCode = 1;
+                }
+            }
+        }
+
+        if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims()
+           && hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
            && hipdnn_integration_tests::bundle::verifiedNothing(
                hipdnn_integration_tests::bundle::supportClaimCoverage()))
         {
