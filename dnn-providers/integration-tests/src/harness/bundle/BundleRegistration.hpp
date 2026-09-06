@@ -312,8 +312,8 @@ namespace detail
 // nullopt when there is nothing to register; the reason is already on stderr.
 //
 // `countClaimCoverage` seeds the support-claim counters as bundles load. Only the
-// engine binary enforces claims, so the golden-data binary passes false rather
-// than seeding counters no one will ever satisfy.
+// engine binary enforces or authors claims, so the golden-data binary passes
+// false rather than seeding counters no one will ever satisfy.
 inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool countClaimCoverage)
 {
     if(!TestConfig::get().allowBundles())
@@ -415,7 +415,12 @@ inline void registerBundleTests()
     const std::optional<LoadedEngine> engineUnderTest = resolveEngineUnderTest();
     const bool enforcing = TestConfig::get().enforceSupportClaims() && engineUnderTest.has_value();
 
-    auto bundles = detail::discoverAndLoadBundles(enforcing);
+    // Write mode needs `graphsFound` as the denominator for what the observer
+    // saw: SetUp() can skip a bundle before the observer runs, and such a graph
+    // is invisible to the observation log.
+    const bool writing = TestConfig::get().writeSupportClaims() && engineUnderTest.has_value();
+
+    auto bundles = detail::discoverAndLoadBundles(enforcing || writing);
     if(!bundles.has_value())
     {
         return;
