@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-include(HipBLASLtCodegen)
+include(hipblaslt_codegen)
 
 set(TENSILELITE_BUILD_PARALLEL_LEVEL "" CACHE STRING "Number of CPU cores to use for building device libraries (will use nproc if unset).")
 set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE STRING "Keep temporary build directory for device libraries (turning this ON  bloat the build size).")
@@ -11,11 +11,30 @@ set(TENSILELITE_NO_COMPRESS "" CACHE STRING "Do not compress device code object 
 set(TENSILELITE_EXPERIMENTAL "" CACHE STRING "Process experimental logic files.")
 set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE STRING "Turn on asm comments when building gemm libraries.")
 set(TENSILELITE_OFFLOADBUNDLER "" CACHE STRING "Path to clang-offload-bundler.")
+mark_as_advanced(
+    TENSILELITE_BUILD_PARALLEL_LEVEL
+    TENSILELITE_KEEP_BUILD_TMP
+    TENSILELITE_ASM_DEBUG
+    TENSILELITE_LOGIC_FILTER
+    TENSILELITE_NO_COMPRESS
+    TENSILELITE_EXPERIMENTAL
+    TENSILELITE_ENABLE_ASM_COMMENTS
+    TENSILELITE_OFFLOADBUNDLER
+)
 
 set(HIPBLASLT_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
 set(HIPBLASLT_TENSILE_LIBPATH "${hipblaslt_BINARY_DIR}/Tensile" CACHE STRING "Path to output the device gemm libraries.")
 
 set(HIPBLASLT_ASIC_REVISION "" CACHE STRING "gfx1250 ASIC revisions to build ('' = both v0 and v1, 'v1' = v1 only, 'v0' = v0 only).")
+
+# This policy belongs to the caller that owns the logic corpus, not to the
+# gfx1250v0 architecture name itself. hipSPARSELt reuses this device-library
+# CMakeLists with a corpus that deliberately has no v0 overlay, while
+# hipBLASLt's own corpus must retain one. The embedding hipSPARSELt CMakeLists
+# overrides this to OFF before adding hipBLASLt as a subdirectory.
+if(NOT DEFINED HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY)
+    set(HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY ON)
+endif()
 
 # Reject an unrecognized value rather than silently building the wrong revisions.
 if(NOT HIPBLASLT_ASIC_REVISION MATCHES "^(v0|v1)?$")
@@ -25,6 +44,29 @@ endif()
 if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${hipblaslt_SOURCE_DIR}/library")
 endif()
+if(NOT HIPBLASLT_CODEGEN_ROOT)
+    set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
+endif()
+
+set(_codegen_host_sanitizer_args "")
+if(HIPBLASLT_ENABLE_ASAN
+        OR THEROCK_SANITIZER STREQUAL "ASAN"
+        OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    list(APPEND _codegen_host_sanitizer_args HOST_ASAN)
+elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
+    list(APPEND _codegen_host_sanitizer_args HOST_TSAN)
+endif()
+
+set(_codegen_product_args "")
+if(HIPBLASLT_ENABLE_ASAN)
+    list(APPEND _codegen_product_args ASAN "${HIPBLASLT_ENABLE_ASAN}")
+endif()
+if(HIPBLASLT_ENABLE_YAML)
+    list(APPEND _codegen_product_args YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}")
+endif()
+if(NOT DEFINED HIPBLASLT_ENABLE_LAZY_LOAD OR NOT HIPBLASLT_ENABLE_LAZY_LOAD)
+    list(APPEND _codegen_product_args LAZY_LOAD "${HIPBLASLT_ENABLE_LAZY_LOAD}")
+endif()
 
 # gfx1250's two ASIC revisions (v0/v1) need different tuned kernels; the runtime
 # picks library/gfx1250/ (v1) vs library/gfx1250v0/ by asicRevision. The default
@@ -33,9 +75,11 @@ endif()
 # validation on the base name); only the bare gfx1250 reaches here.
 set(_main_arches ${GPU_TARGETS})
 set(_build_gfx1250v0 OFF)
+set(_main_requires_gfx1250v0_overlay OFF)
 if("gfx1250" IN_LIST GPU_TARGETS)
     if(HIPBLASLT_ASIC_REVISION STREQUAL "v0")
         list(TRANSFORM _main_arches REPLACE "^gfx1250$" "gfx1250v0")  # v0 in place of v1
+        set(_main_requires_gfx1250v0_overlay ${HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY})
         message(STATUS "hipBLASLt: gfx1250 ASIC revision v0 only")
     elseif(HIPBLASLT_ASIC_REVISION STREQUAL "v1")
         message(STATUS "hipBLASLt: gfx1250 ASIC revision v1 only")
@@ -48,23 +92,13 @@ elseif(HIPBLASLT_ASIC_REVISION STREQUAL "v0")
                     "(${GPU_TARGETS}); nothing in this build is for the v0 revision.")
 endif()
 
-hipblaslt_create_device_library(
-    TARGET tensilelite-device-libraries
+create_device_library(
     LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
     OUTPUT_DIR "${HIPBLASLT_TENSILE_LIBPATH}"
     ARCHES ${_main_arches}
-    CXX_COMPILER "${CMAKE_CXX_COMPILER}"
-    OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
-    JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
-    LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
-    ASAN "${HIPBLASLT_ENABLE_ASAN}"
-    YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}"
-    NO_COMPRESS "${TENSILELITE_NO_COMPRESS}"
-    EXPERIMENTAL "${TENSILELITE_EXPERIMENTAL}"
-    LAZY_LOAD "${HIPBLASLT_ENABLE_LAZY_LOAD}"
-    ASM_COMMENTS "${TENSILELITE_ENABLE_ASM_COMMENTS}"
-    KEEP_BUILD_TMP "${TENSILELITE_KEEP_BUILD_TMP}"
-    ASM_DEBUG "${TENSILELITE_ASM_DEBUG}"
+    REQUIRE_GFX1250V0_OVERLAY ${_main_requires_gfx1250v0_overlay}
+    ${_codegen_host_sanitizer_args}
+    ${_codegen_product_args}
 )
 
 if(_build_gfx1250v0)
@@ -77,23 +111,17 @@ if(_build_gfx1250v0)
     set_property(GLOBAL PROPERTY HIPBLASLT_GFX1250V0_LIBRARY_DIR
                  "${_gfx1250v0_output_dir}/library/gfx1250v0")
 
-    hipblaslt_create_device_library(
+    create_device_library(
         TARGET tensilelite-device-libraries-gfx1250v0
         LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
         OUTPUT_DIR "${_gfx1250v0_output_dir}"
         ARCHES gfx1250v0
-        CXX_COMPILER "${CMAKE_CXX_COMPILER}"
-        OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
-        JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
-        LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
-        ASAN "${HIPBLASLT_ENABLE_ASAN}"
-        YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}"
-        NO_COMPRESS "${TENSILELITE_NO_COMPRESS}"
-        EXPERIMENTAL "${TENSILELITE_EXPERIMENTAL}"
-        LAZY_LOAD "${HIPBLASLT_ENABLE_LAZY_LOAD}"
-        ASM_COMMENTS "${TENSILELITE_ENABLE_ASM_COMMENTS}"
-        KEEP_BUILD_TMP "${TENSILELITE_KEEP_BUILD_TMP}"
-        ASM_DEBUG "${TENSILELITE_ASM_DEBUG}"
+        # hipBLASLt owns the gfx1250/gfx1250v0 split for its own corpus, but
+        # hipSPARSELt reuses this CMakeLists with a no-split corpus. Let the
+        # embedding caller choose whether this target requires the directory.
+        REQUIRE_GFX1250V0_OVERLAY ${HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY}
+        ${_codegen_host_sanitizer_args}
+        ${_codegen_product_args}
     )
 endif()
 

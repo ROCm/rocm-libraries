@@ -222,6 +222,7 @@ _SPEC_PERTURBATIONS = {
     "paged": (),  # unbuildable (not yet supported)
     "block_size": (),  # unbuildable (paged-only, paged not supported)
     "num_kv_blocks": (),  # unbuildable (paged-only, paged not supported)
+    "block_m": (128, 512),
     "block_n": (32, 128),
     "waves_per_eu": (3, 4),
     "lds_k_group_pad": (0, 16),
@@ -238,7 +239,6 @@ _SPEC_PERTURBATIONS = {
 # check below can name which half a missing field belongs to; both halves are applied
 # to the SAME object, since there is one spec and one builder signature.
 _PRIVATE_PERTURBATIONS = {
-    "block_m": (128, 512),
     "lds_row_pad": (0, 16),
     "v_row_pad": (0, 64),
     "use_cfvst": (False, True),
@@ -539,6 +539,61 @@ def test_dataclass_rejects_out_of_scope_headsize():
         _spec(head_size=256)
 
 
+def test_dataclass_rejects_nondividing_block_m():
+    """A partial query tile would read and write Q/O out of bounds.
+
+    block_m=320 is otherwise wave-aligned, divisible by block_n, and within the
+    workgroup limit; seqlen_q=2048 not being divisible by it is the rejecting
+    condition this case preserves.
+    """
+    with pytest.raises(ValueError, match=r"multiple of block_m=320"):
+        _spec(seqlen_q=2048, block_m=320)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    (("wide_lds_dma", True), ("lds_v_row_pad", 32)),
+)
+def test_gfx942_type_rejects_gfx950_only_fields(field, value):
+    with pytest.raises(TypeError, match=field):
+        _spec(**{field: value})
+
+
+@pytest.mark.parametrize("decode", ("gqa_pair", "gqa_pair_2phase"))
+def test_gfx942_type_rejects_gfx950_only_decodes(decode):
+    with pytest.raises(ValueError, match="persist_decode"):
+        _spec(persist_decode=decode)
+
+
+def test_gfx942_support_rejects_concrete_gfx950_spec():
+    from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+
+    gfx950_spec = Gfx950AttentionDenseSpec(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=128,
+        num_kv_heads=8,
+        head_size=128,
+    )
+    ok, why = supports_attention_dense(gfx950_spec, arch="gfx942")
+    assert not ok
+    assert "cannot promote" in why
+
+
+def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
+    spec = _spec(
+        seqlen_q=9728,
+        seqlen_kv=9728,
+        persistent=True,
+        num_persistent=304,
+        persist_decode="auto",
+    )
+    assert spec.resolved_persist_decode == "hkv_major"
+    assert "hkvmaj" in spec.kernel_name()
+    assert "gqapair" not in spec.kernel_name()
+
+
 # --------------------------------------------------------------------------- #
 # the contract: supports is the single gate
 # --------------------------------------------------------------------------- #
@@ -583,16 +638,13 @@ _CONTRACT_GRID = [
     dict(batch=4),
     dict(batch=64, seqlen_q=16384, seqlen_kv=16384, num_kv_heads=8),
     dict(waves_per_eu=4),
-    # --- private: block_m ---
+    # --- shared tile geometry: block_m ---
     dict(block_m=_BLOCK_M),  # the default, spelled out
     dict(block_m=128),  # accepted: halves the query tile
-    dict(block_m=48),  # REJECTED: not a multiple of 32 (wave floor)
+    # 1920 keeps this row constructible under the shared spec's exact tiling
+    # check; gfx942 support then rejects the 48-row non-wave-aligned geometry.
+    dict(block_m=48, seqlen_q=1920, seqlen_kv=1920),
     dict(block_m=1024),  # REJECTED: 2048-thread CTA > the 1024 max
-    # REJECTED: 2048 % 320 != 0, so the last query tile runs past seqlen_q and Q/O
-    # (plain global_load_vN, no bounds check) read and write out of bounds. 320 is a
-    # multiple of 32 and of block_n and fits a 640-thread CTA, so this row reaches
-    # the seqlen check rather than tripping an earlier one.
-    dict(seqlen_q=2048, block_m=320),
     # --- private: lds_row_pad / v_row_pad (the pad-value sweep surface) ---
     dict(lds_row_pad=0),  # accepted: the unpadded A/B arm
     dict(lds_row_pad=2),  # REJECTED: not a multiple of 4 elements
