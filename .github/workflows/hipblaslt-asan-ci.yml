@@ -118,9 +118,7 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          ./TheRock/build_tools/fetch_sources.py \
-            --stage math-libs --jobs 12 --depth 1 \
-            --skip-submodules rocm-libraries
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
       - name: Configure gfx90a TheRock host-ASAN math-libs
         env:
