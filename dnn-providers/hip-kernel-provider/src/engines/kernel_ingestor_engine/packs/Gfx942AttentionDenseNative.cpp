@@ -312,8 +312,6 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
     // This is the same failure mode as the left_bound ordering documented above,
     // and it hid the same way: the Sq != Skv guard at the switch below is correct
     // and never fired, because the graph had already been misclassified here.
-    //
-    // Full analysis: Knowledge/hipdnn/sdpa-mask-attribute-precedence.md
     if(topLeftDeprecated || bottomRightDeprecated)
     {
         const bool bottomRight
