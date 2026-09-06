@@ -6,7 +6,6 @@ on:
       - opened
       - synchronize
       - reopened
-      - labeled
     paths:
       - "projects/hipblaslt/**"
       - "test/therock/test_hipblaslt.py"
@@ -291,7 +290,10 @@ jobs:
 
   summary:
     name: "hipBLASLt ASAN CI Summary"
-    if: always()
+    # A newer PR event cancels the superseded run through the concurrency
+    # group above. Do not convert that cancellation into a second red summary;
+    # genuine build or test failures still reach the gate below.
+    if: ${{ always() && !cancelled() }}
     needs:
       - build
       - test
