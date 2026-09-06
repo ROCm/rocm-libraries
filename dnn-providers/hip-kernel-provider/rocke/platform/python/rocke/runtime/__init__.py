@@ -58,6 +58,9 @@ edge:
                           (shape, dtype, device); replaces ad-hoc
                           ``torch.empty(..., device=q.device)`` per
                           call.
+                        * :class:`WorkspaceLeasePool` -- bounded,
+                          event-safe exclusive workspaces for
+                          concurrent serving shapes.
                         * :class:`DeviceMem` -- RAII over
                           ``Runtime.alloc/free`` for numpy / manifest
                           flows that don't have torch.
@@ -91,7 +94,11 @@ from .launcher import (
     LaunchConfig,
     LaunchSummary,
     PipelineLauncher,
+    WorkspaceLease,
+    WorkspaceLeasePool,
     WorkspacePool,
+    WorkspacePoolExhausted,
+    WorkspaceSpec,
     no_fence,
     release_retained_for_stream,
     synchronize_and_release,
@@ -117,7 +124,11 @@ __all__ = [
     "PipelineLauncher",
     "Runtime",
     "TorchLaunchSummary",
+    "WorkspaceLease",
+    "WorkspaceLeasePool",
     "WorkspacePool",
+    "WorkspacePoolExhausted",
+    "WorkspaceSpec",
     "build_hsaco_from_llvm_ir",
     "empty_workspace",
     "launch_torch_kernel",

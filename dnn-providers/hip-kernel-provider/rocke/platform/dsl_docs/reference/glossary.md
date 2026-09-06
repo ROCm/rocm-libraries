@@ -166,4 +166,13 @@ AMD wavefront of 64 lanes — the wavefront width on the CDNA (gfx942 / gfx950) 
 
 ## WorkspacePool
 
-Runtime helper that keeps temporary torch workspace tensors alive and reusable across asynchronous pipeline launches. Solves the workspace-lifetime race where torch's caching allocator can recycle storage while a raw HIP kernel is still reading it.
+Named-slot runtime helper for a fixed, non-concurrent pipeline. It keeps
+temporary torch tensors alive and grows each name to its largest requested
+capacity.
+
+## WorkspaceLeasePool
+
+Bounded serving-oriented workspace owner. `acquire` returns exclusive tensor
+views; `release_after_event` borrows a launch-completion event and delays reuse
+until it completes. Supports framework allocators, LRU cache eviction, and
+backpressure through `WorkspacePoolExhausted`.

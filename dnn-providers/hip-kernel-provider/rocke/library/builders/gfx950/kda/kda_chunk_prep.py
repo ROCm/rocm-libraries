@@ -19,6 +19,8 @@ Usage:
 import argparse
 import os
 import sys
+from dataclasses import dataclass
+from typing import Any, Mapping
 
 try:
     import rocke  # noqa: F401
@@ -38,9 +40,79 @@ from kernels.gfx950.kda_chunkwise import (  # noqa: E402
     kda_chunk_prep_signature,
 )
 from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.runtime import KernelLauncher, LaunchConfig, time_launches  # noqa: E402
+from rocke.runtime import (  # noqa: E402
+    KernelLauncher,
+    LaunchConfig,
+    WorkspaceSpec,
+    time_launches,
+)
 
 _LAUNCHER_CACHE = {}
+
+
+@dataclass(frozen=True)
+class KdaWorkspacePlan:
+    """Declarative split-KDA intermediates plus their typed tensor views."""
+
+    num_tiles: int
+    chunk: int
+    head_k: int
+    device: Any
+    specs: tuple[WorkspaceSpec, ...]
+
+    @property
+    def required_nbytes(self) -> int:
+        return sum(spec.nbytes() for spec in self.specs)
+
+    def bind(self, tensors: Mapping[str, Any]) -> dict[str, Any]:
+        pool = tensors["kda_tiles"].flatten()
+        shapes = (
+            ("a", (self.chunk, self.chunk)),
+            ("gk", (self.chunk, self.head_k)),
+            ("gq", (self.chunk, self.head_k)),
+            ("aqk", (self.chunk, self.chunk)),
+            ("kt", (self.head_k, self.chunk)),
+        )
+        result: dict[str, Any] = {}
+        offset = 0
+        for name, (rows, cols) in shapes:
+            count = self.num_tiles * rows * cols
+            result[name] = pool[offset : offset + count].view(
+                self.num_tiles, rows, cols
+            )
+            offset += count
+        result["dec"] = tensors["kda_decay"].view(self.num_tiles, self.head_k)
+        result["_pool"] = pool
+        return result
+
+
+def kda_workspace_plan(
+    num_tiles: int,
+    spec: KdaChunkPrepSpec,
+    *,
+    device: Any,
+) -> KdaWorkspacePlan:
+    """Describe all split-KDA intermediates without allocating them."""
+    num_tiles = int(num_tiles)
+    if num_tiles < 0:
+        raise ValueError("num_tiles cannot be negative")
+    chunk, head_k = spec.tile.chunk, spec.head_k
+    elements_per_tile = 2 * chunk * chunk + 3 * chunk * head_k
+    specs = (
+        WorkspaceSpec(
+            "kda_tiles",
+            (num_tiles * elements_per_tile,),
+            torch.bfloat16,
+            device,
+        ),
+        WorkspaceSpec(
+            "kda_decay",
+            (num_tiles, head_k),
+            torch.float32,
+            device,
+        ),
+    )
+    return KdaWorkspacePlan(num_tiles, chunk, head_k, device, specs)
 
 
 def make_launcher(spec: KdaChunkPrepSpec) -> KernelLauncher:
@@ -69,23 +141,16 @@ def alloc_tiles(num_tiles: int, spec: KdaChunkPrepSpec, device="cuda"):
     Six separate allocations show up on the host critical path at short
     sequences, and the tiles are always produced and consumed together.
     """
-    C, DK = spec.tile.chunk, spec.head_k
-    shapes = [
-        ("a", (num_tiles, C, C)),
-        ("gk", (num_tiles, C, DK)),
-        ("gq", (num_tiles, C, DK)),
-        ("aqk", (num_tiles, C, C)),
-        ("kt", (num_tiles, DK, C)),
-    ]
-    counts = [s[0] * s[1] * s[2] for _, s in shapes]
-    pool = torch.empty(sum(counts), dtype=torch.bfloat16, device=device)
-    ws, off = {}, 0
-    for (name, shape), cnt in zip(shapes, counts):
-        ws[name] = pool[off : off + cnt].view(*shape)
-        off += cnt
-    ws["dec"] = torch.empty(num_tiles, DK, dtype=torch.float32, device=device)
-    ws["_pool"] = pool
-    return ws
+    plan = kda_workspace_plan(num_tiles, spec, device=device)
+    tensors = {
+        requirement.name: torch.empty(
+            requirement.shape,
+            dtype=requirement.dtype,
+            device=requirement.device,
+        )
+        for requirement in plan.specs
+    }
+    return plan.bind(tensors)
 
 
 def run_prep(

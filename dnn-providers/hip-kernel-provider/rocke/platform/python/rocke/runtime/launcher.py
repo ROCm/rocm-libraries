@@ -67,6 +67,10 @@ the categories above by construction:
   launches; equivalent to CK Tile's ``workspace_size`` plus
   ``DeviceMem ws_buf(ws_size);`` held over the whole problem lifetime.
 
+* :class:`WorkspaceLeasePool`: bounded exclusive workspace leases whose
+  reuse is delayed by a HIP event recorded after the final consumer.
+  Intended for concurrent serving shapes and framework-owned allocators.
+
 * :class:`DeviceMem`: RAII over `hipMalloc`/`hipFree` for numpy /
   manifest flows that do not use torch tensors.
 
@@ -89,6 +93,7 @@ applies to ``gemm``, ``grouped_gemm``, ``conv``, and any future op.
 from __future__ import annotations
 
 import contextvars
+import threading
 import time as _time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -106,6 +111,9 @@ __all__ = [
     "PipelineLauncher",
     "StreamConfig",
     "WorkspaceSpec",
+    "WorkspaceLease",
+    "WorkspaceLeasePool",
+    "WorkspacePoolExhausted",
     "WorkspacePool",
     "launch_kernel",
     "make_kernel",
@@ -160,13 +168,20 @@ def _resolved_fence(config_fence: bool) -> bool:
 
 @dataclass(frozen=True)
 class LaunchSummary:
-    """Returned by every launcher call. Currently just records the
-    number of launches that were issued; per-launch wall time should
-    be measured by the *caller* using `torch.cuda.Event` so the
-    launcher itself stays free of timing-mode branching.
+    """Returned by every launcher call.
+
+    Records the number of launches and, when requested, a borrowed completion
+    event for lifetime coordination. Per-launch wall time remains the caller's
+    responsibility so the launcher stays free of timing-mode branching.
     """
 
     launches: int
+    completion_event: Any = None
+    """Borrowed completion event for the final event-recording launch.
+
+    Runtime owns and eventually destroys this event. Consumers may query it or
+    attach it to a workspace lease, but must not destroy it.
+    """
 
 
 @dataclass
@@ -219,6 +234,12 @@ class LaunchConfig:
     manager forces this off for any nested launcher call regardless
     of the per-call value.
     """
+
+    record_event: bool = False
+    """Record a nonblocking completion event when ``fence=False``."""
+
+    retain_tensors: bool = True
+    """Keep tensor arguments alive until asynchronous launch completion."""
 
 
 @dataclass(frozen=True)
@@ -470,17 +491,18 @@ class KernelLauncher:
         # in this path -- skipping them is the difference between ~0.3
         # us and ~1 us per launch in tight benchmark loops, and
         # multiple-percent on tiny kernels like the conv bake-off.
-        rt.launch(
+        completion_event = rt.launch(
             self._fn,
             config.grid,
             config.block,
             args,
             shared_bytes=config.shared_bytes,
             stream=stream,
-            record_event=False,
+            record_event=config.record_event,
         )
-        rt.retain_for_stream(stream, *values.values())
-        return LaunchSummary(launches=1)
+        if config.retain_tensors:
+            rt.retain_for_stream(stream, *values.values())
+        return LaunchSummary(launches=1, completion_event=completion_event)
 
     def __repr__(self) -> str:
         key_str = f", cache_key={self._cache_key!r}" if self._cache_key else ""
@@ -533,6 +555,7 @@ class PipelineLauncher:
         resolved_stream = resolve_stream(stream)
         n_stages = len(self._stages)
         total = 0
+        completion_event = None
         for idx, (stage, vals, cfg) in enumerate(
             zip(self._stages, values_per_stage, configs_per_stage)
         ):
@@ -554,10 +577,14 @@ class PipelineLauncher:
                 block=cfg.block,
                 shared_bytes=cfg.shared_bytes,
                 fence=bool(cfg.fence) and is_last,
+                record_event=cfg.record_event,
+                retain_tensors=cfg.retain_tensors,
             )
             s = stage(vals, config=stage_cfg)
             total += s.launches
-        return LaunchSummary(launches=total)
+            if s.completion_event is not None:
+                completion_event = s.completion_event
+        return LaunchSummary(launches=total, completion_event=completion_event)
 
 
 @dataclass
@@ -660,6 +687,403 @@ class WorkspacePool:
 
     def __repr__(self) -> str:
         return f"WorkspacePool(slots={list(self._slots)})"
+
+
+class WorkspacePoolExhausted(RuntimeError):
+    """A bounded lease pool cannot satisfy another workspace request."""
+
+
+@dataclass
+class _LeaseSlot:
+    slot_id: int
+    signature: Tuple[Tuple[str, str, str], ...]
+    tensors: Dict[str, Any]
+    capacities: Dict[str, int]
+    capacity_nbytes: int
+    state: str = "acquired"
+    event: Any = None
+    owns_event: bool = False
+    last_used: int = 0
+
+
+class WorkspaceLease:
+    """Exclusive views into one :class:`WorkspaceLeasePool` allocation.
+
+    A lease starts in the acquired state. The owner must call
+    :meth:`release_after` immediately after enqueueing the final workspace
+    consumer, or :meth:`release_completed` after externally synchronizing.
+    """
+
+    def __init__(
+        self,
+        pool: "WorkspaceLeasePool",
+        slot_id: int,
+        tensors: Mapping[str, Any],
+    ) -> None:
+        self._pool = pool
+        self._slot_id = int(slot_id)
+        self._tensors = dict(tensors)
+        self._released = False
+
+    @property
+    def tensors(self) -> Mapping[str, Any]:
+        if self._released:
+            raise RuntimeError("workspace lease has already been released")
+        return self._tensors
+
+    @property
+    def slot_id(self) -> int:
+        return self._slot_id
+
+    def release_after(self, stream: int = 0) -> None:
+        """Record a stream event and make this lease pending on its completion."""
+        if self._released:
+            raise RuntimeError("workspace lease has already been released")
+        self._pool.release_after(self, stream=stream)
+        self._released = True
+        self._tensors.clear()
+
+    def release_after_event(self, event: Any, *, stream: Optional[int] = None) -> None:
+        """Make this lease pending on a borrowed launch-completion event."""
+        if self._released:
+            raise RuntimeError("workspace lease has already been released")
+        self._pool.release_after_event(self, event, stream=stream)
+        self._released = True
+        self._tensors.clear()
+
+    def release_completed(self) -> None:
+        """Release after the owner has already synchronized all workspace use."""
+        if self._released:
+            raise RuntimeError("workspace lease has already been released")
+        self._pool.release_completed(self)
+        self._released = True
+        self._tensors.clear()
+
+
+class WorkspaceLeasePool:
+    """Bounded, event-safe owner of reusable workspace allocations.
+
+    Unlike :class:`WorkspacePool`, entries are not permanent named slots.
+    Every :meth:`acquire` returns an exclusive lease. Released entries remain
+    pending until a HIP event recorded after the final consumer reports
+    completion, then become best-fit reusable capacity. Free entries are
+    evicted LRU to enforce both the total and cached-byte bounds.
+
+    The object that constructs this pool owns the actual tensors. rocKE only
+    defines the lease state machine; ``allocator`` may be supplied by a
+    framework that wants to create the storage itself.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_bytes: int,
+        max_cached_bytes: Optional[int] = None,
+        max_entries: int = 8,
+        allocator: Optional[Callable[[WorkspaceSpec], Any]] = None,
+        event_factory: Optional[Callable[[int], Any]] = None,
+    ) -> None:
+        self.max_bytes = int(max_bytes)
+        self.max_cached_bytes = (
+            self.max_bytes if max_cached_bytes is None else int(max_cached_bytes)
+        )
+        self.max_entries = int(max_entries)
+        if self.max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        if not 0 <= self.max_cached_bytes <= self.max_bytes:
+            raise ValueError("max_cached_bytes must be within [0, max_bytes]")
+        if self.max_entries <= 0:
+            raise ValueError("max_entries must be positive")
+        self._allocator = allocator or self._torch_allocator
+        self._event_factory = event_factory or self._record_event
+        self._slots: Dict[int, _LeaseSlot] = {}
+        self._next_slot_id = 1
+        self._clock = 0
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _torch_allocator(spec: WorkspaceSpec) -> Any:
+        import torch
+
+        return torch.empty(spec.shape, dtype=spec.dtype, device=spec.device)
+
+    @staticmethod
+    def _record_event(stream: int) -> Any:
+        resolved = resolve_stream(stream)
+        event = _runtime().event()
+        event.record(stream=resolved)
+        return event
+
+    @staticmethod
+    def _normalize_specs(
+        specs: Sequence[WorkspaceSpec],
+    ) -> Tuple[WorkspaceSpec, ...]:
+        result = tuple(specs)
+        if not result:
+            raise ValueError("workspace lease requires at least one spec")
+        names = [spec.name for spec in result]
+        if len(set(names)) != len(names):
+            raise ValueError("workspace spec names must be unique within a lease")
+        if any(any(int(dim) < 0 for dim in spec.shape) for spec in result):
+            raise ValueError("workspace shapes cannot contain negative dimensions")
+        return result
+
+    @staticmethod
+    def _signature(
+        specs: Sequence[WorkspaceSpec],
+    ) -> Tuple[Tuple[str, str, str], ...]:
+        return tuple(
+            sorted((spec.name, str(spec.dtype), str(spec.device)) for spec in specs)
+        )
+
+    @staticmethod
+    def _views(slot: _LeaseSlot, specs: Sequence[WorkspaceSpec]) -> Dict[str, Any]:
+        views = {}
+        for spec in specs:
+            required = spec.numel()
+            tensor = slot.tensors[spec.name]
+            flat = tensor.reshape(-1)
+            views[spec.name] = flat[:required].reshape(tuple(spec.shape))
+        return views
+
+    def _touch(self, slot: _LeaseSlot) -> None:
+        self._clock += 1
+        slot.last_used = self._clock
+
+    def _capacity_nbytes_locked(self) -> int:
+        return sum(slot.capacity_nbytes for slot in self._slots.values())
+
+    def _cached_nbytes_locked(self) -> int:
+        return sum(
+            slot.capacity_nbytes
+            for slot in self._slots.values()
+            if slot.state == "free"
+        )
+
+    def _drop_slot_locked(self, slot: _LeaseSlot) -> None:
+        self._slots.pop(slot.slot_id, None)
+
+    def _trim_free_locked(
+        self,
+        *,
+        reserve_nbytes: int = 0,
+        reserve_entries: int = 0,
+    ) -> None:
+        while True:
+            over_total = (
+                self._capacity_nbytes_locked() + reserve_nbytes > self.max_bytes
+            )
+            over_cached = self._cached_nbytes_locked() > self.max_cached_bytes
+            over_entries = len(self._slots) + reserve_entries > self.max_entries
+            if not (over_total or over_cached or over_entries):
+                return
+            free = sorted(
+                (slot for slot in self._slots.values() if slot.state == "free"),
+                key=lambda slot: slot.last_used,
+            )
+            if not free:
+                return
+            self._drop_slot_locked(free[0])
+
+    def _reap_completed_locked(self) -> int:
+        completed = 0
+        for slot in list(self._slots.values()):
+            if slot.state != "pending" or slot.event is None:
+                continue
+            if not slot.event.query():
+                continue
+            if slot.owns_event:
+                slot.event.destroy()
+            slot.event = None
+            slot.owns_event = False
+            slot.pending_stream = None
+            slot.state = "free"
+            self._touch(slot)
+            completed += 1
+        self._trim_free_locked()
+        return completed
+
+    def reap_completed(self) -> int:
+        """Non-blockingly return all event-complete entries to the free list."""
+        with self._lock:
+            return self._reap_completed_locked()
+
+    def acquire(
+        self,
+        specs: Sequence[WorkspaceSpec],
+        *,
+        stream: Optional[int] = None,
+    ) -> WorkspaceLease:
+        """Acquire best-fit exclusive storage or raise at the configured bound."""
+        normalized = self._normalize_specs(specs)
+        signature = self._signature(normalized)
+        required = {spec.name: spec.numel() for spec in normalized}
+        required_nbytes = sum(spec.nbytes() for spec in normalized)
+        requested_stream = None if stream is None else resolve_stream(stream)
+        if required_nbytes > self.max_bytes:
+            raise WorkspacePoolExhausted(
+                f"workspace request {required_nbytes} B exceeds pool bound "
+                f"{self.max_bytes} B"
+            )
+
+        with self._lock:
+            # A Runtime-owned event may be bypassed on the same stream: FIFO
+            # guarantees the next producer is ordered after the prior consumer.
+            same_stream = [
+                slot
+                for slot in self._slots.values()
+                if slot.state == "pending"
+                and not slot.owns_event
+                and slot.pending_stream == requested_stream
+                and requested_stream is not None
+                and slot.signature == signature
+                and all(
+                    slot.capacities.get(name, -1) >= needed
+                    for name, needed in required.items()
+                )
+            ]
+            if same_stream:
+                slot = min(same_stream, key=lambda item: item.capacity_nbytes)
+                slot.event = None
+                slot.pending_stream = None
+                slot.state = "acquired"
+                self._touch(slot)
+                return WorkspaceLease(self, slot.slot_id, self._views(slot, normalized))
+
+            self._reap_completed_locked()
+            candidates = [
+                slot
+                for slot in self._slots.values()
+                if slot.state == "free"
+                and slot.signature == signature
+                and all(
+                    slot.capacities.get(name, -1) >= needed
+                    for name, needed in required.items()
+                )
+            ]
+            if candidates:
+                slot = min(candidates, key=lambda item: item.capacity_nbytes)
+                slot.state = "acquired"
+                self._touch(slot)
+                return WorkspaceLease(self, slot.slot_id, self._views(slot, normalized))
+
+            self._trim_free_locked(
+                reserve_nbytes=required_nbytes,
+                reserve_entries=1,
+            )
+            if (
+                self._capacity_nbytes_locked() + required_nbytes > self.max_bytes
+                or len(self._slots) >= self.max_entries
+            ):
+                stats = self._stats_locked()
+                raise WorkspacePoolExhausted(
+                    f"workspace pool exhausted for {required_nbytes} B request: {stats}"
+                )
+
+            tensors = {spec.name: self._allocator(spec) for spec in normalized}
+            capacities = {spec.name: spec.numel() for spec in normalized}
+            slot = _LeaseSlot(
+                slot_id=self._next_slot_id,
+                signature=signature,
+                tensors=tensors,
+                capacities=capacities,
+                capacity_nbytes=required_nbytes,
+            )
+            self._next_slot_id += 1
+            self._touch(slot)
+            self._slots[slot.slot_id] = slot
+            return WorkspaceLease(self, slot.slot_id, self._views(slot, normalized))
+
+    def _acquired_slot_locked(self, lease: WorkspaceLease) -> _LeaseSlot:
+        if lease._pool is not self:  # noqa: SLF001 - validates lease ownership
+            raise ValueError("workspace lease belongs to another pool")
+        slot = self._slots.get(lease.slot_id)
+        if slot is None or slot.state != "acquired":
+            raise RuntimeError("workspace lease is not currently acquired")
+        return slot
+
+    def release_after(self, lease: WorkspaceLease, *, stream: int = 0) -> None:
+        """Record completion after the final consumer and mark the lease pending."""
+        resolved = resolve_stream(stream)
+        event = self._event_factory(resolved)
+        self._release_after_event(
+            lease,
+            event,
+            owns_event=True,
+            stream=resolved,
+        )
+
+    def release_after_event(
+        self,
+        lease: WorkspaceLease,
+        event: Any,
+        *,
+        stream: Optional[int] = None,
+    ) -> None:
+        """Mark a lease pending on a runtime-owned completion event."""
+        if event is None:
+            raise ValueError("workspace release requires a completion event")
+        resolved = None if stream is None else resolve_stream(stream)
+        self._release_after_event(
+            lease,
+            event,
+            owns_event=False,
+            stream=resolved,
+        )
+
+    def _release_after_event(
+        self,
+        lease: WorkspaceLease,
+        event: Any,
+        *,
+        owns_event: bool,
+        stream: Optional[int],
+    ) -> None:
+        with self._lock:
+            slot = self._acquired_slot_locked(lease)
+            slot.event = event
+            slot.owns_event = owns_event
+            slot.pending_stream = stream
+            slot.state = "pending"
+            self._touch(slot)
+
+    def release_completed(self, lease: WorkspaceLease) -> None:
+        """Return a lease whose GPU work was synchronized by the owner."""
+        with self._lock:
+            slot = self._acquired_slot_locked(lease)
+            slot.state = "free"
+            self._touch(slot)
+            self._trim_free_locked()
+
+    def stats(self) -> Dict[str, int]:
+        with self._lock:
+            return self._stats_locked()
+
+    def _stats_locked(self) -> Dict[str, int]:
+        counts = {"free": 0, "acquired": 0, "pending": 0}
+        for slot in self._slots.values():
+            counts[slot.state] += 1
+        return {
+            "capacity_nbytes": self._capacity_nbytes_locked(),
+            "cached_nbytes": self._cached_nbytes_locked(),
+            "entries": len(self._slots),
+            **counts,
+        }
+
+    def clear(self) -> None:
+        """Drop completed storage; refuse while any lease is active or pending."""
+        with self._lock:
+            self._reap_completed_locked()
+            busy = [slot for slot in self._slots.values() if slot.state != "free"]
+            if busy:
+                raise RuntimeError("cannot clear a workspace pool with active leases")
+            self._slots.clear()
+
+    def __repr__(self) -> str:
+        return (
+            f"WorkspaceLeasePool(max_bytes={self.max_bytes}, "
+            f"max_cached_bytes={self.max_cached_bytes}, stats={self.stats()})"
+        )
 
 
 class DeviceMem:

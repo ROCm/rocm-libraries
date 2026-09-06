@@ -3518,8 +3518,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)", ll
         )
         self.assertIn(
-            "call void @llvm.amdgcn.s.prefetch.inst.p1("
-            "ptr addrspace(1) %code, i32 64)",
+            "call void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1) %code, i32 64)",
             ll,
         )
 
@@ -4892,6 +4891,149 @@ class TestWorkspaceMaterialize(unittest.TestCase):
         self.assertEqual(name_to_tensor["tmp"].dtype, torch.float16)
 
 
+class TestWorkspaceLeasePool(unittest.TestCase):
+    class _Event:
+        def __init__(self):
+            self.ready = False
+            self.destroyed = False
+            self.queries = 0
+
+        def query(self):
+            self.queries += 1
+            return self.ready
+
+        def destroy(self):
+            self.destroyed = True
+
+    def test_pending_lease_is_not_reused_until_its_event_completes(self):
+        import numpy as np
+
+        from rocke.runtime.launcher import WorkspaceLeasePool, WorkspaceSpec
+
+        events = []
+
+        def event_factory(_stream):
+            event = self._Event()
+            events.append(event)
+            return event
+
+        spec = WorkspaceSpec("tiles", (16,), np.dtype("float32"), "cpu")
+        pool = WorkspaceLeasePool(
+            max_bytes=2 * spec.nbytes(),
+            max_entries=2,
+            allocator=lambda requirement: np.empty(
+                requirement.shape, dtype=requirement.dtype
+            ),
+            event_factory=event_factory,
+        )
+        first = pool.acquire((spec,))
+        first_ptr = first.tensors["tiles"].ctypes.data
+        first.release_after(stream=7)
+        second = pool.acquire((spec,))
+        second_ptr = second.tensors["tiles"].ctypes.data
+        self.assertNotEqual(first_ptr, second_ptr)
+
+        events[0].ready = True
+        self.assertEqual(pool.reap_completed(), 1)
+        second.release_completed()
+        reused = pool.acquire((spec,))
+        self.assertIn(reused.tensors["tiles"].ctypes.data, {first_ptr, second_ptr})
+
+    def test_bound_applies_backpressure_until_pending_work_completes(self):
+        import numpy as np
+
+        from rocke.runtime.launcher import (
+            WorkspaceLeasePool,
+            WorkspacePoolExhausted,
+            WorkspaceSpec,
+        )
+
+        events = []
+
+        def event_factory(_stream):
+            event = self._Event()
+            events.append(event)
+            return event
+
+        spec = WorkspaceSpec("tiles", (16,), np.dtype("float32"), "cpu")
+        pool = WorkspaceLeasePool(
+            max_bytes=spec.nbytes(),
+            max_entries=1,
+            allocator=lambda requirement: np.empty(
+                requirement.shape, dtype=requirement.dtype
+            ),
+            event_factory=event_factory,
+        )
+        lease = pool.acquire((spec,))
+        ptr = lease.tensors["tiles"].ctypes.data
+        lease.release_after(stream=9)
+        with self.assertRaises(WorkspacePoolExhausted):
+            pool.acquire((spec,))
+
+        events[0].ready = True
+        reused = pool.acquire((spec,))
+        self.assertEqual(reused.tensors["tiles"].ctypes.data, ptr)
+
+    def test_zero_cache_bound_drops_completed_storage(self):
+        import numpy as np
+
+        from rocke.runtime.launcher import WorkspaceLeasePool, WorkspaceSpec
+
+        spec = WorkspaceSpec("tiles", (16,), np.dtype("float32"), "cpu")
+        pool = WorkspaceLeasePool(
+            max_bytes=spec.nbytes(),
+            max_cached_bytes=0,
+            allocator=lambda requirement: np.empty(
+                requirement.shape, dtype=requirement.dtype
+            ),
+        )
+        lease = pool.acquire((spec,))
+        lease.release_completed()
+        self.assertEqual(pool.stats()["entries"], 0)
+
+    def test_borrowed_launch_event_is_not_destroyed_by_pool(self):
+        import numpy as np
+
+        from rocke.runtime.launcher import WorkspaceLeasePool, WorkspaceSpec
+
+        spec = WorkspaceSpec("tiles", (16,), np.dtype("float32"), "cpu")
+        pool = WorkspaceLeasePool(
+            max_bytes=spec.nbytes(),
+            allocator=lambda requirement: np.empty(
+                requirement.shape, dtype=requirement.dtype
+            ),
+        )
+        event = self._Event()
+        lease = pool.acquire((spec,))
+        lease.release_after_event(event)
+        event.ready = True
+
+        self.assertEqual(pool.reap_completed(), 1)
+        self.assertFalse(event.destroyed)
+
+    def test_same_stream_reacquires_borrowed_pending_storage_by_fifo(self):
+        import numpy as np
+
+        from rocke.runtime.launcher import WorkspaceLeasePool, WorkspaceSpec
+
+        spec = WorkspaceSpec("tiles", (16,), np.dtype("float32"), "cpu")
+        pool = WorkspaceLeasePool(
+            max_bytes=spec.nbytes(),
+            allocator=lambda requirement: np.empty(
+                requirement.shape, dtype=requirement.dtype
+            ),
+        )
+        event = self._Event()
+        first = pool.acquire((spec,), stream=7)
+        ptr = first.tensors["tiles"].ctypes.data
+        first.release_after_event(event, stream=7)
+
+        reused = pool.acquire((spec,), stream=7)
+        self.assertEqual(reused.tensors["tiles"].ctypes.data, ptr)
+        self.assertEqual(event.queries, 0)
+        self.assertFalse(event.destroyed)
+
+
 class TestValidationHarness(unittest.TestCase):
     """The fusion validation runner must produce well-formed reports."""
 
@@ -5616,6 +5758,8 @@ class TestLauncherFenceContract(unittest.TestCase):
         from rocke.runtime.launcher import LaunchConfig
 
         self.assertTrue(LaunchConfig().fence)
+        self.assertFalse(LaunchConfig().record_event)
+        self.assertTrue(LaunchConfig().retain_tensors)
 
     def test_no_fence_overrides_config_fence_true(self):
         from rocke.runtime.launcher import _resolved_fence, no_fence
@@ -5710,6 +5854,46 @@ class TestLauncherFenceContract(unittest.TestCase):
             stream=1,
         )
         self.assertEqual(recorded, [(0, False), (1, False)])
+
+    def test_pipeline_launcher_returns_the_final_completion_event(self):
+        from rocke.runtime.launcher import LaunchConfig, PipelineLauncher
+
+        events = [object(), object()]
+
+        class FakeStage:
+            kernel_name = "fake"
+
+            def __init__(self, event):
+                self.event = event
+
+            def __call__(self, values, *, config):
+                from rocke.runtime.launcher import LaunchSummary
+
+                self.assert_config = (
+                    config.fence,
+                    config.record_event,
+                    config.retain_tensors,
+                )
+                return LaunchSummary(launches=1, completion_event=self.event)
+
+        stages = [FakeStage(events[0]), FakeStage(events[1])]
+        pipeline = PipelineLauncher(stages)
+        cfg = LaunchConfig(
+            fence=False,
+            record_event=True,
+            retain_tensors=False,
+        )
+        summary = pipeline(
+            values_per_stage=[{}, {}],
+            configs_per_stage=[cfg, cfg],
+            stream=1,
+        )
+
+        self.assertIs(summary.completion_event, events[-1])
+        self.assertEqual(
+            [stage.assert_config for stage in stages],
+            [(False, True, False), (False, True, False)],
+        )
 
 
 class TestCkStyleLaunchKernel(unittest.TestCase):
@@ -6170,11 +6354,14 @@ class TestRuntimeLaunchKeepAlive(unittest.TestCase):
         rt = Runtime()
         prior = self._isolate_pending()
         try:
-            with mock.patch(
-                "rocke.runtime.hip_module._hipModuleLaunchKernel", return_value=0
-            ), mock.patch(
-                "rocke.runtime.hip_module._hipStreamSynchronize", return_value=0
-            ) as sync_stub:
+            with (
+                mock.patch(
+                    "rocke.runtime.hip_module._hipModuleLaunchKernel", return_value=0
+                ),
+                mock.patch(
+                    "rocke.runtime.hip_module._hipStreamSynchronize", return_value=0
+                ) as sync_stub,
+            ):
                 rt.launch_blocking(
                     _HipFunctionHandle(),
                     (1, 1, 1),

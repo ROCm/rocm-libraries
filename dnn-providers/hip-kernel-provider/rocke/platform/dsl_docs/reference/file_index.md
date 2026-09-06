@@ -38,7 +38,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `runtime/hip_module.py` | `Runtime`, `Module`, `Event`, `HipError`. Ctypes over `libamdhip64`. Per-stream pending-args queue. |
 | `runtime/packing.py` | `pack_args`, `pack_args_kernelparams`, `_as_ptr`. Torch-agnostic AMDGPU kernarg packing. |
 | `runtime/torch_interop.py` | `resolve_stream`, `empty_workspace`, `launch_torch_kernel`, `TorchLaunchSummary`. Torch-tensor launch glue. |
-| `runtime/launcher.py` | `KernelLauncher`, `PipelineLauncher`, `LaunchConfig`, `LaunchSummary`, `WorkspaceSpec`, `WorkspacePool`, `DeviceMem`, `time_launches`, `no_fence`, `synchronize_and_release`, `wait_stream_and_release`, `release_retained_for_stream`. |
+| `runtime/launcher.py` | `KernelLauncher`, `PipelineLauncher`, `LaunchConfig`, `LaunchSummary`, `WorkspaceSpec`, `WorkspacePool`, `WorkspaceLease`, `WorkspaceLeasePool`, `WorkspacePoolExhausted`, `DeviceMem`, `time_launches`, `no_fence`, `synchronize_and_release`, `wait_stream_and_release`, `release_retained_for_stream`. |
 
 ## `helpers/` — Authoring Layer
 

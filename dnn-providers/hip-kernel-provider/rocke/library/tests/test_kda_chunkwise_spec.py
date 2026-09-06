@@ -134,6 +134,31 @@ class TestPrepSpec:
         """The prep kernel's whole optimization story is 2 workgroups per CU."""
         assert KdaChunkPrepSpec().lds_bytes() <= 160 * 1024 // 2
 
+    def test_workspace_plan_describes_and_binds_all_split_intermediates(self):
+        torch = pytest.importorskip("torch")
+        from builders.gfx950.kda.kda_chunk_prep import kda_workspace_plan
+
+        num_tiles = 3
+        plan = kda_workspace_plan(
+            num_tiles,
+            KdaChunkPrepSpec(),
+            device="cpu",
+        )
+        expected = num_tiles * ((2 * 32 * 32 + 3 * 32 * 128) * 2 + 128 * 4)
+        assert plan.required_nbytes == expected
+        tensors = {
+            spec.name: torch.empty(spec.shape, dtype=spec.dtype, device=spec.device)
+            for spec in plan.specs
+        }
+        workspace = plan.bind(tensors)
+        assert workspace["a"].shape == (num_tiles, 32, 32)
+        assert workspace["gk"].shape == (num_tiles, 32, 128)
+        assert workspace["gq"].shape == (num_tiles, 32, 128)
+        assert workspace["aqk"].shape == (num_tiles, 32, 32)
+        assert workspace["kt"].shape == (num_tiles, 128, 32)
+        assert workspace["dec"].shape == (num_tiles, 128)
+        assert workspace["_pool"].data_ptr() == tensors["kda_tiles"].data_ptr()
+
     @pytest.mark.parametrize(
         "kw,needle",
         [

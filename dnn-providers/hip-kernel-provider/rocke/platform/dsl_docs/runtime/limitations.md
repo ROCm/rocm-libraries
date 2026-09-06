@@ -170,7 +170,9 @@ Runtime launchers assume:
 - `libamd_comgr` available for compile through the dynamic linker.
 - torch stream resolution is valid for torch launch flows.
 - packed-args ctypes buffers and tensors remain alive until launch completion (`Runtime._pending_args` queue handles this when launches go through `KernelLauncher`).
-- workspace lifetimes are managed for pipelines (use `WorkspacePool` for stage intermediates).
+- workspace lifetimes are managed for pipelines: use `WorkspacePool` only for
+  bounded non-concurrent named slots, and `WorkspaceLeasePool` for concurrent
+  serving shapes that require event-safe reuse and explicit memory bounds.
 
 CI / dev machines without matching ROCm libraries can still build docs, import `rocke`, run the static unit suite, and inspect Python code. They cannot run end-to-end HSACO compile + launch.
 
