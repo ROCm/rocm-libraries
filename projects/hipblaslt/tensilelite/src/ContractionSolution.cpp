@@ -4197,6 +4197,17 @@ namespace TensileLite
         return pass;
     }
 
+    namespace
+    {
+        /// StreamK data-parallel: ON by default on MI300A, off elsewhere, and overridable in
+        /// both directions by TENSILE_STREAMK_DATA_PARALLEL.
+        bool useStreamKDP(Hardware const& hardware)
+        {
+            int const override_ = Debug::Instance().streamKDataParallelOverride();
+            return (override_ >= 0) ? (override_ == 1) : isMI300A(hardware);
+        }
+    } // namespace
+
     size_t ContractionSolution::requiredWorkspaceSize(Problem const&  problem,
                                                       Hardware const& hardware) const
     {
@@ -4214,7 +4225,7 @@ namespace TensileLite
                           << "setting GSU to 1." << std::endl;
                 gsu = 1;
             }
-            const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
+            const bool streamKDP = useStreamKDP(hardware);
             const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
             auto       tiles     = problem.getNumTiles(sizeMapping, 1);
             if(tiles > 0) // Grouped GEMM reports 0 tiles
@@ -4670,7 +4681,7 @@ namespace TensileLite
         // below so that fallback sees the reduction the launch will use.
         sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
 
-        const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
+        const bool streamKDP   = useStreamKDP(hardware);
         const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
         if(sk.grid > 0
            && (sk.reduction == origami::reduction_t::parallel
@@ -5244,10 +5255,7 @@ namespace TensileLite
                 return sk5DynamicValue;
             };
 
-            size_t     skGrid    = tiles; // Fallback
-            const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
-            if(streamKDP)
-                skGrid = tiles;
+            size_t skGrid = tiles; // Fallback
 
             // If K==0, run kernel as DP with Alpha=0 to skip main loop and apply beta*c
             size_t z = 1;
@@ -5702,7 +5710,7 @@ namespace TensileLite
         // the grid lands on a splitting factor below 2 with parallel selected.
         reduction = streamKReconcileReduction(reduction, grid, tiles);
 
-        const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
+        const bool streamKDP   = useStreamKDP(hardware);
         const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
         d.streamKDP            = streamKDP;
         d.forceDPOnly          = forceDPOnly;
@@ -5839,16 +5847,16 @@ namespace TensileLite
             gridChangedBy = "fixedGrid";
 
         // Which mechanism (if any) makes this launch data-parallel-only. More than
-        // one can be set at once (e.g. the debug override on a force-DP-only
-        // kernel), so the ladder reports the most specific explanation first:
-        // the compile-time kernel param, then the process-wide debug override,
-        // then the runtime workspace fallback -- from "this kernel is always DP"
-        // to "this particular launch had to give up on StreamK".
+        // one can be set at once (e.g. DP mode on a force-DP-only kernel), so the
+        // ladder reports the most specific explanation first: the compile-time
+        // kernel param, then the process-wide DP mode, then the runtime workspace
+        // fallback -- from "this kernel is always DP" to "this particular launch
+        // had to give up on StreamK".
         const char* dpOnlySource = "none";
         if(d.forceDPOnly)
             dpOnlySource = "forceDPOnly(param)";
         else if(d.streamKDP)
-            dpOnlySource = "streamKDP(debug)";
+            dpOnlySource = "streamKDP(arch-default|env)";
         else if(d.workspaceDPFallbackFired)
             dpOnlySource = "workspaceDP(runtime)";
 

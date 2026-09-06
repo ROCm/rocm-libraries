@@ -1112,3 +1112,47 @@ TEST(StreamKFlagBound, StreamK5StaticSubPathKeepsTheWholeBlock)
         << "SK5 on its static sub-path indexes from offset 0, so it keeps the "
            "whole block";
 }
+
+// ===========================================================================
+// IsMI300ATest -- isMI300A() SKU discrimination
+// ===========================================================================
+
+// isMI300A() gates two architecture-dependent runtime defaults (the grid-based
+// k-d tree and Stream-K data-parallel mode), so a device it misclassifies
+// silently changes kernel selection and workspace sizing on that part. gfx942
+// ships at many CU counts -- see the gfx942_{20,38,64,80,152,228}cu logic
+// directories -- and only 228 is the MI300A.
+
+namespace
+{
+    AMDGPU makeGfx942(int cuCount)
+    {
+        return AMDGPU(AMDGPU::Processor::gfx942, cuCount, "gfx942");
+    }
+} // namespace
+
+TEST(IsMI300ATest, MatchesMI300A)
+{
+    EXPECT_TRUE(isMI300A(makeGfx942(228)))
+        << "gfx942 at 228 CUs is the MI300A and must take the MI300A defaults";
+}
+
+TEST(IsMI300ATest, RejectsOtherGfx942CuCounts)
+{
+    // 304 is the arch-standard count (MI300X/MI325X); the rest are harvested or
+    // partitioned parts that ship their own tuned logic. A predicate written as
+    // "not the standard count" would wrongly accept every one of these.
+    for(int cuCount : {20, 38, 64, 80, 152, 304})
+    {
+        EXPECT_FALSE(isMI300A(makeGfx942(cuCount)))
+            << "gfx942 at " << cuCount << " CUs is not an MI300A, so it must keep "
+               "the upstream defaults";
+    }
+}
+
+TEST(IsMI300ATest, RejectsOtherArchitecturesAtSameCuCount)
+{
+    EXPECT_FALSE(isMI300A(AMDGPU(AMDGPU::Processor::gfx950, 228, "gfx950")))
+        << "the CU count alone must not identify an MI300A -- the processor "
+           "must be gfx942 too";
+}
