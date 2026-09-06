@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "121dc572-d4db-489e-a2fd-8f24809ea33d",
+  "id": "d1a5b1cf-0e8d-4301-bd85-a70ee47b0e91",
   "name": "kernel dtype matches the graph's dtype",
   "scope": "kernel",
   "match_symbol": "hipkernel.gfx950_attention_dense.kernel_match"

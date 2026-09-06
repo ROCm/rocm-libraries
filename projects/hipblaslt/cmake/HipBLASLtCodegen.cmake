@@ -7,7 +7,8 @@ function(hipblaslt_create_device_library)
     set(_opts "")
     set(_one
         TARGET LOGIC_PATH OUTPUT_DIR CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER
-        ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL LAZY_LOAD ASM_COMMENTS KEEP_BUILD_TMP ASM_DEBUG)
+        ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL LAZY_LOAD ASM_COMMENTS KEEP_BUILD_TMP ASM_DEBUG
+        REQUIRE_GFX1250V0_OVERLAY)
     set(_multi ARCHES)
     cmake_parse_arguments(_cdl "${_opts}" "${_one}" "${_multi}" ${ARGN})
 
@@ -84,16 +85,26 @@ function(hipblaslt_create_device_library)
     # the validation stamp; TensileLogic itself resolves the resource at runtime.
     set(_known_bugs_resource "${_codegen_dir}/Tensile/TensileLogic/known_bugs.yaml")
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
+    set(_tensile_logic_opts_list
+        "${_cdl_LOGIC_PATH}"
+        --architecture
+        "${_arches_semi}"
+        --use-bundled-known-bugs
+        --check-all
+    )
+    # Explicit, caller-owned opt-in: requesting architecture gfx1250v0 alone
+    # does not mean this corpus owns a gfx1250/gfx1250v0 split (a shared
+    # invocation can request that architecture against a corpus, e.g.
+    # hipSPARSELt's, that never did the split and has no overlay directory).
+    if(_cdl_REQUIRE_GFX1250V0_OVERLAY)
+        list(APPEND _tensile_logic_opts_list --require-gfx1250v0-overlay)
+    endif()
     add_custom_command(
         OUTPUT "${_logic_stamp}"
         COMMENT "Validating library logic (TensileLogic --check-all) for ${_cdl_TARGET} ..."
         COMMAND ${HIPBLASLT_PYTHON_COMMAND}
             "${_codegen_dir}/Tensile/bin/TensileLogic"
-            "${_cdl_LOGIC_PATH}"
-            --architecture
-            "${_arches_semi}"
-            --use-bundled-known-bugs
-            --check-all
+            ${_tensile_logic_opts_list}
         COMMAND ${CMAKE_COMMAND} -E touch "${_logic_stamp}"
         DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${_known_bugs_resource}"
         VERBATIM

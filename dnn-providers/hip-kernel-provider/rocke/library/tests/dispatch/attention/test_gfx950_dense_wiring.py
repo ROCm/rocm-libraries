@@ -18,11 +18,15 @@ from dataclasses import replace
 from dispatch.attention import (
     AttentionRequest,
     attention_candidates,
+    dense_spec_for_request as routed_dense_spec_for_request,
 )
 from dispatch.attention.gfx950 import dense_spec_for_request
+from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
+from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
 from kernels.gfx950.attention_dense import (
     AttentionDenseSpec,
-    DENSE_TILE_GEOMETRIES,
+    GFX950_DENSE_LAYOUTS,
+    Gfx950AttentionDenseSpec,
     attention_dense_grid,
     supports_attention_dense,
 )
@@ -45,6 +49,26 @@ def _gfx950_dense_req(**kw) -> AttentionRequest:
     )
     base.update(kw)
     return AttentionRequest(**base)
+
+
+class TestDenseSpecArchRouter(unittest.TestCase):
+    def test_routes_to_concrete_gfx950_spec(self):
+        spec = routed_dense_spec_for_request(_gfx950_dense_req())
+        self.assertIsInstance(spec, Gfx950AttentionDenseSpec)
+
+    def test_routes_to_concrete_gfx942_spec(self):
+        spec = routed_dense_spec_for_request(_gfx950_dense_req(arch="gfx942"))
+        self.assertIsInstance(spec, Gfx942AttentionDenseSpec)
+
+    def test_requires_explicit_arch(self):
+        for arch in ("", None):
+            with self.subTest(arch=arch):
+                with self.assertRaisesRegex(ValueError, "requires an explicit arch"):
+                    routed_dense_spec_for_request(_gfx950_dense_req(arch=arch))
+
+    def test_rejects_arch_without_dense_factory(self):
+        with self.assertRaisesRegex(ValueError, "no spec factory"):
+            routed_dense_spec_for_request(_gfx950_dense_req(arch="gfx1250"))
 
 
 class TestDenseGqaPairWiring(unittest.TestCase):
@@ -91,7 +115,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
 
     def test_invalid_dense_decode_is_rejected_at_dispatch(self):
         req = _gfx950_dense_req(dense_persist_decode="not-a-decode")
-        with self.assertRaisesRegex(ValueError, "dense_persist_decode"):
+        with self.assertRaisesRegex(ValueError, "persist_decode"):
             dense_spec_for_request(req)
 
     def test_s4096_shape_selects_two_phase_pair_and_wide_dma(self):
@@ -248,9 +272,10 @@ class TestDenseGeometrySpec(unittest.TestCase):
             )
         )
         defaults = DENSE_TILE_GEOMETRIES["default"]
+        layout = GFX950_DENSE_LAYOUTS["default"]
         self.assertEqual(spec.block_m, defaults["block_m"])
         self.assertEqual(spec.block_n, defaults["block_n"])
-        self.assertEqual(spec.lds_v_row_pad, defaults["lds_v_row_pad"])
+        self.assertEqual(spec.lds_v_row_pad, layout["lds_v_row_pad"])
 
     def test_block_m_controls_grid_and_kernel_identity(self):
         default = self._spec()

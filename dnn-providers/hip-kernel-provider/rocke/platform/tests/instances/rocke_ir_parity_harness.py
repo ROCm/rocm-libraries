@@ -408,7 +408,7 @@ def build_attention_dense(arch, **over):
 
     def _build():
         from kernels.gfx950.attention_dense import (
-            AttentionDenseSpec,
+            Gfx950AttentionDenseSpec,
             build_attention_dense as _build_dense,
         )
 
@@ -423,7 +423,42 @@ def build_attention_dense(arch, **over):
             dtype="bf16",
         )
         spec.update(over)
-        return _build_dense(AttentionDenseSpec(**spec))
+        return _build_dense(Gfx950AttentionDenseSpec(**spec))
+
+    return _build
+
+
+def build_kda_chunkwise_gfx950(kind, arch, **over):
+    """gfx950 chunkwise KDA kernel from a representative spec.
+
+    ``kind`` selects one of the three emitted kernels. Spec overrides keep the
+    case table compact while covering state flags, fused preprocessing, and a
+    non-default scan partition.
+    """
+
+    def _build():
+        from kernels.gfx950.kda_chunkwise import (
+            KdaChunkFusedSpec,
+            KdaChunkPrepSpec,
+            KdaChunkScanSpec,
+            KdaTileSpec,
+            build_kda_chunk_fused,
+            build_kda_chunk_prep,
+            build_kda_chunk_scan,
+        )
+
+        if kind == "prep":
+            return build_kda_chunk_prep(KdaChunkPrepSpec(**over), arch=arch)
+        if kind == "scan":
+            scan_over = dict(over)
+            tile_over = scan_over.pop("tile", {})
+            tile = KdaTileSpec(**tile_over) if tile_over else KdaTileSpec()
+            return build_kda_chunk_scan(
+                KdaChunkScanSpec(tile=tile, **scan_over), arch=arch
+            )
+        if kind == "fused":
+            return build_kda_chunk_fused(KdaChunkFusedSpec(**over), arch=arch)
+        raise ValueError(f"unknown KDA kernel kind {kind!r}")
 
     return _build
 
@@ -2093,8 +2128,44 @@ def cases():
         ),
     )
 
-    # Chunkwise KDA: all three emitted kernels, state-sensitive ABI variants,
-    # and DK64 fused coverage for the guarded partial Kt pass.
+    # Chunkwise KDA: each emitted kernel plus the ABI/resource-sensitive
+    # variants that change preprocessing, state pointers, or scan geometry.
+    for _case_id, _kind, _over in (
+        ("prep_default", "prep", {}),
+        (
+            "prep_raw",
+            "prep",
+            {
+                "raw_inputs": True,
+                "fuse_qk_l2norm": True,
+                "fuse_gate": True,
+                "fuse_beta_sigmoid": True,
+                "has_dt_bias": True,
+            },
+        ),
+        ("scan_default", "scan", {}),
+        (
+            "scan_h0_noht",
+            "scan",
+            {"has_initial_state": True, "store_final_state": False},
+        ),
+        ("scan_vs4", "scan", {"tile": {"block_size": 64}, "value_splits": 4}),
+        ("fused_default", "fused", {}),
+        (
+            "fused_h0_noht",
+            "fused",
+            {"has_initial_state": True, "store_final_state": False},
+        ),
+    ):
+        add(
+            "kda_chunkwise",
+            f"kda_chunkwise/gfx950/{_case_id}",
+            "gfx950",
+            build_kda_chunkwise_gfx950(_kind, "gfx950", **_over),
+        )
+
+    # gfx942 KDA: all three emitted kernels, state-sensitive ABI variants, and
+    # DK64 fused coverage for the guarded partial Kt pass.
     for _case_id, _kind, _over in (
         ("prep_default", "prep", {}),
         ("scan_default", "scan", {}),

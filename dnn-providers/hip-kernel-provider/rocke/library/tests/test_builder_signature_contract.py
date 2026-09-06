@@ -164,8 +164,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "head_size",
         "num_query_heads",
     ),
-    # The gfx942 dense spec is a subclass of gfx950's and inherits its required
-    # set; every gfx942-only knob it adds is defaulted, four of them to `None`.
+    # Both dense specs inherit the architecture-neutral required shape fields.
     "kernels.gfx942.attention_dense.Gfx942AttentionDenseSpec": (
         "batch",
         "head_size",
@@ -202,9 +201,8 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_query_heads",
         "num_segments",
     ),
-    # gfx942's dense spec is a subclass of gfx950's and inherits its required set;
-    # every gfx942-only knob it adds is defaulted, four of them to `None`.
-    "kernels.gfx950.attention_dense.AttentionDenseSpec": (
+    # Every gfx950-only codegen knob is defaulted.
+    "kernels.gfx950.attention_dense.Gfx950AttentionDenseSpec": (
         "batch",
         "head_size",
         "num_kv_heads",
