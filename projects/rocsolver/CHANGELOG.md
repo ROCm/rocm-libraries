@@ -3,7 +3,7 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
-## (Unreleased) rocSOLVER
+## rocSOLVER 3.37.0 for ROCm 10.1.0
 
 ### Added
 
@@ -16,15 +16,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * 64-bit APIs for existing functions:
     - LARFT_64
 
-### Changed
-### Removed
 ### Optimized
 
 * Improved the performance of sygst/hegst.
-
-### Resolved issues
-### Known issues
-### Upcoming changes
 
 
 

@@ -156,6 +156,16 @@ struct _rocblaslt_handle
     static constexpr size_t c_syncGsuSlots         = 16;
     static constexpr size_t c_syncGsuTotalElements = c_syncGsuSlots * c_syncGsuSlotElements;
 
+    // GSU flag region for `problemIndex`, or null past the last slot. A group
+    // this wide must not run a solution that reads these flags;
+    // SynchronizerSizeCheck and calculateAutoGSU are what ensure that.
+    void* gsuFlagsForProblem(size_t problemIndex) const
+    {
+        if(Synchronizer == nullptr || problemIndex >= c_syncGsuSlots)
+            return nullptr;
+        return static_cast<char*>(Synchronizer) + problemIndex * c_syncGsuSlotBytes;
+    }
+
     // Stream-K indexes its flags by workgroup id (StreamK.py emits "flag offset
     // based on CTA index"), so a slot holds one int per Stream-K workgroup and
     // no more; skGrid is 224 on gfx950, which has 256 CUs. At that size every
