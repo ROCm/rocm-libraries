@@ -73,8 +73,16 @@ class NotApplicable(RuntimeError):
 
 
 class OpOverride:
-    #: ``torch.nn.functional`` attribute this override patches, e.g. ``"linear"``.
+    #: Attribute this override patches on :attr:`target_module`, e.g. ``"linear"``.
     op_name = None
+
+    #: Dotted module path, relative to the ``torch`` root, holding :attr:`op_name`.
+    #: Defaults to the functional namespace every original override targets, so
+    #: those keep patching ``torch.nn.functional.<op_name>`` unchanged. An override
+    #: that lives elsewhere -- e.g. paged attention, which PyTorch exposes from
+    #: ``torch.nn.attention.varlen`` rather than the functional namespace -- sets
+    #: this instead of reimplementing install/uninstall.
+    target_module = "torch.nn.functional"
 
     def __init__(self):
         self._installed = False
@@ -238,24 +246,44 @@ class OpOverride:
         log.log(level, "%s -> native fallback [%s]: %s", self.op_name, key, reason)
 
     # -- install / uninstall ------------------------------------------------
+    def _module(self):
+        """Resolve :attr:`target_module` against the bootstrapped ``torch``.
+
+        Raises ``ImportError`` naming the module when it is absent, because the
+        paged override's target only exists on newer torch builds and a bare
+        ``AttributeError`` there reads as a plugin bug rather than a version skew."""
+        torch = self.state.torch
+        path = self.target_module
+        if not path.startswith("torch"):
+            raise ValueError(f"target_module must be under 'torch': {path!r}")
+        obj = torch
+        for part in path.split(".")[1:]:
+            try:
+                obj = getattr(obj, part)
+            except AttributeError:
+                raise ImportError(
+                    f"{path} is not available in torch {torch.__version__}"
+                ) from None
+        return obj
+
     def install(self) -> None:
         if self._installed:
             return
         self.state = _bootstrap.bootstrap()
-        functional = self.state.torch.nn.functional
-        self._real = getattr(functional, self.op_name)
+        module = self._module()
+        self._real = getattr(module, self.op_name)
         real = self._real
 
         def wrapper(*args, **kwargs):
             return self._call(real, *args, **kwargs)
 
-        setattr(functional, self.op_name, wrapper)
+        setattr(module, self.op_name, wrapper)
         self._installed = True
 
     def uninstall(self) -> None:
         if not self._installed:
             return
-        setattr(self.state.torch.nn.functional, self.op_name, self._real)
+        setattr(self._module(), self.op_name, self._real)
         self._installed = False
 
     def _call(self, real, *args, **kwargs):
