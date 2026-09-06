@@ -89,8 +89,9 @@ TEST(AsmTargetRegistersTest, AddressableRangeIsSmallerThanThePhysicalFile) {
 
     EXPECT_TRUE(target.isAllocatable(RegType::V, 255));
     EXPECT_FALSE(target.isAllocatable(RegType::V, 256));
-    EXPECT_EQ(target.indexCount(RegType::S), 102u);
-    EXPECT_FALSE(target.isAllocatable(RegType::S, 102));
+    EXPECT_EQ(target.indexCount(RegType::S), 106u);
+    EXPECT_TRUE(target.isAllocatable(RegType::S, 105));
+    EXPECT_FALSE(target.isAllocatable(RegType::S, 106));
 }
 
 TEST(AsmTargetRegistersTest, NothingIsReservedUntilACallerSaysSo) {
@@ -232,10 +233,14 @@ TEST_F(PhysRegMatrixTest, ARunMayNotLeaveTheClass) {
     PhysRegMatrix matrix(target);
     const LiveRange range = rangeOf(0, 10);
 
-    EXPECT_TRUE(matrix.runAvailable(RegType::S, 100, 2, range));
-    EXPECT_FALSE(matrix.runAvailable(RegType::S, 101, 2, range));
-    EXPECT_FALSE(matrix.runAvailable(RegType::S, 100, 3, range));
-    EXPECT_EQ(matrix.findFreeRun(RegType::S, 200, range), std::nullopt);
+    // Read off the class, not written out, so this tests the invariant rather
+    // than one architecture's width.
+    const uint32_t count = target.indexCount(RegType::S);
+
+    EXPECT_TRUE(matrix.runAvailable(RegType::S, count - 2, 2, range));
+    EXPECT_FALSE(matrix.runAvailable(RegType::S, count - 1, 2, range));
+    EXPECT_FALSE(matrix.runAvailable(RegType::S, count - 2, 3, range));
+    EXPECT_EQ(matrix.findFreeRun(RegType::S, count + 1, range), std::nullopt);
 }
 
 TEST_F(PhysRegMatrixTest, ReservedUnitsAreNeverCandidates) {
