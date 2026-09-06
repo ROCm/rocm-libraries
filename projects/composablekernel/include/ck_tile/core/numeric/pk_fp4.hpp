@@ -340,6 +340,22 @@ CK_TILE_DEVICE T _from_f4x8_pkscale(uint32_t src, uint32_t scale)
     }
 }
 
+// Apply a per-lane scale through the hardware scale operand.
+// Opsel 0 gives lanes 0-15 byte 0 of their own register and Opsel 1 gives lanes 16-31 byte 1 of
+// theirs, so running each half under its own Opsel avoids any cross-lane read.
+// This serves the float-scale conversions; callers already holding a packed scale use
+// pk4scaled_type_convert instead.
+template <typename T8>
+CK_TILE_DEVICE T8 _from_f4x8_lane_scale(uint32_t src, float scale)
+{
+    Packed4Scale_E8M0 pkscale(0, 0, scale, scale);
+
+    if(__lane_id() < 16)
+        return _from_f4x8_pkscale<T8, 0>(src, pkscale.data());
+    else
+        return _from_f4x8_pkscale<T8, 1>(src, pkscale.data());
+}
+
 template <typename T>
 CK_TILE_DEVICE T _from_f4(pk_fp4_raw_t src, float scale)
 {
@@ -347,9 +363,7 @@ CK_TILE_DEVICE T _from_f4(pk_fp4_raw_t src, float scale)
     using BaseT = typename vector_traits<T>::scalar_type;
     using T8    = ext_vector_t<BaseT, 8>;
 
-    Packed4Scale_E8M0 pkscale(0, 0, 0, scale);
-
-    T8 vec8 = _from_f4x8_pkscale<T8, 0>(static_cast<uint32_t>(src), pkscale.data());
+    T8 vec8 = _from_f4x8_lane_scale<T8>(static_cast<uint32_t>(src), scale);
     if constexpr(N == 1)
         return detail::get_from_lane<0>(vec8);
     else if constexpr(N == 2)
@@ -364,9 +378,7 @@ CK_TILE_DEVICE T _from_f4(pk_fp4x4_t src, float scale)
     using BaseT = typename vector_traits<T>::scalar_type;
     using T8    = ext_vector_t<BaseT, 8>;
 
-    Packed4Scale_E8M0 pkscale(0, 0, 0, scale);
-
-    return _from_f4x8_pkscale<T8, 0>(bit_cast<uint32_t>(src), pkscale.data());
+    return _from_f4x8_lane_scale<T8>(bit_cast<uint32_t>(src), scale);
 }
 
 template <typename T, bool stochastic_rounding = false>
