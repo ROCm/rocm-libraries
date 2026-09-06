@@ -318,6 +318,12 @@ class TestScanSpec:
         assert spec.value_splits == value_splits
         assert spec.tile.block_size == block
         assert spec.tile.scan_atom_m == scan_atom_m
+        if workgroups <= 96:
+            assert spec.tile.pad_dk == 16
+            assert spec.tile.pad_cb == 0
+            assert spec.wave_local_intermediates
+        else:
+            assert not spec.wave_local_intermediates
         assert is_valid_scan_spec(spec, arch=ARCH)[0]
         assert is_valid_spec(spec.prep, arch=ARCH)[0]
 

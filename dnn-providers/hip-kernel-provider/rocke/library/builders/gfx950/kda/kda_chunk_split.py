@@ -482,6 +482,83 @@ def bench(spec, B, H, T, warmup=10, iters=30, split=True):
     return ms
 
 
+def bench_scan_ablation(B, H, T, warmup=20, iters=100, samples=5):
+    """Reproducible four-way production scan ablation.
+
+    Reports the median of independent event-timed blocks so transient clock or
+    neighboring-workload outliers cannot define the result.
+    """
+    from kernels.gfx950.kda_chunkwise import tuned_kda_chunk_scan_spec
+
+    DK, DV = 128, 128
+    C = 32
+    BH, NC = B * H, T // C
+    q, k, v, g, beta = make_inputs(B, H, T, DK, DV)
+    v_token = v.permute(0, 2, 1, 3).contiguous()
+    scale = DK**-0.5
+    gen = torch.Generator(device="cuda").manual_seed(0)
+    h0 = torch.randn(BH, DV, DK, dtype=torch.float32, device="cuda", generator=gen)
+    nt = BH * NC
+    ws = prep_mod.alloc_tiles(nt, prep_spec_of(tuned_kda_chunk_scan_spec(BH)))
+    ht = torch.zeros(BH, DV, DK, dtype=torch.float32, device="cuda")
+
+    def prep_once(spec):
+        pspec = prep_spec_of(spec)
+        prep_mod.run_prep(
+            pspec,
+            q.view(nt, C * DK),
+            k.view(nt, C * DK),
+            g.view(nt, C * DK),
+            beta.view(nt, C),
+            ws,
+            scale,
+        )
+
+    cases = (
+        ("packed/no-h0", dict(token_major_io=False, has_initial_state=False), None),
+        ("token/no-h0", dict(token_major_io=True, has_initial_state=False), None),
+        ("packed/h0", dict(token_major_io=False, has_initial_state=True), h0),
+        ("token/h0", dict(token_major_io=True, has_initial_state=True), h0),
+    )
+    print(f"scan ablation B={B} H={H} T={T} ({BH} streams, {NC} chunks)")
+    results = {}
+    for label, kw, h0t in cases:
+        spec = tuned_kda_chunk_scan_spec(BH, **kw)
+        o = (
+            torch.empty_like(v_token)
+            if kw["token_major_io"]
+            else torch.empty(nt, C * DV, dtype=torch.bfloat16, device="cuda")
+        )
+        prep_once(spec)
+
+        def do_scan():
+            run_scan(
+                spec,
+                ws,
+                v_token if kw["token_major_io"] else v.view(nt, C * DV),
+                o,
+                ht,
+                BH,
+                NC,
+                h0=h0t,
+                batch=B,
+                heads=H,
+                tseq=T,
+            )
+
+        blocks = [
+            time_launches(do_scan, warmup=warmup, iters=iters) for _ in range(samples)
+        ]
+        median_ms = sorted(blocks)[len(blocks) // 2]
+        results[label] = median_ms
+        sample_us = ", ".join(f"{value * 1000:.2f}" for value in blocks)
+        print(
+            f"  {label:14s} median={median_ms * 1000:.2f} us "
+            f"samples=[{sample_us}]  {spec.kernel_name()}"
+        )
+    return results
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shapes", default="8x8x1024,8x16x2048,32x16x2048")

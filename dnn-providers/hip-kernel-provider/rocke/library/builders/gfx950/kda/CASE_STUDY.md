@@ -304,3 +304,49 @@ successful pipeline must reduce VMEM-wait attribution without introducing
 scratch or dropping the intended resident-wave count. The remaining bottleneck
 after that transition is LDS operand readiness and barrier balance; padding
 sweeps are shape-sensitive and should not be promoted from one trace alone.
+
+## 10. Production B1/H12/T4096 follow-up
+
+The token-major, nonzero-`h0` production scan started at `277.36 us`. The
+follow-up applied three correctness-gated changes:
+
+- Batch/head and token-stride invariants are bound once per workgroup. The
+  token-major penalty fell from roughly `9.7 us` to about `1 us`.
+- The value-split FP32 initial state is staged in LDS and consumed by a peeled
+  chunk zero. The prior roughly `52 us` h0 penalty became noise.
+- The underfilled selector uses PDK16/PCB0 plus wave-local waits for the
+  residual and Vt intermediates. Decay scaling is grouped ahead of the state
+  MFMAs to shorten live ranges.
+
+On MI355X n07, the cleaned production candidate measured `205.52 us` in the
+final gate. The documented five-block reproduction produced a `205.82 us`
+median (`205.56` to `205.89 us`), while earlier blocks reached the `204.x us`
+range. The kernel uses `204 VGPR`, `32 AGPR`, `43 SGPR`, `60,928 B` LDS, and
+zero scratch. The focused gate passed 71 spec/dispatch tests (plus 41 subtests)
+and all 44 GPU numeric tests.
+
+Reproduce the reported four-way scan matrix from `rocke/library` with:
+
+```bash
+python -m benchmarks.gfx950.kda.benchmark_chunkwise \
+  --production-ablation --warmup 20 --iters 100 --samples 5
+```
+
+Use the median `token/h0` line. Keep the GPU otherwise idle and record the
+kernel name and HSACO resource metadata with the timing; individual blocks can
+vary by roughly one microsecond with clock state.
+
+The `<200 us` target was not reached by this formulation. A source-correlated
+WaveScope capture attributed `56.9%` of remaining stalls to LDS operand waits,
+versus `7.4%` VMEM wait and `9.2%` barrier stall. Its highest repeated
+`lgkmcnt` waits cost approximately `54`, `52`, and `49` cycles per hit.
+Direct-to-LDS, B64/vs8, compact XOR, full and phased fragment prefetch,
+double-buffered tiles, packed V, independent state/Vt padding, scheduler hints,
+and IR optimization all failed to beat the retained schedule. Even an unsafe
+diagnostic with the final shared-tile commit barrier removed measured
+`205.12 us`; therefore a safe static double buffer cannot close the gap by
+synchronization removal alone.
+
+Further progress requires changing the state-mirror/MFMA operand formulation
+to remove LDS round trips, or introducing a different parallel scan algorithm.
+Those are algorithm changes rather than another schedule knob in this kernel.
