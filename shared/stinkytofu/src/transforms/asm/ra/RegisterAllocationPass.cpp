@@ -28,6 +28,8 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -154,6 +156,19 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
     // which keeps every existing report byte-identical.
     for (const AllocationRule& rule : rules.all()) {
         text += " rule[" + std::string(rule.name) + "=" + ruleStatusName(rule.status) + "]";
+    }
+    // The live-ins left unpinned. Named because moving them rests on nothing
+    // having defined them, which holds only while lifting saw every definition.
+    // Silent when there are none, like the rules above.
+    const std::span<const SSAValueID> undefined = constraints.undefinedLiveIns();
+    if (!undefined.empty()) {
+        text += " undefinedLiveIn[";
+        for (size_t i = 0; i < undefined.size(); ++i) {
+            text += (i > 0 ? " %" : "%") + std::to_string(undefined[i]);
+            if (const std::optional<RegKey> hint = constraints.hintFor(undefined[i]))
+                text += "=" + regKeyToString(*hint);
+        }
+        text += "]";
     }
     return text;
 }
