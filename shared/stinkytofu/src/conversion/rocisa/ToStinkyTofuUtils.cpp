@@ -1624,6 +1624,18 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
                 kSigTotalVgprsMetaKey,
                 static_cast<uint64_t>(stinkySig->kernelDescriptor.totalVgprs));
 
+            // And where the dispatch stops filling scalars, which tells a live-in
+            // the hardware wrote from one merely read early. Absent when the
+            // descriptor does not settle the line, which keeps every live-in
+            // pinned.
+            if (const std::optional<uint32_t> dispatchFilled =
+                    stinkytofu::settledDispatchFilledSgprCount(
+                        stinkySig->kernelDescriptor.numSgprPreload,
+                        stinkySig->kernelDescriptor.sgprWorkGroup)) {
+                stinkyModule->getFunction().setMetaData(kSigDispatchFilledSgprsMetaKey,
+                                                        static_cast<uint64_t>(*dispatchFilled));
+            }
+
             // Set optimization config
             std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};
             std::array<int, 2> sg = {moduleOptions.SubGroup0, moduleOptions.SubGroup1};
