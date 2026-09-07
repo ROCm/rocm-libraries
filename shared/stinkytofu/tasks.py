@@ -603,7 +603,12 @@ def asan(c, build_dir=None, jobs=None, clean=False, rocm_path=None):
     anywhere in the call chain are caught, not just in test code.
 
     Run the test suite separately, e.g.:
-        cd build-asan && ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ctest --output-on-failure
+        cd build-asan && ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ctest --output-on-failure -LE python
+
+    The `-LE python` excludes the Python-binding tests: loading an
+    ASan-instrumented .so into a Python interpreter that wasn't itself
+    started with the ASan runtime preloaded fails with "undefined symbol:
+    __asan_option_detect_stack_use_after_return".
     """
     bld = Path(build_dir).resolve() if build_dir else (ROOT_PATH / "build-asan")
 
