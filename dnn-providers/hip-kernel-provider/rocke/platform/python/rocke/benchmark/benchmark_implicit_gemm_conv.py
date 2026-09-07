@@ -2537,9 +2537,17 @@ def _run_wgrad_sweep(
         ws_nbytes_cur = 0
 
         for combo, spec, resolved_split_k, s1_kernel, s2_kernel in pending_2s:
-            tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue, _ = (
-                combo
-            )
+            (
+                tile_m,
+                tile_n,
+                tile_k,
+                warp_m,
+                warp_n,
+                warp_tile_mn,
+                pipeline,
+                epilogue,
+                _,
+            ) = combo
             warp_tile_k = spec.warp_tile_k
 
             s1_art = artifact_map_2s.get(s1_kernel.name)
@@ -2603,9 +2611,7 @@ def _run_wgrad_sweep(
                 "ws_bytes": ws_nbytes,
                 "dw_bytes": dW_t.nbytes,
             }
-            s1_cfg = LaunchConfig(
-                grid=s1_grid, block=(spec.block_size, 1, 1), stream=0
-            )
+            s1_cfg = LaunchConfig(grid=s1_grid, block=(spec.block_size, 1, 1), stream=0)
             s2_cfg = LaunchConfig(grid=s2_grid, block=s2_block, stream=0)
 
             def _launch_two_stage(
