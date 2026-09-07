@@ -149,10 +149,21 @@ class State:
         "engine_name",
         "dtype_map",
         "select_mode",
+        "tune_mode",
+        "tune_config_path",
     )
 
     def __init__(
-        self, torch, hipdnn, handle, engine_id, engine_name, dtype_map, select_mode
+        self,
+        torch,
+        hipdnn,
+        handle,
+        engine_id,
+        engine_name,
+        dtype_map,
+        select_mode,
+        tune_mode="follow_torch",
+        tune_config_path=None,
     ):
         self.torch = torch
         self.hipdnn = hipdnn
@@ -161,6 +172,8 @@ class State:
         self.engine_name = engine_name
         self.dtype_map = dtype_map
         self.select_mode = select_mode
+        self.tune_mode = tune_mode
+        self.tune_config_path = tune_config_path
 
 
 _state = None  # cached State after the first successful bootstrap()
@@ -191,18 +204,29 @@ def _provider_sos() -> list:
 
 def _torch_backend_path(torch) -> str:
     site = os.path.dirname(os.path.dirname(torch.__file__))
+    # The libraries package has TWO spellings and the layout decides which:
+    # the current whl-multi-arch index ships one arch-agnostic
+    # "_rocm_sdk_libraries", while older per-arch indexes (e.g. v2-staging)
+    # ship "_rocm_sdk_libraries_<arch>". A "_rocm_sdk_libraries_*" glob matches
+    # only the second -- on a multi-arch nightly it finds nothing and the
+    # bootstrap reports "is this a ROCm build of torch?" about a perfectly good
+    # ROCm torch. Match both, exactly as dnn-benchmarking's setup_env.py does
+    # when it resolves this same prefix.
     pattern = os.environ.get(
         "HIPDNN_TORCH_BACKEND_GLOB",
-        os.path.join(site, "_rocm_sdk_libraries_*", "lib", "libhipdnn_backend.so"),
+        os.path.join(site, "_rocm_sdk_libraries*", "lib", "libhipdnn_backend.so"),
     )
-    hits = glob.glob(pattern)
+    hits = sorted(glob.glob(pattern))
     if not hits:
         raise BootstrapError(
             f"Could not find torch's bundled libhipdnn_backend.so (looked for "
             f"{pattern!r}). Is this a ROCm build of torch? Override the search "
             "with HIPDNN_TORCH_BACKEND_GLOB."
         )
-    return hits[0]
+    # Prefer the exact arch-agnostic package when both are present, so the
+    # choice is deterministic rather than filesystem-order dependent.
+    exact = os.path.join(site, "_rocm_sdk_libraries", "lib", "libhipdnn_backend.so")
+    return exact if exact in hits else hits[0]
 
 
 _dll_dir_cookies = (
@@ -329,6 +353,49 @@ def bootstrap() -> State:
             "policy to let hipDNN select across all loaded engines."
         )
 
+    # Autotuning. The DEFAULT trigger is PyTorch's own knob:
+    #
+    #     torch.backends.cudnn.benchmark = True
+    #
+    # which already means "measure the available algorithms for this shape, keep
+    # the fastest, reuse it for later calls of the same shape" -- exactly what
+    # hipDNN's exhaustive sweep plus its exact-match ranking cache provide. A
+    # model that already sets the flag (most convnet/training scripts do) gets
+    # tuned hipDNN selection with no hipDNN-specific code. The flag is read per
+    # graph build, not here, so toggling it at runtime works (see
+    # OpOverride._tuning_requested).
+    #
+    # HIPDNN_TORCH_TUNE overrides that flag in BOTH directions:
+    #   unset  -- follow torch.backends.cudnn.benchmark (the default)
+    #   'tune' -- always sweep, whatever the flag says
+    #   'off'  -- never sweep, whatever the flag says
+    #
+    # Reuse needs no setting at all: the exact-match cache is keyed on graph +
+    # device and is consulted by every later run. Steady state is "tune once,
+    # then run with the flag off".
+    tune_mode = os.environ.get("HIPDNN_TORCH_TUNE")
+    if tune_mode is None:
+        tune_mode = "follow_torch"
+    elif tune_mode == "off":
+        tune_mode = "off_explicit"  # distinct from unset: overrides the flag
+    elif tune_mode != "tune":
+        raise BootstrapError(
+            f"HIPDNN_TORCH_TUNE={tune_mode!r} is not valid; use 'tune' (always run "
+            "an exhaustive sweep per graph and cache the ranking) or 'off' (never "
+            "sweep). Leave it unset to follow torch.backends.cudnn.benchmark."
+        )
+    if tune_mode == "tune" and select_mode == "force":
+        # A forced engine is a candidate set of one, so a sweep measures a field
+        # of one and the cache write is refused as a partial sweep anyway.
+        raise BootstrapError(
+            "HIPDNN_TORCH_TUNE=tune is incompatible with HIPDNN_TORCH_SELECT=force: "
+            "pinning one engine leaves the sweep a single candidate, and the "
+            "exact-match cache refuses a partial sweep "
+            "(AutotuneCacheWriteOutcome.NOT_ATTEMPTED_PARTIAL_SWEEP). Tune under "
+            "the 'default' policy, then pin for attribution on a later run."
+        )
+    tune_config_path = os.environ.get("HIPDNN_TORCH_TUNE_CONFIG") or None
+
     providers = _provider_sos()  # validate the cheap, most-common miss first
 
     import torch  # deferred: importing this module must not require torch
@@ -364,6 +431,8 @@ def bootstrap() -> State:
         engine_name=engine_name,
         dtype_map=dtype_map,
         select_mode=select_mode,
+        tune_mode=tune_mode,
+        tune_config_path=tune_config_path,
     )
     return _state
 

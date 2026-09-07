@@ -67,6 +67,22 @@ def _engine_name(hipdnn, engine_id) -> str:
     return hex(engine_id & 0xFFFFFFFFFFFFFFFF)
 
 
+def _ws(graph, getter) -> int:
+    """A workspace getter's value, or 0 when it does not apply / is unbound.
+
+    The plan-spec and compiled-plan paths each have their own sizer, and a
+    getter for the path not taken may be absent or may raise rather than
+    return 0. Callers want the max across both, so a miss must read as 0.
+    """
+    fn = getattr(graph, getter, None)
+    if fn is None:
+        return 0
+    try:
+        return int(fn() or 0)
+    except Exception:  # noqa: BLE001 -- wrong path for this getter
+        return 0
+
+
 class NotApplicable(RuntimeError):
     """Internal: the engine cannot serve this graph/shape. Always caught and
     turned into a native fallback -- never escapes to the model."""
@@ -96,6 +112,7 @@ class OpOverride:
         self._census = {}  # census-key -> {"aot": int, "native": int, **extras}
         self._fallbacks = {}  # reason -> count (the "gaps" tally)
         self._last_engine = None  # winning engine name from the last _cached_graph
+        self._tune_log = []  # one record per exhaustive sweep actually run
         self.state = None  # bootstrap.State, set on install()
 
     # -- convenience --------------------------------------------------------
@@ -114,6 +131,40 @@ class OpOverride:
         # float32->f32, float16->f16, bfloat16->bf16, float8_e4m3fn->f8_e4m3fn
         name = name.replace("bfloat", "bf").replace("float", "f")
         return name
+
+    def _tuning_requested(self) -> bool:
+        """Whether this graph should be swept before it is first executed.
+
+        PyTorch already has the exact concept: ``torch.backends.cudnn.benchmark``
+        means "spend time measuring the available algorithms for this shape, pick
+        the fastest, and cache it for later calls of the same shape". hipDNN's
+        exhaustive sweep plus its exact-match ranking cache is that same contract,
+        so the flag drives it and models that already opt in get tuned selection
+        with no hipDNN-specific code:
+
+            torch.backends.cudnn.benchmark = True   # sweeps, caches
+
+        It is read HERE, per graph build, not once at bootstrap -- the flag is
+        routinely toggled at runtime (and around a warmup region), and reading it
+        early would freeze whatever value happened to be set at import.
+
+        ``HIPDNN_TORCH_TUNE`` overrides the flag in both directions, for a run
+        that must tune without touching the model's own backend settings (or must
+        not tune despite them).
+        """
+        st = self.state
+        # A forced engine is a candidate set of one: the sweep would measure a
+        # field of one and the cache write is refused as a partial sweep.
+        if st.select_mode != "default":
+            return False
+        if st.tune_mode == "tune":
+            return True
+        if st.tune_mode == "off_explicit":
+            return False
+        try:
+            return bool(st.torch.backends.cudnn.benchmark)
+        except Exception:  # noqa: BLE001 -- no cudnn shim on this build
+            return False
 
     # -- graph build / execute (shared across every op) ---------------------
     def _cached_graph(self, key, build, describe):
@@ -167,11 +218,28 @@ class OpOverride:
             if not ranked:
                 raise NotApplicable(f"no engine applicable for {describe}")
 
-            if st.select_mode == "default":
-                # Hand the graph to hipDNN and let it select across every loaded
-                # engine. The backend Config policy (HIPDNN_HEUR_CONFIG_PATH)
-                # participates here, so a rule file can decide the engine per
-                # graph/shape without any code change.
+            # THE TWO PATHS ARE MUTUALLY EXCLUSIVE. hipDNN offers either the
+            # compiled-plan path (create_execution_plans -> build_plans) or the
+            # plan-spec path (add_engine*() -> build_plans(ALL) -> autotune);
+            # calling add_all_engines() after create_execution_plans() is
+            # rejected outright. So tuning REPLACES heuristic selection here, it
+            # does not follow it.
+            #
+            # The sweep itself cannot run at this point -- it needs the real
+            # device pointers, which only exist at execute time -- so it is
+            # deferred to the first _execute() for this graph (see _maybe_tune).
+            tuning = self._tuning_requested()
+            if tuning:
+                # Plan-spec path: collect every applicable engine as a candidate.
+                err = g.add_all_engines()
+                if err.is_bad():
+                    raise NotApplicable(f"add_all_engines: {err.get_message()}")
+            elif st.select_mode == "default":
+                # Compiled-plan path. Hand the graph to hipDNN and let it select
+                # across every loaded engine. The backend Config policy
+                # (HIPDNN_HEUR_CONFIG_PATH) participates here, so a rule file --
+                # including one a previous tuning run wrote -- can decide the
+                # engine per graph/shape without any code change.
                 err = g.create_execution_plans([st.hipdnn.HeuristicMode.FALLBACK])
                 if err.is_bad():
                     raise NotApplicable(f"create_execution_plans: {err.get_message()}")
@@ -186,14 +254,28 @@ class OpOverride:
                         f"create_execution_plan_ext: {err.get_message()}"
                     )
 
-            err = g.check_support()
-            if err.is_bad():
-                raise NotApplicable(f"check_support: {err.get_message()}")
-            err = g.build_plans()
-            if err.is_bad():
-                raise NotApplicable(f"build_plans: {err.get_message()}")
+            if tuning:
+                # NO build_plans() HERE, deliberately. On the plan-spec path
+                # autotune() compiles the specs itself as it benchmarks them --
+                # that is the whole call. Adding build_plans() fails with "No
+                # execution plans to build. Call create_execution_plans() first.",
+                # because build_plans belongs to the OTHER path. The canonical
+                # order is samples/autotune.py: get_engine_configs ->
+                # add_all_engines -> get_estimated_max_workspace_size -> autotune.
+                # check_support() is likewise compiled-plan-only; an unsupported
+                # candidate simply fails to compile and drops out of the ranking.
+                pass
+            else:
+                err = g.check_support()
+                if err.is_bad():
+                    raise NotApplicable(f"check_support: {err.get_message()}")
+                err = g.build_plans()
+                if err.is_bad():
+                    raise NotApplicable(f"build_plans: {err.get_message()}")
 
             # Ground-truth winner of the (built) plan -- the engine that will run.
+            # Under tuning this is provisional; _maybe_tune re-reads it after the
+            # sweep leaves the measured winner active.
             try:
                 engine = _engine_name(st.hipdnn, g.get_execution_plan_engine_id())
             except Exception:  # noqa: BLE001 -- fall back to the pinned name
@@ -202,20 +284,144 @@ class OpOverride:
             self._nope_cache[key] = str(na)
             raise
 
-        entry = {"graph": g, "ws": g.get_workspace_size(), "engine": engine}
+        entry = {
+            "graph": g,
+            # Under tuning the workspace must cover EVERY candidate, not just the
+            # heuristic pick: a short workspace holds an applicable engine out of
+            # the timing loop while leaving it a live candidate for a later run,
+            # and the cache write is then refused as a partial sweep. The two
+            # getters cover the two paths -- get_estimated_max_workspace_size()
+            # sizes the plan-spec path this build used, get_autotune_workspace_size()
+            # the compiled-plan path -- so take the max and let a zero from the
+            # inapplicable one fall away.
+            "ws": (
+                max(_ws(g, "get_estimated_max_workspace_size"),
+                    _ws(g, "get_autotune_workspace_size"),
+                    _ws(g, "get_workspace_size"))
+                if tuning
+                else g.get_workspace_size()
+            ),
+            "engine": engine,
+            "tuned": not tuning,  # False => _execute runs the sweep once
+        }
         self._graph_cache[key] = entry
         self._last_engine = engine
         return entry
 
-    def _execute(self, entry, variant_pack, device) -> None:
-        """Allocate the workspace (if any) and run the pinned plan. ``variant_pack``
-        maps uid -> device pointer (int); the workspace is an int pointer, 0 == none."""
+    def _maybe_tune(self, entry, variant_pack, ws_ptr) -> None:
+        """Run the exhaustive sweep once for this graph, then mark it tuned.
+
+        This is the whole point of tune mode: hipDNN benchmarks every applicable
+        engine on the REAL tensors, ranks them on ``robust_time_ms``, writes that
+        order to the exact-match cache (keyed on graph + device), and leaves the
+        winning plan active. Every later run of the same graph -- including a
+        later process with ``HIPDNN_TORCH_TUNE`` unset -- inherits the ranking
+        without re-measuring.
+
+        Failure is deliberately non-fatal: a graph that cannot be swept still has
+        a built heuristic plan, so it executes as it would have without tuning.
+        """
         st = self.state
-        ws = entry["ws"]
-        workspace = (
-            st.torch.empty(ws, dtype=st.torch.uint8, device=device) if ws > 0 else None
+        entry["tuned"] = True  # once, whatever happens -- never re-sweep
+        cfg = st.hipdnn.AutotuneConfig()
+        storage = st.hipdnn.AutotuneStorageConfig()
+        if st.tune_config_path:
+            # Also emit the portable JSON rules file. The exact-match cache is
+            # keyed on graph+device and is the fast path; this file is the
+            # shareable artifact, replayable via HIPDNN_HEUR_CONFIG_PATH.
+            storage.file_path = st.tune_config_path
+            storage.delete_all_existing_file_content = False
+        try:
+            results, outcome = entry["graph"].autotune_exhaustive_sweep(
+                st.handle, variant_pack, ws_ptr, entry["ws"], cfg, storage
+            )
+        except Exception as ex:  # noqa: BLE001 -- a failed sweep must not break the model
+            # RECORD it, do not merely log it. At a raised log level the warning is
+            # invisible and tuning_report() then prints nothing, which reads as
+            # "tuning was never requested" rather than "the sweep failed".
+            self._tune_log.append(
+                {
+                    "op": self.op_name,
+                    "outcome": f"SWEEP-FAILED: {type(ex).__name__}: {ex}",
+                    "winner": entry.get("engine", "?"),
+                    "candidates": 0,
+                    "benchmarked": 0,
+                    "best_ms": None,
+                    "ranking": [],
+                }
+            )
+            log.warning("%s: exhaustive sweep failed, using heuristic plan: %s",
+                        self.op_name, ex)
+            return
+
+        ranked = [r for r in results if r.succeeded]
+        ranked.sort(key=lambda r: r.robust_time_ms)
+        if ranked:
+            try:
+                entry["engine"] = _engine_name(
+                    st.hipdnn, entry["graph"].get_execution_plan_engine_id()
+                )
+                self._last_engine = entry["engine"]
+            except Exception:  # noqa: BLE001
+                pass
+            # Re-read: the winning plan is now active and may want more workspace
+            # than the heuristic pick did.
+            entry["ws"] = max(entry["ws"], entry["graph"].get_workspace_size())
+        self._tune_log.append(
+            {
+                "op": self.op_name,
+                "outcome": getattr(outcome, "name", str(outcome)),
+                "winner": entry["engine"],
+                "candidates": len(results),
+                "benchmarked": sum(1 for r in results if r.benchmarked),
+                "best_ms": ranked[0].robust_time_ms if ranked else None,
+                "ranking": [(r.engine_name, r.robust_time_ms) for r in ranked[:8]],
+            }
         )
-        ws_ptr = workspace.data_ptr() if workspace is not None else 0
+        # A refused write means later runs will NOT inherit this ranking, which
+        # silently turns "tuned" into "tuned once, per process". Say so loudly.
+        name = getattr(outcome, "name", str(outcome))
+        if name in ("WRITTEN", "UNCHANGED"):
+            log.info("%s: swept %d candidates, winner=%s (%s)",
+                     self.op_name, len(results), entry["engine"], name)
+        else:
+            log.warning(
+                "%s: swept %d candidates but the ranking was NOT cached (%s) -- "
+                "later runs will re-decide from the heuristic",
+                self.op_name, len(results), name)
+
+    def _workspace(self, entry, device):
+        """The cached workspace tensor for this graph, grown on demand.
+
+        CACHED, NOT PER-CALL. A fresh ``torch.empty`` on every execute charges an
+        allocation to every single call -- caching-allocator hit or not -- while
+        the backend it is being compared against allocates nothing. On a hot
+        attention shape that overhead is a visible fraction of the kernel and it
+        lands entirely on hipDNN's side of any A/B. The buffer is owned by the
+        graph-cache entry, so it lives exactly as long as the plan that needs it.
+        """
+        want = entry["ws"]
+        if want <= 0:
+            return None, 0
+        buf = entry.get("ws_buf")
+        if buf is None or buf.numel() < want or buf.device != device:
+            buf = self.state.torch.empty(
+                want, dtype=self.state.torch.uint8, device=device
+            )
+            entry["ws_buf"] = buf
+        return buf, buf.data_ptr()
+
+    def _execute(self, entry, variant_pack, device) -> None:
+        """Run the pinned plan. ``variant_pack`` maps uid -> device pointer (int);
+        the workspace is an int pointer, 0 == none."""
+        st = self.state
+        _, ws_ptr = self._workspace(entry, device)
+        if not entry.get("tuned", True):
+            # First execution of this graph under tune mode: sweep on these very
+            # pointers, then fall through and execute with the winner active.
+            # The sweep may raise the workspace requirement, so re-resolve after.
+            self._maybe_tune(entry, variant_pack, ws_ptr)
+            _, ws_ptr = self._workspace(entry, device)
         err = entry["graph"].execute(st.handle, variant_pack, ws_ptr)
         if err.is_bad():
             raise NotApplicable(f"execute: {err.get_message()}")
