@@ -102,6 +102,11 @@ private:
                 + ", output rank=" + std::to_string(outputDims.size()) + ")");
         }
 
+        if(inputDims.size() > 5)
+        {
+            throw std::invalid_argument("Reduction supports tensors with at most 5 dimensions");
+        }
+
         bool hasReducedDim = false;
         for(size_t i = 0; i < inputDims.size(); ++i)
         {

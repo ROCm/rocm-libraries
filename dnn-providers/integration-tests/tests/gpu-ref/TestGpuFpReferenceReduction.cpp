@@ -12,7 +12,7 @@ using namespace gpu_reduction_ref_test;
 
 // --- Valid configurations ---
 
-TEST(TestGpuReductionRefValidation, AcceptsValidParams)
+TEST(TestGpuReductionRefValidation, AcceptsValidParamsTensorRanks1to5)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -82,7 +82,7 @@ TEST(TestGpuReductionRefValidation, AcceptsValidParamsPreExistingSizeOneAxis)
     EXPECT_NO_THROW(GpuFpReferenceReduction::reduce<float>(x, y, ReductionMode::ADD));
 }
 
-TEST(TestGpuReductionRefValidation, AcceptsDifferentIOLayouts)
+TEST(TestGpuReductionRefValidation, AcceptsValidParamsDifferentIOLayouts)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -92,6 +92,16 @@ TEST(TestGpuReductionRefValidation, AcceptsDifferentIOLayouts)
 }
 
 // --- Validation throw paths ---
+
+TEST(TestGpuReductionRefValidation, ThrowsOnTensorRankGreaterThan5)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<float> x({2, 4, 8, 8, 8, 8});
+    Tensor<float> y({2, 1, 8, 1, 8, 1});
+
+    EXPECT_THROW(GpuFpReferenceReduction::reduce<float>(x, y, ReductionMode::ADD),
+                 std::invalid_argument);
+}
 
 TEST(TestGpuReductionRefValidation, ThrowsOnOutputRankMismatch)
 {
