@@ -189,6 +189,14 @@ if(HIPSPARSELT_ENABLE_HIP)
     if(HIPSPARSELT_ENABLE_DEVICE)
         include(hipblaslt_codegen)
         set(_hipsparselt_tensile_out "${CMAKE_BINARY_DIR}/Tensile")
+        set(_hipsparselt_codegen_host_sanitizer_args "")
+        if(HIPSPARSELT_ENABLE_ASAN
+                OR THEROCK_SANITIZER STREQUAL "ASAN"
+                OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+            list(APPEND _hipsparselt_codegen_host_sanitizer_args HOST_ASAN)
+        elseif(THEROCK_SANITIZER STREQUAL "TSAN")
+            list(APPEND _hipsparselt_codegen_host_sanitizer_args HOST_TSAN)
+        endif()
         set(_hipsparselt_codegen_product_args "")
         if(HIPSPARSELT_ENABLE_ASAN)
             list(APPEND _hipsparselt_codegen_product_args ASAN ON)
@@ -204,6 +212,7 @@ if(HIPSPARSELT_ENABLE_HIP)
             OUTPUT_DIR "${_hipsparselt_tensile_out}"
             CODEGEN_ROOT "${HIPBLASLT_TENSILELITE_PATH}"
             PYTHON_EXECUTABLE "${Python_EXECUTABLE}"
+            ${_hipsparselt_codegen_host_sanitizer_args}
             ${_hipsparselt_codegen_product_args}
         )
 
