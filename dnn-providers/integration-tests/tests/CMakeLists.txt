@@ -33,6 +33,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuConvolutionFwdPlan.cpp
     TestGpuSdpaFwdSignatureKey.cpp
     TestGpuSdpaFwdPlan.cpp
+    TestPagedKvGather.cpp
     TestGpuRMSNormSignatureKey.cpp
     TestGpuRMSNormPlan.cpp
     TestReferenceGraphExecutorFactory.cpp
