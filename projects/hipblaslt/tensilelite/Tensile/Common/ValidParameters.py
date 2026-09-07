@@ -27,6 +27,7 @@ from functools import lru_cache
 from typing import Any, Union
 
 from .Architectures import SUPPORTED_ISA
+from .LdsPaddingLimits import ldsBlockValues, ldsPadValues
 from .Types import IsaVersion
 
 ################################################################################
@@ -145,6 +146,7 @@ validLdsBlockSizePerPad = [-1, 0, 16, 32, 64, 96, 128, 192, 256, 320, 384, 448, 
                            1728, 1792, 1856, 1920, 1984, 2048, 2176, 2304, 2432, 2560, 2688, 2816, 2944,
                            3072, 3200, 3328, 3456, 3584, 3712, 3840, 3968, 4096, 4352, 4608, 4864, 5120,
                            5376, 5632, 6144, 6656, 7168, 7680, 8192]
+validLdsPad = [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64]
 
 @lru_cache
 def makeValidWorkGroups():
@@ -1011,9 +1013,9 @@ validParameters = { # we need to make sure this matches develop
     # performance so this has been deprecated and probably doesn't work
     # -1 means use same padding as the VectorWidth if TLU=0 else 0.  (Padding only helps when transpose is required)
     # With MatrixInstruciton: -1 means max(GRVW,MIInput) if TLU=0
-    "LdsPadA": [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
+    "LdsPadA": validLdsPad,
     "LdsPadMXSA": [ -1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
-    "LdsPadB": [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
+    "LdsPadB": validLdsPad,
     "LdsPadMXSB": [ -1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
     "LdsPadMetadata": [-1, 0, 1, 2, 3, 4, 8],
     # Padding boundary for LDS. defines block-size for pad insertion. for every 'LdsBlockSizePerPad' bytes, LDS padding (pad value from LdsPad parameter)
@@ -1234,6 +1236,28 @@ validParameters = { # we need to make sure this matches develop
     # 3: Use iterate-mode for both A and B
     "TDMIterateMode": [-1, 0, 1, 2, 3]
 }
+
+
+def validParametersForArch(gfxName: str) -> dict:
+    """validParameters, widened where an architecture needs it.
+
+    Only gfx1250 resolves LdsPad and LdsBlockSizePerPad through a solver, and
+    only a config targeting it may name what that solver reports. Every other
+    architecture reads the table above, so a yaml for one can still name only
+    what it could before.
+
+    Returns a new dict rather than editing the table, which is a module-level
+    object every other reader shares.
+    """
+    if not gfxName.startswith("gfx1250"):
+        return validParameters
+    wider = dict(validParameters)
+    pads = sorted(set(validLdsPad) | ldsPadValues())
+    blocks = sorted(set(validLdsBlockSizePerPad) | ldsBlockValues())
+    wider["LdsPadA"] = wider["LdsPadB"] = pads
+    wider["LdsBlockSizePerPadA"] = wider["LdsBlockSizePerPadB"] = blocks
+    return wider
+
 
 newMIValidParameters = {
     "EnableF32XdlMathOp": [False, True],
