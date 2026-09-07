@@ -130,6 +130,31 @@ Prepared chunk-packed prep and the fused kernel retain their original FP32
 beta ABI. Raw callers pass the original tensor and its strides without a
 host-side dtype conversion or contiguous materialization.
 
+### Packed ragged ABI
+
+The production split path accepts packed variable-length input directly.
+`cu_seqlens` bounds tokens, `chunk_indices` maps global C32 chunks to
+`(sequence, local_chunk)`, and `chunk_offsets` gives each scan workgroup its
+sequence-local chunk range. Partial final chunks use sequence-bounded AMD
+buffer loads/stores, so callers do not pad or copy Q/K/V/G/beta/output.
+
+The materialized workspace remains dense in global-chunk/head order:
+
+```text
+tile = global_chunk * heads + head
+```
+
+For the C128-dominant B1/H12/T3990 shape, five-sample MI355X measurements were
+34.61 us prep + 198.66 us scan = 231.99 us paired. The aligned T4000 control
+with the same 125 chunks measured 235.05 us paired. Through the production
+vLLM engine, the five-sample T3990 median was 251.24 us versus Triton's
+272.16 us; ragged B2 `[213,3777]` measured 247.32 us versus 263.96 us.
+
+In the matched TP8 C128 8K/1K serving gate, rocKE produced 7138.4 total tok/s
+versus Triton's 6848.4 (+4.24%), with mean TTFT 1.79% lower and mean TPOT
+4.76% lower. All 512 requests completed and the rocKE server logged no KDA
+fallback.
+
 ### Workspace ownership
 
 `kda_workspace_plan()` describes the BF16 tile pool and FP32 decay allocation,
@@ -137,6 +162,12 @@ then binds leased tensors to `A/GK/GQ/Aqk/Kt/dec` views. Serving integrations
 should use `WorkspaceLeasePool`, not permanent named slots: acquire before
 prep, launch prep and scan on one stream with a completion event, and pass the
 scan's `LaunchSummary.completion_event` to `lease.release_after_event()`.
+
+`WorkspaceLease.bind_cached()` stores the typed A/GK/GQ/Aqk/Kt/dec view map on
+the allocation slot under `KdaWorkspacePlan.binding_key`. Capacity-compatible
+same-stream reuse therefore returns the existing views instead of rebuilding
+the slice/reshape graph in every KDA layer. A 1,500-tile CPU microprofile
+reduced acquire+bind from 18.98 us to 9.15 us.
 
 The vLLM engine owns its pool and allocator. Its default bounds are controlled
 by `ROCKE_KDA_WORKSPACE_MAX_BYTES` (2 GiB),

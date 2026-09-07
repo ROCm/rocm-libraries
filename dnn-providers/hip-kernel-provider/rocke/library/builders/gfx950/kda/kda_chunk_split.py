@@ -85,6 +85,7 @@ def prep_spec_of(
     spec: KdaChunkScanSpec,
     *,
     raw: bool = False,
+    ragged: bool = False,
     fp32_beta_dtype: bool = False,
 ) -> KdaChunkPrepSpec:
     """The tile builder that produces this scan's inputs.
@@ -94,14 +95,16 @@ def prep_spec_of(
     the prep kernel's global sink writes.
 
     The producer keeps its valid 256-thread schedule when value splitting gives
-    the scan a narrower block. Raw prep additionally preserves the scan's other
-    experimental tile knobs for focused sweeps.
+    the scan a narrower block. Raw prep preserves shared layout knobs but drops
+    ``scan_atom_m``, which has no producer-side effect and must not create a
+    duplicate compiled prep kernel.
     """
     tile = spec.tile
     raw_kw = {}
     if raw:
         raw_kw = dict(
             raw_inputs=True,
+            ragged_inputs=ragged,
             fp32_beta_dtype=fp32_beta_dtype,
             fuse_qk_l2norm=True,
             fuse_gate=True,
@@ -109,7 +112,11 @@ def prep_spec_of(
             has_dt_bias=True,
             lower_bound=-5.0,
         )
-        tile = dataclasses.replace(spec.tile, block_size=256)
+        tile = dataclasses.replace(
+            spec.tile,
+            block_size=256,
+            scan_atom_m=0,
+        )
     elif spec.value_splits != 1:
         # Value splitting is scan-only parallelism.  Keep the producer on its
         # valid 256-thread schedule and drop the scan atom from its identity;
@@ -156,6 +163,8 @@ def run_scan(
     batch=None,
     heads=None,
     tseq=None,
+    cu_seqlens=None,
+    chunk_offsets=None,
 ):
     """Launch the scan over tiles already materialized by the prep kernel."""
     if h0 is None:
@@ -184,6 +193,13 @@ def run_scan(
     }
     if spec.token_major_io:
         args.update({"batch": int(batch), "heads": int(heads), "tseq": int(tseq)})
+        if spec.ragged_io:
+            args.update(
+                {
+                    "cu_seqlens_ptr": cu_seqlens,
+                    "chunk_offsets_ptr": chunk_offsets,
+                }
+            )
     launcher(args, config=cfg)
 
 
@@ -208,6 +224,9 @@ def run_split(
     tseq=None,
     a_log=None,
     dt_bias=None,
+    cu_seqlens=None,
+    chunk_indices=None,
+    chunk_offsets=None,
 ):
     """Both kernels, back to back on one stream.
 
@@ -217,6 +236,7 @@ def run_split(
     pspec = prep_spec_of(
         spec,
         raw=raw,
+        ragged=spec.ragged_io,
         fp32_beta_dtype=raw and beta.dtype == torch.float32,
     )
     prep_mod.run_prep(
@@ -233,6 +253,8 @@ def run_split(
         nc=nc,
         a_log=a_log,
         dt_bias=dt_bias,
+        cu_seqlens=cu_seqlens,
+        chunk_indices=chunk_indices,
     )
     run_scan(
         spec,
@@ -246,6 +268,8 @@ def run_split(
         batch=batch,
         heads=heads,
         tseq=tseq,
+        cu_seqlens=cu_seqlens,
+        chunk_offsets=chunk_offsets,
     )
 
 
@@ -265,16 +289,30 @@ def run_raw_split(
     heads,
     tseq,
     h0=None,
+    *,
+    cu_seqlens=None,
+    chunk_indices=None,
+    chunk_offsets=None,
 ):
-    """Aligned raw token-major split path: fused prep + value-split scan."""
+    """Raw token-major split path, including packed variable-length batches."""
     C = spec.tile.chunk
-    BH, NC = batch * heads, tseq // C
-    nt = BH * NC
+    BH = batch * heads
+    if spec.ragged_io:
+        if cu_seqlens is None or chunk_indices is None or chunk_offsets is None:
+            raise ValueError(
+                "ragged split requires cu_seqlens, chunk_indices, and chunk_offsets"
+            )
+        NC = int(chunk_indices.shape[0])
+        nt = NC * heads
+    else:
+        NC = tseq // C
+        nt = BH * NC
     ws = prep_mod.alloc_tiles(
         nt,
         prep_spec_of(
             spec,
             raw=True,
+            ragged=spec.ragged_io,
             fp32_beta_dtype=beta.dtype == torch.float32,
         ),
     )
@@ -298,6 +336,9 @@ def run_raw_split(
         tseq=tseq,
         a_log=a_log,
         dt_bias=dt_bias,
+        cu_seqlens=cu_seqlens,
+        chunk_indices=chunk_indices,
+        chunk_offsets=chunk_offsets,
     )
     return ws
 
@@ -312,9 +353,14 @@ def launch_raw(
     a_log,
     dt_bias,
     h0=None,
+    *,
+    cu_seqlens=None,
+    chunk_indices=None,
+    chunk_offsets=None,
 ):
-    """Token-major [B,T,H,D] in/out with V-first final state."""
-    B, T, H, DK = q.shape
+    """Token-major equal or packed-ragged input/output with V-first state."""
+    physical_batch, T, H, DK = q.shape
+    B = int(cu_seqlens.numel() - 1) if spec.ragged_io else physical_batch
     DV = v.shape[-1]
     o = torch.empty_like(v)
     ht = torch.zeros(B * H, DV, DK, dtype=torch.float32, device=q.device)
@@ -337,6 +383,9 @@ def launch_raw(
         H,
         T,
         h0=h0t,
+        cu_seqlens=cu_seqlens,
+        chunk_indices=chunk_indices,
+        chunk_offsets=chunk_offsets,
     )
     return o, ht.view(B, H, DV, DK).transpose(-1, -2)
 

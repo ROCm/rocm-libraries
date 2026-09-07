@@ -162,6 +162,35 @@ paths evaluate sigmoid and store the result in the same FP32 LDS tile.
 Prepared chunk-packed prep and the fused composition continue to consume FP32
 beta through their original ABI.
 
+## Packed ragged batches and native tails
+
+The gfx950 raw split path also accepts packed variable-length tensors with a
+physical batch dimension of one. Three INT32 arrays describe the logical
+batch:
+
+```text
+cu_seqlens[B + 1]        token prefix sums
+chunk_indices[NT, 2]     (sequence, sequence-local chunk)
+chunk_offsets[B + 1]     chunk prefix sums
+```
+
+Prep launches `NT * heads` workgroups. A workgroup loads its sequence and local
+chunk once, builds sequence-bounded AMD buffer resources for Q/K/G, and writes
+the same six-tile format as the aligned producer. Hardware OOB behavior
+zero-fills a partial chunk; gate and beta lanes outside the logical sequence
+are explicitly made neutral.
+
+Scan still launches `B * heads * value_splits` workgroups. Each recurrence
+loads its own chunk interval from `chunk_offsets`, walks tiles in sequence
+order, and uses sequence-bounded V/O buffer resources. Tail V loads return zero
+and tail output stores are dropped by hardware, so no padded Q/K/V/G/beta or
+output tensor is materialized. Initial and final state remain dense
+`[B,H,DV,DK]` FP32.
+
+Triton KDA uses C64 chunk metadata, while rocKE uses C32. Integrations must
+retain both maps while Triton remains a fallback; reusing the C64 map for
+rocKE silently gives the wrong tile count.
+
 `dispatch_kda(..., algorithm="chunk_scan")` returns this tuned scan spec,
 builder, multiplied grid, block size, and ABI signature. The split composition
 still requires a preceding `chunk_prep` dispatch on the same stream; `auto`

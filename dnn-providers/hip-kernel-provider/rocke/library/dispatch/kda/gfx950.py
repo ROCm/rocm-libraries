@@ -28,7 +28,6 @@ workgroups fit per CU.
 from __future__ import annotations
 
 import dataclasses
-from typing import Tuple
 
 from kernels.gfx950.kda_chunkwise import (
     KDA_CHUNK_SIZES,
@@ -107,10 +106,12 @@ def _fused_tile(req: KdaRequest) -> KdaTileSpec:
 
 def _split_tile(req: KdaRequest) -> KdaTileSpec:
     value_splits = 1 if req.value_splits is None else int(req.value_splits)
+    tile_overrides = {}
     if value_splits == 8:
         block_size, scan_atom_m = 64, 16
     elif value_splits == 4:
         block_size, scan_atom_m = 128, 16
+        tile_overrides = {"pad_dk": 16, "pad_cb": 0}
     elif value_splits == 2:
         block_size, scan_atom_m = 256, 16
     else:
@@ -120,6 +121,7 @@ def _split_tile(req: KdaRequest) -> KdaTileSpec:
         chunk=req.effective_chunk_size,
         block_size=block_size,
         scan_atom_m=scan_atom_m,
+        **tile_overrides,
     )
 
 
@@ -137,15 +139,18 @@ def _fused_spec(req: OperatorRequest) -> KdaChunkFusedSpec:
 
 def _prep_spec(req: OperatorRequest) -> KdaChunkPrepSpec:
     assert isinstance(req, KdaRequest)
-    tile = _split_tile(req)
+    tile = (
+        _auto_scan_spec(req).prep.tile if req.value_splits is None else _split_tile(req)
+    )
     if req.raw_inputs:
-        tile = dataclasses.replace(tile, block_size=256)
+        tile = dataclasses.replace(tile, block_size=256, scan_atom_m=0)
     return KdaChunkPrepSpec(
         head_k=int(req.head_k),
         head_v=int(req.head_v),
         dtype=req.dtype.lower(),
         tile=tile,
         raw_inputs=bool(req.raw_inputs),
+        ragged_inputs=bool(req.ragged_inputs),
         fp32_beta_dtype=bool(req.fp32_beta_dtype),
         fuse_qk_l2norm=bool(req.fuse_qk_l2norm),
         fuse_gate=bool(req.fuse_gate),
@@ -155,10 +160,8 @@ def _prep_spec(req: OperatorRequest) -> KdaChunkPrepSpec:
     )
 
 
-def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:
-    """Select the pipelined scan and its measured value-band geometry."""
-    assert isinstance(req, KdaRequest)
-    spec = tuned_kda_chunk_scan_spec(
+def _auto_scan_spec(req: KdaRequest) -> KdaChunkScanSpec:
+    return tuned_kda_chunk_scan_spec(
         req.workgroups,
         head_k=int(req.head_k),
         head_v=int(req.head_v),
@@ -167,12 +170,21 @@ def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:
         has_initial_state=bool(req.has_initial_state),
         store_final_state=bool(req.store_final_state),
         token_major_io=bool(req.token_major_io),
+        ragged_io=bool(req.ragged_inputs),
     )
+
+
+def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:
+    """Select the pipelined scan and its measured value-band geometry."""
+    assert isinstance(req, KdaRequest)
+    spec = _auto_scan_spec(req)
     if req.value_splits is not None:
+        value_splits = int(req.value_splits)
         spec = dataclasses.replace(
             spec,
             tile=_split_tile(req),
-            value_splits=int(req.value_splits),
+            value_splits=value_splits,
+            wave_local_intermediates=(value_splits == 4),
         )
     return spec
 
@@ -190,7 +202,7 @@ def _uses_split_contract(req: KdaRequest) -> bool:
     )
 
 
-def _scan_validator(spec: KdaChunkScanSpec, arch: str) -> Tuple[bool, str]:
+def _scan_validator(spec: KdaChunkScanSpec, arch: str) -> tuple[bool, str]:
     """A scan is selectable only if the tile builder that feeds it is too.
 
     The scan validates the staging copies and the state partition; the tile
@@ -230,7 +242,7 @@ def _make_candidate(
     signature_for,
     opt_in_reason: str = "",
 ) -> KernelCandidate:
-    def support(req: OperatorRequest) -> Tuple[bool, str]:
+    def support(req: OperatorRequest) -> tuple[bool, str]:
         errors = _request_errors(req)
         if errors:
             return False, "; ".join(errors)
@@ -292,6 +304,9 @@ def _prep_grid(spec: KdaChunkPrepSpec, req: OperatorRequest):
     assert isinstance(req, KdaRequest)
     # One workgroup per chunk -- the same ``BH * NC`` tile count the host
     # builder allocates and packs.
+    if req.ragged_inputs:
+        assert req.total_chunks is not None
+        return kda_chunk_prep_grid(spec, int(req.total_chunks) * int(req.num_heads))
     return kda_chunk_prep_grid(spec, req.workgroups * req.num_chunks)
 
 

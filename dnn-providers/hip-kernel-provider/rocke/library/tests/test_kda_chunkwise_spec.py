@@ -29,6 +29,7 @@ from kernels.gfx950.kda_chunkwise import (
     is_valid_scan_spec,
     is_valid_spec,
     kda_chunk_prep_signature,
+    kda_chunk_scan_signature,
     tuned_kda_chunk_scan_spec,
 )
 
@@ -130,6 +131,27 @@ class TestPrepSpec:
         assert not ok
         assert "raw_inputs" in why
 
+    def test_ragged_raw_contract_has_distinct_pointer_abi(self):
+        spec = KdaChunkPrepSpec(
+            raw_inputs=True,
+            ragged_inputs=True,
+            fuse_qk_l2norm=True,
+            fuse_gate=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+        )
+        ok, why = is_valid_spec(spec, arch=ARCH)
+        assert ok, why
+        signature = {arg["name"]: arg["type"] for arg in kda_chunk_prep_signature(spec)}
+        assert signature["cu_seqlens_ptr"] == "ptr<i32, global>"
+        assert signature["chunk_indices_ptr"] == "ptr<i32, global>"
+        assert "ragged" in spec.kernel_name()
+
+    def test_ragged_prep_requires_raw_inputs(self):
+        ok, why = is_valid_spec(KdaChunkPrepSpec(ragged_inputs=True), arch=ARCH)
+        assert not ok
+        assert "raw_inputs" in why
+
     def test_lds_within_half_budget(self):
         """The prep kernel's whole optimization story is 2 workgroups per CU."""
         assert KdaChunkPrepSpec().lds_bytes() <= 160 * 1024 // 2
@@ -158,6 +180,19 @@ class TestPrepSpec:
         assert workspace["kt"].shape == (num_tiles, 128, 32)
         assert workspace["dec"].shape == (num_tiles, 128)
         assert workspace["_pool"].data_ptr() == tensors["kda_tiles"].data_ptr()
+        assert plan.binding_key == ("gfx950-kda", num_tiles, 32, 128)
+
+        larger_tensors = {
+            spec.name: torch.empty(
+                (spec.numel() * 2,),
+                dtype=spec.dtype,
+                device=spec.device,
+            )
+            for spec in plan.specs
+        }
+        rebound = plan.bind(larger_tensors)
+        assert rebound["a"].shape == workspace["a"].shape
+        assert rebound["dec"].shape == workspace["dec"].shape
 
     @pytest.mark.parametrize(
         "kw,needle",
@@ -187,6 +222,18 @@ class TestPrepSpec:
 
     def test_builds_and_fits(self):
         spec = KdaChunkPrepSpec()
+        art = _compile_or_skip(build_kda_chunk_prep(spec))
+        assert art.hsaco_bytes > 0
+
+    def test_ragged_builds_and_fits(self):
+        spec = KdaChunkPrepSpec(
+            raw_inputs=True,
+            ragged_inputs=True,
+            fuse_qk_l2norm=True,
+            fuse_gate=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+        )
         art = _compile_or_skip(build_kda_chunk_prep(spec))
         assert art.hsaco_bytes > 0
 
@@ -300,6 +347,25 @@ class TestScanSpec:
         spec = KdaChunkScanSpec(token_major_io=True)
         assert "tm" in spec.kernel_name()
 
+    def test_ragged_scan_contract_has_distinct_pointer_abi(self):
+        spec = tuned_kda_chunk_scan_spec(
+            24,
+            has_initial_state=True,
+            token_major_io=True,
+            ragged_io=True,
+        )
+        ok, why = is_valid_scan_spec(spec, arch=ARCH)
+        assert ok, why
+        signature = {arg["name"]: arg["type"] for arg in kda_chunk_scan_signature(spec)}
+        assert signature["cu_seqlens_ptr"] == "ptr<i32, global>"
+        assert signature["chunk_offsets_ptr"] == "ptr<i32, global>"
+        assert "ragged" in spec.kernel_name()
+
+    def test_ragged_scan_requires_token_major_io(self):
+        ok, why = is_valid_scan_spec(KdaChunkScanSpec(ragged_io=True), arch=ARCH)
+        assert not ok
+        assert "token_major_io" in why
+
     def test_prefetch_opt_out_reaches_name(self):
         assert "nopf" in KdaChunkScanSpec(prefetch_tiles=False).kernel_name()
         assert "nopf" not in KdaChunkScanSpec().kernel_name()
@@ -351,10 +417,10 @@ class TestScanSpec:
             "pad_cb",
             "solve_block",
             "tile_atom_m",
-            "scan_atom_m",
             "waves_per_eu",
         ):
             assert getattr(prep.tile, field) == getattr(tile, field)
+        assert prep.tile.scan_atom_m == 0
 
     def test_lds_leaves_room_for_two_workgroups(self):
         """The split path only earns back its tile traffic at 2 WG/CU.
@@ -395,6 +461,16 @@ class TestScanSpec:
 
     def test_builds_and_fits(self):
         art = _compile_or_skip(build_kda_chunk_scan(KdaChunkScanSpec()))
+        assert art.hsaco_bytes > 0
+
+    def test_ragged_builds_and_fits(self):
+        spec = tuned_kda_chunk_scan_spec(
+            24,
+            has_initial_state=True,
+            token_major_io=True,
+            ragged_io=True,
+        )
+        art = _compile_or_skip(build_kda_chunk_scan(spec))
         assert art.hsaco_bytes > 0
 
 

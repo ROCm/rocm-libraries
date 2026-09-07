@@ -64,6 +64,11 @@ class KdaWorkspacePlan:
     def required_nbytes(self) -> int:
         return sum(spec.nbytes() for spec in self.specs)
 
+    @property
+    def binding_key(self) -> tuple[str, int, int, int]:
+        """Stable key for views cached on a workspace lease slot."""
+        return ("gfx950-kda", self.num_tiles, self.chunk, self.head_k)
+
     def bind(self, tensors: Mapping[str, Any]) -> dict[str, Any]:
         pool = tensors["kda_tiles"].flatten()
         shapes = (
@@ -81,7 +86,12 @@ class KdaWorkspacePlan:
                 self.num_tiles, rows, cols
             )
             offset += count
-        result["dec"] = tensors["kda_decay"].view(self.num_tiles, self.head_k)
+        decay_count = self.num_tiles * self.head_k
+        result["dec"] = (
+            tensors["kda_decay"]
+            .flatten()[:decay_count]
+            .view(self.num_tiles, self.head_k)
+        )
         result["_pool"] = pool
         return result
 
@@ -169,9 +179,18 @@ def run_prep(
     nc=None,
     a_log=None,
     dt_bias=None,
+    cu_seqlens=None,
+    chunk_indices=None,
 ):
     """Launch the prep kernel over ``q/k/g/beta`` already packed by chunk or raw."""
-    num_tiles = q.shape[0] if not spec.raw_inputs else batch * heads * nc
+    if not spec.raw_inputs:
+        num_tiles = q.shape[0]
+    elif spec.ragged_inputs:
+        if cu_seqlens is None or chunk_indices is None:
+            raise ValueError("ragged prep requires cu_seqlens and chunk_indices")
+        num_tiles = chunk_indices.shape[0] * heads
+    else:
+        num_tiles = batch * heads * nc
     launcher = make_launcher(spec)
     if stream is None:
         stream = torch.cuda.current_stream().cuda_stream
@@ -217,6 +236,13 @@ def run_prep(
                 "beta_stride_head": int(beta_stride_head),
             }
         )
+        if spec.ragged_inputs:
+            args.update(
+                {
+                    "cu_seqlens_ptr": cu_seqlens,
+                    "chunk_indices_ptr": chunk_indices,
+                }
+            )
     launcher(args, config=cfg)
 
 

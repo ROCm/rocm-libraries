@@ -64,6 +64,30 @@ class TestMoeTopkActivePack(unittest.TestCase):
             ],
         )
 
+    def test_local_expert_projection_extends_the_abi(self) -> None:
+        spec = MoeTopkActivePackSpec(
+            tokens=8,
+            experts=896,
+            topk=16,
+            local_experts=112,
+        )
+        self.assertEqual(is_valid_spec(spec), (True, "ok"))
+        self.assertIn("local", spec.kernel_name())
+        self.assertEqual(
+            moe_topk_active_pack_signature(spec)[-1]["name"],
+            "expert_start",
+        )
+
+        invalid = MoeTopkActivePackSpec(
+            tokens=8,
+            experts=896,
+            topk=16,
+            local_experts=897,
+        )
+        ok, why = is_valid_spec(invalid)
+        self.assertFalse(ok)
+        self.assertIn("local_experts", why)
+
     def test_build_verifies_and_contains_fused_stages(self) -> None:
         spec = MoeTopkActivePackSpec(tokens=8, experts=896, topk=16)
         kernel = build_moe_topk_active_pack(spec)

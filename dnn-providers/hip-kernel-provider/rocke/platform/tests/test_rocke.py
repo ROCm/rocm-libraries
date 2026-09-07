@@ -4937,7 +4937,10 @@ class TestWorkspaceLeasePool(unittest.TestCase):
         self.assertEqual(pool.reap_completed(), 1)
         second.release_completed()
         reused = pool.acquire((spec,))
-        self.assertIn(reused.tensors["tiles"].ctypes.data, {first_ptr, second_ptr})
+        self.assertIn(
+            reused.tensors["tiles"].ctypes.data,
+            {first_ptr, second_ptr},
+        )
 
     def test_bound_applies_backpressure_until_pending_work_completes(self):
         import numpy as np
@@ -5032,6 +5035,51 @@ class TestWorkspaceLeasePool(unittest.TestCase):
         self.assertEqual(reused.tensors["tiles"].ctypes.data, ptr)
         self.assertEqual(event.queries, 0)
         self.assertFalse(event.destroyed)
+
+    def test_slot_binding_is_built_once_and_reused(self):
+        import numpy as np
+
+        from rocke.runtime.launcher import WorkspaceLeasePool, WorkspaceSpec
+
+        spec = WorkspaceSpec("tiles", (16,), np.dtype("float32"), "cpu")
+        pool = WorkspaceLeasePool(
+            max_bytes=spec.nbytes(),
+            allocator=lambda requirement: np.empty(
+                requirement.shape, dtype=requirement.dtype
+            ),
+        )
+        calls = 0
+
+        def bind(tensors):
+            nonlocal calls
+            calls += 1
+            return {"matrix": tensors["tiles"].reshape(4, 4)}
+
+        first = pool.acquire((spec,), stream=7)
+        binding = first.bind_cached(("matrix", 4, 4), bind)
+        self.assertIs(binding, first.bind_cached(("matrix", 4, 4), bind))
+        first.release_completed()
+
+        reused = pool.acquire((spec,), stream=7)
+        self.assertIs(binding, reused.bind_cached(("matrix", 4, 4), bind))
+        self.assertEqual(calls, 1)
+
+    def test_released_lease_rejects_cached_binding_access(self):
+        import numpy as np
+
+        from rocke.runtime.launcher import WorkspaceLeasePool, WorkspaceSpec
+
+        spec = WorkspaceSpec("tiles", (16,), np.dtype("float32"), "cpu")
+        pool = WorkspaceLeasePool(
+            max_bytes=spec.nbytes(),
+            allocator=lambda requirement: np.empty(
+                requirement.shape, dtype=requirement.dtype
+            ),
+        )
+        lease = pool.acquire((spec,))
+        lease.release_completed()
+        with self.assertRaisesRegex(RuntimeError, "already been released"):
+            lease.bind_cached("late", lambda tensors: tensors)
 
 
 class TestValidationHarness(unittest.TestCase):

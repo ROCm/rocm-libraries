@@ -2143,6 +2143,18 @@ def cases():
                 "has_dt_bias": True,
             },
         ),
+        (
+            "prep_raw_ragged",
+            "prep",
+            {
+                "raw_inputs": True,
+                "ragged_inputs": True,
+                "fuse_qk_l2norm": True,
+                "fuse_gate": True,
+                "fuse_beta_sigmoid": True,
+                "has_dt_bias": True,
+            },
+        ),
         ("scan_default", "scan", {}),
         (
             "scan_h0_noht",
@@ -2150,6 +2162,23 @@ def cases():
             {"has_initial_state": True, "store_final_state": False},
         ),
         ("scan_vs4", "scan", {"tile": {"block_size": 64}, "value_splits": 4}),
+        (
+            "scan_ragged_vs4",
+            "scan",
+            {
+                "tile": {
+                    "block_size": 128,
+                    "pad_dk": 16,
+                    "pad_cb": 0,
+                    "scan_atom_m": 16,
+                },
+                "has_initial_state": True,
+                "value_splits": 4,
+                "token_major_io": True,
+                "ragged_io": True,
+                "wave_local_intermediates": True,
+            },
+        ),
         ("fused_default", "fused", {}),
         (
             "fused_h0_noht",

@@ -103,6 +103,19 @@ def _cases() -> dict[str, Callable]:
         ),
         build_kda_chunk_prep,
     )
+    add(
+        "kda_gfx950/split_c32_prep_raw_ragged",
+        KdaChunkPrepSpec(
+            tile=KdaTileSpec(block_size=256, pad_dk=16, pad_cb=0),
+            raw_inputs=True,
+            ragged_inputs=True,
+            fuse_qk_l2norm=True,
+            fuse_gate=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+        ),
+        build_kda_chunk_prep,
+    )
 
     # The default standalone scan is C32/SA32/value_splits=1.
     add("kda_gfx950/split_c32_scan_sa32", KdaChunkScanSpec(), build_kda_chunk_scan)
@@ -114,6 +127,16 @@ def _cases() -> dict[str, Callable]:
     add(
         "kda_gfx950/split_c32_scan_tuned_vs4",
         tuned_kda_chunk_scan_spec(96),
+        build_kda_chunk_scan,
+    )
+    add(
+        "kda_gfx950/split_c32_scan_tuned_vs4_ragged",
+        tuned_kda_chunk_scan_spec(
+            24,
+            has_initial_state=True,
+            token_major_io=True,
+            ragged_io=True,
+        ),
         build_kda_chunk_scan,
     )
     add(

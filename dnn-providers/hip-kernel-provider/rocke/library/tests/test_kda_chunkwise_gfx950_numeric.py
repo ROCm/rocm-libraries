@@ -465,6 +465,79 @@ def test_value_split_token_major_h0_staging_matches_oracle():
     assert torch.allclose(ht_got.float(), s_ref.float(), rtol=0, atol=3e-2)
 
 
+@pytest.mark.parametrize("lengths", [(1, 31), (45, 77), (32, 65)])
+def test_ragged_raw_split_matches_per_sequence_oracle(lengths):
+    """Packed ragged chunks must neither cross sequences nor update on tails."""
+    import torch
+
+    from builders.gfx950.kda import kda_chunk_split as split
+    from kernels.gfx950.kda_chunkwise import tuned_kda_chunk_scan_spec
+
+    B, H, DK, DV = len(lengths), 4, 128, 128
+    total = sum(lengths)
+    q, k, v, g, beta, a_log, dt_bias = _make_raw_inputs(1, H, total, DK, DV, seed=17)
+    beta_storage = torch.empty(1, total, 2 * H, dtype=beta.dtype, device="cuda")
+    beta_storage[..., ::2].copy_(beta)
+    beta = beta_storage[..., ::2]
+    h0 = torch.randn(B, H, DK, DV, dtype=torch.float32, device="cuda") * 0.1
+
+    cu_values = [0]
+    chunk_pairs = []
+    chunk_offsets = [0]
+    for sequence, length in enumerate(lengths):
+        cu_values.append(cu_values[-1] + length)
+        count = (length + 31) // 32
+        chunk_pairs.extend((sequence, chunk) for chunk in range(count))
+        chunk_offsets.append(chunk_offsets[-1] + count)
+    cu_seqlens = torch.tensor(cu_values, dtype=torch.int32, device="cuda")
+    chunk_indices = torch.tensor(chunk_pairs, dtype=torch.int32, device="cuda")
+    chunk_offsets_tensor = torch.tensor(chunk_offsets, dtype=torch.int32, device="cuda")
+
+    spec = tuned_kda_chunk_scan_spec(
+        B * H,
+        has_initial_state=True,
+        token_major_io=True,
+        ragged_io=True,
+    )
+    o_got, ht_got = split.launch_raw(
+        spec,
+        q,
+        k,
+        v,
+        g,
+        beta,
+        a_log,
+        dt_bias,
+        h0=h0,
+        cu_seqlens=cu_seqlens,
+        chunk_indices=chunk_indices,
+        chunk_offsets=chunk_offsets_tensor,
+    )
+    torch.cuda.synchronize()
+
+    outputs = []
+    states = []
+    for sequence, (bos, eos) in enumerate(zip(cu_values, cu_values[1:])):
+        o_ref, state_ref = split.ref_aligned_raw(
+            q[:, bos:eos],
+            k[:, bos:eos],
+            v[:, bos:eos],
+            g[:, bos:eos],
+            beta[:, bos:eos],
+            a_log,
+            dt_bias,
+            DK**-0.5,
+            h0=h0[sequence : sequence + 1],
+        )
+        outputs.append(o_ref.permute(0, 2, 1, 3))
+        states.append(state_ref)
+    o_ref = torch.cat(outputs, dim=1)
+    state_ref = torch.cat(states, dim=0)
+
+    assert torch.allclose(o_got.float(), o_ref.float(), rtol=0, atol=3e-2)
+    assert torch.allclose(ht_got.float(), state_ref.float(), rtol=0, atol=3e-2)
+
+
 def test_dispatched_specs_match_the_token_serial_oracle():
     """What the dispatcher selects must be what the oracle validates.
 

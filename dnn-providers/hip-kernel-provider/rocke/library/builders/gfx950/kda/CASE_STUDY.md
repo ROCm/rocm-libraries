@@ -350,3 +350,49 @@ synchronization removal alone.
 Further progress requires changing the state-mirror/MFMA operand formulation
 to remove LDS round trips, or introducing a different parallel scan algorithm.
 Those are algorithm changes rather than another schedule knob in this kernel.
+
+## 11. C128 ragged serving follow-up
+
+The C128 serving trace disproved the assumption that the aligned
+B1/H12/T4096 microbenchmark represented saturation. Across 1,150 prefill
+scheduler steps on rank zero, only two had that shape. The dominant path was
+B1/H12/T3990 because a median 106 decode tokens consumed part of the
+4096-token scheduler budget; 509 steps were unequal B2 batches and fell back
+to Triton.
+
+The old adapter padded every unaligned tensor to C32. At T3990 that moved the
+full rocKE call from an aligned 250.36 us control to 300.80 us, while Triton
+measured 271.20 us. Native packed-ragged indexing replaces those copies with
+C32 `cu_seqlens`, chunk-index, and chunk-offset metadata. Sequence-bounded
+buffer resources make tail loads zero and tail stores no-ops.
+
+After hoisting chunk metadata once per workgroup and using buffer OOB
+semantics, the raw split stages measured:
+
+```text
+                 prep       scan       pair
+ragged T3990    34.61 us   198.66 us   231.99 us
+aligned T4000   33.83 us   202.82 us   235.05 us
+```
+
+The production vLLM engine retained the advantage in five-sample runs:
+B1/T3990 measured 251.24 us versus Triton's 272.16 us, and ragged B2
+`[213,3777]` measured 247.32 us versus 263.96 us. Final-state max-absolute
+error stayed below `5.9e-4`.
+
+The ragged numeric cases cover `(1,31)`, `(45,77)`, and `(32,65)` with nonzero
+initial state and strided BF16 beta. Together with the pre-existing suite,
+47 gfx950 numeric cases pass.
+
+Workspace view construction was removed from the steady path separately:
+bindings are cached per lease slot and KDA plan key. The isolated 1,500-tile
+acquire+bind loop fell from 18.98 us to 9.15 us. This does not remove event
+query or Python argument-packing costs, which remain separate host-side
+targets.
+
+The final matched TP8 C128 serving gate used 512 exact 8192/1024 requests,
+4096 max batched tokens, 128 max sequences, a 32 GiB KV cache per GPU, seed
+1234, and no benchmark warmups or prefix cache. Native ragged rocKE completed
+all requests with zero fallback and measured 7138.4 total tok/s versus
+Triton's 6848.4 (+4.24%). Mean TTFT improved from 32.73 s to 32.14 s
+(-1.79%), and mean TPOT improved from 131.00 ms to 124.76 ms (-4.76%).

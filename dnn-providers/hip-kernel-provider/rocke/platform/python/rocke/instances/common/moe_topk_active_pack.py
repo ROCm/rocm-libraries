@@ -42,6 +42,7 @@ class MoeTopkActivePackSpec:
     num_expert_groups: int = 1
     topk_groups: int = 1
     renormalize: bool = True
+    local_experts: int | None = None
     name: str = "rocke_moe_topk_active_pack"
 
     @property
@@ -69,7 +70,10 @@ class MoeTopkActivePackSpec:
             f"G{self.num_expert_groups}x{self.topk_groups}",
             f"tm{self.tile_m}",
             f"b{self.block_size}",
-            flags={"rn": self.renormalize},
+            flags={
+                "rn": self.renormalize,
+                "local": self.local_experts is not None,
+            },
         )
 
 
@@ -89,6 +93,11 @@ def is_valid_spec(
         )
     if spec.topk > spec.experts:
         return False, f"topk ({spec.topk}) must be <= experts ({spec.experts})"
+    if spec.local_experts is not None and not 1 <= spec.local_experts <= spec.experts:
+        return False, (
+            "local_experts must be in [1, experts] "
+            f"(got {spec.local_experts}/{spec.experts})"
+        )
     if spec.topk > 32:
         return False, f"topk ({spec.topk}) must be <= 32"
     if spec.tile_m <= 0:
@@ -192,6 +201,9 @@ def build_moe_topk_active_pack(
     _tokens = b.param("tokens", I32)
     _experts = b.param("experts", I32)
     routed_scale = b.param("routed_scale", F32)
+    expert_start = (
+        b.param("expert_start", I32) if spec.local_experts is not None else None
+    )
 
     tid = b.thread_id_x()
     c_zero = b.const_i32(0)
@@ -403,10 +415,25 @@ def build_moe_topk_active_pack(
         b.global_store(block_offsets, tid, offset, align=4)
         for block in range(spec.max_blocks_per_expert):
             with b.scf_if(b.cmp_lt(b.const_i32(block), blocks)):
+                block_expert = tid
+                if expert_start is not None:
+                    local_expert = b.sub(tid, expert_start)
+                    in_local_range = b.land(
+                        b.cmp_ge(tid, expert_start),
+                        b.cmp_lt(
+                            local_expert,
+                            b.const_i32(spec.local_experts),
+                        ),
+                    )
+                    block_expert = b.select(
+                        in_local_range,
+                        local_expert,
+                        b.const_i32(-1),
+                    )
                 b.global_store(
                     block_expert_ids,
                     b.add(offset, b.const_i32(block)),
-                    tid,
+                    block_expert,
                     align=4,
                 )
 
@@ -446,7 +473,7 @@ def moe_topk_active_pack_signature(
     spec: MoeTopkActivePackSpec,
 ) -> list[dict[str, str]]:
     _ = spec
-    return (
+    signature = (
         SignatureBuilder()
         .ptr("Logits", "f32")
         .ptr("CorrectionBias", "f32")
@@ -460,8 +487,10 @@ def moe_topk_active_pack_signature(
         .scalar("tokens", "i32")
         .scalar("experts", "i32")
         .scalar("routed_scale", "f32")
-        .build()
     )
+    if spec.local_experts is not None:
+        signature = signature.scalar("expert_start", "i32")
+    return signature.build()
 
 
 __all__ = [

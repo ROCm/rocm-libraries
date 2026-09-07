@@ -32,15 +32,15 @@ _BATCH, _HEADS, _SEQLEN, _CHUNK = 2, 8, 1024, 32
 
 
 def _req(**kw) -> KdaRequest:
-    base = dict(
-        batch=_BATCH,
-        num_heads=_HEADS,
-        seqlen=_SEQLEN,
-        arch="gfx950",
-        head_k=128,
-        head_v=128,
-        chunk_size=_CHUNK,
-    )
+    base = {
+        "batch": _BATCH,
+        "num_heads": _HEADS,
+        "seqlen": _SEQLEN,
+        "arch": "gfx950",
+        "head_k": 128,
+        "head_v": 128,
+        "chunk_size": _CHUNK,
+    }
     base.update(kw)
     return KdaRequest(**base)
 
@@ -61,6 +61,20 @@ def _raw_split_req(algorithm: str, **kw) -> KdaRequest:
 
 def _candidate(name: str):
     return KDA_REGISTRY.get(name)
+
+
+def _raw_split_req(algorithm: str, **kw) -> KdaRequest:
+    base = {
+        "algorithm": algorithm,
+        "raw_inputs": True,
+        "token_major_io": True,
+        "fuse_qk_l2norm": True,
+        "fuse_gate": True,
+        "fuse_beta_sigmoid": True,
+        "has_dt_bias": True,
+    }
+    base.update(kw)
+    return _req(**base)
 
 
 class TestRegistration(unittest.TestCase):
@@ -132,6 +146,26 @@ class TestRouting(unittest.TestCase):
         self.assertTrue(scan.spec.token_major_io)
         self.assertEqual(scan.spec.value_splits, 4)
         self.assertEqual(scan.spec.tile.block_size, 128)
+
+    def test_ragged_contract_reaches_both_split_specs(self):
+        request = dict(
+            ragged_inputs=True,
+            total_chunks=249,
+            seqlen=3990,
+            value_splits=4,
+        )
+        prep = dispatch_kda(_raw_split_req("chunk_prep", **request))
+        scan = dispatch_kda(_raw_split_req("chunk_scan", **request))
+
+        self.assertTrue(prep.spec.ragged_inputs)
+        self.assertTrue(scan.spec.ragged_io)
+        self.assertIn("ragged", prep.spec.kernel_name())
+        self.assertIn("ragged", scan.spec.kernel_name())
+        for field in ("chunk", "pad_dk", "pad_c", "pad_cb", "tile_atom_m"):
+            self.assertEqual(
+                getattr(prep.spec.tile, field),
+                getattr(scan.spec.prep.tile, field),
+            )
 
     def test_fused_kernel_rejects_the_raw_split_contract(self):
         ok, why = _candidate(_FUSED).admits(_raw_split_req("chunk_fused"))
@@ -271,6 +305,17 @@ class TestGeometry(unittest.TestCase):
         self.assertEqual(result.grid, (_BATCH * _HEADS * (_SEQLEN // _CHUNK), 1, 1))
         self.assertEqual(result.block, (256, 1, 1))
 
+    def test_ragged_prep_grid_uses_global_chunk_count(self):
+        result = dispatch_kda(
+            _raw_split_req(
+                "chunk_prep",
+                ragged_inputs=True,
+                total_chunks=249,
+                seqlen=3990,
+            )
+        )
+        self.assertEqual(result.grid, (249 * _HEADS, 1, 1))
+
     def test_scan_grid_adds_value_bands_when_underfilled(self):
         scan = dispatch_kda(_req(algorithm="chunk_scan"))
         self.assertEqual(scan.spec.value_splits, 4)
@@ -299,6 +344,10 @@ class TestGeometry(unittest.TestCase):
         self.assertTrue(scan.spec.prefetch_tiles)
         self.assertIn("value_splits=4", scan.explanation)
         self.assertIn("prefetch_tiles=True", scan.explanation)
+
+    def test_value_splits_multiply_the_scan_grid(self):
+        result = dispatch_kda(_raw_split_req("chunk_scan", value_splits=4))
+        self.assertEqual(result.grid, (_BATCH * _HEADS * 4, 1, 1))
 
     def test_the_spec_carries_the_requested_head_widths(self):
         spec = dispatch_kda(_req()).spec
@@ -336,7 +385,9 @@ class TestSignatures(unittest.TestCase):
     def test_raw_beta_signatures_are_distinct_and_strided(self):
         bf16 = dispatch_kda(_raw_split_req("chunk_prep"))
         fp32 = dispatch_kda(_raw_split_req("chunk_prep", fp32_beta_dtype=True))
+        scan = dispatch_kda(_raw_split_req("chunk_scan"))
         prep_names = [arg["name"] for arg in bf16.signature]
+        scan_names = [arg["name"] for arg in scan.signature]
         bf16_types = {arg["name"]: arg["type"] for arg in bf16.signature}
         fp32_types = {arg["name"]: arg["type"] for arg in fp32.signature}
 
@@ -358,6 +409,7 @@ class TestSignatures(unittest.TestCase):
         self.assertEqual(fp32_types["beta_ptr"], "ptr<f32, global>")
         self.assertNotEqual(bf16.spec.kernel_name(), fp32.spec.kernel_name())
         self.assertNotEqual(bf16.kernel_id.spec_hash, fp32.kernel_id.spec_hash)
+        self.assertEqual(scan_names[-3:], ["batch", "heads", "tseq"])
 
 
 class TestBuild(unittest.TestCase):

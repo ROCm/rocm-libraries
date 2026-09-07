@@ -95,9 +95,20 @@ from __future__ import annotations
 import contextvars
 import threading
 import time as _time
+from collections import OrderedDict
 from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Hashable,
+    Iterator,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from .hip_module import Runtime
 from .packing import pack_args
@@ -227,12 +238,27 @@ class LaunchConfig:
     kernel has not yet written to). A per-launch HIP event is the
     minimum safe primitive.
 
-    Set ``fence=False`` only when the caller wraps multiple launches
-    in an outer event-timed region (e.g. :func:`time_launches` or a
-    multi-stage pipeline that ends with its own
-    :meth:`Runtime.wait_stream`). The :func:`no_fence` context
-    manager forces this off for any nested launcher call regardless
-    of the per-call value.
+    Set ``fence=False`` only when the caller records completion with
+    ``record_event=True``, wraps launches in an outer event-timed region
+    (e.g. :func:`time_launches`), or ends the pipeline with its own
+    :meth:`Runtime.wait_stream`. The :func:`no_fence` context manager forces
+    this off for any nested launcher call regardless of the per-call value.
+    """
+
+    record_event: bool = False
+    """Record a nonblocking completion event when ``fence=False``.
+
+    Production pipelines can use this to let later launches reap retained
+    argument and tensor references without synchronizing the host. Benchmark
+    loops that provide their own outer completion event should leave it off.
+    """
+
+    retain_tensors: bool = True
+    """Keep tensor arguments alive until launch completion.
+
+    Disable only when every tensor is owned by a longer-lived pool or by
+    PyTorch's caching allocator on this same stream. Same-stream reuse is then
+    FIFO ordered without retaining Python references for the whole pipeline.
     """
 
     record_event: bool = False
@@ -703,7 +729,9 @@ class _LeaseSlot:
     state: str = "acquired"
     event: Any = None
     owns_event: bool = False
+    pending_stream: Optional[int] = None
     last_used: int = 0
+    bindings: OrderedDict[Hashable, Any] = field(default_factory=OrderedDict)
 
 
 class WorkspaceLease:
@@ -734,6 +762,21 @@ class WorkspaceLease:
     @property
     def slot_id(self) -> int:
         return self._slot_id
+
+    def bind_cached(
+        self,
+        key: Hashable,
+        binder: Callable[[Mapping[str, Any]], Any],
+    ) -> Any:
+        """Return a slot-owned binding built at most once for ``key``.
+
+        Bindings may contain tensor views into the slot's backing allocations.
+        They remain owned by the pool and are valid only while this lease is
+        acquired. Same-stream reuse preserves FIFO ordering for the storage.
+        """
+        if self._released:
+            raise RuntimeError("workspace lease has already been released")
+        return self._pool.bind_cached(self, key, binder)
 
     def release_after(self, stream: int = 0) -> None:
         """Record a stream event and make this lease pending on its completion."""
@@ -1001,6 +1044,31 @@ class WorkspaceLeasePool:
         if slot is None or slot.state != "acquired":
             raise RuntimeError("workspace lease is not currently acquired")
         return slot
+
+    def bind_cached(
+        self,
+        lease: WorkspaceLease,
+        key: Hashable,
+        binder: Callable[[Mapping[str, Any]], Any],
+    ) -> Any:
+        """Cache a typed binding on the acquired slot.
+
+        The backing tensors of a slot never change. A binding key must encode
+        every requested shape/layout property; capacity-compatible leases can
+        then reuse the exact same tensor-view objects without rebuilding them.
+        """
+        with self._lock:
+            slot = self._acquired_slot_locked(lease)
+            if key in slot.bindings:
+                cached = slot.bindings[key]
+                slot.bindings.move_to_end(key)
+                return cached
+            value = binder(slot.tensors)
+            slot.bindings[key] = value
+            # Bound the metadata cache independently of the allocation count.
+            while len(slot.bindings) > 32:
+                slot.bindings.popitem(last=False)
+            return value
 
     def release_after(self, lease: WorkspaceLease, *, stream: int = 0) -> None:
         """Record completion after the final consumer and mark the lease pending."""

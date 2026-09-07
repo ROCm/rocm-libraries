@@ -375,6 +375,10 @@ class FusedMegaKernelSpecFp8:
     pipeline_native_down: bool = False
     mxfp4_preshuffled: bool = False
     pipeline_native_gateup: bool = False
+    # AITER stores a fused gate/up tensor with the gate/up selector inside
+    # each lane-major N tile.  When enabled, WGate/WUp and their scales may
+    # alias that fused allocation; the loaders select plane 0/1 in-kernel.
+    gate_up_interleaved: bool = False
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -446,6 +450,8 @@ class FusedMegaKernelSpecFp8:
             name += "_ps"
         if self.pipeline_native_gateup:
             name += "_gp2"
+        if self.gate_up_interleaved:
+            name += "_gui"
         return name
 
 
@@ -1227,6 +1233,7 @@ def _load_b_mxfp4_native(
     k_tile_base: Value,
     N: Value,
     preshuffled: bool,
+    gate_up_index: int | None = None,
     pad_for_mfma: bool = True,
 ) -> Value:
     """Load 32 packed FP4 values and zero-pad to the intrinsic's 256 bits."""
@@ -1238,6 +1245,11 @@ def _load_b_mxfp4_native(
         n_lane = b.mod(n_col, b.const_i32(16))
         k0 = b.div(k_tile_base, b.const_i32(128))
         k0_count = b.div(N, b.const_i32(128))
+        n0 = (
+            b.add(b.mul(n0, b.const_i32(2)), b.const_i32(gate_up_index))
+            if gate_up_index is not None
+            else n0
+        )
         packed_addr = b.mul(
             b.add(
                 b.mul(
@@ -1272,11 +1284,19 @@ def _load_mxfp4_scale_word(
     stride: Value,
     k_group: Value,
     preshuffled: bool,
+    gate_up_index: int | None = None,
 ) -> Value:
     """Load this lane's E8M0 byte into the low byte of an i32 scale VGPR."""
     if preshuffled:
-        n1 = b.div(n_col, b.const_i32(32))
-        n_pack = b.mod(b.div(n_col, b.const_i32(16)), b.const_i32(2))
+        n1 = b.div(
+            n_col,
+            b.const_i32(16 if gate_up_index is not None else 32),
+        )
+        n_pack = (
+            b.const_i32(gate_up_index)
+            if gate_up_index is not None
+            else b.mod(b.div(n_col, b.const_i32(16)), b.const_i32(2))
+        )
         n_lane = b.mod(n_col, b.const_i32(16))
         kg = b.div(k_tile_base, b.const_i32(128))
         k1 = b.div(kg, b.const_i32(2))
@@ -1439,6 +1459,7 @@ def _emit_mxfp4_native_gateup_fused_kloop(
     stride_up_scale: Value,
     mx_scale_a: Value,
     preshuffled: bool,
+    gate_up_interleaved: bool,
     tag: str,
 ) -> tuple[list[Value], list[Value]]:
     """Native K=128 FP8×FP4 gate/up loop with in-instruction weight scales."""
@@ -1488,6 +1509,7 @@ def _emit_mxfp4_native_gateup_fused_kloop(
                 k_tile_base=k_base,
                 N=K,
                 preshuffled=preshuffled,
+                gate_up_index=0 if gate_up_interleaved else None,
             )
             up_fragment = _load_b_mxfp4_native(
                 b,
@@ -1498,6 +1520,7 @@ def _emit_mxfp4_native_gateup_fused_kloop(
                 k_tile_base=k_base,
                 N=K,
                 preshuffled=preshuffled,
+                gate_up_index=1 if gate_up_interleaved else None,
             )
             gate_scale = _load_mxfp4_scale_word(
                 b,
@@ -1557,6 +1580,7 @@ def _emit_mxfp4_native_gateup_pipeline(
     stride_up_scale: Value,
     mx_scale_a: Value,
     preshuffled: bool,
+    gate_up_interleaved: bool,
     tag: str,
 ) -> tuple[list[Value], list[Value]]:
     """Two-stage K pipeline for native gate/up with packed in-flight FP4."""
@@ -1590,6 +1614,7 @@ def _emit_mxfp4_native_gateup_pipeline(
                 k_tile_base=k_base,
                 N=K,
                 preshuffled=preshuffled,
+                gate_up_index=0 if gate_up_interleaved else None,
                 pad_for_mfma=False,
             )
             for index in range(n_tiles)
@@ -1604,6 +1629,7 @@ def _emit_mxfp4_native_gateup_pipeline(
                 k_tile_base=k_base,
                 N=K,
                 preshuffled=preshuffled,
+                gate_up_index=1 if gate_up_interleaved else None,
                 pad_for_mfma=False,
             )
             for index in range(n_tiles)
@@ -2589,6 +2615,8 @@ def build_moe_fused_mega_gemm_fp8(
         raise ValueError("pipeline_native_down requires mxfp4_native=True")
     if spec.mxfp4_preshuffled and not spec.mxfp4_native:
         raise ValueError("mxfp4_preshuffled requires mxfp4_native=True")
+    if spec.gate_up_interleaved and not spec.mxfp4_preshuffled:
+        raise ValueError("gate_up_interleaved requires mxfp4_preshuffled=True")
     if spec.pipeline_native_gateup and not spec.mxfp4_native:
         raise ValueError("pipeline_native_gateup requires mxfp4_native=True")
     if spec.weight_dtype == "mxfp4":
@@ -2953,6 +2981,7 @@ def build_moe_fused_mega_gemm_fp8(
                     stride_up_scale=stride_up_scale,
                     mx_scale_a=MxScaleA,
                     preshuffled=spec.mxfp4_preshuffled,
+                    gate_up_interleaved=spec.gate_up_interleaved,
                     tag=f"{mi}",
                 )
             elif spec.mxfp4_native:
@@ -2975,6 +3004,7 @@ def build_moe_fused_mega_gemm_fp8(
                     stride_up_scale=stride_up_scale,
                     mx_scale_a=MxScaleA,
                     preshuffled=spec.mxfp4_preshuffled,
+                    gate_up_interleaved=spec.gate_up_interleaved,
                     tag=f"{mi}",
                 )
             elif spec.weight_dtype == "mxfp4":

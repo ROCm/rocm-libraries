@@ -82,7 +82,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from typing import Tuple
 
-from rocke.core.ir import BF16, F32, I8, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import BF16, F32, I8, I32, I64, IRBuilder, KernelDef, PtrType
 from rocke.helpers.activations import _sigmoid_via_exp2
 from rocke.helpers.atoms import MfmaAtom
 from rocke.helpers.spec import SignatureBuilder, kernel_name_join
@@ -328,6 +328,10 @@ class KdaChunkPrepSpec:
     # Default-off raw token-major path: inputs are [B,T,H,D] / [B,T,H] and the
     # producer may fuse the Aiter-equivalent q/k L2 norm, gate, and beta sigmoid.
     raw_inputs: bool = False
+    # Packed variable-length raw input. ``chunk_indices`` maps each global
+    # chunk to (sequence, sequence-local chunk), and ``cu_seqlens`` bounds the
+    # final partial chunk without materializing padded copies.
+    ragged_inputs: bool = False
     # Raw beta has two separately compiled ABIs. False is the framework-native
     # BF16 path; True preserves direct FP32 input without a conversion.
     fp32_beta_dtype: bool = False
@@ -381,6 +385,8 @@ class KdaChunkPrepSpec:
         ]
         if self.raw_inputs:
             parts.extend(("raw", "bfp32" if self.fp32_beta_dtype else "bbf16"))
+            if self.ragged_inputs:
+                parts.append("ragged")
             if self.fuse_qk_l2norm:
                 parts.append("nl2")
             if self.fuse_gate:
@@ -418,6 +424,8 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
         return False, "has_dt_bias requires fuse_gate"
     if spec.fp32_beta_dtype and not spec.raw_inputs:
         return False, "fp32_beta_dtype requires raw_inputs=True"
+    if spec.ragged_inputs and not spec.raw_inputs:
+        return False, "ragged_inputs requires raw_inputs=True"
     for flag, name in (
         (spec.fuse_qk_l2norm, "fuse_qk_l2norm"),
         (spec.fuse_gate, "fuse_gate"),
@@ -572,6 +580,12 @@ class _RawTokenAddr:
         beta_stride_batch=None,
         beta_stride_token=None,
         beta_stride_head=None,
+        cu_seqlens=None,
+        chunk_indices=None,
+        tile=None,
+        q_ptr=None,
+        k_ptr=None,
+        g_ptr=None,
     ):
         self.b = b
         self.H = heads
@@ -581,6 +595,9 @@ class _RawTokenAddr:
         self.DK = dk
         self.a_log = a_log
         self.dt_bias = dt_bias
+        self.cu_seqlens = cu_seqlens
+        self.chunk_indices = chunk_indices
+        self.ragged = cu_seqlens is not None and chunk_indices is not None
         self.stride_token_qk = b.mul(heads, b.const_i32(dk))
         self.stride_batch_qk = b.mul(tseq, self.stride_token_qk)
         self.stride_head_beta = (
@@ -592,19 +609,86 @@ class _RawTokenAddr:
         self.stride_batch_beta = (
             b.mul(tseq, heads) if beta_stride_batch is None else beta_stride_batch
         )
+        self.ragged_head = None
+        self.ragged_chunk_n = None
+        self.ragged_bos = None
+        self.ragged_eos = None
+        self.ragged_token_base = None
+        self.ragged_valid_rows = None
+        if self.ragged:
+            if tile is None:
+                raise ValueError("ragged token addressing requires a bound tile")
+            chunk_id = b.div(tile, heads)
+            self.ragged_head = b.mod(tile, heads)
+            pair = b.mul(chunk_id, b.const_i32(2))
+            sequence = b.to_sgpr_u32(b.global_load_i32(chunk_indices, pair))
+            self.ragged_chunk_n = b.to_sgpr_u32(
+                b.global_load_i32(chunk_indices, b.add(pair, b.const_i32(1)))
+            )
+            self.ragged_bos = b.to_sgpr_u32(b.global_load_i32(cu_seqlens, sequence))
+            self.ragged_eos = b.to_sgpr_u32(
+                b.global_load_i32(cu_seqlens, b.add(sequence, b.const_i32(1)))
+            )
+            self.ragged_token_base = b.add(
+                self.ragged_bos,
+                b.mul(self.ragged_chunk_n, b.const_i32(chunk)),
+            )
+            self.ragged_valid_rows = b.sub(
+                self.ragged_eos,
+                self.ragged_token_base,
+            )
+            sequence_bytes = b.mul(
+                b.mul(
+                    b.zext(self.ragged_bos, I64),
+                    b.zext(self.stride_token_qk, I64),
+                ),
+                b.const_i64(2),
+            )
+            num_bytes = b.mul(
+                b.mul(
+                    b.sub(self.ragged_eos, self.ragged_bos),
+                    self.stride_token_qk,
+                ),
+                b.const_i32(2),
+            )
+            self.q_rsrc = b.buffer_rsrc(
+                b.global_ptr_add(q_ptr, sequence_bytes), num_bytes
+            )
+            self.k_rsrc = b.buffer_rsrc(
+                b.global_ptr_add(k_ptr, sequence_bytes), num_bytes
+            )
+            self.g_rsrc = b.buffer_rsrc(
+                b.global_ptr_add(g_ptr, sequence_bytes), num_bytes
+            )
 
-    def _parts(self, tile, row):
+    def _parts(self, tile, row, *, safe: bool = False):
         b = self.b
+        if self.ragged:
+            valid = b.cmp_gt(self.ragged_valid_rows, row)
+            if safe:
+                row = b.select(valid, row, b.const_i32(0))
+            token = b.add(self.ragged_token_base, row)
+            # Packed varlen tensors have a physical batch dimension of one.
+            return b.const_i32(0), self.ragged_head, token, valid
+
         bh = b.div(tile, self.nc)
         chunk_n = b.mod(tile, self.nc)
         batch = b.div(bh, self.H)
         head = b.mod(bh, self.H)
         token = b.add(b.mul(chunk_n, b.const_i32(self.C)), row)
-        return batch, head, token
+        return batch, head, token, None
+
+    def row_valid(self, tile, row):
+        return self._parts(tile, row)[3]
+
+    def head(self, tile):
+        if self.ragged:
+            return self.ragged_head
+        return self._parts(tile, self.b.const_i32(0), safe=True)[1]
 
     def qk_off(self, tile, row, col):
         b = self.b
-        batch, head, token = self._parts(tile, row)
+        batch, head, token, _ = self._parts(tile, row, safe=True)
         return b.add(
             b.add(
                 b.mul(batch, self.stride_batch_qk),
@@ -613,9 +697,37 @@ class _RawTokenAddr:
             b.add(b.mul(head, b.const_i32(self.DK)), col),
         )
 
+    def load_qk(self, kind, tile, row, col, n, dtype):
+        if not self.ragged:
+            ptr = {"q": None, "k": None, "g": None}[kind]
+            raise ValueError(f"buffer load requested for non-ragged {ptr}")
+        local_token = self.b.add(
+            self.b.mul(self.ragged_chunk_n, self.b.const_i32(self.C)),
+            row,
+        )
+        element_off = self.b.add(
+            self.b.mul(local_token, self.stride_token_qk),
+            self.b.add(
+                self.b.mul(self.ragged_head, self.b.const_i32(self.DK)),
+                col,
+            ),
+        )
+        resource = {
+            "q": self.q_rsrc,
+            "k": self.k_rsrc,
+            "g": self.g_rsrc,
+        }[kind]
+        return self.b.buffer_load_vN(
+            resource,
+            self.b.mul(element_off, self.b.const_i32(2)),
+            self.b.const_i32(0),
+            dtype,
+            n,
+        )
+
     def beta_off(self, tile, row):
         b = self.b
-        batch, head, token = self._parts(tile, row)
+        batch, head, token, _ = self._parts(tile, row, safe=True)
         return b.add(
             b.add(
                 b.mul(batch, self.stride_batch_beta),
@@ -626,7 +738,7 @@ class _RawTokenAddr:
 
     def v_off(self, tile, chunk_row, ev, ev_dim):
         b = self.b
-        batch, head, token = self._parts(tile, chunk_row)
+        batch, head, token, _ = self._parts(tile, chunk_row, safe=True)
         stride_token = b.mul(self.H, b.const_i32(ev_dim))
         stride_batch = b.mul(self.T, stride_token)
         return b.add(
@@ -658,21 +770,85 @@ class _ScanTokenIo:
         batch,
         head,
         v_row_base,
+        cu_seqlens=None,
+        sequence=None,
+        v_ptr=None,
+        o_ptr=None,
     ):
         self.b = b
         self.C = chunk
         self.stride_token = b.mul(heads, b.const_i32(ev_stride))
-        self.stride_batch = b.mul(tseq, self.stride_token)
-        self.base = b.add(
-            b.mul(batch, self.stride_batch),
-            b.mul(head, b.const_i32(ev_stride)),
-        )
+        self.ragged = cu_seqlens is not None and sequence is not None
+        if self.ragged:
+            self.bos = b.to_sgpr_u32(b.global_load_i32(cu_seqlens, sequence))
+            self.eos = b.to_sgpr_u32(
+                b.global_load_i32(cu_seqlens, b.add(sequence, b.const_i32(1)))
+            )
+            length = b.sub(self.eos, self.bos)
+            self.full_chunks = b.div(length, b.const_i32(chunk))
+            self.tail_rows = b.mod(length, b.const_i32(chunk))
+            sequence_bytes = b.mul(
+                b.mul(
+                    b.zext(self.bos, I64),
+                    b.zext(self.stride_token, I64),
+                ),
+                b.const_i64(2),
+            )
+            num_bytes = b.mul(
+                b.mul(length, self.stride_token),
+                b.const_i32(2),
+            )
+            self.v_rsrc = b.buffer_rsrc(
+                b.global_ptr_add(v_ptr, sequence_bytes), num_bytes
+            )
+            self.o_rsrc = b.buffer_rsrc(
+                b.global_ptr_add(o_ptr, sequence_bytes), num_bytes
+            )
+            self.base = b.mul(head, b.const_i32(ev_stride))
+        else:
+            self.bos = b.const_i32(0)
+            self.eos = tseq
+            self.stride_batch = b.mul(tseq, self.stride_token)
+            self.base = b.add(
+                b.mul(batch, self.stride_batch),
+                b.mul(head, b.const_i32(ev_stride)),
+            )
         self.v_row_base = v_row_base
+
+    def row_valid(self, chunk_n, chunk_row):
+        if not self.ragged:
+            return None
+        return self.b.lor(
+            self.b.cmp_gt(self.full_chunks, chunk_n),
+            self.b.cmp_gt(self.tail_rows, chunk_row),
+        )
 
     def v_off(self, chunk_n, chunk_row, gev):
         b = self.b
-        token = b.add(b.mul(chunk_n, b.const_i32(self.C)), chunk_row)
-        return b.add(self.base, b.add(b.mul(token, self.stride_token), gev))
+        local_token = b.add(b.mul(chunk_n, b.const_i32(self.C)), chunk_row)
+        return b.add(
+            self.base,
+            b.add(b.mul(local_token, self.stride_token), gev),
+        )
+
+    def load_v4(self, chunk_n, chunk_row, gev, dtype):
+        element_off = self.v_off(chunk_n, chunk_row, gev)
+        return self.b.buffer_load_vN(
+            self.v_rsrc,
+            self.b.mul(element_off, self.b.const_i32(2)),
+            self.b.const_i32(0),
+            dtype,
+            4,
+        )
+
+    def store_o(self, chunk_n, chunk_row, gev, value):
+        element_off = self.v_off(chunk_n, chunk_row, gev)
+        self.b.buffer_store_bf16(
+            self.o_rsrc,
+            self.b.mul(element_off, self.b.const_i32(2)),
+            self.b.const_i32(0),
+            value,
+        )
 
 
 class _ChunkCtx:
@@ -974,9 +1150,13 @@ def _emit_stage_issue(ctx: _ChunkCtx, ch):
         row = b.div(off, b.const_i32(DK))
         col4 = b.mod(off, b.const_i32(DK))
         if raw is not None:
-            gidx = raw.qk_off(tile, row, col4)
-            gval = b.global_load_vN(ctx.g_ptr, gidx, ELEM, 4)
-            staged.append((ctx.g_lds, row, col4, gval, 4, valid, "g"))
+            token_valid = raw.row_valid(tile, row)
+            if raw.ragged:
+                gval = raw.load_qk("g", tile, row, col4, 4, ELEM)
+            else:
+                gidx = raw.qk_off(tile, row, col4)
+                gval = b.global_load_vN(ctx.g_ptr, gidx, ELEM, 4)
+            staged.append((ctx.g_lds, row, col4, gval, 4, valid, "g", token_valid))
         else:
             staged.append(
                 (
@@ -986,6 +1166,7 @@ def _emit_stage_issue(ctx: _ChunkCtx, ch):
                     b.global_load_vN(ctx.g_ptr, b.add(tile_cd, off), F32, 4),
                     4,
                     valid,
+                    None,
                     None,
                 )
             )
@@ -1000,17 +1181,26 @@ def _emit_stage_issue(ctx: _ChunkCtx, ch):
         row = b.div(off, b.const_i32(DK))
         col = b.mod(off, b.const_i32(DK))
         if raw is not None:
-            gidx = raw.qk_off(tile, row, col)
-            kval = b.global_load_vN(ctx.k_ptr, gidx, ELEM, 8)
-            qval = b.global_load_vN(ctx.q_ptr, gidx, ELEM, 8)
+            if raw.ragged:
+                kval = raw.load_qk("k", tile, row, col, 8, ELEM)
+                qval = raw.load_qk("q", tile, row, col, 8, ELEM)
+                token_valid = None
+            else:
+                token_valid = raw.row_valid(tile, row)
+                gidx = raw.qk_off(tile, row, col)
+                kval = b.global_load_vN(ctx.k_ptr, gidx, ELEM, 8)
+                qval = b.global_load_vN(ctx.q_ptr, gidx, ELEM, 8)
         else:
             gidx = b.add(tile_cd, off)
             kval = b.global_load_vN(ctx.k_ptr, gidx, ELEM, 8)
             qval = b.global_load_vN(ctx.q_ptr, gidx, ELEM, 8)
-        staged.append((ctx.k_lds, row, col, kval, 8, valid, "k"))
-        staged.append((ctx.q_lds, row, col, qval, 8, valid, "q"))
+            token_valid = None
+        staged.append((ctx.k_lds, row, col, kval, 8, valid, "k", token_valid))
+        staged.append((ctx.q_lds, row, col, qval, 8, valid, "q", token_valid))
+    beta_valid = None
     if raw is not None:
         bcol = b.select(b.cmp_gt(b.const_i32(C), tid), tid, b.const_i32(C - 1))
+        beta_valid = raw.row_valid(tile, bcol)
         beta_off = raw.beta_off(tile, bcol)
         if ctx.spec.fp32_beta_dtype:
             beta = b.global_load_f32(ctx.beta_ptr, beta_off)
@@ -1026,22 +1216,21 @@ def _emit_stage_issue(ctx: _ChunkCtx, ch):
     else:
         bcol = b.select(b.cmp_gt(b.const_i32(C), tid), tid, b.const_i32(C - 1))
         beta = b.global_load_f32(ctx.beta_ptr, b.add(tile_c, bcol))
-    return staged, beta, tile
+    return staged, beta, tile, beta_valid
 
 
 def _emit_stage_commit(ctx: _ChunkCtx, issued) -> None:
     """Write what :func:`_emit_stage_issue` loaded into the staging tiles."""
     b = ctx.b
-    staged, beta, tile = issued
+    staged, beta, tile, beta_valid = issued
     spec = ctx.spec
     raw = ctx.raw
     bh = None
     head = None
     if raw is not None:
-        bh = b.div(tile, raw.nc)
-        head = b.mod(bh, raw.H)
+        head = raw.head(tile)
 
-    for lds, row, col, value, n, valid, kind in staged:
+    for lds, row, col, value, n, valid, kind, token_valid in staged:
         with b.scf_if(valid) if valid is not None else nullcontext():
             if kind == "g" and raw is not None and spec.fuse_gate:
                 for j in range(4):
@@ -1058,8 +1247,21 @@ def _emit_stage_commit(ctx: _ChunkCtx, issued) -> None:
                         has_dt_bias=spec.has_dt_bias,
                         dk=ctx.DK,
                     )
+                    if token_valid is not None:
+                        gate = b.select(
+                            token_valid,
+                            gate,
+                            b.const_f32(0.0),
+                        )
                     _st(b, lds, row, col_j, value=gate, n=1)
             elif kind in ("k", "q") and raw is not None and spec.fuse_qk_l2norm:
+                if token_valid is not None:
+                    zero = b.cast_f32_to(b.const_f32(0.0), ctx.ELEM)
+                    value = b.select(
+                        token_valid,
+                        value,
+                        b.vec_pack([zero] * 8, ctx.ELEM),
+                    )
                 vals = [b.cast_to_f32(b.vec_extract(value, j)) for j in range(8)]
                 inv = _l2norm_scale8(b, vals)
                 vals = [b.fmul(v, inv) for v in vals]
@@ -1074,9 +1276,18 @@ def _emit_stage_commit(ctx: _ChunkCtx, issued) -> None:
                     n=8,
                 )
             else:
+                if token_valid is not None:
+                    zero = b.cast_f32_to(b.const_f32(0.0), ctx.ELEM)
+                    value = b.select(
+                        token_valid,
+                        value,
+                        zero if n == 1 else b.vec_pack([zero] * n, ctx.ELEM),
+                    )
                 _st(b, lds, row, col, value=value, n=n)
     if spec.fuse_beta_sigmoid and raw is not None:
         beta = _sigmoid_via_exp2(b, beta)
+    if beta_valid is not None:
+        beta = b.select(beta_valid, beta, b.const_f32(0.0))
     with b.scf_if(b.cmp_gt(b.const_i32(ctx.C), ctx.tid)):
         _st(b, ctx.beta_lds, ctx.tid, value=beta, n=1)
 
@@ -1718,6 +1929,21 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
         beta_stride_batch = b.param("beta_stride_batch", I32)
         beta_stride_token = b.param("beta_stride_token", I32)
         beta_stride_head = b.param("beta_stride_head", I32)
+        cu_seqlens_ptr = None
+        chunk_indices_ptr = None
+        if spec.ragged_inputs:
+            cu_seqlens_ptr = b.param(
+                "cu_seqlens_ptr",
+                PtrType(I32, "global"),
+                readonly=True,
+                align=4,
+            )
+            chunk_indices_ptr = b.param(
+                "chunk_indices_ptr",
+                PtrType(I32, "global"),
+                readonly=True,
+                align=8,
+            )
         raw = _RawTokenAddr(
             b,
             heads=heads,
@@ -1730,6 +1956,12 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
             beta_stride_batch=beta_stride_batch,
             beta_stride_token=beta_stride_token,
             beta_stride_head=beta_stride_head,
+            cu_seqlens=cu_seqlens_ptr,
+            chunk_indices=chunk_indices_ptr,
+            tile=b.block_id_x(),
+            q_ptr=q_ptr,
+            k_ptr=k_ptr,
+            g_ptr=g_ptr,
         )
 
     ctx = _ChunkCtx(b, spec, (q_ptr, k_ptr, g_ptr, beta_ptr, scale, raw))
@@ -2073,6 +2305,75 @@ class _ScanCtx:
         local_ev = b.add(v_row, ev_col)
         return self.v_global(tile, chunk_row, local_ev, chunk_n=chunk_n)
 
+    def load_v4(self, tile, chunk_row, local_ev, *, chunk_n=None):
+        """Load four value channels, zeroing a ragged chunk's invalid rows."""
+        b = self.b
+        if self.io is not None and self.io.ragged and chunk_n is not None:
+            return self.io.load_v4(
+                chunk_n,
+                chunk_row,
+                self.global_ev(local_ev),
+                self.ELEM,
+            )
+        value = b.global_load_vN(
+            self.v_ptr,
+            self.v_global(tile, chunk_row, local_ev, chunk_n=chunk_n),
+            self.ELEM,
+            4,
+        )
+        valid = (
+            self.io.row_valid(chunk_n, chunk_row)
+            if self.io is not None and chunk_n is not None
+            else None
+        )
+        if valid is None:
+            return value
+        zero = b.cast_f32_to(b.const_f32(0.0), self.ELEM)
+        return b.select(
+            valid,
+            value,
+            b.vec_pack([zero] * 4, self.ELEM),
+        )
+
+    def store_o(
+        self,
+        tile,
+        chunk_row,
+        ev_col,
+        v_row,
+        value,
+        *,
+        chunk_n=None,
+    ):
+        """Store one output scalar unless it belongs to a ragged tail row."""
+        b = self.b
+        if self.io is not None and self.io.ragged and chunk_n is not None:
+            self.io.store_o(
+                chunk_n,
+                chunk_row,
+                self.global_ev(b.add(v_row, ev_col)),
+                value,
+            )
+            return
+        valid = (
+            self.io.row_valid(chunk_n, chunk_row)
+            if self.io is not None and chunk_n is not None
+            else None
+        )
+        with b.scf_if(valid) if valid is not None else nullcontext():
+            b.global_store_vN(
+                self.o_ptr,
+                self.o_global(
+                    tile,
+                    chunk_row,
+                    ev_col,
+                    v_row,
+                    chunk_n=chunk_n,
+                ),
+                value,
+                1,
+            )
+
     def slot(self, i):
         """Slot ``i``'s (row, col) inside the atom's output tile.
 
@@ -2239,11 +2540,11 @@ def _emit_scan_body(
                 row0, col = sc.slot(4 * grp)
                 cg = cidx(jt, col)
                 jt_values.append(
-                    b.global_load_vN(
-                        sc.v_ptr,
-                        sc.v_global(tile, cg, b.add(wrow, row0), chunk_n=chunk_n),
-                        ELEM,
-                        4,
+                    sc.load_v4(
+                        tile,
+                        cg,
+                        b.add(wrow, row0),
+                        chunk_n=chunk_n,
                     )
                 )
             issued_v.append(jt_values)
@@ -2323,11 +2624,11 @@ def _emit_scan_body(
             elif issued_v is not None:
                 vvec = issued_v[jt][grp]
             else:
-                vvec = b.global_load_vN(
-                    sc.v_ptr,
-                    sc.v_global(tile, cg, b.add(wrow, row0), chunk_n=chunk_n),
-                    ELEM,
-                    4,
+                vvec = sc.load_v4(
+                    tile,
+                    cg,
+                    b.add(wrow, row0),
+                    chunk_n=chunk_n,
                 )
             for j in range(4):
                 row, _ = sc.slot(4 * grp + j)
@@ -2414,11 +2715,13 @@ def _emit_scan_body(
         # contiguous run of v channels per lane group and is already coalesced.
         for i in range(CPL):
             row, col = sc.slot(i)
-            b.global_store_vN(
-                sc.o_ptr,
-                sc.o_global(tile, cidx(jt, row), col, wrow, chunk_n=chunk_n),
+            sc.store_o(
+                tile,
+                cidx(jt, row),
+                col,
+                wrow,
                 b.cast_f32_to(b.vec_extract(acc_o, i), ELEM),
-                1,
+                chunk_n=chunk_n,
             )
 
     # ---- S^T <- S^T Diag(dec) + V~^T Kt^T -------------------------------
@@ -2681,6 +2984,9 @@ class KdaChunkScanSpec:
     value_splits: int = 1
     # Read/write token-major [B,T,H,D] tensors instead of chunk-packed views.
     token_major_io: bool = False
+    # Packed variable-length token-major V/O. Per-sequence chunk ranges come
+    # from ``chunk_offsets`` and token bounds from ``cu_seqlens``.
+    ragged_io: bool = False
     # Issue the next chunk's materialized tiles across the current scan body,
     # then reuse the same LDS allocations after their current contents die.
     prefetch_tiles: bool = True
@@ -2777,6 +3083,8 @@ class KdaChunkScanSpec:
             parts += (f"vs{self.value_splits}",)
         if self.token_major_io:
             parts += ("tm",)
+        if self.ragged_io:
+            parts += ("ragged",)
         if not self.prefetch_tiles:
             parts += ("nopf",)
         if self.wave_local_intermediates:
@@ -2794,6 +3102,7 @@ def tuned_kda_chunk_scan_spec(
     has_initial_state: bool = False,
     store_final_state: bool = True,
     token_major_io: bool = False,
+    ragged_io: bool = False,
 ) -> KdaChunkScanSpec:
     """Return the measured gfx950 scan geometry for a recurrence-stream count.
 
@@ -2828,6 +3137,7 @@ def tuned_kda_chunk_scan_spec(
         store_final_state=store_final_state,
         value_splits=value_splits,
         token_major_io=token_major_io,
+        ragged_io=ragged_io,
         wave_local_intermediates=wave_local_intermediates,
     )
 
@@ -2840,6 +3150,8 @@ def is_valid_scan_spec(
         return False, f"unsupported arch {arch}"
     if spec.dtype not in _DTYPE_IR:
         return False, f"unsupported dtype {spec.dtype}"
+    if spec.ragged_io and not spec.token_major_io:
+        return False, "ragged_io requires token_major_io=True"
     t = spec.tile
 
     if spec.value_splits not in _RAW_VALUE_SPLITS:
@@ -2968,10 +3280,25 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
 
     io = None
     heads = None
+    cu_seqlens_ptr = None
+    chunk_offsets_ptr = None
     if spec.token_major_io:
         batch = b.param("batch", I32)
         heads = b.param("heads", I32)
         tseq = b.param("tseq", I32)
+        if spec.ragged_io:
+            cu_seqlens_ptr = b.param(
+                "cu_seqlens_ptr",
+                PtrType(I32, "global"),
+                readonly=True,
+                align=4,
+            )
+            chunk_offsets_ptr = b.param(
+                "chunk_offsets_ptr",
+                PtrType(I32, "global"),
+                readonly=True,
+                align=4,
+            )
 
     gk_lds = b.smem_alloc(ELEM, [C, PDK], "gk_s")
     gq_lds = b.smem_alloc(ELEM, [C, PDK], "gq_s")
@@ -2997,6 +3324,17 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
         v_split = b.mod(wg, b.const_i32(spec.value_splits))
         v_row_base = b.mul(v_split, b.const_i32(ev_slice))
 
+    sequence = b.div(bh, heads) if spec.token_major_io else None
+    head = b.mod(bh, heads) if spec.token_major_io else None
+    chunk_begin = b.const_i32(0)
+    scan_nc = nc
+    if spec.ragged_io:
+        chunk_begin = b.to_sgpr_u32(b.global_load_i32(chunk_offsets_ptr, sequence))
+        chunk_end = b.to_sgpr_u32(
+            b.global_load_i32(chunk_offsets_ptr, b.add(sequence, b.const_i32(1)))
+        )
+        scan_nc = b.sub(chunk_end, chunk_begin)
+
     if spec.token_major_io:
         io = _ScanTokenIo(
             b,
@@ -3004,9 +3342,13 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
             tseq=tseq,
             chunk=C,
             ev_stride=EV,
-            batch=b.div(bh, heads),
-            head=b.mod(bh, heads),
+            batch=sequence,
+            head=head,
             v_row_base=v_row_base,
+            cu_seqlens=cu_seqlens_ptr,
+            sequence=sequence if spec.ragged_io else None,
+            v_ptr=v_ptr,
+            o_ptr=o_ptr,
         )
 
     sc = _ScanCtx(
@@ -3235,7 +3577,15 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
             commit_stage(aqb_lds, C, C * C // 8, aqk)
             self._commit_dec(dec)
 
-    first_tile = b.mul(bh, nc)
+    def tile_at(chunk_n):
+        if spec.ragged_io:
+            return b.add(
+                b.mul(b.add(chunk_begin, chunk_n), heads),
+                head,
+            )
+        return b.add(b.mul(bh, nc), chunk_n)
+
+    first_tile = tile_at(b.const_i32(0))
     chunk0_n = b.const_i32(0)
     if pipeline_tiles:
         # Peel chunk zero.  Every later chunk is loaded by its predecessor.
@@ -3261,31 +3611,31 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
             # Keep chunk zero's large next-tile vectors out of the h0 live
             # range. Stage chunk one only after h0 has become the carried state.
             next_n = b.select(
-                b.cmp_gt(nc, b.const_i32(1)),
+                b.cmp_gt(scan_nc, b.const_i32(1)),
                 b.const_i32(1),
                 b.const_i32(0),
             )
-            next_tile = b.add(first_tile, next_n)
+            next_tile = tile_at(next_n)
             stage_all(next_tile)
             b.sync_lds_only()
 
     loop = b.scf_for_iter(
         loop_start,
-        nc,
+        scan_nc,
         b.const_i32(1),
         [(f"s{ti}", loop_init[ti]) for ti in range(sc.NS)],
         iv_name="chunk",
         elide_trailing_barrier=False,
     )
     with loop as (n, carried):
-        tile = b.add(b.mul(bh, nc), n)
+        tile = tile_at(n)
         tile_prefetch = None
         if pipeline_tiles:
             # Clamp the last iteration to a valid tile.  One redundant prefetch
             # is cheaper than a divergent branch in every recurrence stream.
             nxt = b.add(n, b.const_i32(1))
-            nxt = b.select(b.cmp_gt(nc, nxt), nxt, n)
-            tile_prefetch = _TilePrefetch(b.add(b.mul(bh, nc), nxt))
+            nxt = b.select(b.cmp_gt(scan_nc, nxt), nxt, n)
+            tile_prefetch = _TilePrefetch(tile_at(nxt))
         else:
             stage_all(tile)
             b.sync_lds_only()
@@ -3328,6 +3678,8 @@ def kda_chunk_scan_signature(spec: KdaChunkScanSpec):
     )
     if spec.token_major_io:
         sb = sb.scalar("batch", "i32").scalar("heads", "i32").scalar("tseq", "i32")
+        if spec.ragged_io:
+            sb = sb.ptr("cu_seqlens_ptr", "i32").ptr("chunk_offsets_ptr", "i32")
     return sb.build()
 
 
@@ -3366,6 +3718,8 @@ def kda_chunk_prep_signature(spec: KdaChunkPrepSpec):
             .scalar("beta_stride_token", "i32")
             .scalar("beta_stride_head", "i32")
         )
+        if spec.ragged_inputs:
+            sb = sb.ptr("cu_seqlens_ptr", "i32").ptr("chunk_indices_ptr", "i32")
     return sb.build()
 
 

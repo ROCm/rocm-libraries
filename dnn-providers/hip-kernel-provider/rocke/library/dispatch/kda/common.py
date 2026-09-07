@@ -36,7 +36,6 @@ also needs two launches and a tile workspace, which is not represented by one
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Tuple
 
 from kernels.gfx942.kda_chunkwise import (
     # Re-exported, never redeclared. The kernel owns what it covers; dispatch's
@@ -51,7 +50,8 @@ from rocke.core.arch import ArchTarget
 from rocke.dispatch.core import KernelCandidate, OperatorRequest
 
 FAMILY = "kda_chunkwise"
-# v2 gives raw gfx950 beta distinct BF16/FP32 pointer ABIs plus three strides.
+# Existing signatures remain byte-identical; ragged gfx950 variants have
+# distinct spec hashes and kernel names carrying their additional pointers.
 KDA_ABI_VERSION = "rocke-kda-chunkwise/v2"
 
 
@@ -60,10 +60,11 @@ class KdaRequest(OperatorRequest):
     """Normalized chunkwise Kimi Delta Attention prefill request.
 
     ``head_v`` is the logical value width of one attention head, not the
-    per-workgroup partition used on gfx942. ``seqlen`` is the padded
-    per-sequence length; this family has no varlen path, so a ragged batch must
-    be padded by the caller. An omitted ``chunk_size`` selects the tuned
-    architecture default: 16 on gfx942 and 32 on gfx950.
+    per-workgroup partition used on gfx942. ``seqlen`` is the maximum logical
+    sequence length. Aligned requests tile it exactly; packed-ragged gfx950
+    requests carry ``total_chunks`` and provide sequence/chunk maps at launch.
+    An omitted ``chunk_size`` selects the tuned architecture default: 16 on
+    gfx942 and 32 on gfx950.
 
     The raw/token-major fields describe the framework-facing gfx950 split
     pipeline. They default off so existing prepared, chunk-packed requests keep
@@ -84,6 +85,8 @@ class KdaRequest(OperatorRequest):
     has_initial_state: bool = False
     store_final_state: bool = True
     raw_inputs: bool = False
+    ragged_inputs: bool = False
+    total_chunks: int | None = None
     fp32_beta_dtype: bool = False
     token_major_io: bool = False
     fuse_qk_l2norm: bool = False
@@ -110,6 +113,9 @@ class KdaRequest(OperatorRequest):
             "head_v": int(self.head_v),
             "chunk_size": self.effective_chunk_size,
             "num_chunks": self.num_chunks,
+            "total_chunks": (
+                0 if self.total_chunks is None else int(self.total_chunks)
+            ),
             "value_splits": (
                 0 if self.value_splits is None else int(self.value_splits)
             ),
@@ -134,7 +140,11 @@ class KdaRequest(OperatorRequest):
     def num_chunks(self) -> int:
         """Chunks per sequence. Zero when ``seqlen`` does not tile exactly."""
         chunk = self.effective_chunk_size
-        if chunk <= 0 or int(self.seqlen) % chunk:
+        if chunk <= 0:
+            return 0
+        if self.ragged_inputs:
+            return (int(self.seqlen) + chunk - 1) // chunk
+        if int(self.seqlen) % chunk:
             return 0
         return int(self.seqlen) // chunk
 
@@ -159,6 +169,7 @@ KDA_DIM_VOCABULARY = (
     "head_v",
     "chunk_size",
     "num_chunks",
+    "total_chunks",
     "value_splits",
 )
 
@@ -180,6 +191,12 @@ def _request_errors(req: OperatorRequest) -> list[str]:
         errors.append("value_splits must be one of (1, 2, 4, 8)")
     if req.fp32_beta_dtype and not req.raw_inputs:
         errors.append("fp32_beta_dtype requires raw_inputs")
+    if req.ragged_inputs and not (req.raw_inputs and req.token_major_io):
+        errors.append("ragged_inputs requires raw_inputs and token_major_io")
+    if req.ragged_inputs and req.arch != "gfx950":
+        errors.append("ragged_inputs is currently gfx950-only")
+    if req.ragged_inputs and (req.total_chunks is None or int(req.total_chunks) <= 0):
+        errors.append("ragged_inputs requires positive total_chunks")
     if req.has_dt_bias and not req.fuse_gate:
         errors.append("has_dt_bias requires fuse_gate")
     fused_preprocessing = req.fuse_qk_l2norm or req.fuse_gate or req.fuse_beta_sigmoid
@@ -194,7 +211,7 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
-def _selector_matches(req: KdaRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
+def _selector_matches(req: KdaRequest, candidate: KernelCandidate) -> tuple[bool, str]:
     algorithm = req.algorithm.strip().lower()
     spec_id = req.spec_id.strip().lower()
     if algorithm not in ("auto", candidate.algorithm):

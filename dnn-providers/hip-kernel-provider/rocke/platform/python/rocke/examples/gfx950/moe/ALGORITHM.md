@@ -6,6 +6,11 @@ This is the algorithm the `FusedMoeForward` pipeline computes, and *why* it is a
 optimization history; this file is the specification, the data layout, and the
 precise per-stage steps.
 
+The Kimi-K3 decode integration adds two special-purpose stages to this base
+pipeline: a correction-biased top-k router that also constructs the compact
+active-expert layout (§10), and a rank-staged latent-tail reduction fused with
+RMSNorm (§11).
+
 > A different example, [`examples/gfx950/fused_mega_moe/`](../../fused_mega_moe/),
 > computes the **same math** as a single fused kernel. The two are deliberate
 > opposites: that one keeps the intermediate in LDS across one launch; this one
@@ -283,3 +288,149 @@ scheduled and laid out**, never what is computed. Correctness is pinned by the
 torch reference (`max_abs` gate) and by the bitwise-parity tests
 (`test_preshuffle_b.py`, `test_active_tile_skip.py`,
 `test_fused_moe_preshuffle.py`); performance is the per-stage schedule.
+
+---
+
+## 10. Kimi-K3 correction-biased top-k and active packing
+
+The small-batch Kimi-K3 path replaces the generic router-plus-sort sequence with
+one `moe_topk_active_pack` workgroup. The implementation is in
+[`moe_topk_active_pack.py`](../../../instances/common/moe_topk_active_pack.py).
+For router logits `L ∈ R[T,E]`, correction bias `c ∈ R[E]`, and routed scale
+`α`, it computes
+
+```text
+p[t,e] = sigmoid(L[t,e])
+q[t,e] = p[t,e] + c[e]
+S_t    = topk_e(q[t,e], K)                         # tie: smaller e wins
+w[t,e] = α * p[t,e] / sum(j in S_t, p[t,j])       # e in S_t
+```
+
+The correction bias changes expert selection only. The emitted routing weight
+uses the original sigmoid score, not `q`; disabling renormalization removes only
+the denominator. Each selected expert is excluded from later top-k iterations,
+so an expert cannot occupy two slots for the same token.
+
+### 10.1 Selection schedule
+
+The kernel has two equivalent schedules:
+
+1. **Wave-per-token fast path.** When the workgroup contains at least one
+   64-lane wave per token, wave `t` owns token `t`. Lane `l` keeps experts
+   `l, l+64, ...` in registers. A repeated wave-shuffle argmax selects the `K`
+   winners; `(score, -expert_id)` gives deterministic lower-id tie-breaking.
+2. **Block-reduction path.** Otherwise one lane owns one expert. For each token
+   and top-k slot, an LDS block reduction first finds the maximum score and a
+   second reduction finds the minimum expert id among equal maxima.
+
+The first schedule selects all tokens concurrently and avoids the token-serial
+LDS reductions that dominate the Kimi-K3 `T<=8, E=896, K=16` decode shapes.
+
+### 10.2 Build the compact expert layout
+
+Selection and layout construction stay in the same workgroup. Let `M` be the
+downstream GEMM row tile:
+
+```text
+count[e]        = number of selected (token, slot) pairs for expert e
+blocks[e]       = ceil(count[e] / M)
+block_offset[e] = exclusive_scan(blocks)[e]
+num_blocks      = sum_e blocks[e]
+```
+
+For every `j < blocks[e]`,
+`BlockExpertIds[block_offset[e] + j] = e`. Each selected pair obtains an
+expert-local row with an LDS atomic counter and is scattered to
+
+```text
+dst = M * block_offset[e] + local_row[e]
+SortedTokenIds[dst] = token
+SortedTopkIds[dst]  = topk_slot
+SortedWeights[dst]  = w[token,e]
+```
+
+The output capacities are compile-time constants:
+
+```text
+BlockExpertIds : T*K
+Sorted*        : T*K*M
+```
+
+Unused block ids and token ids are initialized to `-1`, and unused weights to
+zero. Consequently the gather and MegaMoE kernels may launch a static maximum
+grid without a device-to-host `num_blocks` readback; sentinel blocks exit before
+expert compute.
+
+With expert parallelism, `expert_start` maps a global expert id to
+`e - expert_start` for this rank. A block for a remote expert receives
+`BlockExpertIds = -1` and is skipped downstream. This preserves the fixed-layout
+contract, although compacting only local blocks is a remaining optimization.
+
+The version-1 ownership constraints are intentional: one expert group,
+`K <= 32`, `E <= block_size`, and `T*K <= block_size`. Under those constraints
+the repeated argmax costs `O(T*K*E)` comparison work and packing costs
+`O(T*K + E)` work. Both are parallelized within one workgroup; the algorithm
+uses no global sort workspace and requires no inter-kernel synchronization
+between selection and packing.
+
+## 11. Kimi-K3 latent tail: rank reduction fused with RMSNorm
+
+The latent-tail compute kernel is
+[`moe_rank_reduce.py`](../../../instances/common/moe_rank_reduce.py). It owns the
+arithmetic after communication, not the communication itself. Each rank first
+produces a local partial `P_r ∈ R[T,H]`; the caller makes all partials locally
+addressable in a rank-major buffer `P[R,T,H]` using RCCL all-gather or an
+equivalent peer-memory transport.
+
+For each token row, `moe_rank_reduce_rmsnorm` computes
+
+```text
+z[t,h] = sum(r=0..R-1, P[r,t,h])
+u[t]   = rsqrt(sum(h=0..H-1, z[t,h]^2) / H + epsilon)
+Y[t,h] = cast(z[t,h] * u[t] * gamma[h])
+```
+
+When `fp32_internal=False`, `z` is rounded to the input storage type before
+forming `z²`. This matches the production sequence “narrow all-reduce output,
+then RMSNorm.” Setting it to true retains the rank sum in f32 through the norm.
+
+### 11.1 Per-row workgroup schedule
+
+The grid contains one workgroup per token row. Every thread owns strided
+`vec`-wide column chunks and performs the following steps:
+
+1. Load its columns from all `R` rank planes and accumulate the rank sum in f32.
+2. Keep the reduced values in registers and form a thread-local sum of squares.
+3. Reduce that scalar first within each wave; if the block has multiple waves,
+   write one partial per wave to LDS and combine those partials.
+4. Compute one row-wide inverse RMS value.
+5. Reload only `gamma`, normalize the register-cached values, cast, and store.
+
+No atomics are required because a workgroup has exclusive ownership of one
+output row. The Kimi-K3 specialization uses `R=8`, `H=3584`, bf16,
+`block_size=64`, `vec=4`, and up to eight decode rows. Fusing the rank sum and
+RMSNorm avoids materializing and rereading a separate reduced tensor between two
+local kernels.
+
+After this kernel, the vLLM latent-tail path applies only this rank's
+column-parallel up-projection shard and folds the shared-output addition into
+the GEMM beta epilogue. A companion `moe_rank_reduce_scatter` algorithm is
+available when the consumer needs only one contiguous `H/R` output shard:
+
+```text
+Y[t,j] = sum(r=0..R-1, P[r,t,rank*(H/R)+j])
+```
+
+The staging buffer must be complete and visible before either kernel launches.
+Thus the current end-to-end tail is
+
+```text
+rank-local partials -> collective staging -> rocKE rank-reduce/RMSNorm
+                    -> sharded up-projection -> final output collective
+                                               (when required)
+```
+
+The fused local arithmetic coalesces rank reduction and RMSNorm into one launch
+and avoids a local reduced intermediate, but it does not reduce collective
+traffic. Replacing all-gather staging with direct peer or symmetric-memory
+staging is a transport optimization outside the kernel algorithm.
