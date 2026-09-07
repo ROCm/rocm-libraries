@@ -44,6 +44,9 @@ namespace cuda {
 enum {
     CPU_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
     MAIN_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
+    // Hard upper bound on the number of scheduler vcores. currentWorkNode is indexed by
+    // blockIdx.x, so the scheduler grid must never exceed this or we write out of bounds.
+    MAX_VCORES = 8192U,
 };
 
 namespace internal {
@@ -93,8 +96,10 @@ __device__ WorkQueue<MAIN_WORK_QUEUE_SIZE> mainWorkQueue;
 
 __device__ uint32_t numVcores = 0;
 __device__ uint32_t activeVcoreCount = 0;
-// Server GPUs can have CU/WGP counts in the hundreds, and we spawn multiple vcores per WGP.
-__device__ WorkNode_Header *currentWorkNode[8192] = {};
+// One slot per vcore, indexed by blockIdx.x. Server GPUs can have CU counts in the hundreds and we
+// spawn multiple vcores per CU, so this is sized for the worst case wthread::hardware_concurrency()
+// is allowed to return.
+__device__ WorkNode_Header *currentWorkNode[MAX_VCORES] = {};
 
 hipStream_t mainStream;
 ::std::atomic<uint32_t> gpuThreadFromHost_counter = 0;
@@ -725,18 +730,29 @@ __host__ __device__ void wthread::detach() {
 #endif // !__HIP_DEVICE_COMPILE__
 }
 
-[[gnu::const]]
+// Deliberately not [[gnu::const]]: the result depends on which device is current when the call is
+// made, so the compiler must not treat calls either side of a hipSetDevice as interchangeable.
 __host__ unsigned int wthread::hardware_concurrency() noexcept {
     try {
-        static uint32_t multiprocessorCount = [](){
-            int temp;
-            __LIBHIPTHREADS_HIP_CHECK__(hipDeviceGetAttribute(&temp, hipDeviceAttributeMultiprocessorCount, 0));
-            // __LIBHIPTHREADS_HIP_CHECK__(hipDeviceGetAttribute(&physicalMultiProcessorCount, hipDeviceAttributePhysicalMultiProcessorCount, 0));
-            return temp;
-        }();
-        // Number of scheduler vcores launched per WGP/multiprocessor. Overridable at runtime via the
-        // HIPTHREADS_VCORES_PER_WGP environment variable; defaults to 16 if unset or unparseable.
-        static uint32_t vcoresPerWgp = [](){
+        int device = 0;
+        __LIBHIPTHREADS_HIP_CHECK__(hipGetDevice(&device));
+
+        // Per-device cache; 0 means "not computed yet". Two threads racing here compute the same
+        // value, so the duplicated work is benign and needs no lock.
+        constexpr int MAX_CACHED_DEVICES = 64;
+        static ::std::atomic<uint32_t> cache[MAX_CACHED_DEVICES];
+        const bool cacheable = device >= 0 && device < MAX_CACHED_DEVICES;
+        if (cacheable) {
+            const uint32_t cached = cache[device].load(::std::memory_order_relaxed);
+            if (cached != 0) {
+                return cached;
+            }
+        }
+
+        // Scheduler vcores requested per compute unit. Overridable at runtime via the
+        // HIPTHREADS_VCORES_PER_WGP environment variable; defaults to
+        // HIPTHREADS_DEFAULT_VCORES_PER_WGP if unset or unparseable.
+        static const uint32_t requestedVcoresPerWgp = [](){
             const char *env = ::std::getenv("HIPTHREADS_VCORES_PER_WGP");
             if (env != nullptr) {
                 char *end;
@@ -747,10 +763,67 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
             }
             return static_cast<uint32_t>(HIPTHREADS_DEFAULT_VCORES_PER_WGP);
         }();
-        return multiprocessorCount * vcoresPerWgp;
+
+        int multiprocessorCount = 0;
+        __LIBHIPTHREADS_HIP_CHECK__(
+            hipDeviceGetAttribute(&multiprocessorCount, hipDeviceAttributeMultiprocessorCount, device));
+
+        int deviceWarpSize = 0;
+        __LIBHIPTHREADS_HIP_CHECK__(
+            hipDeviceGetAttribute(&deviceWarpSize, hipDeviceAttributeWarpSize, device));
+
+        // threading_main is persistent: a vcore that cannot be made resident never runs, and the
+        // resident ones never exit while work might arrive. Over-subscribe the grid and it wedges.
+        //
+        // multiprocessorCount counts WGPs on RDNA (2 CUs each) but CUs on CDNA, so one setting
+        // means two densities - which is why the default hung on Instinct but not Navi. Normalise
+        // to CUs, treating 2 CUs as the WGP equivalent on CDNA. warpSize discriminates: wave32 is
+        // RDNA (multiprocessor == WGP), wave64 is CDNA/GCN (multiprocessor == CU).
+        const uint32_t cusPerMultiprocessor = (deviceWarpSize == 32) ? 2U : 1U;
+        uint32_t vcoresPerMp = requestedVcoresPerWgp;
+        if (cusPerMultiprocessor == 1U) {
+            // Halve, but never to zero: an explicit request of 1 must still launch something.
+            vcoresPerMp = requestedVcoresPerWgp > 1U ? requestedVcoresPerWgp / 2U : 1U;
+        }
+
+        // Even at the right density the device may not hold that many blocks, so cap against
+        // measured occupancy (reported per multiprocessor in the same unit, so unit-consistent).
+        // That figure is theoretical and over-predicts what a persistent kernel sustains: gfx1100
+        // reports 44 blocks/WGP but wedges at 36. The gap is capacity needed by work that must
+        // co-reside - blit kernels behind the async memcpys, detachWorkNode, and the CU held back
+        // by cuMask. Halve it for margin; this only ever lowers the value.
+        constexpr int OCCUPANCY_SAFETY_DIVISOR = 2;
+        int maxBlocksPerMp = 0;
+        __LIBHIPTHREADS_HIP_CHECK__(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+            &maxBlocksPerMp, internal::threading_main, static_cast<int>(wthread::max_width()), 0));
+
+        uint32_t occupancyCeiling = 0;
+        if (maxBlocksPerMp > 0) {
+            occupancyCeiling = static_cast<uint32_t>(maxBlocksPerMp) / OCCUPANCY_SAFETY_DIVISOR;
+            if (occupancyCeiling > 0 && occupancyCeiling < vcoresPerMp) {
+                vcoresPerMp = occupancyCeiling;
+            }
+        }
+
+        // Widen before multiplying so a large unit count times a large override cannot wrap.
+        uint64_t total = static_cast<uint64_t>(multiprocessorCount) * static_cast<uint64_t>(vcoresPerMp);
+        if (total > static_cast<uint64_t>(MAX_VCORES)) {
+            total = static_cast<uint64_t>(MAX_VCORES);
+        }
+        if (total == 0) {
+            // Never report zero: callers size loops off this, and the scheduler needs a grid.
+            total = 1;
+        }
+
+        const uint32_t result = static_cast<uint32_t>(total);
+
+        if (cacheable) {
+            cache[device].store(result, ::std::memory_order_relaxed);
+        }
+        return result;
     }
     catch (...) {
-        ::std::cerr << "Exception while fetching multiprocessorCount\n";
+        ::std::cerr << "Exception while computing hardware_concurrency\n";
         return 1;
     }
 }
