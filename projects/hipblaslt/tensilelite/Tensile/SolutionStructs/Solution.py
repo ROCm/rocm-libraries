@@ -1841,6 +1841,34 @@ class Solution(collections.abc.Mapping):
         return
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for the last-WG election
 
+    if state["ProblemType"]["FusedA2AMode"] == 1:
+      if state["ProblemType"]["FusedGemmA2A"]:
+        reject(state, printRejectionReason,
+               "FusedA2AMode=1 and FusedGemmA2A are mutually exclusive")
+        return
+      if state["ProblemType"]["Batched"]:
+        reject(state, printRejectionReason, "FusedA2AMode=1 does not support batched problems")
+        return
+      if state["ProblemType"]["Sparse"]:
+        reject(state, printRejectionReason, "FusedA2AMode=1 does not support sparse problems")
+        return
+      if state["GlobalSplitU"] != 1:
+        reject(state, printRejectionReason, "FusedA2AMode=1 requires GlobalSplitU=1")
+        return
+      if state["StreamK"] != 0:
+        reject(state, printRejectionReason, "FusedA2AMode=1 requires StreamK=0")
+        return
+      if state["StaggerU"] != 0:
+        reject(state, printRejectionReason, "FusedA2AMode=1 requires StaggerU=0")
+        return
+      if state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "FusedA2AMode=1 requires UseSubtileImpl=0")
+        return
+      if state["DirectToVgprA"] or state["DirectToVgprB"]:
+        reject(state, printRejectionReason,
+               "FusedA2AMode=1 requires DirectToVgprA=DirectToVgprB=0")
+        return
+
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")
       return

@@ -28,7 +28,7 @@
     'DataTypeMetadata': '<DataType Int8>',
     'DestDataType': '<DataType Float>',
     'F32XdlMathOp': '<DataType Float>',
-    'FusedA2AGemm': False,
+    'FusedA2AMode': 0,
     'FusedGemmA2A': False,
     'GateResidualDataTypeList': list([
     ]),
@@ -156,7 +156,7 @@
     'DataTypeMXSB': '<DataType E8>',
     'DestDataType': '<DataType Float>',
     'F32XdlMathOp': '<DataType Float>',
-    'FusedA2AGemm': False,
+    'FusedA2AMode': 0,
     'FusedGemmA2A': False,
     'GateResidualDataTypeList': list([
     ]),
@@ -297,7 +297,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -426,7 +426,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -555,7 +555,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -684,7 +684,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -813,7 +813,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -943,7 +943,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -1072,7 +1072,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -1201,7 +1201,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -1330,7 +1330,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -1459,7 +1459,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -1588,7 +1588,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -1721,7 +1721,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType BFloat16>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -1851,7 +1851,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -1981,7 +1981,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -2111,7 +2111,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -2241,7 +2241,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -2372,7 +2372,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -2501,7 +2501,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType ComplexFloat>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -2630,7 +2630,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType ComplexFloat>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -2759,7 +2759,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -2888,7 +2888,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Double>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -3017,7 +3017,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType XFloat32>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -3146,7 +3146,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -3276,7 +3276,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -3405,7 +3405,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -3534,7 +3534,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -3663,7 +3663,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -3792,7 +3792,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -3921,7 +3921,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -4052,7 +4052,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -4181,7 +4181,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Int8>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -4310,7 +4310,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -4439,7 +4439,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -4582,7 +4582,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -4711,7 +4711,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -4840,7 +4840,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -4969,7 +4969,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -5098,7 +5098,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -5227,7 +5227,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -5357,7 +5357,7 @@
       'DataTypeMetadata': '<DataType Int8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -5489,7 +5489,7 @@
       'DataTypeMetadata': '<DataType Int8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -5621,7 +5621,7 @@
       'DataTypeMetadata': '<DataType Int8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -5753,7 +5753,7 @@
       'DataTypeMetadata': '<DataType Int8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -5884,7 +5884,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -6013,7 +6013,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -6142,7 +6142,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -6271,7 +6271,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),
@@ -6400,7 +6400,7 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
-      'FusedA2AGemm': False,
+      'FusedA2AMode': 0,
       'FusedGemmA2A': False,
       'GateResidualDataTypeList': list([
       ]),

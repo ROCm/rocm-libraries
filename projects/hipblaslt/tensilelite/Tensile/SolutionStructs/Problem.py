@@ -500,8 +500,9 @@ _defaultProblemType = {
     # PUSHes the first AM feature columns to remote peer recv slots from the
     # GEMM epilogue; the remaining columns store locally.
     "FusedGemmA2A": False,
-    # Declares the shard dimension as a second summation index (the outer loop).
-    "FusedA2AGemm": False,
+    # A2A fusion mode. 0=Off, 1=GatheredB (B arrives one shard at a time from
+    # the peers; the shard dimension is the outer of two summation indices).
+    "FusedA2AMode": 0,
     # For kernels putting arguments in workspaces instead of kernel arguments, they can choose to support user arguments input instead.
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
@@ -1108,9 +1109,9 @@ class ProblemType(Mapping):
       self["IndexAssignmentsA"] = [sumIdx, 0] # T
     if self["TransposeB"]:
       self["IndexAssignmentsB"] = [1, sumIdx] # T
-    if self["FusedA2AGemm"]:
+    if self["FusedA2AMode"] == 1:
       # sumIdx becomes the shard index; K moves to sumIdx + 1.
-      for k in ("IndexAssignmentsA", "IndexAssignmentsB"):
+      for k in ("IndexAssignmentsA", "IndexAssignmentsB", "IndexAssignmentsMetadata"):
         self[k] = [sumIdx + 1 if i == sumIdx else i for i in self[k]]
         self[k].append(sumIdx)
     if self["Batched"]:
