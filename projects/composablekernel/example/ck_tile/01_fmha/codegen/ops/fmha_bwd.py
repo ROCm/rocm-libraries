@@ -142,7 +142,7 @@ using dq_dk_dv_trait_{F_idx} = fmha_bwd_dq_dk_dv_traits_<{F_hdim},
                                                          {F_dvpad},
                                                          {F_deterministic},
                                                          {F_trload},
-                                                         {F_maxq},
+                                                         {F_tagq},
                                                          {F_bn0}>;
 
 template <>
@@ -271,7 +271,7 @@ def FMHA_BWD_API_COND_STATEMENT(F_cond: str, F_body: str, *, if_i=0) -> str:
 FMHA_BWD_API_INNER_DISPATCH_COMMON = """{F_if}((t.is_group_mode == {F_mode}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_dbias == {F_dbias}) && ({F_dropout_check}) &&
         ({F_scheck}) && ({F_dcheck}) && ({F_dvcheck}) && (t.is_deterministic == {F_deterministic}){F_max_seq_q_cond}{F_cond_extra}) {{
     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dvpad} > 0)>;
-    using dq_dk_dv_trait_ = fmha_bwd_dq_dk_dv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_mask}, {F_dropout}, {F_bias}, {F_dbias}, {F_dpad}, {F_dvpad}, {F_deterministic}, {F_trload}, {F_maxq}, {F_bn0}>;
+    using dq_dk_dv_trait_ = fmha_bwd_dq_dk_dv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_mask}, {F_dropout}, {F_bias}, {F_dbias}, {F_dpad}, {F_dvpad}, {F_deterministic}, {F_trload}, {F_tagq}, {F_bn0}>;
     using convert_dq_trait_ = fmha_bwd_convert_dq_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dpad} > 0), {F_deterministic}>;
 """
 FMHA_BWD_API_INNER_DISPATCH_RUN = """
@@ -323,6 +323,10 @@ class FmhaBwdDQDKDVTileSize:
     F_wk1: int  # warp size along k in gemm1/gemm3
     F_occupancy: int  # occupancy
     max_seq_q: int = 0
+    # Dispatch bounds only. max_seq_q also switches to the QrQtrDor pipeline,
+    # which is reachable only behind tr_load.
+    dispatch_max_seq_q: int = 0
+    dispatch_max_seq_k: int = 0
     # Hold the dK/dV accumulators in LDS rather than registers. Frees
     # kN0*headdim/kBlockSize VGPRs per accumulator, which is what gets gfx1250
     # back to 2 waves/SIMD at headdim >= 128.
@@ -334,8 +338,15 @@ class FmhaBwdDQDKDVTileSize:
             f"b{self.F_bm0}x{self.F_bn0}x{self.F_bk0}x{self.F_bk1}x{self.F_bk2}x{self.F_bk3}x{self.F_bk4}x{self.F_bhdq}x{self.F_bhdv}"
             + f"_r{self.F_rm0}x{self.F_rn0}x{self.F_rk0}_r{self.F_rm1}x{self.F_rn1}x{self.F_rk1}_r{self.F_rm2}x{self.F_rn2}x{self.F_rk2}"
             + f"_w{self.F_wm0}x{self.F_wn0}x{self.F_wk0}_w{self.F_wm1}x{self.F_wn1}x{self.F_wk1}_o{self.F_occupancy}_maxq{self.max_seq_q}"
+            + (f"_dmaxq{self.dispatch_max_seq_q}" if self.dispatch_max_seq_q else "")
+            + (f"_dmaxk{self.dispatch_max_seq_k}" if self.dispatch_max_seq_k else "")
             + ("_ldsacc" if self.lds_acc else "")
         )
+
+    # Largest seqlen_q this tile may be dispatched for, 0 meaning unbounded.
+    @property
+    def seq_q_limit(self) -> int:
+        return self.max_seq_q or self.dispatch_max_seq_q
 
 
 @dataclass(frozen=True)
@@ -399,6 +410,7 @@ class FmhaBwdDQDKDVKernel:
             F_trload=BOOL_MAP[self.F_trload],
             F_ldsacc=BOOL_MAP["t" if self.F_tile.lds_acc else "f"],
             F_maxq=self.F_tile.max_seq_q,
+            F_tagq=self.F_tile.seq_q_limit,
         )
 
     @property
@@ -570,6 +582,12 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 # instructions. hdim 32/64 already reach occupancy 2, so they
                 # keep the register accumulators and pay no LDS traffic.
                 FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
+                # A short q sequence leaves most of the 64-row M tile idle:
+                # halving M is worth 8-10% at seqlen_q <= 32, and narrowing N
+                # as well is worth 37-44% while seqlen_k <= 64 cannot fill the
+                # 128-wide tile, but costs 8% by seqlen_k 1024.
+                FmhaBwdDQDKDVTileSize( 32,  64, 128,  32, 128,  32, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, dispatch_max_seq_q=32, dispatch_max_seq_k=64, lds_acc=True),
+                FmhaBwdDQDKDVTileSize( 32, 128, 128,  32, 128,  32, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, dispatch_max_seq_q=32, lds_acc=True),
                 FmhaBwdDQDKDVTileSize( 32,  64, 256,  32, 256,  32, 32,  256,  256,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
             ]  # fmt: skip
         return []
@@ -895,13 +913,13 @@ class FmhaBwdApiTrait:
 
     @property
     def max_seq_q_cond(self) -> str:
-        if self.tile.max_seq_q != 0:
-            if self.mode == "group":
-                return f" && (t.max_seqlen_q <= {self.tile.max_seq_q})"
-            else:
-                return f" && (t.seqlen_q <= {self.tile.max_seq_q})"
-        else:
-            return ""
+        prefix = "max_" if self.mode == "group" else ""
+        cond = ""
+        if self.tile.seq_q_limit != 0:
+            cond += f" && (t.{prefix}seqlen_q <= {self.tile.seq_q_limit})"
+        if self.tile.dispatch_max_seq_k != 0:
+            cond += f" && (t.{prefix}seqlen_k <= {self.tile.dispatch_max_seq_k})"
+        return cond
 
     @property
     def extra_cond(self) -> str:
@@ -1016,6 +1034,7 @@ class FmhaBwdApiPool:
                 F_deterministic=BOOL_MAP[trait.deterministic],
                 F_trload=BOOL_MAP[trait.tr_load],
                 F_maxq=trait.tile.max_seq_q,
+                F_tagq=trait.tile.seq_q_limit,
                 F_max_seq_q_cond=trait.max_seq_q_cond,
                 F_cond_extra=trait.extra_cond,
                 F_bn0=trait.tile.F_bn0,
@@ -1032,9 +1051,11 @@ class FmhaBwdApiPool:
 
     @staticmethod
     def max_seq_q_sort_key(trait):
+        # Narrower bounds first; unbounded (0) sorts last as the fallback.
         return (
-            trait.tile.max_seq_q if trait.tile.max_seq_q != 0 else 1000000
-        )  # sort 0 to the end
+            trait.tile.seq_q_limit or 1000000,
+            trait.tile.dispatch_max_seq_k or 1000000,
+        )
 
     @staticmethod
     def dtype_cond(dtype: str) -> str:
@@ -1126,14 +1147,14 @@ def get_bwd_blobs(
             hdim = tile.F_bhdq
             if (mode == "group") and (spad1d == "f"):
                 continue
-            if ("no" not in mask) and tile.max_seq_q != 0:
+            if ("no" not in mask) and tile.seq_q_limit != 0:
                 continue
             if (bias == "no" or bias == "alibi") and dbias == "t":
                 continue
             if "wg32" in dropout:
                 continue
-            if spad1d == "f" and tile.max_seq_q != 0 and tile.max_seq_q < M0_1D:
-                continue  # max_seq_q < M0_1D requires padding
+            if spad1d == "f" and tile.seq_q_limit != 0 and tile.seq_q_limit < M0_1D:
+                continue  # seq_q_limit < M0_1D requires padding
             if tr_load == "t":
                 # tr_load can only work with 8 pad
                 if dpad != dvpad or dpad == 1:
