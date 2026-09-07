@@ -88,6 +88,16 @@ rocke_fused_mega_kernel_spec_fp8_t rocke_fused_mega_kernel_spec_fp8_default(void
 
     s.has_sched_cadence = false; /* Python None (defer to env) */
     s.sched_cadence = NULL;
+    s.activation = "silu";
+    s.activation_beta = 1.0;
+    s.has_activation_linear_beta = false;
+    s.activation_linear_beta = 0.0;
+    s.weight_dtype = "fp8e4m3";
+    s.mxfp4_native = false;
+    s.prefetch_routing_meta = false;
+    s.pipeline_native_down = false;
+    s.mxfp4_preshuffled = false;
+    s.pipeline_native_gateup = false;
 
     rocke_fused_mega_kernel_spec_fp8_post_init(&s);
     return s;
@@ -177,6 +187,7 @@ rocke_status_t rocke_fused_mega_fp8_spec_kernel_name(const rocke_fused_mega_kern
                                                      size_t out_cap)
 {
     int n;
+    size_t used;
 
     if(spec == NULL || out == NULL || spec->name == NULL)
     {
@@ -192,6 +203,77 @@ rocke_status_t rocke_fused_mega_fp8_spec_kernel_name(const rocke_fused_mega_kern
     if(n < 0 || (size_t)n >= out_cap)
     {
         return ROCKE_ERR_VALUE;
+    }
+    used = (size_t)n;
+    if(spec->activation != NULL && strcmp(spec->activation, "situ") == 0)
+    {
+        char beta[64];
+        char linear[64];
+        size_t i;
+        snprintf(beta, sizeof(beta), "%.8g", spec->activation_beta);
+        if(spec->has_activation_linear_beta)
+            snprintf(linear, sizeof(linear), "%.8g", spec->activation_linear_beta);
+        else
+            snprintf(linear, sizeof(linear), "none");
+        for(i = 0; beta[i] != '\0'; ++i)
+        {
+            if(beta[i] == '-')
+                beta[i] = 'm';
+            else if(beta[i] == '.')
+                beta[i] = 'p';
+        }
+        for(i = 0; linear[i] != '\0'; ++i)
+        {
+            if(linear[i] == '-')
+                linear[i] = 'm';
+            else if(linear[i] == '.')
+                linear[i] = 'p';
+        }
+        n = snprintf(out + used, out_cap - used, "_situ_b%s_lb%s", beta, linear);
+        if(n < 0 || (size_t)n >= out_cap - used)
+            return ROCKE_ERR_VALUE;
+        used += (size_t)n;
+    }
+    if(spec->weight_dtype != NULL && strcmp(spec->weight_dtype, "mxfp4") == 0)
+    {
+        n = snprintf(out + used, out_cap - used, "_mxfp4");
+        if(n < 0 || (size_t)n >= out_cap - used)
+            return ROCKE_ERR_VALUE;
+        used += (size_t)n;
+        if(spec->mxfp4_native)
+        {
+            n = snprintf(out + used, out_cap - used, "_native");
+            if(n < 0 || (size_t)n >= out_cap - used)
+                return ROCKE_ERR_VALUE;
+            used += (size_t)n;
+        }
+    }
+    if(spec->prefetch_routing_meta)
+    {
+        n = snprintf(out + used, out_cap - used, "_rmeta");
+        if(n < 0 || (size_t)n >= out_cap - used)
+            return ROCKE_ERR_VALUE;
+        used += (size_t)n;
+    }
+    if(spec->pipeline_native_down)
+    {
+        n = snprintf(out + used, out_cap - used, "_dp2");
+        if(n < 0 || (size_t)n >= out_cap - used)
+            return ROCKE_ERR_VALUE;
+        used += (size_t)n;
+    }
+    if(spec->mxfp4_preshuffled)
+    {
+        n = snprintf(out + used, out_cap - used, "_ps");
+        if(n < 0 || (size_t)n >= out_cap - used)
+            return ROCKE_ERR_VALUE;
+        used += (size_t)n;
+    }
+    if(spec->pipeline_native_gateup)
+    {
+        n = snprintf(out + used, out_cap - used, "_gp2");
+        if(n < 0 || (size_t)n >= out_cap - used)
+            return ROCKE_ERR_VALUE;
     }
     return ROCKE_OK;
 }
@@ -285,6 +367,9 @@ rocke_status_t rocke_moe_fused_mega_fp8_signature(const rocke_fused_mega_kernel_
                                                   size_t* out_count)
 {
     rocke_signature_builder_t sb;
+    bool mxfp4;
+    const char* weight_dtype;
+    const char* weight_scale_dtype;
 
     if(spec == NULL || arena == NULL || out_items == NULL)
     {
@@ -295,14 +380,17 @@ rocke_status_t rocke_moe_fused_mega_fp8_signature(const rocke_fused_mega_kernel_
         return ROCKE_ERR_VALUE;
     }
 
+    mxfp4 = spec->weight_dtype != NULL && strcmp(spec->weight_dtype, "mxfp4") == 0;
+    weight_dtype = mxfp4 ? "i8" : "fp8e4m3";
+    weight_scale_dtype = mxfp4 ? "i8" : "f32";
     rocke_signature_builder_ptr(&sb, "A", "fp8e4m3", NULL);
-    rocke_signature_builder_ptr(&sb, "WGate", "fp8e4m3", NULL);
-    rocke_signature_builder_ptr(&sb, "WUp", "fp8e4m3", NULL);
-    rocke_signature_builder_ptr(&sb, "WDown", "fp8e4m3", NULL);
+    rocke_signature_builder_ptr(&sb, "WGate", weight_dtype, NULL);
+    rocke_signature_builder_ptr(&sb, "WUp", weight_dtype, NULL);
+    rocke_signature_builder_ptr(&sb, "WDown", weight_dtype, NULL);
     rocke_signature_builder_ptr(&sb, "AScale", "f32", NULL);
-    rocke_signature_builder_ptr(&sb, "WGateScale", "f32", NULL);
-    rocke_signature_builder_ptr(&sb, "WUpScale", "f32", NULL);
-    rocke_signature_builder_ptr(&sb, "WDownScale", "f32", NULL);
+    rocke_signature_builder_ptr(&sb, "WGateScale", weight_scale_dtype, NULL);
+    rocke_signature_builder_ptr(&sb, "WUpScale", weight_scale_dtype, NULL);
+    rocke_signature_builder_ptr(&sb, "WDownScale", weight_scale_dtype, NULL);
     rocke_signature_builder_ptr(&sb, "SortedTokenIds", "i32", NULL);
     rocke_signature_builder_ptr(&sb, "SortedWeights", "f32", NULL);
     rocke_signature_builder_ptr(&sb, "BlockExpertIds", "i32", NULL);
@@ -324,6 +412,8 @@ rocke_status_t rocke_moe_fused_mega_fp8_signature(const rocke_fused_mega_kernel_
     rocke_signature_builder_scalar(&sb, "stride_down_scale_e", "i32");
     rocke_signature_builder_scalar(&sb, "slot_size", "i32");
     rocke_signature_builder_scalar(&sb, "tokens", "i32");
+    if(spec->mxfp4_native)
+        rocke_signature_builder_scalar(&sb, "MxScaleA", "i32");
     if(persistent)
     {
         rocke_signature_builder_scalar(&sb, "grid_x", "i32");
@@ -384,7 +474,8 @@ rocke_value_t* rocke_moe_fp8_scale_base(rocke_moe_fp8_build_ctx_t* ctx,
     rocke_value_t* expert_i64 = rocke_b_sext(ctx->b, expert_idx, rocke_i64());
     rocke_value_t* stride_i64 = rocke_b_sext(ctx->b, stride_e, rocke_i64());
     rocke_value_t* inner = rocke_b_mul(ctx->b, expert_i64, stride_i64);
-    rocke_value_t* bytes_off = rocke_b_mul(ctx->b, inner, rocke_b_const_i64(ctx->b, 4));
+    int elem_bytes = strcmp(ctx->spec->weight_dtype, "mxfp4") == 0 ? 1 : 4;
+    rocke_value_t* bytes_off = rocke_b_mul(ctx->b, inner, rocke_b_const_i64(ctx->b, elem_bytes));
     return rocke_b_global_ptr_add(ctx->b, ptr, bytes_off);
 }
 
@@ -501,25 +592,68 @@ void rocke_moe_fp8_emit_body(rocke_moe_fp8_build_ctx_t* ctx)
         }
 
         snprintf(tag, sizeof(tag), "%d", mi);
-        rocke_moe_fp8_emit_fp8_gateup_fused_kloop(ctx,
-                                                  ctx->A,
-                                                  ctx->WGate,
-                                                  ctx->WUp,
-                                                  ctx->AScale,
-                                                  ctx->WGateScale,
-                                                  ctx->WUpScale,
-                                                  m_tile_base,
-                                                  n_tile_bases,
-                                                  mfmas_n,
-                                                  ctx->K,
-                                                  ctx->stride_a_scale,
-                                                  ctx->stride_gate_scale,
-                                                  ctx->stride_up_scale,
-                                                  tag,
-                                                  ctx->dtla.present ? &ctx->dtla : NULL,
-                                                  ctx->cadence,
-                                                  g_dqs,
-                                                  u_dqs);
+        if(ctx->spec->pipeline_native_gateup)
+        {
+            rocke_moe_fp8_emit_mxfp4_native_gateup_pipeline(ctx,
+                                                            ctx->A,
+                                                            ctx->WGate,
+                                                            ctx->WUp,
+                                                            ctx->AScale,
+                                                            ctx->WGateScale,
+                                                            ctx->WUpScale,
+                                                            m_tile_base,
+                                                            n_tile_bases,
+                                                            mfmas_n,
+                                                            ctx->K,
+                                                            ctx->stride_a_scale,
+                                                            ctx->stride_gate_scale,
+                                                            ctx->stride_up_scale,
+                                                            tag,
+                                                            g_dqs,
+                                                            u_dqs);
+        }
+        else if(strcmp(ctx->spec->weight_dtype, "mxfp4") == 0)
+        {
+            rocke_moe_fp8_emit_mxfp4_gateup_fused_kloop(ctx,
+                                                        ctx->A,
+                                                        ctx->WGate,
+                                                        ctx->WUp,
+                                                        ctx->AScale,
+                                                        ctx->WGateScale,
+                                                        ctx->WUpScale,
+                                                        m_tile_base,
+                                                        n_tile_bases,
+                                                        mfmas_n,
+                                                        ctx->K,
+                                                        ctx->stride_a_scale,
+                                                        ctx->stride_gate_scale,
+                                                        ctx->stride_up_scale,
+                                                        tag,
+                                                        g_dqs,
+                                                        u_dqs);
+        }
+        else
+        {
+            rocke_moe_fp8_emit_fp8_gateup_fused_kloop(ctx,
+                                                      ctx->A,
+                                                      ctx->WGate,
+                                                      ctx->WUp,
+                                                      ctx->AScale,
+                                                      ctx->WGateScale,
+                                                      ctx->WUpScale,
+                                                      m_tile_base,
+                                                      n_tile_bases,
+                                                      mfmas_n,
+                                                      ctx->K,
+                                                      ctx->stride_a_scale,
+                                                      ctx->stride_gate_scale,
+                                                      ctx->stride_up_scale,
+                                                      tag,
+                                                      ctx->dtla.present ? &ctx->dtla : NULL,
+                                                      ctx->cadence,
+                                                      g_dqs,
+                                                      u_dqs);
+        }
 
         for(ni = 0; ni < mfmas_n; ++ni)
         {
@@ -672,6 +806,22 @@ void rocke_moe_fp8_emit_body(rocke_moe_fp8_build_ctx_t* ctx)
     /* ---- STAGE 2: down fp8 GEMM (LDS-A) -> dequant -> weighted atomic Y ---- */
     {
         rocke_value_t* inter_blk_base = rocke_b_div(b, ctx->gu_n_off, ctx->c_group_k);
+        rocke_moe_fp8_down_row_t prefetched_rows[ROCKE_MOE_FP8_MAX_ACCS];
+        const rocke_moe_fp8_down_row_t* prefetched_ptr = NULL;
+        if(ctx->spec->prefetch_routing_meta)
+        {
+            rocke_value_t* prefetch_warp_m_off
+                = rocke_b_mul(b, ctx->warp_m_idx, rocke_b_const_i32(b, mfmas_m_down * atom->m));
+            rocke_moe_fp8_prefetch_down_routing_rows(ctx,
+                                                     prefetch_warp_m_off,
+                                                     ctx->lane,
+                                                     mfmas_m_down,
+                                                     ctx->block_m_off,
+                                                     ctx->SortedTokenIds,
+                                                     ctx->SortedWeights,
+                                                     prefetched_rows);
+            prefetched_ptr = prefetched_rows;
+        }
         rocke_for_t down_for = rocke_b_scf_for_iter(b,
                                                     ctx->c0,
                                                     ctx->H_out,
@@ -703,19 +853,53 @@ void rocke_moe_fp8_emit_body(rocke_moe_fp8_build_ctx_t* ctx)
                     rocke_value_t* d_dq;
 
                     snprintf(dtag, sizeof(dtag), "d%d_%d", mi, ni);
-                    d_dq = rocke_moe_fp8_emit_fp8_down_group_gemm(ctx,
-                                                                  &ctx->fp8_view,
-                                                                  ctx->WDown,
-                                                                  ctx->WDownScale,
-                                                                  n_tile_base,
-                                                                  &ctx->scale_view,
-                                                                  tile_n,
-                                                                  ctx->N,
-                                                                  inter_blk_base,
-                                                                  ctx->stride_down_scale,
-                                                                  m_row_base,
-                                                                  dtag,
-                                                                  ctx->cadence);
+                    if(ctx->spec->mxfp4_native)
+                    {
+                        d_dq = rocke_moe_fp8_emit_mxfp4_native_down_group_gemm(
+                            ctx,
+                            &ctx->fp8_view,
+                            ctx->WDown,
+                            ctx->WDownScale,
+                            n_tile_base,
+                            &ctx->scale_view,
+                            tile_n,
+                            ctx->N,
+                            inter_blk_base,
+                            ctx->stride_down_scale,
+                            m_row_base,
+                            dtag);
+                    }
+                    else if(strcmp(ctx->spec->weight_dtype, "mxfp4") == 0)
+                    {
+                        d_dq = rocke_moe_fp8_emit_mxfp4_down_group_gemm(ctx,
+                                                                        &ctx->fp8_view,
+                                                                        ctx->WDown,
+                                                                        ctx->WDownScale,
+                                                                        n_tile_base,
+                                                                        &ctx->scale_view,
+                                                                        tile_n,
+                                                                        ctx->N,
+                                                                        inter_blk_base,
+                                                                        ctx->stride_down_scale,
+                                                                        m_row_base,
+                                                                        dtag);
+                    }
+                    else
+                    {
+                        d_dq = rocke_moe_fp8_emit_fp8_down_group_gemm(ctx,
+                                                                      &ctx->fp8_view,
+                                                                      ctx->WDown,
+                                                                      ctx->WDownScale,
+                                                                      n_tile_base,
+                                                                      &ctx->scale_view,
+                                                                      tile_n,
+                                                                      ctx->N,
+                                                                      inter_blk_base,
+                                                                      ctx->stride_down_scale,
+                                                                      m_row_base,
+                                                                      dtag,
+                                                                      ctx->cadence);
+                    }
                     down_list[down_count++] = d_dq;
                 }
             }
@@ -733,7 +917,8 @@ void rocke_moe_fp8_emit_body(rocke_moe_fp8_build_ctx_t* ctx)
                                                   ctx->SortedTokenIds,
                                                   ctx->SortedWeights,
                                                   ctx->Y,
-                                                  ctx->tokens);
+                                                  ctx->tokens,
+                                                  prefetched_ptr);
             rocke_b_scf_yield(b, NULL, 0);
         }
         rocke_b_region_leave(b);
@@ -788,6 +973,9 @@ rocke_kernel_def_t*
     const rocke_type_t* fp8_global;
     const rocke_type_t* f32_global;
     const rocke_type_t* i32_global;
+    const rocke_type_t* weight_global;
+    const rocke_type_t* weight_scale_global;
+    bool mxfp4;
 
     int tile_m;
     int tile_n;
@@ -825,6 +1013,75 @@ rocke_kernel_def_t*
                         (reason != NULL) ? reason : "");
         return NULL;
     }
+    if(spec->activation == NULL
+       || (strcmp(spec->activation, "silu") != 0 && strcmp(spec->activation, "situ") != 0))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "unsupported gated activation %s",
+                        spec->activation != NULL ? spec->activation : "(null)");
+        return NULL;
+    }
+    if(strcmp(spec->activation, "situ") == 0 && spec->activation_beta <= 0.0)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "situ activation_beta must be > 0 (got %.17g)",
+                        spec->activation_beta);
+        return NULL;
+    }
+    if(spec->has_activation_linear_beta && spec->activation_linear_beta <= 0.0)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "situ activation_linear_beta must be > 0 when set (got %.17g)",
+                        spec->activation_linear_beta);
+        return NULL;
+    }
+    if(spec->weight_dtype == NULL
+       || (strcmp(spec->weight_dtype, "fp8e4m3") != 0 && strcmp(spec->weight_dtype, "mxfp4") != 0))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "unsupported weight_dtype %s",
+                        spec->weight_dtype != NULL ? spec->weight_dtype : "(null)");
+        return NULL;
+    }
+    mxfp4 = strcmp(spec->weight_dtype, "mxfp4") == 0;
+    if(spec->mxfp4_native && !mxfp4)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "mxfp4_native requires weight_dtype='mxfp4'");
+        return NULL;
+    }
+    if(spec->pipeline_native_down && !spec->mxfp4_native)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "pipeline_native_down requires mxfp4_native=True");
+        return NULL;
+    }
+    if(spec->mxfp4_preshuffled && !spec->mxfp4_native)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "mxfp4_preshuffled requires mxfp4_native=True");
+        return NULL;
+    }
+    if(spec->pipeline_native_gateup && !spec->mxfp4_native)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "pipeline_native_gateup requires mxfp4_native=True");
+        return NULL;
+    }
+    if(mxfp4)
+    {
+        int required_k = spec->mxfp4_native ? 128 : 32;
+        if(spec->gate_up_k != required_k || spec->down_k != required_k || spec->use_dtla)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "mxfp4 weights require gate_up_k=%d, down_k=%d, and "
+                            "use_dtla=False",
+                            required_k,
+                            required_k);
+            return NULL;
+        }
+    }
 
     /* ---- resolve atom; catalog guard only for non-hero (k != 128) ---- *
      * (Python 1591-1601) */
@@ -852,15 +1109,17 @@ rocke_kernel_def_t*
     fp8_global = rocke_ptr_type(b, rocke_fp8e4m3(), "global");
     f32_global = rocke_ptr_type(b, rocke_f32(), "global");
     i32_global = rocke_ptr_type(b, rocke_i32(), "global");
+    weight_global = mxfp4 ? rocke_ptr_type(b, rocke_i8(), "global") : fp8_global;
+    weight_scale_global = mxfp4 ? rocke_ptr_type(b, rocke_i8(), "global") : f32_global;
 
     ctx.A = moe_fp8_param(b, "A", fp8_global, true, true, 16);
-    ctx.WGate0 = moe_fp8_param(b, "WGate", fp8_global, true, true, 16);
-    ctx.WUp0 = moe_fp8_param(b, "WUp", fp8_global, true, true, 16);
-    ctx.WDown0 = moe_fp8_param(b, "WDown", fp8_global, true, true, 16);
+    ctx.WGate0 = moe_fp8_param(b, "WGate", weight_global, true, true, 16);
+    ctx.WUp0 = moe_fp8_param(b, "WUp", weight_global, true, true, 16);
+    ctx.WDown0 = moe_fp8_param(b, "WDown", weight_global, true, true, 16);
     ctx.AScale = moe_fp8_param(b, "AScale", f32_global, false, true, 4);
-    ctx.WGateScale0 = moe_fp8_param(b, "WGateScale", f32_global, false, true, 4);
-    ctx.WUpScale0 = moe_fp8_param(b, "WUpScale", f32_global, false, true, 4);
-    ctx.WDownScale0 = moe_fp8_param(b, "WDownScale", f32_global, false, true, 4);
+    ctx.WGateScale0 = moe_fp8_param(b, "WGateScale", weight_scale_global, false, true, 4);
+    ctx.WUpScale0 = moe_fp8_param(b, "WUpScale", weight_scale_global, false, true, 4);
+    ctx.WDownScale0 = moe_fp8_param(b, "WDownScale", weight_scale_global, false, true, 4);
     ctx.SortedTokenIds = moe_fp8_param(b, "SortedTokenIds", i32_global, true, true, 4);
     ctx.SortedWeights = moe_fp8_param(b, "SortedWeights", f32_global, true, true, 4);
     ctx.BlockExpertIds = moe_fp8_param(b, "BlockExpertIds", i32_global, true, true, 4);
@@ -882,6 +1141,8 @@ rocke_kernel_def_t*
     ctx.stride_down_scale_e = rocke_b_param(b, "stride_down_scale_e", rocke_i32(), NULL);
     ctx.slot_size = rocke_b_param(b, "slot_size", rocke_i32(), NULL);
     ctx.tokens = rocke_b_param(b, "tokens", rocke_i32(), NULL);
+    if(spec->mxfp4_native)
+        ctx.MxScaleA = rocke_b_param(b, "MxScaleA", rocke_i32(), NULL);
 
     /* Persistent-only params (Python 1661-1664). */
     if(persistent)
@@ -1019,6 +1280,19 @@ rocke_kernel_def_t*
     ctx.one_f32 = rocke_b_const_f32(b, 1.0);
     ctx.c_fp8_max = rocke_b_const_f32(b, ROCKE_MOE_FP8_FP8_MAX);
     ctx.c_floor = rocke_b_const_f32(b, ROCKE_MOE_FP8_AMAX_FLOOR);
+    if(strcmp(spec->activation, "situ") == 0)
+    {
+        ctx.c_situ_beta = rocke_b_const_f32(b, spec->activation_beta);
+        ctx.c_situ_inv_beta = rocke_b_const_f32(b, 1.0 / spec->activation_beta);
+        if(spec->has_activation_linear_beta)
+        {
+            ctx.c_situ_linear_beta = rocke_b_const_f32(b, spec->activation_linear_beta);
+            ctx.c_situ_linear_inv_beta = rocke_b_const_f32(b, 1.0 / spec->activation_linear_beta);
+        }
+        ctx.c_situ_two = rocke_b_const_f32(b, 2.0);
+        ctx.c_situ_two_log2e = rocke_b_const_f32(b, 2.8853900817779268);
+        ctx.c_situ_zero = rocke_b_const_f32(b, 0.0);
+    }
 
     ctx.c_group_k = rocke_b_const_i32(b, ROCKE_MOE_FP8_GROUP_K);
     ctx.c_threads = rocke_b_const_i32(b, spec->block_size);

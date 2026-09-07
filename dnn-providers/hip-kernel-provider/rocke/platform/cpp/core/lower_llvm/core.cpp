@@ -1113,6 +1113,9 @@ const char* rocke_ll_llvm_type_from_name(rocke_lower_t* L, const char* name)
                 lelem = "bfloat";
             else if(strcmp(elem, "i32") == 0)
                 lelem = "i32";
+            else if(strcmp(elem, "i8") == 0 || strcmp(elem, "fp8e4m3") == 0
+                    || strcmp(elem, "bf8e5m2") == 0)
+                lelem = "i8";
             else
             {
                 rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM type for vec elem %s", elem);

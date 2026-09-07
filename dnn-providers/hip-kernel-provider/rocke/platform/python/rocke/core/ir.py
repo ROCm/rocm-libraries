@@ -86,6 +86,7 @@ _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_16x16x96_fp6": "acc6",
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
+    "mfma_scale_f32_16x16x128_fp8_fp4": "mxw4acc",
 }
 
 
@@ -2144,6 +2145,32 @@ class IRBuilder:
         Lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
         """
         return self.mma("mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale)
+
+    def mfma_scale_f32_16x16x128_fp8_fp4(
+        self,
+        a: Value,
+        b: Value,
+        c: Value,
+        a_scale: Value,
+        b_scale: Value,
+    ) -> Value:
+        """gfx950 native A8W4 MFMA with per-lane E8M0 scales.
+
+        ``a`` is a 32-byte FP8 E4M3 fragment. ``b`` is a 16-byte packed
+        MXFP4 E2M1 fragment zero-padded to 32 bytes so both operands reach the
+        overloaded LLVM intrinsic as ``<8 x i32>``. The low byte of each
+        lane's ``a_scale`` / ``b_scale`` i32 is its E8M0 scale.
+        """
+        if a_scale.type != I32 or b_scale.type != I32:
+            raise ValueError("native A8W4 MFMA scales must be packed i32 words")
+        return self.mma(
+            "mfma_scale_f32_16x16x128_fp8_fp4",
+            a,
+            b,
+            c,
+            a_scale,
+            b_scale,
+        )
 
     def mfma_f32_16x16x128_fp4(self, a: Value, b: Value, c: Value) -> Value:
         """fp4 MX MFMA (gfx950+, P52).

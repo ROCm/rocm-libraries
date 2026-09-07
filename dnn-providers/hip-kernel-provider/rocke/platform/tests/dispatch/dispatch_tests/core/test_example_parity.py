@@ -26,6 +26,14 @@ import unittest
 from rocke.core.arch import ArchTarget
 from rocke.core.ir_serialize import canonical_equal
 from rocke.dispatch.families.moe import MOE_REGISTRY, MoeRequest, dispatch_moe
+from rocke.dispatch.families.moe_rank_reduce import (
+    MOE_RANK_REDUCE_REGISTRY,
+    MoeRankReduceRequest,
+)
+from rocke.dispatch.families.moe_routing import (
+    MOE_ROUTING_REGISTRY,
+    MoeRoutingRequest,
+)
 from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest, dispatch_norm
 from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
 from rocke.dispatch.gemm.common import GemmRequest
@@ -39,17 +47,21 @@ from rocke.dispatch.gemm.fp16_rcr import GEMM_FP16_REGISTRY, dispatch_gemm_fp16
 # examples/common/universal_gemm_verify.py
 GEMM_MNK = (512, 512, 512)
 # examples/gfx1250/fused_mega_moe/fused_mega_moe_bench.py
-MOE_SHAPE = dict(
-    num_tokens=128, hidden=2048, intermediate=768, num_experts=256, top_k=8
-)
+MOE_SHAPE = {
+    "num_tokens": 128,
+    "hidden": 2048,
+    "intermediate": 768,
+    "num_experts": 256,
+    "top_k": 8,
+}
 # examples/common/ck_tile_parity.py
-NORM_SHAPE = dict(rows=4096, cols=4096)
+NORM_SHAPE = {"rows": 4096, "cols": 4096}
 
 # A second shape where one does not reach every candidate. Both are shapes
 # those candidates exist *for*, not padding to satisfy a reachability check:
 # the bf16 decode candidate caps M at 32, and b1024_v8 spans 8192 columns.
 GEMM_DECODE_MNK = (16, 4096, 4096)
-NORM_WIDE_SHAPE = dict(rows=4096, cols=8192)
+NORM_WIDE_SHAPE = {"rows": 4096, "cols": 8192}
 
 
 def _gemm_reqs(arch, spec_id, dtype):
@@ -58,7 +70,35 @@ def _gemm_reqs(arch, spec_id, dtype):
 
 
 def _moe_reqs(arch, spec_id, dtype):
-    yield MoeRequest(arch=arch, dtype=dtype, spec_id=spec_id, **MOE_SHAPE)
+    kwargs = {}
+    if spec_id == "mega_mxfp4":
+        kwargs = {"weight_dtype": "mxfp4", "activation": "situ"}
+    yield MoeRequest(arch=arch, dtype=dtype, spec_id=spec_id, **MOE_SHAPE, **kwargs)
+
+
+def _moe_rank_reduce_reqs(arch, spec_id, dtype):
+    operation = "rmsnorm" if spec_id == "rmsnorm" else "scatter"
+    yield MoeRankReduceRequest(
+        rows=8,
+        width=3584 if operation == "rmsnorm" else 7168,
+        world_size=8,
+        rank=0,
+        arch=arch,
+        operation=operation,
+        dtype=dtype,
+        spec_id=spec_id,
+    )
+
+
+def _moe_routing_reqs(arch, spec_id, dtype):
+    yield MoeRoutingRequest(
+        tokens=8,
+        experts=896,
+        topk=16,
+        arch=arch,
+        dtype=dtype,
+        spec_id=spec_id,
+    )
 
 
 def _norm_reqs(arch, spec_id, dtype):
@@ -71,6 +111,8 @@ _FAMILIES = (
     (GEMM_FP16_REGISTRY, _gemm_reqs, ("fp16",)),
     (GEMM_BF16_REGISTRY, _gemm_reqs, ("bf16",)),
     (MOE_REGISTRY, _moe_reqs, ("fp16", "fp8")),
+    (MOE_RANK_REDUCE_REGISTRY, _moe_rank_reduce_reqs, ("bf16",)),
+    (MOE_ROUTING_REGISTRY, _moe_routing_reqs, ("f32",)),
     (NORM_REGISTRY, _norm_reqs, ("fp16",)),
 )
 

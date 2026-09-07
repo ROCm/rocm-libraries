@@ -883,6 +883,11 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
         "i32 immarg, i32, i32 immarg, i32)"
     ),
+    "mfma.scale.f32.16x16x128.fp8.fp4": (
+        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+        "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
+        "i32 immarg, i32, i32 immarg, i32)"
+    ),
     # --- LLVM 23 async markers (gfx12+ async global/LDS pipelines) ---
     "asyncmark": "declare void @llvm.amdgcn.asyncmark()",
     "wait.asyncmark": "declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)",
@@ -3255,6 +3260,35 @@ class _Lowerer:
             f"<4 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
             f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
+        )
+
+    def _op_tile_mfma_scale_f32_16x16x128_fp8_fp4(self, op: Op) -> None:
+        """Lower native gfx950 A8W4 with four packed E8M0 scale bytes."""
+        a, b, c, a_scale, b_scale = op.operands
+        self._need("mfma.scale.f32.16x16x128.fp8.fp4")
+        a_packed = self._fresh("a8w4a")
+        b_packed = self._fresh("a8w4b")
+        a_ty = _llvm_type(a.type)
+        b_ty = _llvm_type(b.type)
+        if a_ty != "<8 x i32>":
+            self._current().emit(
+                f"  {a_packed} = bitcast {a_ty} {self._operand(a)} to <8 x i32>"
+            )
+        else:
+            a_packed = self._operand(a)
+        if b_ty != "<8 x i32>":
+            self._current().emit(
+                f"  {b_packed} = bitcast {b_ty} {self._operand(b)} to <8 x i32>"
+            )
+        else:
+            b_packed = self._operand(b)
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> "
+            f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+            f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
+            f"<4 x float> {self._operand(c)}, "
+            f"i32 0, i32 4, i32 0, i32 {self._operand(a_scale)}, "
+            f"i32 0, i32 {self._operand(b_scale)})"
         )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
@@ -5819,7 +5853,15 @@ def _llvm_type_from_name(name: str) -> str:
         inner = name[4:-1]
         elem, _, count = inner.partition("x")
         count = int(count)
-        elem_map = {"f32": "float", "f16": "half", "bf16": "bfloat", "i32": "i32"}
+        elem_map = {
+            "f32": "float",
+            "f16": "half",
+            "bf16": "bfloat",
+            "i32": "i32",
+            "i8": "i8",
+            "fp8e4m3": "i8",
+            "bf8e5m2": "i8",
+        }
         return f"<{count} x {elem_map[elem]}>"
     raise NotImplementedError(f"no LLVM type for {name!r}")
 

@@ -25,8 +25,12 @@ from .core import (
 )
 from .families import (
     MoeRequest,
+    MoeRankReduceRequest,
+    MoeRoutingRequest,
     NormRequest,
     dispatch_moe,
+    dispatch_moe_rank_reduce,
+    dispatch_moe_routing,
     dispatch_norm,
 )
 from .gemm import (
@@ -57,7 +61,11 @@ __all__ = [
     "gemm_bf16_sweep_space",
     # operator families
     "MoeRequest",
+    "MoeRankReduceRequest",
+    "MoeRoutingRequest",
     "NormRequest",
     "dispatch_moe",
+    "dispatch_moe_rank_reduce",
+    "dispatch_moe_routing",
     "dispatch_norm",
 ]

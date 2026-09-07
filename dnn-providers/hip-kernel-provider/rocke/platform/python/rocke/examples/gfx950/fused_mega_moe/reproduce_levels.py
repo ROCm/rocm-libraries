@@ -330,7 +330,16 @@ def _build_padded_activation(fp8in, padded, s: Scenario):
 
 
 def torch_fused_moe_fp8_reference(
-    fp8in, padded, A_q, AScale, s: Scenario, *, tile_m: int
+    fp8in,
+    padded,
+    A_q,
+    AScale,
+    s: Scenario,
+    *,
+    tile_m: int,
+    activation: str = "silu",
+    activation_beta: float = 1.0,
+    activation_linear_beta: float | None = None,
 ):
     """f32-accumulator oracle gathering the SAME padded fp8 A/AScale the kernel
     consumes; the dynamic Hidden quant is done PER ``tile_m``-row m-block.
@@ -370,7 +379,19 @@ def torch_fused_moe_fp8_reference(
         Wu_dq = fp8in["Wu_q"][e].float() * su_full
         gate = Xq_f32 @ Wg_dq.T  # (count, I)
         up = Xq_f32 @ Wu_dq.T
-        hidden = torch.nn.functional.silu(gate) * up  # (count, I) f32
+        if activation == "silu":
+            hidden = torch.nn.functional.silu(gate) * up
+        elif activation == "situ":
+            gate = (
+                activation_beta
+                * torch.tanh(gate / activation_beta)
+                * torch.sigmoid(gate)
+            )
+            if activation_linear_beta is not None:
+                up = activation_linear_beta * torch.tanh(up / activation_linear_beta)
+            hidden = gate * up
+        else:
+            raise ValueError(f"unsupported activation {activation!r}")
 
         sd = fp8in["down_scale"][e]  # [nIb, nHb] (inter_blk, h_out_blk)
         sd_full = sd.T.repeat_interleave(GROUP_K, 0).repeat_interleave(
@@ -858,7 +879,15 @@ def _run_parity(mod, lvl, s, spec, launcher) -> tuple[float, float, str]:
     torch.cuda.synchronize()
     Y_kernel = Y_f32.clone()
     Y_ref = torch_fused_moe_fp8_reference(
-        fp8in, padded_ref, A_q, AScale, s, tile_m=spec.tile_m
+        fp8in,
+        padded_ref,
+        A_q,
+        AScale,
+        s,
+        tile_m=spec.tile_m,
+        activation=getattr(spec, "activation", "silu"),
+        activation_beta=getattr(spec, "activation_beta", 1.0),
+        activation_linear_beta=getattr(spec, "activation_linear_beta", None),
     )
     mx, mn, rl = _compare(Y_kernel, Y_ref)
     _isolate_lane()

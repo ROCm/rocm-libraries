@@ -96,6 +96,50 @@ def _spec(idx: int):
             ),
             True,
         )
+    if idx == 6:
+        return (
+            FusedMegaKernelSpecFp8(
+                name="moe_fused_mega_fp8_situ",
+                gate_up_k=128,
+                down_k=128,
+                warp_n=8,
+                use_dtla=False,
+                sched_cadence=None,
+                activation="situ",
+                activation_beta=2.0,
+                activation_linear_beta=3.0,
+                weight_dtype="mxfp4",
+                mxfp4_native=True,
+                prefetch_routing_meta=True,
+                pipeline_native_down=True,
+                mxfp4_preshuffled=True,
+                pipeline_native_gateup=True,
+                **common,
+            ),
+            False,
+        )
+    if idx == 7:
+        return (
+            FusedMegaKernelSpecFp8(
+                name="moe_fused_mega_fp8_situ_t8",
+                gate_up_k=128,
+                down_k=128,
+                warp_n=8,
+                use_dtla=False,
+                sched_cadence=None,
+                activation="situ",
+                activation_beta=2.0,
+                activation_linear_beta=3.0,
+                weight_dtype="mxfp4",
+                mxfp4_native=True,
+                prefetch_routing_meta=True,
+                pipeline_native_down=False,
+                mxfp4_preshuffled=True,
+                pipeline_native_gateup=True,
+                **common,
+            ),
+            False,
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

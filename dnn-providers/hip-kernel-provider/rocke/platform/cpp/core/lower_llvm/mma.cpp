@@ -41,6 +41,7 @@ static void _op_tile_mfma_f32_16x16x32_bf8(rocke_lower_t* L, const rocke_op_t* o
 static void _op_tile_mfma_f32_32x32x16_fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_32x32x16_bf8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const rocke_op_t* op);
+static void _op_tile_mfma_scale_f32_16x16x128_fp8_fp4(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x128_fp4(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x96_fp6(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x128_fp8(rocke_lower_t* L, const rocke_op_t* op);
@@ -116,6 +117,10 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     else if(strcmp(op_id, "mfma_scale_f32_16x16x128_f8f6f4") == 0)
     {
         _op_tile_mfma_scale_f32_16x16x128_f8f6f4(L, op);
+    }
+    else if(strcmp(op_id, "mfma_scale_f32_16x16x128_fp8_fp4") == 0)
+    {
+        _op_tile_mfma_scale_f32_16x16x128_fp8_fp4(L, op);
     }
     else if(strcmp(op_id, "mfma_f32_16x16x128_fp4") == 0)
     {
@@ -812,6 +817,54 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
                    "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
                    "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
                    "i32 0, i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s, i32 0)",
+                   mma_result_name(L, op),
+                   a_packed,
+                   b_packed,
+                   rocke_ll_operand(L, c),
+                   rocke_ll_operand(L, a_scale),
+                   rocke_ll_operand(L, b_scale));
+}
+
+static void _op_tile_mfma_scale_f32_16x16x128_fp8_fp4(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t *a, *b, *c, *a_scale, *b_scale;
+    const char *a_packed, *b_packed;
+    const char *a_ty, *b_ty;
+
+    if(!rocke_ll_live(L))
+        return;
+    if(op->num_operands != 5)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 5 operands", op->name);
+        return;
+    }
+    a = op->operands[0];
+    b = op->operands[1];
+    c = op->operands[2];
+    a_scale = op->operands[3];
+    b_scale = op->operands[4];
+    rocke_ll_need(L, "mfma.scale.f32.16x16x128.fp8.fp4");
+
+    a_packed = rocke_ll_fresh(L, "a8w4a");
+    b_packed = rocke_ll_fresh(L, "a8w4b");
+    a_ty = rocke_ll_llvm_type(L, a->type);
+    b_ty = rocke_ll_llvm_type(L, b->type);
+    if(strcmp(a_ty, "<8 x i32>") != 0)
+        rocke_ll_emitf(
+            L, "  %s = bitcast %s %s to <8 x i32>", a_packed, a_ty, rocke_ll_operand(L, a));
+    else
+        a_packed = rocke_ll_operand(L, a);
+    if(strcmp(b_ty, "<8 x i32>") != 0)
+        rocke_ll_emitf(
+            L, "  %s = bitcast %s %s to <8 x i32>", b_packed, b_ty, rocke_ll_operand(L, b));
+    else
+        b_packed = rocke_ll_operand(L, b);
+
+    rocke_ll_emitf(L,
+                   "  %s = call <4 x float> "
+                   "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                   "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
+                   "i32 0, i32 4, i32 0, i32 %s, i32 0, i32 %s)",
                    mma_result_name(L, op),
                    a_packed,
                    b_packed,

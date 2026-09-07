@@ -75,6 +75,7 @@ extern "C" {
 #define ROCKE_MOE_FP8_MAX_NNI 64
 #define ROCKE_MOE_FP8_MAX_ACCS 128
 #define ROCKE_MOE_FP8_MAX_DTLA_SLOTS 16
+#define ROCKE_MOE_FP8_MAX_PIPE_VALUES 512
 
 /* ===================================================================== *
  *  rocke_moe_fp8_dtla_bundle_t
@@ -153,6 +154,7 @@ typedef struct rocke_moe_fp8_build_ctx
     rocke_value_t* stride_down_scale_e;
     rocke_value_t* slot_size;
     rocke_value_t* tokens;
+    rocke_value_t* MxScaleA; /* native MXFP4-only trailing scalar */
     /* Persistent-only params (set when persistent; else NULL). */
     rocke_value_t* p_grid_x;
     rocke_value_t* p_total_work;
@@ -186,6 +188,13 @@ typedef struct rocke_moe_fp8_build_ctx
     rocke_value_t* one_f32; /* const_f32(1.0)                            */
     rocke_value_t* c_fp8_max; /* const_f32(FP8_MAX)                        */
     rocke_value_t* c_floor; /* const_f32(AMAX_FLOOR)                     */
+    rocke_value_t* c_situ_beta; /* optional gated-activation constants       */
+    rocke_value_t* c_situ_inv_beta;
+    rocke_value_t* c_situ_linear_beta;
+    rocke_value_t* c_situ_linear_inv_beta;
+    rocke_value_t* c_situ_two;
+    rocke_value_t* c_situ_two_log2e;
+    rocke_value_t* c_situ_zero;
     rocke_value_t* c_group_k; /* const_i32(GROUP_K)                        */
     rocke_value_t* c_threads; /* const_i32(block_size)                     */
     rocke_value_t* c_n_blocks; /* const_i32(n_blocks)  (Python _c_n_blocks)  */
@@ -333,6 +342,39 @@ rocke_value_t* rocke_moe_fp8_load_b_fp8(rocke_moe_fp8_build_ctx_t* ctx,
                                         rocke_value_t* k_tile_base,
                                         rocke_value_t* N);
 
+/* MXFP4 helpers: unsigned E8M0 decode and packed E2M1 -> FP8 register recode. */
+rocke_value_t* rocke_moe_fp8_decode_e8m0_scale(rocke_moe_fp8_build_ctx_t* ctx,
+                                               rocke_value_t* encoded);
+rocke_value_t* rocke_moe_fp8_fp4_code_to_fp8(rocke_moe_fp8_build_ctx_t* ctx, rocke_value_t* code);
+rocke_value_t* rocke_moe_fp8_load_b_mxfp4_as_fp8(rocke_moe_fp8_build_ctx_t* ctx,
+                                                 rocke_value_t* B,
+                                                 rocke_value_t* n_tile_base,
+                                                 rocke_value_t* k_tile_base,
+                                                 rocke_value_t* N);
+rocke_value_t* rocke_moe_fp8_load_a_fp8_native(rocke_moe_fp8_build_ctx_t* ctx,
+                                               rocke_value_t* A,
+                                               rocke_value_t* m_tile_base,
+                                               rocke_value_t* k_tile_base,
+                                               rocke_value_t* K);
+rocke_value_t* rocke_moe_fp8_load_a_fp8_lds_native(rocke_moe_fp8_build_ctx_t* ctx,
+                                                   const rocke_tensor_view_t* a_view,
+                                                   rocke_value_t* m_tile_base,
+                                                   rocke_value_t* k_tile_base);
+rocke_value_t* rocke_moe_fp8_load_b_mxfp4_native(rocke_moe_fp8_build_ctx_t* ctx,
+                                                 rocke_value_t* B,
+                                                 rocke_value_t* n_tile_base,
+                                                 rocke_value_t* k_tile_base,
+                                                 rocke_value_t* N,
+                                                 bool preshuffled,
+                                                 bool pad_for_mfma);
+rocke_value_t* rocke_moe_fp8_load_mxfp4_scale_word(rocke_moe_fp8_build_ctx_t* ctx,
+                                                   rocke_value_t* scale,
+                                                   rocke_value_t* n_col,
+                                                   rocke_value_t* k_tile_base,
+                                                   rocke_value_t* stride,
+                                                   rocke_value_t* k_group,
+                                                   bool preshuffled);
+
 /* _load_a_fp8_lds: per-lane fp8 A load for the down GEMM from the LDS-resident
  * Hidden (a_view). */
 rocke_value_t* rocke_moe_fp8_load_a_fp8_lds(rocke_moe_fp8_build_ctx_t* ctx,
@@ -431,6 +473,42 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
                                                rocke_value_t** out_gate,
                                                rocke_value_t** out_up);
 
+/* Packed-E2M1 gate/up path: one independently scaled K=32 MFMA per group. */
+void rocke_moe_fp8_emit_mxfp4_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
+                                                 rocke_value_t* A,
+                                                 rocke_value_t* WGate,
+                                                 rocke_value_t* WUp,
+                                                 rocke_value_t* AScale,
+                                                 rocke_value_t* WGateScale,
+                                                 rocke_value_t* WUpScale,
+                                                 rocke_value_t* m_tile_base,
+                                                 rocke_value_t* const* n_tile_bases,
+                                                 int nni,
+                                                 rocke_value_t* K,
+                                                 rocke_value_t* stride_a_scale,
+                                                 rocke_value_t* stride_gate_scale,
+                                                 rocke_value_t* stride_up_scale,
+                                                 const char* tag,
+                                                 rocke_value_t** out_gate,
+                                                 rocke_value_t** out_up);
+void rocke_moe_fp8_emit_mxfp4_native_gateup_pipeline(rocke_moe_fp8_build_ctx_t* ctx,
+                                                     rocke_value_t* A,
+                                                     rocke_value_t* WGate,
+                                                     rocke_value_t* WUp,
+                                                     rocke_value_t* AScale,
+                                                     rocke_value_t* WGateScale,
+                                                     rocke_value_t* WUpScale,
+                                                     rocke_value_t* m_tile_base,
+                                                     rocke_value_t* const* n_tile_bases,
+                                                     int nni,
+                                                     rocke_value_t* K,
+                                                     rocke_value_t* stride_a_scale,
+                                                     rocke_value_t* stride_gate_scale,
+                                                     rocke_value_t* stride_up_scale,
+                                                     const char* tag,
+                                                     rocke_value_t** out_gate,
+                                                     rocke_value_t** out_up);
+
 /* ---- STAGE 1b: SiLU*up + dyn-quant (Python lines 1481-1546) ---------- */
 
 /* _silu_mul_f32: f32 SwiGLU chain silu(g)*u (sigmoid via exp2 + rcp_fast). */
@@ -439,6 +517,11 @@ rocke_value_t* rocke_moe_fp8_silu_mul_f32(rocke_moe_fp8_build_ctx_t* ctx,
                                           rocke_value_t* u,
                                           rocke_value_t* one_f32,
                                           rocke_value_t* c_neg_log2e);
+rocke_value_t* rocke_moe_fp8_gated_mul_f32(rocke_moe_fp8_build_ctx_t* ctx,
+                                           rocke_value_t* g,
+                                           rocke_value_t* u,
+                                           rocke_value_t* one_f32,
+                                           rocke_value_t* c_neg_log2e);
 
 /* f32_view_store / f32_view_load: 1-wide f32 LDS access at (row, col). */
 void rocke_moe_fp8_f32_view_store(rocke_moe_fp8_build_ctx_t* ctx,
@@ -485,6 +568,49 @@ rocke_value_t* rocke_moe_fp8_emit_fp8_down_group_gemm(rocke_moe_fp8_build_ctx_t*
                                                       const char* tag,
                                                       const char* cadence);
 
+rocke_value_t* rocke_moe_fp8_emit_mxfp4_down_group_gemm(rocke_moe_fp8_build_ctx_t* ctx,
+                                                        const rocke_tensor_view_t* a_view,
+                                                        rocke_value_t* WDown,
+                                                        rocke_value_t* WDownScale,
+                                                        rocke_value_t* n_tile_base,
+                                                        const rocke_tensor_view_t* scale_view,
+                                                        int inter_slice,
+                                                        rocke_value_t* inter_full,
+                                                        rocke_value_t* inter_blk_base,
+                                                        rocke_value_t* stride_down_scale,
+                                                        rocke_value_t* m_row_base,
+                                                        const char* tag);
+rocke_value_t*
+    rocke_moe_fp8_emit_mxfp4_native_down_group_gemm(rocke_moe_fp8_build_ctx_t* ctx,
+                                                    const rocke_tensor_view_t* a_view,
+                                                    rocke_value_t* WDown,
+                                                    rocke_value_t* WDownScale,
+                                                    rocke_value_t* n_tile_base,
+                                                    const rocke_tensor_view_t* scale_view,
+                                                    int inter_slice,
+                                                    rocke_value_t* inter_full,
+                                                    rocke_value_t* inter_blk_base,
+                                                    rocke_value_t* stride_down_scale,
+                                                    rocke_value_t* m_row_base,
+                                                    const char* tag);
+
+typedef struct rocke_moe_fp8_down_row
+{
+    int i;
+    rocke_value_t* col_in;
+    rocke_value_t* token;
+    rocke_value_t* w;
+} rocke_moe_fp8_down_row_t;
+
+int rocke_moe_fp8_prefetch_down_routing_rows(rocke_moe_fp8_build_ctx_t* ctx,
+                                             rocke_value_t* warp_m_off,
+                                             rocke_value_t* lane,
+                                             int mfmas_m,
+                                             rocke_value_t* block_m_off,
+                                             rocke_value_t* SortedTokenIds,
+                                             rocke_value_t* SortedWeights,
+                                             rocke_moe_fp8_down_row_t* out_rows);
+
 /* _emit_down_atomic_reduce: weighted, token-validity-masked atomic-add of
  * down_list (length mfmas_m*mfmas_n) into Y. */
 void rocke_moe_fp8_emit_down_atomic_reduce(rocke_moe_fp8_build_ctx_t* ctx,
@@ -500,7 +626,8 @@ void rocke_moe_fp8_emit_down_atomic_reduce(rocke_moe_fp8_build_ctx_t* ctx,
                                            rocke_value_t* SortedTokenIds,
                                            rocke_value_t* SortedWeights,
                                            rocke_value_t* Y,
-                                           rocke_value_t* tokens);
+                                           rocke_value_t* tokens,
+                                           const rocke_moe_fp8_down_row_t* prefetched_rows);
 
 /* ---- whole-body driver (Python _emit_body, lines 1850-2093) ---------- */
 

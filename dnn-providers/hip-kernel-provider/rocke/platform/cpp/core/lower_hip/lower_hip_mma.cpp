@@ -91,6 +91,19 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     {
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.mma: missing 'op_id' attr");
     }
+    if(strcmp(op_id, "mfma_scale_f32_16x16x128_fp8_fp4") == 0)
+    {
+        rocke_h_emitf(lw,
+                      "f32x4 %s = %s;  // native A8W4 MFMA stub:"
+                      " scale_a=%s scale_b=%s fp8_a=%s packed_fp4_b=%s",
+                      rocke_h_name(lw, op->results[0]),
+                      rocke_h_name(lw, op->operands[2]),
+                      rocke_h_name(lw, op->operands[3]),
+                      rocke_h_name(lw, op->operands[4]),
+                      rocke_h_name(lw, op->operands[0]),
+                      rocke_h_name(lw, op->operands[1]));
+        return lw->status;
+    }
     snprintf(dotted, sizeof(dotted), "tile.%s", op_id);
     legacy_opcode = rocke_opcode_from_name(dotted);
     fn = rocke_h_dispatch(legacy_opcode);

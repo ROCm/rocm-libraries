@@ -2616,9 +2616,24 @@ rocke_fused_mega_kernel_spec_fp8_t
     rocke_fused_mega_kernel_spec_fp8_t s = rocke_fused_mega_kernel_spec_fp8_default();
     s.tile_m = dict_int(d, "tile_m", s.tile_m);
     s.tile_n_inter = dict_int(d, "tile_n_inter", s.tile_n_inter);
+    s.tile_k_gu = dict_int(d, "tile_k_gu", s.tile_k_gu);
+    s.warp_m = dict_int(d, "warp_m", s.warp_m);
+    s.warp_n = dict_int(d, "warp_n", s.warp_n);
+    s.warp_tile_m = dict_int(d, "warp_tile_m", s.warp_tile_m);
+    s.warp_tile_n = dict_int(d, "warp_tile_n", s.warp_tile_n);
+    s.warp_tile_k = dict_int(d, "warp_tile_k", s.warp_tile_k);
+    s.tile_n_down = dict_int(d, "tile_n_down", s.tile_n_down);
+    s.tile_k_down = dict_int(d, "tile_k_down", s.tile_k_down);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.block_size = dict_int(d, "block_size", s.block_size);
     s.gate_up_k = dict_int(d, "gate_up_k", s.gate_up_k);
     s.down_k = dict_int(d, "down_k", s.down_k);
     s.use_dtla = dict_bool(d, "use_dtla", s.use_dtla);
+    s.mxfp4_native = dict_bool(d, "mxfp4_native", s.mxfp4_native);
+    s.prefetch_routing_meta = dict_bool(d, "prefetch_routing_meta", s.prefetch_routing_meta);
+    s.pipeline_native_down = dict_bool(d, "pipeline_native_down", s.pipeline_native_down);
+    s.mxfp4_preshuffled = dict_bool(d, "mxfp4_preshuffled", s.mxfp4_preshuffled);
+    s.pipeline_native_gateup = dict_bool(d, "pipeline_native_gateup", s.pipeline_native_gateup);
     {
         std::string v;
         if(dict_str(d, "sched_cadence", v))
@@ -2630,6 +2645,17 @@ rocke_fused_mega_kernel_spec_fp8_t
             s.name = keep(v);
         if(dict_str(d, "dtype", v))
             s.dtype = keep(v);
+        if(dict_str(d, "activation", v))
+            s.activation = keep(v);
+        if(dict_str(d, "weight_dtype", v))
+            s.weight_dtype = keep(v);
+    }
+    if(d.contains("activation_beta"))
+        s.activation_beta = d["activation_beta"].cast<double>();
+    if(d.contains("activation_linear_beta") && !d["activation_linear_beta"].is_none())
+    {
+        s.has_activation_linear_beta = true;
+        s.activation_linear_beta = d["activation_linear_beta"].cast<double>();
     }
     if(persistent)
         *persistent = dict_bool(d, "persistent", false);

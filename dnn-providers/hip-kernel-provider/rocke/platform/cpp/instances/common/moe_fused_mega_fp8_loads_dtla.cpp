@@ -140,6 +140,206 @@ rocke_value_t* rocke_moe_fp8_load_b_fp8(rocke_moe_fp8_build_ctx_t* ctx,
 }
 
 /* ===================================================================== *
+ * Packed MXFP4 helpers (Python _decode_e8m0_scale through
+ * _load_b_mxfp4_as_fp8).
+ * ===================================================================== */
+rocke_value_t* rocke_moe_fp8_decode_e8m0_scale(rocke_moe_fp8_build_ctx_t* ctx,
+                                               rocke_value_t* encoded)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* exponent = rocke_b_zext(b, encoded, rocke_i32());
+    rocke_value_t* zero_cmp = rocke_b_cmp_eq(b, exponent, rocke_b_const_i32(b, 0));
+    rocke_value_t* nan_cmp = rocke_b_cmp_eq(b, exponent, rocke_b_const_i32(b, 255));
+    rocke_value_t* invalid = rocke_b_lor(b, zero_cmp, nan_cmp);
+    rocke_value_t* exponent_f32 = rocke_b_sitofp_f32(b, exponent);
+    rocke_value_t* unbiased = rocke_b_fsub(b, exponent_f32, rocke_b_const_f32(b, 127.0));
+    rocke_value_t* value = rocke_b_exp2(b, unbiased);
+    rocke_value_t* zero = rocke_b_const_f32(b, 0.0);
+    return rocke_b_select(b, invalid, zero, value);
+}
+
+rocke_value_t* rocke_moe_fp8_fp4_code_to_fp8(rocke_moe_fp8_build_ctx_t* ctx, rocke_value_t* code)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* magnitude = rocke_b_land(b, code, rocke_b_const_i32(b, 0x7));
+    rocke_value_t* regular_base = rocke_b_const_i32(b, 0x30);
+    rocke_value_t* regular_step = rocke_b_mul(b, magnitude, rocke_b_const_i32(b, 4));
+    rocke_value_t* regular = rocke_b_add(b, regular_base, regular_step);
+    rocke_value_t* is_zero = rocke_b_cmp_eq(b, magnitude, rocke_b_const_i32(b, 0));
+    rocke_value_t* positive_zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* is_one = rocke_b_cmp_eq(b, magnitude, rocke_b_const_i32(b, 1));
+    rocke_value_t* positive_one = rocke_b_const_i32(b, 0x30);
+    rocke_value_t* positive_nonzero = rocke_b_select(b, is_one, positive_one, regular);
+    rocke_value_t* positive = rocke_b_select(b, is_zero, positive_zero, positive_nonzero);
+    rocke_value_t* sign_bits = rocke_b_land(b, code, rocke_b_const_i32(b, 0x8));
+    rocke_value_t* sign = rocke_b_shl(b, sign_bits, rocke_b_const_i32(b, 4));
+    rocke_value_t* bits = rocke_b_lor(b, positive, sign);
+    rocke_value_t* byte = rocke_b_trunc(b, bits, rocke_i8());
+    return rocke_b_bitcast(b, byte, rocke_fp8e4m3());
+}
+
+rocke_value_t* rocke_moe_fp8_load_b_mxfp4_as_fp8(rocke_moe_fp8_build_ctx_t* ctx,
+                                                 rocke_value_t* B,
+                                                 rocke_value_t* n_tile_base,
+                                                 rocke_value_t* k_tile_base,
+                                                 rocke_value_t* N)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_mfma_atom_t* atom = ctx->atom;
+    const rocke_lane_decode_t* lane_decode = &ctx->lane_decode;
+    rocke_value_t* values[8];
+    rocke_value_t* n_col;
+    rocke_value_t* k_lane_start;
+    rocke_value_t* k_base;
+    rocke_value_t* packed_stride;
+    rocke_value_t* packed_row;
+    rocke_value_t* packed_col;
+    rocke_value_t* packed_addr;
+    rocke_value_t* packed;
+    int byte_index;
+    int value_index = 0;
+
+    if(atom->k != 32 || atom->b_per_lane != 8)
+        return NULL;
+
+    n_col = rocke_b_add(b, n_tile_base, lane_decode->n_in_atom);
+    k_lane_start = rocke_b_mul(b, lane_decode->k_blk, rocke_b_const_i32(b, atom->b_per_lane));
+    k_base = rocke_b_add(b, k_tile_base, k_lane_start);
+    packed_stride = rocke_b_div(b, N, rocke_b_const_i32(b, 2));
+    packed_row = rocke_b_mul(b, n_col, packed_stride);
+    packed_col = rocke_b_div(b, k_base, rocke_b_const_i32(b, 2));
+    packed_addr = rocke_b_add(b, packed_row, packed_col);
+    packed = rocke_b_global_load_vN(b, B, packed_addr, rocke_i8(), 4, 4);
+
+    for(byte_index = 0; byte_index < 4; ++byte_index)
+    {
+        rocke_value_t* component = rocke_b_vec_extract(b, packed, byte_index);
+        rocke_value_t* byte = rocke_b_zext(b, component, rocke_i32());
+        rocke_value_t* low = rocke_b_land(b, byte, rocke_b_const_i32(b, 0xF));
+        rocke_value_t* shift = rocke_b_lshr(b, byte, rocke_b_const_i32(b, 4));
+        rocke_value_t* high = rocke_b_land(b, shift, rocke_b_const_i32(b, 0xF));
+        values[value_index++] = rocke_moe_fp8_fp4_code_to_fp8(ctx, low);
+        values[value_index++] = rocke_moe_fp8_fp4_code_to_fp8(ctx, high);
+    }
+    return rocke_b_vec_pack(b, values, 8, rocke_fp8e4m3());
+}
+
+rocke_value_t* rocke_moe_fp8_load_a_fp8_native(rocke_moe_fp8_build_ctx_t* ctx,
+                                               rocke_value_t* A,
+                                               rocke_value_t* m_tile_base,
+                                               rocke_value_t* k_tile_base,
+                                               rocke_value_t* K)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_lane_decode_t* ld = &ctx->lane_decode;
+    rocke_value_t* m_row = rocke_b_add(b, m_tile_base, ld->m_in_atom);
+    rocke_value_t* row_base = rocke_b_mul(b, m_row, K);
+    rocke_value_t* lane_k = rocke_b_mul(b, ld->k_blk, rocke_b_const_i32(b, 16));
+    rocke_value_t* inner = rocke_b_add(b, k_tile_base, lane_k);
+    rocke_value_t* first = rocke_b_add(b, row_base, inner);
+    rocke_value_t* lo = rocke_b_global_load_vN(b, A, first, rocke_fp8e4m3(), 16, 16);
+    rocke_value_t* hi_addr = rocke_b_add(b, first, rocke_b_const_i32(b, 64));
+    rocke_value_t* hi = rocke_b_global_load_vN(b, A, hi_addr, rocke_fp8e4m3(), 16, 16);
+    return rocke_b_vec_concat(b, lo, hi);
+}
+
+rocke_value_t* rocke_moe_fp8_load_a_fp8_lds_native(rocke_moe_fp8_build_ctx_t* ctx,
+                                                   const rocke_tensor_view_t* a_view,
+                                                   rocke_value_t* m_tile_base,
+                                                   rocke_value_t* k_tile_base)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_lane_decode_t* ld = &ctx->lane_decode;
+    rocke_value_t* m_row = rocke_b_add(b, m_tile_base, ld->m_in_atom);
+    rocke_value_t* lane_k = rocke_b_mul(b, ld->k_blk, rocke_b_const_i32(b, 16));
+    rocke_value_t* first = rocke_b_add(b, k_tile_base, lane_k);
+    rocke_value_t* idx0[2] = {m_row, first};
+    rocke_value_t* lo = rocke_b_smem_load_vN(b, a_view->base, idx0, 2, rocke_fp8e4m3(), 16);
+    rocke_value_t* second = rocke_b_add(b, first, rocke_b_const_i32(b, 64));
+    rocke_value_t* idx1[2] = {m_row, second};
+    rocke_value_t* hi = rocke_b_smem_load_vN(b, a_view->base, idx1, 2, rocke_fp8e4m3(), 16);
+    return rocke_b_vec_concat(b, lo, hi);
+}
+
+rocke_value_t* rocke_moe_fp8_load_b_mxfp4_native(rocke_moe_fp8_build_ctx_t* ctx,
+                                                 rocke_value_t* B,
+                                                 rocke_value_t* n_tile_base,
+                                                 rocke_value_t* k_tile_base,
+                                                 rocke_value_t* N,
+                                                 bool preshuffled,
+                                                 bool pad_for_mfma)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_mfma_atom_t* atom = ctx->atom;
+    const rocke_lane_decode_t* ld = &ctx->lane_decode;
+    rocke_value_t* n_col = rocke_b_add(b, n_tile_base, ld->n_in_atom);
+    rocke_value_t* packed_addr;
+    if(preshuffled)
+    {
+        rocke_value_t* n0 = rocke_b_div(b, n_col, rocke_b_const_i32(b, 16));
+        rocke_value_t* n_lane = rocke_b_mod(b, n_col, rocke_b_const_i32(b, 16));
+        rocke_value_t* k0 = rocke_b_div(b, k_tile_base, rocke_b_const_i32(b, 128));
+        rocke_value_t* k0_count = rocke_b_div(b, N, rocke_b_const_i32(b, 128));
+        rocke_value_t* x0 = rocke_b_add(b, rocke_b_mul(b, n0, k0_count), k0);
+        rocke_value_t* x1 = rocke_b_add(b, rocke_b_mul(b, x0, rocke_b_const_i32(b, 4)), ld->k_blk);
+        rocke_value_t* x2 = rocke_b_add(b, rocke_b_mul(b, x1, rocke_b_const_i32(b, 16)), n_lane);
+        packed_addr = rocke_b_mul(b, x2, rocke_b_const_i32(b, 16));
+    }
+    else
+    {
+        rocke_value_t* k_lane_start
+            = rocke_b_mul(b, ld->k_blk, rocke_b_const_i32(b, atom->b_per_lane));
+        rocke_value_t* k_base = rocke_b_add(b, k_tile_base, k_lane_start);
+        rocke_value_t* packed_stride = rocke_b_div(b, N, rocke_b_const_i32(b, 2));
+        rocke_value_t* row = rocke_b_mul(b, n_col, packed_stride);
+        rocke_value_t* col = rocke_b_div(b, k_base, rocke_b_const_i32(b, 2));
+        packed_addr = rocke_b_add(b, row, col);
+    }
+    rocke_value_t* packed = rocke_b_global_load_vN(b, B, packed_addr, rocke_i8(), 16, 16);
+    if(!pad_for_mfma)
+        return packed;
+    return rocke_b_vec_concat(b, packed, rocke_b_zero_vec(b, rocke_i8(), 16));
+}
+
+rocke_value_t* rocke_moe_fp8_load_mxfp4_scale_word(rocke_moe_fp8_build_ctx_t* ctx,
+                                                   rocke_value_t* scale,
+                                                   rocke_value_t* n_col,
+                                                   rocke_value_t* k_tile_base,
+                                                   rocke_value_t* stride,
+                                                   rocke_value_t* k_group,
+                                                   bool preshuffled)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* off;
+    if(preshuffled)
+    {
+        rocke_value_t* n1 = rocke_b_div(b, n_col, rocke_b_const_i32(b, 32));
+        rocke_value_t* n_div16 = rocke_b_div(b, n_col, rocke_b_const_i32(b, 16));
+        rocke_value_t* n_pack = rocke_b_mod(b, n_div16, rocke_b_const_i32(b, 2));
+        rocke_value_t* n_lane = rocke_b_mod(b, n_col, rocke_b_const_i32(b, 16));
+        rocke_value_t* kg = rocke_b_div(b, k_tile_base, rocke_b_const_i32(b, 128));
+        rocke_value_t* k1 = rocke_b_div(b, kg, rocke_b_const_i32(b, 2));
+        rocke_value_t* k_pack = rocke_b_mod(b, kg, rocke_b_const_i32(b, 2));
+        rocke_value_t* k1_count = rocke_b_div(b, stride, rocke_b_const_i32(b, 8));
+        rocke_value_t* x0 = rocke_b_add(b, rocke_b_mul(b, n1, k1_count), k1);
+        rocke_value_t* x1 = rocke_b_add(b, rocke_b_mul(b, x0, rocke_b_const_i32(b, 4)), k_group);
+        rocke_value_t* x2 = rocke_b_add(b, rocke_b_mul(b, x1, rocke_b_const_i32(b, 16)), n_lane);
+        rocke_value_t* x3 = rocke_b_mul(b, x2, rocke_b_const_i32(b, 4));
+        rocke_value_t* tail
+            = rocke_b_add(b, rocke_b_mul(b, k_pack, rocke_b_const_i32(b, 2)), n_pack);
+        off = rocke_b_add(b, x3, tail);
+    }
+    else
+    {
+        rocke_value_t* row = rocke_b_mul(b, n_col, stride);
+        rocke_value_t* group
+            = rocke_b_add(b, rocke_b_div(b, k_tile_base, rocke_b_const_i32(b, 32)), k_group);
+        off = rocke_b_add(b, row, group);
+    }
+    return rocke_b_zext(b, rocke_b_global_load_i8(b, scale, off, 0), rocke_i32());
+}
+
+/* ===================================================================== *
  * _load_a_fp8_lds  (Python lines 1224-1255 -- STAGE-2 down-GEMM span)
  *
  *   m_row = b.add(m_tile_base, lane_decode.m_in_atom)

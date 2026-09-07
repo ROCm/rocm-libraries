@@ -93,6 +93,48 @@ static int make_spec(int idx, rocke_fused_mega_kernel_spec_fp8_t* spec, bool* pe
         spec->sched_cadence = "iglp1";
         *persistent = true;
         break;
+    case 6: /* packed MXFP4 weights plus alternate gated activation */
+        spec->name = "moe_fused_mega_fp8_situ";
+        spec->tile_m = 16;
+        spec->tile_n_inter = 256;
+        spec->gate_up_k = 128;
+        spec->down_k = 128;
+        spec->warp_n = 8;
+        spec->use_dtla = false;
+        spec->has_sched_cadence = false;
+        spec->activation = "situ";
+        spec->activation_beta = 2.0;
+        spec->has_activation_linear_beta = true;
+        spec->activation_linear_beta = 3.0;
+        spec->weight_dtype = "mxfp4";
+        spec->mxfp4_native = true;
+        spec->prefetch_routing_meta = true;
+        spec->pipeline_native_down = true;
+        spec->mxfp4_preshuffled = true;
+        spec->pipeline_native_gateup = true;
+        spec->block_size = 0;
+        break;
+    case 7: /* native MXFP4 production path, T8 down-loop schedule */
+        spec->name = "moe_fused_mega_fp8_situ_t8";
+        spec->tile_m = 16;
+        spec->tile_n_inter = 256;
+        spec->gate_up_k = 128;
+        spec->down_k = 128;
+        spec->warp_n = 8;
+        spec->use_dtla = false;
+        spec->has_sched_cadence = false;
+        spec->activation = "situ";
+        spec->activation_beta = 2.0;
+        spec->has_activation_linear_beta = true;
+        spec->activation_linear_beta = 3.0;
+        spec->weight_dtype = "mxfp4";
+        spec->mxfp4_native = true;
+        spec->prefetch_routing_meta = true;
+        spec->pipeline_native_down = false;
+        spec->mxfp4_preshuffled = true;
+        spec->pipeline_native_gateup = true;
+        spec->block_size = 0;
+        break;
     default:
         return -1;
     }

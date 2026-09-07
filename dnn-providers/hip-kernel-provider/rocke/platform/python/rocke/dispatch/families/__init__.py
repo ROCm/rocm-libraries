@@ -46,12 +46,24 @@ of a constraint that silently never matches.
 from __future__ import annotations
 
 from .moe import MOE_REGISTRY, MoeRequest, dispatch_moe
+from .moe_rank_reduce import (
+    MOE_RANK_REDUCE_REGISTRY,
+    MoeRankReduceRequest,
+    dispatch_moe_rank_reduce,
+)
+from .moe_routing import MOE_ROUTING_REGISTRY, MoeRoutingRequest, dispatch_moe_routing
 from .norm import NORM_REGISTRY, NormRequest, dispatch_norm
 
 __all__ = [
     "MOE_REGISTRY",
     "MoeRequest",
     "dispatch_moe",
+    "MOE_RANK_REDUCE_REGISTRY",
+    "MoeRankReduceRequest",
+    "dispatch_moe_rank_reduce",
+    "MOE_ROUTING_REGISTRY",
+    "MoeRoutingRequest",
+    "dispatch_moe_routing",
     "NORM_REGISTRY",
     "NormRequest",
     "dispatch_norm",

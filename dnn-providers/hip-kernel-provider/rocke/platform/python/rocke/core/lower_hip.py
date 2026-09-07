@@ -1678,6 +1678,15 @@ class _Lowerer:
             f" mantissa_a={_name(a)} mantissa_b={_name(b)}"
         )
 
+    def _op_tile_mfma_scale_f32_16x16x128_fp8_fp4(self, op: Op) -> None:
+        """HIP-readable stub for the LLVM-direct native A8W4 MFMA."""
+        a, b, c, a_scale, b_scale = op.operands
+        self._emit(
+            f"f32x4 {_name(op.result)} = {_name(c)};  // native A8W4 MFMA stub:"
+            f" scale_a={_name(a_scale)} scale_b={_name(b_scale)}"
+            f" fp8_a={_name(a)} packed_fp4_b={_name(b)}"
+        )
+
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
         a, b, c = op.operands
         self._emit(

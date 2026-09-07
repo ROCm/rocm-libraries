@@ -121,6 +121,10 @@ fused kernel and keeps the split halves opt-in.
 | `moe_smoothquant.py` | `MoeSmoothQuantSpec` (CK Tile 14) | `instances/small_ops.md` |
 | `moe_sorting.py` | `MoeSortingSpec` (CK Tile 13; three-kernel pipeline) | `instances/small_ops.md` |
 | `fused_moe.py` | `FusedMoeSpec`, `FusedMoeLauncher` (CK Tile 15) | `instances/small_ops.md` |
+| `moe_rank_reduce.py` | `MoeRankReduceRMSNormSpec`, `MoeRankReduceScatterSpec` | `instances/moe_rank_reduce.md` |
+| `moe_topk_active_pack.py` | `MoeTopkActivePackSpec` | `instances/moe_routing.md` |
+| `moe_compact_gather_quant.py` | `MoeCompactGatherQuantSpec` | `instances/moe_routing.md` |
+| `moe_fused_mega_fp8.py` | `FusedMegaKernelSpecFp8` (FP8 or packed MXFP4 weights; SiLU/SITU) | `instances/moe_routing.md` |
 
 The fused-MoE forward (`fused_moe.py`) is a *composition*: it ships
 the three MoE-specific kernels (gather, SwiGLU activation fusion,

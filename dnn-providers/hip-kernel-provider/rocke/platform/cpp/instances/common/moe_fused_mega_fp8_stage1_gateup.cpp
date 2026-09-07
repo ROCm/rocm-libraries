@@ -34,6 +34,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h> /* snprintf */
+#include <string.h>
 
 #include "rocke/helper_helpers.asm.h" /* rocke_mfma_f8f6f4_agpr_cluster */
 #include "rocke/instance_moe_fused_mega_fp8_internal.h"
@@ -147,6 +148,53 @@ rocke_value_t* rocke_moe_fp8_silu_mul_f32(rocke_moe_fp8_build_ctx_t* ctx,
     return rocke_b_fmul(b, silu, u);
 }
 
+static rocke_value_t* moe_fp8_situ_tanh_f32(rocke_moe_fp8_build_ctx_t* ctx,
+                                            rocke_value_t* value,
+                                            rocke_value_t* one_f32)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* abs_value = rocke_b_fabs(b, value);
+    rocke_value_t* exp_arg = rocke_b_fmul(b, ctx->c_situ_two_log2e, abs_value);
+    rocke_value_t* exponential = rocke_b_exp2(b, exp_arg);
+    rocke_value_t* denominator = rocke_b_fadd(b, one_f32, exponential);
+    rocke_value_t* reciprocal = rocke_b_rcp_fast(b, denominator);
+    rocke_value_t* twice_reciprocal = rocke_b_fmul(b, ctx->c_situ_two, reciprocal);
+    rocke_value_t* magnitude = rocke_b_fsub(b, one_f32, twice_reciprocal);
+    rocke_value_t* negative = rocke_b_fcmp(b, "olt", value, ctx->c_situ_zero);
+    rocke_value_t* negated = rocke_b_fneg(b, magnitude);
+    return rocke_b_select(b, negative, negated, magnitude);
+}
+
+rocke_value_t* rocke_moe_fp8_gated_mul_f32(rocke_moe_fp8_build_ctx_t* ctx,
+                                           rocke_value_t* g,
+                                           rocke_value_t* u,
+                                           rocke_value_t* one_f32,
+                                           rocke_value_t* c_neg_log2e)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t *sigmoid_arg, *sigmoid_exp, *sigmoid_den, *sigmoid;
+    rocke_value_t *gate_scaled, *gate_tanh, *gate_clip, *gate;
+
+    if(strcmp(ctx->spec->activation, "silu") == 0)
+        return rocke_moe_fp8_silu_mul_f32(ctx, g, u, one_f32, c_neg_log2e);
+
+    sigmoid_arg = rocke_b_fmul(b, c_neg_log2e, g);
+    sigmoid_exp = rocke_b_exp2(b, sigmoid_arg);
+    sigmoid_den = rocke_b_fadd(b, one_f32, sigmoid_exp);
+    sigmoid = rocke_b_rcp_fast(b, sigmoid_den);
+    gate_scaled = rocke_b_fmul(b, g, ctx->c_situ_inv_beta);
+    gate_tanh = moe_fp8_situ_tanh_f32(ctx, gate_scaled, one_f32);
+    gate_clip = rocke_b_fmul(b, ctx->c_situ_beta, gate_tanh);
+    gate = rocke_b_fmul(b, gate_clip, sigmoid);
+    if(ctx->spec->has_activation_linear_beta)
+    {
+        rocke_value_t* up_scaled = rocke_b_fmul(b, u, ctx->c_situ_linear_inv_beta);
+        rocke_value_t* up_tanh = moe_fp8_situ_tanh_f32(ctx, up_scaled, one_f32);
+        u = rocke_b_fmul(b, ctx->c_situ_linear_beta, up_tanh);
+    }
+    return rocke_b_fmul(b, gate, u);
+}
+
 /* _store_hidden_f32_pass: Pass A -- silu(gate)*up -> f32 LDS scratch + in-register
  * per-lane amax. Returns the per-lane partial amax (floored). */
 rocke_value_t* rocke_moe_fp8_store_hidden_f32_pass(rocke_moe_fp8_build_ctx_t* ctx,
@@ -190,7 +238,7 @@ rocke_value_t* rocke_moe_fp8_store_hidden_f32_pass(rocke_moe_fp8_build_ctx_t* ct
                     b, warp_n_off, rocke_b_add(b, rocke_b_const_i32(b, ni * atom->n), col_in));
                 g = rocke_b_vec_extract(b, g_vec, i);
                 u = rocke_b_vec_extract(b, u_vec, i);
-                h = rocke_moe_fp8_silu_mul_f32(ctx, g, u, one_f32, c_neg_log2e);
+                h = rocke_moe_fp8_gated_mul_f32(ctx, g, u, one_f32, c_neg_log2e);
                 rocke_moe_fp8_f32_view_store(ctx, f32_view, row, col, h);
                 amax_partial = rocke_b_fmax(b, amax_partial, rocke_b_fabs(b, h));
             }
@@ -836,6 +884,370 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
         if(out_up != NULL)
         {
             out_up[ni] = (outer.op != NULL) ? outer.op->results[nni + ni] : NULL;
+        }
+    }
+}
+
+/* ===================================================================== *
+ * STAGE 1a: packed MXFP4 gate+up, independently scaled per K=32 group
+ * ===================================================================== */
+void rocke_moe_fp8_emit_mxfp4_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
+                                                 rocke_value_t* A,
+                                                 rocke_value_t* WGate,
+                                                 rocke_value_t* WUp,
+                                                 rocke_value_t* AScale,
+                                                 rocke_value_t* WGateScale,
+                                                 rocke_value_t* WUpScale,
+                                                 rocke_value_t* m_tile_base,
+                                                 rocke_value_t* const* n_tile_bases,
+                                                 int nni,
+                                                 rocke_value_t* K,
+                                                 rocke_value_t* stride_a_scale,
+                                                 rocke_value_t* stride_gate_scale,
+                                                 rocke_value_t* stride_up_scale,
+                                                 const char* tag,
+                                                 rocke_value_t** out_gate,
+                                                 rocke_value_t** out_up)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_mfma_atom_t* atom = ctx->atom;
+    const rocke_lane_decode_t* lane_decode = &ctx->lane_decode;
+    rocke_value_t* c_group;
+    rocke_value_t* m_row;
+    rocke_value_t* a_scale_row;
+    rocke_value_t* n_cols[ROCKE_MOE_FP8_MAX_NNI];
+    rocke_iter_arg_t iter_args[ROCKE_MOE_FP8_MAX_ACCS];
+    char names[ROCKE_MOE_FP8_MAX_ACCS][64];
+    char iv_name[64];
+    rocke_for_t loop;
+    int ni;
+    int nargs = 0;
+
+    if(atom->k != 32)
+        return;
+
+    c_group = rocke_b_const_i32(b, 32);
+    m_row = rocke_b_add(b, m_tile_base, lane_decode->m_in_atom);
+    a_scale_row = rocke_b_mul(b, m_row, stride_a_scale);
+    for(ni = 0; ni < nni; ++ni)
+    {
+        n_cols[ni] = rocke_b_add(b, n_tile_bases[ni], lane_decode->n_in_atom);
+    }
+    for(ni = 0; ni < nni; ++ni)
+    {
+        snprintf(names[nargs], sizeof(names[nargs]), "mxg_out_%s_%d", tag ? tag : "", ni);
+        iter_args[nargs].name = names[nargs];
+        iter_args[nargs].init = moe_fp8_atom_zero_acc(b, atom);
+        ++nargs;
+    }
+    for(ni = 0; ni < nni; ++ni)
+    {
+        snprintf(names[nargs], sizeof(names[nargs]), "mxu_out_%s_%d", tag ? tag : "", ni);
+        iter_args[nargs].name = names[nargs];
+        iter_args[nargs].init = moe_fp8_atom_zero_acc(b, atom);
+        ++nargs;
+    }
+    snprintf(iv_name, sizeof(iv_name), "mxkg_%s", tag ? tag : "");
+    {
+        rocke_value_t* lo = rocke_b_const_i32(b, 0);
+        rocke_value_t* hi = rocke_b_div(b, K, c_group);
+        rocke_value_t* step = rocke_b_const_i32(b, 1);
+        loop = rocke_b_scf_for_iter(b, lo, hi, step, iter_args, nargs, iv_name, false, true);
+    }
+
+    rocke_b_region_enter(b, loop.body);
+    {
+        rocke_value_t* kg = loop.iv;
+        rocke_value_t* gate_outer[ROCKE_MOE_FP8_MAX_NNI];
+        rocke_value_t* up_outer[ROCKE_MOE_FP8_MAX_NNI];
+        rocke_value_t* activation_scale;
+        rocke_value_t* scale_group;
+        rocke_value_t* scale_offset;
+        rocke_value_t* k_base;
+        rocke_value_t* a_fragment;
+        rocke_value_t* new_gate[ROCKE_MOE_FP8_MAX_NNI];
+        rocke_value_t* new_up[ROCKE_MOE_FP8_MAX_NNI];
+        rocke_value_t* yielded[ROCKE_MOE_FP8_MAX_ACCS];
+        int nyield = 0;
+
+        for(ni = 0; ni < nni; ++ni)
+            gate_outer[ni] = loop.iter_vars[ni];
+        for(ni = 0; ni < nni; ++ni)
+            up_outer[ni] = loop.iter_vars[nni + ni];
+
+        scale_group = rocke_b_div(b, kg, rocke_b_const_i32(b, 4));
+        scale_offset = rocke_b_add(b, a_scale_row, scale_group);
+        activation_scale = rocke_b_global_load_f32(b, AScale, scale_offset, 0);
+        k_base = rocke_b_mul(b, kg, c_group);
+        a_fragment = rocke_moe_fp8_load_a_fp8(ctx, A, m_tile_base, k_base, K);
+
+        for(ni = 0; ni < nni; ++ni)
+        {
+            rocke_value_t* gate_fragment
+                = rocke_moe_fp8_load_b_mxfp4_as_fp8(ctx, WGate, n_tile_bases[ni], k_base, K);
+            rocke_value_t* up_fragment
+                = rocke_moe_fp8_load_b_mxfp4_as_fp8(ctx, WUp, n_tile_bases[ni], k_base, K);
+            rocke_value_t* gate_scale_row = rocke_b_mul(b, n_cols[ni], stride_gate_scale);
+            rocke_value_t* gate_scale_offset = rocke_b_add(b, gate_scale_row, kg);
+            rocke_value_t* gate_encoded
+                = rocke_b_global_load_i8(b, WGateScale, gate_scale_offset, 0);
+            rocke_value_t* gate_scale = rocke_moe_fp8_decode_e8m0_scale(ctx, gate_encoded);
+            rocke_value_t* up_scale_row = rocke_b_mul(b, n_cols[ni], stride_up_scale);
+            rocke_value_t* up_scale_offset = rocke_b_add(b, up_scale_row, kg);
+            rocke_value_t* up_encoded = rocke_b_global_load_i8(b, WUpScale, up_scale_offset, 0);
+            rocke_value_t* up_scale = rocke_moe_fp8_decode_e8m0_scale(ctx, up_encoded);
+            rocke_value_t* gate_zero = moe_fp8_atom_zero_acc(b, atom);
+            rocke_value_t* gate_group
+                = rocke_b_mma(b, atom->name, a_fragment, gate_fragment, gate_zero, NULL, 0);
+            rocke_value_t* up_zero = moe_fp8_atom_zero_acc(b, atom);
+            rocke_value_t* up_group
+                = rocke_b_mma(b, atom->name, a_fragment, up_fragment, up_zero, NULL, 0);
+            rocke_value_t* gate_product = rocke_b_fmul(b, activation_scale, gate_scale);
+            rocke_value_t* gate_ab = rocke_b_vector_splat(b, gate_product, atom->c_per_lane);
+            rocke_value_t* up_product = rocke_b_fmul(b, activation_scale, up_scale);
+            rocke_value_t* up_ab = rocke_b_vector_splat(b, up_product, atom->c_per_lane);
+            new_gate[ni] = rocke_b_vector_fma(b, gate_group, gate_ab, gate_outer[ni]);
+            new_up[ni] = rocke_b_vector_fma(b, up_group, up_ab, up_outer[ni]);
+        }
+        for(ni = 0; ni < nni; ++ni)
+            yielded[nyield++] = new_gate[ni];
+        for(ni = 0; ni < nni; ++ni)
+            yielded[nyield++] = new_up[ni];
+        rocke_b_scf_yield(b, yielded, nyield);
+    }
+    rocke_b_region_leave(b);
+
+    for(ni = 0; ni < nni; ++ni)
+    {
+        if(out_gate != NULL)
+            out_gate[ni] = loop.op != NULL ? loop.op->results[ni] : NULL;
+        if(out_up != NULL)
+            out_up[ni] = loop.op != NULL ? loop.op->results[nni + ni] : NULL;
+    }
+}
+
+static int native_gate_load_group(rocke_moe_fp8_build_ctx_t* ctx,
+                                  rocke_value_t* A,
+                                  rocke_value_t* WGate,
+                                  rocke_value_t* WUp,
+                                  rocke_value_t* AScale,
+                                  rocke_value_t* WGateScale,
+                                  rocke_value_t* WUpScale,
+                                  rocke_value_t* m_tile_base,
+                                  rocke_value_t* const* n_tile_bases,
+                                  rocke_value_t* const* n_cols,
+                                  int nni,
+                                  rocke_value_t* K,
+                                  rocke_value_t* stride_gate_scale,
+                                  rocke_value_t* stride_up_scale,
+                                  rocke_value_t* a_scale_row,
+                                  rocke_value_t* c_group,
+                                  rocke_value_t* kg,
+                                  rocke_value_t** state)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* k_base;
+    int n = 0;
+    int i;
+    state[n++] = rocke_b_global_load_f32(b, AScale, rocke_b_add(b, a_scale_row, kg), 0);
+    k_base = rocke_b_mul(b, kg, c_group);
+    state[n++] = rocke_moe_fp8_load_a_fp8_native(ctx, A, m_tile_base, k_base, K);
+    for(i = 0; i < nni; ++i)
+        state[n++] = rocke_moe_fp8_load_b_mxfp4_native(
+            ctx, WGate, n_tile_bases[i], k_base, K, ctx->spec->mxfp4_preshuffled, false);
+    for(i = 0; i < nni; ++i)
+        state[n++] = rocke_moe_fp8_load_b_mxfp4_native(
+            ctx, WUp, n_tile_bases[i], k_base, K, ctx->spec->mxfp4_preshuffled, false);
+    for(i = 0; i < nni; ++i)
+        state[n++] = rocke_moe_fp8_load_mxfp4_scale_word(ctx,
+                                                         WGateScale,
+                                                         n_cols[i],
+                                                         k_base,
+                                                         stride_gate_scale,
+                                                         ctx->lane_decode.k_blk,
+                                                         ctx->spec->mxfp4_preshuffled);
+    for(i = 0; i < nni; ++i)
+        state[n++] = rocke_moe_fp8_load_mxfp4_scale_word(ctx,
+                                                         WUpScale,
+                                                         n_cols[i],
+                                                         k_base,
+                                                         stride_up_scale,
+                                                         ctx->lane_decode.k_blk,
+                                                         ctx->spec->mxfp4_preshuffled);
+    return n;
+}
+
+static void native_gate_accumulate(rocke_moe_fp8_build_ctx_t* ctx,
+                                   rocke_value_t* const* state,
+                                   rocke_value_t* const* gate_outer,
+                                   rocke_value_t* const* up_outer,
+                                   int nni,
+                                   rocke_value_t** new_gate,
+                                   rocke_value_t** new_up)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_mfma_atom_t* atom = ctx->atom;
+    rocke_value_t* activation_scale = state[0];
+    rocke_value_t* a_fragment = state[1];
+    int cursor = 2;
+    rocke_value_t* const* gate_fragments = state + cursor;
+    cursor += nni;
+    rocke_value_t* const* up_fragments = state + cursor;
+    cursor += nni;
+    rocke_value_t* const* gate_scales = state + cursor;
+    cursor += nni;
+    rocke_value_t* const* up_scales = state + cursor;
+    rocke_value_t* padding = rocke_b_zero_vec(b, rocke_i8(), 16);
+    rocke_value_t* scale_v = rocke_b_vector_splat(b, activation_scale, atom->c_per_lane);
+    int i;
+    for(i = 0; i < nni; ++i)
+    {
+        rocke_value_t* gate_padded = rocke_b_vec_concat(b, gate_fragments[i], padding);
+        rocke_value_t* gate_zero = moe_fp8_atom_zero_acc(b, atom);
+        rocke_value_t* gate_group = rocke_b_mfma_scale_f32_16x16x128_fp8_fp4(
+            b, a_fragment, gate_padded, gate_zero, ctx->MxScaleA, gate_scales[i]);
+        rocke_value_t* up_padded = rocke_b_vec_concat(b, up_fragments[i], padding);
+        rocke_value_t* up_zero = moe_fp8_atom_zero_acc(b, atom);
+        rocke_value_t* up_group = rocke_b_mfma_scale_f32_16x16x128_fp8_fp4(
+            b, a_fragment, up_padded, up_zero, ctx->MxScaleA, up_scales[i]);
+        new_gate[i] = rocke_b_vector_fma(b, gate_group, scale_v, gate_outer[i]);
+        new_up[i] = rocke_b_vector_fma(b, up_group, scale_v, up_outer[i]);
+    }
+}
+
+void rocke_moe_fp8_emit_mxfp4_native_gateup_pipeline(rocke_moe_fp8_build_ctx_t* ctx,
+                                                     rocke_value_t* A,
+                                                     rocke_value_t* WGate,
+                                                     rocke_value_t* WUp,
+                                                     rocke_value_t* AScale,
+                                                     rocke_value_t* WGateScale,
+                                                     rocke_value_t* WUpScale,
+                                                     rocke_value_t* m_tile_base,
+                                                     rocke_value_t* const* n_tile_bases,
+                                                     int nni,
+                                                     rocke_value_t* K,
+                                                     rocke_value_t* stride_a_scale,
+                                                     rocke_value_t* stride_gate_scale,
+                                                     rocke_value_t* stride_up_scale,
+                                                     const char* tag,
+                                                     rocke_value_t** out_gate,
+                                                     rocke_value_t** out_up)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_mfma_atom_t* atom = ctx->atom;
+    rocke_value_t* n_cols[ROCKE_MOE_FP8_MAX_NNI];
+    rocke_value_t* initial_state[ROCKE_MOE_FP8_MAX_PIPE_VALUES];
+    rocke_iter_arg_t args[ROCKE_MOE_FP8_MAX_PIPE_VALUES];
+    char names[ROCKE_MOE_FP8_MAX_PIPE_VALUES][64];
+    rocke_value_t* c_group = rocke_b_const_i32(b, 128);
+    rocke_value_t* m_row = rocke_b_add(b, m_tile_base, ctx->lane_decode.m_in_atom);
+    rocke_value_t* a_scale_row = rocke_b_mul(b, m_row, stride_a_scale);
+    int i, nstate, nargs = 0;
+    for(i = 0; i < nni; ++i)
+        n_cols[i] = rocke_b_add(b, n_tile_bases[i], ctx->lane_decode.n_in_atom);
+    nstate = native_gate_load_group(ctx,
+                                    A,
+                                    WGate,
+                                    WUp,
+                                    AScale,
+                                    WGateScale,
+                                    WUpScale,
+                                    m_tile_base,
+                                    n_tile_bases,
+                                    n_cols,
+                                    nni,
+                                    K,
+                                    stride_gate_scale,
+                                    stride_up_scale,
+                                    a_scale_row,
+                                    c_group,
+                                    rocke_b_const_i32(b, 0),
+                                    initial_state);
+    for(i = 0; i < nni; ++i)
+    {
+        snprintf(names[nargs], 64, "mxpg_out_%s_%d", tag ? tag : "", i);
+        args[nargs].name = names[nargs];
+        args[nargs++].init = moe_fp8_atom_zero_acc(b, atom);
+    }
+    for(i = 0; i < nni; ++i)
+    {
+        snprintf(names[nargs], 64, "mxpu_out_%s_%d", tag ? tag : "", i);
+        args[nargs].name = names[nargs];
+        args[nargs++].init = moe_fp8_atom_zero_acc(b, atom);
+    }
+    for(i = 0; i < nstate; ++i)
+    {
+        snprintf(names[nargs], 64, "mxp_state_%s_%d", tag ? tag : "", i);
+        args[nargs].name = names[nargs];
+        args[nargs++].init = initial_state[i];
+    }
+    rocke_value_t* num_groups = rocke_b_div(b, K, c_group);
+    char iv_name[64];
+    snprintf(iv_name, sizeof(iv_name), "mxpkg_%s", tag ? tag : "");
+    rocke_value_t* lo = rocke_b_const_i32(b, 0);
+    rocke_value_t* upper_one = rocke_b_const_i32(b, 1);
+    rocke_value_t* upper = rocke_b_sub(b, num_groups, upper_one);
+    rocke_value_t* step = rocke_b_const_i32(b, 1);
+    rocke_for_t loop = rocke_b_scf_for_iter(b, lo, upper, step, args, nargs, iv_name, false, true);
+    rocke_b_region_enter(b, loop.body);
+    {
+        rocke_value_t* next_state[ROCKE_MOE_FP8_MAX_PIPE_VALUES];
+        rocke_value_t* new_gate[ROCKE_MOE_FP8_MAX_NNI];
+        rocke_value_t* new_up[ROCKE_MOE_FP8_MAX_NNI];
+        rocke_value_t* yielded[ROCKE_MOE_FP8_MAX_PIPE_VALUES];
+        rocke_value_t* gate_outer[ROCKE_MOE_FP8_MAX_NNI];
+        rocke_value_t* up_outer[ROCKE_MOE_FP8_MAX_NNI];
+        int ny = 0;
+        for(i = 0; i < nni; ++i)
+            gate_outer[i] = loop.iter_vars[i];
+        for(i = 0; i < nni; ++i)
+            up_outer[i] = loop.iter_vars[nni + i];
+        native_gate_load_group(ctx,
+                               A,
+                               WGate,
+                               WUp,
+                               AScale,
+                               WGateScale,
+                               WUpScale,
+                               m_tile_base,
+                               n_tile_bases,
+                               n_cols,
+                               nni,
+                               K,
+                               stride_gate_scale,
+                               stride_up_scale,
+                               a_scale_row,
+                               c_group,
+                               rocke_b_add(b, loop.iv, rocke_b_const_i32(b, 1)),
+                               next_state);
+        native_gate_accumulate(
+            ctx, loop.iter_vars + 2 * nni, gate_outer, up_outer, nni, new_gate, new_up);
+        for(i = 0; i < nni; ++i)
+            yielded[ny++] = new_gate[i];
+        for(i = 0; i < nni; ++i)
+            yielded[ny++] = new_up[i];
+        for(i = 0; i < nstate; ++i)
+            yielded[ny++] = next_state[i];
+        rocke_b_scf_yield(b, yielded, ny);
+    }
+    rocke_b_region_leave(b);
+    {
+        rocke_value_t* gate_outer[ROCKE_MOE_FP8_MAX_NNI];
+        rocke_value_t* up_outer[ROCKE_MOE_FP8_MAX_NNI];
+        rocke_value_t* new_gate[ROCKE_MOE_FP8_MAX_NNI];
+        rocke_value_t* new_up[ROCKE_MOE_FP8_MAX_NNI];
+        for(i = 0; i < nni; ++i)
+            gate_outer[i] = loop.op->results[i];
+        for(i = 0; i < nni; ++i)
+            up_outer[i] = loop.op->results[nni + i];
+        native_gate_accumulate(
+            ctx, loop.op->results + 2 * nni, gate_outer, up_outer, nni, new_gate, new_up);
+        for(i = 0; i < nni; ++i)
+        {
+            if(out_gate)
+                out_gate[i] = new_gate[i];
+            if(out_up)
+                out_up[i] = new_up[i];
         }
     }
 }

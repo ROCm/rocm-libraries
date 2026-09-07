@@ -15,6 +15,14 @@ import unittest
 
 from rocke.core.arch import ArchTarget, known_arches
 from rocke.dispatch.families.moe import MOE_REGISTRY, MoeRequest
+from rocke.dispatch.families.moe_rank_reduce import (
+    MOE_RANK_REDUCE_REGISTRY,
+    MoeRankReduceRequest,
+)
+from rocke.dispatch.families.moe_routing import (
+    MOE_ROUTING_REGISTRY,
+    MoeRoutingRequest,
+)
 from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest
 
 
@@ -32,6 +40,46 @@ def _moe_requests(arch: str):
                         arch=arch,
                         dtype=dtype,
                     )
+                    if dtype == "fp8":
+                        yield MoeRequest(
+                            num_tokens=tokens,
+                            hidden=hidden,
+                            intermediate=inter,
+                            num_experts=32,
+                            top_k=4,
+                            arch=arch,
+                            dtype=dtype,
+                            weight_dtype="mxfp4",
+                            activation="situ",
+                        )
+
+
+def _moe_rank_reduce_requests(arch: str):
+    yield MoeRankReduceRequest(
+        rows=8,
+        width=3584,
+        world_size=8,
+        rank=0,
+        arch=arch,
+        operation="rmsnorm",
+    )
+    yield MoeRankReduceRequest(
+        rows=8,
+        width=7168,
+        world_size=8,
+        rank=0,
+        arch=arch,
+        operation="scatter",
+    )
+
+
+def _moe_routing_requests(arch: str):
+    yield MoeRoutingRequest(
+        tokens=8,
+        experts=896,
+        topk=16,
+        arch=arch,
+    )
 
 
 def _norm_requests(arch: str):
@@ -45,6 +93,8 @@ def _norm_requests(arch: str):
 
 _FAMILIES = (
     (MOE_REGISTRY, _moe_requests),
+    (MOE_RANK_REDUCE_REGISTRY, _moe_rank_reduce_requests),
+    (MOE_ROUTING_REGISTRY, _moe_routing_requests),
     (NORM_REGISTRY, _norm_requests),
 )
 

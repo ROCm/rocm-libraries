@@ -146,8 +146,9 @@ void rocke_block_exclusive_scan_i32(
         /* self_idx = b.select(in_bounds, tid, b.const_i32(0)) */
         rocke_value_t* self_idx = rocke_b_select(b, in_bounds, tid, rocke_b_const_i32(b, 0));
         /* left_idx = b.select(do_add, b.sub(tid, c_stride), b.const_i32(0)) */
-        rocke_value_t* l_idx
-            = rocke_b_select(b, do_add, rocke_b_sub(b, tid, c_stride), rocke_b_const_i32(b, 0));
+        rocke_value_t* l_candidate = rocke_b_sub(b, tid, c_stride);
+        rocke_value_t* l_zero = rocke_b_const_i32(b, 0);
+        rocke_value_t* l_idx = rocke_b_select(b, do_add, l_candidate, l_zero);
         /* self_vec = b.smem_load_vN(lds_buf, self_idx, dtype=I32, n=1) */
         rocke_value_t* self_vec;
         rocke_value_t* l_vec;
@@ -189,8 +190,12 @@ void rocke_block_exclusive_scan_i32(
     /* in_range_left = b.land(in_bounds, b.cmp_gt(tid, b.const_i32(0))) */
     in_range_left = rocke_b_land(b, in_bounds, rocke_b_cmp_gt(b, tid, rocke_b_const_i32(b, 0)));
     /* left_idx = b.select(in_range_left, b.sub(tid, b.const_i32(1)), b.const_i32(0)) */
-    left_idx = rocke_b_select(
-        b, in_range_left, rocke_b_sub(b, tid, rocke_b_const_i32(b, 1)), rocke_b_const_i32(b, 0));
+    {
+        rocke_value_t* c_one = rocke_b_const_i32(b, 1);
+        rocke_value_t* left_candidate = rocke_b_sub(b, tid, c_one);
+        rocke_value_t* c_zero = rocke_b_const_i32(b, 0);
+        left_idx = rocke_b_select(b, in_range_left, left_candidate, c_zero);
+    }
     /* left_vec = b.smem_load_vN(lds_buf, left_idx, dtype=I32, n=1) */
     {
         rocke_value_t* lidx2[1];

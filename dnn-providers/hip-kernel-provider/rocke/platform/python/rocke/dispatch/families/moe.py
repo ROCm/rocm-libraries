@@ -38,8 +38,8 @@ is a candidate-registration follow-on (same recipe).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from typing import Sequence, Tuple
 
 from ...core.arch import ArchTarget
 from ...instances.common.moe_fused_mega import (
@@ -51,8 +51,8 @@ from ...instances.common.moe_fused_mega_fp8 import (
     build_moe_fused_mega_gemm_fp8,
 )
 from ..core import (
-    Capability,
     CandidateRegistry,
+    Capability,
     DispatchResult,
     KernelCandidate,
     KernelId,
@@ -62,7 +62,7 @@ from ..core import (
 )
 
 _FAMILY = "moe_fused_mega"
-MOE_ABI_VERSION = "hipkg-moe-fused-mega/v1"
+MOE_ABI_VERSION = "hipkg-moe-fused-mega/v3"
 
 # Both mega configs are gfx950-tuned (see module docstring).
 _SUPPORTED_ARCHES = ("gfx950",)
@@ -78,6 +78,10 @@ class MoeRequest(OperatorRequest):
     num_experts: int
     top_k: int
     arch: str
+    weight_dtype: str = "same"
+    activation: str = "silu"
+    activation_beta: float = 1.0
+    activation_linear_beta: float | None = None
     op: str = "moe"
     dtype: str = "fp16"
     algorithm: str = "auto"
@@ -86,6 +90,8 @@ class MoeRequest(OperatorRequest):
     def normalized(self) -> dict:
         d = asdict(self)
         d["dtype"] = _moe_dtype(self.dtype)
+        d["weight_dtype"] = _moe_weight_dtype(self.weight_dtype, self.dtype)
+        d["activation"] = self.activation.strip().lower()
         return d
 
     def dims(self) -> dict[str, int]:
@@ -116,6 +122,15 @@ def _moe_dtype(dtype: str) -> str:
     return d
 
 
+def _moe_weight_dtype(weight_dtype: str, activation_dtype: str) -> str:
+    value = weight_dtype.strip().lower()
+    if value in ("same", "auto"):
+        return _moe_dtype(activation_dtype)
+    if value in ("fp4", "mxfp4", "e2m1"):
+        return "mxfp4"
+    return _moe_dtype(value)
+
+
 _F16_DTYPES = ("fp16", "bf16")
 _FP8_DTYPES = ("fp8e4m3",)
 
@@ -138,10 +153,20 @@ def _request_errors(req: OperatorRequest) -> list[str]:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:
         errors.append(str(e))
+    weight_dtype = _moe_weight_dtype(req.weight_dtype, req.dtype)
+    if weight_dtype not in _F16_DTYPES + _FP8_DTYPES + ("mxfp4",):
+        errors.append(f"unsupported weight_dtype {req.weight_dtype!r}")
+    activation = req.activation.strip().lower()
+    if activation not in ("silu", "situ"):
+        errors.append(f"unsupported activation {req.activation!r}")
+    if activation == "situ" and req.activation_beta <= 0:
+        errors.append("situ activation_beta must be positive")
+    if req.activation_linear_beta is not None and req.activation_linear_beta <= 0:
+        errors.append("activation_linear_beta must be positive when set")
     return errors
 
 
-def _selector_matches(req: MoeRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
+def _selector_matches(req: MoeRequest, candidate: KernelCandidate) -> tuple[bool, str]:
     algorithm = req.algorithm.strip().lower()
     spec_id = req.spec_id.strip().lower()
     if algorithm not in ("auto", candidate.algorithm):
@@ -157,7 +182,31 @@ def _spec_f16(req: MoeRequest):
 
 
 def _spec_fp8(req: MoeRequest):
-    return FusedMegaKernelSpecFp8(name="moe_fp8")
+    return FusedMegaKernelSpecFp8(
+        name="moe_fp8",
+        activation=req.activation.strip().lower(),
+        activation_beta=req.activation_beta,
+        activation_linear_beta=req.activation_linear_beta,
+    )
+
+
+def _spec_mxfp4(req: MoeRequest):
+    return FusedMegaKernelSpecFp8(
+        name="moe_mxfp4",
+        gate_up_k=128,
+        down_k=128,
+        use_dtla=False,
+        warp_n=8,
+        activation=req.activation.strip().lower(),
+        activation_beta=req.activation_beta,
+        activation_linear_beta=req.activation_linear_beta,
+        weight_dtype="mxfp4",
+        mxfp4_native=True,
+        prefetch_routing_meta=True,
+        pipeline_native_down=req.num_tokens == 1,
+        mxfp4_preshuffled=True,
+        pipeline_native_gateup=True,
+    )
 
 
 def _build(spec, arch: str):
@@ -172,8 +221,16 @@ def _build(spec, arch: str):
     return build_moe_fused_mega_gemm(spec, arch)
 
 
-def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandidate:
-    def support(req: OperatorRequest) -> Tuple[bool, str]:
+def _make_candidate(
+    *,
+    name,
+    spec_id,
+    dtypes,
+    weight_dtypes,
+    spec_fn,
+    priority,
+) -> KernelCandidate:
+    def support(req: OperatorRequest) -> tuple[bool, str]:
         errors = _request_errors(req)
         if errors:
             return False, "; ".join(errors)
@@ -181,6 +238,14 @@ def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandid
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
+        normalized_weight = _moe_weight_dtype(req.weight_dtype, req.dtype)
+        if normalized_weight not in weight_dtypes:
+            return False, (
+                f"weight_dtype {req.weight_dtype!r} does not select "
+                f"one of {weight_dtypes!r}"
+            )
+        if _moe_dtype(req.dtype) in _F16_DTYPES and req.activation != "silu":
+            return False, "the f16/bf16 mega-kernel supports silu only"
         # f16 path: validate the 16x16x32 atom against the per-arch catalog
         # (gfx942 lacks it -> rejected even though arch-family is CDNA).
         if _moe_dtype(req.dtype) in _F16_DTYPES:
@@ -235,6 +300,7 @@ MOE_REGISTRY.extend(
             name="moe_fused_mega_f16",
             spec_id="mega_f16",
             dtypes=_F16_DTYPES,
+            weight_dtypes=_F16_DTYPES,
             spec_fn=_spec_f16,
             priority=10,
         ),
@@ -242,14 +308,23 @@ MOE_REGISTRY.extend(
             name="moe_fused_mega_fp8",
             spec_id="mega_fp8",
             dtypes=_FP8_DTYPES,
+            weight_dtypes=("fp8e4m3",),
             spec_fn=_spec_fp8,
+            priority=10,
+        ),
+        _make_candidate(
+            name="moe_fused_mega_mxfp4",
+            spec_id="mega_mxfp4",
+            dtypes=_FP8_DTYPES,
+            weight_dtypes=("mxfp4",),
+            spec_fn=_spec_mxfp4,
             priority=10,
         ),
     )
 )
 
 
-def moe_candidates() -> Tuple[KernelCandidate, ...]:
+def moe_candidates() -> tuple[KernelCandidate, ...]:
     return MOE_REGISTRY.candidates()
 
 
@@ -257,9 +332,11 @@ def _struct(spec) -> dict:
     """The selection-parity structural identity for a MoE mega spec."""
     if isinstance(spec, FusedMegaKernelSpecFp8):
         atom_k = spec.gate_up_k
-        path = "fp8"
+        down_atom_k = spec.down_k
+        path = spec.weight_dtype
     else:
         atom_k = spec.warp_tile_k
+        down_atom_k = spec.warp_tile_k
         path = "f16"
     return {
         "path": path,
@@ -267,7 +344,17 @@ def _struct(spec) -> dict:
         "tile_n_inter": spec.tile_n_inter,
         "tile_k_gu": spec.tile_k_gu,
         "atom_k": atom_k,
+        "down_atom_k": down_atom_k,
         "block_size": int(spec.block_size),
+        "warp_n": spec.warp_n,
+        "activation": getattr(spec, "activation", "silu"),
+        "activation_beta": getattr(spec, "activation_beta", 1.0),
+        "activation_linear_beta": getattr(spec, "activation_linear_beta", None),
+        "mxfp4_native": getattr(spec, "mxfp4_native", False),
+        "prefetch_routing_meta": getattr(spec, "prefetch_routing_meta", False),
+        "pipeline_native_down": getattr(spec, "pipeline_native_down", False),
+        "mxfp4_preshuffled": getattr(spec, "mxfp4_preshuffled", False),
+        "pipeline_native_gateup": getattr(spec, "pipeline_native_gateup", False),
     }
 
 

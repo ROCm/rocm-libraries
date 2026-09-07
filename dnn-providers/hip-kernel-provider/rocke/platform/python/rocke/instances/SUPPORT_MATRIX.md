@@ -37,6 +37,9 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 | `img2col` | ✅ | ✅ | ✅ |
 | `topk_softmax` | ✅ | ✅ | ✅ |
 | `moe_sorting` (histogram/scan/scatter/persistent) | ✅ | ✅ | ✅ |
+| `moe_rank_reduce` (RMSNorm/scatter epilogues) | ❌ | ✅ | ❌ |
+| `moe_topk_active_pack` | ❌ | ✅ | ❌ |
+| `moe_compact_gather_quant` | ❌ | ✅ | ❌ |
 
 These emit generic AMDGPU IR; arch only sets the comgr target triple.
 
@@ -56,6 +59,8 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 | `streamk_gemm` | ✅ | ✅ | ❌ | MFMA stream-K reduction path |
 | `block_scale_gemm` | ✅ | ✅ | ❌ | MFMA quantized GEMM |
 | `mx_gemm` | ✅ | ✅ | ❌ | MFMA microscaling GEMM |
+| `moe_fused_mega_fp8` | ❌ | ✅ | ❌ | FP8 weights; SiLU or SITU |
+| `moe_fused_mega_mxfp4` | ❌ | ✅ | ❌ | native A8W4 MFMA; lane-preshuffled E2M1 weights/E8M0 scales |
 
 ---
 

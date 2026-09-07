@@ -268,6 +268,32 @@ from .common.moe_sorting import (  # noqa: F401
     moe_sort_scatter_signature,
     moe_sorting_workspace_bytes,
 )
+from .common.moe_rank_reduce import (  # noqa: F401
+    MoeRankReduceRMSNormSpec,
+    MoeRankReduceScatterSpec,
+    build_moe_rank_reduce_rmsnorm,
+    build_moe_rank_reduce_scatter,
+    is_valid_rmsnorm_spec as is_valid_moe_rank_reduce_rmsnorm_spec,
+    is_valid_scatter_spec as is_valid_moe_rank_reduce_scatter_spec,
+    moe_rank_reduce_rmsnorm_grid,
+    moe_rank_reduce_rmsnorm_signature,
+    moe_rank_reduce_scatter_grid,
+    moe_rank_reduce_scatter_signature,
+)
+from .common.moe_topk_active_pack import (  # noqa: F401
+    MoeTopkActivePackSpec,
+    build_moe_topk_active_pack,
+    is_valid_spec as is_valid_moe_topk_active_pack_spec,
+    moe_topk_active_pack_grid,
+    moe_topk_active_pack_signature,
+)
+from .common.moe_compact_gather_quant import (  # noqa: F401
+    MoeCompactGatherQuantSpec,
+    build_moe_compact_gather_quant,
+    is_valid_spec as is_valid_moe_compact_gather_quant_spec,
+    moe_compact_gather_quant_grid,
+    moe_compact_gather_quant_signature,
+)
 from .common.fused_moe import (  # noqa: F401
     FusedMoeLauncher,
     FusedMoeSpec,

@@ -650,6 +650,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # instead of hitting the zero-length _frag_info fallback.
     "mfma_f32_16x16x128_fp8": _FragInfo(32, 32, 4, 64),
     "mfma_scale_f32_16x16x128_f8f6f4": _FragInfo(32, 32, 4, 64),
+    "mfma_scale_f32_16x16x128_fp8_fp4": _FragInfo(32, 32, 4, 64),
     # --- WMMA f16 / bf16 (wave32, RDNA) ----------------------------------
     "wmma_f32_16x16x16_f16": _FragInfo(
         16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_acc_16x16

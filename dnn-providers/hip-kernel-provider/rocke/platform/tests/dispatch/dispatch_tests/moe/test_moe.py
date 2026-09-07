@@ -10,15 +10,15 @@ from rocke.dispatch.families.moe import MoeRequest, dispatch_moe, moe_candidates
 
 
 def _moe(arch="gfx950", dtype="fp16", **kw):
-    base = dict(
-        num_tokens=128,
-        hidden=7168,
-        intermediate=2048,
-        num_experts=256,
-        top_k=8,
-        arch=arch,
-        dtype=dtype,
-    )
+    base = {
+        "num_tokens": 128,
+        "hidden": 7168,
+        "intermediate": 2048,
+        "num_experts": 256,
+        "top_k": 8,
+        "arch": arch,
+        "dtype": dtype,
+    }
     base.update(kw)
     return MoeRequest(**base)
 
@@ -38,6 +38,40 @@ class TestMoeDispatch(unittest.TestCase):
         self.assertEqual(r.candidate.spec_id, "mega_fp8")
         # fp8 hero atom K=128.
         self.assertEqual(r.spec.gate_up_k, 128)
+
+    def test_fp8_mxfp4_situ_selects_packed_weight_path(self):
+        r = dispatch_moe(
+            _moe(
+                dtype="fp8",
+                weight_dtype="mxfp4",
+                activation="situ",
+                activation_beta=2.0,
+                activation_linear_beta=3.0,
+            )
+        )
+        self.assertEqual(r.candidate.spec_id, "mega_mxfp4")
+        self.assertEqual(r.spec.weight_dtype, "mxfp4")
+        self.assertEqual((r.spec.gate_up_k, r.spec.down_k), (128, 128))
+        self.assertTrue(r.spec.mxfp4_native)
+        self.assertEqual(r.spec.warp_n, 8)
+        self.assertTrue(r.spec.prefetch_routing_meta)
+        self.assertTrue(r.spec.mxfp4_preshuffled)
+        self.assertTrue(r.spec.pipeline_native_gateup)
+        self.assertFalse(r.spec.pipeline_native_down)
+        self.assertFalse(r.spec.use_dtla)
+
+    def test_native_mxfp4_down_pipeline_is_t1_only(self):
+        common = {
+            "dtype": "fp8",
+            "weight_dtype": "mxfp4",
+            "activation": "situ",
+        }
+        self.assertTrue(
+            dispatch_moe(_moe(num_tokens=1, **common)).spec.pipeline_native_down
+        )
+        self.assertFalse(
+            dispatch_moe(_moe(num_tokens=8, **common)).spec.pipeline_native_down
+        )
 
     def test_rejects_unknown_dtype(self):
         with self.assertRaises(ValueError):
@@ -64,6 +98,11 @@ class TestMoeDispatch(unittest.TestCase):
         req = _moe(dtype="fp8")
         supported = [c for c in moe_candidates() if c.admits(req)[0]]
         self.assertEqual([c.spec_id for c in supported], ["mega_fp8"])
+
+    def test_mxfp4_candidate_is_weight_dtype_exclusive(self):
+        req = _moe(dtype="fp8", weight_dtype="mxfp4", activation="situ")
+        supported = [c for c in moe_candidates() if c.admits(req)[0]]
+        self.assertEqual([c.spec_id for c in supported], ["mega_mxfp4"])
 
     def test_unique_candidate_names(self):
         names = [c.name for c in moe_candidates()]

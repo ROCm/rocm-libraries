@@ -20,9 +20,10 @@ See ``examples/gfx950/fused_mega_moe/docs/BUILD_SPEC_FP8.md`` for the authoritat
 build spec. The dequant ordering follows BUILD_SPEC_FP8 Section 1.2 (the
 ``block_scale_gemm.py`` group-accumulator pattern): within a 128-wide
 contraction block the scales are constant, so
-``sum_k (a.sa)(b.sb) = sa.sb . sum_k (a.b)`` -- the scale is applied per
-K-group, post-MFMA, NOT in-instruction (which would mean the E8M0 trap of
-``cvt_scalef32_pk_f32_fp8x4``).
+``sum_k (a.sa)(b.sb) = sa.sb . sum_k (a.b)``. The FP8 path applies both
+arbitrary f32 scales post-MFMA. The native MXFP4 path applies the weight's
+E8M0 scale in-instruction and retains the arbitrary activation scale as the
+post-MFMA fold.
 
 STAGING STATUS (incremental implementation per BUILD_SPEC_FP8 Phase plan):
 
@@ -56,12 +57,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Literal
 
 from ...core.ir import (
     CACHE_ALL,
     F32,
     FP8E4M3,
+    I8,
     I32,
     I64,
     IRBuilder,
@@ -78,7 +80,6 @@ from ...helpers.mfma_gemm_inner import (
 )
 from ...helpers.quant import quant_max_abs
 from ...helpers.tensor_view import TensorDescriptor, TensorView
-
 
 __all__ = [
     "FusedMegaKernelSpecFp8",
@@ -288,6 +289,12 @@ GROUP_K = 128
 FP8_MAX = quant_max_abs("fp8e4m3")  # 448.0
 # pyisa dynamic-quant amax floor.
 AMAX_FLOOR = 1e-6
+Activation = Literal["silu", "situ"]
+WeightDType = Literal["fp8e4m3", "mxfp4"]
+
+
+def _float_kernel_tag(value: float) -> str:
+    return format(float(value), ".8g").replace("-", "m").replace(".", "p")
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +335,16 @@ class FusedMegaKernelSpecFp8:
       hint. ``None`` (default) defers to the ``ROCKE_FP8_SCHED`` env var
       (default ``iglp1`` = best); set to ``"iglp1"`` / ``"none"`` / ``"sgb"`` to
       pin the cadence on the spec (overrides the env for this build).
+    * ``mxfp4_native`` selects gfx950's scaled FP8×FP4 K=128 MFMA instead of
+      recoding each FP4 nibble to FP8 in VALU.
+    * ``mxfp4_preshuffled`` declares the AITER/FlyDSL lane-major weight and
+      E8M0-scale layout. It coalesces each wave's 16-byte fragments and is part
+      of the native MXFP4 ABI selected by dispatch.
+    * ``prefetch_routing_meta`` hoists token/weight metadata out of the repeated
+      H-output loop. ``pipeline_native_down`` uses a two-group register pipeline
+      for the T1 down projection; dispatch leaves it off at T8.
+    * ``pipeline_native_gateup`` keeps packed FP4 fragments in a two-stage
+      cross-K register pipeline so K(next) VMEM overlaps K(current) MFMA.
     """
 
     name: str
@@ -349,6 +366,15 @@ class FusedMegaKernelSpecFp8:
     down_k: int = 128  # level 7 (down hero atom); 32 = legacy baseline
     use_dtla: bool = True  # level 8 (direct-to-LDS gate+up); False = global->VGPR
     sched_cadence: str | None = None  # level 9; None defers to ROCKE_FP8_SCHED env
+    activation: Activation = "silu"
+    activation_beta: float = 1.0
+    activation_linear_beta: float | None = None
+    weight_dtype: WeightDType = "fp8e4m3"
+    mxfp4_native: bool = False
+    prefetch_routing_meta: bool = False
+    pipeline_native_down: bool = False
+    mxfp4_preshuffled: bool = False
+    pipeline_native_gateup: bool = False
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -397,10 +423,30 @@ class FusedMegaKernelSpecFp8:
         return (self.tile_n_down // self.warp_n) // self.warp_tile_n
 
     def kernel_name(self) -> str:
-        return (
+        name = (
             f"{self.name}_moe_fused_mega_fp8_"
             f"m{self.tile_m}n{self.tile_n_inter}k{self.tile_k_gu}"
         )
+        if self.activation == "situ":
+            linear = (
+                "none"
+                if self.activation_linear_beta is None
+                else _float_kernel_tag(self.activation_linear_beta)
+            )
+            name += f"_situ_b{_float_kernel_tag(self.activation_beta)}" f"_lb{linear}"
+        if self.weight_dtype == "mxfp4":
+            name += "_mxfp4"
+            if self.mxfp4_native:
+                name += "_native"
+        if self.prefetch_routing_meta:
+            name += "_rmeta"
+        if self.pipeline_native_down:
+            name += "_dp2"
+        if self.mxfp4_preshuffled:
+            name += "_ps"
+        if self.pipeline_native_gateup:
+            name += "_gp2"
+        return name
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +456,7 @@ class FusedMegaKernelSpecFp8:
 
 def moe_fused_mega_fp8_grid(
     num_m_blocks: int, inter: int, spec: FusedMegaKernelSpecFp8
-) -> Tuple[int, int, int]:
+) -> tuple[int, int, int]:
     """Mega-kernel launch grid (unchanged from the f16 kernel).
 
     ``grid = (ceil(inter / tile_n_inter), num_m_blocks, 1)``. Canonical decode
@@ -430,7 +476,7 @@ def moe_fused_mega_fp8_persistent_grid(
     inter: int,
     spec: FusedMegaKernelSpecFp8,
     p_cap: int = PERSISTENT_P_CAP,
-) -> Tuple[Tuple[int, int, int], int, int, int]:
+) -> tuple[tuple[int, int, int], int, int, int]:
     """Persistent 1-D launch grid + the (grid_x, total_work, P) ABI scalars.
 
     Relinearizes the 2-D ``(grid_x, num_active_m_blocks)`` work space into a 1-D
@@ -457,16 +503,18 @@ def moe_fused_mega_fp8_signature(
 ):
     from ...helpers.spec import SignatureBuilder
 
+    weight_dtype = "i8" if spec.weight_dtype == "mxfp4" else "fp8e4m3"
+    weight_scale_dtype = "i8" if spec.weight_dtype == "mxfp4" else "f32"
     sb = (
         SignatureBuilder()
         .ptr("A", "fp8e4m3")  # quantized activation X (pyisa: fp8 + input_scale)
-        .ptr("WGate", "fp8e4m3")
-        .ptr("WUp", "fp8e4m3")
-        .ptr("WDown", "fp8e4m3")
+        .ptr("WGate", weight_dtype)
+        .ptr("WUp", weight_dtype)
+        .ptr("WDown", weight_dtype)
         .ptr("AScale", "f32")  # input_scale, per (token-block, H-block-of-128)
-        .ptr("WGateScale", "f32")  # fc1_scale gate half, per (E, I-block, H-block)
-        .ptr("WUpScale", "f32")  # fc1_scale up half
-        .ptr("WDownScale", "f32")  # fc2_scale, per (E, H_out-block, I-block)
+        .ptr("WGateScale", weight_scale_dtype)
+        .ptr("WUpScale", weight_scale_dtype)
+        .ptr("WDownScale", weight_scale_dtype)
         .ptr("SortedTokenIds", "i32")
         .ptr("SortedWeights", "f32")
         .ptr("BlockExpertIds", "i32")
@@ -489,6 +537,8 @@ def moe_fused_mega_fp8_signature(
         .scalar("slot_size", "i32")
         .scalar("tokens", "i32")
     )
+    if spec.mxfp4_native:
+        sb = sb.scalar("MxScaleA", "i32")
     if persistent:
         # Persistent ABI variant: appended AFTER ``tokens`` to match the
         # builder's b.param() append order (grid_x, total_work, P).
@@ -519,7 +569,7 @@ def _emit_fp8_gateup_group_gemm(
     stride_gate_scale: Value,
     stride_up_scale: Value,
     tag: str,
-) -> Tuple[Value, Value]:
+) -> tuple[Value, Value]:
     """Gate + up fp8 GEMM, returning ``(gate_dq, up_dq)`` per-lane f32 vectors.
 
     Group-accumulator pattern (BUILD_SPEC_FP8 Section 1.2): the outer loop walks
@@ -1039,6 +1089,628 @@ def _load_b_fp8(
     return _global_load_fp8_vec(b, B, b_addr, atom.b_per_lane)
 
 
+def _decode_e8m0_scale(b: IRBuilder, encoded: Value) -> Value:
+    """Decode one unsigned E8M0 scale byte to its f32 multiplier."""
+
+    exponent = b.zext(encoded, I32)
+    invalid = b.lor(
+        b.cmp_eq(exponent, b.const_i32(0)),
+        b.cmp_eq(exponent, b.const_i32(255)),
+    )
+    value = b.exp2(b.fsub(b.sitofp_f32(exponent), b.const_f32(127.0)))
+    return b.select(invalid, b.const_f32(0.0), value)
+
+
+def _fp4_code_to_fp8(b: IRBuilder, code: Value) -> Value:
+    """Map an OCP E2M1 nibble to its exactly-representable FP8 E4M3 code."""
+
+    magnitude = b.land(code, b.const_i32(0x7))
+    regular = b.add(
+        b.const_i32(0x30),
+        b.mul(magnitude, b.const_i32(4)),
+    )
+    positive = b.select(
+        b.cmp_eq(magnitude, b.const_i32(0)),
+        b.const_i32(0),
+        b.select(
+            b.cmp_eq(magnitude, b.const_i32(1)),
+            b.const_i32(0x30),
+            regular,
+        ),
+    )
+    sign = b.shl(b.land(code, b.const_i32(0x8)), b.const_i32(4))
+    return b.bitcast(b.trunc(b.lor(positive, sign), I8), FP8E4M3)
+
+
+def _load_b_mxfp4_as_fp8(
+    b: IRBuilder,
+    *,
+    B: Value,
+    atom: MfmaAtom,
+    lane_decode,
+    n_tile_base: Value,
+    k_tile_base: Value,
+    N: Value,
+) -> Value:
+    """Load one K=32 packed-E2M1 B fragment and recode it to FP8 registers."""
+
+    if atom.k != 32 or atom.b_per_lane != 8:
+        raise ValueError("mxfp4 recode path requires the fp8 16x16x32 atom")
+    n_col = b.add(n_tile_base, lane_decode.n_in_atom)
+    k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.b_per_lane))
+    k_base = b.add(k_tile_base, k_lane_start)
+    packed_stride = b.div(N, b.const_i32(2))
+    packed_addr = b.add(
+        b.mul(n_col, packed_stride),
+        b.div(k_base, b.const_i32(2)),
+    )
+    packed = b.global_load_vN(B, packed_addr, I8, 4, align=4)
+    values: list[Value] = []
+    for byte_index in range(4):
+        byte = b.zext(b.vec_extract(packed, byte_index), I32)
+        low = b.land(byte, b.const_i32(0xF))
+        high = b.land(b.lshr(byte, b.const_i32(4)), b.const_i32(0xF))
+        values.append(_fp4_code_to_fp8(b, low))
+        values.append(_fp4_code_to_fp8(b, high))
+    return b.vec_pack(values, FP8E4M3)
+
+
+def _load_a_fp8_native(
+    b: IRBuilder,
+    *,
+    A: Value,
+    atom: MfmaAtom,
+    lane_decode,
+    m_tile_base: Value,
+    k_tile_base: Value,
+    K: Value,
+) -> Value:
+    """Load the two interleaved 16-byte stripes required by scaled K=128 MFMA."""
+    if atom.k != 128 or atom.a_per_lane != 32:
+        raise ValueError("native mxfp4 A load requires the K=128 atom")
+    m_row = b.add(m_tile_base, lane_decode.m_in_atom)
+    row_base = b.mul(m_row, K)
+    lane_k = b.mul(lane_decode.k_blk, b.const_i32(16))
+    first = b.add(row_base, b.add(k_tile_base, lane_k))
+    return b.vec_concat(
+        b.global_load_vN(A, first, FP8E4M3, 16, align=16),
+        b.global_load_vN(
+            A,
+            b.add(first, b.const_i32(64)),
+            FP8E4M3,
+            16,
+            align=16,
+        ),
+    )
+
+
+def _load_a_fp8_lds_native(
+    b: IRBuilder,
+    *,
+    a_view,
+    atom: MfmaAtom,
+    lane_decode,
+    m_tile_base: Value,
+    k_tile_base: Value,
+) -> Value:
+    """LDS counterpart of :func:`_load_a_fp8_native`."""
+    if atom.k != 128 or atom.a_per_lane != 32:
+        raise ValueError("native mxfp4 LDS A load requires the K=128 atom")
+    m_row = b.add(m_tile_base, lane_decode.m_in_atom)
+    lane_k = b.mul(lane_decode.k_blk, b.const_i32(16))
+    first = b.add(k_tile_base, lane_k)
+    return b.vec_concat(
+        b.smem_load_vN(
+            a_view.base,
+            m_row,
+            first,
+            dtype=FP8E4M3,
+            n=16,
+        ),
+        b.smem_load_vN(
+            a_view.base,
+            m_row,
+            b.add(first, b.const_i32(64)),
+            dtype=FP8E4M3,
+            n=16,
+        ),
+    )
+
+
+def _load_b_mxfp4_native(
+    b: IRBuilder,
+    *,
+    B: Value,
+    atom: MfmaAtom,
+    lane_decode,
+    n_tile_base: Value,
+    k_tile_base: Value,
+    N: Value,
+    preshuffled: bool,
+    pad_for_mfma: bool = True,
+) -> Value:
+    """Load 32 packed FP4 values and zero-pad to the intrinsic's 256 bits."""
+    if atom.k != 128 or atom.b_per_lane != 32:
+        raise ValueError("native mxfp4 load requires the K=128 fp8 atom geometry")
+    n_col = b.add(n_tile_base, lane_decode.n_in_atom)
+    if preshuffled:
+        n0 = b.div(n_col, b.const_i32(16))
+        n_lane = b.mod(n_col, b.const_i32(16))
+        k0 = b.div(k_tile_base, b.const_i32(128))
+        k0_count = b.div(N, b.const_i32(128))
+        packed_addr = b.mul(
+            b.add(
+                b.mul(
+                    b.add(
+                        b.mul(b.add(b.mul(n0, k0_count), k0), b.const_i32(4)),
+                        lane_decode.k_blk,
+                    ),
+                    b.const_i32(16),
+                ),
+                n_lane,
+            ),
+            b.const_i32(16),
+        )
+    else:
+        k_lane_start = b.mul(lane_decode.k_blk, b.const_i32(atom.b_per_lane))
+        k_base = b.add(k_tile_base, k_lane_start)
+        packed_stride = b.div(N, b.const_i32(2))
+        packed_addr = b.add(
+            b.mul(n_col, packed_stride),
+            b.div(k_base, b.const_i32(2)),
+        )
+    packed = b.global_load_vN(B, packed_addr, I8, 16, align=16)
+    return b.vec_concat(packed, b.zero_vec(I8, 16)) if pad_for_mfma else packed
+
+
+def _load_mxfp4_scale_word(
+    b: IRBuilder,
+    *,
+    scale: Value,
+    n_col: Value,
+    k_tile_base: Value,
+    stride: Value,
+    k_group: Value,
+    preshuffled: bool,
+) -> Value:
+    """Load this lane's E8M0 byte into the low byte of an i32 scale VGPR."""
+    if preshuffled:
+        n1 = b.div(n_col, b.const_i32(32))
+        n_pack = b.mod(b.div(n_col, b.const_i32(16)), b.const_i32(2))
+        n_lane = b.mod(n_col, b.const_i32(16))
+        kg = b.div(k_tile_base, b.const_i32(128))
+        k1 = b.div(kg, b.const_i32(2))
+        k_pack = b.mod(kg, b.const_i32(2))
+        k1_count = b.div(stride, b.const_i32(8))
+        scale_offset = b.add(
+            b.mul(
+                b.add(
+                    b.mul(
+                        b.add(
+                            b.mul(
+                                b.add(b.mul(n1, k1_count), k1),
+                                b.const_i32(4),
+                            ),
+                            k_group,
+                        ),
+                        b.const_i32(16),
+                    ),
+                    n_lane,
+                ),
+                b.const_i32(4),
+            ),
+            b.add(b.mul(k_pack, b.const_i32(2)), n_pack),
+        )
+    else:
+        scale_offset = b.add(
+            b.mul(n_col, stride),
+            b.add(b.div(k_tile_base, b.const_i32(32)), k_group),
+        )
+    return b.zext(b.global_load_i8(scale, scale_offset), I32)
+
+
+def _emit_mxfp4_gateup_fused_kloop(
+    b: IRBuilder,
+    *,
+    A: Value,
+    WGate: Value,
+    WUp: Value,
+    AScale: Value,
+    WGateScale: Value,
+    WUpScale: Value,
+    atom: MfmaAtom,
+    lane_decode,
+    m_tile_base: Value,
+    n_tile_bases: list[Value],
+    K: Value,
+    stride_a_scale: Value,
+    stride_gate_scale: Value,
+    stride_up_scale: Value,
+    tag: str,
+) -> tuple[list[Value], list[Value]]:
+    """FP8 activation times packed MXFP4 gate/up, scaled per K=32 group."""
+
+    if atom.k != 32:
+        raise ValueError("mxfp4 gate/up requires the K=32 fp8 MFMA atom")
+    n_tiles = len(n_tile_bases)
+    c_group = b.const_i32(32)
+    m_row = b.add(m_tile_base, lane_decode.m_in_atom)
+    a_scale_row = b.mul(m_row, stride_a_scale)
+    n_cols = [b.add(n_tile_base, lane_decode.n_in_atom) for n_tile_base in n_tile_bases]
+    iter_args = [
+        (f"mxg_out_{tag}_{index}", atom.zero_acc(b)) for index in range(n_tiles)
+    ]
+    iter_args.extend(
+        (f"mxu_out_{tag}_{index}", atom.zero_acc(b)) for index in range(n_tiles)
+    )
+    loop = b.scf_for_iter(
+        b.const_i32(0),
+        b.div(K, c_group),
+        b.const_i32(1),
+        iter_args,
+        iv_name=f"mxkg_{tag}",
+    )
+    with loop as (kg, carried):
+        gate_outer = list(carried[:n_tiles])
+        up_outer = list(carried[n_tiles:])
+        activation_scale = b.global_load_f32(
+            AScale,
+            b.add(a_scale_row, b.div(kg, b.const_i32(4))),
+        )
+        k_base = b.mul(kg, c_group)
+        a_fragment = _load_a_fp8(
+            b,
+            A=A,
+            atom=atom,
+            lane_decode=lane_decode,
+            m_tile_base=m_tile_base,
+            k_tile_base=k_base,
+            K=K,
+        )
+        new_gate: list[Value] = []
+        new_up: list[Value] = []
+        for index in range(n_tiles):
+            gate_fragment = _load_b_mxfp4_as_fp8(
+                b,
+                B=WGate,
+                atom=atom,
+                lane_decode=lane_decode,
+                n_tile_base=n_tile_bases[index],
+                k_tile_base=k_base,
+                N=K,
+            )
+            up_fragment = _load_b_mxfp4_as_fp8(
+                b,
+                B=WUp,
+                atom=atom,
+                lane_decode=lane_decode,
+                n_tile_base=n_tile_bases[index],
+                k_tile_base=k_base,
+                N=K,
+            )
+            gate_scale = _decode_e8m0_scale(
+                b,
+                b.global_load_i8(
+                    WGateScale,
+                    b.add(
+                        b.mul(n_cols[index], stride_gate_scale),
+                        kg,
+                    ),
+                ),
+            )
+            up_scale = _decode_e8m0_scale(
+                b,
+                b.global_load_i8(
+                    WUpScale,
+                    b.add(
+                        b.mul(n_cols[index], stride_up_scale),
+                        kg,
+                    ),
+                ),
+            )
+            gate_group = atom.emit(b, a_fragment, gate_fragment, atom.zero_acc(b))
+            up_group = atom.emit(b, a_fragment, up_fragment, atom.zero_acc(b))
+            gate_ab = b.vector_splat(
+                b.fmul(activation_scale, gate_scale), atom.c_per_lane
+            )
+            up_ab = b.vector_splat(b.fmul(activation_scale, up_scale), atom.c_per_lane)
+            new_gate.append(b.vector_fma(gate_group, gate_ab, gate_outer[index]))
+            new_up.append(b.vector_fma(up_group, up_ab, up_outer[index]))
+        b.scf_yield(*(new_gate + new_up))
+    return list(loop.results[:n_tiles]), list(loop.results[n_tiles:])
+
+
+def _emit_mxfp4_native_gateup_fused_kloop(
+    b: IRBuilder,
+    *,
+    A: Value,
+    WGate: Value,
+    WUp: Value,
+    AScale: Value,
+    WGateScale: Value,
+    WUpScale: Value,
+    atom: MfmaAtom,
+    lane_decode,
+    m_tile_base: Value,
+    n_tile_bases: list[Value],
+    K: Value,
+    stride_a_scale: Value,
+    stride_gate_scale: Value,
+    stride_up_scale: Value,
+    mx_scale_a: Value,
+    preshuffled: bool,
+    tag: str,
+) -> tuple[list[Value], list[Value]]:
+    """Native K=128 FP8×FP4 gate/up loop with in-instruction weight scales."""
+    if atom.k != 128:
+        raise ValueError("native mxfp4 gate/up requires the K=128 atom")
+    n_tiles = len(n_tile_bases)
+    c_group = b.const_i32(128)
+    m_row = b.add(m_tile_base, lane_decode.m_in_atom)
+    a_scale_row = b.mul(m_row, stride_a_scale)
+    n_cols = [b.add(base, lane_decode.n_in_atom) for base in n_tile_bases]
+    iter_args = [
+        (f"mxng_out_{tag}_{index}", atom.zero_acc(b)) for index in range(n_tiles)
+    ]
+    iter_args.extend(
+        (f"mxnu_out_{tag}_{index}", atom.zero_acc(b)) for index in range(n_tiles)
+    )
+    loop = b.scf_for_iter(
+        b.const_i32(0),
+        b.div(K, c_group),
+        b.const_i32(1),
+        iter_args,
+        iv_name=f"mxnkg_{tag}",
+    )
+    with loop as (kg, carried):
+        gate_outer = list(carried[:n_tiles])
+        up_outer = list(carried[n_tiles:])
+        activation_scale = b.global_load_f32(AScale, b.add(a_scale_row, kg))
+        k_base = b.mul(kg, c_group)
+        a_fragment = _load_a_fp8_native(
+            b,
+            A=A,
+            atom=atom,
+            lane_decode=lane_decode,
+            m_tile_base=m_tile_base,
+            k_tile_base=k_base,
+            K=K,
+        )
+        new_gate: list[Value] = []
+        new_up: list[Value] = []
+        for index in range(n_tiles):
+            gate_fragment = _load_b_mxfp4_native(
+                b,
+                B=WGate,
+                atom=atom,
+                lane_decode=lane_decode,
+                n_tile_base=n_tile_bases[index],
+                k_tile_base=k_base,
+                N=K,
+                preshuffled=preshuffled,
+            )
+            up_fragment = _load_b_mxfp4_native(
+                b,
+                B=WUp,
+                atom=atom,
+                lane_decode=lane_decode,
+                n_tile_base=n_tile_bases[index],
+                k_tile_base=k_base,
+                N=K,
+                preshuffled=preshuffled,
+            )
+            gate_scale = _load_mxfp4_scale_word(
+                b,
+                scale=WGateScale,
+                n_col=n_cols[index],
+                k_tile_base=k_base,
+                stride=stride_gate_scale,
+                k_group=lane_decode.k_blk,
+                preshuffled=preshuffled,
+            )
+            up_scale = _load_mxfp4_scale_word(
+                b,
+                scale=WUpScale,
+                n_col=n_cols[index],
+                k_tile_base=k_base,
+                stride=stride_up_scale,
+                k_group=lane_decode.k_blk,
+                preshuffled=preshuffled,
+            )
+            gate_group = b.mfma_scale_f32_16x16x128_fp8_fp4(
+                a_fragment,
+                gate_fragment,
+                atom.zero_acc(b),
+                mx_scale_a,
+                gate_scale,
+            )
+            up_group = b.mfma_scale_f32_16x16x128_fp8_fp4(
+                a_fragment,
+                up_fragment,
+                atom.zero_acc(b),
+                mx_scale_a,
+                up_scale,
+            )
+            scale_v = b.vector_splat(activation_scale, atom.c_per_lane)
+            new_gate.append(b.vector_fma(gate_group, scale_v, gate_outer[index]))
+            new_up.append(b.vector_fma(up_group, scale_v, up_outer[index]))
+        b.scf_yield(*(new_gate + new_up))
+    return list(loop.results[:n_tiles]), list(loop.results[n_tiles:])
+
+
+def _emit_mxfp4_native_gateup_pipeline(
+    b: IRBuilder,
+    *,
+    A: Value,
+    WGate: Value,
+    WUp: Value,
+    AScale: Value,
+    WGateScale: Value,
+    WUpScale: Value,
+    atom: MfmaAtom,
+    lane_decode,
+    m_tile_base: Value,
+    n_tile_bases: list[Value],
+    K: Value,
+    stride_a_scale: Value,
+    stride_gate_scale: Value,
+    stride_up_scale: Value,
+    mx_scale_a: Value,
+    preshuffled: bool,
+    tag: str,
+) -> tuple[list[Value], list[Value]]:
+    """Two-stage K pipeline for native gate/up with packed in-flight FP4."""
+    if atom.k != 128:
+        raise ValueError("native mxfp4 gate/up pipeline requires the K=128 atom")
+    n_tiles = len(n_tile_bases)
+    c_group = b.const_i32(128)
+    m_row = b.add(m_tile_base, lane_decode.m_in_atom)
+    a_scale_row = b.mul(m_row, stride_a_scale)
+    n_cols = [b.add(base, lane_decode.n_in_atom) for base in n_tile_bases]
+
+    def _load_group(kg: Value) -> list[Value]:
+        activation_scale = b.global_load_f32(AScale, b.add(a_scale_row, kg))
+        k_base = b.mul(kg, c_group)
+        a_fragment = _load_a_fp8_native(
+            b,
+            A=A,
+            atom=atom,
+            lane_decode=lane_decode,
+            m_tile_base=m_tile_base,
+            k_tile_base=k_base,
+            K=K,
+        )
+        gate_fragments = [
+            _load_b_mxfp4_native(
+                b,
+                B=WGate,
+                atom=atom,
+                lane_decode=lane_decode,
+                n_tile_base=n_tile_bases[index],
+                k_tile_base=k_base,
+                N=K,
+                preshuffled=preshuffled,
+                pad_for_mfma=False,
+            )
+            for index in range(n_tiles)
+        ]
+        up_fragments = [
+            _load_b_mxfp4_native(
+                b,
+                B=WUp,
+                atom=atom,
+                lane_decode=lane_decode,
+                n_tile_base=n_tile_bases[index],
+                k_tile_base=k_base,
+                N=K,
+                preshuffled=preshuffled,
+                pad_for_mfma=False,
+            )
+            for index in range(n_tiles)
+        ]
+        gate_scales = [
+            _load_mxfp4_scale_word(
+                b,
+                scale=WGateScale,
+                n_col=n_cols[index],
+                k_tile_base=k_base,
+                stride=stride_gate_scale,
+                k_group=lane_decode.k_blk,
+                preshuffled=preshuffled,
+            )
+            for index in range(n_tiles)
+        ]
+        up_scales = [
+            _load_mxfp4_scale_word(
+                b,
+                scale=WUpScale,
+                n_col=n_cols[index],
+                k_tile_base=k_base,
+                stride=stride_up_scale,
+                k_group=lane_decode.k_blk,
+                preshuffled=preshuffled,
+            )
+            for index in range(n_tiles)
+        ]
+        return [
+            activation_scale,
+            a_fragment,
+            *gate_fragments,
+            *up_fragments,
+            *gate_scales,
+            *up_scales,
+        ]
+
+    def _accumulate(
+        state: list[Value],
+        gate_outer: list[Value],
+        up_outer: list[Value],
+    ) -> tuple[list[Value], list[Value]]:
+        activation_scale = state[0]
+        a_fragment = state[1]
+        cursor = 2
+        gate_fragments = state[cursor : cursor + n_tiles]
+        cursor += n_tiles
+        up_fragments = state[cursor : cursor + n_tiles]
+        cursor += n_tiles
+        gate_scales = state[cursor : cursor + n_tiles]
+        cursor += n_tiles
+        up_scales = state[cursor : cursor + n_tiles]
+        padding = b.zero_vec(I8, 16)
+        scale_v = b.vector_splat(activation_scale, atom.c_per_lane)
+        new_gate: list[Value] = []
+        new_up: list[Value] = []
+        for index in range(n_tiles):
+            gate_group = b.mfma_scale_f32_16x16x128_fp8_fp4(
+                a_fragment,
+                b.vec_concat(gate_fragments[index], padding),
+                atom.zero_acc(b),
+                mx_scale_a,
+                gate_scales[index],
+            )
+            up_group = b.mfma_scale_f32_16x16x128_fp8_fp4(
+                a_fragment,
+                b.vec_concat(up_fragments[index], padding),
+                atom.zero_acc(b),
+                mx_scale_a,
+                up_scales[index],
+            )
+            new_gate.append(b.vector_fma(gate_group, scale_v, gate_outer[index]))
+            new_up.append(b.vector_fma(up_group, scale_v, up_outer[index]))
+        return new_gate, new_up
+
+    initial_state = _load_group(b.const_i32(0))
+    iter_args = [
+        (f"mxpg_out_{tag}_{index}", atom.zero_acc(b)) for index in range(n_tiles)
+    ]
+    iter_args.extend(
+        (f"mxpu_out_{tag}_{index}", atom.zero_acc(b)) for index in range(n_tiles)
+    )
+    iter_args.extend(
+        (f"mxp_state_{tag}_{index}", value) for index, value in enumerate(initial_state)
+    )
+    num_groups = b.div(K, c_group)
+    loop = b.scf_for_iter(
+        b.const_i32(0),
+        b.sub(num_groups, b.const_i32(1)),
+        b.const_i32(1),
+        iter_args,
+        iv_name=f"mxpkg_{tag}",
+    )
+    with loop as (kg, carried):
+        gate_outer = list(carried[:n_tiles])
+        up_outer = list(carried[n_tiles : 2 * n_tiles])
+        current_state = list(carried[2 * n_tiles :])
+        next_state = _load_group(b.add(kg, b.const_i32(1)))
+        new_gate, new_up = _accumulate(current_state, gate_outer, up_outer)
+        b.scf_yield(*(new_gate + new_up + next_state))
+
+    gate_outer = list(loop.results[:n_tiles])
+    up_outer = list(loop.results[n_tiles : 2 * n_tiles])
+    final_state = list(loop.results[2 * n_tiles :])
+    return _accumulate(final_state, gate_outer, up_outer)
+
+
 # ---------------------------------------------------------------------------
 # DIRECT-TO-LDS (DTLA) B-operand staging for the gate+up GEMM
 # ---------------------------------------------------------------------------
@@ -1395,6 +2067,228 @@ def _emit_fp8_down_group_gemm(
     return outer.results[0]
 
 
+def _emit_mxfp4_down_group_gemm(
+    b: IRBuilder,
+    *,
+    a_view,
+    WDown: Value,
+    WDownScale: Value,
+    atom: MfmaAtom,
+    lane_decode,
+    n_tile_base: Value,
+    scale_view,
+    inter_slice: int,
+    inter_full: Value,
+    inter_blk_base: Value,
+    stride_down_scale: Value,
+    m_row_base: Value,
+    tag: str,
+) -> Value:
+    """Packed MXFP4 down GEMM with one independently scaled K=32 MFMA."""
+
+    if atom.k != 32:
+        raise ValueError("mxfp4 down path requires the K=32 fp8 MFMA atom")
+    c_group = b.const_i32(32)
+    n_col = b.add(n_tile_base, lane_decode.n_in_atom)
+    m_row = b.add(m_row_base, lane_decode.m_in_atom)
+    global_inter_base = b.mul(inter_blk_base, b.const_i32(GROUP_K))
+    outer = b.scf_for_iter(
+        b.const_i32(0),
+        b.const_i32(inter_slice // 32),
+        b.const_i32(1),
+        [(f"mxdown_outer_{tag}", atom.zero_acc(b))],
+        iv_name=f"mxdg_{tag}",
+    )
+    with outer as (kg, (down_outer,)):
+        hidden_scale = b.vec_extract(
+            b.smem_load_vN(
+                scale_view.base,
+                m_row,
+                b.div(kg, b.const_i32(4)),
+                dtype=F32,
+                n=1,
+            ),
+            0,
+        )
+        global_group = b.add(b.mul(inter_blk_base, b.const_i32(4)), kg)
+        weight_scale = _decode_e8m0_scale(
+            b,
+            b.global_load_i8(
+                WDownScale,
+                b.add(
+                    b.mul(n_col, stride_down_scale),
+                    global_group,
+                ),
+            ),
+        )
+        local_k = b.mul(kg, c_group)
+        global_k = b.add(global_inter_base, local_k)
+        a_fragment = _load_a_fp8_lds(
+            b,
+            a_view=a_view,
+            atom=atom,
+            lane_decode=lane_decode,
+            m_tile_base=m_row_base,
+            k_tile_base=local_k,
+        )
+        b_fragment = _load_b_mxfp4_as_fp8(
+            b,
+            B=WDown,
+            atom=atom,
+            lane_decode=lane_decode,
+            n_tile_base=n_tile_base,
+            k_tile_base=global_k,
+            N=inter_full,
+        )
+        group = atom.emit(b, a_fragment, b_fragment, atom.zero_acc(b))
+        scale = b.vector_splat(b.fmul(hidden_scale, weight_scale), atom.c_per_lane)
+        b.scf_yield(b.vector_fma(group, scale, down_outer))
+    return outer.results[0]
+
+
+def _emit_mxfp4_native_down_group_gemm(
+    b: IRBuilder,
+    *,
+    a_view,
+    WDown: Value,
+    WDownScale: Value,
+    atom: MfmaAtom,
+    lane_decode,
+    n_tile_base: Value,
+    scale_view,
+    inter_slice: int,
+    inter_full: Value,
+    inter_blk_base: Value,
+    stride_down_scale: Value,
+    m_row_base: Value,
+    mx_scale_a: Value,
+    pipeline: bool,
+    preshuffled: bool,
+    tag: str,
+) -> Value:
+    """Native K=128 FP8×FP4 down GEMM with packed weight scales."""
+    if atom.k != 128:
+        raise ValueError("native mxfp4 down requires the K=128 atom")
+    c_group = b.const_i32(128)
+    n_col = b.add(n_tile_base, lane_decode.n_in_atom)
+    m_row = b.add(m_row_base, lane_decode.m_in_atom)
+    global_inter_base = b.mul(inter_blk_base, b.const_i32(GROUP_K))
+
+    def _load_group(kg: Value):
+        hidden_scale = b.vec_extract(
+            b.smem_load_vN(
+                scale_view.base,
+                m_row,
+                kg,
+                dtype=F32,
+                n=1,
+            ),
+            0,
+        )
+        local_k = b.mul(kg, c_group)
+        global_k = b.add(global_inter_base, local_k)
+        a_fragment = _load_a_fp8_lds_native(
+            b,
+            a_view=a_view,
+            atom=atom,
+            lane_decode=lane_decode,
+            m_tile_base=m_row_base,
+            k_tile_base=local_k,
+        )
+        b_fragment = _load_b_mxfp4_native(
+            b,
+            B=WDown,
+            atom=atom,
+            lane_decode=lane_decode,
+            n_tile_base=n_tile_base,
+            k_tile_base=global_k,
+            N=inter_full,
+            preshuffled=preshuffled,
+        )
+        weight_scale = _load_mxfp4_scale_word(
+            b,
+            scale=WDownScale,
+            n_col=n_col,
+            k_tile_base=global_k,
+            stride=stride_down_scale,
+            k_group=lane_decode.k_blk,
+            preshuffled=preshuffled,
+        )
+        return hidden_scale, a_fragment, b_fragment, weight_scale
+
+    if pipeline:
+        groups = inter_slice // 128
+        current = _load_group(b.const_i32(0))
+        down_outer = atom.zero_acc(b)
+        for group_index in range(groups):
+            next_group = (
+                _load_group(b.const_i32(group_index + 1))
+                if group_index + 1 < groups
+                else None
+            )
+            hidden_scale, a_fragment, b_fragment, weight_scale = current
+            group = b.mfma_scale_f32_16x16x128_fp8_fp4(
+                a_fragment,
+                b_fragment,
+                atom.zero_acc(b),
+                mx_scale_a,
+                weight_scale,
+            )
+            scale = b.vector_splat(hidden_scale, atom.c_per_lane)
+            down_outer = b.vector_fma(group, scale, down_outer)
+            if next_group is not None:
+                current = next_group
+        return down_outer
+
+    outer = b.scf_for_iter(
+        b.const_i32(0),
+        b.const_i32(inter_slice // 128),
+        b.const_i32(1),
+        [(f"mxndown_outer_{tag}", atom.zero_acc(b))],
+        iv_name=f"mxndg_{tag}",
+    )
+    with outer as (kg, (down_outer,)):
+        hidden_scale, a_fragment, b_fragment, weight_scale = _load_group(kg)
+        group = b.mfma_scale_f32_16x16x128_fp8_fp4(
+            a_fragment,
+            b_fragment,
+            atom.zero_acc(b),
+            mx_scale_a,
+            weight_scale,
+        )
+        scale = b.vector_splat(hidden_scale, atom.c_per_lane)
+        b.scf_yield(b.vector_fma(group, scale, down_outer))
+    return outer.results[0]
+
+
+def _prefetch_down_routing_rows(
+    b: IRBuilder,
+    *,
+    atom: MfmaAtom,
+    warp_m_off: Value,
+    lane: Value,
+    mfmas_m: int,
+    block_m_off: Value,
+    SortedTokenIds: Value,
+    SortedWeights: Value,
+):
+    """Load down-epilogue row metadata once for reuse across every H tile."""
+    rows_by_mi = []
+    for mi in range(mfmas_m):
+        rows = []
+        for i in range(atom.c_per_lane):
+            row_in, col_in = atom.lane_to_output(b, lane, i)
+            row = b.add(
+                block_m_off,
+                b.add(warp_m_off, b.add(b.const_i32(mi * atom.m), row_in)),
+            )
+            token = b.global_load_i32(SortedTokenIds, row)
+            weight = b.global_load_f32(SortedWeights, row)
+            rows.append((i, col_in, token, weight))
+        rows_by_mi.append(rows)
+    return rows_by_mi
+
+
 def _emit_down_atomic_reduce(
     b: IRBuilder,
     *,
@@ -1412,6 +2306,7 @@ def _emit_down_atomic_reduce(
     SortedWeights: Value,
     Y: Value,
     tokens: Value,
+    prefetched_rows=None,
 ) -> None:
     """Weighted, token-validity-masked atomic reduce of the down result into Y.
 
@@ -1442,17 +2337,19 @@ def _emit_down_atomic_reduce(
         # the operands already resident. The weight bucket index is always a
         # valid slot (padded-row slots have weights too), so the unconditional
         # hoisted load is safe; the validity check still gates the atomic store.
-        rows = []
-        for i in range(atom.c_per_lane):
-            row_in, col_in = atom.lane_to_output(b, lane, i)
-            row = b.add(
-                block_m_off,
-                b.add(warp_m_off, b.add(b.const_i32(mi * atom.m), row_in)),
-            )
-            bucket = row
-            token = b.global_load_i32(SortedTokenIds, bucket)
-            w = b.global_load_f32(SortedWeights, bucket)
-            rows.append((i, col_in, token, w))
+        if prefetched_rows is None:
+            rows = []
+            for i in range(atom.c_per_lane):
+                row_in, col_in = atom.lane_to_output(b, lane, i)
+                row = b.add(
+                    block_m_off,
+                    b.add(warp_m_off, b.add(b.const_i32(mi * atom.m), row_in)),
+                )
+                token = b.global_load_i32(SortedTokenIds, row)
+                w = b.global_load_f32(SortedWeights, row)
+                rows.append((i, col_in, token, w))
+        else:
+            rows = prefetched_rows[mi]
         # One rolling drain covers all c_per_lane (token,weight) loads instead of
         # one vmcnt(0) per row.
         b.s_waitcnt(vmcnt=0)
@@ -1492,6 +2389,69 @@ def _silu_mul_f32(
     return b.fmul(silu, u)
 
 
+def _gated_mul_f32(
+    b: IRBuilder,
+    g: Value,
+    u: Value,
+    *,
+    activation: Activation,
+    one_f32: Value,
+    c_neg_log2e: Value,
+    situ_beta: Value | None,
+    situ_inv_beta: Value | None,
+    situ_linear_beta: Value | None,
+    situ_linear_inv_beta: Value | None,
+    situ_two: Value | None,
+    situ_two_log2e: Value | None,
+    situ_zero: Value | None,
+) -> Value:
+    """Apply the selected gated activation without changing the SiLU path.
+
+    The default calls :func:`_silu_mul_f32` directly, preserving its emitted
+    operation order. ``situ`` softly clips the gate before the same sigmoid and
+    optionally clips the up projection:
+
+    ``beta*tanh(g/beta)*sigmoid(g) * linear_beta*tanh(u/linear_beta)``.
+    """
+
+    if activation == "silu":
+        return _silu_mul_f32(b, g, u, one_f32=one_f32, c_neg_log2e=c_neg_log2e)
+    assert situ_beta is not None and situ_inv_beta is not None
+    assert situ_two is not None and situ_two_log2e is not None and situ_zero is not None
+
+    def tanh_f32(value: Value) -> Value:
+        magnitude = b.fsub(
+            one_f32,
+            b.fmul(
+                situ_two,
+                b.rcp_fast(
+                    b.fadd(
+                        one_f32,
+                        b.exp2(b.fmul(situ_two_log2e, b.fabs(value))),
+                    )
+                ),
+            ),
+        )
+        return b.select(
+            b.fcmp("olt", value, situ_zero),
+            b.fneg(magnitude),
+            magnitude,
+        )
+
+    sigmoid = b.rcp_fast(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
+    gate = b.fmul(
+        b.fmul(situ_beta, tanh_f32(b.fmul(g, situ_inv_beta))),
+        sigmoid,
+    )
+    if situ_linear_beta is not None:
+        assert situ_linear_inv_beta is not None
+        u = b.fmul(
+            situ_linear_beta,
+            tanh_f32(b.fmul(u, situ_linear_inv_beta)),
+        )
+    return b.fmul(gate, u)
+
+
 def _store_hidden_f32_pass(
     b: IRBuilder,
     *,
@@ -1507,6 +2467,14 @@ def _store_hidden_f32_pass(
     one_f32: Value,
     c_neg_log2e: Value,
     c_floor: Value,
+    activation: Activation,
+    situ_beta: Value | None,
+    situ_inv_beta: Value | None,
+    situ_linear_beta: Value | None,
+    situ_linear_inv_beta: Value | None,
+    situ_two: Value | None,
+    situ_two_log2e: Value | None,
+    situ_zero: Value | None,
 ) -> Value:
     """Fused Pass A: silu(gate)*up -> f32 LDS scratch AND in-register amax.
 
@@ -1531,7 +2499,21 @@ def _store_hidden_f32_pass(
                 col = b.add(warp_n_off, b.add(b.const_i32(ni * atom.n), col_in))
                 g = b.vec_extract(g_vec, i)
                 u = b.vec_extract(u_vec, i)
-                h = _silu_mul_f32(b, g, u, one_f32=one_f32, c_neg_log2e=c_neg_log2e)
+                h = _gated_mul_f32(
+                    b,
+                    g,
+                    u,
+                    activation=activation,
+                    one_f32=one_f32,
+                    c_neg_log2e=c_neg_log2e,
+                    situ_beta=situ_beta,
+                    situ_inv_beta=situ_inv_beta,
+                    situ_linear_beta=situ_linear_beta,
+                    situ_linear_inv_beta=situ_linear_inv_beta,
+                    situ_two=situ_two,
+                    situ_two_log2e=situ_two_log2e,
+                    situ_zero=situ_zero,
+                )
                 f32_view_store(b, f32_view, row, col, h)
                 amax_partial = b.fmax(amax_partial, b.fabs(h))
     return amax_partial
@@ -1588,6 +2570,34 @@ def build_moe_fused_mega_gemm_fp8(
     ok, why, _ = validate_arch_and_block_size(arch, spec.block_size)
     if not ok:
         raise ValueError(f"invalid fp8 fused-mega spec for {arch}: {why}")
+    if spec.activation not in ("silu", "situ"):
+        raise ValueError(f"unsupported gated activation {spec.activation!r}")
+    if spec.activation == "situ" and spec.activation_beta <= 0:
+        raise ValueError(
+            f"situ activation_beta must be > 0 (got {spec.activation_beta})"
+        )
+    if spec.activation_linear_beta is not None and spec.activation_linear_beta <= 0:
+        raise ValueError(
+            "situ activation_linear_beta must be > 0 when set "
+            f"(got {spec.activation_linear_beta})"
+        )
+    if spec.weight_dtype not in ("fp8e4m3", "mxfp4"):
+        raise ValueError(f"unsupported weight_dtype {spec.weight_dtype!r}")
+    if spec.mxfp4_native and spec.weight_dtype != "mxfp4":
+        raise ValueError("mxfp4_native requires weight_dtype='mxfp4'")
+    if spec.pipeline_native_down and not spec.mxfp4_native:
+        raise ValueError("pipeline_native_down requires mxfp4_native=True")
+    if spec.mxfp4_preshuffled and not spec.mxfp4_native:
+        raise ValueError("mxfp4_preshuffled requires mxfp4_native=True")
+    if spec.pipeline_native_gateup and not spec.mxfp4_native:
+        raise ValueError("pipeline_native_gateup requires mxfp4_native=True")
+    if spec.weight_dtype == "mxfp4":
+        required_k = 128 if spec.mxfp4_native else 32
+        if spec.gate_up_k != required_k or spec.down_k != required_k or spec.use_dtla:
+            raise ValueError(
+                f"mxfp4 weights require gate_up_k={required_k}, "
+                f"down_k={required_k}, and use_dtla=False"
+            )
     atom = spec.gate_up_atom()
     # L6: the unscaled fp8 16x16x128 hero atom reuses the (catalog-registered)
     # ``mfma.scale.f32.16x16x128.f8f6f4`` intrinsic with the in-instruction E8M0
@@ -1609,20 +2619,28 @@ def build_moe_fused_mega_gemm_fp8(
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
 
     # ---- params (BUILD_SPEC_FP8 Section 2.7) ---------------------------
+    weight_ty = I8 if spec.weight_dtype == "mxfp4" else FP8E4M3
+    weight_scale_ty = I8 if spec.weight_dtype == "mxfp4" else F32
     A = b.param("A", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16)
     WGate = b.param(
-        "WGate", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16
+        "WGate", PtrType(weight_ty, "global"), noalias=True, readonly=True, align=16
     )
     WUp = b.param(
-        "WUp", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16
+        "WUp", PtrType(weight_ty, "global"), noalias=True, readonly=True, align=16
     )
     WDown = b.param(
-        "WDown", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16
+        "WDown", PtrType(weight_ty, "global"), noalias=True, readonly=True, align=16
     )
     AScale = b.param("AScale", PtrType(F32, "global"), readonly=True, align=4)
-    WGateScale = b.param("WGateScale", PtrType(F32, "global"), readonly=True, align=4)
-    WUpScale = b.param("WUpScale", PtrType(F32, "global"), readonly=True, align=4)
-    WDownScale = b.param("WDownScale", PtrType(F32, "global"), readonly=True, align=4)
+    WGateScale = b.param(
+        "WGateScale", PtrType(weight_scale_ty, "global"), readonly=True, align=4
+    )
+    WUpScale = b.param(
+        "WUpScale", PtrType(weight_scale_ty, "global"), readonly=True, align=4
+    )
+    WDownScale = b.param(
+        "WDownScale", PtrType(weight_scale_ty, "global"), readonly=True, align=4
+    )
     SortedTokenIds = b.param(
         "SortedTokenIds", PtrType(I32, "global"), noalias=True, readonly=True, align=4
     )
@@ -1637,23 +2655,22 @@ def build_moe_fused_mega_gemm_fp8(
     N = b.param("N", I32)  # = I (inter dim)
     K = b.param("K", I32)  # = H (hidden contraction)
     H_out = b.param("H_out", I32)  # = H (down output)
-    stride_a = b.param(
-        "stride_a", I32
-    )  # noqa: F841 -- ABI (A is dense, gather elsewhere)
+    stride_a = b.param("stride_a", I32)
     stride_b_gate = b.param("stride_b_gate", I32)
     stride_b_up = b.param("stride_b_up", I32)
-    stride_b_down = b.param("stride_b_down", I32)  # noqa: F841 -- used in STAGE 2
+    stride_b_down = b.param("stride_b_down", I32)
     stride_a_scale = b.param("stride_a_scale", I32)
     stride_gate_scale = b.param("stride_gate_scale", I32)
     stride_up_scale = b.param("stride_up_scale", I32)
-    stride_down_scale = b.param("stride_down_scale", I32)  # noqa: F841 -- STAGE 2
+    stride_down_scale = b.param("stride_down_scale", I32)
     # Per-expert ELEMENT stride for the weight scale tensors (scales are
     # per-expert, but the scale pointer is NOT folded by _b_base; fold here).
     stride_gate_scale_e = b.param("stride_gate_scale_e", I32)
     stride_up_scale_e = b.param("stride_up_scale_e", I32)
     stride_down_scale_e = b.param("stride_down_scale_e", I32)
-    slot_size = b.param("slot_size", I32)  # noqa: F841 -- ABI
-    tokens = b.param("tokens", I32)  # noqa: F841 -- used in STAGE 2 epilogue
+    slot_size = b.param("slot_size", I32)
+    tokens = b.param("tokens", I32)
+    MxScaleA = b.param("MxScaleA", I32) if spec.mxfp4_native else None
 
     # Persistent transform params (ONLY on the persistent ABI variant so the
     # default kernel stays byte-identical). grid_x = inter-tile modulus,
@@ -1735,7 +2752,7 @@ def build_moe_fused_mega_gemm_fp8(
     def _scale_base(ptr: Value, stride_e: Value, expert_idx: Value) -> Value:
         bytes_off = b.mul(
             b.mul(b.sext(expert_idx, I64), b.sext(stride_e, I64)),
-            b.const_i64(4),
+            b.const_i64(1 if spec.weight_dtype == "mxfp4" else 4),
         )
         return b.global_ptr_add(ptr, bytes_off)
 
@@ -1843,6 +2860,26 @@ def build_moe_fused_mega_gemm_fp8(
     one_f32 = b.const_f32(1.0)
     c_fp8_max = b.const_f32(FP8_MAX)
     c_floor = b.const_f32(AMAX_FLOOR)
+    if spec.activation == "situ":
+        c_situ_beta = b.const_f32(spec.activation_beta)
+        c_situ_inv_beta = b.const_f32(1.0 / spec.activation_beta)
+        if spec.activation_linear_beta is not None:
+            c_situ_linear_beta = b.const_f32(spec.activation_linear_beta)
+            c_situ_linear_inv_beta = b.const_f32(1.0 / spec.activation_linear_beta)
+        else:
+            c_situ_linear_beta = None
+            c_situ_linear_inv_beta = None
+        c_situ_two = b.const_f32(2.0)
+        c_situ_two_log2e = b.const_f32(2.8853900817779268)
+        c_situ_zero = b.const_f32(0.0)
+    else:
+        c_situ_beta = None
+        c_situ_inv_beta = None
+        c_situ_linear_beta = None
+        c_situ_linear_inv_beta = None
+        c_situ_two = None
+        c_situ_two_log2e = None
+        c_situ_zero = None
 
     c_group_k = b.const_i32(GROUP_K)
     c_threads = b.const_i32(spec.block_size)
@@ -1896,26 +2933,90 @@ def build_moe_fused_mega_gemm_fp8(
                 b.add(gu_n_off, b.add(warp_n_off, b.const_i32(ni * atom.n)))
                 for ni in range(mfmas_n)
             ]
-            g_dqs, u_dqs = _emit_fp8_gateup_fused_kloop(
-                b,
-                A=A,
-                WGate=WGate,
-                WUp=WUp,
-                AScale=AScale,
-                WGateScale=WGateScale,
-                WUpScale=WUpScale,
-                atom=atom,
-                lane_decode=lane_decode,
-                m_tile_base=m_tile_base,
-                n_tile_bases=n_tile_bases,
-                K=K,
-                stride_a_scale=stride_a_scale,
-                stride_gate_scale=stride_gate_scale,
-                stride_up_scale=stride_up_scale,
-                tag=f"{mi}",
-                dtla=dtla_bundle,
-                cadence=cadence,
-            )
+            if spec.pipeline_native_gateup:
+                assert MxScaleA is not None
+                g_dqs, u_dqs = _emit_mxfp4_native_gateup_pipeline(
+                    b,
+                    A=A,
+                    WGate=WGate,
+                    WUp=WUp,
+                    AScale=AScale,
+                    WGateScale=WGateScale,
+                    WUpScale=WUpScale,
+                    atom=atom,
+                    lane_decode=lane_decode,
+                    m_tile_base=m_tile_base,
+                    n_tile_bases=n_tile_bases,
+                    K=K,
+                    stride_a_scale=stride_a_scale,
+                    stride_gate_scale=stride_gate_scale,
+                    stride_up_scale=stride_up_scale,
+                    mx_scale_a=MxScaleA,
+                    preshuffled=spec.mxfp4_preshuffled,
+                    tag=f"{mi}",
+                )
+            elif spec.mxfp4_native:
+                assert MxScaleA is not None
+                g_dqs, u_dqs = _emit_mxfp4_native_gateup_fused_kloop(
+                    b,
+                    A=A,
+                    WGate=WGate,
+                    WUp=WUp,
+                    AScale=AScale,
+                    WGateScale=WGateScale,
+                    WUpScale=WUpScale,
+                    atom=atom,
+                    lane_decode=lane_decode,
+                    m_tile_base=m_tile_base,
+                    n_tile_bases=n_tile_bases,
+                    K=K,
+                    stride_a_scale=stride_a_scale,
+                    stride_gate_scale=stride_gate_scale,
+                    stride_up_scale=stride_up_scale,
+                    mx_scale_a=MxScaleA,
+                    preshuffled=spec.mxfp4_preshuffled,
+                    tag=f"{mi}",
+                )
+            elif spec.weight_dtype == "mxfp4":
+                g_dqs, u_dqs = _emit_mxfp4_gateup_fused_kloop(
+                    b,
+                    A=A,
+                    WGate=WGate,
+                    WUp=WUp,
+                    AScale=AScale,
+                    WGateScale=WGateScale,
+                    WUpScale=WUpScale,
+                    atom=atom,
+                    lane_decode=lane_decode,
+                    m_tile_base=m_tile_base,
+                    n_tile_bases=n_tile_bases,
+                    K=K,
+                    stride_a_scale=stride_a_scale,
+                    stride_gate_scale=stride_gate_scale,
+                    stride_up_scale=stride_up_scale,
+                    tag=f"{mi}",
+                )
+            else:
+                g_dqs, u_dqs = _emit_fp8_gateup_fused_kloop(
+                    b,
+                    A=A,
+                    WGate=WGate,
+                    WUp=WUp,
+                    AScale=AScale,
+                    WGateScale=WGateScale,
+                    WUpScale=WUpScale,
+                    atom=atom,
+                    lane_decode=lane_decode,
+                    m_tile_base=m_tile_base,
+                    n_tile_bases=n_tile_bases,
+                    K=K,
+                    stride_a_scale=stride_a_scale,
+                    stride_gate_scale=stride_gate_scale,
+                    stride_up_scale=stride_up_scale,
+                    tag=f"{mi}",
+                    dtla=dtla_bundle,
+                    cadence=cadence,
+                )
             gate_list.extend(g_dqs)
             up_list.extend(u_dqs)
 
@@ -1951,6 +3052,14 @@ def build_moe_fused_mega_gemm_fp8(
             one_f32=one_f32,
             c_neg_log2e=c_neg_log2e,
             c_floor=c_floor,
+            activation=spec.activation,
+            situ_beta=c_situ_beta,
+            situ_inv_beta=c_situ_inv_beta,
+            situ_linear_beta=c_situ_linear_beta,
+            situ_linear_inv_beta=c_situ_linear_inv_beta,
+            situ_two=c_situ_two,
+            situ_two_log2e=c_situ_two_log2e,
+            situ_zero=c_situ_zero,
         )
         # 64-lane butterfly max over the warp (xor 1,2,4,8,16,32).
         amax_warp = amax_lane
@@ -2037,6 +3146,18 @@ def build_moe_fused_mega_gemm_fp8(
         # inter columns, W_down reads GLOBAL inter columns (full inter row stride
         # N) at this slice's base. inter_blk_base = gu_n_off // GROUP_K.
         inter_blk_base = b.div(gu_n_off, c_group_k)
+        prefetched_rows = None
+        if spec.prefetch_routing_meta:
+            prefetched_rows = _prefetch_down_routing_rows(
+                b,
+                atom=atom,
+                warp_m_off=b.mul(warp_m_idx, b.const_i32(mfmas_m_down * atom.m)),
+                lane=lane,
+                mfmas_m=mfmas_m_down,
+                block_m_off=block_m_off,
+                SortedTokenIds=SortedTokenIds,
+                SortedWeights=SortedWeights,
+            )
         down_for = b.scf_for_iter(
             c0, H_out, b.const_i32(spec.tile_n_down), [], iv_name="ho"
         )
@@ -2054,23 +3175,62 @@ def build_moe_fused_mega_gemm_fp8(
                     # A-read m-base for this atom: warp m-offset + mi*atom.m so
                     # atom mi reads its own Hidden LDS rows (the correctness fix).
                     m_row_base = b.add(down_warp_m_off, b.const_i32(mi * atom.m))
-                    d_dq = _emit_fp8_down_group_gemm(
-                        b,
-                        a_view=fp8_view,
-                        WDown=WDown,
-                        WDownScale=WDownScale,
-                        atom=atom,
-                        lane_decode=lane_decode,
-                        n_tile_base=n_tile_base,
-                        scale_view=scale_view,
-                        inter_slice=tile_n,
-                        inter_full=N,
-                        inter_blk_base=inter_blk_base,
-                        stride_down_scale=stride_down_scale,
-                        m_row_base=m_row_base,
-                        tag=f"d{mi}_{ni}",
-                        cadence=cadence,
-                    )
+                    if spec.mxfp4_native:
+                        assert MxScaleA is not None
+                        d_dq = _emit_mxfp4_native_down_group_gemm(
+                            b,
+                            a_view=fp8_view,
+                            WDown=WDown,
+                            WDownScale=WDownScale,
+                            atom=atom,
+                            lane_decode=lane_decode,
+                            n_tile_base=n_tile_base,
+                            scale_view=scale_view,
+                            inter_slice=tile_n,
+                            inter_full=N,
+                            inter_blk_base=inter_blk_base,
+                            stride_down_scale=stride_down_scale,
+                            m_row_base=m_row_base,
+                            mx_scale_a=MxScaleA,
+                            pipeline=spec.pipeline_native_down,
+                            preshuffled=spec.mxfp4_preshuffled,
+                            tag=f"d{mi}_{ni}",
+                        )
+                    elif spec.weight_dtype == "mxfp4":
+                        d_dq = _emit_mxfp4_down_group_gemm(
+                            b,
+                            a_view=fp8_view,
+                            WDown=WDown,
+                            WDownScale=WDownScale,
+                            atom=atom,
+                            lane_decode=lane_decode,
+                            n_tile_base=n_tile_base,
+                            scale_view=scale_view,
+                            inter_slice=tile_n,
+                            inter_full=N,
+                            inter_blk_base=inter_blk_base,
+                            stride_down_scale=stride_down_scale,
+                            m_row_base=m_row_base,
+                            tag=f"d{mi}_{ni}",
+                        )
+                    else:
+                        d_dq = _emit_fp8_down_group_gemm(
+                            b,
+                            a_view=fp8_view,
+                            WDown=WDown,
+                            WDownScale=WDownScale,
+                            atom=atom,
+                            lane_decode=lane_decode,
+                            n_tile_base=n_tile_base,
+                            scale_view=scale_view,
+                            inter_slice=tile_n,
+                            inter_full=N,
+                            inter_blk_base=inter_blk_base,
+                            stride_down_scale=stride_down_scale,
+                            m_row_base=m_row_base,
+                            tag=f"d{mi}_{ni}",
+                            cadence=cadence,
+                        )
                     down_list.append(d_dq)
             # Barrier before the next H_out tile reuses Hidden_smem reads
             # (read-only here, but keep the scf.for body well-formed).
@@ -2090,6 +3250,7 @@ def build_moe_fused_mega_gemm_fp8(
                 SortedWeights=SortedWeights,
                 Y=Y,
                 tokens=tokens,
+                prefetched_rows=prefetched_rows,
             )
             b.scf_yield()
         _ = (M, stride_a, slot_size)

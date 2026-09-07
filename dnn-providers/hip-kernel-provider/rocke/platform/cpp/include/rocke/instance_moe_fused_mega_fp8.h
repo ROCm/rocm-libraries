@@ -160,6 +160,17 @@ typedef struct rocke_fused_mega_kernel_spec_fp8
 
     bool has_sched_cadence; /* false => Python None (defer to env)  */
     const char* sched_cadence; /* "iglp1" | "none" | "sgb" when has_*  */
+
+    const char* activation; /* default "silu"; also supports "situ"       */
+    double activation_beta; /* default 1.0; positive for "situ"           */
+    bool has_activation_linear_beta; /* false => Python None               */
+    double activation_linear_beta; /* positive when has_*                  */
+    const char* weight_dtype; /* default "fp8e4m3"; also supports "mxfp4"  */
+    bool mxfp4_native;
+    bool prefetch_routing_meta;
+    bool pipeline_native_down;
+    bool mxfp4_preshuffled;
+    bool pipeline_native_gateup;
 } rocke_fused_mega_kernel_spec_fp8_t;
 
 /* Default-constructed spec (every Python dataclass default, block_size resolved
@@ -190,9 +201,11 @@ int rocke_fused_mega_fp8_spec_mfmas_n(const rocke_fused_mega_kernel_spec_fp8_t* 
 int rocke_fused_mega_fp8_spec_mfmas_m_down(const rocke_fused_mega_kernel_spec_fp8_t* spec);
 int rocke_fused_mega_fp8_spec_mfmas_n_down(const rocke_fused_mega_kernel_spec_fp8_t* spec);
 
-/* kernel_name() -> "{name}_moe_fused_mega_fp8_m{tile_m}n{tile_n_inter}k{tile_k_gu}".
- * Writes the NUL-terminated string into out (capacity out_cap). Returns ROCKE_OK
- * or ROCKE_ERR_VALUE on NULL args / too-small buffer. */
+/* kernel_name() starts with
+ * "{name}_moe_fused_mega_fp8_m{tile_m}n{tile_n_inter}k{tile_k_gu}", then appends
+ * the non-default activation and weight-dtype tags in Python order. Writes the
+ * NUL-terminated string into out (capacity out_cap). Returns ROCKE_OK or
+ * ROCKE_ERR_VALUE on NULL args / too-small buffer. */
 rocke_status_t rocke_fused_mega_fp8_spec_kernel_name(const rocke_fused_mega_kernel_spec_fp8_t* spec,
                                                      char* out,
                                                      size_t out_cap);
