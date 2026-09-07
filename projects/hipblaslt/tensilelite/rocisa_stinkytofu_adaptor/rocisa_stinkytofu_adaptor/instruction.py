@@ -1465,6 +1465,52 @@ class VCndMaskB32(CommonInstruction):
         return CommonInstruction.__deepcopy__(self, memo)
 
 
+# -- VCndMaskB16 (native: dst, src0, src1, src2=VCC; true16 16-bit select) --
+# logicalIR: VCndMaskB16
+class VCndMaskB16(CommonInstruction):
+    """``v_cndmask_b16 dst, src0, src1, vcc`` shim (true16 16-bit select).
+
+    Same shape as VCndMaskB32 but 16-bit: the true16 half-word (.l/.h) is carried
+    on the operands themselves. Native rocisa takes (dst, src0, src1, src2=VCC);
+    the logical IR version has only 2 explicit sources (the VCC mask is implicit).
+    """
+
+    def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
+                 src2: Any = None,
+                 sdwa: Any = None, comment: str = "", dpp: Any = None, **kw):
+        _ = kw
+        srcs = [src0, src1]
+        if src2 is not None:
+            srcs.append(src2)
+        super().__init__(
+            instType=InstType.INST_B16,
+            dst=dst,
+            srcs=srcs,
+            dpp=dpp,
+            sdwa=sdwa,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst("v_cndmask_b16")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        dst_reg = _to_stinky_register(self.dst)
+        src0_reg = _to_stinky_register(self.srcs[0])
+        src1_reg = _to_stinky_register(self.srcs[1])
+        src2_reg = _to_stinky_register(self.srcs[2]) if len(self.srcs) > 2 else _st.Register("vcc_lo")
+        # stinkytofu's logical IR may not expose a dedicated 16-bit select; fall
+        # back to the 32-bit logical op when absent (the true16 half-word rides on
+        # the operands). The compiled rocisa->stinky path maps v_cndmask_b16 by
+        # mnemonic and does not depend on this.
+        factory = getattr(_st, "VCndMaskB16", None) or _st.VCndMaskB32
+        return factory(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+
 # -- VReadfirstlaneB32 (unary: dst, src) --
 # logicalIR: VReadfirstlaneB32
 VReadfirstlaneB32 = _make_scalar_unary_class("VReadfirstlaneB32", "v_readfirstlane_b32", InstType.INST_B32)
@@ -2977,6 +3023,7 @@ VNotB32 = _make_scalar_unary_class("VNotB32", "v_not_b32", InstType.INST_B32)
 # logicalIR: VPrngB32
 VPrngB32 = _make_scalar_unary_class("VPrngB32", "v_prng_b32", InstType.INST_B32)
 # VCndMaskB32 — real class (see Vector ALU section above)
+# VCndMaskB16 — real class (see Vector ALU section above)
 # logicalIR: VLShiftLeftB16
 VLShiftLeftB16 = _make_vector_shift_class("VLShiftLeftB16", "v_lshlrev_b16", InstType.INST_B16)
 # VLShiftLeftB32 — real class (see Vector ALU section above)
@@ -5159,6 +5206,20 @@ class _True16Wrap:
 
     def __str__(self) -> str:
         return self.toString()
+
+
+def t16(reg: Any, sel: Any) -> Any:
+    """NoSDWA-gated true16 half-select (extension.hpp::t16).
+
+    On a true16 (NoSDWA) target, tag *reg* with the ``.l``/``.h`` half-word given
+    by *sel*; on legacy (SDWA) targets return *reg* unchanged. Mirrors the C++
+    helper so kernel generators can tag f16 operands unconditionally.
+    """
+    from .base import getArchCaps  # noqa: WPS433
+
+    if reg is not None and getArchCaps().get("NoSDWA", 0):
+        return _True16Wrap(reg, sel)
+    return reg
 
 
 def ECvtF16toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
