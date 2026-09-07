@@ -92,6 +92,7 @@ if(TENSILELITE_ENABLE_HOST)
         PUBLIC
             $<BUILD_INTERFACE:rocisa::rocisa-cpp>
             $<BUILD_INTERFACE:roc::origami>
+            $<BUILD_INTERFACE:roc::tilewright-hipblaslt>
             $<BUILD_INTERFACE:hip::host>
         PRIVATE
             hip::device

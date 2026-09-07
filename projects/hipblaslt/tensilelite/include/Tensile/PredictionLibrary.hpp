@@ -27,13 +27,17 @@
 #pragma once
 
 #include <atomic>
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <vector>
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/UtilsOrigami.hpp>
+
+#include "tilewright/hipblaslt/adapter.hpp"
 
 #include <tensilelitehost/export.h>
 
@@ -53,6 +57,15 @@ namespace TensileLite
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
+        // Pre-built tilewright configs (base params + ML features), index-aligned
+        // with origami_config_list. Built once at deserialize (the kernel name +
+        // SizeMapping are available there); see Serialization/PredictionLibrary.hpp.
+        std::vector<tilewright::Config> tilewright_config_list;
+        // Per-library tilewright model handle, resolved at deserialize from this
+        // logic file's stem via the colocated tilewright_index (see
+        // Serialization/PredictionLibrary.hpp). -1 => no tilewright model for this
+        // library; the code below uses the base analytical (origami) path instead.
+        int tilewright_model = -1;
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
@@ -75,9 +88,9 @@ namespace TensileLite
                                                                Hardware const&  hardware,
                                                                const int index) const override
         {
-            auto indexMatch =
-                std::find_if(solution_list.begin(), solution_list.end(),
-                             [&index](auto& s){ return s.first == index; });
+            auto indexMatch = std::find_if(solution_list.begin(),
+                                           solution_list.end(),
+                                           [&index](auto& s) { return s.first == index; });
             if(indexMatch != solution_list.end())
                 return indexMatch->second;
             return nullptr;
@@ -144,10 +157,15 @@ namespace TensileLite
                                                             int numSolutions) const override
         {
             SolutionVector<MySolution> rv;
-            size_t                     m     = 1;
-            size_t                     n     = 1;
-            size_t                     k     = 1;
-            size_t                     batch = 1;
+            // numSolutions == 0 requests nothing; return before ranking/selection
+            // (the selection loop below only breaks AFTER a push, so 0 would
+            // otherwise return at least one solution).
+            if(numSolutions == 0)
+                return rv;
+            size_t m     = 1;
+            size_t n     = 1;
+            size_t k     = 1;
+            size_t batch = 1;
             for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
             {
                 m *= problem.freeSizeA(i);
@@ -211,8 +229,36 @@ namespace TensileLite
                     .b_mx_block_size = 0, // MX Data types come from rocroller
                 };
 
-                auto prediction_result = origami::rank_configs(
-                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+                // Use the tilewright recommender only when this library actually has a
+                // per-library model (loaded via tilewright_index at deserialize).
+                // Otherwise fall back to plain analytical origami -- NOT to some
+                // other dtype/layout's model.
+                //
+                // Pass the requested solution count as tilewright's ranking depth
+                // (min_scored), covering every request shape:
+                //   numSolutions <  0  (e.g. -1 "all"): score EVERY feasible config
+                //                       (LDS + kernel-feasibility filtered) beyond the
+                //                       smart_K whitelist -> SIZE_MAX depth.
+                //   numSolutions <= smart_K size: whitelist only, in score order
+                //                       (numSolutions == 1 == the common top-1 path,
+                //                       identical picks, no extra cost).
+                //   numSolutions >  smart_K size: extend past the whitelist. The engine
+                //                       clamps to the feasible set, so e.g. 999 with 257
+                //                       feasible kernels ranks all 257 (never overruns).
+                const std::size_t tilewrightDepth
+                    = numSolutions < 0 ? std::numeric_limits<std::size_t>::max()
+                                       : static_cast<std::size_t>(numSolutions);
+                auto              prediction_result
+                    = (Debug::Instance().useTilewright() && tilewright_model >= 0)
+                          ? tilewright::hipblaslt::rank_configs(tilewright_model,
+                                                                origami_problem,
+                                                                *(pAMDGPU->analyticalHardware),
+                                                                tilewright_config_list,
+                                                                origami_config_list,
+                                                                tilewrightDepth)
+                          : origami::rank_configs(origami_problem,
+                                                  *(pAMDGPU->analyticalHardware),
+                                                  origami_config_list);
 
                 for(const auto& r : prediction_result)
                 {
@@ -220,10 +266,38 @@ namespace TensileLite
                     {
                         continue;
                     }
+                    // Only return configs the recommender actually scored (i.e. that
+                    // survived the LDS + kernel-feasibility pre-filters). Filtered-out
+                    // configs come back with a NaN "latency" sentinel; never select them,
+                    // even when many solutions are requested -- "all" (rsn < 0) means all
+                    // FEASIBLE, not the full padded pool.
+                    if(std::isnan(r.latency))
+                    {
+                        continue;
+                    }
                     considerSolution(solution_list[r.config.index].second);
                     if(rv.size() == numSolutions)
                     {
                         break;
+                    }
+                }
+
+                // Safety net: if the recommender scored nothing (e.g. no per-cell
+                // model matched and every config came back unscored), fall back to
+                // predicate-passing configs so a kernel is still returned.
+                if(rv.empty())
+                {
+                    for(const auto& r : prediction_result)
+                    {
+                        if(r.config.index >= solution_list.size())
+                        {
+                            continue;
+                        }
+                        considerSolution(solution_list[r.config.index].second);
+                        if(rv.size() == numSolutions)
+                        {
+                            break;
+                        }
                     }
                 }
             }
