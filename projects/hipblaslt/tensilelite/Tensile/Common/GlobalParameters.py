@@ -401,8 +401,15 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
 globalParameters["StinkyTofuCostOutputDir"] = ""
 
-# StinkyTofu SGPR allocation: 0 off, 1 shadow, 2 apply (higher values clamp
-# to apply). Shadow colours and reports without rewriting operands.
+# StinkyTofu allocation:
+#   0  off
+#   1  shadow      colour and report, rewrite nothing
+#   2  apply       rewrite operands; an over-budget kernel is still rejected
+#                  before allocation is asked, as it always was
+#   3  force apply as 2, but an over-budget kernel reaches allocation and its
+#                  verdict is re-judged against the count that comes out
+# Higher values clamp to 3. Only mode 3 changes which kernels are accepted;
+# 1 and 2 change only how the accepted ones are coloured.
 globalParameters["StinkyTofuRegisterAllocation"] = 0
 
 globalParameters["DisableSTWaitCnt"] = True
