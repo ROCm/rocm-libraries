@@ -24224,5 +24224,632 @@
    "graph": "bundle_fp16cov_d64_sq2048_nomask",
    "why": "quick-tier bundle fp16cov_d64_sq2048_nomask is GQA-4 (hq32/kv8) at nomask; the corpus carries only MHA (hq48/hq8) at that shape, so the bundle skipped. Test shape, not a workload shape."
   }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 1024,
+  "seqlen_k": 1024,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq1024_skv1024_d128_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 1024,
+  "seqlen_k": 1024,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq1024_skv1024_d128_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 1024,
+  "seqlen_k": 1024,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq1024_skv1024_d64_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 1024,
+  "seqlen_k": 1024,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "bf16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq1024_skv1024_d64_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq2048_skv2048_d128_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq2048_skv2048_d128_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq2048_skv2048_d64_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "bf16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq2048_skv2048_d64_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 256,
+  "seqlen_k": 512,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq256_skv512_d128_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 256,
+  "seqlen_k": 512,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq256_skv512_d128_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 256,
+  "seqlen_k": 512,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq256_skv512_d64_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 256,
+  "seqlen_k": 512,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "bf16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq256_skv512_d64_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 512,
+  "seqlen_k": 256,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq512_skv256_d128_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 512,
+  "seqlen_k": 256,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq512_skv256_d128_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 512,
+  "seqlen_k": 256,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq512_skv256_d64_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 512,
+  "seqlen_k": 256,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "bf16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "bf16_b4_hq6_kv6_sq512_skv256_d64_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 1024,
+  "seqlen_k": 1024,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq1024_skv1024_d128_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 1024,
+  "seqlen_k": 1024,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq1024_skv1024_d128_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 1024,
+  "seqlen_k": 1024,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "fp16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq1024_skv1024_d64_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 1024,
+  "seqlen_k": 1024,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq1024_skv1024_d64_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq2048_skv2048_d128_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq2048_skv2048_d128_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "fp16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq2048_skv2048_d64_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq2048_skv2048_d64_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 256,
+  "seqlen_k": 512,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq256_skv512_d128_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 256,
+  "seqlen_k": 512,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq256_skv512_d128_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 256,
+  "seqlen_k": 512,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "fp16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq256_skv512_d64_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 256,
+  "seqlen_k": 512,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq256_skv512_d64_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 512,
+  "seqlen_k": 256,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq512_skv256_d128_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 512,
+  "seqlen_k": 256,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq512_skv256_d128_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 512,
+  "seqlen_k": 256,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "fp16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq512_skv256_d64_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 6,
+  "nhead_k": 6,
+  "seqlen_q": 512,
+  "seqlen_k": 256,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "fp16_b4_hq6_kv6_sq512_skv256_d64_noncausal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
+ },
+ {
+  "batch": 1,
+  "nhead_q": 32,
+  "nhead_k": 32,
+  "seqlen_q": 512,
+  "seqlen_k": 512,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "graphs",
+   "suite": "aiter+attn",
+   "graph": "llama-2-7b__bf16_prefill_bf16_idx63_b1_hq32_kv32_sq512_skv512_d128v128_causal",
+   "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
+  }
  }
 ]
