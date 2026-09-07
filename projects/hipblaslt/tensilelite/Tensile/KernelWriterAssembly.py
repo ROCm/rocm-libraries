@@ -7804,6 +7804,7 @@ class KernelWriterAssembly(KernelWriter):
                        comment="next shard"))
     for tP in (tPA, tPB):
       tc = tP["tensorChar"]
+      module.add(self.localReadResetOffsets(kernel, tP))
       module.add(self.computeLoadSrd(kernel, tP, tc,
                                      kernel["ProblemType"]["IndexAssignments%s" % tc],
                                      tP["bpeGR"]))

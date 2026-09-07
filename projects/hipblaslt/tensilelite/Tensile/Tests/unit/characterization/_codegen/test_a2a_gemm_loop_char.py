@@ -13,6 +13,9 @@ pytestmark = pytest.mark.unit
 
 _CONFIG = "Tensile/Tests/common/comm/gfx950/a2a_gemm_loop.yaml"
 
+# Same solution; K gives an odd unroll trip count K/DepthU.
+_CONFIG_ODD_TRIP = "Tensile/Tests/common/comm/gfx950/a2a_gemm_loop_odd_trip.yaml"
+
 
 def _tn_problem_type(**overrides):
     from Tensile.SolutionStructs.Problem import ProblemType
@@ -144,3 +147,55 @@ class TestA2AGemmTransitionPhase:
     def test_transition_offsets_by_the_shard_index(self):
         body = self._body()
         assert "A2AShardIdx" in body, "the rebind ignores which shard comes next"
+
+
+@pytest.mark.parametrize("config", [_CONFIG, _CONFIG_ODD_TRIP])
+class TestA2AGemmPerRoundState:
+    """State the shard loop body re-establishes on every round."""
+
+    def _body(self, config):
+        from config_harness import emit_kernels_from_config
+
+        src = emit_kernels_from_config(config, limit=1, arch="gfx950")[0][1]
+        return src[src.index("label_A2AShardLoopBegin:"):src.rindex("A2AShardLoopBegin")]
+
+    def _before_the_tail_loop_branch(self, config):
+        body = self._body(config)
+        return body[:body.index("s_cbranch_scc1 label_SkipTailLoopL")]
+
+    def _transition(self, config):
+        body = self._body(config)
+        return body[body.index("A2A_TRANSITION begin"):body.index("A2A_TRANSITION end")]
+
+    def test_lds_write_address_is_reloaded_into_m0(self, config):
+        assert "s_mov_b32 m0, s[sgprLocalWriteAddrA]" in self._body(config), (
+            "the DirectToLds m0 update is hoisted out of the shard loop"
+        )
+
+    def test_inner_trip_count_is_recomputed(self, config):
+        assert "s[sgprLoopCounterL], s[sgprSizesSum" in self._body(config), (
+            "the unroll trip count is hoisted out of the shard loop"
+        )
+
+    def test_no_load_loop_is_inside_the_body(self, config):
+        assert "NoLoadLoop" in self._body(config), (
+            "the drain phase is hoisted out of the shard loop"
+        )
+
+    def test_local_write_address_is_reset_on_every_path(self, config):
+        reachable = self._before_the_tail_loop_branch(config)
+        assert reachable.count("Set LWA to first buffer offset") == 2, (
+            "srdA/srdB local-write addresses keep the round's buffer parity"
+        )
+
+    def test_local_read_address_reset_sits_behind_the_tail_loop_branch(self, config):
+        assert "Set LRA to first buffer offset" not in self._before_the_tail_loop_branch(config)
+
+    def test_transition_phase_resets_both_local_read_addresses(self, config):
+        assert self._transition(config).count("Set LRA to first buffer offset") == 2, (
+            "local-read addresses keep the round's buffer parity while local-write "
+            "addresses are reset"
+        )
+
+    def test_transition_phase_writes_gsu_sum_idx(self, config):
+        assert "GSUSumIdx" in self._transition(config)
