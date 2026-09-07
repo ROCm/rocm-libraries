@@ -343,6 +343,22 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=.\"\n"
            "  TIMEOUT 300)\n")
+
+    # Library conv CPU tests (no GPU required; dispatch selection + signature guards).
+    # PYTHONPATH includes both the rocke platform package (.) and the library tree
+    # (tests/library) so kernels.*, builders.*, and dispatch.* are importable.
+    set(_ROCKE_LIBRARY_CONV_TESTS
+        "tests/library/tests/dispatch/conv"
+        "tests/library/tests/test_conv_build_signatures.py"
+        "tests/library/tests/test_builder_signature_contract.py"
+        "tests/library/tests/test_library_layering.py")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_conv_pytest python -m pytest ${_ROCKE_LIBRARY_CONV_TESTS} -v --timeout=120)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=.:tests/library\"\n"
+           "  TIMEOUT 180)\n")
   endif()
 
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
