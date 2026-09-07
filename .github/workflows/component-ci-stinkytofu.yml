@@ -62,7 +62,7 @@ jobs:
           test_path: python_module/tests
 
       - name: Build (ASan)
-        run: invoke build --asan --build-dir build_asan --clean
+        run: invoke asan --build-dir build_asan --clean
 
       - name: Test (ASan)
         working-directory: shared/stinkytofu/build_asan

@@ -590,19 +590,20 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
     help={
         "build_dir": "ASan build directory (default: build-asan/).",
         "jobs": "Number of parallel build jobs (default: all cores).",
+        "clean": "Remove the build directory before configuring.",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
     }
 )
-def asan(c, build_dir=None, jobs=None, rocm_path=None):
-    """Build with AddressSanitizer instrumentation and run the full test suite under it.
+def asan(c, build_dir=None, jobs=None, clean=False, rocm_path=None):
+    """Build with AddressSanitizer instrumentation.
 
     Uses a RelWithDebInfo build (keeps -g for symbolized reports without the
     runtime cost of a full Debug build) with -fsanitize=address baked into
     every target (library, tools, unit_tests, api_tests) so violations
     anywhere in the call chain are caught, not just in test code.
 
-    Unlike `invoke coverage`, test failures are fatal here: an ASan finding
-    should fail the build, not just get reported.
+    Run the test suite separately, e.g.:
+        cd build-asan && ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ctest --output-on-failure
     """
     bld = Path(build_dir).resolve() if build_dir else (ROOT_PATH / "build-asan")
 
@@ -612,11 +613,6 @@ def asan(c, build_dir=None, jobs=None, rocm_path=None):
         build_type="RelWithDebInfo",
         asan=True,
         jobs=jobs,
+        clean=clean,
         rocm_path=rocm_path,
     )
-
-    with c.cd(bld.as_posix()):
-        c.run(
-            "ctest --output-on-failure",
-            env={"ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"},
-        )
