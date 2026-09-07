@@ -323,6 +323,44 @@ def test_gate_accepts_no_split_k_requested(n):
     assert ok, f"num_splits={n!r} should route, got decline: {reason}"
 
 
+class _FakeIntTensor:
+    """A stand-in for whatever lands in the num_splits slot. Only `numel`,
+    `item` and `shape` are touched by the gate, so the suite stays torch-free."""
+
+    def __init__(self, values):
+        self._v = list(values)
+        self.shape = (len(self._v),)
+
+    def numel(self):
+        return len(self._v)
+
+    def item(self):
+        if len(self._v) != 1:
+            raise ValueError(
+                "only one element tensors can be converted to Python scalars"
+            )
+        return self._v[0]
+
+
+def test_gate_declines_multi_element_num_splits_without_raising():
+    """A gate must DECLINE, never raise: an exception escapes to the model,
+    while a decline is counted and falls back.
+
+    Job 515 (torch 2.15/rocm10.1) put a multi-element tensor in this slot and
+    the bare int() cast raised ValueError straight through the override, so the
+    census recorded nothing at all (aot=0 native=0) and the call died."""
+    ok, reason = _make()._gate(_Q, _BT, _SK, _FakeIntTensor([1, 2, 3, 4]))
+    assert not ok
+    assert "tensor" in reason and "(4,)" in reason
+
+
+@pytest.mark.parametrize("n,should_route", [(1, True), (0, True), (4, False)])
+def test_gate_reads_single_element_tensor_num_splits(n, should_route):
+    """A 1-element tensor carries a real value; read it rather than refuse it."""
+    ok, reason = _make()._gate(_Q, _BT, _SK, _FakeIntTensor([n]))
+    assert ok is should_route, reason
+
+
 @pytest.mark.parametrize("d", [48, 96, 512])
 def test_gate_declines_unbaked_head_size(d):
     q = _FakeTensor((64, 16, d))

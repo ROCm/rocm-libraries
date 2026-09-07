@@ -95,11 +95,42 @@ class VarlenSdpaOverride(OpOverride):
         # 510 (torch 2.15/rocm10.1): census aot=0 native=1, sole reason
         # "num_splits not expressible in the graph", on a geometry the engine and
         # the descriptors both cover.
-        if num_splits is not None and int(num_splits) > 1:
-            return (
-                False,
-                f"num_splits={int(num_splits)} (>1 split-k) not expressible in the graph",
-            )
+        # The value is not reliably a python int. Torch documents num_splits as
+        # `int | None`, but measured on device (job 515, torch 2.15/rocm10.1) a
+        # MULTI-ELEMENT TENSOR arrives in this slot and `int()` raises
+        # "only one element tensors can be converted to Python scalars" -- which
+        # aborted the whole call rather than declining it.
+        #
+        # Whatever the cause (a Tensor-typed schema, or a positional mismatch
+        # putting another operand here), a gate must DECLINE, never raise: an
+        # exception escapes to the model, while a decline is counted and falls
+        # back. So coerce defensively and treat anything unreadable as a decline
+        # with a reason that names what actually arrived.
+        if num_splits is not None:
+            n = None
+            if isinstance(num_splits, int):
+                n = num_splits
+            elif hasattr(num_splits, "numel"):
+                if num_splits.numel() == 1:
+                    n = int(num_splits.item())
+                else:
+                    return False, (
+                        f"num_splits is a {tuple(num_splits.shape)} tensor, not a scalar "
+                        "(schema/positional mismatch -- see varlen_aten._impl)"
+                    )
+            else:
+                try:
+                    n = int(num_splits)
+                except (TypeError, ValueError):
+                    return (
+                        False,
+                        f"num_splits of unreadable type {type(num_splits).__name__}",
+                    )
+            if n is not None and n > 1:
+                return (
+                    False,
+                    f"num_splits={n} (>1 split-k) not expressible in the graph",
+                )
         if query.dim() != 3:
             return False, f"query rank {query.dim()} != 3 (expected [total_q, H, D])"
         d = int(query.shape[-1])
