@@ -44,7 +44,7 @@ import math
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
-from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType
 from rocke.helpers.io import (
     io_ir_type,
     load_scalar_as_f32,
@@ -71,6 +71,8 @@ LN2 = 0.6931471805599453
 NORM_EPS = 1e-6
 SOFTPLUS_THRESHOLD = 20.0
 STATE_VEC = 8  # 16B bf16 vector load/store width
+# State element size in bytes; is_valid_spec bars any state dtype but these.
+_STATE_BYTES = {"f16": 2, "bf16": 2}
 
 
 @dataclass(frozen=True)
@@ -188,6 +190,7 @@ def _build_simple(spec: GdnDecodeSpec) -> KernelDef:
     Q_HN, Q_HK = HK * DK, DK  # query/key: [B,1,HK,DK]
     V_HN, V_HK = HV * DV, DV  # value/out: [B,1,HV,DV]
     S_POOL, S_HV, S_VR = HV * DV * DK, DV * DK, DK  # state: [pool,HV,DV,DK]
+    ST_BYTES = _STATE_BYTES[spec.state_dtype]
 
     io_ty = io_ir_type(spec.dtype)
     st_ty = io_ir_type(spec.state_dtype)
@@ -276,17 +279,17 @@ def _build_simple(spec: GdnDecodeSpec) -> KernelDef:
         dot_kq = tree_reduce(b, b.fadd, [b.fmul(kn[j], qn[j]) for j in range(DK)])
 
         # ---- load state row t=tid: state[read_pool, hv, tid, 0:DK] ----
-        rs_base = b.add(
-            b.add(
-                b.mul(read_pool, b.const_i32(S_POOL)),
-                b.mul(hv_i, b.const_i32(S_HV)),
-            ),
-            b.mul(tid, b.const_i32(S_VR)),
+        # The pool base (read_pool * S_POOL) overflows i32 once the pool holds
+        # >=4096 slots, so advance the pointer by a 64-bit byte offset and keep
+        # the in-slot index (< S_POOL) in i32.
+        state_r = b.global_ptr_add(
+            STATE, b.mul(b.sext(read_pool, I64), b.const_i64(S_POOL * ST_BYTES))
         )
+        rs_base = b.add(b.mul(hv_i, b.const_i32(S_HV)), b.mul(tid, b.const_i32(S_VR)))
         sv = []
         for c in range(0, DK, STATE_VEC):
             off = b.add(rs_base, b.const_i32(c))
-            sv += load_vec_as_f32(b, STATE, off, dtype=spec.state_dtype, n=STATE_VEC)
+            sv += load_vec_as_f32(b, state_r, off, dtype=spec.state_dtype, n=STATE_VEC)
         sv = [b.fmul(s, decay) for s in sv]  # gated forget
 
         # ---- S_row . k_hat  and  S_row . q_hat ----
@@ -303,17 +306,14 @@ def _build_simple(spec: GdnDecodeSpec) -> KernelDef:
         store_scalar_from_f32(b, OUT, v_idx, out_val, dtype=spec.dtype)
 
         # ---- rank-1 state write: S_row += k_hat * v_new ----
-        ws_base = b.add(
-            b.add(
-                b.mul(write_pool, b.const_i32(S_POOL)),
-                b.mul(hv_i, b.const_i32(S_HV)),
-            ),
-            b.mul(tid, b.const_i32(S_VR)),
+        state_w = b.global_ptr_add(
+            STATE, b.mul(b.sext(write_pool, I64), b.const_i64(S_POOL * ST_BYTES))
         )
+        ws_base = b.add(b.mul(hv_i, b.const_i32(S_HV)), b.mul(tid, b.const_i32(S_VR)))
         new_s = [b.fma(kn[j], v_new, sv[j]) for j in range(DK)]
         for c in range(0, DK, STATE_VEC):
             vec = pack_f32_to(b, new_s[c : c + STATE_VEC], dtype=spec.state_dtype)
-            store_vec(b, STATE, b.add(ws_base, b.const_i32(c)), vec, n=STATE_VEC)
+            store_vec(b, state_w, b.add(ws_base, b.const_i32(c)), vec, n=STATE_VEC)
 
     return b.kernel
 
@@ -346,6 +346,7 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
     Q_HN, Q_HK = HK * DK, DK
     V_HN, V_HK = HV * DV, DV
     S_POOL, S_HV, S_VR = HV * DV * DK, DV * DK, DK
+    ST_BYTES = _STATE_BYTES[spec.state_dtype]
 
     io_ty = io_ir_type(spec.dtype)
     st_ty = io_ir_type(spec.state_dtype)
@@ -482,22 +483,26 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
             )
         )
 
-        # load state tiles (decayed) into registers
+        # load state tiles (decayed) into registers. The pool base overflows
+        # i32 for large pools, so advance the pointer by a 64-bit byte offset
+        # once and keep the in-slot index in i32.
+        state_r = b.global_ptr_add(
+            STATE, b.mul(b.sext(read_pool, I64), b.const_i64(S_POOL * ST_BYTES))
+        )
         sv = {}
         for vi in range(WTV_ITERS):
             v_row = b.add(tile_v_start, b.add(gv_start, b.const_i32(vi * WGROUP_V)))
             rs_row = b.add(
-                b.add(
-                    b.mul(read_pool, b.const_i32(S_POOL)),
-                    b.mul(hv_i, b.const_i32(S_HV)),
-                ),
-                b.mul(v_row, b.const_i32(S_VR)),
+                b.mul(hv_i, b.const_i32(S_HV)), b.mul(v_row, b.const_i32(S_VR))
             )
             for ki in range(WTK_ITERS):
                 off = b.add(rs_row, b.add(warp_k_start, b.const_i32(ki * WARP_TILE_K)))
-                vec = load_vec_as_f32(b, STATE, off, dtype=spec.state_dtype, n=VPT)
+                vec = load_vec_as_f32(b, state_r, off, dtype=spec.state_dtype, n=VPT)
                 sv[(vi, ki)] = [b.fmul(s, decay) for s in vec]
 
+        state_w = b.global_ptr_add(
+            STATE, b.mul(b.sext(write_pool, I64), b.const_i64(S_POOL * ST_BYTES))
+        )
         for vi in range(WTV_ITERS):
             v_row = b.add(tile_v_start, b.add(gv_start, b.const_i32(vi * WGROUP_V)))
             phk = wsum(
@@ -533,17 +538,13 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
             with b.scf_if(b.cmp_eq(k_lane, b.const_i32(0))):
                 store_scalar_from_f32(b, OUT, v_idx, out_val, dtype=spec.dtype)
             ws_row = b.add(
-                b.add(
-                    b.mul(write_pool, b.const_i32(S_POOL)),
-                    b.mul(hv_i, b.const_i32(S_HV)),
-                ),
-                b.mul(v_row, b.const_i32(S_VR)),
+                b.mul(hv_i, b.const_i32(S_HV)), b.mul(v_row, b.const_i32(S_VR))
             )
             for ki in range(WTK_ITERS):
                 new = [b.fma(kn[ki][i], v_new, sv[(vi, ki)][i]) for i in range(VPT)]
                 vec = pack_f32_to(b, new, dtype=spec.state_dtype)
                 off = b.add(ws_row, b.add(warp_k_start, b.const_i32(ki * WARP_TILE_K)))
-                store_vec(b, STATE, off, vec, n=VPT)
+                store_vec(b, state_w, off, vec, n=VPT)
 
     return b.kernel
 

@@ -128,6 +128,56 @@ def test_padding_lanes_are_skipped_and_leave_state_untouched(harness):
 
 
 @requires_gfx950
+def test_large_pool_crosses_the_i32_offset_boundary(harness):
+    """A pool deep enough that ``slot * S_POOL`` overflows a signed i32 must
+    still address the right slot.
+
+    ``S_POOL = HV*DV*DK = 2**19`` for the default dims, so the element base
+    ``read_pool * S_POOL`` wraps at slot 4096. The kernel advances the state
+    pointer by a 64-bit byte offset, so both the read and the rank-1 write land
+    in the intended slot rather than a wrapped-around one. A read-only fix would
+    pass ``out`` yet corrupt a different slot, so the state write is checked too.
+    """
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec = GdnDecodeSpec()
+    hv, dv, dk = spec.num_v_heads, spec.head_v_dim, spec.head_k_dim
+    s_pool = hv * dv * dk
+    slot = (1 << 31) // s_pool  # first slot whose element base overflows i32
+    pool_depth = slot + 1
+    # state pool + its in-place clone in prepare(), 2 bytes/elem, plus slack.
+    need = pool_depth * s_pool * 2 * 3
+    free, _ = torch.cuda.mem_get_info()
+    if free < need:
+        pytest.skip(f"needs ~{need >> 30} GiB device memory for the boundary pool")
+
+    batch = 1
+    inp = harness["make_inputs"](spec, batch)
+    dev, dtype = inp["state"].device, inp["state"].dtype
+    inp["state"] = torch.zeros(pool_depth, hv, dv, dk, device=dev, dtype=dtype)
+    inp["state"][slot] = torch.randn(hv, dv, dk, device=dev, dtype=dtype) * 0.01
+    inp["read_indices"][:] = slot
+    inp["write_indices"][:] = slot
+
+    # Reference from a 1-slot pool holding the same active state: identical math,
+    # tiny memory (avoids a full-pool fp32 copy of the multi-GiB pool).
+    ref_inp = dict(inp)
+    ref_inp["state"] = inp["state"][slot : slot + 1].contiguous()
+    ref_inp["read_indices"] = torch.zeros(batch, dtype=torch.int32, device=dev)
+    ref_out, ref_state = harness["ref_fp32"](spec, ref_inp)
+
+    values, cfg = harness["prepare"](spec, inp, batch)
+    harness["launch"](harness["launcher_for"](spec), values, cfg)
+    torch.cuda.synchronize()
+
+    out_err = (values["out"].float() - ref_out).abs().max().item()
+    state_err = (values["state"].float()[slot] - ref_state[0]).abs().max().item()
+    assert (
+        max(out_err, state_err) <= harness["TOL"]
+    ), f"i32 offset overflow at slot {slot}: out={out_err:.3e} state={state_err:.3e}"
+
+
+@requires_gfx950
 def test_results_are_deterministic(harness):
     """Same inputs, same answer -- no dependence on scheduling or leftovers."""
     from kernels.gfx950.gdn_decode import GdnDecodeSpec

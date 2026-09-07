@@ -144,7 +144,50 @@ def ref_fp32(spec: GdnDecodeSpec, inp) -> Tuple[torch.Tensor, torch.Tensor]:
     return out.unsqueeze(1), s_after
 
 
-def prepare(spec: GdnDecodeSpec, inp, batch: int):
+def _validate_decode_inputs(
+    spec: GdnDecodeSpec, inp, batch: int, *, validate_indices: bool = True
+):
+    """Reject inputs that would make the decode kernel read or write out of bounds.
+
+    The kernel indexes the state pool through ``read_indices``/``write_indices``
+    with a raw pointer add and only skips the ``-1`` sentinel; it never
+    hardware-bounds the index against the pool depth, so an out-of-range index
+    is an out-of-bounds load/store. These host checks catch that before launch.
+
+    Shape and dtype checks are sync-free and always run. The index *value* range
+    check reads the index extrema, forcing a device->host sync, so it is gated
+    by ``validate_indices`` (default on; a hot re-prepare loop whose indices are
+    already known good may pass ``False``).
+    """
+    state = inp["state"]
+    if state.ndim != 4:
+        raise ValueError(f"state must be [pool, HV, DV, DK]; got {tuple(state.shape)}")
+    pool_depth = state.shape[0]
+    want = (spec.num_v_heads, spec.head_v_dim, spec.head_k_dim)
+    if tuple(state.shape[1:]) != want:
+        raise ValueError(f"state head dims {tuple(state.shape[1:])} != spec {want}")
+    for name in ("read_indices", "write_indices"):
+        idx = inp[name]
+        if idx.dtype != torch.int32:
+            raise ValueError(f"{name} must be int32; got {idx.dtype}")
+        if tuple(idx.shape) != (batch,):
+            raise ValueError(f"{name} must be [batch={batch}]; got {tuple(idx.shape)}")
+    if not validate_indices:
+        return
+    for name in ("read_indices", "write_indices"):
+        idx = inp[name]
+        # -1 is the 'skip this slot' sentinel; every other value must land in
+        # [0, pool_depth). min()/max() forces one device->host sync.
+        lo = int(idx.min().item())
+        hi = int(idx.max().item())
+        if lo < -1 or hi >= pool_depth:
+            raise ValueError(
+                f"{name} out of range: [{lo}, {hi}] escapes -1 (skip) or "
+                f"[0, {pool_depth})"
+            )
+
+
+def prepare(spec: GdnDecodeSpec, inp, batch: int, *, validate_indices: bool = True):
     """Allocate the kernel's outputs and freeze a launch config.
 
     Split out from :func:`launch` deliberately. Allocating inside a timing loop
@@ -152,6 +195,7 @@ def prepare(spec: GdnDecodeSpec, inp, batch: int):
     graph capture is illegal, so every caller that repeats a launch prepares
     once and then only launches.
     """
+    _validate_decode_inputs(spec, inp, batch, validate_indices=validate_indices)
     torch_dtype = {"bf16": torch.bfloat16, "f16": torch.float16}[spec.dtype]
     out = torch.zeros(
         batch,
