@@ -77,3 +77,28 @@ class TestA2AGemmKernarg:
 
     def test_kernel_declares_the_shard_count(self):
         assert "FusedW" in self._src()
+
+
+class TestA2AGemmShardLoop:
+    """The shard loop wraps the unroll loop and closes before the store."""
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def test_shard_loop_has_a_begin_label_and_a_back_edge(self):
+        src = self._src()
+        assert src.count("A2AShardLoopBegin") >= 2, "expected a label and a branch to it"
+
+    def test_initc_precedes_the_shard_loop(self):
+        src = self._src()
+        assert src.index("initC") < src.index("A2AShardLoopBegin"), (
+            "initC is emitted inside the shard loop"
+        )
+
+    def test_shard_loop_closes_before_the_summation_end(self):
+        src = self._src()
+        assert src.rindex("A2AShardLoopBegin") < src.index("Summation_End"), (
+            "the back edge lands after endSummation"
+        )

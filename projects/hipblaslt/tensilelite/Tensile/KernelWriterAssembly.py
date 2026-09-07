@@ -7766,6 +7766,35 @@ class KernelWriterAssembly(KernelWriter):
     return 0
 
   ##############################################################################
+  # A2A-GEMM shard loop
+  ##############################################################################
+  def a2aShardLoopLabel(self):
+    return Label("A2AShardLoopBegin", "", alignment=16)
+
+  def openA2AShardLoop(self, kernel):
+    module = Module("openA2AShardLoop")
+    if kernel["ProblemType"]["FusedA2AMode"] != 1:
+      return module
+    from .Components.Signature import fusedA2AKernArgLayout
+    offset = self.states.fusedA2AKernArgBase + fusedA2AKernArgLayout()["FusedW"]
+    module.add(self.argLoader.loadKernArg("A2AShardCounter", "KernArgAddress",
+                                          sgprOffset=hex(offset), dword=1))
+    module.add(SWaitCnt(kmcnt=0, comment="wait FusedW for the shard trip count"))
+    module.add(self.a2aShardLoopLabel())
+    return module
+
+  def closeA2AShardLoop(self, kernel):
+    module = Module("closeA2AShardLoop")
+    if kernel["ProblemType"]["FusedA2AMode"] != 1:
+      return module
+    module.add(SSubU32(dst=sgpr("A2AShardCounter"), src0=sgpr("A2AShardCounter"), src1=1,
+                       comment="dec shard counter"))
+    module.add(SCmpEQI32(src0=sgpr("A2AShardCounter"), src1=0, comment="shard counter==0"))
+    module.add(SCBranchSCC0(labelName=self.a2aShardLoopLabel().getLabelName(),
+                            comment="restart shard loop"))
+    return module
+
+  ##############################################################################
   # Open Loop
   ##############################################################################
   def openLoop(self, kernel, tPA, tPB, loopIdx, noLabelGen=False, beginLabelOnly=False, nta=0, ntb=0):

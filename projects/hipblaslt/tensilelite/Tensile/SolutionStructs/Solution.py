@@ -1865,6 +1865,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason,
                "FusedA2AMode=1 requires DirectToVgprA=DirectToVgprB=0")
         return
+      state["OptNoLoadLoop"] = 0
 
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")
