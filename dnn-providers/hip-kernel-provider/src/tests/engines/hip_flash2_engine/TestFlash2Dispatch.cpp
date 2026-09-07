@@ -150,9 +150,13 @@ TEST(TestFlash2Dispatch, SplitKDoesNotSuppressTinyGridVariant)
     const Flash2Selection split = selectFlash2Config(1, 8, 2048, 128, false);
     EXPECT_EQ(split.splitK, 4) << "split factor should still be recorded";
     if(K_FLASH2_SPLITK_EXECUTES)
+    {
         EXPECT_STREQ(split.variant.tag, "w8q2k4");
+    }
     else
+    {
         EXPECT_STREQ(split.variant.tag, "w4q1k4");
+    }
 
     // ct256 = 128: fills the GPU, so neither rule fires.
     const Flash2Selection full = selectFlash2Config(1, 8, 4096, 128, false);

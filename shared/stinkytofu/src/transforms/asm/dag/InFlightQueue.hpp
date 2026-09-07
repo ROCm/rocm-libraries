@@ -43,8 +43,14 @@ class InFlightQueue {
         currentTime_ += cycles;
     }
 
-    void setThrottleInterval(double issueInterval) {
+    // Configure saturated-queue pacing. When transitionEntries is positive, the first
+    // transitionEntries issued beyond depth use issueInterval * transitionFactor; later
+    // entries use the full interval.
+    void setThrottleInterval(double issueInterval, double transitionFactor = 1.0,
+                             int transitionEntries = 0) {
         throttleInterval_ = issueInterval;
+        transitionFactor_ = std::clamp(transitionFactor, 0.0, 1.0);
+        transitionEntries_ = std::max(0, transitionEntries);
     }
 
     void push(int drainLatency) {
@@ -84,10 +90,11 @@ class InFlightQueue {
         nextIssueTick_ = -1.0;
     }
 
-    // Wait cycles to satisfy a saturated-queue issue pacing interval.
-    // Returns 0 when queue is not full or interval is invalid.
+    // Wait cycles to satisfy the active saturated-queue pacing interval.
+    // Returns 0 below queue depth or when the interval is invalid.
     int throttleWait() const {
-        if (!full() || throttleInterval_ <= 0.0) return 0;
+        evict();
+        if (activeThrottleInterval() <= 0.0) return 0;
         const double now = (double)currentTime_;
         const double nextTick = (nextIssueTick_ < 0.0) ? now : nextIssueTick_;
         return (int)std::max(0.0, std::ceil((nextTick - now) - 1e-9));
@@ -97,8 +104,9 @@ class InFlightQueue {
     void pushWithThrottle(int drainLatency) {
         push(drainLatency);
         const double now = (double)currentTime_;
-        if (full() && throttleInterval_ > 0.0)
-            nextIssueTick_ = std::max(nextIssueTick_, now) + throttleInterval_;
+        const double issueInterval = activeThrottleInterval();
+        if (issueInterval > 0.0)
+            nextIssueTick_ = std::max(nextIssueTick_, now) + issueInterval;
         else
             nextIssueTick_ = now;
     }
@@ -118,6 +126,14 @@ class InFlightQueue {
     }
 
    private:
+    double activeThrottleInterval() const {
+        const int occupancy = (int)expiries_.size();
+        if (depth_ <= 0 || occupancy < depth_ || throttleInterval_ <= 0.0) return 0.0;
+        if (transitionEntries_ > 0 && occupancy < depth_ + transitionEntries_)
+            return throttleInterval_ * transitionFactor_;
+        return throttleInterval_;
+    }
+
     void evict() const {
         while (!expiries_.empty() && expiries_.front() <= currentTime_) expiries_.pop_front();
     }
@@ -125,6 +141,8 @@ class InFlightQueue {
     int depth_ = 0;
     int currentTime_ = 0;
     double throttleInterval_ = 0.0;
+    double transitionFactor_ = 1.0;
+    int transitionEntries_ = 0;
     double nextIssueTick_ = -1.0;
     mutable std::deque<int> expiries_;
 };

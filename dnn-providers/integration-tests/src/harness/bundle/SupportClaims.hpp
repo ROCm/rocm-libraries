@@ -18,7 +18,7 @@ namespace hipdnn_integration_tests::bundle
 
 /// Locates a specific support claim: the sidecar file, which case (if sweep),
 /// and the display path for reports. Constructed once at registration time and
-/// threaded through LoadedBundle -> harness -> observeAllSupport.
+/// threaded through LoadedBundle -> harness -> observeSupport.
 struct SupportClaimLocator
 {
     std::filesystem::path sidecarPath; // X.support.json or sweepDir/support.json

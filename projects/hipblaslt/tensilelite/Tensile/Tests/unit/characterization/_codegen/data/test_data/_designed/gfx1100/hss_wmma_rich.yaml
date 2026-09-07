@@ -55,6 +55,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         # WMMA V1 instruction for gfx1100: [M, N, K, B] = [16, 16, 16, 1]
         # MIWaveTile [1,1] -> MacroTile 32x32 (compact, low-register)
