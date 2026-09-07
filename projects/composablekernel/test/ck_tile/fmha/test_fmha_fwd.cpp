@@ -101,8 +101,6 @@ struct Fp8FamilyTestConfigs
     }
 };
 
-// fp8 output leaves rtol=0, atol=16 (see get_elimit), so these cases are close to
-// unfalsifiable. They still catch dispatch and crash regressions.
 template <>
 struct TestConfigs<FmhaFwdFp8> : Fp8FamilyTestConfigs
 {
