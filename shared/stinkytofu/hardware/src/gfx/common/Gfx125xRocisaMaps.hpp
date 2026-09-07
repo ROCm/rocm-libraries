@@ -319,6 +319,7 @@ inline void setRocisaToArchMap(GpuArch& registry) {
         {"VOrB32", "v_or_b32"},
         {"VXorB32", "v_xor_b32"},
         {"VCndMaskB32", "v_cndmask_b32"},
+        {"VCndMaskB16", "v_cndmask_b16"},
         {"VLShiftLeftB16", "v_lshlrev_b16"},
         {"VLShiftLeftB32", "v_lshlrev_b32"},
         {"VLShiftRightB32", "v_lshrrev_b32"},

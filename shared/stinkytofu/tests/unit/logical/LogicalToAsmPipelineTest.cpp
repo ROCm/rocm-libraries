@@ -114,3 +114,97 @@ TEST_F(IRToAsmPipelineTest, SimpleVectorALU) {
 
     // TODO: Step 4: Emit assembly string and verify output
 }
+
+/**
+ * True16Modifiers set on a LogicalInstruction must survive logical->asm
+ * lowering and render as the .l/.h operand suffix. This is the channel the
+ * pure-Python rocisa_stinkytofu_adaptor uses to carry t16 half-selects (op_sel
+ * would bypass stinkytofu's true16-aware SSA/wait passes).
+ */
+TEST_F(IRToAsmPipelineTest, True16HalfSelectSurvivesLowering) {
+    using H = HighBitSel;
+    Function func("kernel");
+    BasicBlock* entryBB = func.createBasicBlock("entry");
+
+    // Inject an already-derived modifier; deriving it from tagged operands is
+    // tested elsewhere (adaptor _apply_true16 / attachTrue16ModifiersFromOperands).
+    auto add = [&](LogicalInstruction* inst, H dst0, std::vector<H> srcs) {
+        inst->true16 = True16Modifiers(dst0, H::NONE, std::move(srcs));
+        entryBB->appendIR(static_cast<IRBase*>(inst));
+    };
+
+    // Binary f16 ALU (dst, src0, src1) -- HIGH and LOW both exercised.
+    add(VAddF16(v0, v1, v2), H::HIGH, {H::HIGH, H::HIGH});
+    add(VMulF16(v0, v1, v2), H::HIGH, {H::HIGH, H::HIGH});
+    add(VMaxF16(v0, v1, v2), H::LOW, {H::LOW, H::LOW});
+    add(VMinF16(v0, v1, v2), H::LOW, {H::LOW, H::LOW});
+    // Unary f16 transcendentals (dst, src0).
+    add(VExpF16(v0, v1), H::HIGH, {H::HIGH});
+    add(VRcpF16(v0, v1), H::LOW, {H::LOW});
+    // Ternary fma (dst, src0, src1, src2).
+    add(VFmaF16(v0, v1, v2, v3), H::HIGH, {H::HIGH, H::HIGH, H::HIGH});
+    // f16 compares (mask dst has no half; both srcs do).
+    add(VCmpGTF16(v0, v1, v2), H::NONE, {H::HIGH, H::HIGH});
+    add(VCmpGEF16(v0, v1, v2), H::NONE, {H::LOW, H::LOW});
+    // b16 select (src2 is VCC -> no half) and b16 shift (shift amount is src0).
+    add(VCndMaskB16(v0, v1, v2, v3), H::HIGH, {H::HIGH, H::HIGH});
+    add(VLShiftLeftB16(v0, v1, v2), H::HIGH, {H::NONE, H::HIGH});
+    // Conversions: half rides on whichever operand carries the 16-bit value.
+    add(VCvtF16toF32(v0, v1), H::NONE, {H::HIGH});     // f16 src -> f32 dst
+    add(VCvtF32toF16(v0, v1), H::HIGH, {H::NONE});     // f32 src -> f16 dst
+    add(VCvtPkFP8toF32(v0, v1), H::NONE, {H::HIGH});   // packed-fp8 src
+    add(VCvtPkBF8toF32(v0, v1), H::NONE, {H::HIGH});   // packed-bf8 src
+    add(PVCvtBF16toFP32(v0, v1), H::NONE, {H::HIGH});  // bf16 src
+
+    PassManager pm;
+    GemmTileConfig config;
+    config.arch = {12, 5, 0};  // Gfx1250
+    config.TileA0 = 16;
+    config.TileB0 = 16;
+    config.TileM0 = 16;
+    config.NumGRA = 4;
+    config.NumGRB = 4;
+    config.NumGRM = 4;
+    config.NumWaves = 1;
+    pm.setGemmTileConfig(config);
+    pm.addPass(createCompositeInstructionLoweringPass());
+    pm.addPass(createToStinkyAsmPass());
+    pm.run(func);
+
+    StinkyAsmEmitter emitter;
+    std::string asmText;
+    for (BasicBlock& bb : func) {
+        for (IRBase& ir : bb) {
+            if (ir.getType() == IRBase::IRType::StinkyTofu) {
+                asmText += emitter.emit(static_cast<StinkyInstruction&>(ir)) + "\n";
+            }
+        }
+    }
+
+    // Every expected line must appear verbatim; a dropped half-select would
+    // silently strip the .l/.h suffix (the exact bug this guards against).
+    const std::vector<std::string> expected = {
+        "v_add_f16 v0.h, v1.h, v2.h",
+        "v_mul_f16 v0.h, v1.h, v2.h",
+        "v_max_f16 v0.l, v1.l, v2.l",
+        "v_min_f16 v0.l, v1.l, v2.l",
+        "v_exp_f16 v0.h, v1.h",
+        "v_rcp_f16 v0.l, v1.l",
+        "v_fma_f16 v0.h, v1.h, v2.h, v3.h",
+        "v_cmp_gt_f16 v0, v1.h, v2.h",
+        "v_cmp_ge_f16 v0, v1.l, v2.l",
+        "v_cndmask_b16 v0.h, v1.h, v2.h",
+        "v_lshlrev_b16 v0.h, v1, v2.h",
+        "v_cvt_f32_f16 v0, v1.h",
+        "v_cvt_f16_f32 v0.h, v1",
+        "v_cvt_pk_f32_fp8 v0, v1.h",
+        "v_cvt_pk_f32_bf8 v0, v1.h",
+        "v_cvt_f32_bf16 v0, v1.h",
+    };
+    for (const std::string& want : expected) {
+        EXPECT_NE(asmText.find(want), std::string::npos)
+            << "true16 half-select missing/dropped; expected line:\n  " << want
+            << "\nfull assembly:\n"
+            << asmText;
+    }
+}

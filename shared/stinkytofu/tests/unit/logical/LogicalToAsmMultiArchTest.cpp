@@ -160,6 +160,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return VPrngB32(vgpr(0), vgpr(1));
         case logical::VCndMaskB32:
             return VCndMaskB32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
+        case logical::VCndMaskB16:
+            return VCndMaskB16(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VLShiftLeftB16:
             return VLShiftLeftB16(vgpr(0), vgpr(1), vgpr(2));
         case logical::VLShiftLeftB32:
@@ -867,6 +869,7 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::VXorB32, "v_xor_b32"},
     {logical::VAndOrB32, "v_and_or_b32"},
     {logical::VCndMaskB32, "v_cndmask_b32"},
+    {logical::VCndMaskB16, "v_cndmask_b16"},
     // Vector Shift
     {logical::VLShiftLeftB32, "v_lshlrev_b32"},
     {logical::VLShiftRightB32, "v_lshrrev_b32"},
