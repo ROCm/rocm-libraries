@@ -1,7 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for Tensile.RocisaStatus._rocisa_install_status."""
+"""Unit tests for Tensile.RocisaStatus._rocisa_install_status (the three-way
+rocisa detection that drives auto-enabling HIPBLASLT_BUNDLE_PYTHON_DEPS in
+tasks.build_client)."""
 
 from importlib import metadata
 

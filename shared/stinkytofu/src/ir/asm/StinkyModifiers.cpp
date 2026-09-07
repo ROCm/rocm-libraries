@@ -78,8 +78,9 @@ std::string dppCtrlToAsmStr(DppCtrl ctrl) {
 static int parseTrailingInt(std::string_view s, std::string_view prefix) {
     if (s.size() <= prefix.size()) return -1;
     auto numStr = s.substr(prefix.size());
+    std::string numStrOwned(numStr);
     char* end = nullptr;
-    long val = std::strtol(std::string(numStr).c_str(), &end, 10);
+    long val = std::strtol(numStrOwned.c_str(), &end, 10);
     return (end && *end == '\0') ? static_cast<int>(val) : -1;
 }
 
