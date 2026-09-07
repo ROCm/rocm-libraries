@@ -28,21 +28,21 @@ using hipdnn_test_sdk::detail::denseKvStrides;
 using hipdnn_test_sdk::detail::derivePagedKvGeometry;
 
 // The committed paged bundle's geometry: hd128, page 64, GQA 4, 2 sequences.
-constexpr int64_t kNumBlocks       = 128;
-constexpr int64_t kNumKvHeads      = 4;
-constexpr int64_t kPageSize        = 64;
-constexpr int64_t kHeadSize        = 128;
-constexpr int64_t kNumSeqs         = 2;
-constexpr int64_t kMaxBlocksPerSeq = 32;
+constexpr int64_t NUM_BLOCKS       = 128;
+constexpr int64_t NUM_KV_HEADS      = 4;
+constexpr int64_t PAGE_SIZE        = 64;
+constexpr int64_t HEAD_SIZE        = 128;
+constexpr int64_t NUM_SEQS         = 2;
+constexpr int64_t MAX_BLOCKS_PER_SEQ = 32;
 
 std::vector<int64_t> bundleKDims()
 {
-    return {kNumBlocks, kNumKvHeads, kPageSize, kHeadSize};
+    return {NUM_BLOCKS, NUM_KV_HEADS, PAGE_SIZE, HEAD_SIZE};
 }
 
 std::vector<int64_t> bundlePageTableDims()
 {
-    return {kNumSeqs, kMaxBlocksPerSeq};
+    return {NUM_SEQS, MAX_BLOCKS_PER_SEQ};
 }
 
 TEST(PagedKvGather, DerivesTheBundleGeometry)
@@ -50,12 +50,12 @@ TEST(PagedKvGather, DerivesTheBundleGeometry)
     const auto geometry
         = derivePagedKvGeometry(bundleKDims(), bundlePageTableDims(), {1024, 2048});
 
-    EXPECT_EQ(geometry.numBlocks, kNumBlocks);
-    EXPECT_EQ(geometry.numKvHeads, kNumKvHeads);
-    EXPECT_EQ(geometry.pageSize, kPageSize);
-    EXPECT_EQ(geometry.headSize, kHeadSize);
-    EXPECT_EQ(geometry.numSeqs, kNumSeqs);
-    EXPECT_EQ(geometry.maxBlocksPerSeq, kMaxBlocksPerSeq);
+    EXPECT_EQ(geometry.numBlocks, NUM_BLOCKS);
+    EXPECT_EQ(geometry.numKvHeads, NUM_KV_HEADS);
+    EXPECT_EQ(geometry.pageSize, PAGE_SIZE);
+    EXPECT_EQ(geometry.headSize, HEAD_SIZE);
+    EXPECT_EQ(geometry.numSeqs, NUM_SEQS);
+    EXPECT_EQ(geometry.maxBlocksPerSeq, MAX_BLOCKS_PER_SEQ);
     // The dense buffer is sized by the LONGEST sequence, so every sequence
     // occupies one rectangular slot the reference can address with strides.
     EXPECT_EQ(geometry.denseSeqLen, 2048);
@@ -67,10 +67,10 @@ TEST(PagedKvGather, DenseLayoutIsPackedBhsd)
         = derivePagedKvGeometry(bundleKDims(), bundlePageTableDims(), {1024, 2048});
 
     EXPECT_EQ(denseKvDims(geometry),
-              (std::vector<int64_t>{kNumSeqs, kNumKvHeads, 2048, kHeadSize}));
+              (std::vector<int64_t>{NUM_SEQS, NUM_KV_HEADS, 2048, HEAD_SIZE}));
     // Packed BHSD: each stride is the product of the extents below it.
     EXPECT_EQ(denseKvStrides(geometry),
-              (std::vector<int64_t>{kNumKvHeads * 2048 * kHeadSize, 2048 * kHeadSize, kHeadSize, 1}));
+              (std::vector<int64_t>{NUM_KV_HEADS * 2048 * HEAD_SIZE, 2048 * HEAD_SIZE, HEAD_SIZE, 1}));
 }
 
 TEST(PagedKvGather, AcceptsALengthThatDoesNotFillItsLastPage)
@@ -106,7 +106,7 @@ TEST(PagedKvGather, RejectsASequenceCountMismatch)
 
 TEST(PagedKvGather, RejectsAKvCacheOfTheWrongRank)
 {
-    EXPECT_THROW(derivePagedKvGeometry({kNumBlocks, kPageSize, kHeadSize},
+    EXPECT_THROW(derivePagedKvGeometry({NUM_BLOCKS, PAGE_SIZE, HEAD_SIZE},
                                        bundlePageTableDims(),
                                        {1024, 2048}),
                  std::invalid_argument);
@@ -114,7 +114,7 @@ TEST(PagedKvGather, RejectsAKvCacheOfTheWrongRank)
 
 TEST(PagedKvGather, RejectsAPageTableOfTheWrongRank)
 {
-    EXPECT_THROW(derivePagedKvGeometry(bundleKDims(), {kNumSeqs}, {1024, 2048}),
+    EXPECT_THROW(derivePagedKvGeometry(bundleKDims(), {NUM_SEQS}, {1024, 2048}),
                  std::invalid_argument);
 }
 
