@@ -6711,6 +6711,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self._nextLdsToken(self.states.ldsTensorTokenIdx)
       module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, i, True))
 
+    module.add(self.a2aTransitionPhase(kernel, tensorParametersA, tensorParametersB))
     module.add(self.closeA2AShardLoop(kernel))
 
     # Drop GlobalReadIncs* from the free pool so endSummation's store-phase SRDs don't
@@ -10724,6 +10725,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   @abc.abstractmethod
   def closeA2AShardLoop(self, kernel):
+    return ""
+
+  ##############################################################################
+  # A2A-GEMM Transition Phase
+  ##############################################################################
+  @abc.abstractmethod
+  def a2aTransitionPhase(self, kernel, tPA, tPB):
     return ""
 
   ##############################################################################

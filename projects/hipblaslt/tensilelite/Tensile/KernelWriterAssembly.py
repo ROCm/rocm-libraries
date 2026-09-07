@@ -7794,6 +7794,14 @@ class KernelWriterAssembly(KernelWriter):
                             comment="restart shard loop"))
     return module
 
+  def a2aTransitionPhase(self, kernel, tPA, tPB):
+    module = Module("a2aTransitionPhase")
+    if kernel["ProblemType"]["FusedA2AMode"] != 1:
+      return module
+    module.addComment1("A2A_TRANSITION begin")
+    module.addComment1("A2A_TRANSITION end")
+    return module
+
   ##############################################################################
   # Open Loop
   ##############################################################################
