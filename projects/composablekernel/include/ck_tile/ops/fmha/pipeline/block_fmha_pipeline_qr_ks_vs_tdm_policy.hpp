@@ -194,9 +194,16 @@ inline constexpr bool is_qr_tdm_measured_tiling_v =
     std::is_same_v<typename Problem::BlockFmhaShape::Gemm0WarpTile, sequence<16, 16, K>> &&
     std::is_same_v<typename Problem::BlockFmhaShape::Gemm1WarpTile, sequence<16, 16, K>>;
 
+// Temporary: this trait mix lands at 346 VGPR with V padding, one allocation block over the
+// 336 that keeps 3 workgroups/CU. Drop this once the register pressure is brought back down.
+template <typename Problem>
+inline constexpr bool is_qr_tdm_padding_regressing_traits_v =
+    Problem::QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE &&
+    Problem::BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS && !Problem::FmhaMask::IsMasking;
+
 template <typename Problem>
 inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
-    is_qr_tdm_padding_supported_arch_v &&
+    is_qr_tdm_padding_supported_arch_v && !is_qr_tdm_padding_regressing_traits_v<Problem> &&
     (is_qr_tdm_measured_tiling_v<Problem, bf16_t, 64, 32> ||
      is_qr_tdm_measured_tiling_v<Problem, half_t, 64, 32> ||
      is_qr_tdm_measured_tiling_v<Problem, fp8_t, 128, 128>) &&
