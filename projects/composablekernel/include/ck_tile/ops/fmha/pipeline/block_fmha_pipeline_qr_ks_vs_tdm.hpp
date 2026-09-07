@@ -1404,17 +1404,14 @@ struct BlockFmhaPipelineQRKSVSTdm
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
             k_tile = load_tile(k_lds_read_window);
 
-            static_for<0, 12, 1>{}([&](auto i) {
+            static_for<0, 3, 1>{}([&](auto i) {
                 ignore = i;
-                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
-                __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS_READ
+                __builtin_amdgcn_sched_group_barrier(0x008, 4, 0); // MFMA
+                __builtin_amdgcn_sched_group_barrier(0x100, 8, 0); // DS_READ
             });
 
-            static_for<0, 4, 1>{}([&](auto i) {
-                ignore = i;
-                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS_READ
-            });
+            __builtin_amdgcn_sched_group_barrier(0x008, 4, 0); // MFMA
+            __builtin_amdgcn_sched_group_barrier(0x100, 4, 0); // DS_READ
         }; // mainloop
 
         do
