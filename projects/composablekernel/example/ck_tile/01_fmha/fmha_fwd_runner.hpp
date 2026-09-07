@@ -932,6 +932,20 @@ fwd_result fmha_fwd_run(mode_enum mode,
             }
         }
     }
+    // A descale is dequantized_max/quantized_max, and quantized_max is what the fill
+    // actually wrote, not what the format can hold. The two coincide only for init=3,
+    // which fills to the fp8 maximum; every other fill leaves headroom, and anchoring
+    // on the format instead shrinks the logits by the ratio between them until the
+    // softmax is uniform to within a rounding step. Measured rather than tabulated so
+    // that the fills without a nominal bound, nf and tf, are covered too.
+    const auto tensor_max = [](auto& t) {
+        float m = 0.f;
+        t.ForEach([&](auto& self, const auto& i) {
+            m = std::max(m, std::abs(ck_tile::type_convert<float>(self(i))));
+        });
+        return 0.f < m ? m : 1.f;
+    };
+
     if constexpr(is_mx)
     {
         auto gen_scales = [&](auto& scales, auto data, float range) {
@@ -973,22 +987,22 @@ fwd_result fmha_fwd_run(mode_enum mode,
     }
     else if(qscale.type == quant_scale_enum::pertensor)
     {
-        float q_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<QDataType>::max());
-        float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
-        float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
+        const float q_quant_max = tensor_max(q_host);
+        const float k_quant_max = tensor_max(k_host);
+        const float v_quant_max = tensor_max(v_host);
 
-        float qkv_max = 3.f;
+        const float qkv_max = 3.f;
 
-        q_descale_host(0) = qkv_max / q_dtype_max;
-        k_descale_host(0) = qkv_max / k_dtype_max;
-        v_descale_host(0) = qkv_max / v_dtype_max;
+        q_descale_host(0) = qkv_max / q_quant_max;
+        k_descale_host(0) = qkv_max / k_quant_max;
+        v_descale_host(0) = qkv_max / v_quant_max;
     }
     else if(qscale.type == quant_scale_enum::blockscale)
     {
-        float q_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<QDataType>::max());
-        float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
+        const float q_quant_max = tensor_max(q_host);
+        const float k_quant_max = tensor_max(k_host);
 
-        float qkv_max = 3.f;
+        const float qkv_max = 3.f;
 
         // Powers of two because v_descale ends up in an E8M0 scale operand.
         // Neighbouring entries differ so an index off-by-one changes the answer.
@@ -1002,22 +1016,21 @@ fwd_result fmha_fwd_run(mode_enum mode,
         };
         auto top_exp = [](float v) { return static_cast<int>(std::floor(std::log2(v))); };
 
-        const float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
-        const int e_v_top       = (init_method == "3") ? top_exp(qkv_max / v_dtype_max) : 2;
+        const float v_quant_max = tensor_max(v_host);
 
-        fill_blockscale(q_descale_host, top_exp(qkv_max / q_dtype_max), 0);
-        fill_blockscale(k_descale_host, top_exp(qkv_max / k_dtype_max), 1);
-        fill_blockscale(v_descale_host, e_v_top, 2);
+        fill_blockscale(q_descale_host, top_exp(qkv_max / q_quant_max), 0);
+        fill_blockscale(k_descale_host, top_exp(qkv_max / k_quant_max), 1);
+        fill_blockscale(v_descale_host, top_exp(qkv_max / v_quant_max), 2);
     }
     else if(qscale.type == quant_scale_enum::perhead)
     {
-        float q_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<QDataType>::max());
-        float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
-        float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
+        const float q_quant_max = tensor_max(q_host);
+        const float k_quant_max = tensor_max(k_host);
+        const float v_quant_max = tensor_max(v_host);
 
-        float qkv_max = 3.f;
+        const float qkv_max = 3.f;
 
-        // A descale is dequantized_max/dtype_max, so these are anchored on qkv_max/dtype_max
+        // A descale is dequantized_max/quant_max, so these are anchored on qkv_max/quant_max
         // like the other granularities. Neighbouring entries differ; no mantissa is a power
         // of two.
         constexpr int kCycle = 8;
@@ -1032,9 +1045,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
         };
         auto top_exp = [](float v) { return static_cast<int>(std::floor(std::log2(v))); };
 
-        fill_perhead(q_descale_host, top_exp(qkv_max / q_dtype_max), 0);
-        fill_perhead(k_descale_host, top_exp(qkv_max / k_dtype_max), 3);
-        fill_perhead(v_descale_host, top_exp(qkv_max / v_dtype_max), 5);
+        fill_perhead(q_descale_host, top_exp(qkv_max / q_quant_max), 0);
+        fill_perhead(k_descale_host, top_exp(qkv_max / k_quant_max), 3);
+        fill_perhead(v_descale_host, top_exp(qkv_max / v_quant_max), 5);
     }
 
     iota_shuffle(block_table_host.begin(), block_table_host.end(), 0, random_engine);
