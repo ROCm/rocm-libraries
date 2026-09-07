@@ -206,6 +206,8 @@ class StateValues:
   invalidLSUCode: bool                   = False
   inTailLoop: bool                       = False
   overflowedResources: int               = 0
+  # Pool size behind a deferred SGPR overflow; 0 once resolveDeferredSgprOverflow rules.
+  sgprOverflowPendingRA: int             = 0
   ## Schedule
   scheduleGlobalRead: int                = 0
   scheduleLocalWrite: int                = 0
@@ -5350,6 +5352,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     moduleKernelBody.addBody(module)
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
+    self.applyOverflowVerdict(kernel, moduleKernelBody)
 
 
     # TODO: Check what does this do and enable this if needed
@@ -6789,7 +6792,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.add(Label("ASM_End", "The end of the kernel"))
 
     moduleKernelBody.addBody(module)
+    # Judge, defer, act. The middle step is this path's alone: it runs the
+    # allocation pipeline below and resolves the deferral.
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
+    self.deferSgprOverflowForAllocation(kernel)
+    self.applyOverflowVerdict(kernel, moduleKernelBody)
 
     # Tensile instruction pass, temporarily disable due to build time.
     # Kernels with epilog especially with activation is too long (50000~ lines).
@@ -6814,10 +6821,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
 
+    # A code recorded by now is final: the resolver runs only when it is 0.
+    rejected = self.states.overflowedResources != 0
+
     # Run StinkyTofu conversion for supported architectures
     t0_start = time.perf_counter()
     stinky_opt_level = kernel.get("_StinkyTofuOptLevel")
-    if stinky_opt_level is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
+    if not rejected and stinky_opt_level is not None \
+       and rocisa.isSupportedByStinkyTofu(self.states.version):
       print2(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
 
       moduleKernelBody.body.setParent()
@@ -6936,6 +6947,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
       t2_end = time.perf_counter()
       print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
 
+      # Pay off the deferral: the verdict now comes from what the emitted code
+      # declares, not from the pool estimate. The guard is defensive -- error is
+      # always 0 here -- because a resolver that accepts would erase a rejection.
+      if error == 0:
+        error = self.resolveDeferredSgprOverflow(kernel, moduleKernelBody,
+                                                 stModule.getDeclaredSgprCount())
+        if error != 0:
+          # Rejected after all, so the skipped stub is due: ForceGenerateKernel
+          # builds this source, so replace it with the stubbed rocisa module.
+          self.applyOverflowStub(moduleKernelBody)
+          st_asm = str(moduleKernelBody)
+      else:
+        self.states.sgprOverflowPendingRA = 0
+
       if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
         t3_start = time.perf_counter()
         import hashlib, fcntl
@@ -6979,6 +7004,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       print2(f"Using StinkyTofu Assembly")
       return (error, st_asm)
     else:
+      # Unreachable: the mode gates a deferral on the same two questions the
+      # conversion gate above asks. Kept, and loud, because a deferral nothing
+      # resolves would silently accept an over-budget kernel.
+      if self.states.sgprOverflowPendingRA:
+        printWarning("%s: deferred SGPR overflow but no StinkyTofu module; the mode and "
+                     "the conversion gate disagree" % self.states.kernelName)
+        self.states.sgprOverflowPendingRA = 0
+        self.states.overflowedResources = 2
+        error = 2
       print2(f"Using Original Rocisa Assembly")
       return (error, str(moduleKernelBody))
 
@@ -10417,6 +10451,39 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def updateOccupancyFromMaxVgpr(self, kernel, mkb, max_vgpr: int) -> None:
     """Override in KernelWriterAssembly to update CUOccupancy after rocIsaPass
     using the pre-computed maxVgpr from rocIsaPassResult."""
+    pass
+
+  def stinkyTofuRegisterAllocationMode(self, kernel) -> int:
+    """Effective scalar allocation mode: 0 off, 1 shadow, 2 apply, 3 force apply,
+    higher clamping to 3, and 0 whenever the StinkyTofu path will not run -- the
+    module is built on the same conditions checked here, so mode 3 guarantees the
+    resolver is reached, which is what makes deferring safe.
+
+    Only mode 3 defers: shadow could not lower a count, and plain apply keeps the
+    old accept set, so enabling allocation cannot change which solutions survive.
+    """
+    if kernel.get("_StinkyTofuOptLevel") is None:
+      return 0
+    if not rocisa.isSupportedByStinkyTofu(self.states.version):
+      return 0
+    # TODO: ask whether the backend's capabilities include the allocation passes
+    configured = int(globalParameters.get("StinkyTofuRegisterAllocation", 0))
+    return max(0, min(configured, 3))
+
+  def deferSgprOverflowForAllocation(self, kernel) -> None:
+    """Override in KernelWriterAssembly to defer an SGPR verdict to allocation."""
+    pass
+
+  def applyOverflowVerdict(self, kernel, mkb) -> None:
+    """Override in KernelWriterAssembly to report and act on an overflow."""
+    pass
+
+  def resolveDeferredSgprOverflow(self, kernel, mkb, declaredSgprs: int) -> int:
+    """Override in KernelWriterAssembly to judge a deferred SGPR overflow."""
+    return 0
+
+  def applyOverflowStub(self, mkb) -> None:
+    """Override in KernelWriterAssembly to stub out a rejected kernel's body."""
     pass
 
   ##############################################################################

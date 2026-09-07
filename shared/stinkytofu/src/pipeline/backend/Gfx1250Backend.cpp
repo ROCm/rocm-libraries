@@ -114,10 +114,12 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     }
 }
 
-/// Register allocation from ModuleOptions::RegisterAllocation:
-///   - 0 off
-///   - 1 shadow (colour and report, no rewrite)
-///   - 2 apply (higher values clamp to apply)
+/// Register allocation from ModuleOptions::RegisterAllocation: 0 off, 1 shadow,
+/// 2 and above apply, as Mode below describes.
+///
+/// The producer reads 3 as "let an over-budget kernel reach allocation and
+/// re-judge afterwards", a policy that changes nothing about this pipeline.
+/// Clamping, rather than switching on the value, is what keeps it that way.
 void addRegisterAllocationPasses(PassManager& pm, const StinkyAsmModule& module) {
     enum class Mode : int {
         Off = 0,     ///< Keep the producer's numbering; add no passes.
