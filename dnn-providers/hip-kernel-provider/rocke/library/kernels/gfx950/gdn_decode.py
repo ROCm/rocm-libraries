@@ -146,6 +146,14 @@ def is_valid_spec(spec: GdnDecodeSpec, arch: str = "gfx950") -> Tuple[bool, str]
 
     if spec.dtype not in ("f16", "bf16") or spec.state_dtype not in ("f16", "bf16"):
         return False, f"unsupported dtype {spec.dtype}/{spec.state_dtype}"
+    for _field, _value in (
+        ("num_k_heads", spec.num_k_heads),
+        ("num_v_heads", spec.num_v_heads),
+        ("head_k_dim", spec.head_k_dim),
+        ("head_v_dim", spec.head_v_dim),
+    ):
+        if _value <= 0:
+            return False, f"{_field} must be positive, got {_value}"
     if spec.num_v_heads % spec.num_k_heads:
         return False, "num_v_heads must be divisible by num_k_heads"
     if spec.head_k_dim % STATE_VEC or spec.head_v_dim % STATE_VEC:
@@ -156,6 +164,14 @@ def is_valid_spec(spec: GdnDecodeSpec, arch: str = "gfx950") -> Tuple[bool, str]
             f"{target.max_threads_per_block} on {arch}"
         )
     if not spec.simple:
+        for _field, _value in (
+            ("num_warps", spec.num_warps),
+            ("warp_threads_k", spec.warp_threads_k),
+            ("blocks_per_v_dim", spec.blocks_per_v_dim),
+            ("wave_size", spec.wave_size),
+        ):
+            if _value <= 0:
+                return False, f"{_field} must be positive, got {_value}"
         if spec.wave_size % spec.warp_threads_k:
             return False, "wave_size must be divisible by warp_threads_k"
         vpt = STATE_VEC

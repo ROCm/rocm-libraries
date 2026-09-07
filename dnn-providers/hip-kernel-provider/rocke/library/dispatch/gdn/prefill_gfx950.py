@@ -64,6 +64,9 @@ ARCH = "gfx950"
 # (max_batch_heads, value_splits). BH = batch * num_v_heads. The final band is
 # open-ended (value_splits=1, natural parallelism fills the GPU). Measured
 # anchors: BH<=64 -> value_splits=8, BH<=128 -> 2. Ratios in the internal perf repo.
+# Snapshot: regenerate with
+# ``python -m benchmarks.gfx950.gdn.sweep_prefill_value_splits`` after any
+# kernel, compiler, or shape change -- a baked table drifts otherwise.
 _VALUE_SPLIT_BANDS = (
     (64, 8),
     (128, 2),
@@ -72,10 +75,11 @@ _DEFAULT_VALUE_SPLITS = 1
 
 # Each value_splits fixes the scan tile: the scan block must cover the split V
 # extent, and vs=8 additionally needs the M16 scan atom. Mirrors the builder's
-# ``aligned_split_specs``. Raw prep overrides block_size back to 256.
+# ``aligned_split_specs``. Raw prep overrides block_size back to 256. Only the
+# splits the bands actually select (8/2/1) are listed; the builder also defines
+# vs=4, but no band picks it here so it is intentionally absent.
 _SPLIT_TILE = {
     8: dict(block_size=64, scan_atom_m=16),
-    4: dict(block_size=64),
     2: dict(block_size=128),
     1: dict(block_size=256),
 }

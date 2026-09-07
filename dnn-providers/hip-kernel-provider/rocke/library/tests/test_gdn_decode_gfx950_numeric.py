@@ -201,6 +201,20 @@ def test_state_dtype_variant_is_correct(harness):
 
 
 @requires_gfx950
+def test_f16_io_variant_is_correct(harness):
+    """f16 I/O is an advertised dtype -- ``is_valid_spec`` admits it -- so a
+    config the validator says yes to must be numerically checked on device, not
+    just assumed. (The default path is bf16 I/O.)"""
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
+
+    spec = dc.replace(GdnDecodeSpec(), dtype="f16", state_dtype="f16")
+    ok, why = is_valid_spec(spec, arch=ARCH)
+    assert ok, why
+    out_err, state_err = harness["check"](spec, 8)
+    assert max(out_err, state_err) <= harness["TOL"]
+
+
+@requires_gfx950
 def test_end_to_end_through_the_dispatch_result(harness):
     """Drive a launch from the dispatch result alone, as a caller would.
 

@@ -84,6 +84,25 @@ class TestSpecAdmission(unittest.TestCase):
         ok, why = is_valid_spec(dc.replace(GdnDecodeSpec(), dtype="f32"), arch=ARCH)
         self.assertFalse(ok)
 
+    def test_nonpositive_geometry_is_rejected_cleanly(self):
+        # A zero geometry field must come back as a reason, never a
+        # ZeroDivisionError from a downstream ``%`` divisibility check -- the
+        # validator's contract is "if I say yes, it builds; if no, here's why".
+        for field in (
+            "num_k_heads",
+            "num_v_heads",
+            "head_k_dim",
+            "head_v_dim",
+            "num_warps",
+            "warp_threads_k",
+            "blocks_per_v_dim",
+        ):
+            ok, why = is_valid_spec(
+                dc.replace(GdnDecodeSpec(), **{field: 0}), arch=ARCH
+            )
+            self.assertFalse(ok, field)
+            self.assertIn("positive", why)
+
 
 class TestBuilderRejectsInvalidSpecs(unittest.TestCase):
     def test_build_refuses_an_invalid_spec(self):

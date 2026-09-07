@@ -68,6 +68,29 @@ def test_prep_kv_group_tracks_gqa_ratio():
     assert result.spec.kv_group == 4
 
 
+def test_dispatched_prep_matches_the_builder_prep_spec():
+    """The dispatcher hand-builds the raw GDN prep spec; pin it to the builder's
+    canonical ``prep_spec_of(scan, raw=True)`` plus the GDN gate flags, so the
+    two copies of that derivation cannot drift apart unnoticed (the dispatch
+    layer cannot import the builder helper, hence a test rather than delegation).
+    """
+    import dataclasses
+
+    pytest.importorskip("torch", reason="builder module imports torch")
+    from builders.gfx950.kda.kda_chunk_split import prep_spec_of
+    from dispatch.gdn.prefill_gfx950 import _prep_spec, _scan_spec
+
+    for num_v_heads in (8, 16, 32):  # kv_group 1, 2, 4
+        req = _req(num_v_heads=num_v_heads, algorithm="chunk_prep")
+        scan = _scan_spec(req)
+        expected = dataclasses.replace(
+            prep_spec_of(scan, raw=True),
+            gate_kind="gdn",
+            kv_group=int(req.kv_group),
+        )
+        assert _prep_spec(req) == expected, f"prep drift at kv_group={req.kv_group}"
+
+
 @pytest.mark.parametrize(
     "num_v_heads,batch_heads",
     [

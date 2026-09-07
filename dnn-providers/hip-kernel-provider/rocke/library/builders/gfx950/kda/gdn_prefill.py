@@ -12,12 +12,14 @@ Run (on a gfx950 box)::
 
     python gdn_prefill.py            # parity sweep, split path, MHA + GQA
 """
+
 from __future__ import annotations
 
 import dataclasses
 import math
 import os
 import sys
+import warnings
 
 try:
     import rocke  # noqa: F401
@@ -62,6 +64,30 @@ def make_gdn_inputs(B, Hv, Hk, T, DK, DV, gate_low=-0.5, seed=0, device="cuda"):
     # the tail, which made the parity latently flaky as head count grew.
     a_log = torch.randn(Hv, dtype=torch.float32, **kw).clamp(max=math.log(8.0))
     return q, k, v, a, beta, a_log, dt_bias
+
+
+def warn_if_decay_out_of_range(a_log, a, dt_bias, *, limit=5.0):
+    """Warn (once) if the intra-chunk decay exponent exceeds the design range.
+
+    The chunkwise stabilization is sized for the reference gate lower bound
+    (-5); the intra-chunk cumulative decay ``exp(a_log) * softplus(a + dt_bias)``
+    beyond ~``limit`` loses bf16 precision on the steepest-decay head and its
+    output degrades. This is a documented, accepted limit -- the guard exists so
+    a workload that drives the gate past it gets a loud warning instead of a
+    silent wrong number. Cheap host reduction; call it once per problem, not in
+    a timed launch loop. Returns the observed peak decay exponent.
+    """
+    x = a.float() + dt_bias.float()
+    softplus = torch.where(x > 20.0, x, torch.log1p(torch.exp(x)))
+    peak = (torch.exp(a_log.float()) * softplus).abs().max().item()
+    if peak > limit:
+        warnings.warn(
+            f"GDN decay exponent peak {peak:.2f} exceeds the stabilized design "
+            f"range (~{limit}); the steepest-decay head may degrade. See the "
+            f"prefill decay-range note.",
+            stacklevel=2,
+        )
+    return peak
 
 
 def ref_gdn_raw(q, k, v, a, beta, a_log, dt_bias, scale, kv_group, h0=None):
