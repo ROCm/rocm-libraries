@@ -36,6 +36,11 @@ product is thread-local and needs no cross-thread reduction. Q/K L2 norms and
 ``dot(k,q)`` are recomputed per thread (redundant but simple). This is
 VGPR-heavy by design; the warp-tiled reduction is the first optimization pass,
 not part of the correctness baseline.
+
+Built for gfx950 (wave64) and placed alongside the KDA chunkwise kernel in
+``kernels/gfx950/``; the ``arch`` argument is a validation/target hook, not a
+portability claim -- a new arch adds its own tuned specs here rather than
+importing across folders.
 """
 
 from __future__ import annotations
