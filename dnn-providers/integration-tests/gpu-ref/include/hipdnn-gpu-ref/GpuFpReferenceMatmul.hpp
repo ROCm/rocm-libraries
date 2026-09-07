@@ -158,6 +158,11 @@ private:
         // Validate tensor dimensions
         validateConsistentDimensions(a.dims(), b.dims(), c.dims());
         validateConsistentLayouts(a.strides(), b.strides(), c.strides());
+        if(!a.isPacked() || !b.isPacked() || !c.isPacked())
+        {
+            throw std::invalid_argument(
+                "Matmul requires A, B and C tensors to have a contiguous layout.");
+        }
 
         // Validate data types
         static_assert(IS_SUPPORTED_DATA_TYPE<ADataType>,
