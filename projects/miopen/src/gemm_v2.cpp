@@ -445,8 +445,6 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
     check_hipblas_status(hipblasLtMatmulDescSetAttribute(
         hipBLASLtHandles.matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)));
 
-    /// \todo Callers that do not supply a workspace still get the workspace-free heuristic.
-    /// --BrianHarrisonAMD June 2024
     size_t max_workspace_size =
         (user_workspace != nullptr && !gemm_desc.deterministic) ? user_workspace_size : 0;
     void* workspace = (max_workspace_size != 0) ? user_workspace : nullptr;
