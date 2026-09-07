@@ -3283,6 +3283,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, i))
           if self.states.actualSummationLoops>1:
             module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, i))
+        module.add(self.openA2AShardLoop(kernel))
         module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
       if deferInitC:
@@ -7021,6 +7022,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self._dcpAdvanceTokens("Tensor")
       module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, i, True))
 
+    module.add(self.closeA2AShardLoop(kernel))
+
     # Drop GlobalReadIncs* from the free pool so endSummation's store-phase SRDs don't
     # re-check-out an already-grabbed slot.
     for grIncName in ("GlobalReadIncsA", "GlobalReadIncsB", "GlobalReadIncsMXSA", "GlobalReadIncsMXSB"):
@@ -7473,10 +7476,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # TODO re-enable..
     if not kernel["ForceDisableShadowInit"] and not kernel["UseSubtileImpl"]:
       if kernel["PrefetchGlobalRead"]:
-        if self.states.actualSummationLoops == 1:
+        if self.states.actualSummationLoops == 1 and kernel["ProblemType"]["FusedA2AMode"] != 1:
           self.states.doShadowInit = 2 # 2 is both store setup and initC
         else:
-          # can't do shadow initC with multiple summation since this resets the ValuC counters
+          # can't do shadow initC inside an outer loop since this resets the ValuC counters
           # on each unroll iteration.
           self.states.doShadowInit = 1 # 1 is just store setup
 
@@ -9858,6 +9861,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     for i in range(kernel["ProblemType"]["NumIndicesSummation"]):
       self.defineSgpr(self.loopCounterName(kernel,i), 1)
 
+    if kernel["ProblemType"]["FusedA2AMode"] == 1:
+      self.defineSgpr("A2AShardCounter", 1)
+
     self.defineSgpr("OrigLoopCounter", 1)
 
     if self.debugConfig.debugKernel:
@@ -10952,6 +10958,20 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                 finalLoop, emitEndLabelOnly=False, oddLabel=False, \
                 skipCondJumpCounter=-1, NLLlast=False, \
                 nta=0, ntb=0, loopCopy=-1):
+    return ""
+
+  ##############################################################################
+  # Open A2A-GEMM Shard Loop
+  ##############################################################################
+  @abc.abstractmethod
+  def openA2AShardLoop(self, kernel):
+    return ""
+
+  ##############################################################################
+  # Close A2A-GEMM Shard Loop
+  ##############################################################################
+  @abc.abstractmethod
+  def closeA2AShardLoop(self, kernel):
     return ""
 
   ##############################################################################
