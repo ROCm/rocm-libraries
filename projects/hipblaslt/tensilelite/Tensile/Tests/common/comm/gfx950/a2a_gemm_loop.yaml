@@ -29,7 +29,7 @@ BenchmarkProblems:
       TransposeA: True
       TransposeB: False
       UseBeta: True
-      Batched: False
+      Batched: True
       FusedA2AMode: 1
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -53,7 +53,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [3072, 2048, 1024]
+          - Exact: [3072, 2048, 1, 1024]
 
 LibraryLogic:
   ScheduleName: "a2a_gemm_loop_gfx950"

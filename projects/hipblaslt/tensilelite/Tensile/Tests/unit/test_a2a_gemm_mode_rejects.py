@@ -3,7 +3,7 @@
 """Solution-validation guards for ``ProblemType["FusedA2AMode"] == 1`` (GatheredB).
 
 The guards admit GlobalSplitU=1, StreamK=0, StaggerU=0, UseSubtileImpl=0, no
-DirectToVgpr, non-batched, non-sparse, and FusedGemmA2A off.
+DirectToVgpr, non-sparse, and FusedGemmA2A off.
 
 Each negative test flips one knob off a known-good base and asserts the specific
 diagnostic. The positive test pins the accept path.
@@ -110,7 +110,7 @@ def _make_params(iim, arch=_ARCH, **overrides):
         "TransposeA": True,
         "TransposeB": False,
         "UseBeta": True,
-        "Batched": False,
+        "Batched": True,
         "FusedA2AMode": 1,
     }
     problem_type.update(pt)
@@ -160,7 +160,7 @@ def test_a2a_mode_base_is_accepted(_gp_gfx942, gfx942_iim, assembler, capsys):
     sol, out = _derive(gfx942_iim, assembler, capsys)
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
     assert sol["ProblemType"]["NumIndicesSummation"] == 1
-    assert sol["ProblemType"]["IndicesSummation"] == [2]
+    assert sol["ProblemType"]["IndicesSummation"] == [3]
 
 
 def test_a2a_mode_off_keeps_one_summation_index(_gp_gfx942, gfx942_iim, assembler, capsys):
@@ -236,12 +236,6 @@ def test_a2a_mode_rejects_direct_to_vgpr(_gp_gfx942, gfx942_iim, assembler, caps
 # ---------------------------------------------------------------------------
 # ProblemType-level guards.
 # ---------------------------------------------------------------------------
-def test_a2a_mode_rejects_batched(_gp_gfx942, gfx942_iim, assembler, capsys):
-    sol, out = _derive(gfx942_iim, assembler, capsys, ProblemType={"Batched": True})
-    assert sol.get("Valid") is False
-    assert "FusedA2AMode=1 does not support batched problems" in out
-
-
 @pytest.mark.parametrize("sparse", [1, 2])
 def test_a2a_mode_rejects_sparse(_gp_gfx942, gfx942_iim, assembler, capsys, sparse):
     sol, out = _derive(gfx942_iim, assembler, capsys, ProblemType={"Sparse": sparse})

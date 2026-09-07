@@ -1846,9 +1846,6 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason,
                "FusedA2AMode=1 and FusedGemmA2A are mutually exclusive")
         return
-      if state["ProblemType"]["Batched"]:
-        reject(state, printRejectionReason, "FusedA2AMode=1 does not support batched problems")
-        return
       if state["ProblemType"]["Sparse"]:
         reject(state, printRejectionReason, "FusedA2AMode=1 does not support sparse problems")
         return
