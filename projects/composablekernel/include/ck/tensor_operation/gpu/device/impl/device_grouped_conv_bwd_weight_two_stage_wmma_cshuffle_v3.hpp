@@ -1172,7 +1172,8 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
-                std::cout << "Stride overflow." << std::endl;
+                std::cout << "Stride overflow!" << " In " << __FILE__ << ":" << __LINE__
+                          << ", in function: " << __func__ << std::endl;
             }
             return false;
         }
