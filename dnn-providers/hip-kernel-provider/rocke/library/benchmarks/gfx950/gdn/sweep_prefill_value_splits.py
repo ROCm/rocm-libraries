@@ -6,8 +6,9 @@
 For each batch-heads band (``BH = batch * num_v_heads``), time every legal
 ``value_splits`` geometry on the selected gfx950 device -- each correctness-gated
 against the fp64 oracle first -- and report the fastest. The winning split per
-band is exactly what belongs in
-``dispatch.gdn.prefill_gfx950._VALUE_SPLIT_BANDS``.
+band belongs in ``dispatch.gdn.prefill_gfx950._VALUE_SPLIT_BANDS`` -- except the
+open-ended large-BH band, which keeps ``value_splits=1`` by a natural-parallelism
+policy, so marginal deltas there (within run noise) are not adopted.
 
 This ships in-repo so the tuned table is *reproducible* rather than a baked-in
 snapshot: re-run it after any kernel, compiler, or shape change. Absolute rocKE

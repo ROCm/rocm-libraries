@@ -170,11 +170,25 @@ def launch_gdn(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0=None):
     return o, ht.view(B, Hv, DV, DK).transpose(-1, -2)
 
 
-def check_gdn(B, Hv, Hk, T, DK, DV, gate_low=-0.5, with_h0=False, seed=0, specs=None):
+def check_gdn(
+    B,
+    Hv,
+    Hk,
+    T,
+    DK,
+    DV,
+    gate_low=-0.5,
+    with_h0=False,
+    seed=0,
+    specs=None,
+    warn_decay=False,
+):
     kv_group = Hv // Hk
     q, k, v, a, beta, a_log, dt_bias = make_gdn_inputs(
         B, Hv, Hk, T, DK, DV, gate_low=gate_low, seed=seed
     )
+    if warn_decay:
+        warn_if_decay_out_of_range(a_log, a, dt_bias)
     h0 = None
     if with_h0:
         gen = torch.Generator(device="cuda").manual_seed(7)
@@ -201,7 +215,15 @@ def main() -> int:
         for gate_low in (-0.5, -5.0):
             for with_h0 in (False, True):
                 w = check_gdn(
-                    2, Hv, Hk, 256, 128, 128, gate_low=gate_low, with_h0=with_h0
+                    2,
+                    Hv,
+                    Hk,
+                    256,
+                    128,
+                    128,
+                    gate_low=gate_low,
+                    with_h0=with_h0,
+                    warn_decay=True,
                 )
                 worst = max(worst, w)
                 tag = f"Hv{Hv}/Hk{Hk} gate[{gate_low},0] h0={with_h0}"
