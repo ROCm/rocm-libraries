@@ -230,6 +230,19 @@ def test_use_qk_l2norm_off_matches_reference(harness):
 
 
 @requires_gfx950
+def test_fallback_head_dim_geometry_is_numerically_correct(harness):
+    """The head_k=64 geometry the dispatcher serves via tile fallback (#1) must
+    be numerically correct on device, not merely dispatch-valid -- a served-but-
+    unverified geometry would be out of scope."""
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+
+    spec = dispatch_gdn_decode(GdnDecodeRequest(batch=1, head_k_dim=64, arch=ARCH)).spec
+    assert spec.head_k_dim == 64
+    out_err, state_err = harness["check"](spec, 1)
+    assert max(out_err, state_err) <= harness["TOL"]
+
+
+@requires_gfx950
 def test_end_to_end_through_the_dispatch_result(harness):
     """Drive a launch from the dispatch result alone, as a caller would.
 
