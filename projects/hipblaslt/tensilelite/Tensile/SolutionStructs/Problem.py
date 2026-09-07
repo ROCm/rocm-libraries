@@ -1109,11 +1109,6 @@ class ProblemType(Mapping):
       self["IndexAssignmentsA"] = [sumIdx, 0] # T
     if self["TransposeB"]:
       self["IndexAssignmentsB"] = [1, sumIdx] # T
-    if self["FusedA2AMode"] == 1:
-      # sumIdx becomes the shard index; K moves to sumIdx + 1.
-      for k in ("IndexAssignmentsA", "IndexAssignmentsB", "IndexAssignmentsMetadata"):
-        self[k] = [sumIdx + 1 if i == sumIdx else i for i in self[k]]
-        self[k].append(sumIdx)
     if self["Batched"]:
       self["IndexAssignmentsA"].append(2)
       self["IndexAssignmentsB"].append(2)

@@ -157,11 +157,10 @@ def _derive(iim, assembler, capsys, arch=_ARCH, **overrides):
 # Positive and control arms.
 # ---------------------------------------------------------------------------
 def test_a2a_mode_base_is_accepted(_gp_gfx942, gfx942_iim, assembler, capsys):
-    """Mode 1 derives two summation indices and stays valid."""
     sol, out = _derive(gfx942_iim, assembler, capsys)
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
-    assert sol["ProblemType"]["NumIndicesSummation"] == 2
-    assert sol["ProblemType"]["IndicesSummation"] == [2, 3]
+    assert sol["ProblemType"]["NumIndicesSummation"] == 1
+    assert sol["ProblemType"]["IndicesSummation"] == [2]
 
 
 def test_a2a_mode_off_keeps_one_summation_index(_gp_gfx942, gfx942_iim, assembler, capsys):

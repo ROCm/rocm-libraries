@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 # A2A-GEMM outer shard-loop (FusedA2AMode=1, GatheredB) config for gfx950.
 #
-# K is declared as two summation indices, so ProblemSizes carry four entries:
-# index 0 = M (feature), 1 = N (token), 2 = shard, 3 = k_local.
+# The index structure is the stock GEMM one; K holds k_local. The shard count
+# is a runtime scalar and is not a ProblemSizes entry.
 
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -53,7 +53,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [3072, 2048, 2, 1024]
+          - Exact: [3072, 2048, 1024]
 
 LibraryLogic:
   ScheduleName: "a2a_gemm_loop_gfx950"
