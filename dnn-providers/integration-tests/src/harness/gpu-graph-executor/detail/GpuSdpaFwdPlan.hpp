@@ -214,10 +214,48 @@ public:
             return false;
         }
 
-        // Unsupported: variable sequence lengths
-        if(nodeAttributes->seq_len_q_tensor_uid().has_value()
-           || nodeAttributes->seq_len_kv_tensor_uid().has_value())
+        // PAGED + VARLEN: served by gathering the cache to dense, not declined.
+        //
+        // These two travel together and are validated together. The reference
+        // itself stays dense and stride-based; PagedKvGather re-addresses the
+        // block-table indirection into the BHSD form fprop already reads, which
+        // is the adapter the README prescribes rather than a second reference.
+        //
+        // The acceptance is deliberately NARROW. Everything below must hold, and
+        // anything outside it still declines, because a paged graph this plan
+        // cannot faithfully re-address is exactly the case where computing
+        // something plausible is worse than computing nothing.
+        const bool hasPageTable = nodeAttributes->page_table_k_tensor_uid().has_value()
+                                  || nodeAttributes->page_table_v_tensor_uid().has_value();
+        const bool hasSeqLens = nodeAttributes->seq_len_q_tensor_uid().has_value()
+                                || nodeAttributes->seq_len_kv_tensor_uid().has_value();
+
+        if(hasPageTable)
         {
+            // Both tables, or neither. One table is a graph this plan cannot
+            // interpret: K and V would disagree about their own indirection.
+            if(!nodeAttributes->page_table_k_tensor_uid().has_value()
+               || !nodeAttributes->page_table_v_tensor_uid().has_value())
+            {
+                return false;
+            }
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->page_table_k_tensor_uid().value());
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->page_table_v_tensor_uid().value());
+
+            // The gather is bounded by per-sequence KV LENGTHS. Without them the
+            // live extent of the last page is unknown, and reading the whole page
+            // would feed unowned slots into the softmax.
+            if(!nodeAttributes->seq_len_kv_tensor_uid().has_value())
+            {
+                return false;
+            }
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->seq_len_kv_tensor_uid().value());
+        }
+        else if(hasSeqLens)
+        {
+            // Varlen WITHOUT a page table is a padded dense buffer whose valid
+            // extent this plan does not honour -- a different feature, and still
+            // unsupported. Distinct from paged, and easy to conflate with it.
             return false;
         }
 
@@ -228,13 +266,6 @@ public:
            || nodeAttributes->dropout_mask_tensor_uid().has_value()
            || nodeAttributes->dropout_scale_tensor_uid().has_value()
            || nodeAttributes->rng_dump_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // Unsupported: paged KV cache
-        if(nodeAttributes->page_table_k_tensor_uid().has_value()
-           || nodeAttributes->page_table_v_tensor_uid().has_value())
         {
             return false;
         }
