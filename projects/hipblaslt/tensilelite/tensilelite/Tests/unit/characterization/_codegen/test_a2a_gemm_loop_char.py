@@ -65,3 +65,15 @@ class TestA2AGemmConfigPath:
 
         kernels = emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")
         assert len(kernels) == 1, "the config must assemble to exactly one kernel"
+
+
+class TestA2AGemmKernarg:
+    """The fused-A2A kernarg segment carries the shard loop's trip count."""
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def test_kernel_declares_the_shard_count(self):
+        assert "FusedW" in self._src()
