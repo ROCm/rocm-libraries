@@ -138,7 +138,7 @@ typedef enum {
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES = 12, /**<Required by a solution using the SDMA transport. Host array of ``world`` ``hipblasLtSdmaQueue_t`` entries; entry ``j`` is this device's copy-engine queue targeting rank ``j``, with ``j == rank`` the loopback queue. The library copies the entries and never interprets the addresses, so the caller's array need not outlive the call - but the queues themselves must outlive the launch group. Data type: ``const hipblasLtSdmaQueue_t*``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS = 13, /**<Required. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s receive buffer. The buffer holds ``world * N * (AM / world)`` elements of D's type, laid out ``[source, token, feature]`` with feature contiguous and the unpadded ``N`` as the source stride. Data type: ``void* const*``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT = 14, /**<Required. ``AM``, the number of leading free-0 (feature) positions of D that are redistributed; the per-rank shard is ``AM / world``. Must be positive and divide by ``world``. This participates in solution selection, so it has the same standing as M, N, and K: setting it after ``hipblasLtMatmulAlgoGetHeuristic`` invalidates the returned algo. Data type: ``int64_t``.*/
-  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE = 15, /**<Optional. How receive completion is established. ``HIPBLASLT_A2A_COMPLETION_IN_KERNEL`` is the only accepted value in this release, and the default. Data type: ``hipblasLtA2ACompletionMode_t``.*/
+  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE = 15, /**<Optional. How receive completion is established. ``HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL`` is the only accepted value in this release, and the default. Data type: ``hipblasLtA2ACompletionMode_t``.*/
   HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL = 16, /**<Optional, default ``0``. Which of the communicator's ``nChannels`` flag regions this operation uses. Concurrent operations need distinct channels and disjoint queue sets; every rank of one launch group must pass the same channel, which the library cannot verify. Data type: ``uint32_t``.*/
 } hipblasLtFusedEpilogueAttribute_t;
 
@@ -146,9 +146,9 @@ typedef enum {
  *  \brief How a fused all-to-all establishes receive completion.
  */
 typedef enum {
-  HIPBLASLT_A2A_COMPLETION_IN_KERNEL = 0, /**<The kernel does not retire until this rank's receive buffer is fully populated, so ordinary stream semantics cover the collective and the receive buffer is safe to read once this rank's stream is synchronized.*/
+  HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL = 3, /**<The kernel does not retire until this rank's receive buffer is fully populated and this rank's engines have finished reading \p D, so ordinary stream semantics cover the collective: once this rank's stream is synchronized the receive buffer is safe to read and \p D is safe to overwrite.*/
 
-  /* Value 1 is reserved for a deferred mode, in which the kernel retires before
+  /* Value 0 is reserved for a deferred mode, in which the kernel retires before
      inbound data lands. It ships together with the primitive a caller would wait
      on, not before it. */
 } hipblasLtA2ACompletionMode_t;

@@ -268,7 +268,7 @@ namespace
 
     TEST_F(FusedA2ABuilder_pre_checkin, CompletionModeAcceptsInKernelOnly)
     {
-        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL;
+        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
         EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
                       fused,
                       HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE,

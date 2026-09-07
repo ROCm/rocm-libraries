@@ -130,7 +130,7 @@ struct hipblasLtFusedEpilogueDescriptor
     // communicator's world size is checked where the communicator is visible.
     int64_t                           a2a_extent     = 0;
     bool                              a2a_extent_set = false;
-    hipblasLtA2ACompletionMode_t      a2a_completion = HIPBLASLT_A2A_COMPLETION_IN_KERNEL;
+    hipblasLtA2ACompletionMode_t      a2a_completion = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
     uint32_t                          comm_channel   = 0;
     std::vector<void*>                a2a_recv_ptrs;
     std::vector<hipblasLtSdmaQueue_t> a2a_queues;
@@ -838,9 +838,9 @@ try
             status = HIPBLAS_STATUS_INVALID_VALUE;
             break;
         }
-        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL;
+        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
         memcpy(&mode, buf, sizeof(mode));
-        if(mode != HIPBLASLT_A2A_COMPLETION_IN_KERNEL)
+        if(mode != HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL)
         {
             log_error(__func__, "unsupported all-to-all completion mode", (int)mode);
             status = HIPBLAS_STATUS_INVALID_VALUE;
