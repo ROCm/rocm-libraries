@@ -38,7 +38,18 @@ from .varlen import VarlenSdpaOverride
 
 log = logging.getLogger("hipdnn_torch")
 
-_OP_NAME = "_flash_attention_forward"
+#: The op paged varlen ACTUALLY arrives on. Measured on device, not read:
+#: ``varlen_attn`` delegates immediately to this custom op, so patching the
+#: Python wrapper is bypassed by every caller -- including the wrapper's own
+#: body. Verified in Spur job 469, where the monkeypatch provably installed and
+#: the call still reached the native kernel with no frame of ours in the
+#: traceback. See Results/paged-real-seam-is-torch-attn-varlen-op.md.
+_OP_NAMESPACE = "torch_attn"
+_OP_NAME = "_varlen_attn"
+
+#: The op is registered when ``torch.nn.attention.varlen`` is imported, not at
+#: torch import. Touching that module first is what makes the namespace exist.
+_OP_DEFINING_MODULE = "torch.nn.attention.varlen"
 
 #: Arguments the paged mapping cannot express. Any of these present and non-default
 #: sends the call back to the native kernel, counted with a reason.
@@ -78,12 +89,15 @@ class AtenVarlenRoute:
             ov.state = _bootstrap.bootstrap()
         torch = ov.state.torch
 
-        if not hasattr(torch.ops.aten, _OP_NAME):
+        import importlib
+        importlib.import_module(_OP_DEFINING_MODULE)  # registers the custom op
+        ns = getattr(torch.ops, _OP_NAMESPACE)
+        if not hasattr(ns, _OP_NAME):
             raise ImportError(
-                f"aten::{_OP_NAME} is not available in torch {torch.__version__}"
+                f"{_OP_NAMESPACE}::{_OP_NAME} is not available in torch {torch.__version__}"
             )
         schema_args = {
-            a.name for a in getattr(torch.ops.aten, _OP_NAME).default._schema.arguments
+            a.name for a in getattr(ns, _OP_NAME).default._schema.arguments
         }
         missing = {"block_table", "seqused_k"} - schema_args
         if missing:
@@ -91,11 +105,11 @@ class AtenVarlenRoute:
             # against that schema would silently never see a page table, which is
             # the failure mode this check exists to make loud.
             raise ImportError(
-                f"aten::{_OP_NAME} in torch {torch.__version__} lacks "
+                f"{_OP_NAMESPACE}::{_OP_NAME} in torch {torch.__version__} lacks "
                 f"{sorted(missing)}; paged routing needs torch >= 2.12"
             )
 
-        op = getattr(torch.ops.aten, _OP_NAME)
+        op = getattr(ns, _OP_NAME)
         # The dispatch key we register on. Falling back cannot simply re-call the
         # op: that re-enters THIS kernel and recurses until the stack dies
         # (verified -- it is not theoretical). Excluding our own key before
@@ -105,108 +119,77 @@ class AtenVarlenRoute:
 
         def _impl(
             query,
-            key_t,
+            key,
             value,
-            cum_seq_q,
-            cum_seq_k,
+            cu_seq_q,
+            cu_seq_k,
             max_q,
             max_k,
-            dropout_p,
-            is_causal,
-            return_debug_mask,
+            is_causal=False,
             scale=None,
-            window_size_left=None,
-            window_size_right=None,
+            window_size=None,
             seqused_k=None,
-            alibi_slopes=None,
             block_table=None,
             num_splits=None,
         ):
+            """hipDNN's implementation of ``torch_attn::_varlen_attn``.
+
+            Signature mirrors the op EXACTLY (13 args, 3 returns). It is not the
+            same shape as ``aten::_flash_attention_forward`` -- no dropout_p, no
+            return_debug_mask, no alibi_slopes, and the window arrives as one
+            ``window_size`` pair rather than two scalars."""
+
             def _native():
                 with torch._C._ExcludeDispatchKeyGuard(key_set):
                     return op(
-                        query,
-                        key_t,
-                        value,
-                        cum_seq_q,
-                        cum_seq_k,
-                        max_q,
-                        max_k,
-                        dropout_p,
-                        is_causal,
-                        return_debug_mask,
-                        scale=scale,
-                        window_size_left=window_size_left,
-                        window_size_right=window_size_right,
-                        seqused_k=seqused_k,
-                        alibi_slopes=alibi_slopes,
-                        block_table=block_table,
-                        num_splits=num_splits,
+                        query, key, value, cu_seq_q, cu_seq_k, max_q, max_k,
+                        is_causal, scale, window_size, seqused_k, block_table,
+                        num_splits,
                     )
 
-            census_key = "aten"
+            census_key = "varlen_op"
             try:
                 census_key = (
-                    f"aten:Tq={int(query.shape[0])},Hq={int(query.shape[1])},"
+                    f"op:Tq={int(query.shape[0])},Hq={int(query.shape[1])},"
                     f"D={int(query.shape[-1])},dtype={ov._tok(query.dtype)}"
                 )
             except Exception:  # noqa: BLE001 -- census must never break dispatch
                 pass
 
-            # dropout and the debug mask have no expression in the graph, and
-            # alibi_slopes is a scoring term the tiled engine declines outright.
-            if dropout_p:
-                ov.note_native(census_key, "dropout_p != 0")
-                return _native()
-            if return_debug_mask:
-                ov.note_native(census_key, "return_debug_mask requested")
-                return _native()
-            if alibi_slopes is not None:
-                ov.note_native(census_key, "alibi_slopes not served")
-                return _native()
-
-            left = -1 if window_size_left is None else int(window_size_left)
-            right = (
-                0
-                if is_causal
-                else (-1 if window_size_right is None else int(window_size_right))
-            )
+            # torch's (left, right) window; is_causal is the right edge at 0.
+            left, right = (-1, -1)
+            if window_size is not None:
+                try:
+                    left, right = int(window_size[0]), int(window_size[1])
+                except Exception:  # noqa: BLE001 -- malformed window -> native
+                    ov.note_native(census_key, "window_size not a (left, right) pair")
+                    return _native()
+            if is_causal:
+                right = 0
 
             out = ov.run_paged(
-                query,
-                key_t,
-                value,
-                cum_seq_q,
-                max_k,
-                scale=scale,
-                window=(left, right),
-                seqused_k=seqused_k,
-                block_table=block_table,
-                num_splits=num_splits,
+                query, key, value, cu_seq_q, max_k, scale=scale,
+                window=(left, right), seqused_k=seqused_k,
+                block_table=block_table, num_splits=num_splits,
                 census_key=census_key,
             )
             if out is None:
                 return _native()
 
-            # The op returns (output, softmax_logsumexp, rng_state, unused,
-            # debug_attn_mask). The graph produces only the output, so the rest
-            # are returned as correctly-shaped empties -- the same thing the
-            # native kernel yields when dropout is 0 and no debug mask is asked
-            # for. logsumexp is [H, total_q]; a caller that wants a real one is
-            # already declined above via return_aux/backward paths.
-            empty = torch.empty(0, device=query.device, dtype=query.dtype)
+            # The op returns (output, softmax_lse, rng_state). The graph produces
+            # only the output; lse is [H, total_q] and rng_state is the 2-element
+            # zero tensor the native path hardcodes because dropout is always 0.
             lse = torch.empty(
                 (int(query.shape[1]), int(query.shape[0])),
-                device=query.device,
-                dtype=torch.float32,
+                device=query.device, dtype=torch.float32,
             )
-            rng = torch.empty(2, device=query.device, dtype=torch.uint64)
-            return out, lse, rng, empty, empty
+            rng = torch.zeros(2, device=query.device, dtype=torch.uint64)
+            return out, lse, rng
 
-        self._lib = torch.library.Library("aten", "IMPL")
+        self._lib = torch.library.Library(_OP_NAMESPACE, "IMPL")
         self._lib.impl(_OP_NAME, _impl, "CUDA")
         self._installed = True
-        log.info("hipdnn_torch: registered aten::%s (CUDA)", _OP_NAME)
+        log.info("hipdnn_torch: registered %s::%s (CUDA)", _OP_NAMESPACE, _OP_NAME)
 
     def uninstall(self) -> None:
         """Drop the registration. ``torch.library.Library`` releases its
