@@ -1,0 +1,62 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# A2A-GEMM outer shard-loop (FusedA2AMode=1, GatheredB) config for gfx950.
+#
+# K is declared as two summation indices, so ProblemSizes carry four entries:
+# index 0 = M (feature), 1 = N (token), 2 = shard, 3 = k_local.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: -1
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  Device: 0
+  PrintSolutionRejectionReason: True
+  Architecture: gfx950
+  ISA: [[9, 5, 0]]
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: False
+      FusedA2AMode: 1
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]   # MT 256x256
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - DirectToLds: [1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - GlobalSplitU: [1]
+        - WorkGroupMapping: [1]
+        - MIArchVgpr: [False]
+        - UseSubtileImpl: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [3072, 2048, 2, 1024]
+
+LibraryLogic:
+  ScheduleName: "a2a_gemm_loop_gfx950"
+  DeviceNames: ["Device 75a0"]
+  ArchitectureName: "gfx950"
+  LibraryType: "Equality"
