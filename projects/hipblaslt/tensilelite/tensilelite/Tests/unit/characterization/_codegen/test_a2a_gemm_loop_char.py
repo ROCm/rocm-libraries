@@ -102,3 +102,26 @@ class TestA2AGemmShardLoop:
         assert src.rindex("A2AShardLoopBegin") < src.index("Summation_End"), (
             "the back edge lands after endSummation"
         )
+
+
+class TestA2AGemmTransitionPhase:
+    """The transition phase sits between the tail loop and the back edge."""
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def test_transition_phase_is_emitted(self):
+        src = self._src()
+        assert "A2A_TRANSITION begin" in src
+        assert "A2A_TRANSITION end" in src
+
+    def test_transition_phase_sits_inside_the_shard_loop(self):
+        src = self._src()
+        assert src.index("A2AShardLoopBegin") < src.index("A2A_TRANSITION begin"), (
+            "the transition phase is emitted before the shard loop opens"
+        )
+        assert src.index("A2A_TRANSITION end") < src.rindex("A2AShardLoopBegin"), (
+            "the transition phase is emitted after the back edge"
+        )
