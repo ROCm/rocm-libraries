@@ -630,6 +630,8 @@ TEST_F(DAGSchedulerPassTest, ExecMaskGroup_InheritsSideEffectFromChildren) {
     group->addModifier<ExecGroupData>(ExecGroupData{{sideEffecting}});
 
     EXPECT_TRUE(hasSideEffect(*group));
+
+    sideEffecting->erase();
 }
 
 TEST_F(DAGSchedulerPassTest, Layer2PublishesDirectionalBarrierOverlapPair) {
