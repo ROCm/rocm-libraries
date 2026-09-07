@@ -9,17 +9,21 @@ changes device-side index math (grid.x, the 32-token block, and the
 golden (that only holds the D256 4wgqa kernel) and the on-GPU fp32 oracle passes
 both the folded and unfolded kernels, so nothing else guards it.
 
-These tests run off-GPU (build/emit + pure index math) and are written to FAIL
-against the pre-fold kernel:
+These tests run off-GPU (build + emit + dispatch) and are written to FAIL against
+the pre-fold kernel:
   * the launch grid must fold over KV heads (grid.x == num_kv_heads, not
     num_query_heads) with 32-token blocks -- pre-fold it is num_query_heads;
   * the builder must emit the distinct ``_4wgqa_fold`` kernel name -- pre-fold
     it is always ``_4wgqa``;
   * the fold predicate must select exactly the D128 / 4:1-GQA / SWA / bf16 /
-    block<=32 cohort and reject every other axis;
-  * the row->(token,head) map must be a bijection with the head index contained
-    in [0, num_query_heads) and an exact inverse (the O-store map);
-  * non-divisible head counts must raise (the invariant the fold relies on).
+    block<=32 cohort and reject every other axis.
+
+Every assertion here executes builder/dispatch code, so a fold regression can turn
+it red. Pure-arithmetic properties (the ``m//4`` / ``m%4`` bijection) and
+pre-existing ``UnifiedAttentionProblem`` invariants (non-divisible head counts
+raise) are deliberately NOT asserted here: they hold with or without the fold, so
+they cannot fail on a regression. The 4:1 pin the fold relies on is enforced at
+build time by the ``GQAG != FOLD_HEADS`` raise in ``attention_tiled_2d.py``.
 """
 
 from __future__ import annotations
@@ -155,34 +159,6 @@ class TestGfx942GqaHeadFoldEmit(unittest.TestCase):
         self.assertTrue(
             re.search(r"_4wgqa\b", ir), "fp16 keeps the baseline `_4wgqa` name"
         )
-
-
-class TestGfx942GqaHeadFoldMap(unittest.TestCase):
-    """The row->(token,head) invariants the folded kernel relies on (§H)."""
-
-    def test_mmap_bijection_head_range_and_inverse(self):
-        TOKBLK, GQAG, TILE_M = 32, 4, 128
-        H, HKV = 32, 8  # H == HKV * GQAG
-        seen = set()
-        for m in range(TILE_M):
-            tok, hloc = m // GQAG, m % GQAG  # forward map (Q-load / mask / O-store)
-            self.assertTrue(0 <= tok < TOKBLK and 0 <= hloc < GQAG)
-            self.assertEqual(tok * GQAG + hloc, m)  # exact inverse (O-store recovers m)
-            seen.add((tok, hloc))
-            for kvh in range(HKV):  # folded global head must stay in range
-                self.assertTrue(0 <= kvh * GQAG + hloc < H)
-        # bijection: 128 rows cover exactly 32 tokens x 4 heads, each once.
-        self.assertEqual(len(seen), TILE_M)
-        self.assertEqual(seen, {(t, h) for t in range(TOKBLK) for h in range(GQAG)})
-
-
-class TestGfx942GqaHeadFoldInvariant(unittest.TestCase):
-    def test_nondivisible_head_counts_raise(self):
-        # The fold requires num_query_heads == num_kv_heads * nqpk; the spec must
-        # reject a non-divisible pairing rather than silently overflow the head index.
-        p = _problem(num_query_heads=30, num_kv_heads=8)
-        with self.assertRaises(ValueError):
-            _ = p.num_queries_per_kv
 
 
 if __name__ == "__main__":

@@ -6205,7 +6205,7 @@ def build_gfx942_4warp_gqa(
     q_blk_lo = b.add(context_off, qbase)  # min q_g
     q_blk_hi = b.add(
         b.add(context_off, qbase), b.const_i32(TOKBLK - 1)
-    )  # max q_g (BLOCK_M=128)
+    )  # max q_g (TOKBLK query tokens per CTA: 32 folded, 128 unfolded)
     _cn = b.sub(q_blk_lo, b.const_i32(BN - 1))  # causal-interior: kv*BN+BN-1<=q_blk_lo
     int_end_c = b.select(
         b.cmp_lt(_cn, b.const_i32(0)),

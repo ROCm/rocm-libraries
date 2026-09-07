@@ -4065,6 +4065,12 @@ def gfx942_gqa_fold_eligible(
         int(head_size) == 128
         and int(num_queries_per_kv) == 4
         and int(sliding_window or 0) > 0
+        # bf16-only is a MEASUREMENT boundary, not a structural one: the fold is a
+        # data-movement change (pack 4 heads per M-tile so KV is read once per
+        # kv-head) and the fp16 MFMA atom has the same 32x32x8 geometry, so it
+        # would very likely fold correctly. It is excluded because only bf16 has an
+        # A/B run behind it. Widening to fp16 requires a measured fp16 A/B plus a
+        # numeric-oracle case, not just deleting this clause.
         and str(dtype) == "bf16"
         and int(block_size) <= 32
     )
