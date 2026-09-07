@@ -102,9 +102,7 @@ def test_kernel_id_tracks_the_spec():
 
 
 def test_kernel_id_forwards_op_from_arg_and_identity_from_candidate():
-    kid = make_kernel_id(
-        _request(), _candidate(family="fam_x"), _Spec(), op="op_y"
-    )
+    kid = make_kernel_id(_request(), _candidate(family="fam_x"), _Spec(), op="op_y")
     assert isinstance(kid, KernelId)
     assert kid.op == "op_y"  # from the argument
     assert kid.family == "fam_x"  # from the candidate
