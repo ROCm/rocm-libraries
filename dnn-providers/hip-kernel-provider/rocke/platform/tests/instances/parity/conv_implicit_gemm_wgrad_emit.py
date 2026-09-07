@@ -385,6 +385,34 @@ def _spec(idx: int):
     # The harness (run_emit) expects a ValueError / SystemExit when
     # the config index is >= 100 and "expect_fail=True" is set.
     # ----------------------------------------------------------------
+    if idx == 15:
+        # gfx1250 wave32 WMMA 16x16x32 K-outer: the transpose read lowers to
+        # ds_load_tr16_b128 (8 per lane), so a 16-element fragment is two reads.
+        # dtype_d=fp32 because WMMA wgrad supports only the 'default' epilogue,
+        # which rejects 16-bit dW.
+        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            WgradConvSpec(
+                problem=p,
+                data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="default",
+                lds_k_outer=True,
+            ),
+            "gfx1250",
+        )
+
     if idx == 100:
         # Odd C with fp16 split-K -- must raise (packed atomic OOB).
         p = ConvProblem(N=8, Hi=56, Wi=56, C=3, K=64, Y=2, X=2)

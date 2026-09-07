@@ -401,16 +401,35 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * but it has no arch to check against. Without this an older target builds
      * cleanly and emits ds_read_tr16_b64, which only exists on CDNA4.
      * Mirrors Python _LDS_K_OUTER_ARCH in conv_implicit_gemm_wgrad.py. */
-    if(s->lds_k_outer && (!arch || strcmp(arch, ROCKE_WGRAD_LDS_K_OUTER_ARCH) != 0))
+    if(s->lds_k_outer)
     {
-        if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "lds_k_outer requires %s (ds_read_tr16_b64 is a CDNA4 "
-                     "transpose read); got %s",
-                     ROCKE_WGRAD_LDS_K_OUTER_ARCH,
-                     arch ? arch : "(null)");
-        return false;
+        /* Two regimes: gfx950 wave64 (ds_read_b64_tr_b16) and gfx1250 wave32
+         * (ds_load_tr16_b128). The arch and the wave must agree, since the lane
+         * mapping is derived per wave size. Mirrors _LDS_K_OUTER_ARCH_WAVE. */
+        const bool ko_950 = (arch && strcmp(arch, "gfx950") == 0);
+        const bool ko_1250 = (arch && strcmp(arch, "gfx1250") == 0);
+        if(!ko_950 && !ko_1250)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer requires gfx950 or gfx1250 (the LDS transpose "
+                         "read); got %s",
+                         arch ? arch : "(null)");
+            return false;
+        }
+        const int ko_wave = ko_950 ? 64 : 32;
+        if(s->wave_size != ko_wave)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer on %s requires wave_size=%d; got %d",
+                         arch,
+                         ko_wave,
+                         s->wave_size);
+            return false;
+        }
     }
 
     if(s->async_dma && !s->lds_k_outer)
@@ -497,14 +516,30 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                          s->warp_tile_n);
             return false;
         }
-        if(s->wave_size != 64)
+        if(s->wave_size != 64 && s->wave_size != 32)
         {
             if(reason && reason_cap)
                 snprintf(reason,
                          reason_cap,
-                         "lds_k_outer requires wave_size=64 (ds_read_b64_tr_b16 is a "
-                         "wave64 instruction); got %d",
+                         "lds_k_outer requires wave_size 64 (ds_read_b64_tr_b16) or "
+                         "32 (ds_load_tr16_b128); got %d",
                          s->wave_size);
+            return false;
+        }
+        /* One atom in the wave32 regime: gfx1250 WMMA 16x16x32, whose A/B
+         * fragment is 16 per lane and whose B lane map is col = lane % 16,
+         * k = (lane / 16) * 16 + i. Nothing else is derived. */
+        if(s->wave_size == 32
+           && (s->warp_tile_m != 16 || s->warp_tile_n != 16 || s->warp_tile_k != 32))
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer on wave32 supports only the 16x16x32 atom "
+                         "(got %dx%dx%d)",
+                         s->warp_tile_m,
+                         s->warp_tile_n,
+                         s->warp_tile_k);
             return false;
         }
     }
@@ -2116,7 +2151,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
      * closures emit no IR), so they must be materialised here to keep the SSA
      * numbering byte-identical. Emitted only on the K-outer path: an
      * unconditional emission would add ops to every existing config. */
-    if(ctx.lds_k_outer)
+    if(ctx.lds_k_outer && spec->wave_size == 64)
     {
         /* Python: b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4)) -- evaluated
          * strictly left-to-right. C argument order is unspecified, so sequence

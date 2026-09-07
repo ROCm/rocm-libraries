@@ -404,6 +404,7 @@ rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
                                   rocke_value_t* k_base,
                                   int mn_atom,
                                   int n,
+                                  int wave_size,
                                   const rocke_type_t* dtype);
 
 rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,

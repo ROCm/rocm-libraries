@@ -499,18 +499,29 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
      * only) because just the B tile flips. */
     if(s->lds_k_outer)
     {
-        if(strcmp(arch, "gfx950") != 0)
+        /* Two regimes: gfx950 wave64 MFMA (ds_read_b64_tr_b16) and gfx1250
+         * wave32 WMMA (ds_load_tr16_b128). The arch and the wave must agree or
+         * the lane formula addresses a layout the hardware does not implement. */
+        const bool k_outer_950 = (strcmp(arch, "gfx950") == 0);
+        const bool k_outer_1250 = (strcmp(arch, "gfx1250") == 0);
+        if(!k_outer_950 && !k_outer_1250)
         {
             snprintf(reason,
                      reason_cap,
-                     "lds_k_outer requires gfx950 (ds_read_tr16_b64 is a CDNA4 "
-                     "transpose read); got %s",
+                     "lds_k_outer requires gfx950 or gfx1250 (the LDS transpose "
+                     "read); got %s",
                      arch);
             return false;
         }
-        if(strcmp(family, "wmma") == 0)
+        const int want_wave = k_outer_950 ? 64 : 32;
+        if(s->wave_size != want_wave)
         {
-            snprintf(reason, reason_cap, "lds_k_outer is an MFMA-family path; got wmma");
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer on %s requires wave_size=%d; got %d",
+                     arch,
+                     want_wave,
+                     s->wave_size);
             return false;
         }
         if(!(s->dtype_b && (strcmp(s->dtype_b, "bf16") == 0 || strcmp(s->dtype_b, "fp16") == 0)))
@@ -522,21 +533,27 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      s->dtype_b ? s->dtype_b : "(null)");
             return false;
         }
-        if(s->warp_tile_n != 16 && s->warp_tile_n != 32)
+        if(s->wave_size == 32)
+        {
+            /* One atom in the wave32 regime: gfx1250 WMMA 16x16x32. */
+            if(s->warp_tile_n != 16 || s->warp_tile_k != 32)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer on wave32 supports only the 16x16x32 atom "
+                         "(got %dx%dx%d)",
+                         s->warp_tile_m,
+                         s->warp_tile_n,
+                         s->warp_tile_k);
+                return false;
+            }
+        }
+        else if(s->warp_tile_n != 16 && s->warp_tile_n != 32)
         {
             snprintf(reason,
                      reason_cap,
                      "lds_k_outer requires warp_tile_n in (16, 32); got %d",
                      s->warp_tile_n);
-            return false;
-        }
-        if(s->wave_size != 64)
-        {
-            snprintf(reason,
-                     reason_cap,
-                     "lds_k_outer requires wave_size=64 (ds_read_tr16_b64 is a wave64 "
-                     "instruction); got %d",
-                     s->wave_size);
             return false;
         }
         if(s->lds_layout != NULL)
@@ -2090,7 +2107,7 @@ static rocke_kernel_def_t*
      * instruction stream (immediately after the schedule prologue). */
     rocke_value_t* tr_lane_mod4 = NULL;
     rocke_value_t* tr_grp16 = NULL;
-    if(spec->lds_k_outer)
+    if(spec->lds_k_outer && spec->wave_size == 64)
     {
         /* Python: b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4)) -- evaluated
          * strictly left-to-right. C argument order is unspecified, so sequence
@@ -2471,6 +2488,7 @@ static rocke_kernel_def_t*
                                                         k_c,
                                                         spec->warp_tile_n,
                                                         b_per_lane,
+                                                        spec->wave_size,
                                                         NULL);
                         continue;
                     }
