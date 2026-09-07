@@ -4,6 +4,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
@@ -16,6 +19,8 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+
+#include "PagedKvGather.hpp"
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
@@ -78,7 +83,12 @@ struct GpuSdpaFwdParams
         int64_t rightBound,
         bool topLeftAlignment,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* pageTableKAttributes
+        = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* pageTableVAttributes
+        = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenKvAttributes = nullptr)
         : qTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(qAttributes))
         , kTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(kAttributes))
         , vTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(vAttributes))
@@ -95,6 +105,20 @@ struct GpuSdpaFwdParams
                         ? std::make_optional(
                               hipdnn_test_sdk::detail::unpackTensorAttributes(*lseAttributes))
                         : std::nullopt)
+        , pageTableKTensor(pageTableKAttributes != nullptr
+                               ? std::make_optional(
+                                     hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                         *pageTableKAttributes))
+                               : std::nullopt)
+        , pageTableVTensor(pageTableVAttributes != nullptr
+                               ? std::make_optional(
+                                     hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                         *pageTableVAttributes))
+                               : std::nullopt)
+        , seqLenKvTensor(seqLenKvAttributes != nullptr
+                             ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                   *seqLenKvAttributes))
+                             : std::nullopt)
     {
     }
 
@@ -108,6 +132,11 @@ struct GpuSdpaFwdParams
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
+    /// Set together, or all unset. Presence of \ref pageTableKTensor is what marks
+    /// the graph as paged; isApplicable guarantees the other two accompany it.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> pageTableKTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> pageTableVTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenKvTensor;
 };
 
 template <typename QDataType,
@@ -123,14 +152,138 @@ public:
     {
     }
 
+    /// Device buffers holding one gathered cache, released when the call ends.
+    /// A unique_ptr with a hipFree deleter rather than a raw pointer, so an
+    /// exception between here and fprop cannot leak device memory.
+    struct PagedGather
+    {
+        struct Free
+        {
+            void operator()(void* p) const noexcept
+            {
+                if(p != nullptr)
+                {
+                    static_cast<void>(hipFree(p));
+                }
+            }
+        };
+        std::unique_ptr<void, Free> k;
+        std::unique_ptr<void, Free> v;
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+    };
+
+    /// Read the page table and lengths back to the host, size the dense buffers,
+    /// and copy each sequence's live pages into them.
+    PagedGather gatherPagedOperands(const std::unordered_map<int64_t, void*>& variantPack) const
+    {
+        using hipdnn_test_sdk::detail::denseKvDims;
+        using hipdnn_test_sdk::detail::denseKvStrides;
+        using hipdnn_test_sdk::detail::derivePagedKvGeometry;
+        using hipdnn_test_sdk::detail::gatherPagedKvToDense;
+
+        const auto& tableDims = _params.pageTableKTensor->dims;
+        const auto& lenDims   = _params.seqLenKvTensor->dims;
+
+        const auto elementCount = [](const std::vector<int64_t>& dims) {
+            int64_t n = 1;
+            for(const auto d : dims)
+            {
+                n *= d;
+            }
+            return static_cast<size_t>(n);
+        };
+
+        // The page table and lengths are int32 on device; the gather walks them
+        // on the host, so copy them back once.
+        std::vector<std::int32_t> blockIds(elementCount(tableDims));
+        std::vector<std::int32_t> rawLengths(elementCount(lenDims));
+        const auto copyBack = [](void* dst, const void* src, size_t bytes) {
+            const auto status = hipMemcpy(dst, src, bytes, hipMemcpyDeviceToHost);
+            if(status != hipSuccess)
+            {
+                throw std::runtime_error(std::string("GpuSdpaFwdPlan: paged metadata copy "
+                                                     "failed: ")
+                                         + hipGetErrorString(status));
+            }
+        };
+        copyBack(blockIds.data(),
+                 variantPack.at(_params.pageTableKTensor->uid),
+                 blockIds.size() * sizeof(std::int32_t));
+        copyBack(rawLengths.data(),
+                 variantPack.at(_params.seqLenKvTensor->uid),
+                 rawLengths.size() * sizeof(std::int32_t));
+
+        const std::vector<int64_t> kvLengths(rawLengths.begin(), rawLengths.end());
+        const auto geometry
+            = derivePagedKvGeometry(_params.kTensor.dims, tableDims, kvLengths);
+
+        PagedGather gathered;
+        gathered.dims    = denseKvDims(geometry);
+        gathered.strides = denseKvStrides(geometry);
+
+        const size_t bytes = elementCount(gathered.dims) * sizeof(KDataType);
+        const auto allocate = [bytes]() {
+            void* p = nullptr;
+            const auto status = hipMalloc(&p, bytes);
+            if(status != hipSuccess)
+            {
+                throw std::runtime_error(std::string("GpuSdpaFwdPlan: paged gather allocation "
+                                                     "failed: ")
+                                         + hipGetErrorString(status));
+            }
+            // Zero the whole buffer: sequences shorter than denseSeqLen leave a
+            // tail that the reference will still read through its strides.
+            static_cast<void>(hipMemset(p, 0, bytes));
+            return p;
+        };
+        gathered.k.reset(allocate());
+        gathered.v.reset(allocate());
+
+        gatherPagedKvToDense(variantPack.at(_params.kTensor.uid),
+                             gathered.k.get(),
+                             geometry,
+                             blockIds,
+                             kvLengths,
+                             sizeof(KDataType));
+        // V shares the page table -- the matcher requires both tables to be
+        // shape-identical, and the kernel itself has one block_tables_ptr.
+        gatherPagedKvToDense(variantPack.at(_params.vTensor.uid),
+                             gathered.v.get(),
+                             geometry,
+                             blockIds,
+                             kvLengths,
+                             sizeof(VDataType));
+        return gathered;
+    }
+
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         hipdnn_gpu_ref::ShallowGpuTensor<QDataType> qTensor(
             variantPack.at(_params.qTensor.uid), _params.qTensor.dims, _params.qTensor.strides);
+        // PAGED K/V ARE GATHERED TO DENSE FIRST. The reference reads q/k/v as
+        // pointers plus strides, so a block-table indirection has to become real
+        // contiguous bytes before fprop sees it. The gathered buffers are owned
+        // for the duration of this call and released on the way out.
+        PagedGather gathered;
+        const void* kBase = variantPack.at(_params.kTensor.uid);
+        const void* vBase = variantPack.at(_params.vTensor.uid);
+        std::vector<int64_t> kDims    = _params.kTensor.dims;
+        std::vector<int64_t> kStrides = _params.kTensor.strides;
+
+        if(_params.pageTableKTensor.has_value())
+        {
+            gathered = gatherPagedOperands(variantPack);
+            kBase    = gathered.k.get();
+            vBase    = gathered.v.get();
+            kDims    = gathered.dims;
+            kStrides = gathered.strides;
+        }
+
         hipdnn_gpu_ref::ShallowGpuTensor<KDataType> kTensor(
-            variantPack.at(_params.kTensor.uid), _params.kTensor.dims, _params.kTensor.strides);
+            const_cast<void*>(kBase), kDims, kStrides);
         hipdnn_gpu_ref::ShallowGpuTensor<VDataType> vTensor(
-            variantPack.at(_params.vTensor.uid), _params.vTensor.dims, _params.vTensor.strides);
+            const_cast<void*>(vBase), kDims, kStrides);
         hipdnn_gpu_ref::ShallowGpuTensor<ODataType> oTensor(
             variantPack.at(_params.oTensor.uid), _params.oTensor.dims, _params.oTensor.strides);
 
@@ -378,6 +531,19 @@ public:
             isTopLeft = false;
         }
 
+        // Paged operands, when the graph carries them. isApplicable has already
+        // established that both tables and seq_len_kv are present and resolvable,
+        // so these lookups cannot fail here.
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* pageTableKPtr = nullptr;
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* pageTableVPtr = nullptr;
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenKvPtr   = nullptr;
+        if(nodeAttributes->page_table_k_tensor_uid().has_value())
+        {
+            pageTableKPtr = tensorMap.at(nodeAttributes->page_table_k_tensor_uid().value());
+            pageTableVPtr = tensorMap.at(nodeAttributes->page_table_v_tensor_uid().value());
+            seqLenKvPtr   = tensorMap.at(nodeAttributes->seq_len_kv_tensor_uid().value());
+        }
+
         return std::make_unique<GpuSdpaFwdPlan<QDataType, KDataType, VDataType, ODataType, float>>(
             GpuSdpaFwdParams(*tensorMap.at(nodeAttributes->q_tensor_uid()),
                              *tensorMap.at(nodeAttributes->k_tensor_uid()),
@@ -388,7 +554,10 @@ public:
                              rightBound,
                              isTopLeft,
                              attnMaskPtr,
-                             lsePtr));
+                             lsePtr,
+                             pageTableKPtr,
+                             pageTableVPtr,
+                             seqLenKvPtr));
     }
 };
 
