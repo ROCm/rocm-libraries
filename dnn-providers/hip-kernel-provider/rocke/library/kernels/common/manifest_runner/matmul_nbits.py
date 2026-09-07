@@ -9,14 +9,14 @@ import os
 import struct
 from typing import Optional, Tuple
 
-from ....runtime.hip_module import Runtime
-from .._matmul_nbits_common import (
+from rocke.runtime.hip_module import Runtime
+from rocke.instances.common._matmul_nbits_common import (
     MatMulNBitsSpec,
     matmul_nbits_reference,
     pack_i4_weights_for_matmul_nbits,
 )
-from ..gemm_universal import TileSpec
-from .utils import as_u8_buffer, nbytes, require_numpy
+from rocke.instances.common.gemm_universal import TileSpec
+from kernels.common.manifest_runner.utils import as_u8_buffer, nbytes, require_numpy
 
 
 def _spec_from_manifest(manifest: dict) -> MatMulNBitsSpec:

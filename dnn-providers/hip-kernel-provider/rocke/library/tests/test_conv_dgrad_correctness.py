@@ -30,6 +30,7 @@ import unittest
 
 from rocke.runtime.hip_module import get_device_arch
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
 _PYDIR = os.path.abspath(os.path.join(_HERE, "../../../../platform/python"))
 _LIB_DIR = os.path.abspath(os.path.join(_HERE, "../../../../library"))
 

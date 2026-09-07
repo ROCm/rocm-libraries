@@ -8,8 +8,8 @@ from __future__ import annotations
 import struct
 from typing import Optional, Tuple
 
-from ....runtime.hip_module import Runtime
-from .utils import as_u8_buffer, nbytes, require_numpy
+from rocke.runtime.hip_module import Runtime
+from kernels.common.manifest_runner.utils import as_u8_buffer, nbytes, require_numpy
 
 
 def run_simple_op_manifest_problem(

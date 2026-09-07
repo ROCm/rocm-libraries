@@ -568,7 +568,7 @@ def compute_wavelet_epi_barriers(epilogue: str, cshuffle_no_alias: bool) -> int:
     return 0
 
 
-def build_wavelet_loaders(
+def _build_wavelet_loaders(
     num_load_waves: int,
     wave_size: int,
     block_m: int,

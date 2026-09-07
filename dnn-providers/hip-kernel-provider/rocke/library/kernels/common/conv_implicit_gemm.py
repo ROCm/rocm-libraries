@@ -90,7 +90,7 @@ from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exp
     _emit_mfma,
     _emit_smem_load,
     _ir_dtype,
-    build_wavelet_loaders,
+    _build_wavelet_loaders,
     compute_wavelet_epi_barriers,
     emit_wavelet_kloop,
     make_a_descriptor,
@@ -751,7 +751,7 @@ def make_d_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
 # ---------------------------------------------------------------------
 
 
-def build_implicit_gemm_conv(
+def _build_implicit_gemm_conv_impl(
     spec: ImplicitGemmConvSpec,
     *,
     arch: str = "gfx950",
@@ -1148,7 +1148,7 @@ def build_implicit_gemm_conv(
         # exceed the tile dimensions, writing LDS at wrong addresses and
         # producing NaN outputs.
         if spec.pipeline == "wavelet":
-            a_wavelet_loader, b_wavelet_loader = build_wavelet_loaders(
+            a_wavelet_loader, b_wavelet_loader = _build_wavelet_loaders(
                 num_load_waves=spec.num_load_waves,
                 wave_size=spec.wave_size,
                 block_m=block_m,
@@ -1967,3 +1967,12 @@ def _emit_cshuffle_epilogue(
         d_rsrc=d_rsrc,
         bounds=(b.const_i32(p.M), b.const_i32(p.N_gemm)),
     )
+
+def build_implicit_gemm_conv(spec: "ImplicitGemmConvSpec", *, arch: str = "gfx950") -> "KernelDef":
+    """Build the IR for one implicit-GEMM forward convolution kernel.
+
+    Public API: takes only ``spec`` and ``arch``.  For internal extension via
+    descriptor callbacks (``extra_params``, ``m_index_fn``, etc.) call
+    :func:`_build_implicit_gemm_conv_impl` directly.
+    """
+    return _build_implicit_gemm_conv_impl(spec, arch=arch)
