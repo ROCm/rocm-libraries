@@ -130,9 +130,10 @@ def test_numeric_cohort_routes_to_fold(gfx942, bs):
 
 
 @requires_gfx942_gpu
+@pytest.mark.parametrize("bs", [16, 32])
 @pytest.mark.parametrize("sq,window", [(2048, 512), (8192, 4096)])
 @pytest.mark.parametrize("hq,hk", [(32, 8)])
-def test_fold_numeric_vs_fp32_windowed_oracle(sq, hq, hk, window):
+def test_fold_numeric_vs_fp32_windowed_oracle(sq, hq, hk, window, bs):
     """Launch the production fold kernel at randn magnitude and assert max_abs
     against the fp32 windowed paged-attn oracle.
 
@@ -141,6 +142,13 @@ def test_fold_numeric_vs_fp32_windowed_oracle(sq, hq, hk, window):
     pass even with a broken SWA lower bound. These cases exercise the window
     boundary the fold cohort is named for (an off-by-one in the drop-out-of-
     window mask fails here, not just a packing bug).
+
+    ``bs`` matches the block sizes the routing anchor above asserts are
+    fold-eligible, so everything the predicate ships is numerically checked.
+    The two are NOT redundant: BPT = BN // BS is the number of paged KV blocks
+    consumed per 32-key tile, so bs=32 walks one block-table entry per tile and
+    bs=16 walks two -- a different gather, and a stride/index error in the
+    second entry is invisible at bs=32.
     """
     import torch
 
@@ -151,12 +159,12 @@ def test_fold_numeric_vs_fp32_windowed_oracle(sq, hq, hk, window):
         pytest.skip("windowed parity harness not present in this checkout")
 
     s = H.Scenario(
-        name=f"d128swa_fold_{hq}_{hk}_S{sq}_w{window}",
+        name=f"d128swa_fold_{hq}_{hk}_S{sq}_w{window}_bs{bs}",
         seq_lens=[(sq, sq)],
         num_query_heads=hq,
         num_kv_heads=hk,
         head_size=128,
-        block_size=32,  # fold requires block_size <= 32
+        block_size=bs,  # fold requires block_size <= 32
         dtype=torch.bfloat16,
         sliding_window=window,
     )
@@ -164,9 +172,20 @@ def test_fold_numeric_vs_fp32_windowed_oracle(sq, hq, hk, window):
     ref = H.run_reference(s, data)
     out, _ = H.run_unified("rocke", s, data)
     m = H.compare(ref, out)
-    assert m["max_abs"] <= 6e-2, (
-        f"fold D128 SWA {hq}/{hk} S{sq} w{window}: max_abs {m['max_abs']:.4f} "
-        f"> 6e-2 (fold numeric regression?)"
+    # 4e-2 is the repo-wide bf16 attention gate (ALGORITHM.md §10, the gfx942
+    # attention README, parity_unified_attention.py, both dense numeric tests).
+    # The fold repacks which M-tile row holds which (token, head) pair; it does
+    # not change the MFMA accumulation order or the fp32 accumulator, so it must
+    # not need more headroom than the unfolded kernel.
+    #
+    # Measured on MI300A (gfx942, ROCm 7.13, kreb): max_abs = 0.01562 on ALL four
+    # cases -- 2.6x inside this gate. That value is exactly 2^-6, i.e. one bf16
+    # ulp for outputs in [2, 4), so the residual is the bf16 rounding of the
+    # stored output, not accumulation drift. There is no mechanism here that
+    # would need the 6e-2 this file originally asserted.
+    assert m["max_abs"] <= 4e-2, (
+        f"fold D128 SWA {hq}/{hk} S{sq} w{window} bs{bs}: max_abs "
+        f"{m['max_abs']:.4f} > 4e-2 (fold numeric regression?)"
     )
 
 
