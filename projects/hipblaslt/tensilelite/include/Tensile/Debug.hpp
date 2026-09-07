@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include <Tensile/Macros.hpp>
 #include <cstdlib>
 #include <set>
 #include <string>
