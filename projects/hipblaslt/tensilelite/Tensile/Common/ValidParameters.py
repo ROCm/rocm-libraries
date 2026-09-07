@@ -778,7 +778,7 @@ validParameters = { # we need to make sure this matches develop
     #  - Level2 grid dim 1x16 (if enabled, otherwise last 16 bit values are ignored)
     "SFCWGM" : -1,
     "MaxOccupancy": list(
-        range(1, 40 + 1)
+        range(1, 64 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy
     "MaxLDS": [-1, 65536, 163840, 327680],
     "WorkGroup": makeValidWorkGroups(),  # ( wg0 x wg1 x LocalSplitU ) dimensions of the workgroup which will operate on a tile and share lds
@@ -1085,7 +1085,8 @@ validParameters = { # we need to make sure this matches develop
     "KernelLanguage": ["Assembly"],
     # We set validParams["ISA"] in multiple places
     "ISA": validISA,  # arch for assembly kernels
-    # Name of the custom kernel located at `CUSTOM_KERNEL_PATH`.
+    # Name of a bundled custom kernel, or one located in an explicitly supplied
+    # custom-kernel directory.
     # a custom kernel is a user written assembly kernel with its associated configuration parameters included in a custom.config section
     # inside the yaml block between the --- and ... markers.  These parameters are only used for information purposes, not kernel generation.
     # Ex:

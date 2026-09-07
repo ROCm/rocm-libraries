@@ -36,7 +36,7 @@ from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
 
-from Tensile import SOURCE_PATH, LibraryIO
+from Tensile import LibraryIO
 from Tensile.Common import (
     CHeader,
     DebugConfig,
@@ -67,6 +67,7 @@ from Tensile.KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
     KERNEL_HELPER_FILENAME_H,
 )
+from Tensile.resources import copy_static_headers
 from Tensile.SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
 from Tensile.SolutionStructs import Solution
 from Tensile.SolutionStructs.Solution import (
@@ -240,18 +241,16 @@ def memCompress(obj):
 def memDecompress(byt):
     return pickle.loads(zlib.decompress(byt))
 
-def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
-    """
-    Generate source for a single kernel.
-    Returns (error, source, header, kernelName).
-    """
-    kernelWriter = kernelWriterAssembly
-    kernelWriter.setRocIsa(data, outOptions)
+_GFX1250 = (12, 5)
+
+
+def _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress=False) -> KernelCodeGenResult:
+    """Run codegen on a single kernel after rocisa state has been set up."""
     asmFilename = getKernelFileBase(splitGSU, kernel)
-    err, src = kernelWriter.getSourceFileString(kernel)
+    err, src = kernelWriterAssembly.getSourceFileString(kernel)
     if compress:
         src = memCompress(src)
-    header = kernelWriter.getHeaderFileString(kernel)
+    header = kernelWriterAssembly.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
     cuocc = kernel["CUOccupancy"]
@@ -261,10 +260,37 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
             f"runtime will clamp to 1."
         )
     return KernelCodeGenResult(
-        err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
-        kernel["WavefrontSize"], cuocc, \
+        err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]),
+        kernel["WavefrontSize"], cuocc,
         pgr, kernel["MathClocksUnrolledLoop"]
     )
+
+
+def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
+    """Generate source for a single kernel."""
+    kernelWriterAssembly.setRocIsa(data, outOptions)
+    return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
+
+
+def processKernelSourceNativeInit(
+    kernelWriterAssembly, assemblerPath, outputNoComment, splitGSU, kernel, compress=False
+) -> KernelCodeGenResult:
+    """Generate source for a non-gfx1250 kernel using native rocisa.
+
+    Workers importing native rocisa (``ROCISA_BACKEND=rocisa``) call this
+    instead of ``processKernelSource`` so they initialise the rocisa
+    singleton from scratch rather than accepting pickled adapter data.
+    Each ISA is initialised at most once per worker process.
+    """
+    import rocisa as _ri
+    ti = _ri.rocIsa.getInstance()
+    isa = tuple(kernel["ISA"])
+    if isa not in ti.getData():
+        ti.init(isa, assemblerPath, False)
+    outOpts = ti.getOutputOptions()
+    outOpts.outputNoComment = outputNoComment
+    kernelWriterAssembly.setRocIsa(ti.getData(), outOpts)
+    return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
     if result.err != 0:
@@ -675,13 +701,87 @@ def writeSolutionsAndKernelsTCL(
             return processed_kernel
         return composed_function
 
-    results = ParallelMap2(
-        compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
-        uniqueAsmKernels,
-        "Generating assembly kernels",
-        multiArg=False,
-        return_as="list"
-    )
+    # --- Backend-aware kernel batching ---
+    # When the stinkytofu adapter is active (gfx1250 auto-detected), split
+    # kernels so gfx1250 uses the adapter and non-gfx1250 uses native rocisa
+    # in a fresh worker pool.
+    _stinkytofu_active = getattr(rocisa, "_BACKEND", "") == "stinkytofu"
+
+    if _stinkytofu_active:
+        gfx1250_kernels = [k for k in uniqueAsmKernels if tuple(k["ISA"])[:2] == _GFX1250]
+        native_kernels  = [k for k in uniqueAsmKernels if tuple(k["ISA"])[:2] != _GFX1250]
+    else:
+        gfx1250_kernels = []
+        native_kernels  = []
+
+    if not native_kernels:
+        # Common path: single-backend (all stinkytofu or all native).
+        results = ParallelMap2(
+            compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
+            uniqueAsmKernels,
+            "Generating assembly kernels",
+            multiArg=False,
+            return_as="list"
+        )
+    else:
+        results = []
+        # Batch 1: gfx1250 kernels with stinkytofu adapter workers.
+        if gfx1250_kernels:
+            results.extend(ParallelMap2(
+                compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
+                gfx1250_kernels,
+                "Generating assembly kernels (gfx1250, stinkytofu)",
+                multiArg=False,
+                return_as="list"
+            ))
+
+        # Batch 2: non-gfx1250 kernels with fresh native-rocisa workers.
+        # Shut down the existing worker pool so new workers inherit the
+        # updated ROCISA_BACKEND env and import native rocisa.
+        try:
+            from joblib.externals.loky import get_reusable_executor
+            get_reusable_executor().shutdown(wait=True)
+        except Exception:
+            pass
+
+        _orig_backend = os.environ.get("ROCISA_BACKEND")
+        _orig_threads = globalParameters["CpuThreads"]
+        os.environ["ROCISA_BACKEND"] = "rocisa"
+        # Force at least 2 threads so joblib spawns a subprocess.
+        # Running in-process would reuse the already-imported stinkytofu
+        # adapter from sys.modules instead of loading native rocisa.
+        if _orig_threads >= 0 and _orig_threads < 2:
+            globalParameters["CpuThreads"] = 2
+        try:
+            assemblerPath = str(asmToolchain.assembler._component_path)
+            unaryProcessNative = functools.partial(
+                processKernelSourceNativeInit,
+                kernelWriterAssembly,
+                assemblerPath,
+                not disableAsmComments,
+                splitGSU,
+                compress=memcompress,
+            )
+            results.extend(ParallelMap2(
+                compose(unaryAssemble, unaryWriteAssembly, unaryProcessNative),
+                native_kernels,
+                "Generating assembly kernels (native rocisa)",
+                multiArg=False,
+                return_as="list"
+            ))
+        finally:
+            # Shut down native workers before restoring env so joblib won't
+            # reuse them for subsequent stinkytofu codegen.
+            try:
+                from joblib.externals.loky import get_reusable_executor
+                get_reusable_executor().shutdown(wait=True)
+            except Exception:
+                pass
+            globalParameters["CpuThreads"] = _orig_threads
+            if _orig_backend is None:
+                os.environ.pop("ROCISA_BACKEND", None)
+            else:
+                os.environ["ROCISA_BACKEND"] = _orig_backend
 
     buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
@@ -712,19 +812,7 @@ def writeSolutionsAndKernelsTCL(
 
 @timing
 def copyStaticFiles(outputPath):
-    libraryStaticFiles = [
-        "TensileTypes.h",
-        "tensile_bfloat16.h",
-        "tensile_float8_bfloat8.h",
-        "KernelHeader.h",
-        "ReductionTemplate.h",
-        "memory_gfx.h",
-    ]
-
-    for fileName in libraryStaticFiles:
-        shutil.copy(os.path.join(SOURCE_PATH, fileName), outputPath)
-
-    return libraryStaticFiles
+    return copy_static_headers(outputPath)
 
 
 @timing

@@ -10,6 +10,6 @@ target_link_libraries(stinkytofu-check PRIVATE stinkytofu-warnings)
 target_compile_options(stinkytofu-check PRIVATE -fexceptions -frtti)
 
 install(TARGETS stinkytofu-check
-    RUNTIME DESTINATION bin
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     COMPONENT tools
 )

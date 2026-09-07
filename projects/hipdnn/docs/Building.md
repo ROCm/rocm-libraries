@@ -201,7 +201,7 @@ The ROCm SDK is published as Python wheels on a nightly index. Installing into a
 
 2. Install the SDK, selecting your GPU architecture with the `device-<arch>` extra (replace `gfx942`):
    ```bash
-   pip install --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ "rocm[libraries,devel,device-gfx942]"
+   pip install --index-url https://nightly.repo.amd.com/rocm/whl-next/ "rocm[libraries,devel,device-gfx942]"
    ```
    The `libraries` and `devel` extras provide the ROCm libraries, headers, CMake configuration, and compiler needed to build hipDNN; `device-<arch>` provides the device code for your GPU. This installs the latest nightly; see [RELEASES.md](https://github.com/ROCm/TheRock/blob/main/RELEASES.md) to pin a specific version or for other extras.
 
@@ -220,7 +220,7 @@ Run the `python -m rocm_sdk` commands with the same Python you installed the whe
 
 ### Tarballs
 
-Tarballs are published as nightly builds (dated versions, like the wheels) at `https://rocm.nightlies.amd.com/tarball-multi-arch/`. Filenames follow `therock-dist-<platform>-<group>-<version>.tar.gz`, where:
+Tarballs are published as nightly builds (dated versions, like the wheels) at `https://nightly.repo.amd.com/rocm/core/tarball/`. Filenames follow `therock-dist-<platform>-<group>-<version>.tar.gz`, where:
 
 - `<platform>` is `linux` or `windows`.
 - `<group>` is either `multiarch` (all supported architectures) or a specific GPU family (for example `gfx110X-all`). If in doubt or just getting started, `multiarch` is the recommended safe choice.
@@ -726,7 +726,7 @@ gfx1103
 
 Install the ROCm SDK from the nightly wheel index, selecting your architecture with the `device-<arch>` extra (replace `gfx1103` with the architecture reported above), then expand the development tree:
 ```cmd
-pip install --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ "rocm[libraries,devel,device-gfx1103]"
+pip install --index-url https://nightly.repo.amd.com/rocm/whl-next/ "rocm[libraries,devel,device-gfx1103]"
 python -m rocm_sdk init
 ```
 The `libraries` and `devel` extras provide the ROCm libraries, headers, CMake configuration, and compiler needed to build hipDNN; `device-<arch>` provides the device code for your GPU. Re-run `python -m rocm_sdk init` if you later add or change a `device-*` wheel. To pin a specific dated build instead of the latest nightly, see [Python wheels](#python-wheels-recommended) under Obtaining ROCm.

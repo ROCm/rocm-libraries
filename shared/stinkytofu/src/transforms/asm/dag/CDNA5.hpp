@@ -38,10 +38,12 @@
 #include <map>
 #include <tuple>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
+#include "stinkytofu/analysis/asm/WmmaHideBudgetAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
@@ -391,10 +393,23 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return cfg > 0 ? cfg : hw_.lds.readDrainLatency;
     }
     // Lifetime of one in-flight ds_read credit; also sets the saturated-queue issue interval
-    // (dsReadThrottleLatency/dsReadQueueDepth cycles per ds_read).
+    // (dsReadThrottleLatency/dsReadQueueDepth cycles per ds_read). If neither the pass nor
+    // hardware model supplies a value, default to four cycles per queue entry.
     int dsReadThrottleLatency() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleLatency;
-        return cfg > 0 ? cfg : hw_.lds.readThrottleLatency;
+        if (cfg > 0) return cfg;
+        if (hw_.lds.readThrottleLatency > 0) return hw_.lds.readThrottleLatency;
+        return 4 * dsReadQueueDepth();
+    }
+    double dsReadThrottleTransitionFactor() const {
+        const double cfg =
+            getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleTransitionFactor;
+        return std::clamp(cfg, 0.0, 1.0);
+    }
+    int dsReadThrottleTransitionEntries() const {
+        const int cfg =
+            getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleTransitionEntries;
+        return cfg >= 0 ? cfg : dsReadQueueDepth();
     }
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
@@ -403,6 +418,13 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int tensorLoadWmmaSpace() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
         return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
+    }
+    // Whether to run the per-window hide-budget pre-scan at the top of each region. OFF
+    // by default and reachable only from stinkytofu-opt: the budget is a pure
+    // measurement so far -- nothing in the pick paths gates on it -- so a production
+    // compile would pay for a verdict nobody reads.
+    bool hideBudgetPrescanEnabled() const {
+        return getPassContext().getPassFeatureConfig().dagFeatures.enableWmmaHideBudgetPrescan;
     }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
@@ -504,6 +526,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int wmmaIssuedCountThisRegion_ = 0;
 
     BasicBlock* currentBB_ = nullptr;
+    std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates_;
 
     DAGNode* lastPickedNode_ = nullptr;
 
@@ -597,6 +620,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     DAGNode* pickOne() override;
     void push(DAGNode* node) override;
+    std::vector<Layer2BarrierOverlapCandidate> takeLayer2BarrierOverlapCandidates() override {
+        return std::exchange(layer2BarrierOverlapCandidates_, {});
+    }
     bool empty() const override;
 
     // Build the coexec filler v_nops counted during the last pickOne() as detached insts.
@@ -617,8 +643,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void onInit(IRList::iterator regionStart, IRList::iterator regionEnd) override;
 
     void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
-                      IRList::iterator blockBegin,
-                      std::vector<HardSchedulingConstraint>& hardConstraints) override;
+                      IRList::iterator blockBegin, const RegionDependencies& deps) override;
 
     void onFinishBB() override;
 };
@@ -628,10 +653,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
 // instruction of any pipe can issue there. The mask is end-anchored, so bit 0 is the
 // window's last cycle.
 bool CDNA5ReadyQueue::isBlockedCycle(int pos) const {
-    if (activeWmmaBlockedScale_ == 0 || pos < 0 || pos >= activeWmmaLatency_) return false;
-    const int fromEnd = activeWmmaLatency_ - 1 - pos;
-    constexpr int kBits = (int)(sizeof(activeWmmaBlockedScale_) * 8);
-    return fromEnd < kBits && ((activeWmmaBlockedScale_ >> fromEnd) & 1u) != 0u;
+    return isBlockedWindowCycle(pos, activeWmmaLatency_, activeWmmaBlockedScale_);
 }
 
 // Cycles of genuinely free latency shadow left in the active op's window: it ends at the
@@ -1044,7 +1066,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // Per-WMMA-window DS cap (rule 4) only spreads ds_loads across an active WMMA
     // co-issue window; it is meaningless when no WMMA is available to issue, so it
     // is applied only while a WMMA is pending. When the DS queue reaches depth,
-    // ds_load can still issue, but is throttled to dsReadThrottleLatency/dsReadQueueDepth.
+    // ds_load can still issue: configured transition entries use the transition
+    // factor, then later entries use dsReadThrottleLatency/dsReadQueueDepth.
     int windowCap = maxDsPerWmmaWindow_;
     if (!dsTargetPerWindow_.empty()) {
         const int w = std::min((int)wmmaIssuedCountThisRegion_, (int)dsTargetPerWindow_.size() - 1);
@@ -1214,10 +1237,10 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
     return forced;
 }
 
-// WMMA windows needed to issue dsLoadCount ds_reads given the per-window DS cap. When the
-// count exceeds the DS read queue depth, the queue is saturated and the extra ds_reads are
-// paced at dsReadThrottleLatency/dsReadQueueDepth cycles each, so add enough extra windows
-// to cover that pacing cost.
+// WMMA windows needed to issue dsLoadCount ds_reads given the per-window DS cap. After the
+// count reaches the DS read queue depth, the configured transition entries use the scaled
+// throttle interval; any entries beyond that use the full interval. Add enough windows to
+// cover both pacing stages.
 int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     const int maxDsPerWmmaWindow = dsReadPerWmma();
     int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
@@ -1226,7 +1249,12 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     // ratio when the depth is zero.
     if (dsReadQueueDepth() > 0 && dsLoadCount > dsReadQueueDepth()) {
         const float cyclePerDs = (float)dsReadThrottleLatency() / (float)dsReadQueueDepth();
-        const float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
+        const int overflowCount = dsLoadCount - dsReadQueueDepth();
+        const int transitionCount = std::min(overflowCount, dsReadThrottleTransitionEntries());
+        const int fullThrottleCount = std::max(0, overflowCount - transitionCount);
+        const float transitionFactor = (float)dsReadThrottleTransitionFactor();
+        const float cyclesNeeded =
+            cyclePerDs * (transitionFactor * (float)transitionCount + (float)fullThrottleCount);
         const float baseWindows =
             (float)(dsReadQueueDepth() + maxDsPerWmmaWindow - 1) / (float)maxDsPerWmmaWindow;
         const float latencyWindows = cyclesNeeded / (float)wmmaIssueConfig.latency;
@@ -1531,8 +1559,7 @@ CDNA5ReadyQueue::computeBarrierBeforeThresholds(IRList::iterator regionStart,
         //   beforeN — remaining latency after the last consumer WMMA
         //   maxFinalWmmaIdx — absolute cap after the 1st ds_load (DS load latency / WMMA latency)
         //   wmmaWindowsNeeded — DS issue bandwidth (enough WMMA windows for all ds_loads); when
-        //       dsLoadCount > dsReadQueueDepth(), add extra drain windows from
-        //       dsReadThrottleLatency.
+        //       dsLoadCount > dsReadQueueDepth(), add the scaled/full throttle windows.
         int beforeThreshold =
             std::max(0, std::min(beforeN, wmmaIssueConfig.issuedCount -
                                               std::max(maxFinalWmmaIdx, wmmaWindowsNeeded)));
@@ -1856,7 +1883,8 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     const int dsDepth = dsReadQueueDepth();
     const double dsThrottleInterval =
         dsDepth > 0 ? (double)dsReadThrottleLatency() / (double)dsDepth : 0.0;
-    dsReadInflight_.setThrottleInterval(dsThrottleInterval);
+    dsReadInflight_.setThrottleInterval(dsThrottleInterval, dsReadThrottleTransitionFactor(),
+                                        dsReadThrottleTransitionEntries());
 
     currentBB_ = (regionStart != regionEnd) ? regionStart->getParent() : nullptr;
 
@@ -1931,8 +1959,7 @@ void CDNA5ReadyQueue::onFinishBB() {
 // Rule (2): seedWmmaDsLatencyFromPrefix. Rule (5): head balance.
 // Barrier thresholds: computeBarrierAfterThresholds / computeBarrierBeforeThresholds.
 void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
-                                   IRList::iterator blockBegin,
-                                   std::vector<HardSchedulingConstraint>& hardConstraints) {
+                                   IRList::iterator blockBegin, const RegionDependencies& deps) {
     wmmaIssuedCountThisRegion_ = 0;
     dsInsertedSinceLastWmma_ = 0;
     lastPickedNode_ = nullptr;
@@ -1955,6 +1982,32 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // cuts — no reordering crosses them), so it has nothing left to gate here.
     hazardHoistCandidates_.clear();
     for (auto& gate : hazardGates_) gate.clear();
+
+    // Hide-budget pre-scan. Runs ahead of the unrollGemm gate below, and ahead of every
+    // other per-region analysis, because it describes the region itself, not a
+    // scheduling strategy: what each WMMA window can hide, and what the dependency graph
+    // obliges it to issue anyway. Nothing in the pick paths gates on the verdict yet, so
+    // the budget is a local: it is reported here and dropped. The follow-up that reads it
+    // from pickOne() is what promotes it to per-region state.
+    if (hideBudgetPrescanEnabled()) {
+        const RegionHideBudget hideBudget = analyzeWmmaHideBudget(deps.dag);
+        PASS_DEBUG({
+            std::cerr << "[CDNA5 hideBudget] windows=" << hideBudget.numWindows()
+                      << " prologueCycles=" << hideBudget.prologueCycles
+                      << " deadlinedCycles=" << hideBudget.deadlinedCycles
+                      << " floatingCycles=" << hideBudget.floatingCycles
+                      << " windowsPastSlot=" << hideBudget.windowsPastSlot() << "\n";
+            for (int i = 0; i < hideBudget.numWindows(); ++i) {
+                const WmmaWindowBudget& w = hideBudget.windows[static_cast<size_t>(i)];
+                std::cerr << "[CDNA5 hideBudget]   window#" << i
+                          << " capacityCycles=" << w.capacityCycles
+                          << " capacityValu=" << w.capacityValu << " extraIssue=" << w.extraIssue
+                          << "\n";
+            }
+        });
+        reportWmmaHideBudget(getPassContext(), hideBudget);
+    }
+
     if (getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false) return;
 
     const Loop* loop = getLoop();
@@ -2124,11 +2177,22 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     int deltaAfter = (adjustedAfterEnd - adjustedBeforeBegin + 1) / 2 + 1;
                     int deltaBefore = (adjustedAfterEnd - adjustedBeforeBegin) / 2 + 1;
 
+                    // Do not publish overlap yet: some policy constraints can be rejected
+                    // later when merged into the register DAG. The scheduler validates
+                    // every requested ordering against final instruction order first.
+                    Layer2BarrierOverlapCandidate overlapCandidate{
+                        afterGroup.barriers, beforeGroup.barriers, {}};
+                    auto requireOrdering = [&](StinkyInstruction* predecessor,
+                                               StinkyInstruction* successor) {
+                        deps.requestedConstraints.emplace_back(predecessor, successor);
+                        overlapCandidate.requiredConstraints.emplace_back(predecessor, successor);
+                    };
+
                     // Every overlapping pair needs structural ordering, independent of
                     // which threshold-adjustment branch above was taken.
                     for (StinkyInstruction* barrierAfter : afterGroup.barriers) {
                         for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
-                            hardConstraints.emplace_back(barrierAfter, barrierBefore);
+                            requireOrdering(barrierAfter, barrierBefore);
                         }
                     }
 
@@ -2140,12 +2204,13 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     const auto& descendantDsLoads = beforeGroupDsLoads[beforeIdx];
                     for (StinkyInstruction* tensorLoad : descendantTensorLoads) {
                         for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
-                            hardConstraints.emplace_back(tensorLoad, barrierBefore);
+                            requireOrdering(tensorLoad, barrierBefore);
                         }
                         for (StinkyInstruction* dsLoad : descendantDsLoads) {
-                            hardConstraints.emplace_back(tensorLoad, dsLoad);
+                            requireOrdering(tensorLoad, dsLoad);
                         }
                     }
+                    layer2BarrierOverlapCandidates_.push_back(std::move(overlapCandidate));
 
                     adjustedAfterEnd = std::clamp(adjustedAfterEnd - deltaAfter, 0, totalWmma);
                     adjustedBeforeBegin =

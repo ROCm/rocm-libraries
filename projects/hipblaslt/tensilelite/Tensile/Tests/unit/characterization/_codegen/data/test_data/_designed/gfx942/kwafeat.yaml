@@ -72,6 +72,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         # f32 MFMA shape valid on gfx942 for SIA2 (MatrixInstruction required by SIA2)
         - MatrixInstruction:
