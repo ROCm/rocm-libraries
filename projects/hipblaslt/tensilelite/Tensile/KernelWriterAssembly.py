@@ -7780,6 +7780,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(self.argLoader.loadKernArg("A2AShardCounter", "KernArgAddress",
                                           sgprOffset=hex(offset), dword=1))
     module.add(SWaitCnt(kmcnt=0, comment="wait FusedW for the shard trip count"))
+    module.add(SMovB32(dst=sgpr("A2AShardIdx"), src=0, comment="start at shard 0"))
     module.add(self.a2aShardLoopLabel())
     return module
 
@@ -7799,6 +7800,27 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["FusedA2AMode"] != 1:
       return module
     module.addComment1("A2A_TRANSITION begin")
+    module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
+                       comment="next shard"))
+    for tP in (tPA, tPB):
+      tc = tP["tensorChar"]
+      module.add(self.computeLoadSrd(kernel, tP, tc,
+                                     kernel["ProblemType"]["IndexAssignments%s" % tc],
+                                     tP["bpeGR"]))
+      with self.allocTmpSgpr(4, alignment=2, tag="a2aShardOffset") as tmpSgprInfo:
+        s = tmpSgprInfo.idx
+        module.add(SMulI32(dst=sgpr(s), src0=self.sizeRef(tP["tileIdx"]),
+                           src1=self.strideRef(tc, tP["tileIdx"]),
+                           comment="elements per %s shard" % tc))
+        module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(s + 2), sgpr(s + 3), sgpr(s),
+                                                       sgpr("A2AShardIdx"),
+                                                       comment="shard offset in elements"))
+        module.add(scalarMultiply64Bpe(s + 2, s + 2, float(tP["bpeGR"]), s,
+                                       comment="shard offset"))
+        module.add(SAddU32(dst=sgpr("Srd%s+0" % tc), src0=sgpr("Srd%s+0" % tc),
+                           src1=sgpr(s + 2), comment="Srd%s base += shard offset" % tc))
+        module.add(SAddCU32(dst=sgpr("Srd%s+1" % tc), src0=sgpr("Srd%s+1" % tc),
+                            src1=sgpr(s + 3)))
     module.addComment1("A2A_TRANSITION end")
     return module
 

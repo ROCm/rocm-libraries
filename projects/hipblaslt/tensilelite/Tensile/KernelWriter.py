@@ -9535,6 +9535,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["ProblemType"]["FusedA2AMode"] == 1:
       self.defineSgpr("A2AShardCounter", 1)
+      self.defineSgpr("A2AShardIdx", 1)
 
     self.defineSgpr("OrigLoopCounter", 1)
 
