@@ -57,7 +57,7 @@ jobs:
           echo "test_matrix={\"include\":${test}}" >> "$GITHUB_OUTPUT"
 
   build:
-    name: "Build (hipBLASLt | ${{ matrix.family }} | HOST_ASAN)"
+    name: "Build (hipBLASLt | ${{ matrix.family }} | ASAN)"
     needs: setup
     runs-on: ${{ needs.setup.outputs.build_runs_on }}
     timeout-minutes: 600
@@ -119,11 +119,11 @@ jobs:
         run: |
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
-      - name: Configure gfx90a TheRock host-ASAN math-libs
+      - name: Configure gfx90a TheRock ASAN math-libs
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          # Mirrors TheRock's linux-release-host-asan preset while retaining
+          # Mirrors TheRock's linux-release-asan preset while retaining
           # this workflow's focused single-family build.
           extra_cmake_options: >-
             -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../
@@ -131,12 +131,12 @@ jobs:
             -DTHEROCK_ENABLE_ALL=OFF
             -DTHEROCK_ENABLE_BLAS=ON
             -DTHEROCK_ENABLE_SPARSE=ON
-            -DTHEROCK_SANITIZER=HOST_ASAN
+            -DTHEROCK_SANITIZER=ASAN
             -Damd-llvm_BUILD_TYPE=Release
             -Dtherock-host-blas_BUILD_TYPE=Release
             -Dtherock-SuiteSparse_BUILD_TYPE=Release
             -Damd-llvm_SANITIZER=OFF
-            -Damd-comgr_SANITIZER=HOST_ASAN
+            -Damd-comgr_SANITIZER=ASAN
             -Dhipcc_SANITIZER=OFF
             -Dhipify_SANITIZER=OFF
             -Daqlprofile_SANITIZER=OFF
@@ -148,7 +148,7 @@ jobs:
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build hipBLASLt through staged hipSPARSELt consumer (HOST_ASAN)
+      - name: Build hipBLASLt through staged hipSPARSELt consumer (ASAN)
         run: cmake --build TheRock/build --target hipSPARSELt -- -k 0
 
       - name: Report
@@ -193,7 +193,7 @@ jobs:
           retention-days: 7
 
   test:
-    name: "Test hipBLASLt HOST_ASAN | ${{ matrix.family }} (quick)"
+    name: "Test hipBLASLt ASAN | ${{ matrix.family }} (quick)"
     needs: [setup, build]
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 210
