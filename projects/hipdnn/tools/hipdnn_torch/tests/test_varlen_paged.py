@@ -298,9 +298,29 @@ def test_gate_declines_block_table_without_lengths():
     assert not ok and "seqused_k" in reason
 
 
-def test_gate_declines_num_splits():
-    ok, reason = _make()._gate(_Q, _BT, _SK, 4)
+@pytest.mark.parametrize("n", [2, 4, 8])
+def test_gate_declines_real_split_k(n):
+    """More than one split needs a partial-reduce the single-pass graph has no
+    way to express, so it is a genuine decline."""
+    ok, reason = _make()._gate(_Q, _BT, _SK, n)
     assert not ok and "num_splits" in reason
+
+
+@pytest.mark.parametrize("n", [None, 1, 0, -1])
+def test_gate_accepts_no_split_k_requested(n):
+    """`1` is documented by torch as "no split-KV", and 0/-1 are its
+    let-the-backend-choose spellings. None of them ask for a partial reduce, so
+    all are ordinary single-pass attention this graph serves.
+
+    This is a REGRESSION TEST for a real routing failure, not a hypothetical.
+    The override is registered as a dispatch-key kernel, so torch calls it
+    positionally with every schema argument materialised and the Python default
+    of None never applies. Gating on `is not None` therefore declined 100% of
+    paged calls: job 510 on torch 2.15/rocm10.1 measured census aot=0 native=1
+    with this as the sole reason, on a geometry both the engine and the shipped
+    descriptors cover."""
+    ok, reason = _make()._gate(_Q, _BT, _SK, n)
+    assert ok, f"num_splits={n!r} should route, got decline: {reason}"
 
 
 @pytest.mark.parametrize("d", [48, 96, 512])

@@ -76,8 +76,30 @@ class VarlenSdpaOverride(OpOverride):
             # The page table indexes pages; without per-sequence KV lengths there
             # is nothing to say how much of the last page is live.
             return False, "block_table without seqused_k"
-        if num_splits is not None:
-            return False, "num_splits not expressible in the graph"
+        # SPLIT-K. `num_splits` asks the backend to partition the KV axis across
+        # workgroups and reduce the partials. This graph is single-pass, so a
+        # request for MORE THAN ONE split is genuinely unmapped and declines.
+        #
+        # But "1" (and torch's "let the backend choose" spellings, 0 and -1) do
+        # NOT ask for that -- torch documents `num_splits=1` as no split-KV
+        # (torch/nn/attention/varlen.py: "Number of splits for split-KV. Set to
+        # ``1``..."). A single split IS ordinary single-pass attention, which the
+        # graph expresses exactly.
+        #
+        # Declining on `is not None` therefore refused workloads we can serve, and
+        # it is not a theoretical over-refusal: this override is registered as a
+        # DISPATCH-KEY kernel (varlen_aten.py: `self._lib.impl(..., "CUDA")`), so
+        # torch calls it POSITIONALLY with every schema argument materialised. The
+        # Python default of None never applies on that path, so the C++ schema's
+        # own default arrived here and every paged call declined. Measured on job
+        # 510 (torch 2.15/rocm10.1): census aot=0 native=1, sole reason
+        # "num_splits not expressible in the graph", on a geometry the engine and
+        # the descriptors both cover.
+        if num_splits is not None and int(num_splits) > 1:
+            return (
+                False,
+                f"num_splits={int(num_splits)} (>1 split-k) not expressible in the graph",
+            )
         if query.dim() != 3:
             return False, f"query rank {query.dim()} != 3 (expected [total_q, H, D])"
         d = int(query.shape[-1])
