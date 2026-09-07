@@ -17,6 +17,6 @@ target_link_libraries(stinkytofu-opt PRIVATE
 
 # Install stinkytofu-opt tool
 install(TARGETS stinkytofu-opt
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    RUNTIME DESTINATION bin
     COMPONENT tools
 )
