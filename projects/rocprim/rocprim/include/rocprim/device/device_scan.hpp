@@ -92,7 +92,7 @@ inline auto scan_impl(void*               temporary_storage,
                 stream,
                 [&](auto launcher, auto config, auto target, auto /* wavefront */)
                 {
-                    constexpr auto params = get_config<Selector>(config, target);
+                    constexpr auto params = get_config<Selector>(decltype(config){}, decltype(target){});
 
                     constexpr unsigned int block_size       = params.kernel_config.block_size;
                     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
