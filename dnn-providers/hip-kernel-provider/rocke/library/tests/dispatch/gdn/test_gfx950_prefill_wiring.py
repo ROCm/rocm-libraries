@@ -69,22 +69,29 @@ def test_prep_kv_group_tracks_gqa_ratio():
 
 
 @pytest.mark.parametrize(
-    "num_v_heads,batch_heads,value_splits,block_size",
+    "num_v_heads,batch_heads",
     [
-        (8, 64, 8, 64),  # BH=64  -> vs8 (measured optimum)
-        (16, 128, 2, 128),  # BH=128 -> vs2 (near-parity)
-        (32, 256, 1, 256),  # BH=256 -> vs1 (natural parallelism)
+        (8, 64),  # BH=64  -> first band
+        (16, 128),  # BH=128 -> second band
+        (32, 256),  # BH=256 -> past the bands (default)
     ],
 )
-def test_scan_value_splits_table(num_v_heads, batch_heads, value_splits, block_size):
+def test_scan_value_splits_table(num_v_heads, batch_heads):
+    """Each probe batch lands in a different band; the expected split and its
+    block size are read from the tuning table, not re-typed here, so a retune of
+    the table cannot silently drift this test."""
+    from dispatch.gdn.prefill_gfx950 import _SPLIT_TILE, value_splits_for
+
+    expected_vs = value_splits_for(batch_heads)
+    expected_block = _SPLIT_TILE[expected_vs]["block_size"]
     result = dispatch_gdn_prefill(
         _req(num_k_heads=8, num_v_heads=num_v_heads, algorithm="chunk_scan")
     )
     assert result.candidate.name == "gdn_prefill_gfx950_chunk_scan"
     assert result.request.batch_heads == batch_heads
     spec = result.spec
-    assert spec.value_splits == value_splits
-    assert spec.tile.block_size == block_size
+    assert spec.value_splits == expected_vs
+    assert spec.tile.block_size == expected_block
     assert spec.token_major_io
 
 
@@ -97,11 +104,14 @@ def test_scan_vs8_uses_m16_atom():
 
 
 def test_value_splits_bands():
+    """Independent oracle for the tuned bands: deliberately hardcoded, *not*
+    derived from ``_VALUE_SPLIT_BANDS``, so a wrong edit to that table is caught
+    here instead of the test silently agreeing with it."""
     assert value_splits_for(1) == 8
-    assert value_splits_for(64) == 8
-    assert value_splits_for(65) == 2
+    assert value_splits_for(64) == 8  # band edge
+    assert value_splits_for(65) == 2  # just past -> next band
     assert value_splits_for(128) == 2
-    assert value_splits_for(129) == 1
+    assert value_splits_for(129) == 1  # past the last band -> default
     assert value_splits_for(4096) == 1
 
 
