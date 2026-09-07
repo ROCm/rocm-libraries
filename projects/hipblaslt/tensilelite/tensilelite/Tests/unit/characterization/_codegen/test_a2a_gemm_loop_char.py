@@ -25,7 +25,7 @@ def _tn_problem_type(**overrides):
         "TransposeA": True,
         "TransposeB": False,
         "UseBeta": True,
-        "Batched": False,
+        "Batched": True,
     }
     state.update(overrides)
     return ProblemType(state, False)
@@ -36,16 +36,16 @@ class TestA2AGemmSummationIndices:
         """Control arm: without the flag nothing changes."""
         pt = _tn_problem_type()
         assert pt["NumIndicesSummation"] == 1
-        assert pt["IndicesSummation"] == [2]
+        assert pt["IndicesSummation"] == [3]
 
     def test_a2a_gemm_leaves_the_index_structure_alone(self):
         pt = _tn_problem_type(FusedA2AMode=1)
         assert pt["NumIndicesSummation"] == 1
-        assert pt["IndicesSummation"] == [2]
-        assert pt["IndexAssignmentsA"] == [2, 0]
-        assert pt["IndexAssignmentsB"] == [2, 1]
-        assert pt["IndexUnroll"] == 2
-        assert pt["NumIndicesC"] == 2
+        assert pt["IndicesSummation"] == [3]
+        assert pt["IndexAssignmentsA"] == [3, 0, 2]
+        assert pt["IndexAssignmentsB"] == [3, 1, 2]
+        assert pt["IndexUnroll"] == 3
+        assert pt["NumIndicesC"] == 3
 
 
 class TestA2AGemmConfigPath:
@@ -59,3 +59,9 @@ class TestA2AGemmConfigPath:
         pt = states[0]["ProblemType"]
         assert pt["FusedA2AMode"] == 1
         assert pt["NumIndicesSummation"] == 1
+
+    def test_config_emits_a_kernel(self):
+        from config_harness import emit_kernels_from_config
+
+        kernels = emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")
+        assert len(kernels) == 1, "the config must assemble to exactly one kernel"
