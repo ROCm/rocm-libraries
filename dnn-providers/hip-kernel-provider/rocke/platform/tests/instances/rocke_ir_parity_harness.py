@@ -446,6 +446,31 @@ def _d256_problem():
     )
 
 
+def _d128_swa_fold_problem():
+    """Validated gfx942 GQA head-fold cohort point (GQA 32/8 = 4:1, hd128, bs16,
+    sq8192 bf16, sliding window).
+
+    ``block_size=16`` on purpose: BPT = BN // BS is the number of paged KV blocks
+    consumed per 32-key tile, so bs16 walks TWO block-table entries per tile where
+    bs32 walks one. Pinning the bs16 variant records the busier paged gather.
+    """
+    from kernels.common.attention_unified import UnifiedAttentionProblem
+
+    return UnifiedAttentionProblem(
+        total_q=8192,
+        num_seqs=1,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        block_size=16,
+        max_seqlen_q=8192,
+        max_seqlen_k=8192,
+        dtype="bf16",
+        sliding_window=4096,
+        num_cus=120,
+    )
+
+
 @contextlib.contextmanager
 def _pinned_attention_arch(arch):
     """Pin the *memoized runtime device arch* the D256 fast routes gate on.
@@ -540,6 +565,58 @@ def build_attention_d256_gfx942(arch):
                 )
             spec = _tiled_spec_from_problem(problem)
             return build_gfx942_4warp_gqa(spec, arch=arch)
+
+    return _build
+
+
+def build_attention_d128_swa_fold_gfx942(arch):
+    """gfx942 GQA head-fold (D128 sliding-window bf16), the DEFAULT for its cohort.
+
+    Mirrors ``build_attention_d256_gfx942`` but pins the *fold* cohort. The D256
+    case above cannot stand in for this one: ``build_gfx942_4warp_gqa`` returns
+    ``_build_gfx942_4warp_gqa_lean`` at the ``HD == _4WGQA_LEAN_HEAD_SIZE`` (256)
+    early-return, which is ~20 lines BEFORE the D128 fold body -- so the D256
+    golden never lowers a single line of the folded kernel.
+
+    The fold rewrites device-side (token, head) index math, the folded head index
+    ``kv_head*4 + m%4`` and the launch grid. Its other guards both have escape
+    hatches: the CPU test only greps the kernel NAME (a mangled kernel keeps its
+    name), and the on-GPU oracle is skipped on every non-gfx942 host. This golden
+    is the only one of the three that runs at every llvm flavor on any host, with
+    no GPU.
+
+    Raises if the cohort is not fold-eligible, so a future predicate narrowing can
+    never silently re-bless the UNFOLDED kernel under this case id.
+    """
+
+    def _build():
+        from kernels.common.attention_unified import (
+            _tiled_spec_from_problem,
+            gfx942_gqa_fold_eligible,
+        )
+        from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+
+        problem = _d128_swa_fold_problem()
+        with _pinned_attention_arch(arch):
+            if not gfx942_gqa_fold_eligible(
+                problem.head_size,
+                problem.num_queries_per_kv,
+                problem.sliding_window,
+                problem.dtype,
+                problem.block_size,
+            ):
+                raise RuntimeError(
+                    f"GQA head-fold not selected under pinned arch {arch!r}; "
+                    "would pin the unfolded kernel"
+                )
+            spec = _tiled_spec_from_problem(problem)
+            kernel = build_gfx942_4warp_gqa(spec, arch=arch)
+            if not kernel.name.endswith("_4wgqa_fold"):
+                raise RuntimeError(
+                    f"fold-eligible cohort lowered {kernel.name!r}, which is not "
+                    "the folded kernel; the predicate and the builder disagree"
+                )
+            return kernel
 
     return _build
 
@@ -1806,6 +1883,17 @@ def cases():
         "attention_d256/gfx942/4warp_gqa",
         "gfx942",
         build_attention_d256_gfx942("gfx942"),
+    )
+
+    # gfx942 GQA head-fold (D128 sliding-window bf16). Registered SEPARATELY from
+    # the D256 case above because that one early-returns into the lean D256 kernel
+    # and never reaches the D128 fold body -- and the fold is default-ON for its
+    # cohort with no other host-runnable guard.
+    add(
+        "attention_d128_swa",
+        "attention_d128_swa/gfx942/4warp_gqa_fold",
+        "gfx942",
+        build_attention_d128_swa_fold_gfx942("gfx942"),
     )
     return out
 
