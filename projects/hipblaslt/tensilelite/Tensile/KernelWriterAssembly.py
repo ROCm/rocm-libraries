@@ -3123,39 +3123,40 @@ class KernelWriterAssembly(KernelWriter):
           moduleExternalArgs = Module("Load external Arguments")
         # Here alpha and beta in user args are fixed sizes, so we need to exclude beta and read it with a different offset
           load = load - self.states.numSgprBeta
-          if kernel["InternalSupportParams"]["KernArgsVersion"] < 3:
-            # Legacy layout: DeviceUserArguments field order matches the kernel
-            # arg (defineSgpr) order, so a single sequential load is correct.
-            moduleExternalArgs.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(sgprStart, "KernArgAddress", load, 4))
-          else:
-            # KernArgsVersion >= 3: the kernel arg order was reordered, but
-            # DeviceUserArguments (ContractionSolution.hpp) is still the fixed
-            # legacy layout. Read each field from its fixed struct byte offset
-            # into the correctly-named sgpr (same approach as the Beta
-            # special-case below), so struct order and sgpr order no longer need
-            # to match. Each sgpr is loaded exactly once (no double-load race).
-            # Offsets are measured from the per-gemm struct start:
-            #   d@16 c@24 a@32 b@40 |
-            #   strideD@48 strideC@56 strideA@64 strideB@72 |
-            #   alpha@80 (beta@96 is handled below).
-            base = self.externalArgLoader.getOffset()
-            numSgprAddress = self.states.rpga
-            def _loadUserArg(name, structOffset, dword):
-              if dword > 0:
-                moduleExternalArgs.add(self.externalArgLoader.loadKernArg(
-                    name, "KernArgAddress", sgprOffset=hex(base + structOffset), dword=dword))
-            _loadUserArg("AddressD", 16, numSgprAddress)
-            _loadUserArg("AddressC", 24, numSgprAddress)
-            _loadUserArg("AddressA", 32, numSgprAddress)
-            _loadUserArg("AddressB", 40, numSgprAddress)
-            _loadUserArg("StridesD", 48, self.states.d.numSgprStrides)
-            _loadUserArg("StridesC", 56, self.states.c.numSgprStrides)
-            _loadUserArg("StridesA", 64, self.states.a.numSgprStrides)
-            _loadUserArg("StridesB", 72, self.states.b.numSgprStrides)
-            _loadUserArg("Alpha",    80, self.states.numSgprAlpha)
-            # Restore the running offset to where a sequential load would have
-            # left it, so the Beta / scale bookkeeping below stays unchanged.
-            self.externalArgLoader.setOffset(base + load * 4)
+          if not kernel["ProblemType"]["UseInitialStridesCD"]:
+            if kernel["InternalSupportParams"]["KernArgsVersion"] < 3:
+              # Legacy layout: DeviceUserArguments field order matches the kernel
+              # arg (defineSgpr) order, so a single sequential load is correct.
+              moduleExternalArgs.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(sgprStart, "KernArgAddress", load, 4))
+            else:
+              # KernArgsVersion >= 3: the kernel arg order was reordered, but
+              # DeviceUserArguments (ContractionSolution.hpp) is still the fixed
+              # legacy layout. Read each field from its fixed struct byte offset
+              # into the correctly-named sgpr (same approach as the Beta
+              # special-case below), so struct order and sgpr order no longer need
+              # to match. Each sgpr is loaded exactly once (no double-load race).
+              # Offsets are measured from the per-gemm struct start:
+              #   d@16 c@24 a@32 b@40 |
+              #   strideD@48 strideC@56 strideA@64 strideB@72 |
+              #   alpha@80 (beta@96 is handled below).
+              base = self.externalArgLoader.getOffset()
+              numSgprAddress = self.states.rpga
+              def _loadUserArg(name, structOffset, dword):
+                if dword > 0:
+                  moduleExternalArgs.add(self.externalArgLoader.loadKernArg(
+                      name, "KernArgAddress", sgprOffset=hex(base + structOffset), dword=dword))
+              _loadUserArg("AddressD", 16, numSgprAddress)
+              _loadUserArg("AddressC", 24, numSgprAddress)
+              _loadUserArg("AddressA", 32, numSgprAddress)
+              _loadUserArg("AddressB", 40, numSgprAddress)
+              _loadUserArg("StridesD", 48, self.states.d.numSgprStrides)
+              _loadUserArg("StridesC", 56, self.states.c.numSgprStrides)
+              _loadUserArg("StridesA", 64, self.states.a.numSgprStrides)
+              _loadUserArg("StridesB", 72, self.states.b.numSgprStrides)
+              _loadUserArg("Alpha",    80, self.states.numSgprAlpha)
+              # Restore the running offset to where a sequential load would have
+              # left it, so the Beta / scale bookkeeping below stays unchanged.
+              self.externalArgLoader.setOffset(base + load * 4)
           offset = self.externalArgLoader.getOffset() + self.states.bpr * (self.states.userArgsInfo.alphaMaxRegisterSize - self.states.numSgprAlpha)
           self.externalArgLoader.setOffset(offset)
           if kernel["ProblemType"]["UseBeta"]:
@@ -5538,6 +5539,24 @@ class KernelWriterAssembly(KernelWriter):
     return Module("graIncrements (Empty)") if self.dontAppendCode else module
 
   ##############################################################################
+  # Is a kernel argument live-in from the SGPR preload window?
+  ##############################################################################
+  def isKernArgPreloaded(self, name):
+    """Return True if ``name`` arrives in an SGPR at kernel entry.
+
+    The prologue defers its ``s_waitcnt lgkmcnt(0)`` for the kern-arg
+    ``s_load`` burst until just before ``calculateWG`` (see
+    ``waitForArgsToLoad`` in ``defineAndResources``). Anything emitted earlier
+    that reads a kern-arg SGPR is only safe when preloading put that argument
+    in a register instead of loading it. Indices are measured from
+    ``SizesFree``, matching ``waitForArgsToLoad``'s own preload accounting.
+    """
+    if self.states.numSgprPreload <= 0:
+      return False
+    preloadedArgs = max(0, self.states.numSgprPreload - self.states.userArgsInfo.commonArgsNum)
+    return (self.sgprs[name] - self.sgprs["SizesFree"]) < preloadedArgs
+
+  ##############################################################################
   # Local Write Addresses: Tile Assignment A/B
   ##############################################################################
   def lwaTileAssignment(self, kernel, tP):
@@ -5602,6 +5621,8 @@ class KernelWriterAssembly(KernelWriter):
         numKr = sgpr(tmp)
         swzStride = tP["swizzleK"]
         module.addComment(f"Align to {swzStride}")
+        if not self.isKernArgPreloaded("SizesSum"):
+          module.add(SWaitCnt(kmcnt=0, comment="wait for SizesSum kern arg"))
         module.add(SAddU32(numKr, sgpr("SizesSum"), swzStride-1))
         module.add(SLShiftRightB32(dst=numKr, shiftHex=hex(log2(swzStride)), src=numKr,  comment="%s: numKr = DimK / %s"%(swizzledOrTrName, swzStride)))
       elif isTr:
