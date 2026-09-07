@@ -33,7 +33,7 @@
 #include "../../../config.hpp"
 
 #include "../../../util_deprecated.hpp"
-#include "../detail/temporary_storage.hpp"
+#include "../detail/util_env.hpp"
 #include "../iterator/arg_index_input_iterator.hpp"
 #include "../thread/thread_operators.hpp"
 
@@ -48,10 +48,7 @@
 #include <hip/hip_fp16.h> // __half
 
 #include _HIPCUB_LIBCXX_INCLUDE(functional)
-#include _HIPCUB_LIBCXX_INCLUDE(memory_resource)
-#include _HIPCUB_LIBCXX_INCLUDE(stream)
 #include _HIPCUB_STD_INCLUDE(functional)
-#include _HIPCUB_STD_INCLUDE(execution)
 #include _HIPCUB_STD_INCLUDE(limits)
 
 #include <iterator>
@@ -170,41 +167,6 @@ inline hip_bfloat16 get_max_special_value<hip_bfloat16>()
     return set_half_bits<hip_bfloat16>(0x7f80);
 }
 
-// TODO: this should be moved to libhipcxx's `hip::__device_memory_resource` when that's added
-struct device_memory_resource
-{
-    void* allocate(size_t bytes, size_t /* alignment */)
-    {
-        void* ptr{nullptr};
-        HIPCUB_TRY_CUDA_API(::hipMalloc, "allocate failed to allocate with hipMalloc", &ptr, bytes);
-        return ptr;
-    }
-
-    void deallocate(void* ptr, size_t /* bytes */)
-    {
-        HIPCUB_ASSERT_CUDA_API(::hipFree, "deallocate failed with hipFree", ptr);
-    }
-
-    void* allocate(_HIPCUB_LIBCXX::stream_ref stream, size_t bytes)
-    {
-        void* ptr{nullptr};
-        HIPCUB_TRY_CUDA_API(::hipMallocAsync,
-                            "allocate failed to allocate with hipMallocAsync",
-                            &ptr,
-                            bytes,
-                            stream.get());
-        return ptr;
-    }
-
-    void deallocate(_HIPCUB_LIBCXX::stream_ref stream, void* ptr, size_t /* bytes */)
-    {
-        HIPCUB_ASSERT_CUDA_API(::hipFreeAsync,
-                               "deallocate failed with hipFreeAsync",
-                               ptr,
-                               stream.get());
-    }
-};
-
 } // namespace detail
 
 class DeviceReduce
@@ -252,54 +214,19 @@ public:
     {
         // Note: determinism is not yet supported in libhipcxx, so it is not checked here
 
-        // Query properties from the environment
-        auto stream = _HIPCUB_STD_EXEC::__query_or(env,
-                                                   _HIPCUB_LIBCXX::get_stream,
-                                                   _HIPCUB_LIBCXX::stream_ref{hipStream_t{}});
-        auto mr     = _HIPCUB_STD_EXEC::__query_or(env,
-                                               _HIPCUB_LIBCXX::mr::__get_memory_resource,
-                                               detail::device_memory_resource{});
-
-        // Query and allocate temp storage
-        void*  d_temp_storage     = nullptr;
-        size_t temp_storage_bytes = 0;
-
-        HIPCUB_RETURN_ON_ERROR(::rocprim::reduce(
-            d_temp_storage,
-            temp_storage_bytes,
-            d_in,
-            d_out,
-            init,
-            num_items,
-            ::hipcub::detail::convert_binary_result_type<InputIteratorT, T>(reduction_op),
-            stream.get(),
-            HIPCUB_DETAIL_DEBUG_SYNC_VALUE));
-
-        HIPCUB_RETURN_ON_ERROR(
-            detail::temporary_storage::allocate(stream, d_temp_storage, temp_storage_bytes, mr));
-
-        // Run
-        const hipError_t error = ::rocprim::reduce(
-            d_temp_storage,
-            temp_storage_bytes,
-            d_in,
-            d_out,
-            init,
-            num_items,
-            ::hipcub::detail::convert_binary_result_type<InputIteratorT, T>(reduction_op),
-            stream.get(),
-            HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
-
-        // Deallocate temp storage and return. Reduce error takes precedence over deallocate error
-        const hipError_t deallocate_error
-            = detail::temporary_storage::deallocate(stream, d_temp_storage, temp_storage_bytes, mr);
-
-        if(error != hipSuccess)
-        {
-            return error;
-        }
-
-        return deallocate_error;
+        // Env-based reduce invoke
+        return detail::env_invoke(env,
+                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                                  {
+                                      return Reduce(d_temp_storage,
+                                                    temp_storage_bytes,
+                                                    d_in,
+                                                    d_out,
+                                                    num_items,
+                                                    reduction_op,
+                                                    init,
+                                                    stream);
+                                  });
     }
 
     template<typename InputIteratorT,
@@ -348,6 +275,37 @@ public:
                       _HIPCUB_STD::plus<>{},
                       InitT(0),
                       stream);
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        Sum(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
+    {
+        using InputT            = detail::it_value_t<InputIteratorT>;
+        using OutputT           = detail::it_value_t<OutputIteratorT>;
+        using InitT             = detail::non_void_value_t<OutputT, InputT>;
+        using ReductionOpT      = _HIPCUB_STD::plus<>;
+        const auto reduction_op = ReductionOpT{};
+
+        // Note: determinism is not yet supported in libhipcxx, so it is not checked here
+
+        // Env-based reduce invoke
+        return detail::env_invoke(env,
+                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                                  {
+                                      return Reduce(d_temp_storage,
+                                                    temp_storage_bytes,
+                                                    d_in,
+                                                    d_out,
+                                                    num_items,
+                                                    reduction_op,
+                                                    InitT(0),
+                                                    stream);
+                                  });
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
