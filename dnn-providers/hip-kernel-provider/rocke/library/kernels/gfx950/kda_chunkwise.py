@@ -457,6 +457,11 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
     ):
         if flag and not spec.raw_inputs:
             return False, f"{name} requires raw_inputs=True"
+    if spec.fuse_qk_l2norm and spec.head_k != 128:
+        return False, (
+            f"fuse_qk_l2norm reduces a fixed 16-lane x 8 = 128-element row, so it "
+            f"requires head_k == 128 (got {spec.head_k})"
+        )
     if spec.raw_inputs:
         if not (spec.fuse_qk_l2norm or spec.fuse_gate or spec.fuse_beta_sigmoid):
             return False, (
@@ -1709,7 +1714,10 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
 
     q_ptr = b.param("q_ptr", PtrType(ELEM, "global"), readonly=True, align=16)
     k_ptr = b.param("k_ptr", PtrType(ELEM, "global"), readonly=True, align=16)
-    g_elem = ELEM if spec.raw_inputs else F32
+    # GDN raw prep reads the f32 gate ``a`` (global_load_f32); KDA raw reads a
+    # bf16 ``g`` vector. The declared pointer type must match, or the HIP/C++
+    # backend indexes at the wrong stride (LLVM opaque pointers hide it).
+    g_elem = F32 if spec.gate_kind == "gdn" else (ELEM if spec.raw_inputs else F32)
     g_ptr = b.param("g_ptr", PtrType(g_elem, "global"), readonly=True, align=16)
     beta_ptr = b.param("beta_ptr", PtrType(F32, "global"), readonly=True, align=4)
     a_ptr = b.param("a_ptr", PtrType(ELEM, "global"), writeonly=True, align=16)
@@ -2947,7 +2955,14 @@ def kda_chunk_prep_signature(spec: KdaChunkPrepSpec):
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
         .ptr("k_ptr", spec.dtype)
-        .ptr("g_ptr", "bf16" if spec.raw_inputs else "f32")
+        .ptr(
+            "g_ptr",
+            (
+                "f32"
+                if spec.gate_kind == "gdn"
+                else ("bf16" if spec.raw_inputs else "f32")
+            ),
+        )
         .ptr("beta_ptr", "f32")
         .ptr("a_ptr", spec.dtype)
         .ptr("gk_ptr", spec.dtype)

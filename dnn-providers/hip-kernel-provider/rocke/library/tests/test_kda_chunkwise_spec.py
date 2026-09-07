@@ -33,6 +33,28 @@ from kernels.gfx950.kda_chunkwise import (
 ARCH = "gfx950"
 
 
+def test_gdn_fused_l2norm_requires_head_k_128():
+    """The fused q/k l2norm reduces a fixed 16-lane x 8 = 128-element row, so the
+    validator must reject non-128 head_k for that mode and admit head_k==128."""
+    import dataclasses as dc
+
+    bad = KdaChunkPrepSpec(
+        head_k=64,
+        tile=KdaTileSpec(chunk=32, block_size=128),
+        raw_inputs=True,
+        fuse_qk_l2norm=True,
+        fuse_gate=True,
+        fuse_beta_sigmoid=True,
+        has_dt_bias=True,
+        gate_kind="gdn",
+    )
+    ok, why = is_valid_spec(bad, arch=ARCH)
+    assert not ok and "head_k == 128" in why
+    good = dc.replace(bad, head_k=128, tile=KdaTileSpec(chunk=32, block_size=256))
+    ok2, why2 = is_valid_spec(good, arch=ARCH)
+    assert ok2, why2
+
+
 def _compile_or_skip(kernel, *, arch: str = ARCH):
     """Compile through comgr, skipping only when the toolchain is missing.
 

@@ -84,6 +84,16 @@ class TestTunedSelection(unittest.TestCase):
                 )
                 self.assertTrue(ok, why)
 
+    def test_supported_geometry_falls_back_when_tuned_tile_is_invalid(self):
+        # batch 1's tuned tile is b4 (warp_threads_k=16 -> warp_tile_k=128), which
+        # is invalid for head_k_dim=64; b32 (warp_tile_k=64) is a valid fallback,
+        # so a kernel-supported request must still dispatch, not fail.
+        result = dispatch_gdn_decode(_req(1, head_k_dim=64))
+        ok, why = is_valid_spec(result.spec, arch=ARCH)
+        self.assertTrue(ok, why)
+        self.assertEqual(result.spec.head_k_dim, 64)
+        self.assertNotEqual(result.candidate.spec_id, "b4")  # fell off the tuned tile
+
 
 class TestRequestRejection(unittest.TestCase):
     def test_other_arch_is_rejected(self):

@@ -81,6 +81,13 @@ def spec_id_for_batch(batch: int) -> str:
     raise AssertionError("unreachable: table has an open-ended final band")
 
 
+def _tile_for_spec_id(spec_id: str) -> Tuple[int, int, int]:
+    for _, tile, sid in _TUNED_TILES:
+        if sid == spec_id:
+            return tile
+    raise KeyError(spec_id)
+
+
 def make_spec(req: GdnDecodeRequest, tile: Tuple[int, int, int]) -> GdnDecodeSpec:
     """Map a request plus a chosen tile onto a concrete kernel spec."""
     num_warps, warp_threads_k, blocks_per_v_dim = tile
@@ -127,7 +134,16 @@ def _make_candidate(*, tile: Tuple[int, int, int], spec_id: str, priority: int):
         # is what makes a tuning sweep able to force a non-default tile.
         if req.spec_id.strip().lower() == "auto":
             wanted = spec_id_for_batch(int(req.batch))
-            if wanted != spec_id:
+            # Prefer the tuned tile, but only when it is valid for this geometry.
+            # If it is not, fall through so any valid candidate may serve (the
+            # registry picks by priority) rather than failing a kernel-supported
+            # request.
+            if (
+                wanted != spec_id
+                and is_valid_spec(
+                    make_spec(req, _tile_for_spec_id(wanted)), arch=req.arch
+                )[0]
+            ):
                 return False, (
                     f"tuned tile for batch {req.batch} is {wanted!r}, not {spec_id!r}"
                 )

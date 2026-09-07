@@ -123,8 +123,12 @@ def ref_fp32(spec: GdnDecodeSpec, inp) -> Tuple[torch.Tensor, torch.Tensor]:
     q = inp["query"][:, 0].float()[:, k_of_v]  # [B, HV, DK]
     k = inp["key"][:, 0].float()[:, k_of_v]
 
-    q = q * torch.rsqrt((q * q).sum(-1, keepdim=True) + eps) * scale
-    k = k * torch.rsqrt((k * k).sum(-1, keepdim=True) + eps)
+    if spec.use_qk_l2norm:
+        q = q * torch.rsqrt((q * q).sum(-1, keepdim=True) + eps) * scale
+        k = k * torch.rsqrt((k * k).sum(-1, keepdim=True) + eps)
+    else:
+        # l2norm off: the kernel scales q by 1/sqrt(dk) and leaves k raw.
+        q = q * scale
 
     x = inp["a"][:, 0].float() + inp["dt_bias"].float()  # [B, HV]
     softplus = torch.where(x > 20.0, x, torch.log1p(torch.exp(x)))

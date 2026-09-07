@@ -215,6 +215,18 @@ def test_f16_io_variant_is_correct(harness):
 
 
 @requires_gfx950
+def test_use_qk_l2norm_off_matches_reference(harness):
+    """With l2norm disabled the kernel scales q by 1/sqrt(dk) and leaves k raw;
+    the reference must branch the same way, or it grades against the wrong
+    oracle and a raw-q/k regression would pass unnoticed."""
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec = dc.replace(GdnDecodeSpec(), use_qk_l2norm=False)
+    out_err, state_err = harness["check"](spec, 8)
+    assert max(out_err, state_err) <= harness["TOL"]
+
+
+@requires_gfx950
 def test_end_to_end_through_the_dispatch_result(harness):
     """Drive a launch from the dispatch result alone, as a caller would.
 
