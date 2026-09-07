@@ -389,9 +389,21 @@ TEST_P(General, DataTypeConfig)
 // Every other suite pins the scale to TestConfigs<T>::qscale_str, leaving the rest untested.
 // Only gfx125x has more than one, so the sweep is compiled in there alone.
 #ifdef CK_TILE_TEST_FMHA_QSCALE_SWEEP
-class QuantScale
-    : public TestWithParam<
-          std::tuple<mode_enum, const char*, int, std::tuple<int, int, int, int, int, std::string>>>
+enum class sink_kind
+{
+    none,
+    gptoss,
+    streamllm
+};
+
+constexpr auto kStreamLlmMask = "b:-1,0,2";
+
+class QuantScale : public TestWithParam<
+                       std::tuple<mode_enum,
+                                  const char*,
+                                  int,
+                                  sink_kind,
+                                  std::tuple<int, int, int, int, int, std::string>>>
 {
 };
 
@@ -403,6 +415,7 @@ INSTANTIATE_TEST_SUITE_P(
     Combine(ModeValues,
             QScaleValues,
             Values(128, 256),
+            Values(sink_kind::none, sink_kind::gptoss, sink_kind::streamllm),
             Values(std::tuple{2, 2, 1, 55, 256, "0"},      // GQA, seqlen_q << seqlen_k
                    std::tuple{1, 3, -1, 100, 51, "0"},     // plain MHA, seqlen_q > seqlen_k
                    std::tuple{2, 1, -1, 99, 256, "1"},     // causal
@@ -421,8 +434,11 @@ const char* qscale_init_method(std::string_view qscale)
 
 TEST_P(QuantScale, DataTypeConfig)
 {
-    auto [mode, qscale, hdim, dims_mask]                       = GetParam();
+    auto [mode, qscale, hdim, sink, dims_mask]                 = GetParam();
     auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
+
+    const std::string mask = sink == sink_kind::streamllm ? kStreamLlmMask : mask_str;
+    const int init_sink    = sink == sink_kind::gptoss ? 1 : 0;
 
     auto result = fmha_fwd_run<DataTypeConfig>(mode,
                                                batch,
@@ -451,11 +467,17 @@ TEST_P(QuantScale, DataTypeConfig)
                                                0,     // drop_seed
                                                0,     // drop_offset
                                                false, // drop_prefs
-                                               mask_str,
+                                               mask,
                                                qscale,
                                                true, // is_rotary_interleaved
-                                               1,    // num_splits
-                                               COMMON_ARGS_INIT(qscale_init_method(qscale)));
+                                               1, // num_splits
+                                               qscale_init_method(qscale),
+                                               static_cast<uint32_t>(ck_tile::EnvValue(
+                                                   CK_TILE_ENV(CK_TILE_TEST_SEED))),
+                                               1,         // do_validation
+                                               init_sink, // init_sink_value
+                                               1,         // pack_gqa
+                                               stream_config);
     CHECK_RESULT(result);
 }
 #endif
