@@ -84,8 +84,17 @@ class AtenVarlenRoute:
             return
         ov = self._override
         if ov.state is None:
-            from . import bootstrap as _bootstrap
+            # importlib, NOT `from . import bootstrap`. Inside a function that
+            # runs after the package is initialised, `from . import bootstrap`
+            # resolves the ATTRIBUTE on the package -- and __init__.py has
+            # rebound that name to the bootstrap() FUNCTION
+            # (`from .bootstrap import bootstrap`). The same statement works at
+            # module top-level, before __init__ finishes, which is why base.py
+            # gets away with it and this did not:
+            #   AttributeError: 'function' object has no attribute 'bootstrap'
+            import importlib
 
+            _bootstrap = importlib.import_module("hipdnn_torch.bootstrap")
             ov.state = _bootstrap.bootstrap()
         torch = ov.state.torch
 
