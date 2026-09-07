@@ -24851,5 +24851,181 @@
    "graph": "llama-2-7b__bf16_prefill_bf16_idx63_b1_hq32_kv32_sq512_skv512_d128v128_causal",
    "note": "exact-batch coverage for a shape previously served by batch widening (probe j516)"
   }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 28,
+  "nhead_k": 4,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "model_sweep_gap_fill",
+   "suite": "gfx950_dense_model_sweep_28cell_grid",
+   "graph": "tuple_hq28_kv4_sq2048_sk2048_d128_bf16_m1_b4",
+   "model": "Qwen2.5-7B",
+   "persistent_expected": true,
+   "graphs_at_this_batch": 1,
+   "note": "batch-4 gap fill: the 28-cell gfx950 dense model-sweep grid requested this head-pair only at batch 1, so job 525 declined all four b4 cells under strict batch equality (6f8b8b682f4)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 28,
+  "nhead_k": 4,
+  "seqlen_q": 4096,
+  "seqlen_k": 4096,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "model_sweep_gap_fill",
+   "suite": "gfx950_dense_model_sweep_28cell_grid",
+   "graph": "tuple_hq28_kv4_sq4096_sk4096_d128_bf16_m1_b4",
+   "model": "Qwen2.5-7B",
+   "persistent_expected": true,
+   "graphs_at_this_batch": 1,
+   "note": "batch-4 gap fill: the 28-cell gfx950 dense model-sweep grid requested this head-pair only at batch 1, so job 525 declined all four b4 cells under strict batch equality (6f8b8b682f4)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 40,
+  "nhead_k": 8,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "model_sweep_gap_fill",
+   "suite": "gfx950_dense_model_sweep_28cell_grid",
+   "graph": "tuple_hq40_kv8_sq2048_sk2048_d128_bf16_m1_b4",
+   "model": "Qwen3-14B",
+   "persistent_expected": true,
+   "graphs_at_this_batch": 1,
+   "note": "batch-4 gap fill: the 28-cell gfx950 dense model-sweep grid requested this head-pair only at batch 1, so job 525 declined all four b4 cells under strict batch equality (6f8b8b682f4)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 40,
+  "nhead_k": 8,
+  "seqlen_q": 4096,
+  "seqlen_k": 4096,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "model_sweep_gap_fill",
+   "suite": "gfx950_dense_model_sweep_28cell_grid",
+   "graph": "tuple_hq40_kv8_sq4096_sk4096_d128_bf16_m1_b4",
+   "model": "Qwen3-14B",
+   "persistent_expected": true,
+   "graphs_at_this_batch": 1,
+   "note": "batch-4 gap fill: the 28-cell gfx950 dense model-sweep grid requested this head-pair only at batch 1, so job 525 declined all four b4 cells under strict batch equality (6f8b8b682f4)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 40,
+  "nhead_k": 40,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "model_sweep_gap_fill",
+   "suite": "gfx950_dense_model_sweep_28cell_grid",
+   "graph": "tuple_hq40_kv40_sq2048_sk2048_d128_bf16_m1_b4",
+   "model": "GPT-3-13B-class",
+   "persistent_expected": true,
+   "graphs_at_this_batch": 1,
+   "note": "batch-4 gap fill: the 28-cell gfx950 dense model-sweep grid requested this head-pair only at batch 1, so job 525 declined all four b4 cells under strict batch equality (6f8b8b682f4)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 40,
+  "nhead_k": 40,
+  "seqlen_q": 4096,
+  "seqlen_k": 4096,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "model_sweep_gap_fill",
+   "suite": "gfx950_dense_model_sweep_28cell_grid",
+   "graph": "tuple_hq40_kv40_sq4096_sk4096_d128_bf16_m1_b4",
+   "model": "GPT-3-13B-class",
+   "persistent_expected": true,
+   "graphs_at_this_batch": 1,
+   "note": "batch-4 gap fill: the 28-cell gfx950 dense model-sweep grid requested this head-pair only at batch 1, so job 525 declined all four b4 cells under strict batch equality (6f8b8b682f4)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 64,
+  "nhead_k": 8,
+  "seqlen_q": 2048,
+  "seqlen_k": 2048,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "model_sweep_gap_fill",
+   "suite": "gfx950_dense_model_sweep_28cell_grid",
+   "graph": "tuple_hq64_kv8_sq2048_sk2048_d128_bf16_m1_b4",
+   "model": "Llama-3-70B",
+   "persistent_expected": true,
+   "graphs_at_this_batch": 1,
+   "note": "batch-4 gap fill: the 28-cell gfx950 dense model-sweep grid requested this head-pair only at batch 1, so job 525 declined all four b4 cells under strict batch equality (6f8b8b682f4)"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 64,
+  "nhead_k": 8,
+  "seqlen_q": 4096,
+  "seqlen_k": 4096,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "model_sweep_gap_fill",
+   "suite": "gfx950_dense_model_sweep_28cell_grid",
+   "graph": "tuple_hq64_kv8_sq4096_sk4096_d128_bf16_m1_b4",
+   "model": "Llama-3-70B",
+   "persistent_expected": true,
+   "graphs_at_this_batch": 1,
+   "note": "batch-4 gap fill: the 28-cell gfx950 dense model-sweep grid requested this head-pair only at batch 1, so job 525 declined all four b4 cells under strict batch equality (6f8b8b682f4)"
+  }
  }
 ]

@@ -2622,6 +2622,30 @@ packs:
       knobs838:
       - {block_m: 256, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_np256_pdauto_lr_bs0_nkb0_lvrp32_v1244.block}
       - {block_m: 128, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_np256_pdauto_lr_bs0_nkb0_lvrp32_v1244.block}
+      knobs839:
+      - {block_m: 256, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1245.block}
+      - {block_m: 128, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1245.block}
+      knobs840:
+      - {block_m: 256, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1246.block}
+      - {block_m: 128, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1246.block}
+      knobs841:
+      - {block_m: 256, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1247.block}
+      - {block_m: 128, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1247.block}
+      knobs842:
+      - {block_m: 256, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1248.block}
+      - {block_m: 128, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1248.block}
+      knobs843:
+      - {block_m: 256, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1249.block}
+      - {block_m: 128, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1249.block}
+      knobs844:
+      - {block_m: 256, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1250.block}
+      - {block_m: 128, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1250.block}
+      knobs845:
+      - {block_m: 256, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1251.block}
+      - {block_m: 128, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1251.block}
+      knobs846:
+      - {block_m: 256, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1252.block}
+      - {block_m: 128, tag: ca_dtbf16_sw0_bm256_bn64_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_lvrp32_wld_v1252.block}
     shapes:
     - {batch: 3, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, ragged: false, block_n: 64, persistent: true, wide_lds_dma: true, knobs: knobs0}
     - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, ragged: false, block_n: 64, persistent: true, wide_lds_dma: true, knobs: knobs1}
@@ -3462,3 +3486,11 @@ packs:
     - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: fp16, ragged: false, block_n: 64, persistent: false, wide_lds_dma: false, knobs: knobs836}
     - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: fp16, ragged: false, block_n: 64, persistent: false, wide_lds_dma: false, knobs: knobs837}
     - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, ragged: false, block_n: 64, persistent: false, wide_lds_dma: false, knobs: knobs838}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, ragged: false, block_n: 64, persistent: true, wide_lds_dma: true, knobs: knobs839}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, ragged: false, block_n: 64, persistent: true, wide_lds_dma: true, knobs: knobs840}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, ragged: false, block_n: 64, persistent: true, wide_lds_dma: true, knobs: knobs841}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, ragged: false, block_n: 64, persistent: true, wide_lds_dma: true, knobs: knobs842}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: bf16, ragged: false, block_n: 64, persistent: true, wide_lds_dma: true, knobs: knobs843}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: bf16, ragged: false, block_n: 64, persistent: true, wide_lds_dma: true, knobs: knobs844}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, ragged: false, block_n: 64, persistent: true, wide_lds_dma: true, knobs: knobs845}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, ragged: false, block_n: 64, persistent: true, wide_lds_dma: true, knobs: knobs846}
