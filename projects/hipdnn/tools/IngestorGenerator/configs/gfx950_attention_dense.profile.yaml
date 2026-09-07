@@ -650,7 +650,16 @@ launch_surface:
       relaxes -- now evaluated against the variant's OWN block_m rather than a
       compile-time 256 -- plus the two predicate tile rules and the wide_lds_dma
       self-consistency check. A mismatch on any field declines the candidate rather
-      than launching it.
+      than launching it. BATCH IS INCLUDED IN THAT EQUALITY, on both the persistent
+      and the default arm. The default arm briefly treated batch as a CAPACITY BOUND
+      (a binary built for N serving any batch <= N, with prepare() taking grid Z from
+      the graph); on device that raised an illegal memory access -- probe j516, a
+      batch-4 graph on the batch-5 binary faulting while the same shape at batch 5 on
+      the same binary was correct to tolerance, in a process with no other engine in
+      it. Across two device jobs the widened path was 0 success / 3 faults against
+      21 / 0 for exact batch. The shapes it had covered by widening now ship real
+      exact-batch variants instead. Restoring the bound needs a DEVICE result: the
+      unit tests and the IR diff that justified it were both green while it faulted.
     test: >-
       dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
 

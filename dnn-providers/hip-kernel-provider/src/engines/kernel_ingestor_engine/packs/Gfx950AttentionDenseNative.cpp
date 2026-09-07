@@ -789,20 +789,7 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
-    // BATCH IS A CAPACITY BOUND ON THE DEFAULT ARM, AND A BAKED CONSTANT ON THE
-    // PERSISTENT ONE. The two arms genuinely differ, and collapsing them either way is
-    // a defect:
-    //
-    //   * DEFAULT arm. `batch` reaches the emitted IR in exactly two places, both
-    //     `buffer_rsrc` extents -- the K/V cache bound
-    //     (kernels/gfx950/attention_dense.py:830) and, on the ragged path, the Q bound
-    //     (:781). The batch INDEX is `b.block_id_z()` (:718) and the addressing is
-    //     `bt * Sq * stride` (:741), both runtime. Verified rather than read: building
-    //     the same spec at batch=1 and batch=8 and diffing every numeric literal in
-    //     the emitted IR moves exactly two of them, and they are those extents -- at
-    //     aligned, ragged, non-causal, hdim=64 and GQA configurations alike. So a
-    //     binary compiled for batch N serves any batch <= N correctly: the resource
-    //     bound is larger than needed, and the grid launches fewer CTAs in Z.
+    // BATCH IS STRICT EQUALITY ON BOTH ARMS.
     //
     //   * PERSISTENT arm. The grid is 1-D, so each CTA recovers (qb, hq, bt) from a
     //     flat work-item index by `mod`/`div` against a COMPILE-TIME `B`
@@ -810,17 +797,30 @@ bool kernelMatches(const MatchContext& context,
     //     different batch decodes to the wrong (qb, hq, bt) entirely -- wrong output,
     //     no fault. That is strict equality, permanently.
     //
-    // THE BOUND HAS A PARTNER OBLIGATION IN prepare(), and without it this widening
-    // would be a silent wrong answer: the default arm's grid Z must come from the
-    // GRAPH's batch, not the descriptor's. Launching a batch=8 variant's Z extent for
-    // a batch=4 graph runs four CTAs over memory the tensors do not cover.
+    //   * DEFAULT arm. This USED to be a capacity bound -- `problem.batch >
+    //     kernelBatch` -- on the argument that `batch` reaches the emitted IR only as
+    //     two `buffer_rsrc` extents, so a binary built for N serves any batch <= N
+    //     with a shorter grid Z. The IR diff behind that argument is real and was
+    //     verified. The conclusion was still wrong ON DEVICE.
     //
-    // Requiring equality on both arms was not WRONG, just needlessly narrow: it forced
-    // one variant per (shape x batch) pair, which on the 5,005-graph corpus is 1,453
-    // variants for the reachable population where 771 suffice.
-    const bool kernelIsPersistent = intField(PERSISTENT_FIELD) != 0;
+    //     Measured, in a process with NO other engine in it (probe j516): a graph at
+    //     batch 4 served by the batch-5 binary raises an illegal memory access, while
+    //     the SAME shape at batch 5 on the SAME binary is correct to tolerance. One
+    //     variable. Across both device jobs the widened path is 0 success / 3 faults
+    //     and the exact-batch path is 21 success / 0 faults -- the widening has never
+    //     once been observed to work.
+    //
+    //     The mechanism is not understood, and that is precisely why this is equality
+    //     rather than a narrower bound: a widening nobody can explain is not one to
+    //     keep. prepare() still takes grid Z from the graph's batch, which is now
+    //     redundant-but-harmless and stays as a guard (see the throw there).
+    //
+    //     Cost: one variant per (shape x batch) pair. The shapes this previously
+    //     covered by widening are covered by real exact-batch variants instead --
+    //     compiled for the batch they serve. Restoring the bound needs a DEVICE test,
+    //     not the unit tests that passed throughout while this faulted.
     const int64_t kernelBatch = intField(BATCH_FIELD);
-    if(kernelIsPersistent ? (kernelBatch != problem.batch) : (problem.batch > kernelBatch))
+    if(kernelBatch != problem.batch)
     {
         return false;
     }

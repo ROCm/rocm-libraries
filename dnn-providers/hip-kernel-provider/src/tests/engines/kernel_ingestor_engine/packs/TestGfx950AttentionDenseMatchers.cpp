@@ -1051,30 +1051,42 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesAWideDmaCandidateThatIsNotPersi
 }
 
 // ---------------------------------------------------------------------------
-// batch: a CAPACITY BOUND on the default arm, strict equality on the persistent one.
+// batch: STRICT EQUALITY ON BOTH ARMS. The default arm briefly widened -- a binary
+// built for N serving any batch <= N -- and that faulted on device (probe j516: a
+// batch-4 graph on the batch-5 binary raises an illegal memory access while the same
+// shape at batch 5 on the same binary is correct to tolerance). These tests pin the
+// equality so a future re-widening has to argue with a device result, not an IR diff.
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseKernelMatch, ADefaultVariantServesASmallerBatchThanItWasBuiltFor)
+TEST(TestGfx950AttentionDenseKernelMatch, ADefaultVariantRefusesASmallerBatchThanItWasBuiltFor)
 {
-    // The widening this bound exists for. `batch` reaches the default arm's IR only as
-    // the K/V (and ragged Q) buffer_rsrc extents; the batch index is block_id_z and the
-    // addressing is computed at runtime. A binary compiled for 8 has resource bounds
-    // strictly larger than a 4-sequence graph needs, and prepare() launches 4 CTAs in
-    // Z rather than 8.
+    // THE REGRESSION. This previously returned true, on the argument that `batch`
+    // reaches the default arm's IR only as buffer_rsrc extents, so a larger bound is
+    // harmless and prepare() simply launches fewer CTAs in Z. The IR diff supporting
+    // that is real; the device disagrees, and the device wins. Serving this
+    // combination is an illegal memory access, so declining it is correct even though
+    // the mechanism is not yet understood.
     GraphSpec graph;
     graph.batch = 4;
     KernelSpec kernel;
     kernel.batch = 8;
     kernel.persistent = 0;
-    EXPECT_TRUE(matchesKernel(graph, kernel));
+    EXPECT_FALSE(matchesKernel(graph, kernel));
+
+    // Control: the same graph against a binary compiled for ITS batch still matches,
+    // so the guard above refuses the mismatch rather than the arm. Exact-batch is the
+    // path with 21 device successes and zero faults behind it.
+    KernelSpec exact;
+    exact.batch = 4;
+    exact.persistent = 0;
+    EXPECT_TRUE(matchesKernel(graph, exact));
 }
 
 TEST(TestGfx950AttentionDenseKernelMatch, ADefaultVariantRefusesALargerBatchThanItWasBuiltFor)
 {
-    // The other side, and the one that is a fault rather than a missed opportunity: a
-    // graph with more sequences than the compiled resource bound covers reads past the
-    // K/V extent. Bounds-checked, so it zero-fills silently -- which is why the bound
-    // is `<=` and not "ignore batch".
+    // The other side, unchanged and never in doubt: a graph with more sequences than
+    // the compiled resource bound covers reads past the K/V extent. Bounds-checked, so
+    // it zero-fills silently rather than faulting -- a wrong answer, not a crash.
     GraphSpec graph;
     graph.batch = 16;
     KernelSpec kernel;
