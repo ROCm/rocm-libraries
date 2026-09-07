@@ -14,6 +14,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Extended fixed-size-segments variant of `hipcub::DeviceSegmentedReduce` to support all operators (`Sum`, `Min/Max`, and `ArgMin/Max`).
 * Added support for large sizes to `hipcub::DeviceRunLengthEncode::NonTrivialRuns`.
 * Added env-based API for `hipcub::DeviceReduce::Reduce`.
+* Added env-based API for `hipcub::DeviceReduce::Sum`.
 * Feature parity with CCCL/CUB 3.1.4.
 
 ### Changed
