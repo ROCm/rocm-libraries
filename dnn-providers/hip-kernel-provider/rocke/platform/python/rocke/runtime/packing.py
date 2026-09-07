@@ -89,9 +89,9 @@ def compile_packer(signature: Sequence[Mapping[str, Any]]):
     work (type dispatch, alignment padding, format-string build, and
     ``struct`` format compile) out of the per-call path. On a hot
     decode launch loop this removes the dominant Python cost of
-    re-deriving the layout on every single launch (measured ~1.8 us on
-    a 12-arg B=1 GDN decode). The signature is immutable per kernel, so
-    a launcher can build this once at construction and reuse it.
+    re-deriving the layout on every single launch. The signature is
+    immutable per kernel, so a launcher can build this once at
+    construction and reuse it.
     """
     _TY_FMT: Mapping[str, Tuple[str, int, int]] = {
         "i32": ("i", 4, 4),

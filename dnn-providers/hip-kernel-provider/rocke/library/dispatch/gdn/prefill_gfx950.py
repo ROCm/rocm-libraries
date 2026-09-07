@@ -17,7 +17,7 @@ kernel, so ``auto`` does not resolve here (see :mod:`.prefill_common`).
 
 Tuned ``value_splits`` table
 ----------------------------
-Measured on gfx950 (jobs 256/257, correctness-gated vs the fp64 oracle): the
+Measured on gfx950 (correctness-gated vs the fp64 oracle): the
 serial scan is parallelism-starved at small ``BH`` and ``value_splits`` fills
 the GPU. The optimum is per-``BH``; each split also fixes the scan tile's block
 size (and the ``vs=8`` atom), because the scan block must cover the split V
@@ -63,7 +63,7 @@ ARCH = "gfx950"
 
 # (max_batch_heads, value_splits). BH = batch * num_v_heads. The final band is
 # open-ended (value_splits=1, natural parallelism fills the GPU). Measured
-# anchors: BH=64 -> vs8 (1.30x FlyDSL), BH=128 -> vs2 (1.07x, near-parity).
+# anchors: BH<=64 -> value_splits=8, BH<=128 -> 2. Ratios in the internal perf repo.
 _VALUE_SPLIT_BANDS = (
     (64, 8),
     (128, 2),
