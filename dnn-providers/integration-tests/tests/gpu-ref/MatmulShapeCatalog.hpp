@@ -56,18 +56,18 @@ inline std::vector<MatmulTestCase> getMatmulMedium3DTestCases()
 
 inline std::vector<MatmulTestCase> getMatmulMedium4DTestCases()
 {
-    return {{{2, 2, 2, 64, 64}, {2, 2, 2, 64, 64}},
-            {{2, 2, 2, 15, 65}, {2, 2, 2, 65, 17}},
-            {{2, 2, 2, 63, 17}, {2, 2, 2, 17, 65}},
-            {{1, 6, 2, 16, 16}, {3, 2, 6, 16, 16}}};
-}
-
-inline std::vector<MatmulTestCase> getMatmulMedium5DTestCases()
-{
     return {{{2, 2, 64, 64}, {2, 2, 64, 64}},
             {{2, 2, 15, 65}, {2, 2, 65, 17}},
             {{2, 2, 63, 17}, {2, 2, 17, 65}},
             {{1, 6, 16, 16}, {3, 3, 16, 16}}};
+}
+
+inline std::vector<MatmulTestCase> getMatmulMedium5DTestCases()
+{
+    return {{{2, 2, 2, 64, 64}, {2, 2, 2, 64, 64}},
+            {{2, 2, 2, 15, 65}, {2, 2, 2, 65, 17}},
+            {{2, 2, 2, 63, 17}, {2, 2, 2, 17, 65}},
+            {{1, 6, 2, 16, 16}, {3, 2, 6, 16, 16}}};
 }
 
 inline std::vector<MatmulTestCase> getMatmulLarge2DTestCases()
