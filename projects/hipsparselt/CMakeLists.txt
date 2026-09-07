@@ -60,11 +60,15 @@ if(HIPSPARSELT_ENABLE_CUDA AND HIPSPARSELT_ENABLE_HIP)
     message(FATAL_ERROR "Cannot enable CUDA and HIP support simultaneously.")
 endif()
 
-option(HIPSPARSELT_BUILD_SHARED_LIBS "Build the hipSPARSELt shared library." ON)
+option(HIPSPARSELT_BUILD_SHARED_LIBS "Build the hipSPARSELt library as shared vs static." ON)
 option(HIPSPARSELT_BUILD_TESTING "Build test client." ON)
 option(HIPSPARSELT_BUILD_COVERAGE "Build tests with coverage enabled." OFF)
 
 option(HIPSPARSELT_ENABLE_DEVICE "Build hipSPARSELt device libraries." ON)
+set(TENSILELITE_LIBLOGIC_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
+    CACHE PATH "Path to the hipSPARSELt TensileLite logic files."
+)
 option(HIPSPARSELT_ENABLE_CLIENT "Build hipSPARSELt clients." ON)
 if(HIPSPARSELT_ENABLE_CLIENT)
     option(HIPSPARSELT_ENABLE_BENCHMARKS "Build benchmark client." ON)
@@ -78,11 +82,13 @@ option(HIPSPARSELT_ENABLE_OPENMP "Enable OpenMP support." ON)
 option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSELT_ENABLE_FETCH "Fetch dependencies." OFF)
 option(HIPSPARSELT_ENABLE_THEROCK "Enable TheRock support." OFF)
-
-set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
-    CACHE PATH "Path to hipblaslt directory."
-)
 set(HIPSPARSELT_COVERAGE_GTEST_FILTER "" CACHE STRING "GTest filter for coverage tests.")
+mark_as_advanced(
+    HIPSPARSELT_ENABLE_ASAN
+    HIPSPARSELT_ENABLE_FETCH
+    HIPSPARSELT_ENABLE_THEROCK
+    HIPSPARSELT_COVERAGE_GTEST_FILTER
+)
 
 if(NOT HIPSPARSELT_ENABLE_CUDA)
     set(GPU_TARGETS "all" CACHE STRING "AMD GFX targets to cross-compile")
@@ -150,51 +156,78 @@ if(HIPSPARSELT_ENABLE_CUDA)
 endif()
 
 if(HIPSPARSELT_ENABLE_HIP)
-    set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
-    if(NOT EXISTS "${HIPBLASLT_PATH}")
-        message(FATAL_ERROR "hipBLASLt required but no not found at ${HIPBLASLT_PATH}.")
+    if(NOT HIPBLASLT_TENSILELITE_PATH)
+        set(HIPBLASLT_TENSILELITE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt/tensilelite")
     endif()
 
-    block(SCOPE_FOR VARIABLES)
-    set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
-    # Builds tensilelite's device libraries (.co/.dat)
-    set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
-    set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
-    set(TENSILELITE_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
-    set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
-    # hipSPARSELt does not use ExtOp or MatrixTransform artifacts
-    set(HIPBLASLT_ENABLE_EXTOPS OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_ENABLE_MATRIX_TRANSFORM OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_LIBLOGIC_PATH
-        "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
-        CACHE STRING "" FORCE
-    )
-    # hipSPARSELt's corpus has a unified gfx1250 tree. It shares hipBLASLt's
-    # device-library CMake machinery, which can still build a gfx1250v0 target,
-    # but that target must not imply this separate corpus owns a v0 overlay.
-    set(HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY OFF)
+    if(HIPSPARSELT_ENABLE_THEROCK)
+        find_package(hipblaslt CONFIG REQUIRED)
+        message(STATUS "hipSPARSELt uses the staged hipBLASLt package.")
+    else()
+        cmake_path(GET HIPBLASLT_TENSILELITE_PATH PARENT_PATH _hipblaslt_source_dir)
+        list(APPEND CMAKE_MODULE_PATH "${_hipblaslt_source_dir}/cmake")
+        block()
+            set(HIPBLASLT_ENABLE_TENSILELITE_ONLY ON)
+            set(CMAKE_SKIP_INSTALL_RULES ON)
+            if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
+                set(HIPBLASLT_ENABLE_YAML ON)
+            else()
+                set(HIPBLASLT_ENABLE_YAML OFF)
+            endif()
+            add_subdirectory(
+                "${_hipblaslt_source_dir}"
+                "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/hipblaslt"
+                EXCLUDE_FROM_ALL
+            )
+        endblock()
+    endif()
+
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
         CACHE FILEPATH "License file for package" FORCE
     )
 
-    if(WIN32)
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin"
-            CACHE PATH "path to tensile library" FORCE
+    if(HIPSPARSELT_ENABLE_DEVICE)
+        include(hipblaslt_codegen)
+        set(_hipsparselt_tensile_out "${CMAKE_BINARY_DIR}/Tensile")
+        set(_hipsparselt_codegen_product_args "")
+        if(HIPSPARSELT_ENABLE_ASAN)
+            list(APPEND _hipsparselt_codegen_product_args ASAN ON)
+        endif()
+        if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
+            list(APPEND _hipsparselt_codegen_product_args YAML_FORMAT ON)
+        endif()
+        if(Tensile_NO_LAZY_LIBRARY_LOADING)
+            list(APPEND _hipsparselt_codegen_product_args LAZY_LOAD OFF)
+        endif()
+        create_device_library(
+            LOGIC_PATH "${TENSILELITE_LIBLOGIC_PATH}"
+            OUTPUT_DIR "${_hipsparselt_tensile_out}"
+            CODEGEN_ROOT "${HIPBLASLT_TENSILELITE_PATH}"
+            PYTHON_EXECUTABLE "${Python_EXECUTABLE}"
+            ${_hipsparselt_codegen_product_args}
         )
-    else()
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR
-            "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt"
-            CACHE PATH "path to tensile library" FORCE
+
+        if(WIN32)
+            set(_hipsparselt_tensile_install_dir "${CMAKE_INSTALL_BINDIR}/hipsparselt")
+        else()
+            set(_hipsparselt_tensile_install_dir "${CMAKE_INSTALL_LIBDIR}/hipsparselt")
+        endif()
+        install(
+            DIRECTORY "${_hipsparselt_tensile_out}/library"
+            DESTINATION "${_hipsparselt_tensile_install_dir}"
+            COMPONENT runtime
         )
     endif()
-
-    add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
-    endblock()
 endif()
 
+set(BUILD_SHARED_LIBS "${HIPSPARSELT_BUILD_SHARED_LIBS}")
 add_subdirectory(library)
+
+set(_hipsparselt_requires_hipblaslt OFF)
+if(HIPSPARSELT_ENABLE_HIP
+        AND (HIPSPARSELT_ENABLE_THEROCK OR NOT BUILD_SHARED_LIBS))
+    set(_hipsparselt_requires_hipblaslt ON)
+endif()
 
 if(HIPSPARSELT_BUILD_TESTING)
   enable_testing()
@@ -213,6 +246,32 @@ if(HIPSPARSELT_ENABLE_CLIENT)
 endif()
 
 # --- Packaging and installation ---
+
+if(_hipsparselt_requires_hipblaslt)
+    if(BUILD_SHARED_LIBS)
+        rocm_package_add_dependencies(
+            COMPONENT runtime
+            DEPENDS hipblaslt
+        )
+        rocm_package_add_deb_dependencies(
+            COMPONENT devel
+            DEPENDS hipblaslt-dev
+        )
+        rocm_package_add_rpm_dependencies(
+            COMPONENT devel
+            DEPENDS hipblaslt-devel
+        )
+    else()
+        rocm_package_add_deb_dependencies(
+            COMPONENT devel
+            DEPENDS hipblaslt-static-dev
+        )
+        rocm_package_add_rpm_dependencies(
+            COMPONENT devel
+            DEPENDS hipblaslt-static-devel
+        )
+    endif()
+endif()
 
 if(HIPSPARSELT_ENABLE_CLIENT)
     include(rocm_client_prerequisites)
@@ -272,6 +331,11 @@ rocm_install(
     COMPONENT "devel"
 )
 
+set(_hipsparselt_export_depends PACKAGE hip)
+if(_hipsparselt_requires_hipblaslt)
+    list(APPEND _hipsparselt_export_depends PACKAGE hipblaslt)
+endif()
+
 rocm_export_targets(
     NAMESPACE
     roc::
@@ -280,9 +344,10 @@ rocm_export_targets(
     EXPORT
     hipsparselt-targets
     DEPENDS
-    PACKAGE
-    hip
+    ${_hipsparselt_export_depends}
 )
+unset(_hipsparselt_export_depends)
+unset(_hipsparselt_requires_hipblaslt)
 
 if(HIPSPARSELT_ENABLE_CLIENT)
     if(HIPSPARSELT_BUILD_TESTING OR BUILD_TESTING)
@@ -335,9 +400,7 @@ if(HIPSPARSELT_ENABLE_CLIENT)
 endif()
 
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPSPARSELT_IS_SUBPROJECT)
-    # rocm_create_package makes decisions on what type of package to produce based on
-    # BUILD_SHARED_LIBS. If we don't set this here we will only get a dev package.
-    set(BUILD_SHARED_LIBS ${HIPSPARSELT_BUILD_SHARED_LIBS})
+    # rocm_create_package uses BUILD_SHARED_LIBS to select the package layout.
     set(HIPSPARSELT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
         CACHE PATH "Path placed into ldconfig file"
     )
