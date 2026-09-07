@@ -168,7 +168,7 @@ exercises the same build + launch plumbing as the provider.
 
 ---
 
-## 6. Three matmul schedules: narrow, transposed-x8, D256-lean
+## 6. Four matmul schedules: narrow, transposed-x8, D256-lean, GQA head-fold
 
 The recurrence of Section 3 is fixed; the shipped gfx942 paths differ only in
 **how the two matmuls ($QK^\top$ and $PV$) are mapped onto the CDNA3 matrix
@@ -176,6 +176,13 @@ unit** and how K/V reach it. The harness's `_build_spec` selects between the fir
 two (narrow §6.1, transposed-x8 §6.2); the third — the D256 lean natural-QK path
 (§6.3) — is a *production-dispatcher* path (`_d256_gfx942_fast`), not a harness
 `_build_spec` choice.
+
+The fourth (§6.4) is a different kind of change and worth naming as such: the
+**GQA head-fold** does not alter either matmul, the atom, or the recurrence. It
+changes only **which query rows a workgroup owns**, so that the paged K/V a
+workgroup streams is read once per KV head instead of once per query head. It is
+also a *production-dispatcher* path (`gfx942_gqa_fold_eligible`), and it is
+**default-ON** for its cohort.
 
 ### 6.1 The narrow default (`16x16x16`)
 
@@ -300,7 +307,76 @@ the fp32 reference (§10) on real gfx942.
 > sliding-window** cohort (`_d128_gfx942_swa_fast`) through its non-lean branch;
 > that branch keeps the fuller D128 schedule (K **and** V staged, double-buffered
 > at `block_size ≤ 32`) and adds the windowed mask / windowed KV-skip. Only
-> `head_size == 256` takes the lean body above.
+> `head_size == 256` takes the lean body above. Part of that D128 cohort also
+> takes the **head-fold** of §6.4, which changes the row ownership of that same
+> body rather than the body itself.
+
+### 6.4 The GQA head-fold (D128 sliding-window bf16)
+
+In grouped-query attention several query heads share one KV head. The shipped
+cohort here is 32 query heads over 8 KV heads, so `num_queries_per_kv = 4`.
+
+**The problem.** Without the fold, one workgroup owns **one query head**:
+
+```
+grid = (num_query_heads, total_q // 128 + num_seqs, 1)   # block_m = 128
+```
+
+The 4 query heads that share a KV head are therefore 4 *separate* workgroups,
+and each one streams the same paged K and V. The same bytes cross the HBM
+(High Bandwidth Memory — the off-chip DRAM) interface up to 4 times, with reuse
+only by luck of L2 residency.
+
+**The fold.** Pack those 4 heads into one workgroup's 128-row M-tile, as 32
+tokens × 4 heads instead of 128 tokens × 1 head:
+
+```
+row m  ->  token = qbase + m // FOLD_HEADS ,  head = kv_head * GQAG + m % FOLD_HEADS
+grid   =  (num_kv_heads, total_q // 32 + num_seqs, 1)
+```
+
+`FOLD_HEADS = 4` and `TOKBLK = 128 // FOLD_HEADS = 32`. KV is now read **once per
+KV head**. The inverse map recovers `m` at the O-store, so the output layout is
+unchanged.
+
+**Parallelism is preserved**, which is why the smaller token tile is affordable.
+At `total_q = 8192`, one sequence:
+
+| | grid.x | grid.y | workgroups |
+|---|---:|---:|---:|
+| unfolded | 32 | 8192/128 + 1 = 65 | 2080 |
+| folded | 8 | 8192/32 + 1 = 257 | 2056 |
+
+The 4× cut in `grid.x` is paid back by the 4× rise in `grid.y`. The occupancy is
+the same; only the KV traffic changes.
+
+**`FOLD_HEADS` is tile geometry, not the GQA ratio.** They are equal only because
+the predicate pins `num_queries_per_kv == 4`. A 4:1 fold needs 4 × 32 = 128 rows,
+which is exactly the tile; an 8:1 fold would need 8 × 32 = 256 rows, which the
+tile cannot hold. Widening the cohort therefore requires re-deriving the row
+split, not just relaxing the predicate — so `build_gfx942_4warp_gqa` **raises** on
+`GQAG != FOLD_HEADS` rather than silently corrupting addresses.
+
+**Scope / how it is selected.** One predicate,
+`gfx942_gqa_fold_eligible(head_size, num_queries_per_kv, sliding_window, dtype,
+block_size)`, drives **both** the builder and the launch grid — they must agree or
+the kernel and its grid describe different tiles. The cohort is `head_size == 128`
+**and** `num_queries_per_kv == 4` **and** `sliding_window > 0` **and** `bf16`
+**and** `block_size <= 32`. Every other shape keeps the unfolded path. fp16 is
+excluded as a *measurement* boundary, not a structural one: the fp16 atom has the
+same `32x32x8` geometry, but only bf16 has an A/B behind it.
+
+All five predicate inputs are already components of `_tiled_cache_key`, so the
+cache key stays faithful without carrying a separate fold flag.
+
+**Measured.** `gqa_head_fold_bench.py` in `prefill/` A/Bs the fold against the
+same kernel with the predicate forced false. On MI308X (gfx942, ROCm 7.13), bf16
+D128 GQA 32/8, `sliding_window = 4096`, block sizes 16 and 32, seqlens 512-16384:
+**+5.2% to +21.3%, no regression at any of the 12 points**; the gain is largest at
+short sequence lengths and settles at ~5% for 8192-16384. Numerically the fold is
+**exact** — at seqlen 16384 the folded and unfolded kernels agree to `max_abs = 0`,
+as they must, since the fold only repacks rows. The case study
+(`gqa_head_fold_case_study.md`) records the full table and the dead ends.
 
 ---
 
