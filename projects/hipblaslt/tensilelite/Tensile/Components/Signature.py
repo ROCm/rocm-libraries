@@ -32,12 +32,11 @@ from dataclasses import dataclass, field
 
 # Fused GEMM.A2A kernarg segment layout.
 #
-# When kernel["ProblemType"]["FusedGemmA2A"] is set, Signature appends a fixed-size segment at
+# When either A2A fusion mode is set, Signature appends a fixed-size segment at
 # the tail of the kernarg buffer. These args are kernarg metadata ONLY -- no
-# defineSgpr, not counted in numSgprToLoad. The fusion logic runs solely in the
-# D-store epilogue, which reads each arg on demand by absolute byte offset into
-# a scratch SGPR freed right after use. A WG maps to a single dst_rank, so it
-# reads exactly one peer group.
+# defineSgpr, not counted in numSgprToLoad. Readers take each arg on demand by
+# absolute byte offset into a scratch SGPR freed right after use. A WG maps to a
+# single dst_rank, so it reads exactly one peer group.
 #
 # The slot count is a COMPILE-TIME constant, independent of the runtime W.
 FUSED_A2A_MAX_RANKS = 8
@@ -436,7 +435,7 @@ class SignatureDefault(Signature):
 
         # Fused GEMM.A2A kernarg metadata; registered LAST so it lands at the
         # tail. See fusedA2AKernArgLayout() for the offset contract.
-        if kernel["ProblemType"]["FusedGemmA2A"]:
+        if kernel["ProblemType"]["FusedGemmA2A"] or kernel["ProblemType"]["FusedA2AMode"] == 1:
             fusedBase = signature.offset
             for j in range(FUSED_A2A_MAX_RANKS):
                 for f in FUSED_A2A_PEER_FIELDS:
