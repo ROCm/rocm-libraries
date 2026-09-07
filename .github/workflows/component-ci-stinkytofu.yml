@@ -61,6 +61,15 @@ jobs:
           package_path: shared/stinkytofu
           test_path: python_module/tests
 
+      - name: Build (ASan)
+        run: invoke build --asan --build-dir build_asan --clean
+
+      - name: Test (ASan)
+        working-directory: shared/stinkytofu/build_asan
+        run: ctest --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+
   windows:
     name: Windows
     runs-on: ${{ inputs.windows_runner }}
