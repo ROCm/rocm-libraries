@@ -162,8 +162,7 @@ TEST_F(AllocationConstraintsTest, LiveInAboveWhatTheDispatchFillsIsUndefinedAndF
 
     AllocationSetup setup(*func, RegClassSet::all());
     EXPECT_FALSE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
-    EXPECT_TRUE(isUndefinedLiveIn(setup.constraints(), liveIn))
-        << setup.constraints().toString();
+    EXPECT_TRUE(isUndefinedLiveIn(setup.constraints(), liveIn)) << setup.constraints().toString();
 }
 
 TEST_F(AllocationConstraintsTest, WithoutTheBoundaryEveryLiveInStaysPinned) {
