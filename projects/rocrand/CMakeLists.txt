@@ -74,7 +74,7 @@ else()
 endif()
 
 # CMake modules
-list(APPEND
+list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
   $ENV{ROCM_PATH}/lib/cmake/hip
