@@ -102,6 +102,17 @@ public:
                                                                stream));
     }
 
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        Sum(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceReduce::Sum(d_in, d_out, num_items, env));
+    }
+
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION static hipError_t Min(void*           d_temp_storage,
                                                   size_t&         temp_storage_bytes,
