@@ -125,3 +125,22 @@ class TestA2AGemmTransitionPhase:
         assert src.index("A2A_TRANSITION end") < src.rindex("A2AShardLoopBegin"), (
             "the transition phase is emitted after the back edge"
         )
+
+    def _body(self):
+        src = self._src()
+        return src[src.index("A2A_TRANSITION begin"):src.index("A2A_TRANSITION end")]
+
+    def test_transition_rebinds_both_srd_bases(self):
+        body = self._body()
+        assert "SrdA" in body, "the transition phase does not touch srdA"
+        assert "SrdB" in body, "the transition phase does not touch srdB"
+
+    def test_transition_restores_both_shadow_limits(self):
+        """ShadowLimit is reset each round, not carried."""
+        body = self._body()
+        assert "ShadowLimitA" in body, "srdA's limit stays drained across rounds"
+        assert "ShadowLimitB" in body, "srdB's limit stays drained across rounds"
+
+    def test_transition_offsets_by_the_shard_index(self):
+        body = self._body()
+        assert "A2AShardIdx" in body, "the rebind ignores which shard comes next"
