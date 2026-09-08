@@ -50,6 +50,7 @@ struct GemmConfigBase
 
     // Enable for gfx1250 RCR
     static constexpr bool EnableKPadFallback = false;
+    static constexpr bool EnableMNPadFallback = false;
 };
 
 // A,B vector sizes must be multiples of K
@@ -64,7 +65,9 @@ struct GemmConfigFixedVectorSize : public GemmConfig
                       GemmConfig::K_Warp_Tile % VectorSizeB_ == 0,
                   "A/B vector width must divide K_Warp_Tile");
 
-    // Enable K padding
+    // Enable K/M/N padding
+    static constexpr bool kPadM = true;
+    static constexpr bool kPadN = true;
     static constexpr bool kPadK = true;
 
     static constexpr bool FixedVectorSize         = true;
@@ -206,6 +209,7 @@ struct GemmConfigComputeV3_3 : public GemmConfigBase
 template <typename PrecType>
 struct GemmConfigComputeV3_WMMA : public GemmConfigBase
 {
+
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 128;
     static constexpr ck_tile::index_t K_Tile = 64 / sizeof(PrecType);
@@ -224,7 +228,8 @@ struct GemmConfigComputeV3_WMMA : public GemmConfigBase
 
     static constexpr int kBlockPerCu = 2;
 
-    static constexpr bool EnableKPadFallback = true;
+    static constexpr bool EnableKPadFallback  = true;
+    static constexpr bool EnableMNPadFallback = true;
 };
 
 template <typename PrecType>
@@ -432,6 +437,15 @@ struct GemmTypeConfig<ck_tile::tf32_t, ck_tile::tf32_t, float>
     using BDataType   = ck_tile::tf32_t;
     using AccDataType = float;
     using CDataType   = float;
+};
+
+template <>
+struct GemmTypeConfig<ck_tile::fp32_t>
+{
+    using ADataType   = ck_tile::fp32_t;
+    using BDataType   = ck_tile::fp32_t;
+    using AccDataType = ck_tile::fp32_t;
+    using CDataType   = ck_tile::fp32_t;
 };
 
 template <>
