@@ -36,6 +36,7 @@ SOFTWARE.
 #ifdef RPP_USE_ROCFFT
 #include <rocfft/rocfft.h>
 
+#include <cstdint>
 #include <map>
 #endif
 #endif
