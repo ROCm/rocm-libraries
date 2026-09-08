@@ -673,7 +673,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastAffine)
     assertAllClose(yCpu, yGpu, getToleranceInference<YDataType>());
 }
 
-TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastCompute)
+TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeHalf)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -682,6 +682,50 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastCompute)
     using MeanVarType = float;
     using YDataType = float;
     using ComputeDataType = half;
+
+    Tensor<XDataType> x({1, 2, 2, 2});
+    Tensor<ScaleBiasType> scale({1, 2, 1, 1});
+    Tensor<ScaleBiasType> bias({1, 2, 1, 1});
+    Tensor<MeanVarType> estMean({1, 2, 1, 1});
+    Tensor<MeanVarType> invVar({1, 2, 1, 1});
+    Tensor<YDataType> yCpu({1, 2, 2, 2});
+    Tensor<YDataType> yGpu({1, 2, 2, 2});
+
+    unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    x.fillWithRandomValues(
+        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    scale.fillWithRandomValues(
+        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
+    bias.fillWithRandomValues(
+        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
+    estMean.fillWithRandomValues(
+        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    invVar.fillWithRandomValues(
+        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+
+    CpuFpReferenceBatchnorm::
+        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, invVar, yCpu);
+    GpuFpReferenceBatchnorm::
+        fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
+            x, scale, bias, estMean, invVar, yGpu);
+
+    // Use compute type tolerance since half operations may not have same implementation between host CPU
+    // reference and device GPU reference, e.g scale * inhat + bias may get contracted into a more precise
+    // fma on device but not host
+    assertAllClose(yCpu, yGpu, getToleranceInference<ComputeDataType>());
+}
+
+TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeBfloat)
+{
+    SKIP_IF_NO_DEVICES();
+
+    using XDataType = float;
+    using ScaleBiasType = float;
+    using MeanVarType = float;
+    using YDataType = float;
+    using ComputeDataType = bfloat16;
 
     Tensor<XDataType> x({1, 2, 2, 2});
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
