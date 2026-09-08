@@ -156,6 +156,13 @@ void typesBindings(nb::module_& m)
         .value("HEURISTICS_CHOICE", BuildPlanPolicy::HEURISTICS_CHOICE)
         .value("ALL", BuildPlanPolicy::ALL);
 
+    // Bind KnobValueType enum
+    nb::enum_<KnobValueType>(m, "KnobValueType")
+        .value("NOT_SET", KnobValueType::NOT_SET)
+        .value("INT64", KnobValueType::INT64)
+        .value("FLOAT64", KnobValueType::FLOAT64)
+        .value("STRING", KnobValueType::STRING);
+
     // Bind ErrorCode enum
     nb::enum_<ErrorCode>(m, "ErrorCode")
         .value("OK", ErrorCode::OK)

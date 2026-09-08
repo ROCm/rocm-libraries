@@ -133,6 +133,9 @@ inv build --architecture gfx950
 # build with clients
 inv build --architecture gfx950 --clients
 
+# clients with an explicit Fortran compiler (default: ROCm flang if present, else detected gfortran)
+inv build --architecture gfx950 --clients --fortran-compiler gfortran
+
 # install system dependencies, build with clients, and install the package
 inv build --install-deps --clients --install-pkg --architecture gfx950
 
@@ -148,6 +151,14 @@ inv build --architecture gfx950 --clean
 # see all options
 inv --help build
 ```
+
+> [!NOTE]
+> `inv build --clients` requires a Fortran compiler (LAPACK). Selection order:
+> `--fortran-compiler` (path or name), then `FC`, then `CMAKE_Fortran_COMPILER`,
+> then ROCm flang from `--rocm-path` / `ROCM_PATH` / `/opt/rocm`
+> (`llvm/bin/flang`, `bin/amdflang`, `bin/flang`, then `flang` on `PATH`),
+> then `gfortran` on `PATH`. Invoke exits if none of those are found.
+> Without `--clients`, Fortran is not enabled.
 
 > [!NOTE]
 > To build hipBLASLt for ROCm <= 6.2, pass `--legacy-hipblas-direct` to `inv build`.
@@ -267,6 +278,7 @@ inv build --architecture gfx1100 --clean
 * `TENSILELITE_EXPERIMENTAL` Process experimental logic files (default: see below)
 * `HIPBLASLT_LIBLOGIC_PATH` Path to library logic files (will use 'library' if unset) (default: `Off`)
 * `HIPBLASLT_TENSILE_LIBPATH` Path to output the device gemm libraries (default: `build/Tensile`)
+* `HIPBLASLT_ASIC_REVISION` gfx1250 ASIC revision to build for, `v0` or `v1`; `invoke build` probes the local GPU and sets it when unset (default: empty, treated as `v1`)
 
 > [!NOTE]
 > To determine defaults for the `TensileCreateLibrary` command generated when building the device

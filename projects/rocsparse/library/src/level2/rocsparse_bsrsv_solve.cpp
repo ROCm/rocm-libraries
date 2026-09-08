@@ -68,7 +68,7 @@ namespace rocsparse
     {                                                                  \
     case rocsparse_fill_mode_lower:                                    \
     {                                                                  \
-        if(arch == rocpsarse_arch_names::gfx908 && asic < 2)           \
+        if(arch == rocsparse_arch_names::gfx908 && asic < 2)           \
         {                                                              \
             LAUNCH_BSRSV_LOWER_SHARED(bsize, wfsize, dim, true);       \
         }                                                              \
@@ -80,7 +80,7 @@ namespace rocsparse
     }                                                                  \
     case rocsparse_fill_mode_upper:                                    \
     {                                                                  \
-        if(arch == rocpsarse_arch_names::gfx908 && asic < 2)           \
+        if(arch == rocsparse_arch_names::gfx908 && asic < 2)           \
         {                                                              \
             LAUNCH_BSRSV_UPPER_SHARED(bsize, wfsize, dim, true);       \
         }                                                              \
@@ -143,7 +143,7 @@ namespace rocsparse
     {                                                              \
     case rocsparse_fill_mode_lower:                                \
     {                                                              \
-        if(arch == rocpsarse_arch_names::gfx908 && asic < 2)       \
+        if(arch == rocsparse_arch_names::gfx908 && asic < 2)       \
         {                                                          \
             LAUNCH_BSRSV_LOWER_GENERAL(bsize, wfsize, true);       \
         }                                                          \
@@ -155,7 +155,7 @@ namespace rocsparse
     }                                                              \
     case rocsparse_fill_mode_upper:                                \
     {                                                              \
-        if(arch == rocpsarse_arch_names::gfx908 && asic < 2)       \
+        if(arch == rocsparse_arch_names::gfx908 && asic < 2)       \
         {                                                          \
             LAUNCH_BSRSV_UPPER_GENERAL(bsize, wfsize, true);       \
         }                                                          \

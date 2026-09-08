@@ -770,11 +770,14 @@ public:
 
     template <memory_mode::value_t MODE, typename T, typename I = rocsparse_int>
     explicit rocsparse_local_spmat(bell_matrix<MODE, T, I>& h)
+        // bell_matrix stores scalar rows/cols and a scalar ell_cols, which are exactly what
+        // rocsparse_create_bell_descr expects (value array of length m*ell_cols, column index
+        // array of length (m/bdim)*(ell_cols/bdim)).
         : rocsparse_local_spmat(h.m,
                                 h.n,
-                                h.bdir,
+                                rocsparse_direction_row,
                                 h.bdim,
-                                h.width,
+                                h.ell_cols,
                                 h.ind,
                                 h.val,
                                 get_indextype<I>(),

@@ -260,7 +260,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicEdgeCases)
     EXPECT_EQ(count.load(), 3);
 }
 
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicZeroThreads)
+TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicZeroThreadsFallsBackToSingleThread)
 {
     std::atomic<int> count{0};
     auto countFunction = [&count](const std::vector<int64_t>& indices) {
@@ -269,10 +269,9 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicZeroThreads)
     };
 
     auto functor = makeParallelTensorFunctor(countFunction, std::vector<int64_t>{5});
-    functor(0); // Zero threads
+    functor(0);
 
-    // With zero threads, no processing should occur
-    EXPECT_EQ(count.load(), 0);
+    EXPECT_EQ(count.load(), 5);
 }
 
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicLargerTensorPerformance)

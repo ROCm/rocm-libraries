@@ -7,6 +7,7 @@
 #include "HipdnnException.hpp"
 #include "HipdnnOperationType.h"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/MoeGroupedMatmulValidation.hpp>
 
 namespace hipdnn_backend
 {
@@ -33,90 +34,20 @@ void MoeGroupedMatmulOperationDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "MoeGroupedMatmulOperationDescriptor::finalize() failed: compute data type not "
                   "set");
-    THROW_IF_TRUE(_firstTokenOffsetDesc->getData().data_type
-                      != hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+    const auto* reason = hipdnn_flatbuffers_sdk::utilities::checkMoeGroupedMatmulRouting(
+        {_data.mode,
+         _tokenIndexDesc != nullptr,
+         _tokenKsDesc != nullptr,
+         _firstTokenOffsetDesc->getData().data_type,
+         _tokenIndexDesc != nullptr ? _tokenIndexDesc->getData().data_type
+                                    : hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+         _tokenKsDesc != nullptr ? _tokenKsDesc->getData().data_type
+                                 : hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+         _data.top_k,
+         _weightDesc->getData().dims.empty() ? 0 : _weightDesc->getData().dims[0]});
+    THROW_IF_TRUE(reason != nullptr,
                   HIPDNN_STATUS_BAD_PARAM,
-                  "MoeGroupedMatmulOperationDescriptor::finalize() failed: FIRST_TOKEN_OFFSET_DESC "
-                  "tensor must have "
-                  "INT32 data type");
-    switch(_data.mode)
-    {
-    case hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::NONE:
-        THROW_IF_TRUE(_tokenIndexDesc != nullptr,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: NONE mode forbids "
-                      "TOKEN_INDEX_DESC tensor");
-        THROW_IF_TRUE(_tokenKsDesc != nullptr,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: NONE mode forbids "
-                      "TOKEN_KS_DESC tensor");
-        THROW_IF_NE(_data.top_k,
-                    0,
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "MoeGroupedMatmulOperationDescriptor::finalize() failed: NONE mode requires "
-                    "top_k to equal 0");
-        break;
-    case hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::GATHER:
-        THROW_IF_NULL(_tokenIndexDesc,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: GATHER mode "
-                      "requires TOKEN_INDEX_DESC tensor");
-        THROW_IF_TRUE(
-            _tokenIndexDesc->getData().data_type
-                != hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
-            HIPDNN_STATUS_BAD_PARAM,
-            "MoeGroupedMatmulOperationDescriptor::finalize() failed: TOKEN_INDEX_DESC tensor must "
-            "have INT32 data type");
-        THROW_IF_TRUE(_tokenKsDesc != nullptr,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: GATHER mode forbids "
-                      "TOKEN_KS_DESC tensor");
-        THROW_IF_NE(_data.top_k,
-                    0,
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "MoeGroupedMatmulOperationDescriptor::finalize() failed: GATHER mode requires "
-                    "top_k to equal 0");
-        break;
-    case hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::SCATTER:
-        THROW_IF_NULL(_tokenIndexDesc,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: SCATTER mode "
-                      "requires TOKEN_INDEX_DESC tensor");
-        THROW_IF_TRUE(
-            _tokenIndexDesc->getData().data_type
-                != hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
-            HIPDNN_STATUS_BAD_PARAM,
-            "MoeGroupedMatmulOperationDescriptor::finalize() failed: TOKEN_INDEX_DESC tensor must "
-            "have INT32 data type");
-        THROW_IF_NULL(_tokenKsDesc,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: SCATTER mode "
-                      "requires TOKEN_KS_DESC tensor");
-        THROW_IF_TRUE(
-            _tokenKsDesc->getData().data_type
-                != hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
-            HIPDNN_STATUS_BAD_PARAM,
-            "MoeGroupedMatmulOperationDescriptor::finalize() failed: TOKEN_KS_DESC tensor must "
-            "have INT32 data type");
-        THROW_IF_TRUE(
-            _data.top_k < 1,
-            HIPDNN_STATUS_BAD_PARAM,
-            "MoeGroupedMatmulOperationDescriptor::finalize() failed: SCATTER mode requires "
-            "top_k to be at least 1");
-        THROW_IF_TRUE(_weightDesc->getData().dims.empty(),
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: WEIGHT_DESC "
-                      "tensor has too few dimensions to bound top_k");
-        THROW_IF_TRUE(_data.top_k > _weightDesc->getData().dims[0],
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: top_k must not "
-                      "exceed weight dimension 0");
-        break;
-    default:
-        throw HipdnnException(
-            HIPDNN_STATUS_BAD_PARAM,
-            "MoeGroupedMatmulOperationDescriptor::finalize() failed: unknown routing mode");
-    }
+                  std::string("MoeGroupedMatmulOperationDescriptor::finalize() failed: ") + reason);
 
     HipdnnBackendDescriptorImpl<MoeGroupedMatmulOperationDescriptor>::finalize();
 }

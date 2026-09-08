@@ -29,6 +29,20 @@ def stub_engine_active():
     return _stub_engine_active
 
 
+_stub_engine_path = None
+
+
+def set_stub_engine_path(path):
+    """Record the plugin file conftest loaded, for tests needing a sibling plugin."""
+    global _stub_engine_path
+    _stub_engine_path = path
+
+
+def stub_engine_path():
+    """Path of the loaded test stub plugin, or None when no stub was loaded."""
+    return _stub_engine_path
+
+
 def create_float_graph():
     """Create a hipDNN Graph configured with FLOAT data types."""
     graph = hipdnn.Graph()
