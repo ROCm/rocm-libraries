@@ -415,6 +415,10 @@ class StateValues:
   tdmParityPackedInArgType: bool         = False
   scheduleGROverBarrier: bool            = False
   numLDSBlk: int                         = 0
+  # Loop bodies emitted per unroll-loop iteration. Each advances the LDS tokens
+  # once, so this is also how far the back edge rotates them; see
+  # _ldsTokenBackEdgeMap.
+  unrollLoopCopies: int                  = 1
   IncLdsBufSwitch: bool                  = False
   # First token of the TDMSplit half-1 block used when tokens rotate. Buffer
   # tokens occupy 0..numLDSBlk-1 and metadata uses memTokenLdsBufferMeta (4), so
@@ -3565,7 +3569,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     lastuIdx = False
     pflr     = self.states.numItersPLR
     localWriteEndIter = kernel["LoopIters"] - self.states.numItersPLR - 1
-    dsWriteBA = False
     if isNGLL and UnrollLoopSwapGlobalReadOrder == 1 and NLLindex == 0 and NLLnum == 2:
       dsWriteBA = True
 
@@ -4517,6 +4520,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       isSwapLroIter = isResetLroIter
       if kernel["_ScheduleIterAlg"] == 3:
         isSwapAndResetLwoIter = (u == self.states.lwEndMfmaIndex//(self.states.numMfmaPerIter))
+      if kernel["TDMPlusLdsBuf"]:
+        isSwapAndResetLwoIter = (u == 0)
       extraComment = ""
       if isResetLroIter:
         extraComment += " (reset local read pointers iteration) "
@@ -4805,15 +4810,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
             syncCode.add(self._syncThreads(kernel, "PGR1 and TDM, another wait to sync", skipForceWaitcnt0=skipForceWaitcnt0))
 
         if isSwapAndResetLwoIter: # ResetLroIter
+          # Swap local write memory token
+          self.states.ldsWriteTokenIdx = \
+            self._nextLdsToken(self.states.ldsWriteTokenIdx)
           if kernel["ExpertSchedulingMode"] > 0:
             pointerLWCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
           if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["_ScheduleIterAlg"] == 0 and \
-             kernel["PrefetchGlobalRead"] == 2 and kernel["TDMPlusLdsBuf"] != 1:
+             kernel["PrefetchGlobalRead"] == 2:
             pointerLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, \
               "wait for local read before cross-wave TDM swap sync"))
             pointerLWCode.add(self._syncThreads(
               kernel,
-              "Waiting current LR finish for next GR(TDM), sync"))
+              "Waiting current LR finish for next GR(TDM), sync LDS%d"%self.states.ldsWriteTokenIdx,
+              memoryToken=[self.states.ldsWriteTokenIdx]))
           # local write for next iter, used to have local writes here
           # Swap offsets A(MXSA)
           if kernel["enableTDMA"]:
@@ -4849,9 +4858,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["enableTDMMetadata"]:
               pointerLWCode.addComment1("tdm swap offsets metadata")
               pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tPM))
-          # Swap local write memory token
-          self.states.ldsWriteTokenIdx = \
-            self._nextLdsToken(self.states.ldsWriteTokenIdx)
 
         if isSwapLroIter: # ResetLroIter
           if kernel["ExpertSchedulingMode"] > 0:
@@ -5863,6 +5869,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if loopCopies == 1 and needSecondLoop:
       # force to generate 2 loop bodies
       loopCopies = 2
+    self.states.unrollLoopCopies = loopCopies
 
     loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
 
@@ -11199,14 +11206,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
         headInfo[beginName] = info
       return headInfo
 
-    # Back-edge modeling is only needed for PrefetchGlobalRead < 2. With
-    # PrefetchGlobalRead >= 2 the pipelined prologue pre-stages the next
-    # iteration's LDS data, so the steady-state phase is already established and
-    # a plain single linear pass is correct - leaving loopHeadInfo empty makes
-    # _rewriteModuleInOrder degrade to exactly that linear pass.
+    # Back-edge modeling is only needed when the loop head's incoming token phase
+    # differs from what a plain linear walk computes. With PrefetchGlobalRead >= 2
+    # the pipelined prologue pre-stages the next iteration's LDS data, so the
+    # steady-state phase is already established and a single linear pass is
+    # correct - leaving loopHeadInfo empty makes _rewriteModuleInOrder degrade to
+    # exactly that linear pass. Rotating tokens are the exception at any PGR: the
+    # back edge renames them, so the linear walk reads each token's phase off the
+    # wrong buffer and misses every loop-carried hazard.
+    ldsTokenBackEdgeMap = self._ldsTokenBackEdgeMap()
     loopEntryOverride = {}
     loopPendingTokens = set()
-    loopHeadInfo = _detectLoopHeadInfo() if kernel["PrefetchGlobalRead"] < 2 else {}
+    loopHeadInfo = _detectLoopHeadInfo() \
+      if kernel["PrefetchGlobalRead"] < 2 or ldsTokenBackEdgeMap else {}
 
     def _rewriteModuleInOrder(mod: Module):
       nonlocal insertedCount
@@ -11227,11 +11239,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # barrier hoisted into the prologue (emitted right before the loop
             # label) instead of one that re-fires every iteration.
             prologueBarrierTokens = []
-            for token, (firstAccess, tailState) in loopHeadInfo[labelName].items():
+            tailStates = {token: info[1] for token, info in loopHeadInfo[labelName].items()}
+            for token, (firstAccess, _) in loopHeadInfo[labelName].items():
+              # Next iteration this token names the buffer that
+              # ldsTokenBackEdgeMap[token] names now, so the phase the back edge
+              # carries in is that token's tail phase. Without rotation the map is
+              # empty and a token simply carries its own tail phase. A buffer the
+              # body never touches stays standby.
+              carriedToken = ldsTokenBackEdgeMap.get(token, token)
+              carriedState = tailStates.get(carriedToken, "standby")
               preState = tokenState.get(token, "standby")
-              loopEntryOverride[token] = tailState
+              loopEntryOverride[token] = carriedState
               loopPendingTokens.add(token)
-              if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, tailState):
+              if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, carriedState):
                 prologueBarrierTokens.append(token)
             if prologueBarrierTokens:
               uniqueTokens = sorted(set(prologueBarrierTokens))
@@ -11497,6 +11517,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     return ""
 
+  def _ldsTokensRotate(self) -> bool:
+    """Whether the LDS tokens form a mod-``numLDSBlk`` ring, not a 0<->1 toggle.
+
+    ``TDMPlusLdsBuf == 1`` alone names that path: assignDerivedParameters clears
+    the parameter unless TDM A+B + PGR2, and pins NumLdsBlk to 3 wherever it stays
+    set (the one path that falls back to 2 buffers also clears it), so numLDSBlk
+    needs no separate check here. It is compared against 1 rather than tested for
+    truth because the unresolved auto value is -1, which is itself truthy.
+    """
+    return self.states.kernel.get("TDMPlusLdsBuf", 0) == 1
+
   def _nextLdsToken(self, idx: int) -> int:
     """Advance an LDS memory-token index to the next physical buffer.
 
@@ -11507,17 +11538,46 @@ class KernelWriter(metaclass=abc.ABCMeta):
     a write/read hazard or over-syncing the prefetch the 3rd buffer exists to
     hide. Every other configuration (2 buffers, DTL, PGR>=3) keeps the original
     binary 0<->1 toggle so its token stream is byte-for-byte unchanged.
-
-    ``TDMPlusLdsBuf == 1`` alone names this path: assignDerivedParameters clears
-    the parameter unless TDM A+B + PGR2, and pins NumLdsBlk to 3 wherever it stays
-    set (the one path that falls back to 2 buffers also clears it), so numLDSBlk
-    needs no separate check here. It is compared against 1 rather than tested for
-    truth because the unresolved auto value is -1, which is itself truthy.
     """
-    if self.states.kernel.get("TDMPlusLdsBuf", 0) == 1:
+    if self._ldsTokensRotate():
       return (idx + 1) % self.states.numLDSBlk
     return self.states.memTokenLdsBuffer1 if idx == self.states.memTokenLdsBuffer0 \
       else self.states.memTokenLdsBuffer0
+
+  def _ldsTokenBackEdgeMap(self) -> dict:
+    """Map each LDS token to the token naming the same LDS region one iteration later.
+
+    A token names a physical buffer only for the iteration it was emitted from:
+    the runtime LDS addresses advance one block per loop body, so on trip ``k+1``
+    the instruction tagged ``t`` touches whatever the instruction tagged
+    ``map[t]`` touched on trip ``k``. postMainLoopBarrierCheckAndReset uses that
+    to carry loop-tail phases onto the right token across the back edge. Empty
+    when the tokens do not rotate, which leaves the carry an identity - the
+    classic behaviour, and what the binary 0<->1 toggle already amounts to once
+    ExpandPointerSwap's two loop copies have each taken it.
+
+    A token is not an LDS buffer index, so the advance cannot be arithmetic on
+    the token itself: ``_getLdsReadMemToken`` builds it as
+    ``memTokenLdsSplit[buffer][half]``, which for TDMSplit puts the half-1 tokens
+    in a numbering disjoint from the buffer tokens. Rotate the buffer row with
+    ``_nextLdsToken``, the same primitive codegen swaps with, then read the token
+    back out of the same table so each LDS region stays in its own ring.
+    Tokens outside the table (the metadata token) name no rotating buffer and are
+    left out, so the caller's lookup falls back to identity for them.
+    """
+    if not self._ldsTokensRotate():
+      return {}
+    splitTable = self.states.memTokenLdsSplit
+    backEdgeMap = {}
+    for buf, row in enumerate(splitTable):
+      # One _nextLdsToken per loop body is what the body itself does to the read
+      # and tensor tokens, so a whole iteration advances the buffer loopCopies times.
+      nextBuf = buf
+      for _ in range(self.states.unrollLoopCopies):
+        nextBuf = self._nextLdsToken(nextBuf)
+      for half, token in enumerate(row):
+        backEdgeMap[token] = splitTable[nextBuf][half]
+    return backEdgeMap
 
   def resetLdsTokensForTailLoop(self) -> None:
     """Point all LDS-related memory tokens at buffer 0 before tail-loop codegen.
