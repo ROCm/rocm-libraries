@@ -364,6 +364,9 @@ struct VgprStamp {
     unsigned vmOrdTex = 0;
     // Both vm ordinals from one flat_*.
     bool pairedFlat = false;
+    // Oldest op holding a ticket in both classes that issued after this producer; 0 when none.
+    unsigned anchorLds = 0;
+    unsigned anchorTex = 0;
     // Ordinal step this producer took.
     unsigned vaInc = 1;
     // This producer's ticket in the shared VA order.
@@ -416,6 +419,46 @@ class WaitcntBrackets {
             // A second form: disable both rules rather than pick one.
             xdlFormMixed = true;
         }
+    }
+
+    // Per-queue rebasing data for one join, filled before any stamp is touched.
+    struct SlotFrame {
+        std::array<unsigned, NUM_VM_FIFOS> myShift{}, otherShift{}, myFloor{}, otherFloor{};
+    };
+
+    // Join the paired flag and the anchor; gaining either weakens a wait, so it must propagate.
+    static void mergeStampVm(VgprStamp& s, const VgprStamp* o, bool myVm, bool oVm,
+                             const SlotFrame& vm, bool& strictDom) {
+        // Paired survives only if every path that contributed a stamp got it from a paired op.
+        const bool wasPaired = s.pairedFlat;
+        const unsigned wasAnchorLds = s.anchorLds;
+        s.pairedFlat = (!myVm || s.pairedFlat) && (!oVm || o->pairedFlat) && (myVm || oVm);
+        // An anchor holds only if every path carrying a producer issued one.
+        if (myVm && oVm) {
+            if (s.anchorLds == 0 || o->anchorLds == 0) {
+                s.anchorLds = 0;
+                s.anchorTex = 0;
+            } else {
+                mergeSlotOrd(s.anchorLds, o->anchorLds, vm.myShift[FIFO_LDS],
+                             vm.otherShift[FIFO_LDS], vm.myFloor[FIFO_LDS], vm.otherFloor[FIFO_LDS],
+                             strictDom, "anchorLds");
+                mergeSlotOrd(s.anchorTex, o->anchorTex, vm.myShift[FIFO_TEX],
+                             vm.otherShift[FIFO_TEX], vm.myFloor[FIFO_TEX], vm.otherFloor[FIFO_TEX],
+                             strictDom, "anchorTex");
+            }
+        } else if (oVm) {
+            // The merged ordinals came from the other side, so its anchor comes too.
+            s.anchorLds =
+                rebase(o->anchorLds, vm.otherShift[FIFO_LDS], vm.otherFloor[FIFO_LDS], "anchorLds");
+            s.anchorTex =
+                rebase(o->anchorTex, vm.otherShift[FIFO_TEX], vm.otherFloor[FIFO_TEX], "anchorTex");
+        } else if (s.anchorLds != 0) {
+            s.anchorLds += vm.myShift[FIFO_LDS];
+            s.anchorTex += vm.myShift[FIFO_TEX];
+        }
+        // Report any flip: a loss tightens the wait, so successors must be reprocessed too.
+        if (wasPaired != s.pairedFlat || (wasAnchorLds == 0) != (s.anchorLds == 0))
+            strictDom = true;
     }
 
     // Join the per-stamp ages. Keep the fewer matrix ops: the harder one to satisfy.
@@ -474,6 +517,22 @@ class WaitcntBrackets {
         }
     }
 
+    // An op holding a ticket in both classes anchors every older producer. First anchor wins.
+    void noteVmAnchor(unsigned ordLds, unsigned ordTex) {
+        if (ordLds == 0 || ordTex == 0) return;
+        for (auto& [k, s] : scores) {
+            if (s.anchorLds != 0) continue;
+            const bool olderLds = s.vmOrdLds != 0 && s.vmOrdLds < ordLds;
+            const bool olderTex = s.vmOrdTex != 0 && s.vmOrdTex < ordTex;
+            if (!olderLds && !olderTex) continue;
+            s.anchorLds = ordLds;
+            s.anchorTex = ordTex;
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]   set anchor on v" << k.idx << " ["
+                                 << s.vmOrdLds << "/" << s.vmOrdTex << " -> anchor " << ordLds
+                                 << "/" << ordTex << "]\n");
+        }
+    }
+
     // Stamp the scoreboard for producer `inst`.
     void onProducer(WaitEventType ev, const StinkyInstruction& inst, const VGPRHalfKeyer& keyer) {
         CounterType ct = counterFromEvent(ev);
@@ -522,6 +581,7 @@ class WaitcntBrackets {
         unsigned ordLds = 0, ordTex = 0;
         if (enqueuesFifoLds(ev)) ordLds = ++vmFifoUB[FIFO_LDS];
         if (enqueuesFifoTex(ev)) ordTex = ++vmFifoUB[FIFO_TEX];
+        noteVmAnchor(ordLds, ordTex);
 
         PASS_DEBUG(std::cerr << "[InsertWaitAlu]   stamp vm event=" << eventName(ev)
                              << " [vm ub=" << vmUB << " lb=" << vmLB << "]"
@@ -533,11 +593,17 @@ class WaitcntBrackets {
         auto stampVM = [&](unsigned idx, HighBitSel half) {
             RegKey k = keyer.producerKey(idx, half);
             VgprStamp& s = scores[k];
+            const bool lds = enqueuesFifoLds(ev);
+            const bool tex = enqueuesFifoTex(ev);
+            // A paired stamp's other ordinal is already covered by this one, so drop it.
+            if (s.pairedFlat && lds != tex) (lds ? s.vmOrdTex : s.vmOrdLds) = 0;
             // Set only the FIFO(s) this op enqueues into.
-            if (enqueuesFifoLds(ev)) s.vmOrdLds = ordLds;
-            if (enqueuesFifoTex(ev)) s.vmOrdTex = ordTex;
+            if (lds) s.vmOrdLds = ordLds;
+            if (tex) s.vmOrdTex = ordTex;
             // Paired when both ordinals came from this one flat_*.
-            s.pairedFlat = enqueuesFifoLds(ev) && enqueuesFifoTex(ev);
+            s.pairedFlat = lds && tex;
+            s.anchorLds = 0;
+            s.anchorTex = 0;
             PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp vm v" << k.idx << "("
                                  << halfName(k.half) << ") [LDS ord=" << s.vmOrdLds << "]"
                                  << " [TEX ord=" << s.vmOrdTex << " paired=" << s.pairedFlat
@@ -602,14 +668,40 @@ class WaitcntBrackets {
         return true;
     }
 
+    // True when the anchor recorded for this producer has accumulated enough reads in
+    // either class to prove it drained, which proves the producer drained too.
+    bool bridgeHides(const VgprStamp& s, bool liveLds, bool liveTex) const {
+        if (g_waitHide == nullptr || s.anchorLds == 0 || g_waitHide->vmVsrcBridge <= 0)
+            return false;
+        if (s.anchorLds <= vmFifoLB[FIFO_LDS] && s.anchorTex <= vmFifoLB[FIFO_TEX]) return false;
+        // The anchor must sit after the producer in a class the producer is live in.
+        const bool afterLds = liveLds && s.anchorLds > s.vmOrdLds;
+        const bool afterTex = liveTex && s.anchorTex > s.vmOrdTex;
+        if (!afterLds && !afterTex) return false;
+        const unsigned fLds = vmFifoUB[FIFO_LDS] - s.anchorLds;
+        const unsigned fTex = vmFifoUB[FIFO_TEX] - s.anchorTex;
+        // Each class is tested against its own count.
+        if (!waitHideSatisfied(fLds, 1, g_waitHide->vmVsrcLds) &&
+            !waitHideSatisfied(fTex, 1, g_waitHide->vmVsrcTex))
+            return false;
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip vm_vsrc (anchor LDS ord=" << s.anchorLds
+                             << " TEX ord=" << s.anchorTex << ") [LDS=" << fLds << "/"
+                             << g_waitHide->vmVsrcLds << " TEX=" << fTex << "/"
+                             << g_waitHide->vmVsrcTex << "]\n");
+        return true;
+    }
+
     // Wait needed for this reg's VM readers. kNoWait when nothing live constrains it.
     unsigned vmFollowers(const VgprStamp& s) const {
         bool liveLds = s.vmOrdLds && s.vmOrdLds > vmFifoLB[FIFO_LDS];
         bool liveTex = s.vmOrdTex && s.vmOrdTex > vmFifoLB[FIFO_TEX];
+        if (s.pairedFlat && !(liveLds && liveTex)) return kNoWait;
         unsigned fLds = liveLds ? vmFifoUB[FIFO_LDS] - s.vmOrdLds : 0u;
         unsigned fTex = liveTex ? vmFifoUB[FIFO_TEX] - s.vmOrdTex : 0u;
 
         if (vmFollowerHides(s, fLds, fTex, liveLds, liveTex)) return kNoWait;
+
+        if (bridgeHides(s, liveLds, liveTex)) return kNoWait;
 
         // One flat_* retires from both FIFOs at once, so either proves it done.
         if (s.pairedFlat && liveLds && liveTex) return std::max(fLds, fTex);
@@ -637,6 +729,11 @@ class WaitcntBrackets {
         for (int p = 0; p < NUM_VA_PIPE; ++p)
             if (s.vaOrd[p] != 0) return true;
         return false;
+    }
+
+    // Whether the stamp names a VM reader at all, live or retired.
+    static bool hasVmProducer(const VgprStamp& s) {
+        return s.vmOrdLds != 0 || s.vmOrdTex != 0;
     }
 
     // Follower count for this stamp on pipe p; ~0u when intervening ops satisfy it.
@@ -817,16 +914,15 @@ class WaitcntBrackets {
             vmUB = vmLB + std::max(mineIF, otherIF);
         }
 
-        std::array<unsigned, NUM_VM_FIFOS> fMyShift{}, fOtherShift{}, fMyOldFloor{},
-            fOtherOldFloor{};
+        SlotFrame vm;
         for (int g = 0; g < NUM_VM_FIFOS; ++g) {
             unsigned mineIF = vmFifoUB[g] - vmFifoLB[g];
             unsigned otherIF = other.vmFifoUB[g] - other.vmFifoLB[g];
             unsigned newUB = vmFifoLB[g] + std::max(mineIF, otherIF);
-            fMyOldFloor[g] = vmFifoLB[g];
-            fOtherOldFloor[g] = other.vmFifoLB[g];
-            fMyShift[g] = newUB - vmFifoUB[g];
-            fOtherShift[g] = newUB - other.vmFifoUB[g];
+            vm.myFloor[g] = vmFifoLB[g];
+            vm.otherFloor[g] = other.vmFifoLB[g];
+            vm.myShift[g] = newUB - vmFifoUB[g];
+            vm.otherShift[g] = newUB - other.vmFifoUB[g];
             vmFifoUB[g] = newUB;
         }
 
@@ -838,16 +934,20 @@ class WaitcntBrackets {
             // Taken before the ordinal merge below, which can zero a stamp's last ordinal.
             const bool myVa = hasVaProducer(s);
             const bool oVa = o && hasVaProducer(*o);
+            const bool myVm = hasVmProducer(s);
+            const bool oVm = o && hasVmProducer(*o);
             // Merge each pipe's ordinal independently.
             for (int p = 0; p < NUM_VA_PIPE; ++p) {
                 mergeSlotOrd(s.vaOrd[p], o ? o->vaOrd[p] : 0, myShift[p], otherShift[p],
                              myOldFloor[p], otherOldFloor[p], strictDom,
                              vaPipeName(static_cast<VaPipe>(p)));
             }
-            mergeSlotOrd(s.vmOrdLds, o ? o->vmOrdLds : 0, fMyShift[FIFO_LDS], fOtherShift[FIFO_LDS],
-                         fMyOldFloor[FIFO_LDS], fOtherOldFloor[FIFO_LDS], strictDom, "vmLds");
-            mergeSlotOrd(s.vmOrdTex, o ? o->vmOrdTex : 0, fMyShift[FIFO_TEX], fOtherShift[FIFO_TEX],
-                         fMyOldFloor[FIFO_TEX], fOtherOldFloor[FIFO_TEX], strictDom, "vmTex");
+            mergeSlotOrd(s.vmOrdLds, o ? o->vmOrdLds : 0, vm.myShift[FIFO_LDS],
+                         vm.otherShift[FIFO_LDS], vm.myFloor[FIFO_LDS], vm.otherFloor[FIFO_LDS],
+                         strictDom, "vmLds");
+            mergeSlotOrd(s.vmOrdTex, o ? o->vmOrdTex : 0, vm.myShift[FIFO_TEX],
+                         vm.otherShift[FIFO_TEX], vm.myFloor[FIFO_TEX], vm.otherFloor[FIFO_TEX],
+                         strictDom, "vmTex");
             mergeSlotOrd(s.vaOrdShared, o ? o->vaOrdShared : 0, myShiftShared, otherShiftShared,
                          myOldFloorShared, otherOldFloorShared, strictDom, "vaOrdShared");
             mergeSlotOrd(s.nextAnchorShared, o ? o->nextAnchorShared : 0, myShiftShared,
@@ -859,8 +959,7 @@ class WaitcntBrackets {
                 strictDom = true;
             }
             mergeStampAge(s, o, myVa, oVa, strictDom);
-            // Paired survives the join only if both paths agree.
-            s.pairedFlat = s.pairedFlat && o && o->pairedFlat;
+            mergeStampVm(s, o, myVm, oVm, vm, strictDom);
         }
 
         return strictDom;
@@ -905,7 +1004,10 @@ class WaitcntBrackets {
             }
             out += "]";
         }
-        if (s) out += " paired=" + std::to_string(s->pairedFlat);
+        if (s) {
+            out += " paired=" + std::to_string(s->pairedFlat);
+            out += " anchor=" + std::to_string(s->anchorLds) + "/" + std::to_string(s->anchorTex);
+        }
         return out;
     }
 
@@ -923,6 +1025,16 @@ class WaitcntBrackets {
         unsigned myS = (myOrd && myOrd > myOldFloor) ? myOrd + myShift : 0;
         unsigned oS = (oOrd && oOrd > otherOldFloor) ? oOrd + otherShift : 0;
         takeLater(myOrd, myS, oS, strictDom, slot);
+    }
+
+    // Move an ordinal into the widened frame; the clamp keeps a retired one from wrapping.
+    static unsigned rebase(unsigned ord, unsigned shift, unsigned oldFloor,
+                           const char* slot = "?") {
+        if (ord == 0) return 0;
+        PASS_DEBUG(if (shift > (~0u / 2) && ord < (0u - shift)) std::cerr
+                   << "[InsertWaitAlu]   WRAP-AVOIDED slot=" << slot << " ord=" << ord << " shift=-"
+                   << (0u - shift) << " floor=" << oldFloor << "\n");
+        return std::max(ord, oldFloor) + shift;
     }
 
     static void takeLater(unsigned& myOrd, unsigned myS, unsigned oS, bool& strictDom,
@@ -1337,6 +1449,7 @@ class InsertWaitAluPassImpl : public Pass {
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] waitHide" << " forms=" << g_waitHide->forms.size()
                              << " vmVsrcLds=" << waitHideStr(g_waitHide->vmVsrcLds)
                              << " vmVsrcTex=" << waitHideStr(g_waitHide->vmVsrcTex)
+                             << " vmVsrcBridge=" << waitHideStr(g_waitHide->vmVsrcBridge)
                              << " [xdlSinceCap=" << g_xdlSinceCap << "]\n");
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] sharedOrder"
                              << " countFollowers=" << g_sharedOrderCountFollowers
