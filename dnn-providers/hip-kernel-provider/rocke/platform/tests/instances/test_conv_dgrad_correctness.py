@@ -549,6 +549,66 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
         kernel = build_implicit_gemm_conv_dgrad(spec, arch="gfx1250")
         return _lower_kernel_to_llvm_python(kernel, arch="gfx1250")
 
+    def test_gfx1250_kouter_rejects_wavelet_pipeline(self):
+        """wavelet + lds_k_outer must be rejected, not silently miscompiled.
+
+        build_wavelet_loaders pins the B tile to (block_n, block_k) and takes
+        the unswapped descriptor, so it writes the tile M-outer while the
+        compute phase reads it through _tr_frag. The allocation is K-outer, so
+        the row stride is wrong for every element and the store runs past
+        B_smem whenever tile_n > tile_k. Confirmed numerically wrong on
+        gfx1250 before the gate went in, and the K-outer A/B pins
+        pipeline="mem", so nothing else covers this pair.
+        """
+        import dataclasses
+
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        p = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=1)
+        base = DgradConvSpec(
+            problem=p,
+            data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            warp_m=1,
+            warp_n=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            wave_size=32,
+            pipeline="mem",
+            epilogue="cshuffle",
+            lds_k_outer=True,
+        )
+        # mem + K-outer is the supported pair and must stay valid.
+        ok, why = is_valid_dgrad_spec(base, "gfx1250")
+        self.assertTrue(ok, f"mem + lds_k_outer should be valid: {why}")
+
+        wavelet = dataclasses.replace(base, pipeline="wavelet")
+        ok, why = is_valid_dgrad_spec(wavelet, "gfx1250")
+        self.assertFalse(ok, "wavelet + lds_k_outer must be rejected")
+        self.assertIn("wavelet", why)
+        with self.assertRaises(ValueError):
+            wavelet.validate()
+
+        # And the selection policy must never hand out the broken pair.
+        common = dict(
+            arch="gfx1250", dtype_b="bf16", warp_tile_n=16, cpg=64, wave_size=32
+        )
+        self.assertTrue(DgradConvSpec.default_lds_k_outer(pipeline="mem", **common))
+        self.assertFalse(
+            DgradConvSpec.default_lds_k_outer(pipeline="wavelet", **common),
+            "default_lds_k_outer must fall back to M-outer under wavelet",
+        )
+
     def test_gfx1250_kouter_emits_ds_load_tr16_b128(self):
         """The K-outer B fetch must lower to ds_load_tr16_b128 of <8 x T>.
 

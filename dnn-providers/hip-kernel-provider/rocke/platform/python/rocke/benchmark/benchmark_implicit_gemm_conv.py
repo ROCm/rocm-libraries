@@ -1493,6 +1493,7 @@ def _build_dgrad_one(args_tuple):
             warp_tile_n=warp_tile_mn,
             cpg=problem.cpg,
             wave_size=target.wave_size,
+            pipeline=pipeline,
         ),
         name="rocke_bench_igemm_dgrad",
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),

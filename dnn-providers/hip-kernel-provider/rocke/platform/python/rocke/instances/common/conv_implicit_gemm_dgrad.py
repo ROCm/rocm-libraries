@@ -612,6 +612,7 @@ class DgradConvSpec:
         warp_tile_n: int,
         cpg: int,
         wave_size: int = 64,
+        pipeline: str = "mem",
     ) -> bool:
         """Whether the K-outer B tile is the better layout for this spec.
 
@@ -633,6 +634,12 @@ class DgradConvSpec:
         if arch not in _LDS_K_OUTER_ARCH_WAVE:
             return False
         if wave_size != _LDS_K_OUTER_ARCH_WAVE[arch]:
+            return False
+        if pipeline == "wavelet":
+            # The wavelet loader does not implement the K-outer tile (see the
+            # validate() gate). Selecting M-outer here keeps the combination
+            # off the sweep entirely -- it costs the transpose-on-store this
+            # optimisation removes, but it is correct, whereas the pair is not.
             return False
         if dtype_b not in ("bf16", "fp16"):
             return False
@@ -807,6 +814,23 @@ class DgradConvSpec:
                     "lds_k_outer is not supported with async_dma on dgrad: the "
                     "tilde builder has no direct global->LDS path"
                 )
+            if self.pipeline == "wavelet":
+                # Same shape of problem as async_dma above: the alternate load
+                # path does not implement K-outer. build_wavelet_loaders pins
+                # the B tile to (block_n, block_k) and takes the unswapped
+                # descriptor, so it writes the tile M-outer while the compute
+                # phase reads it through _tr_frag. The allocation is K-outer
+                # -- (block_k, block_n + _KOUTER_PAD) -- so this is not merely
+                # a transposed operand: the row stride is wrong for every
+                # element and, whenever block_n > block_k (the usual case), the
+                # store runs off the end of B_smem into a neighbouring LDS
+                # allocation. Verified numerically wrong on gfx1250.
+                raise ValueError(
+                    "lds_k_outer is not supported with pipeline='wavelet' on "
+                    "dgrad: the wavelet loader writes the B tile M-outer into a "
+                    "K-outer allocation (wrong row stride, and out of bounds "
+                    "when tile_n > tile_k)"
+                )
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -941,6 +965,12 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             return False, "lds_k_outer does not honour an explicit lds_layout"
         if spec.async_dma:
             return False, "lds_k_outer is not supported with async_dma on dgrad"
+        if spec.pipeline == "wavelet":
+            return False, (
+                "lds_k_outer is not supported with pipeline='wavelet' on dgrad "
+                "(the wavelet loader writes the B tile M-outer into a K-outer "
+                "allocation)"
+            )
 
     _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
     _lds_layout = spec.effective_lds_layout()
@@ -1571,14 +1601,24 @@ def _build_tilde_dgrad(
     else:
         _b_desc_fn = w_descriptor
 
-    # The fragment length is per-atom, not a constant: 8 for 32x32x16 and
-    # 16x16x32, 4 for 16x16x16 and 32x32x8. Hardcoding 8 would make a
-    # 4-element atom read past the end of the K-outer tile and return garbage.
-    if spec.lds_k_outer and b_per_lane % 4 != 0:
+    # The fragment length is per-atom, not a constant: on wave64 it is 8 for
+    # 32x32x16 and the MFMA 16x16x32, 4 for 16x16x16 and 32x32x8; on wave32 the
+    # WMMA 16x16x32 carries 16. Hardcoding a stride would read past the end of
+    # the K-outer tile and return garbage.
+    #
+    # The required multiple is the width the transpose read returns per lane,
+    # which differs by regime: ds_read_tr16_b64 returns 4, ds_load_tr16_b128
+    # returns 8. Checking 4 on wave32 would admit a fragment length of 4 or 12,
+    # where the ``n // 8`` read loop is empty (or truncates) and the fragment is
+    # built from an empty ``parts`` list -- an IndexError at build time rather
+    # than a wrong answer, but the guard should state the real invariant.
+    _tr_lanes = 8 if spec.wave_size == 32 else 4
+    _tr_insn = "ds_load_tr16_b128" if spec.wave_size == 32 else "ds_read_tr16_b64"
+    if spec.lds_k_outer and b_per_lane % _tr_lanes != 0:
         raise ValueError(
-            f"lds_k_outer needs a B fragment length that is a multiple of 4 "
-            f"(ds_read_tr16_b64 returns 4 elements per lane); got "
-            f"b_per_lane={b_per_lane} for atom "
+            f"lds_k_outer needs a B fragment length that is a multiple of "
+            f"{_tr_lanes} ({_tr_insn} returns {_tr_lanes} elements per lane on "
+            f"wave{spec.wave_size}); got b_per_lane={b_per_lane} for atom "
             f"{spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k}"
         )
 

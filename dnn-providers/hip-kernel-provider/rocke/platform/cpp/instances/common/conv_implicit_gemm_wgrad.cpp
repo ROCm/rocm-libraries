@@ -340,9 +340,14 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         }
     }
 
-    /* For bf16/fp16 output the default epilogue emits zero-fill packed atomics
-     * at the scattered MFMA layout.  Matches Python is_valid_wgrad_spec and
-     * validate(): epilogue='cshuffle' is required for these dtypes. */
+    /* For bf16/fp16 output the *packed atomic* store emits zero-fill pairs at
+     * the scattered MFMA layout, so it needs cshuffle's contiguous pairs.  This
+     * is an atomic-epilogue constraint only: at split_k == 1 the epilogue is a
+     * direct store with no packed atomics, and the default epilogue is fine.
+     * Guarding on sk keeps the whole non-atomic 16-bit output path reachable
+     * (it is the only one WMMA wgrad can use, since WMMA rejects cshuffle).
+     * Matches Python is_valid_wgrad_spec and validate(). */
+    if(sk > 1 || sk == 0)
     {
         const char* dt = s->dtype_d ? s->dtype_d : "fp16";
         bool is_default_epi = (s->epilogue == NULL || strcmp(s->epilogue, "default") == 0);

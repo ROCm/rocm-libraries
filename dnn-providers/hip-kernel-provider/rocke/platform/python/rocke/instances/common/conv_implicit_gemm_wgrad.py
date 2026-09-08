@@ -474,12 +474,12 @@ class WgradConvSpec:
                     f"position; the packed dW inner dim is cpg=C/groups); "
                     f"got cpg={self.problem.cpg} (C={self.problem.C}, groups={self.problem.groups})"
                 )
-        if self.data.dtype_d in ("bf16", "fp16") and self.epilogue == "default":
-            raise ValueError(
-                f"split_k atomic with dtype_d={self.data.dtype_d!r} requires "
-                f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
-                f"scattered MFMA layout; cshuffle produces contiguous pairs)"
-            )
+            if self.data.dtype_d in ("bf16", "fp16") and self.epilogue == "default":
+                raise ValueError(
+                    f"split_k atomic with dtype_d={self.data.dtype_d!r} requires "
+                    f"epilogue='cshuffle' (default emits zero-fill packed atomics "
+                    f"with scattered MFMA layout; cshuffle produces contiguous pairs)"
+                )
         if self.async_dma and not self.lds_k_outer:
             # Direct global->LDS load is only correct on the K-outer tile.
             # `raw_ptr_buffer_load_lds` moves N *contiguous global* elements into
@@ -761,7 +761,16 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"position; the packed dW inner dim is cpg=C/groups); "
             f"got cpg={spec.problem.cpg}"
         )
-    if spec.data.dtype_d in ("bf16", "fp16") and spec.epilogue == "default":
+    # Atomic-epilogue constraint only: the packed atomic store emits zero-fill
+    # pairs at the scattered MFMA layout, so it needs cshuffle's contiguous
+    # pairs. At split_k == 1 the epilogue is a direct store with no packed
+    # atomics and 'default' is fine -- and that is the only combination WMMA
+    # wgrad can use, since WMMA rejects cshuffle outright.
+    if (
+        _is_atomic
+        and spec.data.dtype_d in ("bf16", "fp16")
+        and spec.epilogue == "default"
+    ):
         return False, (
             f"split_k atomic with dtype_d={spec.data.dtype_d!r} requires "
             f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
@@ -1081,6 +1090,24 @@ def build_implicit_gemm_conv_wgrad(
     atom = spec.atom if op.family == "mma" else None
     a_per_lane = op.a_frag_len
     b_per_lane = op.b_frag_len
+    # wgrad flips BOTH operands under K-outer, so both fragment lengths have to
+    # divide the width the transpose read returns per lane: ds_read_tr16_b64
+    # returns 4 (wave64), ds_load_tr16_b128 returns 8 (wave32). A length that
+    # does not divide it builds the fragment from an empty/truncated `parts`
+    # list in _tr_frag. dgrad carries the same guard for its single flipped
+    # operand.
+    if spec.lds_k_outer:
+        _tr_lanes = 8 if spec.wave_size == 32 else 4
+        _tr_insn = "ds_load_tr16_b128" if spec.wave_size == 32 else "ds_read_tr16_b64"
+        for _side, _n in (("A", a_per_lane), ("B", b_per_lane)):
+            if _n % _tr_lanes != 0:
+                raise ValueError(
+                    f"lds_k_outer needs a {_side} fragment length that is a "
+                    f"multiple of {_tr_lanes} ({_tr_insn} returns {_tr_lanes} "
+                    f"elements per lane on wave{spec.wave_size}); got "
+                    f"{_side.lower()}_per_lane={_n} for atom "
+                    f"{spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k}"
+                )
     _smem_dtype: Optional[Type] = (
         BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
     )
