@@ -73,8 +73,10 @@ using OwnedConvDescriptor =
     Owned<miopenConvolutionDescriptor_t, miopenDestroyConvolutionDescriptor>;
 using OwnedProblem = Owned<miopenProblem_t, miopenDestroyProblem>;
 
-// Every solution the find call handed back, released together on scope exit. Declared after
-// the vector it refers to so it runs before the vector goes away.
+// Every solution the find call handed back, released together on scope exit. Two things keep
+// this safe and both are easy to break by reordering: the guard has to be declared after the
+// vector so it destructs first, and the later resize() to the found count may leave
+// value-initialized entries behind, which is why the loop skips nulls.
 struct OwnedSolutions
 {
     explicit OwnedSolutions(const std::vector<miopenSolution_t>& s) : solutions(s) {}
@@ -92,10 +94,14 @@ struct OwnedSolutions
     const std::vector<miopenSolution_t>& solutions;
 };
 
+// ASSERT_* rather than EXPECT_*: on a failure here conv.handle stays null and every call below
+// would be handed a null descriptor, burying the real failure under a cascade of secondary
+// ones. A fatal failure only returns from this function, so callers wrap the call in
+// ASSERT_NO_FATAL_FAILURE to actually stop.
 void InitConvDescriptor(OwnedConvDescriptor& conv)
 {
-    EXPECT_EQ(miopenCreateConvolutionDescriptor(&conv.handle), miopenStatusSuccess);
-    EXPECT_EQ(miopenInitConvolutionNdDescriptor(conv.handle,
+    ASSERT_EQ(miopenCreateConvolutionDescriptor(&conv.handle), miopenStatusSuccess);
+    ASSERT_EQ(miopenInitConvolutionNdDescriptor(conv.handle,
                                                 static_cast<int>(pads.size()),
                                                 pads.data(),
                                                 strides.data(),
@@ -146,7 +152,7 @@ TEST(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
     auto x = MakeInput();
     auto w = MakeWeights();
     OwnedConvDescriptor conv;
-    InitConvDescriptor(conv);
+    ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(conv));
     const auto out_lengths = OutputLengths(conv.handle, x, w);
     tensor<float> y{out_lengths};
 
@@ -211,7 +217,7 @@ TEST(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
     auto x = MakeInput();
     auto w = MakeWeights();
     OwnedConvDescriptor conv;
-    InitConvDescriptor(conv);
+    ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(conv));
     const auto out_lengths = OutputLengths(conv.handle, x, w);
     tensor<float> y{out_lengths};
 
@@ -238,7 +244,7 @@ TEST(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
     ASSERT_GT(found, 0);
     solutions.resize(found);
 
-    std::size_t workspace_size;
+    std::size_t workspace_size = 0;
     ASSERT_EQ(miopenGetSolutionWorkspaceSize(solutions[0], &workspace_size), miopenStatusSuccess);
     Workspace wspace{workspace_size};
 

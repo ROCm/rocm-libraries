@@ -298,10 +298,10 @@ function(add_gtest TEST_NAME TEST_CPP)
     # implementation serves each entry point, and require the two runs to agree test for
     # test.
     #
-    # DEPENDS orders the comparison after both replays, under -j as well as serially, but it
-    # does not propagate failure: if a replay fails, the comparison still runs and reports a
-    # stale or missing XML rather than the divergence that caused it. Read the replay result
-    # first when the whole label goes red.
+    # The replays are a fixture rather than a DEPENDS: DEPENDS only orders, so a failed replay
+    # would still let the comparison run and report a stale or missing XML instead of the
+    # failure that caused it. A fixture short-circuits, so the comparison is skipped and
+    # marked failed and the replay stays the thing you read.
     #
     # Not registered in the discrete branch, where each test would need its own doubled
     # replay for the same signal. Deliberately unsharded: sharding would split each run
@@ -324,6 +324,7 @@ function(add_gtest TEST_NAME TEST_CPP)
         set_tests_properties(${TEST_NAME}_forwarding_${FORWARDING_MODE} PROPERTIES
           RUN_SERIAL TRUE
           LABELS "forwarding_parity"
+          FIXTURES_SETUP "${TEST_NAME}_forwarding_replays"
           ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;MIOPEN_HIPDNN_FORWARDING=${FORWARDING_MODE}"
         )
       endforeach()
@@ -338,7 +339,7 @@ function(add_gtest TEST_NAME TEST_CPP)
       )
       set_tests_properties(${TEST_NAME}_forwarding_parity PROPERTIES
         LABELS "forwarding_parity"
-        DEPENDS "${TEST_NAME}_forwarding_disabled;${TEST_NAME}_forwarding_enabled"
+        FIXTURES_REQUIRED "${TEST_NAME}_forwarding_replays"
       )
     endif()
 
@@ -477,13 +478,13 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE AND NOT MIOPEN_NO_G
   foreach(FORWARDING_MODE disabled enabled)
     file(APPEND "${INSTALL_TEST_FILE}"
 "add_test(miopen_gtest_forwarding_${FORWARDING_MODE} \"../miopen_gtest\" \"--gtest_filter=${MIOPEN_FORWARDING_PARITY_FILTER}\" \"--gtest_output=xml:miopen_gtest_forwarding_${FORWARDING_MODE}.xml\")
-set_tests_properties(miopen_gtest_forwarding_${FORWARDING_MODE} PROPERTIES RUN_SERIAL TRUE LABELS \"forwarding_parity\" ENVIRONMENT \"MIOPEN_INVOKED_FROM_CTEST=1;MIOPEN_HIPDNN_FORWARDING=${FORWARDING_MODE}\")
+set_tests_properties(miopen_gtest_forwarding_${FORWARDING_MODE} PROPERTIES RUN_SERIAL TRUE LABELS \"forwarding_parity\" FIXTURES_SETUP \"miopen_gtest_forwarding_replays\" ENVIRONMENT \"MIOPEN_INVOKED_FROM_CTEST=1;MIOPEN_HIPDNN_FORWARDING=${FORWARDING_MODE}\")
 
 ")
   endforeach()
   file(APPEND "${INSTALL_TEST_FILE}"
 "add_test(miopen_gtest_forwarding_parity \"../compare_forwarding_runs.py\" \"miopen_gtest_forwarding_disabled.xml\" \"miopen_gtest_forwarding_enabled.xml\" \"--newer-than\" \"../miopen_gtest\")
-set_tests_properties(miopen_gtest_forwarding_parity PROPERTIES LABELS \"forwarding_parity\" DEPENDS \"miopen_gtest_forwarding_disabled;miopen_gtest_forwarding_enabled\")
+set_tests_properties(miopen_gtest_forwarding_parity PROPERTIES LABELS \"forwarding_parity\" FIXTURES_REQUIRED \"miopen_gtest_forwarding_replays\")
 
 ")
 endif()
@@ -497,8 +498,9 @@ if( NOT ENABLE_ASAN_PACKAGING )
       RENAME "CTestTestfile.cmake"
   )
 
-  # The mirrored parity entries invoke this script from the installed tree.
-  if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+  # The mirrored parity entries invoke this script from the installed tree, so this gate has
+  # to match theirs exactly -- a wider one ships a script nothing calls.
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE AND NOT MIOPEN_NO_GPU)
     install(
         PROGRAMS "${PROJECT_SOURCE_DIR}/script/compare_forwarding_runs.py"
         DESTINATION ${CMAKE_INSTALL_BINDIR}

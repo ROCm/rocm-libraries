@@ -16,8 +16,29 @@ import sys
 import xml.etree.ElementTree as ET
 
 
+class UnreadableRun(Exception):
+    """An XML that cannot be turned into a set of outcomes at all."""
+
+
 def outcomes(path):
-    root = ET.parse(path).getroot()
+    """Map each test name to the statuses recorded for it, in document order.
+
+    A name maps to a list rather than a single status because a JUnit file can
+    carry the same fully-qualified name more than once, and collapsing those
+    into one entry would hide a divergence between them.
+    """
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as exc:
+        # What a crashed or killed replay leaves behind. Say so, rather than
+        # letting the traceback stand in for a diagnostic.
+        raise UnreadableRun(
+            "{} is not well-formed XML ({}) -- the replay that writes it "
+            "most likely crashed partway through".format(path, exc)
+        )
+    except OSError as exc:
+        raise UnreadableRun("{} could not be read ({})".format(path, exc))
+
     result = {}
     for case in root.iter("testcase"):
         name = "{}.{}".format(case.get("classname"), case.get("name"))
@@ -27,8 +48,15 @@ def outcomes(path):
             status = "skipped"
         else:
             status = "passed"
-        result[name] = status
+        result.setdefault(name, []).append(status)
     return result
+
+
+def describe(statuses):
+    """Render one name's statuses, keeping the count visible when it is > 1."""
+    if len(statuses) == 1:
+        return statuses[0]
+    return "{} ({} entries)".format(", ".join(statuses), len(statuses))
 
 
 def check_fresh(path, newer_than):
@@ -67,7 +95,12 @@ def main(disabled_xml, enabled_xml, newer_than=None):
             sys.stderr.write("  {}\n".format(problem))
         return 1
 
-    a, b = outcomes(disabled_xml), outcomes(enabled_xml)
+    try:
+        a, b = outcomes(disabled_xml), outcomes(enabled_xml)
+    except UnreadableRun as exc:
+        sys.stderr.write("forwarding parity cannot be checked:\n  {}\n".format(exc))
+        return 1
+
     problems = []
 
     for name in sorted(set(a) - set(b)):
@@ -75,8 +108,14 @@ def main(disabled_xml, enabled_xml, newer_than=None):
     for name in sorted(set(b) - set(a)):
         problems.append("only in enabled run: {}".format(name))
     for name in sorted(set(a) & set(b)):
-        if a[name] != b[name]:
-            problems.append("{}: disabled={} enabled={}".format(name, a[name], b[name]))
+        # Sorted, because the two runs agreeing on which outcomes occurred is the
+        # claim; the order gtest happened to emit them in is not.
+        if sorted(a[name]) != sorted(b[name]):
+            problems.append(
+                "{}: disabled={} enabled={}".format(
+                    name, describe(a[name]), describe(b[name])
+                )
+            )
 
     if not a and not b:
         problems.append("both runs reported zero tests")
@@ -87,7 +126,8 @@ def main(disabled_xml, enabled_xml, newer_than=None):
             sys.stderr.write("  {}\n".format(p))
         return 1
 
-    print("forwarding parity OK: {} tests identical under both modes".format(len(a)))
+    total = sum(len(statuses) for statuses in a.values())
+    print("forwarding parity OK: {} tests identical under both modes".format(total))
     return 0
 
 

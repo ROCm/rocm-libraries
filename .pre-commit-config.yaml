@@ -170,6 +170,19 @@ repos:
         files: ^projects/miopen/script/(check_public_abi|test_check_public_abi)\.py$
         pass_filenames: false
 
+      # The forwarding comparator only ever runs on a GPU machine with the
+      # wrapper flag on, so nothing in PR CI exercises it. Its failure modes are
+      # the ones where it reports agreement that is not there, which is exactly
+      # what silent breakage looks like -- so its tests run here instead, on
+      # string fixtures, wherever the script is edited.
+      - id: miopen-forwarding-parity-comparator-tests
+        name: MIOpen forwarding parity comparator self-tests
+        entry: python -m pytest projects/miopen/script/test_compare_forwarding_runs.py -q
+        language: python
+        additional_dependencies: ["pytest==8.4.2"]
+        files: ^projects/miopen/script/(compare_forwarding_runs|test_compare_forwarding_runs)\.py$
+        pass_filenames: false
+
       - id: kpack-pin-sync
         name: rocm_kpack pin is consistent (hipDNN)
         # The pin is the kpack-ref output of .github/actions/ci-env/action.yml.

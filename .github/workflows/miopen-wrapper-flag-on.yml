@@ -19,9 +19,20 @@ on:
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+    # The lane builds MIOpen and nothing else, so a PR that does not touch it has
+    # nothing here to learn -- and this is an expensive build to spend on that.
+    paths:
+      - 'projects/miopen/**'
+      - '.github/workflows/miopen-wrapper-flag-on.yml'
 
 permissions:
   contents: read
+
+# A push supersedes the build already running for the same PR; that build can only
+# report on code that no longer exists.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   flag-on:
@@ -109,6 +120,9 @@ jobs:
       # wrapper on, the parity harness has to be there.
       - name: Forwarding parity harness is registered
         run: |
+          # pipefail: without it the exit status is sed's, so a ctest that failed
+          # outright would be read as a well-formed empty result.
+          set -o pipefail
           count=$(ctest --test-dir build -N -L forwarding_parity |
             sed -n 's/^Total Tests: //p')
           echo "forwarding_parity tests registered: ${count:-<unparsed>}"

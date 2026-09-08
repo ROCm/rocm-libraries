@@ -180,6 +180,9 @@ jobs:
       - name: Forwarding parity harness is absent with the wrapper off
         if: matrix.job_id == 'no-ck-build'
         run: |
+          # pipefail: without it the exit status is sed's, so a ctest that failed
+          # outright would be read as the zero count this step is asserting.
+          set -o pipefail
           count=$(ctest --test-dir build -N -L forwarding_parity |
             sed -n 's/^Total Tests: //p')
           echo "forwarding_parity tests registered: ${count:-<unparsed>}"
