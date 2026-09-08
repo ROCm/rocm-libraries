@@ -1088,7 +1088,7 @@ size_t rocfft_plan_description_t::batch() const
     return ret;
 }
 
-rocfft_field_t::rocfft_field_t(std::vector<rocfft_brick_t>&& field_bricks)
+rocfft_field_t::rocfft_field_t(std::vector<rocfft_brick_t> field_bricks)
     : bricks(std::move(field_bricks))
 {
     if(bricks.empty())
