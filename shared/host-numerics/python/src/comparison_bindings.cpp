@@ -28,10 +28,7 @@ void registerComparisonBindings(nb::module_& module) {
         .def_rw("all_close", &ComparisonOptions::allClose)
         .def_rw("absolute_tolerance", &ComparisonOptions::absoluteTolerance)
         .def_rw("relative_tolerance", &ComparisonOptions::relativeTolerance)
-        .def_rw("symmetric_relative_tolerance", &ComparisonOptions::symmetricRelativeTolerance)
-        .def_rw("strict_tolerance", &ComparisonOptions::strictTolerance)
         .def_rw("equal_nans", &ComparisonOptions::equalNaNs)
-        .def_rw("equal_signed_zero", &ComparisonOptions::equalSignedZero)
         .def_rw("zero_expected_norm_is_nan", &ComparisonOptions::zeroExpectedNormIsNaN)
         .def_rw("non_finite_values_invalidate_relative_norms",
                 &ComparisonOptions::nonFiniteValuesInvalidateRelativeNorms)
@@ -71,11 +68,8 @@ void registerComparisonBindings(nb::module_& module) {
         .def_ro("matched_nans", &ComparisonReport::matchedNaNs)
         .def_ro("matched_infinities", &ComparisonReport::matchedInfinities)
         .def_ro("non_finite_mismatches", &ComparisonReport::nonFiniteMismatches)
-        .def_ro("signed_zero_mismatches", &ComparisonReport::signedZeroMismatches)
         .def_ro("max_absolute_difference", &ComparisonReport::maxAbsoluteDifference)
         .def_ro("max_relative_difference", &ComparisonReport::maxRelativeDifference)
-        .def_ro("max_symmetric_relative_difference",
-                &ComparisonReport::maxSymmetricRelativeDifference)
         .def_ro("maximum_observed_magnitude", &ComparisonReport::maximumObservedMagnitude)
         .def_ro("maximum_expected_magnitude", &ComparisonReport::maximumExpectedMagnitude)
         .def_ro("frobenius_difference", &ComparisonReport::frobeniusDifference)
@@ -121,8 +115,6 @@ void registerComparisonBindings(nb::module_& module) {
             return compare(observed, expected, options);
         },
         "observed"_a, "expected"_a, "options"_a = ComparisonOptions{});
-    module.def("default_comparison_options", &defaultComparisonOptions, "type"_a,
-               "symmetric_relative_tolerance"_a = std::optional<double>{});
     module.def("near_comparison_options", &nearComparisonOptions, "absolute_tolerance"_a);
     module.def("allclose_comparison_options", &allCloseComparisonOptions,
                "absolute_tolerance"_a = 1e-8, "relative_tolerance"_a = 1e-5,

@@ -229,10 +229,10 @@ namespace
         const auto                 observedView = hostOutputTensor<float>(observed, 1, 1);
 
         const HostComparisonResult boundary = compareHostReference(
-            observedView, expectedView, AcceptableGEMMError{1.0, "strict boundary"});
-        require(boundary.statistics.relativeFrobeniusError == 1.0 && !boundary.ok()
-                    && !boundary.statistics.frobeniusPassed,
-                "rocroller-gemm comparison did not preserve strict less-than acceptance.");
+            observedView, expectedView, AcceptableGEMMError{1.0, "inclusive boundary"});
+        require(boundary.statistics.relativeFrobeniusError == 1.0 && boundary.ok()
+                    && boundary.statistics.frobeniusPassed,
+                "rocroller-gemm comparison rejected an inclusive tolerance boundary.");
 
         const HostComparisonResult aboveBoundary = compareHostReference(
             observedView, expectedView, AcceptableGEMMError{1.01, "above boundary"});

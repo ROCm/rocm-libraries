@@ -18,7 +18,6 @@ enum class GemmBackend {
     Automatic,  // Selects between available BLAS and built-in Blocked execution.
     Blocked,    // Accumulates complete touched output blocks; writes selected D coordinates.
     Blas,       // Uses the optional BLAS component's transforming implementation.
-    Mixed,      // Reporting-only value for an aggregate that used multiple concrete backends.
 };
 
 // Selects when low-precision accumulator types are rounded.
@@ -72,9 +71,9 @@ struct GemmOptions {
 
 // Writes selected coordinates into caller-owned D and reports the concrete
 // backend used. Exact same-layout C/D aliasing is supported.
-GemmBackend referenceGemmInto(Tensor a, Tensor b, Tensor c, Tensor d,
-                              const GemmOptions& options = GemmOptions{},
-                              GemmBackend backend = GemmBackend::Automatic);
+void referenceGemmInto(Tensor a, Tensor b, Tensor c, Tensor d,
+                       const GemmOptions& options = GemmOptions{},
+                       GemmBackend backend = GemmBackend::Automatic);
 
 // Allocates and zero-initializes D, then executes the owning GEMM. Unselected
 // logical coordinates remain zero.

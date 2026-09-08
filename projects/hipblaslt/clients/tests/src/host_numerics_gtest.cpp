@@ -607,16 +607,18 @@ TEST(HostNumericsComparisonBridge, UnitNearAndSpecialValuePolicies)
     request.allCloseMode = hipblaslt::host_numerics::HostAllCloseMode::Unit;
     EXPECT_TRUE(hipblaslt::host_numerics::compareHost(request).comparison.passed());
 
-    request.allCloseMode      = hipblaslt::host_numerics::HostAllCloseMode::Near;
+    request.allCloseMode      = hipblaslt::host_numerics::HostAllCloseMode::AllClose;
     request.absoluteTolerance = 1e-6;
+    request.relativeTolerance = 0.0;
     EXPECT_TRUE(hipblaslt::host_numerics::compareHost(request).comparison.passed());
 
     expected[0]       = 0.0f;
     observed[0]       = 2.0f * std::numeric_limits<float>::epsilon();
-    request.allCloseMode = hipblaslt::host_numerics::HostAllCloseMode::SymmetricRelative;
-    request.symmetricRelativeTolerance = 3.0f * std::numeric_limits<float>::epsilon();
+    request.allCloseMode      = hipblaslt::host_numerics::HostAllCloseMode::AllClose;
+    request.absoluteTolerance = 3.0f * std::numeric_limits<float>::epsilon();
+    request.relativeTolerance = 0.0;
     EXPECT_TRUE(hipblaslt::host_numerics::compareHost(request).comparison.passed());
-    request.symmetricRelativeTolerance = std::numeric_limits<float>::epsilon();
+    request.absoluteTolerance = std::numeric_limits<float>::epsilon();
     EXPECT_FALSE(hipblaslt::host_numerics::compareHost(request).comparison.passed());
 
     request.allCloseMode                   = hipblaslt::host_numerics::HostAllCloseMode::Disabled;
