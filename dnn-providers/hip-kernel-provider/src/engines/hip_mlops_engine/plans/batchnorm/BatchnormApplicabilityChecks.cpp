@@ -14,52 +14,6 @@
 namespace hip_kernel_provider
 {
 
-// --- Type Configuration Helpers ---
-
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
-    bn_type_configs::getAllowedIoTypes()
-{
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
-    for(const auto& config : VALID)
-    {
-        types.insert(config.io);
-    }
-    return types;
-}
-
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
-    bn_type_configs::getAllowedAffineTypes()
-{
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
-    for(const auto& config : VALID)
-    {
-        types.insert(config.affine);
-    }
-    return types;
-}
-
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
-    bn_type_configs::getAllowedStatTypes()
-{
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
-    for(const auto& config : VALID)
-    {
-        types.insert(config.stat);
-    }
-    return types;
-}
-
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
-    bn_type_configs::getAllowedIntermediateTypes()
-{
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
-    for(const auto& config : VALID)
-    {
-        types.insert(config.intermediate);
-    }
-    return types;
-}
-
 void BatchnormValidator::validateSpatialDimensions(const std::vector<int64_t>& ioDims)
 {
     if(ioDims.size() < 3)
@@ -83,22 +37,21 @@ void BatchnormValidator::validateSpatialDimensions(const std::vector<int64_t>& i
 
 // --- Component Validators ---
 
-void BatchnormValidator::checkTensorLayoutsAndDimsSupported()
+void BatchnormValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
 {
     // Skip tensors with embedded scalar values (epsilon, momentum) - they don't have layouts or dimensions to validate
     std::vector<TensorDescriptor> tensors;
-    tensors.reserve(_tensorMap.size());
+    tensors.reserve(tensorIds.size());
 
-    for(const auto& [id, attr] : _tensorMap)
+    for(const auto& id : tensorIds)
     {
-        if(attr->value_type() != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
+        auto attr = _tensorMap.at(id);
+        if(!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(attr))
         {
-            continue;
+            tensors.emplace_back(attr);
         }
-        tensors.emplace_back(attr);
     }
 
-    validateConsistentDimensions(tensors);
     validatePackedTensors(tensors);
     validateConsistentLayouts(tensors);
 }
@@ -109,14 +62,21 @@ void BatchnormValidator::checkTensorDataTypesSupported(
     const std::vector<int64_t>& statTensorIds,
     const std::vector<int64_t>& intermediateTensorIds)
 {
-    validateConsistentDataTypes(
-        ioTensorIds,
-        bn_type_configs::getAllowedIoTypes(),
-        "Batchnorm implementation supports only FLOAT, HALF, and BFLOAT16 data types for x, y, "
-        "dy, and dx tensors.",
-        "All IO tensors for batchnorm must have the same data type.");
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedIOTypes{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF};
+    for(const auto ioTensorId : ioTensorIds)
+    {
+        const auto& ioTensorAttr = core::utils::findTensorAttributes(_tensorMap, ioTensorId);
+        validateDataTypeIsSupported(ioTensorAttr.data_type(),
+                                    allowedIOTypes,
+                                    "Batchnorm implementation supports only FLOAT, HALF, and "
+                                    "BFLOAT16 data types for x, y, tensors");
+    }
 
-    const auto allowedAffineTypes = bn_type_configs::getAllowedAffineTypes();
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedAffineTypes{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
     if(allowedAffineTypes.size() == 1)
     {
         validateFixedDataType(affineTensorIds,
@@ -133,7 +93,8 @@ void BatchnormValidator::checkTensorDataTypesSupported(
             "All affine tensors for batchnorm must have the same data type.");
     }
 
-    const auto allowedStatTypes = bn_type_configs::getAllowedStatTypes();
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedStatTypes{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
     if(allowedStatTypes.size() == 1)
     {
         validateFixedDataType(statTensorIds,
@@ -149,8 +110,9 @@ void BatchnormValidator::checkTensorDataTypesSupported(
                                     "All stat tensors for batchnorm must have the same data type.");
     }
 
-    const auto allowedIntermediateTypes = bn_type_configs::getAllowedIntermediateTypes();
-    if(allowedIntermediateTypes.size() == 1)
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
+        allowedIntermediateTypes{hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
+    if(allowedStatTypes.size() == 1)
     {
         validateFixedDataType(
             intermediateTensorIds,
@@ -180,17 +142,126 @@ void BatchnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
             "At least one IO tensor must be provided for batchnorm.");
     }
 
+    // Validate consistent dimensions for IO and stat tensors (affine tensors can have fewer dimensions due to broadcasting)
+    std::vector<TensorDescriptor> ioStatTensors;
+    ioStatTensors.reserve(ioTensorIds.size() + statTensorIds.size());
+    for(const auto& tensorId : ioTensorIds)
+    {
+        const auto& tensorAttr = _tensorMap.at(tensorId);
+        ioStatTensors.emplace_back(tensorAttr);
+    }
+    for(const auto& tensorId : statTensorIds)
+    {
+        const auto& tensorAttr = _tensorMap.at(tensorId);
+        ioStatTensors.emplace_back(tensorAttr);
+    }
+    validateConsistentDimensions(ioStatTensors);
+
     const auto& ioTensorAttr = core::utils::findTensorAttributes(_tensorMap, ioTensorIds[0]);
     const std::vector<int64_t> ioDims(ioTensorAttr.dims()->begin(), ioTensorAttr.dims()->end());
 
     validateConsistentShapes(
         ioTensorIds, ioDims, "All IO tensors for batchnorm must have the same shape.");
 
+    // Check that scale and bias tensors must have the same shape
+    if(!affineTensorIds.empty())
+    {
+        const auto& referenceAffineAttr
+            = core::utils::findTensorAttributes(_tensorMap, affineTensorIds[0]);
+        const std::vector<int64_t> referenceAffineDims(referenceAffineAttr.dims()->begin(),
+                                                       referenceAffineAttr.dims()->end());
+
+        validateConsistentShapes(affineTensorIds,
+                                 referenceAffineDims,
+                                 "Scale and bias tensors for batchnorm must have the same shape.");
+    }
+
+    // Checks if the affine tensor shape is valid for broadcasting to the IO tensor shape as per
+    // NumPy broadcasting rules with the constraint that the channel dimension must match.
+    const auto isValidAffineShapeForIo
+        = [&](const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& affineTensorAttr) {
+              const std::vector<int64_t> affineDims(affineTensorAttr.dims()->begin(),
+                                                    affineTensorAttr.dims()->end());
+
+              const size_t affineRank = affineDims.size();
+              const size_t ioRank = ioDims.size();
+
+              if(affineRank < 1 || affineRank > ioRank)
+              {
+                  return false;
+              }
+
+              const int64_t numChannels = ioDims[1];
+              const bool ioIsChannelLast = core::utils::isChannelLastLayout(&ioTensorAttr);
+
+              // Checking against the IO tensor's layout implicitly rejects affine tensors
+              // whose dimensions don't satisfy the IO layout's expected channel position.
+              if(ioIsChannelLast)
+              {
+                  // For channel-last, C is at index 0 for reduced rank or index 1 for full rank
+                  const size_t channelDimIndex = affineRank == ioRank ? 1 : 0;
+
+                  if(affineDims[channelDimIndex] != numChannels)
+                  {
+                      return false;
+                  }
+
+                  for(size_t i = 0; i < affineRank; ++i)
+                  {
+                      if(i != channelDimIndex && affineDims[i] != 1)
+                      {
+                          return false;
+                      }
+                  }
+              }
+              else
+              {
+                  // For channel-first, only full rank or reduced rank are allowed
+                  if(affineRank != ioRank && affineRank != ioRank - 1)
+                  {
+                      return false;
+                  }
+
+                  // C is at index 1 for full rank and index 0 for reduced rank
+                  const size_t channelDimIndex = affineRank == ioRank ? 1 : 0;
+
+                  if(affineDims[channelDimIndex] != numChannels)
+                  {
+                      return false;
+                  }
+
+                  for(size_t i = 0; i < affineRank; ++i)
+                  {
+                      if(i != channelDimIndex && affineDims[i] != 1)
+                      {
+                          return false;
+                      }
+                  }
+              }
+
+              return true;
+          };
+
+    // Check that scale and bias tensors have any broadcastable shape with same number of channels as IO tensors
+    for(const auto& tensorId : affineTensorIds)
+    {
+        const auto& tensorAttr = core::utils::findTensorAttributes(_tensorMap, tensorId);
+
+        if(!isValidAffineShapeForIo(tensorAttr))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "BatchNorm affine tensor shape "
+                    + hipdnn_data_sdk::utilities::vecToString(
+                        std::vector<int64_t>(tensorAttr.dims()->begin(), tensorAttr.dims()->end()))
+                    + " is incompatible with the IO tensor shape "
+                    + hipdnn_data_sdk::utilities::vecToString(ioDims)
+                    + ". The affine tensor shape must be broadcastable to the IO tensor shape with "
+                      "matching channel dimension.");
+        }
+    }
+
     const auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(ioDims);
-    validateConsistentShapes(affineTensorIds,
-                             derivedDims,
-                             "Scale and bias tensors for batchnorm must have shape "
-                             "derived from IO tensor shape.");
     validateConsistentShapes(statTensorIds,
                              derivedDims,
                              "Mean and variance tensors for batchnorm must have shape "
@@ -211,7 +282,12 @@ void BatchnormValidator::checkTensorConfigSupported(
     const std::vector<int64_t>& intermediateTensorIds,
     bool isTraining)
 {
-    checkTensorLayoutsAndDimsSupported();
+    std::vector<int64_t> allTensors = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
+    allTensors.insert(allTensors.end(), affineTensorIds.begin(), affineTensorIds.end());
+    allTensors.insert(allTensors.end(), statTensorIds.begin(), statTensorIds.end());
+    allTensors.insert(allTensors.end(), intermediateTensorIds.begin(), intermediateTensorIds.end());
+
+    checkTensorLayoutsAndDimsSupported(allTensors);
     checkTensorDataTypesSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, isTraining);

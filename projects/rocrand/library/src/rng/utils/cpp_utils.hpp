@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -107,7 +107,8 @@ constexpr auto numeric_combinations(const std::array<T, Ns>... inputs)
 }
 
 /// \brief Calculates greatest common divisor.
-__host__ __device__ constexpr unsigned int gcd(const unsigned int a, const unsigned int b)
+__host__ __device__
+constexpr unsigned int gcd(const unsigned int a, const unsigned int b)
 {
     if(a == 0)
         return b;
@@ -117,7 +118,8 @@ __host__ __device__ constexpr unsigned int gcd(const unsigned int a, const unsig
 }
 
 /// \brief Calculates least common multiple
-__host__ __device__ constexpr unsigned int lcm(const unsigned int a, const unsigned int b)
+__host__ __device__
+constexpr unsigned int lcm(const unsigned int a, const unsigned int b)
 {
     if(a == 0 || b == 0)
         return 0;
@@ -192,10 +194,14 @@ struct vec_wrapper
 {
     static_assert(is_vector_type_v<V>, "vec_wrapper can only be used with vector types");
 
-    __host__ __device__ explicit vec_wrapper(V vec) : m_vec(vec) {}
+    __host__ __device__
+    explicit vec_wrapper(V vec)
+        : m_vec(vec)
+    {}
 
     template<class U = V, std::enable_if_t<vector_size_v<U> == 2, int> = 0>
-    __host__ __device__ auto& operator[](int idx)
+    __host__ __device__
+    auto& operator[](int idx)
     {
         switch(idx)
         {
@@ -206,7 +212,8 @@ struct vec_wrapper
     }
 
     template<class U = V, std::enable_if_t<vector_size_v<U> == 2, int> = 0>
-    __host__ __device__ const auto& operator[](int idx) const
+    __host__ __device__
+    const auto& operator[](int idx) const
     {
         switch(idx)
         {
@@ -217,7 +224,8 @@ struct vec_wrapper
     }
 
     template<class U = V, std::enable_if_t<vector_size_v<U> == 4, int> = 0>
-    __host__ __device__ auto& operator[](int idx)
+    __host__ __device__
+    auto& operator[](int idx)
     {
         switch(idx)
         {
@@ -230,7 +238,8 @@ struct vec_wrapper
     }
 
     template<class U = V, std::enable_if_t<vector_size_v<U> == 4, int> = 0>
-    __host__ __device__ const auto& operator[](int idx) const
+    __host__ __device__
+    const auto& operator[](int idx) const
     {
         switch(idx)
         {
@@ -246,7 +255,7 @@ struct vec_wrapper
 };
 
 template<class V>
-__host__ __device__ vec_wrapper(V) -> vec_wrapper<V>;
+vec_wrapper(V) -> vec_wrapper<V>;
 
 /// \brief Returns the maximum of its arguments.
 /// \note This function must be the choice in `__host__ __device__` and preferably on

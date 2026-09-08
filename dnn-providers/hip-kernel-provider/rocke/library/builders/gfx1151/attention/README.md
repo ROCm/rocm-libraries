@@ -75,7 +75,7 @@ nuances**, **algorithmic differences from a gfx950 (CDNA) MFMA FMHA**, and
 Reproduce everything here with:
 
 ```bash
-PYTHONPATH=Python python3 -m builders.gfx1151.attention.bench_v_staging \
+PYTHONPATH=python python3 -m builders.gfx1151.attention.bench_v_staging \
     --seqlen-q 512 --seqlen-k 512 --head-size 128 --heads 8 --batch 4
 ```
 
@@ -199,7 +199,7 @@ masked by a different bottleneck. So we built a **heavily-parameterized** vehicl
 combination, every variant GPU-measured against the numpy reference.
 
 ```bash
-PYTHONPATH=Python python3 -m builders.gfx1151.attention.tune \
+PYTHONPATH=python python3 -m builders.gfx1151.attention.tune \
     --bm 1 2 --pmode lds --vmode gather lds_t --qpreload 0 1
 ```
 
@@ -329,7 +329,7 @@ P-transpose uses a per-wave LDS slab with an intra-wave `s_waitcnt` (no
 cross-wave barrier).
 
 ```bash
-PYTHONPATH=Python python3 -m builders.gfx1151.attention.mw_tune --waves 2 4
+PYTHONPATH=python python3 -m builders.gfx1151.attention.mw_tune --waves 2 4
 ```
 
 **It is correct (max_abs 3.05e-05) but slower: w4 = 6.3 TF vs the single-wave
@@ -364,7 +364,7 @@ only** (`warp_n=1`), so softmax stays intra-warp (`wave_reduce_*` over 16 lanes
 `[n][d]`, V transposed `[d][n]`, P→A via the per-wave LDS slab (not ds_bpermute).
 
 ```bash
-PYTHONPATH=Python python3 -m builders.gfx1151.attention.prod_tune \
+PYTHONPATH=python python3 -m builders.gfx1151.attention.prod_tune \
   --head-size 128 --num-warps 2 4 --m-repeat 1 2 --block-n 32 64
 ```
 

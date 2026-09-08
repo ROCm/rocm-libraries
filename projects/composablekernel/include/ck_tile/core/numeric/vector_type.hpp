@@ -69,6 +69,9 @@ using fp16x16_t = _Float16 __attribute__((ext_vector_type(16)));
 using fp16x32_t = _Float16 __attribute__((ext_vector_type(32)));
 using fp16x64_t = _Float16 __attribute__((ext_vector_type(64)));
 
+using llvm_fp16x8_t  = __fp16 __attribute__((ext_vector_type(8)));
+using llvm_fp16x16_t = __fp16 __attribute__((ext_vector_type(16)));
+
 // bf16
 // using bf16_t = ...
 using bf16x2_t  = bfloat16_t __attribute__((ext_vector_type(2)));
@@ -77,6 +80,10 @@ using bf16x8_t  = bfloat16_t __attribute__((ext_vector_type(8)));
 using bf16x16_t = bfloat16_t __attribute__((ext_vector_type(16)));
 using bf16x32_t = bfloat16_t __attribute__((ext_vector_type(32)));
 using bf16x64_t = bfloat16_t __attribute__((ext_vector_type(64)));
+
+// take native __bf16 regardless of whether bfloat16_t is spelled __bf16 or ushort
+using llvm_bf16x8_t  = __bf16 __attribute__((ext_vector_type(8)));
+using llvm_bf16x16_t = __bf16 __attribute__((ext_vector_type(16)));
 
 // i32
 // using int32_t = ...

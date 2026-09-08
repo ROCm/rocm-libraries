@@ -2,7 +2,7 @@
 - navi32
 - gfx1101
 - [Device 73f0]
-- Activation: null
+- Activation: false
   ActivationComputeDataType: 0
   ActivationNoGuard: false
   ActivationType: hipblaslt_all

@@ -105,6 +105,11 @@ endif()
 
 add_armor_flags(hipsolver "${ARMOR_LEVEL}")
 
+# Embed PE version metadata (VERSIONINFO) into the DLL
+if(WIN32 AND BUILD_SHARED_LIBS)
+  target_sources(hipsolver PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
+
 if(WIN32)
   if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     add_custom_command(TARGET hipsolver
@@ -124,6 +129,11 @@ set(static_depends)
 
 if(NOT BUILD_WITH_SPARSE)
   target_link_libraries(hipsolver PRIVATE $<$<PLATFORM_ID:Linux>:${CMAKE_DL_LIBS}>)
+endif()
+
+# Feature flags
+if(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(hipsolver PUBLIC HIPSOLVER_ENABLE_EIGENSOLVERS_64)
 endif()
 
 # Build hipsolver from source on AMD platform

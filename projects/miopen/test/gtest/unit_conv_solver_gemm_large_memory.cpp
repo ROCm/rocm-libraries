@@ -96,6 +96,11 @@ const auto& GetTestParams()
 
 } // namespace
 
+// These LargeMemory GEMM cases are single, deliberately large convolutions
+// (several seconds each) -- too heavy for the Smoke (pre-commit) tier. They run
+// in the Standard tier (every CI/PR) and above. Matched by the
+// */GPU_Gemm*_LargeMemory_* pattern in test_categories.yaml.
+
 //************************************************************************************
 // GemmFwdRest Tests
 //************************************************************************************
@@ -112,13 +117,13 @@ TEST_P(GPU_GemmFwdRest_LargeMemory_FP16, GemmFwdRest)
     this->RunTest(miopen::solver::conv::GemmFwdRest{});
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_GemmFwdRest_LargeMemory_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetGemmFwdRestTestCases(miopenFloat))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_GemmFwdRest_LargeMemory_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
@@ -140,13 +145,13 @@ TEST_P(GPU_GemmBwdRest_LargeMemory_FP16, GemmBwdRest)
     this->RunTest(miopen::solver::conv::GemmBwdRest{});
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_GemmBwdRest_LargeMemory_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetGemmBwdRestTestCases(miopenFloat))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_GemmBwdRest_LargeMemory_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
@@ -169,14 +174,14 @@ TEST_P(GPU_GemmWrwUniversal_LargeMemory_FP16, GemmWrwUniversal)
 };
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Standard,
     GPU_GemmWrwUniversal_LargeMemory_FP32,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoGEMM),
                      testing::ValuesIn(GetGemmWrwUniversalTestCases(miopenFloat))));
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Standard,
     GPU_GemmWrwUniversal_LargeMemory_FP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoGEMM),

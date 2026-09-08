@@ -57,11 +57,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include <miopen/config.hpp>
 
-#if MIOPEN_BACKEND_OPENCL
-#include <miopen/oclkernel.hpp>
-#include <miopen/clhelper.hpp>
-#include <miopen/ocldeviceinfo.hpp>
-#endif
 #include <miopen/db_path.hpp>
 #include <miopen/conv/db_getter.hpp>
 #include <miopen/execution_context.hpp>
@@ -69,15 +64,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <miopen/problem_description.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/ramdb.hpp>
-
-#if MIOPEN_BACKEND_OPENCL
-#define CL_TARGET_OPENCL_VERSION 120
-#ifdef __APPLE__
-#include <OpenCL/opencl.h>
-#else
-#include <CL/cl.h>
-#endif
-#endif
 
 #ifdef __APPLE__
 #include <mach/mach_time.h> // for mach_absolute_time() and friends
@@ -284,7 +270,6 @@ protected:
 
 #define MLO_POOLING_OP_AVE 0
 #define MLO_POOLING_OP_MAX 1
-#define MLO_POOLING_OP_STC 2
 #define MLO_POOLING_OP_AVE_INCLUSIVE 3
 
 /// \todo Move this into respective Solution objects. --atamazov
@@ -319,16 +304,10 @@ struct mlo_construct_activ_lrn_pooling_common : mlo_construct_base
      */
     inline const std::vector<size_t>& getGlobalWkSize() const { return (_g_wk); }
 
-    int _grp_tile0       = 8; // total number ALUs per group
-    int _grp_tile1       = 8; // total number ALUs per group
-    int _out_pix_tile0   = 2; // # of generated pixels per output per wk-item  (ALU)
-    int _out_pix_tile1   = 4; // # of generated pixels per output per wk-item  (ALU)
-    size_t _workspace_sz = 0;
-
-    /*
-     * get workspace size
-     */
-    inline size_t getWorkSpaceSzBytes() const { return (_workspace_sz); }
+    int _grp_tile0     = 8; // total number ALUs per group
+    int _grp_tile1     = 8; // total number ALUs per group
+    int _out_pix_tile0 = 2; // # of generated pixels per output per wk-item  (ALU)
+    int _out_pix_tile1 = 4; // # of generated pixels per output per wk-item  (ALU)
 
     void setupFloats();
 
@@ -415,20 +394,9 @@ struct mlo_construct_activ_lrn_pooling_common : mlo_construct_base
                                stride,
                                w_stride);
 
-        const int data_len = miopen::GetTypeSize(data_type);
-        const size_t size =
-            (layout == "NCHW")
-                ? batch * channels * depth * height * width * data_len
-                : batch * batch_stride * channel_stride * stride * w_stride * data_len;
-
-        _out_df_width          = width;
-        _out_df_height         = height;
         _out_df_batch_stride   = batch_stride;
         _out_df_channel_stride = channel_stride;
         _out_df_stride         = stride;
-        _top_df_sz             = size;
-        _out_df_layout         = layout;
-        _out_df_data_type      = miopen::GetDataTypeName(data_type);
     }
 
     /*
@@ -458,20 +426,11 @@ struct mlo_construct_activ_lrn_pooling_common : mlo_construct_base
                                stride,
                                w_stride);
 
-        const int data_len = miopen::GetTypeSize(data_type);
-        const size_t size =
-            (layout == "NCHW")
-                ? batch * channels * depth * height * width * data_len
-                : batch * batch_stride * channel_stride * stride * w_stride * data_len;
-
         _in_df_width          = width;
         _in_df_height         = height;
         _in_df_batch_stride   = batch_stride;
         _in_df_channel_stride = channel_stride;
         _in_df_stride         = stride;
-        _bot_df_sz            = size;
-        _in_df_layout         = layout;
-        _in_df_data_type      = miopen::GetDataTypeName(data_type);
     }
 
     size_t setTopDescFromMLDesc(const miopen::TensorDescriptor& tensor)
@@ -508,26 +467,17 @@ protected:
     int _hw_wave_sz   = 0;
 
     // cl_queue
-    std::size_t _bot_df_sz = 0; /// \todo Written but not read - remove?
-    std::size_t _top_df_sz = 0; /// \todo Written but not read - remove?
 
     int _in_df_width          = 0;
     int _in_df_height         = 0;
     int _in_df_batch_stride   = 0;
     int _in_df_channel_stride = 0;
     int _in_df_stride         = 0;
-    std::string _in_df_layout;
-    std::string _in_df_data_type;
 
-    int _out_df_width          = 0;
-    int _out_df_height         = 0;
     int _out_df_batch_stride   = 0;
     int _out_df_channel_stride = 0;
     int _out_df_stride         = 0;
-    std::string _out_df_layout;
-    std::string _out_df_data_type;
 };
-#define MLO_LRN_WITHIN_CHANNEL 0
 #define MLO_LRN_ACROSS_CHANNELS 1
 
 struct mlo_construct_norm : mlo_construct_activ_lrn_pooling_common

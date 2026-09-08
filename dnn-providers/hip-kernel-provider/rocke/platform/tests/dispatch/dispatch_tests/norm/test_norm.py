@@ -76,7 +76,7 @@ class TestNormDispatch(unittest.TestCase):
     def test_kind_gate_filters_candidates(self):
         req = _rms(4096, 4096, "gfx950")
         for c in norm_candidates():
-            ok, _ = c.supports(req)
+            ok, _ = c.admits(req)
             if ok:
                 self.assertEqual(c.algorithm, "rmsnorm")
 

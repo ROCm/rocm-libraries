@@ -33,6 +33,8 @@ namespace hipdnn_frontend::graph
  * auto dw = graph.conv_wgrad(dy, x, ConvWgradAttributes()
  *              .set_padding({1, 1})
  *              .set_stride({1, 1}));
+ * // Required before validation/build; strides may be omitted and inferred.
+ * dw->set_dim({K, C, R, S});
  * @endcode
  *
  * @see Graph::conv_wgrad(), ConvFpropAttributes, ConvDgradAttributes
@@ -231,6 +233,22 @@ public:
     ConvolutionMode get_convolution_mode() const
     {
         return math_mode;
+    }
+    /**
+     * @brief Custom equality hook for wgrad-specific attributes
+     */
+    bool logicallyEqualsImpl(const ConvWgradAttributes& other) const
+    {
+        return pre_padding == other.pre_padding && post_padding == other.post_padding
+               && stride == other.stride && dilation == other.dilation
+               && math_mode == other.math_mode;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const ConvWgradAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
     }
 };
 

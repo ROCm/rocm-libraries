@@ -148,7 +148,7 @@ Tests:
   M: [43]
   N: [65]
   K: [22]
-  block_dim: [6]
+  block_dim: [3, 5, 6]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
@@ -166,7 +166,7 @@ Tests:
   M: 1
   N: 3
   K: 1
-  block_dim: [2, 7]
+  block_dim: [2, 7, 9, 10]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_transpose]
@@ -186,7 +186,7 @@ Tests:
   M: [48]
   N: [64]
   K: [22]
-  block_dim: [5, 16]
+  block_dim: [5, 11, 12, 16]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
@@ -215,3 +215,22 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bell]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
+
+- name: spmm_bell_file
+  category: nightly
+  function: spmm_bell
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: 3
+  K: 1
+  block_dim: [2]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spmm_alg: [rocsparse_spmm_alg_bell]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_row]
+  filename: [Chevron2]

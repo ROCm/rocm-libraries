@@ -20,7 +20,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-from gpu_test_helpers import init_rocisa
+from gpu_test_helpers import init_rocisa, preserve_rocisa_kernel_state
 
 
 GFX1250_ISA = (12, 5, 0)
@@ -30,10 +30,11 @@ WAVESIZE_32 = 32
 def _gfx1250_asm_supported():
     """Return True if the host assembler supports gfx1250 instructions."""
     try:
-        init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
-        from rocisa import rocIsa
-        caps = rocIsa.getInstance().getAsmCaps()
-        return bool(caps.get("s_add_u64", 0))
+        with preserve_rocisa_kernel_state():
+            init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
+            from rocisa import rocIsa
+            caps = rocIsa.getInstance().getAsmCaps()
+            return bool(caps.get("s_add_u64", 0))
     except Exception:
         return False
 
@@ -46,7 +47,32 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module", autouse=True)
 def _rocisa_once():
-    init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
+    with preserve_rocisa_kernel_state():
+        init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
+        yield
+
+
+def test_preserve_rocisa_kernel_state_restores_active_isa():
+    """The gfx1250 module must not leak its pinned ISA to later test modules."""
+    from rocisa import rocIsa
+
+    ri = rocIsa.getInstance()
+    with preserve_rocisa_kernel_state():
+        ri.setKernel((9, 5, 0), 64)
+        ri.setVgprIdx("state_guard", 7)
+        ri.setVgprMsb(5)
+        expected_vgpr_idx = dict(ri.getVgprIdx())
+
+        with preserve_rocisa_kernel_state():
+            init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
+            ri.setVgprIdx("leaked_state", 9)
+            ri.setVgprMsb(11)
+
+        restored_kernel = ri.getKernel()
+        assert tuple(restored_kernel.isa) == (9, 5, 0)
+        assert restored_kernel.wavefrontSize == 64
+        assert dict(ri.getVgprIdx()) == expected_vgpr_idx
+        assert ri.getVgprMsb() == 5
 
 
 def _mock_dtype(num_bytes=2):
@@ -220,6 +246,49 @@ class TestGfx1250SubtileCodegen:
         module = initVgprTilesToZero(writer, kernel, tiA)
         asm = str(module)
         assert "v_wmma_f32_16x16x4_f32" in asm
+        assert ", 0" in asm  # acc2_imm=0
+
+    # -- scheduler preloop initD placement on the WMMA path --
+
+    def test_initd_preloop_op_wmma_zeroing_gfx1250(self):
+        """Scheduler preloop initD op zeros accumulators via WMMA on gfx1250."""
+        from types import SimpleNamespace
+        from Tensile.Components.Subtile.Kernel import TileInfo, selectDGeometry
+        from Tensile.Components.Subtile.LogicalScheduler import (
+            LogicalScheduler, SchedulerConfig, ReadGranularity, Pass,
+        )
+
+        kernel = _create_gfx1250_kernel(32, 32)
+        writer, tiA, tiB = _create_writer_gfx1250(kernel)
+        _setup_sgprs(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+
+        dTileInfo = TileInfo(selectDGeometry(kernel), 'D', writer, kernel)
+        dTileInfo.allocVgprTileRegisters_legacy(writer, kernel)
+
+        cfg = SchedulerConfig(
+            numMFMATilesM=tiA.localMMATileGrid[0],
+            numMFMATilesN=tiB.localMMATileGrid[0],
+            numSubIterK=tiA.localMMATileGrid[1],
+            lrA=ReadGranularity(mn=1, k=1),
+            lrB=ReadGranularity(mn=1, k=1),
+            grA=ReadGranularity(mn=1, k=2),
+            grB=ReadGranularity(mn=1, k=2),
+            pgr=2,
+        )
+        sched = LogicalScheduler(cfg)
+        sched.build(stop_after=Pass.EMIT)
+        preloop = sched.build_preloop()
+
+        initd_ops = [em.source for partition in preloop for group in partition
+                     for em in group
+                     if getattr(em.source, 'label', None) == 'initC_overlap']
+        assert len(initd_ops) == 1, "build_preloop must place exactly one initD op"
+
+        # Build the op against the gfx1250 writer (the scheduler's emit-time call).
+        emitter = SimpleNamespace(writer=writer, kernel=kernel, dtileInfo=dTileInfo)
+        asm = str(initd_ops[0].build(emitter))
+        assert "v_wmma_f32_16x16x4_f32" in asm, "gfx1250 preloop initD must use WMMA"
         assert ", 0" in asm  # acc2_imm=0
 
     # -- globalReadLDSBufferSwap TDM path --

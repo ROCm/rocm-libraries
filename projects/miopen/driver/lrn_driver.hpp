@@ -214,9 +214,6 @@ int LRNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     size_t workSpaceNbVal = workSpaceSize / sizeof(Tgpu);
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
     in_dev  = std::unique_ptr<GPUMem>(new GPUMem(ctx, in_sz, sizeof(Tgpu)));
     out_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, out_sz, sizeof(Tgpu)));
 

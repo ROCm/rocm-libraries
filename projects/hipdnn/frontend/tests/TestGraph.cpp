@@ -6,9 +6,11 @@
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
@@ -305,8 +307,11 @@ public:
 }
 
 // Creates a minimal batchnorm inference graph for testing. Used both by TestGraph
-// fixture methods and by standalone helper functions.
-static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph)
+// fixture methods and by standalone helper functions. When @p withRaggedOffset is
+// true, the primary input tensor is given a ragged-offset aux tensor so the graph
+// auto-detects as ragged-tensor enabled.
+static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph,
+                                                                   bool withRaggedOffset = false)
 {
     graph.set_name("TestGraph")
         .set_compute_data_type(DataType::FLOAT)
@@ -314,11 +319,20 @@ static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph)
         .set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({5, 6, 7, 8})
-        .set_data_type(DataType::FLOAT);
+    x->set_uid(1).set_name("X").set_dim({1, 2, 3, 4});
+    x->set_stride({5, 6, 7, 8});
+    x->set_data_type(DataType::FLOAT);
+
+    if(withRaggedOffset)
+    {
+        auto raggedOffset = std::make_shared<TensorAttributes>();
+        raggedOffset->set_uid(10)
+            .set_name("RaggedOffset")
+            .set_dim({2, 1, 1, 1})
+            .set_stride({1, 1, 1, 1})
+            .set_data_type(DataType::INT64);
+        x->set_ragged_offset(raggedOffset);
+    }
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2)
@@ -531,7 +545,7 @@ TEST_F(TestGraph, GetBehaviorNotesForEnginePropagatesNoteQueryFailure)
     EXPECT_TRUE(notes.empty());
 }
 
-TEST_F(TestGraph, GetBehaviorNotesForEnginePreservesUnknownNotes)
+TEST_F(TestGraph, GetBehaviorNotesForEngineDropsUnknownNotes)
 {
     Graph graph;
     createBasicBatchnormGraph(graph);
@@ -573,10 +587,11 @@ TEST_F(TestGraph, GetBehaviorNotesForEnginePreservesUnknownNotes)
     auto result = graph.get_behavior_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    ASSERT_EQ(notes.size(), 3u);
+    // The note this frontend does not recognize is dropped rather than
+    // reinterpreted numerically, so only the two known notes survive.
+    ASSERT_EQ(notes.size(), 2u);
     EXPECT_EQ(notes[0], BehaviorNote::RUNTIME_COMPILATION);
-    EXPECT_EQ(notes[1], static_cast<BehaviorNote>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1));
-    EXPECT_EQ(notes[2], BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+    EXPECT_EQ(notes[1], BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 }
 
 TEST_F(TestGraph, GetBehaviorNotesForEngineRejectsMismatchedReturnedNoteCount)
@@ -1637,12 +1652,97 @@ TEST_F(TestGraph, ConvolutionDgradNodeCreation)
     attributes.set_dilation({1, 1});
 
     auto dx = graph.conv_dgrad(dy, w, attributes);
+    dx->set_dim({1, 3, 32, 32});
 
     EXPECT_EQ(dx->get_name(), "ConvolutionDgradNode::DX");
     EXPECT_TRUE(dx->get_is_virtual());
 
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ConvolutionDgradValidationFailsWithMissingDxDim)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
+
+    ConvDgradAttributes attributes;
+    attributes.set_name("ConvolutionDgradNode");
+    attributes.set_pre_padding({1, 1});
+    attributes.set_post_padding({1, 1});
+    attributes.set_stride({1, 1});
+    attributes.set_dilation({1, 1});
+
+    graph.conv_dgrad(dy, w, attributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_FALSE(validationResult.is_good());
+    EXPECT_EQ(validationResult.code, ErrorCode::ATTRIBUTE_NOT_SET);
+}
+
+TEST_F(TestGraph, ConvolutionWgradNodeCreation)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    ConvWgradAttributes attributes;
+    attributes.set_name("ConvolutionWgradNode");
+    attributes.set_pre_padding({1, 1});
+    attributes.set_post_padding({1, 1});
+    attributes.set_stride({1, 1});
+    attributes.set_dilation({1, 1});
+
+    auto dw = graph.conv_wgrad(dy, x, attributes);
+    dw->set_dim({64, 3, 3, 3});
+
+    EXPECT_EQ(dw->get_name(), "ConvolutionWgradNode::DW");
+    EXPECT_TRUE(dw->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ConvolutionWgradValidationFailsWithMissingDwDim)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    ConvWgradAttributes attributes;
+    attributes.set_name("ConvolutionWgradNode");
+    attributes.set_pre_padding({1, 1});
+    attributes.set_post_padding({1, 1});
+    attributes.set_stride({1, 1});
+    attributes.set_dilation({1, 1});
+
+    graph.conv_wgrad(dy, x, attributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_FALSE(validationResult.is_good());
+    EXPECT_EQ(validationResult.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
 TEST_F(TestGraph, MatmulNodeCreation)
@@ -1811,6 +1911,100 @@ TEST_F(TestGraph, RMSNormBackwardNodeCreation)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
+TEST_F(TestGraph, ResampleReturnsNullIndexWhenNotRequested)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleFwdAttributes attributes;
+    attributes.set_name("ResampleNode");
+    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+    attributes.set_pre_padding({0, 0});
+    attributes.set_post_padding({0, 0});
+    attributes.set_stride({2, 2});
+    attributes.set_window({2, 2});
+
+    auto [y, index] = graph.resample(x, attributes);
+
+    EXPECT_EQ(y->get_name(), "ResampleNode::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    EXPECT_EQ(index, nullptr);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ResampleReturnsIndexWhenRequested)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleFwdAttributes attributes;
+    attributes.set_name("ResampleNodeWithIndex");
+    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+    attributes.set_pre_padding({0, 0});
+    attributes.set_post_padding({0, 0});
+    attributes.set_stride({2, 2});
+    attributes.set_window({2, 2});
+    attributes.set_generate_index(true);
+
+    auto [y, index] = graph.resample(x, attributes);
+
+    EXPECT_EQ(y->get_name(), "ResampleNodeWithIndex::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    ASSERT_NE(index, nullptr);
+    EXPECT_EQ(index->get_name(), "ResampleNodeWithIndex::Index");
+    EXPECT_TRUE(index->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    EXPECT_EQ(index->get_dim(), y->get_dim());
+    EXPECT_EQ(index->get_stride(), y->get_stride());
+}
+
+TEST_F(TestGraph, ResampleFwdPreservesLegacyNoIndexApi)
+{
+    GraphTestUtils graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleFwdAttributes attributes;
+    attributes.set_name("LegacyResampleNode")
+        .set_resample_mode(ResampleMode::MAXPOOL)
+        .set_padding_mode(PaddingMode::ZERO_PAD)
+        .set_pre_padding({0, 0})
+        .set_post_padding({0, 0})
+        .set_stride({2, 2})
+        .set_window({2, 2})
+        .set_generate_index(true);
+
+    auto y = graph.resample_fwd(x, attributes);
+
+    EXPECT_EQ(y->get_name(), "LegacyResampleNode::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    ASSERT_EQ(graph.getPrivateGraphSubnodes().size(), 1);
+    EXPECT_EQ(graph.getPrivateGraphSubnodes().front()->getNodeOutputTensorAttributes().size(), 1);
+}
+
 TEST_F(TestGraph, RMSNormBackwardNodeCreationWithDbias)
 {
     Graph graph;
@@ -1881,79 +2075,18 @@ TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
-TEST_F(TestGraph, ResampleReturnsNullIndexWhenNotRequested)
-{
-    Graph graph;
-    graph.set_io_data_type(DataType::FLOAT)
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
-
-    ResampleFwdAttributes attributes;
-    attributes.set_name("ResampleNode");
-    attributes.set_resample_mode(ResampleMode::MAXPOOL);
-    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
-    attributes.set_pre_padding({0, 0});
-    attributes.set_post_padding({0, 0});
-    attributes.set_stride({2, 2});
-    attributes.set_window({2, 2});
-
-    auto [y, index] = graph.resample(x, attributes);
-
-    EXPECT_EQ(y->get_name(), "ResampleNode::Y");
-    EXPECT_TRUE(y->get_is_virtual());
-    EXPECT_EQ(index, nullptr);
-
-    auto validationResult = graph.validate();
-    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
-}
-
-TEST_F(TestGraph, ResampleReturnsIndexWhenRequested)
-{
-    Graph graph;
-    graph.set_io_data_type(DataType::FLOAT)
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
-
-    ResampleFwdAttributes attributes;
-    attributes.set_name("ResampleNodeWithIndex");
-    attributes.set_resample_mode(ResampleMode::MAXPOOL);
-    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
-    attributes.set_pre_padding({0, 0});
-    attributes.set_post_padding({0, 0});
-    attributes.set_stride({2, 2});
-    attributes.set_window({2, 2});
-    attributes.set_generate_index(true);
-
-    auto [y, index] = graph.resample(x, attributes);
-
-    EXPECT_EQ(y->get_name(), "ResampleNodeWithIndex::Y");
-    EXPECT_TRUE(y->get_is_virtual());
-    ASSERT_NE(index, nullptr);
-    EXPECT_EQ(index->get_name(), "ResampleNodeWithIndex::Index");
-    EXPECT_TRUE(index->get_is_virtual());
-
-    auto validationResult = graph.validate();
-    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
-    EXPECT_EQ(index->get_dim(), y->get_dim());
-    EXPECT_EQ(index->get_stride(), y->get_stride());
-}
-
 // Test graph.tensor()
 TEST_F(TestGraph, TensorGraphAttributes)
 {
-    auto tensor = Graph::tensor(TensorAttributes()
-                                    .set_name("TestTensor")
-                                    .set_uid(100)
-                                    .set_stride({5, 6, 7, 8})
-                                    .set_data_type(DataType::FLOAT)
-                                    .set_is_virtual(false)
-                                    .set_dim({1, 2, 3, 4}));
+    TensorAttributes attributes;
+    attributes.set_name("TestTensor")
+        .set_uid(100)
+        .set_stride({5, 6, 7, 8})
+        .set_data_type(DataType::FLOAT)
+        .set_is_virtual(false)
+        .set_dim({1, 2, 3, 4});
+
+    auto tensor = Graph::tensor(attributes);
 
     EXPECT_EQ(tensor->get_data_type(), DataType::FLOAT);
     EXPECT_FALSE(tensor->get_is_virtual());
@@ -3427,22 +3560,28 @@ TEST_F(TestGraph, TopologicalSortFailsOnCircularDependency)
 TEST_F(TestGraph, ValidateSortsNodesTopologically)
 {
     GraphTestUtils graph;
-    graph.set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::HALF)
-        .set_io_data_type(DataType::FLOAT);
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::HALF);
+    graph.set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_dim({1, 2, 3, 4});
+    x->set_stride({5, 6, 7, 8});
+    x->set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
     auto mean = std::make_shared<TensorAttributes>();
-    mean->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    mean->set_dim({1, 2, 1, 1});
+    mean->set_stride({2, 1, 1, 1});
     auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    invVariance->set_dim({1, 2, 1, 1});
+    invVariance->set_stride({2, 1, 1, 1});
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    scale->set_dim({1, 2, 1, 1});
+    scale->set_stride({2, 1, 1, 1});
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    bias->set_dim({1, 2, 1, 1});
+    bias->set_stride({2, 1, 1, 1});
 
     // Node 0: batchnorm1
     BatchnormInferenceAttributes bnAttrs1;
@@ -3528,12 +3667,14 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
 TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
 {
     GraphTestUtils graph;
-    graph.set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::HALF)
-        .set_io_data_type(DataType::FLOAT);
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::HALF);
+    graph.set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_dim({1, 2, 3, 4});
+    x->set_stride({5, 6, 7, 8});
+    x->set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
     auto mean = std::make_shared<TensorAttributes>();
@@ -5874,6 +6015,24 @@ TEST_F(TestGraph, SetPreferredEngineIdByIdThenByName)
     EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
 }
 
+TEST_F(TestGraph, SetPreferredEngineIdByHexIdSpellingResolvesToThatEngine)
+{
+    Graph graph;
+
+    // An engine that declares no name is enumerated as its hexadecimal ID, so
+    // that spelling has to reach the engine itself rather than hash like a
+    // name. Only the ID survives a round trip through a backend graph
+    // descriptor, so hashing here would silently drop the preference.
+    const int64_t unnamedEngineId = 0x1A2B3C4D5E6F7080LL;
+    const std::string hexSpelling = hipdnn_data_sdk::utilities::formatEngineIdHex(unnamedEngineId);
+
+    graph.set_preferred_engine_id_ext(hexSpelling);
+
+    ASSERT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), unnamedEngineId);
+    EXPECT_NE(hipdnn_data_sdk::utilities::engineNameToId(hexSpelling), unnamedEngineId);
+}
+
 TEST_F(TestGraph, MethodChaining)
 {
     Graph graph;
@@ -5981,8 +6140,6 @@ TEST_F(TestGraph, MoveConstruction)
     EXPECT_EQ(movedGraph.get_compute_data_type(), DataType::FLOAT);
     EXPECT_EQ(movedGraph.get_intermediate_data_type(), DataType::HALF);
     EXPECT_EQ(movedGraph.get_io_data_type(), DataType::FLOAT);
-    EXPECT_EQ(originalGraph.get_name(), ""); // NOLINT(bugprone-use-after-move)
-    EXPECT_TRUE(originalGraph.getTensorsByName().empty());
 }
 
 TEST_F(TestGraph, MoveAssignment)
@@ -8099,6 +8256,17 @@ TEST_F(TestGraph, AddAllEnginesRejectsAfterCreateExecutionPlans)
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
+TEST_F(TestGraph, LegacyEngineConfigsOverloadForwardsWithoutAHandle)
+{
+    // The handle-free form kept for callers written against the earlier signature.
+    // Reaching the same guard as the handle-taking form is what says the forwarding
+    // is in place; the names it collects are the null-handle resolution the
+    // plan-name tests cover.
+    hipdnn_frontend::GraphTestUtils unbuilt;
+    std::vector<EngineConfigInfo> configs;
+    EXPECT_EQ(unbuilt.get_engine_configs(configs).code, ErrorCode::INVALID_VALUE);
+}
+
 // ---------------------------------------------------------------------------
 // Plan-Indexed Access Tests
 // ---------------------------------------------------------------------------
@@ -8129,16 +8297,16 @@ TEST_F(TestGraph, GetPlanNameAtIndexValid)
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectDummyCompiledPlan();
     std::string name;
-    auto result = graph.get_plan_name_at_index(0, name);
+    auto result = graph.get_plan_name_at_index(_handle, 0, name);
     EXPECT_TRUE(result.is_good());
-    EXPECT_EQ(name, "0x0");
+    EXPECT_EQ(name, "0x0000000000000000");
 }
 
 TEST_F(TestGraph, GetPlanNameAtIndexOutOfBounds)
 {
     const hipdnn_frontend::GraphTestUtils graph;
     std::string name;
-    auto result = graph.get_plan_name_at_index(0, name);
+    auto result = graph.get_plan_name_at_index(_handle, 0, name);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -8289,14 +8457,40 @@ TEST_F(TestGraph, DeselectEnginesCompiledPlanPath)
     EXPECT_EQ(barredIds.count(MIOPEN_ENGINE_ID), 1u);
 }
 
-TEST_F(TestGraph, DeselectEnginesUnknownNameSkipped)
+TEST_F(TestGraph, DeselectEnginesUnregisteredNameIsHashed)
 {
+    // A plugin-supplied engine is absent from the frontend's engine name
+    // registry, so a name that is neither registered nor a number falls
+    // through to the hash.
+    const std::string unregisteredName = "nonexistent_engine_xyz";
+    ASSERT_FALSE(hipdnn_data_sdk::utilities::isEngineNameRegistered(unregisteredName));
+
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectPlanSpec(1, 0);
     graph.injectPlanSpec(2, 0);
 
-    graph.deselect_engines({"nonexistent_engine_xyz"});
+    graph.deselect_engines({unregisteredName});
     EXPECT_EQ(graph.getPlanSpecsCount(), 2u);
+
+    auto barredIds = graph.getBarredEngineIds();
+    EXPECT_EQ(barredIds.count(hipdnn_data_sdk::utilities::engineNameToId(unregisteredName)), 1u);
+}
+
+TEST_F(TestGraph, DeselectEnginesHexIdSpellingBarsThatEngine)
+{
+    // The hexadecimal spelling an unnamed engine is enumerated under bars that
+    // engine, not the engine its spelling happens to hash to.
+    const int64_t unnamedEngineId = 0x1A2B3C4D5E6F7080LL;
+    const std::string hexSpelling = hipdnn_data_sdk::utilities::formatEngineIdHex(unnamedEngineId);
+
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectPlanSpec(1, 0);
+
+    graph.deselect_engines({hexSpelling});
+
+    auto barredIds = graph.getBarredEngineIds();
+    EXPECT_EQ(barredIds.count(unnamedEngineId), 1u);
+    EXPECT_EQ(barredIds.count(hipdnn_data_sdk::utilities::engineNameToId(hexSpelling)), 0u);
 }
 
 TEST_F(TestGraph, DeselectEnginesEmptyList)
@@ -8314,6 +8508,148 @@ TEST_F(TestGraph, DeselectEnginesNoOp)
     hipdnn_frontend::GraphTestUtils graph;
     auto& ref = graph.deselect_engines({"MIOPEN_ENGINE"});
     EXPECT_EQ(&ref, &graph);
+}
+
+// ---------------------------------------------------------------------------
+// Engine name resolution tests
+// ---------------------------------------------------------------------------
+
+// An engine ID absent from the built-in engine name registry, rendered as hex.
+static constexpr int64_t ENGINE_ID_WITHOUT_REGISTRY_NAME = 0x1A2B;
+
+// Sets up the two-call hipdnnGetEngineNameById_ext read (byte-count query with a
+// null buffer, then the data query) so the mocked backend reports engineName for
+// engineId.
+static void expectEngineNameQuery(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
+                                  int64_t engineId,
+                                  const std::string& engineName)
+{
+    const size_t byteCount = engineName.size() + 1;
+
+    EXPECT_CALL(mockBackend, getEngineNameByIdExt(_, engineId, nullptr, _))
+        .WillOnce(DoAll(SetArgPointee<3>(byteCount), Return(HIPDNN_STATUS_SUCCESS)));
+
+    EXPECT_CALL(mockBackend, getEngineNameByIdExt(_, engineId, Ne(nullptr), _))
+        .WillOnce(DoAll(SetArgPointee<3>(byteCount),
+                        Invoke([engineName](hipdnnHandle_t, int64_t, char* nameOut, size_t*) {
+                            std::memcpy(nameOut, engineName.c_str(), engineName.size() + 1);
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+}
+
+// Graph::engineNameFor() is private; the behaviour is exercised through
+// get_plan_name_at_index().
+
+TEST_F(TestGraph, PlanNameAtIndexReportsPluginEngineName)
+{
+    // The name a plugin declared for its engine is what the backend reports and
+    // what the plan is named after, even though no registry entry carries it.
+    expectEngineNameQuery(
+        *_mockBackend, ENGINE_ID_WITHOUT_REGISTRY_NAME, "EXAMPLE_PROVIDER_RELU_ENGINE");
+
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectCompiledPlan(ENGINE_ID_WITHOUT_REGISTRY_NAME, /*workspaceSize=*/0);
+
+    std::string name;
+    ASSERT_TRUE(graph.get_plan_name_at_index(_handle, 0, name).is_good());
+    EXPECT_EQ(name, "EXAMPLE_PROVIDER_RELU_ENGINE");
+}
+
+TEST_F(TestGraph, PlanNameAtIndexDegradesToRegistryWhenEntryPointIsUnsupported)
+{
+    // A backend too old to export hipdnnGetEngineNameById_ext.
+    EXPECT_CALL(*_mockBackend, getEngineNameByIdExt(_, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_NOT_SUPPORTED));
+
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectCompiledPlan(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID, /*workspaceSize=*/0);
+
+    std::string name;
+    ASSERT_TRUE(graph.get_plan_name_at_index(_handle, 0, name).is_good());
+    EXPECT_EQ(name, "MIOPEN_ENGINE");
+}
+
+TEST_F(TestGraph, PlanNameAtIndexFallsBackToHexWhenBackendReportsNoName)
+{
+    // A zero byte count means the engine carries no name, and the ID is not in
+    // the registry either, so the hexadecimal rendering is all that is left.
+    EXPECT_CALL(*_mockBackend, getEngineNameByIdExt(_, ENGINE_ID_WITHOUT_REGISTRY_NAME, nullptr, _))
+        .WillOnce(DoAll(SetArgPointee<3>(size_t{0}), Return(HIPDNN_STATUS_SUCCESS)));
+
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectCompiledPlan(ENGINE_ID_WITHOUT_REGISTRY_NAME, /*workspaceSize=*/0);
+
+    std::string name;
+    ASSERT_TRUE(graph.get_plan_name_at_index(_handle, 0, name).is_good());
+    EXPECT_EQ(name, "0x0000000000001A2B");
+}
+
+TEST_F(TestGraph, PlanNameAtIndexFallsBackWhenTheDataQueryFails)
+{
+    // The byte count arrives but the read that follows it does not. A name is
+    // never worth failing on, so the registry answers instead.
+    EXPECT_CALL(*_mockBackend,
+                getEngineNameByIdExt(_, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID, nullptr, _))
+        .WillOnce(DoAll(SetArgPointee<3>(size_t{32}), Return(HIPDNN_STATUS_SUCCESS)));
+    EXPECT_CALL(
+        *_mockBackend,
+        getEngineNameByIdExt(_, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID, Ne(nullptr), _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectCompiledPlan(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID, /*workspaceSize=*/0);
+
+    std::string name;
+    ASSERT_TRUE(graph.get_plan_name_at_index(_handle, 0, name).is_good());
+    EXPECT_EQ(name, "MIOPEN_ENGINE");
+}
+
+TEST_F(TestGraph, PlanNameAtIndexWithNullHandleSkipsBackend)
+{
+    // Without a handle there is nothing to query through, so the registry
+    // answers on its own.
+    EXPECT_CALL(*_mockBackend, getEngineNameByIdExt(_, _, _, _)).Times(0);
+
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectCompiledPlan(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID, /*workspaceSize=*/0);
+
+    std::string name;
+    ASSERT_TRUE(graph.get_plan_name_at_index(nullptr, 0, name).is_good());
+    EXPECT_EQ(name, "MIOPEN_ENGINE");
+}
+
+TEST_F(TestGraph, LegacyPlanNameOverloadsResolveWithoutAHandle)
+{
+    // The handle-free overloads kept for callers written against the earlier
+    // signatures. They forward a null handle, so they name an engine the way the
+    // frontend did before the backend could be asked: registry, then hexadecimal.
+    EXPECT_CALL(*_mockBackend, getEngineNameByIdExt(_, _, _, _)).Times(0);
+
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectCompiledPlan(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID, /*workspaceSize=*/0);
+    graph.injectCompiledPlan(ENGINE_ID_WITHOUT_REGISTRY_NAME, /*workspaceSize=*/0);
+
+    std::string name;
+    ASSERT_TRUE(graph.get_plan_name_at_index(0, name).is_good());
+    EXPECT_EQ(name, "MIOPEN_ENGINE");
+
+    ASSERT_TRUE(graph.get_plan_name_at_index(1, name).is_good());
+    EXPECT_EQ(name, "0x0000000000001A2B");
+
+    // get_plan_name() names the active plan, which is the first one.
+    ASSERT_TRUE(graph.get_plan_name(name).is_good());
+    EXPECT_EQ(name, "MIOPEN_ENGINE");
+}
+
+TEST_F(TestGraph, BackendInterfaceDefaultReportsNameQueryUnsupported)
+{
+    // What a backend implementation written against an earlier header inherits: the
+    // refusal that sends callers to the registry. Called qualified to reach the base
+    // implementation rather than the mock's override.
+    size_t engineNameLen = 0;
+    EXPECT_EQ(_mockBackend->hipdnn_frontend::detail::IHipdnnBackend::getEngineNameByIdExt(
+                  _handle, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID, nullptr, &engineNameLen),
+              HIPDNN_STATUS_NOT_SUPPORTED);
 }
 
 // ---------------------------------------------------------------------------
@@ -9308,6 +9644,123 @@ TEST_F(TestGraph, AutotuneAcceptsExtraUidsInVariantPack)
     }
 }
 
+// Builds a batchnorm graph whose epsilon (UID 4) is supplied by the caller,
+// leaving UIDs 1-3 as the only pointer-backed operands.
+static void createBatchnormGraphWithEpsilon(Graph& graph,
+                                            const std::shared_ptr<TensorAttributes>& epsilon)
+{
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2).set_name("Scale").set_dim(derivedDims).set_stride(derivedStrides);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3).set_name("Bias").set_dim(derivedDims).set_stride(derivedStrides);
+
+    BatchnormAttributes attributes;
+    attributes.set_name("BatchnormNode");
+    attributes.set_epsilon(epsilon);
+    graph.batchnorm(x, scale, bias, attributes);
+}
+
+// UIDs 1-3 only; epsilon is deliberately absent.
+static const std::unordered_map<int64_t, void*> K_PACK_WITHOUT_EPSILON
+    = {{1, reinterpret_cast<void*>(0x1)},
+       {2, reinterpret_cast<void*>(0x2)},
+       {3, reinterpret_cast<void*>(0x3)}};
+
+// A compile-time constant is baked into the op-graph flatbuffer, so it has no
+// pointer to give and autotune() must accept the pack execute() accepts.
+TEST_F(TestGraph, AutotuneDoesNotRequireUidsForCompileTimeConstantScalars)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(4).set_name("Epsilon").set_value(1e-5F);
+    createBatchnormGraphWithEpsilon(graph, epsilon);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
+    ASSERT_TRUE(epsilon->get_has_compile_time_constant());
+
+    graph.injectDummyPlanSpec();
+
+    const auto result = graph.autotune(_handle, K_PACK_WITHOUT_EPSILON, nullptr, int64_t{0});
+    if(result.is_bad())
+    {
+        EXPECT_EQ(result.err_msg.find("missing"), std::string::npos) << result.err_msg;
+    }
+}
+
+// The other value-carrying kind: runtime flag set *and* a value baked. Also
+// exempt, and the case get_has_compile_time_constant() does not cover.
+TEST_F(TestGraph, AutotuneDoesNotRequireUidsForRuntimeDefaultScalars)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+
+    // set_value() clears the runtime flag, so set the flag after it;
+    // set_as_runtime_parameter() would clear the value instead.
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(4).set_name("Epsilon").set_value(1e-5F).set_is_pass_by_value(true);
+    createBatchnormGraphWithEpsilon(graph, epsilon);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
+    ASSERT_TRUE(epsilon->get_pass_by_value().has_value());
+    ASSERT_FALSE(epsilon->get_has_compile_time_constant());
+
+    graph.injectDummyPlanSpec();
+
+    const auto result = graph.autotune(_handle, K_PACK_WITHOUT_EPSILON, nullptr, int64_t{0});
+    if(result.is_bad())
+    {
+        EXPECT_EQ(result.err_msg.find("missing"), std::string::npos) << result.err_msg;
+    }
+}
+
+// A runtime user-supplied scalar carries no value and is variantPack-delivered
+// as a host pointer, so it stays required. get_is_pass_by_value() is true for
+// this kind too, which is why it cannot be the exemption predicate.
+TEST_F(TestGraph, AutotuneStillRequiresUidsForRuntimeUserSuppliedScalars)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(4)
+        .set_name("Epsilon")
+        .set_dim({1})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT)
+        .set_is_pass_by_value(true);
+    createBatchnormGraphWithEpsilon(graph, epsilon);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
+    ASSERT_TRUE(epsilon->get_is_pass_by_value());
+    ASSERT_FALSE(epsilon->get_has_compile_time_constant());
+    ASSERT_FALSE(epsilon->get_pass_by_value().has_value());
+
+    graph.injectDummyPlanSpec();
+
+    const auto result = graph.autotune(_handle, K_PACK_WITHOUT_EPSILON, nullptr, int64_t{0});
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("missing"), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find('4'), std::string::npos) << result.err_msg;
+}
+
 // ============================================================================
 // add_engines() batch method tests
 // ============================================================================
@@ -9635,8 +10088,9 @@ TEST_F(TestGraph, AutotuneBarredAndOversizedPlanAddedOnce)
 
     std::vector<AutotuneResult> results;
     void* workspace = reinterpret_cast<void*>(0x1000);
-    auto result
-        = graph.autotune(_handle, pack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
+    const int64_t workspaceLimit = 1024;
+    const AutotuneConfig config;
+    auto result = graph.autotune(_handle, pack, workspace, workspaceLimit, config, {}, &results);
 
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 

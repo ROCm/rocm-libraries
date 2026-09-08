@@ -779,7 +779,7 @@ std::vector<std::vector<int>> get_toreduce_dims()
 }
 
 template <typename T>
-inline auto GenCases()
+inline auto GenCasesFull()
 {
     std::vector<std::vector<float>> alphabetas = {{1.0f, 0.0f}, {0.5f, 0.5f}};
 
@@ -797,9 +797,110 @@ inline auto GenCases()
 }
 
 template <typename T>
-inline auto GetCases()
+inline auto GetCasesFull()
 {
-    static const auto cases = GenCases<T>();
+    static const auto cases = GenCasesFull<T>();
+    return cases;
+}
+
+// Smoke (pre-commit) tier: a tiny representative subset -- a couple of
+// reduce-dimension layouts crossed with a few representative ops, no indices,
+// single alpha/beta. The complete cross product stays in the Full instantiation.
+template <typename T>
+inline auto GenCasesSmoke()
+{
+    std::vector<std::vector<float>> alphabetas = {{1.0f, 0.0f}};
+
+    // Reduce cases are expensive (each distinct op/dim compiles a kernel), so
+    // keep Smoke minimal: canonical ADD op over a partial and a full reduction.
+    // Other ops (AMAX/NORM2) are exercised by the Standard tier on every CI.
+    return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
+                            testing::ValuesIn(std::vector<std::vector<int>>{{0}, {0, 1, 2, 3}}),
+                            testing::Values(MIOPEN_REDUCE_TENSOR_ADD),
+                            testing::Values(0),
+                            testing::Values(0),
+                            testing::ValuesIn(alphabetas));
+}
+
+// Standard (per-CI) tier: exercises every distinct reduce code path at least
+// once -- all reduce operators, the alpha/beta blend epilogue, and the AMAX
+// flattened-indices path -- without the full nanOpt x indices x alpha/beta cross
+// product (that stays in the Full instantiation). The kernel compile-cache key
+// (see src/reducetensor.cpp) covers reduceOp / nanOpt / indices / dim-count but
+// NOT alpha/beta, so the blend cases below are essentially free.
+template <typename T>
+inline std::vector<TestCase> GenCasesStandard()
+{
+    const auto lengths = get_tensor_lengths<T>();
+    const auto dims    = get_toreduce_dims();
+
+    const std::vector<miopenReduceTensorOp_t> ops = {MIOPEN_REDUCE_TENSOR_ADD,
+                                                     MIOPEN_REDUCE_TENSOR_MUL,
+                                                     MIOPEN_REDUCE_TENSOR_AMAX,
+                                                     MIOPEN_REDUCE_TENSOR_AVG,
+                                                     MIOPEN_REDUCE_TENSOR_NORM1,
+                                                     MIOPEN_REDUCE_TENSOR_NORM2};
+
+    const std::vector<float> ab_plain = {1.0f, 0.0f};
+    const std::vector<float> ab_blend = {0.5f, 0.5f};
+
+    std::vector<TestCase> cases;
+
+    // (1) Every operator x every reduce-dimension layout, no indices, no blend.
+    for(const auto& len : lengths)
+        for(const auto& op : ops)
+            for(const auto& dim : dims)
+                cases.emplace_back(len,
+                                   dim,
+                                   op,
+                                   MIOPEN_NOT_PROPAGATE_NAN,
+                                   MIOPEN_REDUCE_TENSOR_NO_INDICES,
+                                   ab_plain);
+
+    // (2) alpha/beta blend epilogue: every operator on one dim layout (free --
+    // alpha/beta is not part of the kernel compile key).
+    for(const auto& len : lengths)
+        for(const auto& op : ops)
+            cases.emplace_back(len,
+                               dims.front(),
+                               op,
+                               MIOPEN_NOT_PROPAGATE_NAN,
+                               MIOPEN_REDUCE_TENSOR_NO_INDICES,
+                               ab_blend);
+
+    // (3) Flattened-indices path: only AMAX produces indices, across every dim
+    // layout. One nan-propagation case to touch that compile path too.
+    for(const auto& len : lengths)
+    {
+        for(const auto& dim : dims)
+            cases.emplace_back(len,
+                               dim,
+                               MIOPEN_REDUCE_TENSOR_AMAX,
+                               MIOPEN_NOT_PROPAGATE_NAN,
+                               MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES,
+                               ab_plain);
+        cases.emplace_back(len,
+                           dims.front(),
+                           MIOPEN_REDUCE_TENSOR_AMAX,
+                           MIOPEN_PROPAGATE_NAN,
+                           MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES,
+                           ab_plain);
+    }
+
+    return cases;
+}
+
+template <typename T>
+inline auto GetCasesSmoke()
+{
+    static const auto cases = GenCasesSmoke<T>();
+    return cases;
+}
+
+template <typename T>
+inline auto GetCasesStandard()
+{
+    static const auto cases = testing::ValuesIn(GenCasesStandard<T>());
     return cases;
 }
 
@@ -1164,9 +1265,16 @@ TEST_P(GPU_Reduce_FP32, TestFloat) { this->Run(); }
 TEST_P(GPU_Reduce_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_Reduce_FP64, TestDouble) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP32, GetCases<float>());
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP16, GetCases<half_float::half>());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP64, GetCases<double>());
+// Tiered instantiation: Smoke (pre-commit) and Standard (per-CI) run small
+// subsets; Full (comprehensive/nightly) runs the complete cross product so no
+// coverage is lost. See GenCasesSmoke/GenCasesStandard above.
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP32, GetCasesSmoke<float>());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_Reduce_FP32, GetCasesStandard<float>());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP32, GetCasesFull<float>());
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP16, GetCasesSmoke<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_Reduce_FP16, GetCasesStandard<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP16, GetCasesFull<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP64, GetCasesFull<double>());
 
 // Reduce Custom Tests
 template <typename T>

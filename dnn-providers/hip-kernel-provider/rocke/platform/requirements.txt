@@ -20,7 +20,7 @@
 #   ROCm 6.2:  pip install --index-url https://download.pytorch.org/whl/rocm6.2 torch
 numpy>=1.24
 
-# --- building the rocke_engine pybind module (Cpp/bindings) --------------------
+# --- building the rocke_engine pybind module (cpp/bindings) --------------------
 pybind11>=3.0
 
 # --- test / dev --------------------------------------------------------------

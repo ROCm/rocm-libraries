@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
@@ -10,7 +11,11 @@
 #include <limits>
 #include <mutex>
 #include <numeric>
+#include <string>
 #include <string_view>
+#include <tuple>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "EnginePlugin.hpp"
@@ -83,21 +88,6 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
-const hipdnn_data_sdk::utilities::Version&
-    computeMinimumPluginApiVersion(bool isOverrideShapeEnabled)
-{
-    static const hipdnn_data_sdk::utilities::Version s_baselineVersion{
-        hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
-    static const hipdnn_data_sdk::utilities::Version s_overrideExecuteMinVersion{
-        hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
-
-    if(isOverrideShapeEnabled)
-    {
-        return s_overrideExecuteMinVersion;
-    }
-    return s_baselineVersion;
-}
-
 } // namespace
 
 // Static accessor implementations for CRTP base class
@@ -138,7 +128,52 @@ size_t EnginePluginResourceManager::getEngineCount() const
 
 std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
 {
-    if(_cachedEngineInfos.has_value())
+    return buildEngineIndex();
+}
+
+std::optional<int64_t>
+    EnginePluginResourceManager::findEngineIdByName(std::string_view engineName) const
+{
+    buildEngineIndex();
+
+    const auto it = _cachedEngineIdsByName->find(std::string(engineName));
+    if(it == _cachedEngineIdsByName->end())
+    {
+        return std::nullopt;
+    }
+
+    return it->second;
+}
+
+std::optional<std::string> EnginePluginResourceManager::findEngineNameById(int64_t engineId) const
+{
+    // Scanning rather than adding a third memo keeps the fill-both-together
+    // invariant intact, and the engine count is small.
+    const auto& infos = buildEngineIndex();
+
+    const auto it = std::find_if(infos.begin(), infos.end(), [engineId](const EngineInfo& info) {
+        return info.engineId == engineId;
+    });
+
+    if(it == infos.end())
+    {
+        return std::nullopt;
+    }
+
+    return it->engineName;
+}
+
+const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() const
+{
+    // Public entry points reach this concurrently, so the fill is
+    // serialized. Neither memo is invalidated afterwards, which is what lets
+    // callers hold the returned reference past the lock; a future reset path
+    // would have to return copies instead.
+    const std::lock_guard<std::mutex> lock(_engineIndexMutex);
+
+    // Both memos are filled together on every path, so requiring both here keeps
+    // findEngineIdByName() from ever seeing a half-built index.
+    if(_cachedEngineInfos.has_value() && _cachedEngineIdsByName.has_value())
     {
         return *_cachedEngineInfos;
     }
@@ -146,8 +181,8 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
     std::vector<EngineInfo> infos;
     if(!_pm)
     {
-        _cachedEngineInfos = infos;
-        return infos;
+        _cachedEngineIdsByName.emplace();
+        return _cachedEngineInfos.emplace(std::move(infos));
     }
 
     const auto& plugins = _pm->getPlugins();
@@ -157,8 +192,9 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
         auto pluginType = std::string(::toString(plugin->type()));
         auto pluginName = std::string(plugin->name());
 
-        auto engineIds = plugin->getAllEngineIds();
-        for(const auto id : engineIds)
+        // The accepted set omits engines dropped at load time, so they reach
+        // neither the enumeration nor the reverse index.
+        for(const auto id : _pm->acceptedEngineIds(*plugin))
         {
             EngineInfo info;
             info.engineId = id;
@@ -166,25 +202,86 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
             info.type = pluginType;
             info.pluginName = pluginName;
 
-            try
-            {
-                info.engineName = hipdnn_data_sdk::utilities::getEngineNameFromId(id);
-            }
-            catch(const std::out_of_range&)
-            {
-                info.engineName = hipdnn_data_sdk::utilities::formatEngineIdHex(id);
-            }
+            // No graph here, so no EngineDetails candidate.
+            info.engineName = resolveEngineName(id, std::nullopt);
 
             infos.push_back(std::move(info));
         }
     }
 
+    // Alphabetical by resolved name is the documented contract. The tie breakers
+    // make the comparator a total order, keeping the order stable across runs.
     std::sort(infos.begin(), infos.end(), [](const EngineInfo& a, const EngineInfo& b) {
-        return a.engineName < b.engineName;
+        return std::tie(a.engineName, a.engineId, a.pluginName)
+               < std::tie(b.engineName, b.engineId, b.pluginName);
     });
 
-    _cachedEngineInfos = infos;
-    return infos;
+    // Built from the sorted vector, so it agrees with the enumeration. Admission
+    // ties each declared name to its own hash, so declared names cannot collide
+    // here; an unnamed engine is keyed by a rendering of its ID, which is unique
+    // for the same reason.
+    auto& idsByName = _cachedEngineIdsByName.emplace();
+    idsByName.reserve(infos.size());
+    for(const auto& info : infos)
+    {
+        idsByName.emplace(info.engineName, info.engineId);
+    }
+
+    return _cachedEngineInfos.emplace(std::move(infos));
+}
+
+std::string EnginePluginResourceManager::resolveEngineName(
+    int64_t engineId, std::optional<std::string_view> detailsName) const
+{
+    const EnginePlugin* owningPlugin = _pm ? _pm->engineOwner(engineId) : nullptr;
+
+    const std::string_view pluginName = owningPlugin != nullptr
+                                            ? std::string_view(owningPlugin->cachedName())
+                                            : std::string_view("<unknown>");
+
+    // The entry point is the only channel a plugin can name an engine through,
+    // because it is the only one load-time admission can reach. Admission resolved
+    // it once, so this reads a map.
+    const std::optional<std::string> entryPointName
+        = _pm ? _pm->engineEntryPointName(engineId) : std::optional<std::string>{};
+
+    if(entryPointName.has_value())
+    {
+        // The entry point is authoritative; a disagreement is a plugin defect
+        // worth reporting, not worth failing over.
+        if(detailsName.has_value() && !detailsName->empty() && *detailsName != *entryPointName)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Plugin '{}' names engine {} '{}' through hipdnnEnginePluginGetEngineName but "
+                "'{}' in EngineDetails.name; using '{}'",
+                pluginName,
+                hipdnn_data_sdk::utilities::formatEngineIdHex(engineId),
+                *entryPointName,
+                *detailsName,
+                *entryPointName);
+        }
+
+        // Admission already established that this name hashes to engineId.
+        return *entryPointName;
+    }
+
+    // EngineDetails.name records a name but never confers one. Admission is
+    // graph-blind and cannot see this field, so honoring a candidate that
+    // survived to here would surface a name no load-time gate ever checked.
+    // Declaring a name here but not through the entry point is a plugin defect;
+    // the name resolves from the registry or the hex ID instead.
+    if(detailsName.has_value() && !detailsName->empty())
+    {
+        HIPDNN_BACKEND_LOG_WARN(
+            "Plugin '{}' names engine {} '{}' in EngineDetails.name but does not report that name "
+            "through hipdnnEnginePluginGetEngineName. An engine name must be declared through the "
+            "entry point so load-time admission can validate it; ignoring the reported name.",
+            pluginName,
+            hipdnn_data_sdk::utilities::formatEngineIdHex(engineId),
+            *detailsName);
+    }
+
+    return hipdnn_data_sdk::utilities::engineNameOrHex(engineId);
 }
 
 std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create()
@@ -257,21 +354,10 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
 
         _handleToPlugin[handle] = plugin.get();
 
-        std::vector<int64_t> engineIds;
-        try
-        {
-            engineIds = plugin->getAllEngineIds();
-        }
-        catch(const std::exception& e)
-        {
-            HIPDNN_BACKEND_LOG_ERROR(
-                "Failed to get engine IDs for plugin '{}': {}", plugin->name(), e.what());
-            safeDestroyHandle(plugin.get(), handle);
-            _handleToPlugin.erase(handle);
-            continue;
-        }
-
-        for(const auto id : engineIds)
+        // Nested in the success path on purpose: a plugin that never got a handle
+        // has nothing to route to. Routing is built from the accepted set, so a
+        // dropped engine cannot be reached at all.
+        for(const auto id : _pm->acceptedEngineIds(*plugin))
         {
             _engineIdToHandle[id] = handle;
         }
@@ -312,6 +398,7 @@ EnginePluginResourceManager::EnginePluginResourceManager(
     : _handleToPlugin(std::move(other._handleToPlugin))
     , _engineIdToHandle(std::move(other._engineIdToHandle))
     , _cachedEngineInfos(std::move(other._cachedEngineInfos))
+    , _cachedEngineIdsByName(std::move(other._cachedEngineIdsByName))
 {
     // Move base class member explicitly
     _pm = std::move(other._pm);
@@ -325,6 +412,7 @@ EnginePluginResourceManager&
         _handleToPlugin = std::move(other._handleToPlugin);
         _engineIdToHandle = std::move(other._engineIdToHandle);
         _cachedEngineInfos = std::move(other._cachedEngineInfos);
+        _cachedEngineIdsByName = std::move(other._cachedEngineIdsByName);
         _pm = std::move(other._pm);
     }
     return *this;
@@ -350,7 +438,12 @@ std::vector<int64_t>
     // and graphs that opt in to overridable tensor shapes require the extended
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
-    const auto& requiredVersion = computeMinimumPluginApiVersion(isOverrideShapeEnabled);
+    const bool isRuntimePBV = graphDesc->isRuntimePassByValueEnabled();
+    const bool isRaggedTensorEnabled = graphDesc->hasRaggedTensors();
+    const bool hasNonDefaultTensorAlignment = graphDesc->hasNonDefaultTensorAlignment();
+
+    const auto& requiredVersion = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+        isOverrideShapeEnabled, isRuntimePBV, isRaggedTensorEnabled, hasNonDefaultTensorAlignment);
 
     std::vector<int64_t> engineIds;
 
@@ -378,23 +471,30 @@ std::vector<int64_t>
             continue;
         }
 
-        auto ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
-        engineIds.insert(engineIds.end(), ids.begin(), ids.end());
+        const auto ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
 
         for(const auto& id : ids)
         {
-            if(_engineIdToHandle.find(id) == _engineIdToHandle.end())
+            const auto handleIt = _engineIdToHandle.find(id);
+            if(handleIt == _engineIdToHandle.end())
             {
-                throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Unknown engine ID");
+                // A plugin is never told which of its engines were dropped, so it
+                // keeps offering them; skipping beats failing the whole graph.
+                HIPDNN_BACKEND_LOG_INFO(
+                    "Skipping engine {} offered by plugin '{}': it was dropped at load time",
+                    hipdnn_data_sdk::utilities::formatEngineIdHex(id),
+                    plugin->cachedName());
+                continue;
             }
 
-            auto existingHandle = _engineIdToHandle.at(id);
-            if(existingHandle != handle)
+            if(handleIt->second != handle)
             {
                 throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
                                       "Engine ID " + std::to_string(id)
                                           + " is already associated with a different plugin");
             }
+
+            engineIds.push_back(id);
         }
 
         if(findFirst && !engineIds.empty())
@@ -658,6 +758,44 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
         deviceBuffers.push_back(buffer);
     }
 
+    // Enforce each tensor's required device-pointer byte alignment. Alignments
+    // are carried on the execution plan (populated from the graph at finalize and
+    // preserved across plan serialization), keyed by tensor uid. Null pointers
+    // (absent optional tensors) and uids without a recorded alignment are skipped.
+    const auto& planTensorUids = executionPlanDesc->getTensorUids();
+    const auto& planTensorAlignments = executionPlanDesc->getTensorAlignments();
+    if(!planTensorAlignments.empty() && planTensorUids.size() == planTensorAlignments.size())
+    {
+        std::unordered_map<int64_t, int64_t> alignmentByUid;
+        alignmentByUid.reserve(planTensorUids.size());
+        for(size_t i = 0; i < planTensorUids.size(); ++i)
+        {
+            alignmentByUid.emplace(planTensorUids[i], planTensorAlignments[i]);
+        }
+
+        for(const auto& buffer : deviceBuffers)
+        {
+            if(buffer.ptr == nullptr)
+            {
+                continue;
+            }
+
+            const auto it = alignmentByUid.find(buffer.uid);
+            if(it == alignmentByUid.end() || it->second <= 0)
+            {
+                continue;
+            }
+
+            const auto alignment = static_cast<uintptr_t>(it->second);
+            const auto address = reinterpret_cast<uintptr_t>(buffer.ptr);
+            THROW_IF_TRUE(address % alignment != 0,
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "Tensor uid " + std::to_string(buffer.uid)
+                              + " device pointer is not aligned to the required "
+                              + std::to_string(it->second) + " bytes");
+        }
+    }
+
     const auto& overrideUniqueIds = variantPackDesc->getOverrideUniqueIds();
     const auto& overrideShapesFlat = variantPackDesc->getOverrideShapes();
     const auto& overrideStridesFlat = variantPackDesc->getOverrideStrides();
@@ -693,9 +831,22 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides although the variant pack "
                        "carries override-tensor selectors.");
 
+        // Defense-in-depth recheck of the override-execute floor. Override-shape
+        // support is hipDNN-owned routing metadata carried in the execution plan
+        // envelope, so it is cheap and correct to re-verify here that the selected
+        // plugin still meets the override API floor. Pass-by-value is intentionally
+        // false: per RFC 0009, once a serialized plan resolves to an engine id the
+        // plugin owns its own payload versioning/compatibility, so hipDNN does not
+        // re-gate feature floors (like pbv) that live in the plugin payload rather
+        // than the envelope.
         const auto pluginApiVersion = plugin->parsedApiVersion();
         THROW_IF_FALSE(pluginApiVersion.has_value()
-                           && *pluginApiVersion >= computeMinimumPluginApiVersion(true),
+                           && *pluginApiVersion
+                                  >= hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+                                      true,
+                                      /*isRuntimePassByValue=*/false,
+                                      /*isRaggedTensorEnabled=*/false,
+                                      /*hasNonDefaultTensorAlignment=*/false),
                        HIPDNN_STATUS_NOT_SUPPORTED,
                        "Selected plugin API version does not support "
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides.");

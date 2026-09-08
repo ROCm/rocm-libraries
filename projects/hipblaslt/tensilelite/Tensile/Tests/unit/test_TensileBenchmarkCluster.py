@@ -588,3 +588,40 @@ class TestTensileBenchmarkCluster:
         mock_generate.assert_called_once()
         mock_invoke.assert_called_once()
         mock_merge.assert_called_once()
+
+
+@pytest.mark.unit
+class TestBenchmarkParametersSecurity:
+    """Regression tests for ROCM-26842 (SEC-00394): --benchmark-parameters values must
+    be parsed as Python literals via ast.literal_eval, never eval()'d, so a CLI/CI-supplied
+    argument cannot execute arbitrary code within the benchmark process."""
+
+    @patch("sys.argv", ["script.py", "logic.yaml", "/deploy/path",
+                        "--benchmark-parameters", "Foo=5", "Bar='baz'"])
+    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    def test_benchmark_parameters_parse_literals(self, mock_project_config, mock_init):
+        """Literal key=value overrides are parsed and applied to the config."""
+        mock_config_instance = MagicMock()
+        # Treat every key as recognised so __overrideConfig applies it via __setitem__.
+        mock_config_instance.__contains__.return_value = True
+        mock_project_config.return_value = mock_config_instance
+
+        TensileBenchmarkCluster(["logic.yaml", "/deploy/path"])
+
+        mock_config_instance.__setitem__.assert_any_call("Foo", 5)
+        mock_config_instance.__setitem__.assert_any_call("Bar", "baz")
+
+    @patch("Tensile.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
+    @patch("Tensile.TensileBenchmarkCluster.ProjectConfig")
+    def test_benchmark_parameters_reject_code_execution(self, mock_project_config, mock_init, tmp_path):
+        """An expression that would execute code on eval() is rejected by the parser and
+        never runs. Under the old eval() this payload created the marker file and parsing
+        succeeded; literal parsing must reject it (SystemExit) and leave no side effect."""
+        marker = tmp_path / "pwned"
+        payload = f"X=open({str(marker)!r}, 'w').close()"
+        argv = ["script.py", "logic.yaml", "/deploy/path", "--benchmark-parameters", payload]
+        with patch("sys.argv", argv):
+            with pytest.raises(SystemExit):
+                TensileBenchmarkCluster(["logic.yaml", "/deploy/path"])
+        assert not marker.exists(), "eval() executed attacker-controlled code"

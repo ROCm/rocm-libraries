@@ -52,7 +52,7 @@ Use this skill when:
 Example commands from the CK DSL repo root:
 
 ```bash
-export PYTHONPATH=Python
+export PYTHONPATH=python
 
 # If the kernel artifact is already built, inspect the HSACO/code object.
 llvm-objdump -d --mcpu=<gfx_arch> path/to/kernel.hsaco > /tmp/kernel.isa
@@ -67,7 +67,7 @@ directly from a CK DSL kernel builder, lower the kernel to LLVM IR and ask
 pipelined kernel look serialized.
 
 ```bash
-export PYTHONPATH=<repo>/dnn-providers/hip-kernel-provider/rocKE/Python
+export PYTHONPATH=<repo>/dnn-providers/hip-kernel-provider/rocke/platform/python
 
 python3 - <<'PY'
 from pathlib import Path

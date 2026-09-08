@@ -29,7 +29,7 @@
 #define ROCSPARSE_TYPES_H
 
 #include "rocsparse-complex-types.h"
-#include "rocsparse-version.h"
+#include "rocsparse-config.h"
 #include "rocsparse_bfloat16.h"
 
 #include <float.h>
@@ -394,6 +394,41 @@ typedef enum rocsparse_fill_mode_
 } rocsparse_fill_mode;
 
 /*! \ingroup types_module
+ *  \brief Select whether a solve stage performs a triangular or diagonal-only solve.
+ *
+ *  \details
+ *  The \ref rocsparse_solve_mode selects, for \ref rocsparse_sptrsv and
+ *  \ref rocsparse_sptrsm, whether the compute stage performs the regular triangular
+ *  solve or a diagonal-only solve that reuses the diagonal positions collected during
+ *  the analysis stage. The diagonal-only mode is intended for the diagonal step of a
+ *  factored solve such as \f$L D L^H\f$; how the diagonal values are treated is then
+ *  selected separately by \ref rocsparse_diagonal_modifier.
+ */
+typedef enum rocsparse_solve_mode_
+{
+    rocsparse_solve_mode_triangular
+    = 0, /**< Regular triangular solve \f$op(A) \, y = \alpha \, x\f$ (default). */
+    rocsparse_solve_mode_diagonal = 1 /**< Diagonal solve \f$D \, y = \alpha \, x\f$. */
+} rocsparse_solve_mode;
+
+/*! \ingroup types_module
+ *  \brief Select the function applied to each diagonal value in a diagonal solve.
+ *
+ *  \details
+ *  When \ref rocsparse_solve_mode is \ref rocsparse_solve_mode_diagonal, the
+ *  \ref rocsparse_diagonal_modifier selects the element-wise function \f$f\f$ applied to
+ *  each diagonal entry \f$d\f$ before the solve: \ref rocsparse_diagonal_modifier_none uses
+ *  \f$d\f$, while \ref rocsparse_diagonal_modifier_absolute uses \f$|d|\f$, which turns
+ *  \f$L |D| L^H\f$ into an HPD operator (a valid inner product for Hermitian Krylov methods
+ *  even when \f$D\f$ is indefinite). It has no effect for a triangular solve.
+ */
+typedef enum rocsparse_diagonal_modifier_
+{
+    rocsparse_diagonal_modifier_none     = 0, /**< Use \f$d\f$ (default). */
+    rocsparse_diagonal_modifier_absolute = 1 /**< Use \f$|d|\f$. */
+} rocsparse_diagonal_modifier;
+
+/*! \ingroup types_module
  *  \brief Specify whether the matrix is stored sorted or not.
  *
  *  \details
@@ -557,6 +592,11 @@ typedef enum rocsparse_data_status_
  */
 typedef enum rocsparse_indextype_
 {
+// The deprecated u16 index type is removed from the public enum when
+// ROCSPARSE_WITH_U16_REMOVED is defined, but it is retained internally
+// (ROCSPARSE_KEEP_INTERNAL_U16) so that the library can still recognize and
+// gracefully reject the value without triggering -Wswitch warnings.
+#if !defined(ROCSPARSE_WITH_U16_REMOVED) || defined(ROCSPARSE_KEEP_INTERNAL_U16)
     rocsparse_indextype_u16
     [[deprecated("rocsparse_indextype_u16 is no longer supported and will be removed in a future "
                  "release. Use "
@@ -564,6 +604,7 @@ typedef enum rocsparse_indextype_
     = 1, /**< 16-bit unsigned integer. \deprecated This index type is unsupported and will be
             removed in a future release. Use \ref rocsparse_indextype_i32 or \ref
             rocsparse_indextype_i64 instead. */
+#endif
     rocsparse_indextype_i32 = 2, /**< 32-bit signed integer. */
     rocsparse_indextype_i64 = 3 /**< 64-bit signed integer. */
 } rocsparse_indextype;
@@ -1045,7 +1086,11 @@ typedef enum rocsparse_sptrsv_input_
     rocsparse_sptrsv_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSV descriptor. */
-    rocsparse_sptrsv_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    rocsparse_sptrsv_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSV descriptor. */
+#endif
 } rocsparse_sptrsv_input;
 
 /*! \ingroup types_module
@@ -1099,7 +1144,11 @@ typedef enum rocsparse_sptrsm_input_
     rocsparse_sptrsm_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpTRSM descriptor. */
     rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on a SpTRSM descriptor. */
     rocsparse_sptrsm_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSM descriptor. This datatype is used as the compute type. */
-    rocsparse_sptrsm_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSM descriptor. */
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    rocsparse_sptrsm_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSM descriptor. */
+#endif
 } rocsparse_sptrsm_input;
 
 /*! \ingroup types_module
@@ -1259,7 +1308,13 @@ typedef enum rocsparse_spildlt0_input_
     rocsparse_spildlt0_input_boost_tolerance, /**< Select diagonal boosting tolerance on a SpILDLT0 descriptor. */
     rocsparse_spildlt0_input_boost_value, /**< Select diagonal boosting value on a SpILDLT0 descriptor. */
     rocsparse_spildlt0_input_singularity_tolerance, /**< Select singularity tolerance for input on a SpILDLT0 descriptor. */
-    rocsparse_spildlt0_input_diag, /**< Set the device pointer to the dense array of \p m real-valued diagonal entries of \f$D\f$ for output from SpILDLT0. */
+    rocsparse_spildlt0_input_diag [[deprecated(
+        "rocsparse_spildlt0_input_diag is deprecated and "
+        "will be removed in a future "
+        "release. The diagonal D is always stored in-place "
+        "on the (implicit unit) diagonal "
+        "of the L factor and can be read back from "
+        "there.")]], /**< Optionally set the device pointer to a dense array of \p m * \p batch_count real-valued entries that receives a copy of the diagonal \f$D\f$ as an output of SpILDLT0 (\p m entries per batch, batch \p b at offset \p b * \p m). \f$D\f$ is always real, even for complex matrices (\p float* for \p s and \p c, \p double* for \p d and \p z). \deprecated \f$D\f$ is always stored in-place on the (implicit unit) diagonal of the \f$L\f$ factor; read it back from there instead. */
 } rocsparse_spildlt0_input;
 
 /*! \ingroup types_module

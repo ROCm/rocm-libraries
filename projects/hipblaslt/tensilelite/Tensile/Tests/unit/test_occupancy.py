@@ -66,6 +66,11 @@ def _occ(kw, *, numThreads, vgprs, accvgprs, sgprs, ldsBytes, doubleVgpr=True):
         ((9, 0, 10), 8),   # gfx90a  – ArchAccUnifiedRegs, capped at 8
         ((9, 4, 2), 8),    # gfx942  – ArchAccUnifiedRegs, capped at 8
         ((9, 5, 0), 8),    # gfx950  – ArchAccUnifiedRegs, capped at 8
+        ((11, 0, 0), 16),  # gfx1100 – 16 wave slots (was wrongly 10)
+        ((11, 5, 1), 16),  # gfx1151 – 16 wave slots
+        ((12, 0, 0), 16),  # gfx1200 – 16 wave slots
+        ((12, 0, 1), 16),  # gfx1201 – 16 wave slots
+        ((12, 5, 0), 10),  # gfx1250 – CDNA-class (isa 12.5.x), stays at 10
     ],
 )
 def test_max_waves_per_simd_from_arch_caps(isa, expected):
@@ -118,6 +123,69 @@ def test_gfx950_physical_vgpr_pool_is_512():
     ri = _init_rocisa((9, 5, 0))
     assert ri.getRegCaps()["PhysicalMaxVgpr"] == 512
     assert ri.getRegCaps()["MaxVgpr"] == 256  # logical max per wave
+
+
+# ---------------------------------------------------------------------------
+# gfx11 (RDNA3) PhysicalMaxVgprCU – per-SIMD VGPR file size
+# ---------------------------------------------------------------------------
+
+# PhysicalMaxVgprCU is the total VGPR budget per CU: 2 SIMDs * <VGPRs/SIMD> * 32
+# wave32 lanes.  gfx1100, gfx1101 and gfx1151 ship a 1536-VGPR file per SIMD;
+# every other gfx11 part has 1024.
+_GFX11_PHYSICAL_VGPR_PER_SIMD = [
+    ((11, 0, 0), 1536),  # gfx1100 (Navi 31)
+    ((11, 0, 1), 1536),  # gfx1101 (Navi 32)
+    ((11, 0, 2), 1024),  # gfx1102 (Navi 33)
+    ((11, 0, 3), 1024),  # gfx1103 (Phoenix APU)
+    ((11, 5, 0), 1024),  # gfx1150
+    ((11, 5, 1), 1536),  # gfx1151 (Strix Halo)
+    ((11, 5, 2), 1024),  # gfx1152
+    ((11, 5, 3), 1024),  # gfx1153
+]
+
+
+@pytest.mark.parametrize(
+    "isa,vgpr_per_simd",
+    _GFX11_PHYSICAL_VGPR_PER_SIMD,
+    ids=[f"gfx{a}{b}{c}" for (a, b, c), _ in _GFX11_PHYSICAL_VGPR_PER_SIMD],
+)
+def test_gfx11_physical_max_vgpr_cu(isa, vgpr_per_simd):
+    """gfx11 PhysicalMaxVgprCU = 2 SIMDs * VGPRs/SIMD * 32 lanes.
+
+    Only gfx1100/gfx1101/gfx1151 have the larger 1536-VGPR file; all other
+    gfx11 parts (gfx1102/gfx1103/gfx1150/gfx1152/gfx1153) have 1024.  Before
+    the fix gfx1103 fell through to a catch-all that returned 1536, and gfx1102
+    omitted the two-SIMDs-per-CU factor entirely.
+    """
+    ri = _init_rocisa(isa)
+    expected = 2 * vgpr_per_simd * 32
+    assert ri.getRegCaps()["PhysicalMaxVgprCU"] == expected
+
+
+@pytest.mark.parametrize(
+    "isa",
+    [(11, 0, 0), (11, 0, 1), (11, 5, 1)],
+    ids=["gfx1100", "gfx1101", "gfx1151"],
+)
+def test_gfx11_1536_vgpr_parts(isa):
+    """The three 1536-VGPR/SIMD gfx11 parts report 2 * 1536 * 32 = 98304."""
+    ri = _init_rocisa(isa)
+    assert ri.getRegCaps()["PhysicalMaxVgprCU"] == 2 * 1536 * 32
+
+
+@pytest.mark.parametrize(
+    "isa",
+    [(11, 0, 2), (11, 0, 3), (11, 5, 0), (11, 5, 2), (11, 5, 3)],
+    ids=["gfx1102", "gfx1103", "gfx1150", "gfx1152", "gfx1153"],
+)
+def test_gfx11_1024_vgpr_parts(isa):
+    """Every other gfx11 part reports 2 * 1024 * 32 = 65536.
+
+    gfx1103 in particular must NOT inherit the 1536 catch-all value it got
+    before the fix, and gfx1102 must include the two-SIMDs-per-CU factor.
+    """
+    ri = _init_rocisa(isa)
+    assert ri.getRegCaps()["PhysicalMaxVgprCU"] == 2 * 1024 * 32
 
 
 # ---------------------------------------------------------------------------

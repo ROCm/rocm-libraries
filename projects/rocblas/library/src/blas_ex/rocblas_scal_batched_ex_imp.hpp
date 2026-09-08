@@ -120,12 +120,23 @@ namespace
                                    "batch_count",
                                    batch_count,
                                    "compute_type",
-                                   ex_type_str);
+                                   ex_type_str,
+                                   "stride_alpha",
+                                   handle->get_stride_alpha());
         }
 
         static constexpr rocblas_stride stride_0 = 0;
-        return rocblas_scal_ex_template<API_INT, ROCBLAS_SCAL_NB, true>(
-            handle, n, alpha, alpha_type, x, x_type, incx, stride_0, batch_count, execution_type);
+        return rocblas_scal_ex_template<API_INT, ROCBLAS_SCAL_NB, true>(handle,
+                                                                        n,
+                                                                        alpha,
+                                                                        alpha_type,
+                                                                        handle->get_stride_alpha(),
+                                                                        x,
+                                                                        x_type,
+                                                                        incx,
+                                                                        stride_0,
+                                                                        batch_count,
+                                                                        execution_type);
     }
 }
 

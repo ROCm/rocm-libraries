@@ -33,9 +33,9 @@ import ctypes
 import glob
 from fnmatch import fnmatchcase
 try:  # Import either the C or pure-Python YAML parser
-    from yaml import CLoader as Loader
+    from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import Loader
+    from yaml import SafeLoader as Loader
 import yaml
 
 # Regex for type names in the YAML file. Optional *nnn indicates array.

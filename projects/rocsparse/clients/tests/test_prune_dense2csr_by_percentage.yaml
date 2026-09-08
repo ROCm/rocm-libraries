@@ -26,11 +26,7 @@ include: rocsparse_common.yaml
 
 
 Tests:
-- name: prune_dense2csr_by_percentage_bad_arg
-  category: pre_checkin
-  function: prune_dense2csr_by_percentage_bad_arg
-  precision: *single_double_precisions
-
+# Quick
 - name: prune_dense2csr_by_percentage
   category: quick
   function: prune_dense2csr_by_percentage
@@ -51,6 +47,12 @@ Tests:
   percentage: [67.0, 35.0, 99.0, 100.0]
   baseA: [rocsparse_index_base_one]
 
+# Pre-checkin
+- name: prune_dense2csr_by_percentage_bad_arg
+  category: pre_checkin
+  function: prune_dense2csr_by_percentage_bad_arg
+  precision: *single_double_precisions
+  
 - name: prune_dense2csr_by_percentage
   category: pre_checkin
   function: prune_dense2csr_by_percentage
@@ -71,6 +73,7 @@ Tests:
   percentage: [0.0, 55.0]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
+# Nightly
 - name: prune_dense2csr_by_percentage
   category: nightly
   function: prune_dense2csr_by_percentage
@@ -90,3 +93,15 @@ Tests:
   denseld: [1000]
   percentage: [100.0, 88.0]
   baseA: [rocsparse_index_base_one]
+
+# Stress
+- name: prune_dense2csr_by_percentage
+  category: stress
+  hardware: [gfx942, gfx950]
+  function: prune_dense2csr_by_percentage
+  precision: *single_only_precisions
+  M: [47000]
+  N: [47000]
+  denseld: [47000]
+  percentage: [10.0]
+  baseA: [rocsparse_index_base_zero]

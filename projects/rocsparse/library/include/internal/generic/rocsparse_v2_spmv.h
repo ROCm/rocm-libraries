@@ -294,6 +294,9 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
  *          or missing scalar/compute data type configuration.
  *  \retval rocsparse_status_invalid_size size mismatches between \p gamma_vec and \p num_extras,
  *          or between \p z_vecs elements.
+ *
+ *  \par Example
+ *  \snippet example_rocsparse_spmv_set_extra.cpp doc example
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spmv_set_extra(rocsparse_handle             handle,

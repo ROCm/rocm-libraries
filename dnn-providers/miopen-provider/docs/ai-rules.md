@@ -66,7 +66,7 @@ cmake --build build
 
 This uses the `miopen-provider` preset which builds both hipDNN and miopen-provider together. Other available presets: `hipdnn` (hipDNN only), `hipblaslt-provider` (hipDNN + hipblaslt-provider).
 
-In the superbuild, targets are prefixed (e.g., `miopen-provider-check`, `miopen-provider-unit-check`). See `projects/hipdnn/docs/Superbuild.md` for full details.
+In the superbuild, targets are prefixed and YAML category-driven (e.g., `miopen-provider-check`, `miopen-provider-quick-check`). See `projects/hipdnn/docs/Superbuild.md` for full details.
 
 **Standalone build** (requires hipDNN installed):
 ```bash

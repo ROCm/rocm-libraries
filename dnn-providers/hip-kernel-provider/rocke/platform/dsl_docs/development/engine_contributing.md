@@ -5,7 +5,7 @@ itself** — the IR builder, the helpers, the instance builders, or the LLVM
 lowering. If you only want to *author and tune kernels*, start with
 [`onboarding.md`](./onboarding.md) and [`extending.md`](./extending.md); you may
 never need this page. If you are about to edit anything under `rocke/core/`,
-`rocke/helpers/`, `rocke/instances/`, or `Cpp/`, read this first — it
+`rocke/helpers/`, `rocke/instances/`, or `cpp/`, read this first — it
 describes a contract that is easy to break silently and expensive to break.
 
 ## The one thing to know: there are two engines
@@ -15,7 +15,7 @@ The engine exists **twice**, on purpose:
 | | Path | Role |
 |---|------|------|
 | **Python engine** | `rocke/` | The authoring frontend. You write specs and builders here; it lowers IR → LLVM text. |
-| **C++ engine** | `Cpp/` | A faithful port of the same lowering, compiled into `librocke_core.a`. It is what the hipDNN provider links so kernels can be served with **no Python at runtime**. |
+| **C++ engine** | `cpp/` | A faithful port of the same lowering, compiled into `librocke_core.a`. It is what the hipDNN provider links so kernels can be served with **no Python at runtime**. |
 
 The two are kept **byte-for-byte identical at the LLVM-IR level**: for every
 kernel family and every config, the `.ll` text the Python engine emits and the
@@ -64,31 +64,35 @@ One script builds the C++ engine and runs the full cross-engine `.ll` diff:
 tools/check_byte_identity.py
 ```
 
-It prints a per-family GREEN/MISMATCH table and exits non-zero on any **real**
-mismatch. A green run means the two engines still agree everywhere.
+It prints a per-family status table and exits non-zero unless every family
+passed the gate. A green run means the two engines were compared everywhere and
+agreed.
 
 If you prefer to run the steps by hand (they are what the script does):
 
 ```bash
-# From dnn-providers/hip-kernel-provider/rocKE/Python  (use the project venv with ROCm+PyTorch).
-PY=$(pwd)                      # .../dnn-providers/hip-kernel-provider/rocKE/Python
+# From dnn-providers/hip-kernel-provider/rocke/platform/python  (use the project venv with ROCm+PyTorch).
+PY=$(pwd)                      # .../dnn-providers/hip-kernel-provider/rocke/platform/python
 
 # 1. Build the C++ engine archive into a LOCAL dir (never NFS — it is slow).
-cmake -S "$PY/Cpp" -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release
+cmake -S "$PY/cpp" -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/rocke_verify -j
 
 # 2. Run the differential .ll gate (default archive is /tmp/rocke_verify/librocke_core.a).
 PYTHONPATH="$PY" python3 -m tests/instances/differential/run_diff.py --mode ll
 ```
 
-Expected: every family GREEN, 0 real mismatches. Two families
-(`fmha_appendkv`, `gfx1151_wmma_gemm_iu8_dequant`) may report a benign
-`RANGE_DRIFT` (the C emitter enumerates a slightly wider config range; the
-in-range bytes are identical) — that is pre-existing and not a failure.
+Expected: every family GREEN. Any other status fails the gate, including ones
+this doc does not name — the runner classifies every status it knows and fails
+closed on the rest, so a status added later is red until someone decides it is
+benign. A failing run prints a `=== GATE FAILURES ===` block naming each family
+and why.
 
 ### When the gate is red
 
-A red gate means your change altered emitted bytes on one side but not the other.
+A red gate means the run did not establish byte-identity. Usually that is your
+change altering emitted bytes on one side but not the other; it can also be a
+family that compared nothing. The `=== GATE FAILURES ===` block says which.
 To localize and understand it:
 
 ```bash
@@ -160,12 +164,12 @@ gate go green *without understanding why it went red* is how the contract dies.
 ## The C++ binding catalog
 
 The Python ↔ C++ engine equivalence is also exercised through the pybind binding
-(`Cpp/bindings/`), which exposes each family's lowering to Python. If you add
+(`cpp/bindings/`), which exposes each family's lowering to Python. If you add
 or change an instance family, validate the binding still produces identical
 emission:
 
 ```bash
-python3 Cpp/bindings/prove_parity_binding.py   # per-family VALIDATED / mismatched
+python3 cpp/bindings/prove_parity_binding.py   # per-family VALIDATED / mismatched
 ```
 
 ## Where a change lands on both sides
@@ -173,7 +177,7 @@ python3 Cpp/bindings/prove_parity_binding.py   # per-family VALIDATED / mismatch
 [`extending.md`](./extending.md) walks the Python side (a new IR op touches
 `core/ir.py`, `core/ir_print.py`, `core/lower_llvm.py`, and tests). The contract
 adds one rule: **the same lowering must exist in the C++ engine** under the
-mirrored path in `Cpp/` (the directory layout mirrors the Python module
+mirrored path in `cpp/` (the directory layout mirrors the Python module
 tree). The gate is what tells you the two sides agree.
 
 ## Building the full provider stack

@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -69,8 +69,8 @@ struct callback_type<rocfft_complex<rocfft_fp16>>
                           void*                        sharedMem);
 };
 
-static __device__ auto load_cb_default_complex_half = load_cb_default<rocfft_complex<rocfft_fp16>>;
-static __device__ auto store_cb_default_complex_half
+inline __device__ auto load_cb_default_complex_half = load_cb_default<rocfft_complex<rocfft_fp16>>;
+inline __device__ auto store_cb_default_complex_half
     = store_cb_default<rocfft_complex<rocfft_fp16>>;
 
 template <>
@@ -87,8 +87,8 @@ struct callback_type<rocfft_complex<float>>
                           void*                  sharedMem);
 };
 
-static __device__ auto load_cb_default_complex_float  = load_cb_default<rocfft_complex<float>>;
-static __device__ auto store_cb_default_complex_float = store_cb_default<rocfft_complex<float>>;
+inline __device__ auto load_cb_default_complex_float  = load_cb_default<rocfft_complex<float>>;
+inline __device__ auto store_cb_default_complex_float = store_cb_default<rocfft_complex<float>>;
 
 template <>
 struct callback_type<rocfft_complex<double>>
@@ -104,8 +104,8 @@ struct callback_type<rocfft_complex<double>>
                           void*                   sharedMem);
 };
 
-static __device__ auto load_cb_default_complex_double  = load_cb_default<rocfft_complex<double>>;
-static __device__ auto store_cb_default_complex_double = store_cb_default<rocfft_complex<double>>;
+inline __device__ auto load_cb_default_complex_double  = load_cb_default<rocfft_complex<double>>;
+inline __device__ auto store_cb_default_complex_double = store_cb_default<rocfft_complex<double>>;
 
 template <>
 struct callback_type<rocfft_fp16>
@@ -115,8 +115,8 @@ struct callback_type<rocfft_fp16>
         rocfft_fp16* data, size_t offset, rocfft_fp16 element, void* cbdata, void* sharedMem);
 };
 
-static __device__ auto load_cb_default_half  = load_cb_default<rocfft_fp16>;
-static __device__ auto store_cb_default_half = store_cb_default<rocfft_fp16>;
+inline __device__ auto load_cb_default_half  = load_cb_default<rocfft_fp16>;
+inline __device__ auto store_cb_default_half = store_cb_default<rocfft_fp16>;
 
 template <>
 struct callback_type<float>
@@ -125,8 +125,8 @@ struct callback_type<float>
     typedef void (*store)(float* data, size_t offset, float element, void* cbdata, void* sharedMem);
 };
 
-static __device__ auto load_cb_default_float  = load_cb_default<float>;
-static __device__ auto store_cb_default_float = store_cb_default<float>;
+inline __device__ auto load_cb_default_float  = load_cb_default<float>;
+inline __device__ auto store_cb_default_float = store_cb_default<float>;
 
 template <>
 struct callback_type<double>
@@ -136,8 +136,8 @@ struct callback_type<double>
         double* data, size_t offset, double element, void* cbdata, void* sharedMem);
 };
 
-static __device__ auto load_cb_default_double  = load_cb_default<double>;
-static __device__ auto store_cb_default_double = store_cb_default<double>;
+inline __device__ auto load_cb_default_double  = load_cb_default<double>;
+inline __device__ auto store_cb_default_double = store_cb_default<double>;
 
 // planar helpers
 template <typename Tfloat>
@@ -262,26 +262,5 @@ enum struct CallbackType
     // reals and the kernel wants complex
     USER_LOAD_STORE_C2R,
 };
-
-// helpers to cast void* to the correct function pointer type
-template <typename T, CallbackType cbtype>
-static __device__ typename callback_type<T>::load get_load_cb(void* ptr)
-{
-#ifdef ROCFFT_CALLBACKS_ENABLED
-    if(cbtype != CallbackType::NONE)
-        return reinterpret_cast<typename callback_type<T>::load>(ptr);
-#endif
-    return load_cb_default<T>;
-}
-
-template <typename T, CallbackType cbtype>
-static __device__ typename callback_type<T>::store get_store_cb(void* ptr)
-{
-#ifdef ROCFFT_CALLBACKS_ENABLED
-    if(cbtype != CallbackType::NONE)
-        return reinterpret_cast<typename callback_type<T>::store>(ptr);
-#endif
-    return store_cb_default<T>;
-}
 
 #endif

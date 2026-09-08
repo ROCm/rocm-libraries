@@ -26,6 +26,7 @@
  * - **Not supported** (8): Requested functionality unavailable
  * - **Internal errors** (9-13): Library internal failures
  * - **Plugin errors** (14): Errors from loaded plugins
+ * - **Version mismatch** (15): Frontend/backend ABI mismatch
  */
 typedef enum
 {
@@ -139,4 +140,12 @@ typedef enum
      * error messages for details.
      */
     HIPDNN_STATUS_PLUGIN_ERROR = 14,
+
+    /**
+     * @brief Frontend/backend version mismatch
+     *
+     * A runtime-loaded backend does not provide the symbols required by
+     * this frontend.
+     */
+    HIPDNN_STATUS_VERSION_MISMATCH = 15,
 } hipdnnStatus_t;

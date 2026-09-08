@@ -52,7 +52,7 @@ RppStatus rppt_gridmask(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -155,7 +155,7 @@ RppStatus rppt_spatter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -299,7 +299,7 @@ RppStatus rppt_salt_and_pepper_noise(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, Rp
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -416,7 +416,7 @@ RppStatus rppt_shot_noise(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -528,7 +528,7 @@ RppStatus rppt_gaussian_noise(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t 
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -640,7 +640,7 @@ RppStatus rppt_gaussian_noise_voxel(RppPtr_t srcPtr, RpptGenericDescPtr srcGener
     if (srcGenericDescPtr->dataType != dstGenericDescPtr->dataType)
         return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams;
@@ -737,7 +737,7 @@ RppStatus rppt_non_linear_blend(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr 
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -832,7 +832,7 @@ RppStatus rppt_water(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -926,7 +926,7 @@ RppStatus rppt_vignette(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -1013,7 +1013,7 @@ RppStatus rppt_erase(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -1111,7 +1111,7 @@ RppStatus rppt_ricap(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
         return RPP_ERROR_OUT_OF_BOUND_SRC_ROI;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -1206,7 +1206,7 @@ RppStatus rppt_glitch(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -1292,7 +1292,7 @@ RppStatus rppt_jitter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -1410,7 +1410,7 @@ RppStatus rppt_pixelate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
     if (pixelationPercentage < 0 || pixelationPercentage > 100) return RPP_ERROR_INVALID_ARGUMENTS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams srcLayoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -1653,7 +1653,7 @@ RppStatus rppt_fog(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr, Rpp
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -1832,7 +1832,7 @@ RppStatus rppt_rain(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -1927,7 +1927,7 @@ RppStatus rppt_posterize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPt
         if (posterizeLevelBits[i] > 8) return RPP_ERROR_INVALID_ARGUMENTS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -2007,7 +2007,7 @@ RppStatus rppt_solarize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
         if (thresholdTensor[i] < 0 || thresholdTensor[i] > 1) return RPP_ERROR_INVALID_ARGUMENTS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -2100,7 +2100,7 @@ RppStatus rppt_snow(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
     }
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -2194,7 +2194,7 @@ RppStatus rppt_channel_dropout(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -2280,7 +2280,7 @@ RppStatus rppt_cutout_dropout(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t 
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -2375,7 +2375,7 @@ RppStatus rppt_grid_dropout(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t ds
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -2469,7 +2469,7 @@ RppStatus rppt_random_erase(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t ds
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -2569,7 +2569,7 @@ RppStatus rppt_coarse_dropout(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t 
     if (maxBoxesPerImage == 0) return RPP_ERROR_INVALID_ARGUMENTS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);

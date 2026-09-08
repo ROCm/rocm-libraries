@@ -1,0 +1,278 @@
+# Stream-K on f32 source (non-MFMA) kernels -- NO VOPD. NN/TN/NT, two configs:
+#   * matched   (VectorWidthA=1, StoreVectorWidth=1): StreamK [0,3], assorted shapes.
+#   * mismatched (VectorWidthA=4, StoreVectorWidth=1): b128 partials; the workspace
+#     pitch must come from gwvw, not StoreVectorWidth. The large NN/TN shape's
+#     Stream-K remainder region gives ~5% wrong outputs if it doesn't.
+# gfx11/gfx12 only; full numerical validation must PASS.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030] # source Stream-K validated on gfx11+
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: True
+  PrintWinnersOnly: True
+  MaxWorkspaceSize: 268435456   # 256MB for the large pitch-regression shape
+
+BenchmarkProblems:
+
+  ########################################
+  # Matched VW (VectorWidthA == StoreVectorWidth == 1), Stream-K off/on
+  ########################################
+
+  ########################################
+  # NN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StreamK: [0, 3]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 256]
+          - Exact: [128, 128, 1, 255]    # odd K exercises the tail loop
+          - Exact: [128, 128, 1, 2048]   # large K -> Stream-K K-split
+
+  ########################################
+  # TN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StreamK: [0, 3]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 256]
+          - Exact: [128, 128, 1, 255]    # odd K exercises the tail loop
+          - Exact: [128, 128, 1, 2048]   # large K -> Stream-K K-split
+
+  ########################################
+  # NT
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StreamK: [0, 3]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 256]
+          - Exact: [128, 128, 1, 255]    # odd K exercises the tail loop
+          - Exact: [128, 128, 1, 2048]   # large K -> Stream-K K-split
+
+  ########################################
+  # Mismatched VW (VectorWidthA=4, StoreVectorWidth=1) -- workspace-pitch guard.
+  # b128 partials, StreamK=3, MT128x128. NN/TN use 2560x1920x32896, whose Stream-K
+  # remainder region gives ~5% wrong outputs without the gwvw pitch fix. NT doesn't
+  # overlap at that shape, so it uses a smaller correctness-check shape.
+  ########################################
+
+  ########################################
+  # NN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StreamK: [3]
+        - StreamKAtomic: [0]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - LocalReadVectorWidth: [4]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [8, 8]
+        - WorkGroup:
+          - [16, 16, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [5]
+        - GlobalSplitU: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2560, 1920, 1, 32896]   # ~5% wrong without the gwvw pitch fix
+
+  ########################################
+  # TN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StreamK: [3]
+        - StreamKAtomic: [0]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - LocalReadVectorWidth: [4]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [8, 8]
+        - WorkGroup:
+          - [16, 16, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [5]
+        - GlobalSplitU: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2560, 1920, 1, 32896]   # ~5% wrong without the gwvw pitch fix
+
+  ########################################
+  # NT
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StreamK: [3]
+        - StreamKAtomic: [0]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - LocalReadVectorWidth: [4]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [8, 8]
+        - WorkGroup:
+          - [16, 16, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [5]
+        - GlobalSplitU: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 8192]   # correctness only (NT doesn't trigger the pitch bug)

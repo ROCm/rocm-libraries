@@ -299,7 +299,7 @@
     ISA: [9, 4, 2]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
@@ -500,7 +500,7 @@
     ISA: [9, 4, 2]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
@@ -697,7 +697,7 @@
     ISA: [9, 4, 2]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 1, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_HHS_BH_UserArgs_MT32x96x128_MI16x16x1_SN_GRVWA8_GRVWB8_LBSPPA256_LBSPPB256_LPA16_LPB16_LRVW8_MIWT1_3_NTA0_SS0_SVW4_VWA1_VWB1_WG32_8_1

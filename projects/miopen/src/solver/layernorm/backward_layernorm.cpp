@@ -208,7 +208,7 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
     else
     {
         size_t xlocalsize = config.local_size;
-        size_t xgridsize  = problem.inner_size;
+        size_t xgridsize  = AlignUp(problem.inner_size, xlocalsize);
         size_t ylocalsize = 1;
         size_t ygridsize  = 1;
         size_t zlocalsize = 1;

@@ -58,6 +58,25 @@ class SWaitCntEx(SWaitCnt):
             comment=self.comment)
 
 
+
+def _zigzag_order(rows, cols):
+    """Return (row, col) pairs in boustrophedon (zigzag/snake) order.
+
+    Even rows traverse left-to-right, odd rows right-to-left.
+    Row transitions share the column coordinate with the last element
+    of the previous row, so every consecutive pair shares exactly one
+    coordinate -- guaranteeing a VGPR source-cache hit at every step.
+    """
+    result = []
+    for r in range(rows):
+        if r % 2 == 0:
+            for c in range(cols):
+                result.append((r, c))
+        else:
+            for c in range(cols - 1, -1, -1):
+                result.append((r, c))
+    return result
+
 class InstructionEmitter:
     """Emits GPU instructions for each opType in the LogicalScheduler output.
 
@@ -119,6 +138,8 @@ class InstructionEmitter:
             'skip':         lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
             'inline':       lambda em, ui: self.emit_inline(em.source),
+            'gl2_prefetch':     lambda em, ui: self.emit_gl2_prefetch(),
+            'gl2_prefetch_inc': lambda em, ui: self.emit_gl2_prefetch_inc(),
         }
 
         # Sentinel for the long-lived per-lane diff vgpr. Set by
@@ -132,36 +153,51 @@ class InstructionEmitter:
         tile_maps = {t: placement.vgpr_tile_maps[t][unroll_iter]
                      for t in placement.vgpr_tile_maps}
 
-        for a in placement.tileA.tileId_list:
-            for b in placement.tileB.tileId_list:
-                groupA = (a // self.config.lrA.mn) * self.config.lrA.mn
-                groupB = (b // self.config.lrB.mn) * self.config.lrB.mn
-                aTile = self.vgprTilesA[tile_maps['A'][groupA]]
-                bTile = self.vgprTilesB[tile_maps['B'][groupB]]
-                dTile = self.dtileInfo.vgprTiles[a + b * self.dtileInfo.localMMATileGrid[0]]
+        aTiles = placement.tileA.tileId_list
+        bTiles = placement.tileB.tileId_list
 
-                if self.hasScale:
-                    scaleGroupA = (a // self.config.lrSA.mn) * self.config.lrSA.mn
-                    scaleGroupB = (b // self.config.lrSB.mn) * self.config.lrSB.mn
-                    scaleATile = self.vgprTilesSA[tile_maps['SA'][scaleGroupA]]
-                    scaleBTile = self.vgprTilesSB[tile_maps['SB'][scaleGroupB]]
-                    scaleAVgpr = next(iter(scaleATile))
-                    scaleBVgpr = next(iter(scaleBTile))
-                    mShapeA = self.tileInfoMap['SA'].lrSubtileShape[0]
-                    mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
-                    kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
-                    kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
-                    sAsel = (a % mShapeA) + mShapeA * (subIterK % kShapeA)
-                    sBsel = (b % mShapeB) + mShapeB * (subIterK % kShapeB)
-                else:
-                    scaleAVgpr = scaleBVgpr = -1
-                    sAsel = sBsel = 0
+        hasWmmaSourceCache = self.writer.states.asmCaps.get("HasWMMA_V3", False)
+        if hasWmmaSourceCache and len(aTiles) > 1 and len(bTiles) > 1:
+            # Zigzag ordering: traverse the AxB tile grid in snake order so
+            # every consecutive WMMA pair shares exactly one operand (A or B),
+            # guaranteeing a VGPR source-cache hit at every step.
+            # Always sweep along the longer tile dimension for maximum reuse.
+            if len(aTiles) >= len(bTiles):
+                abPairs = [(aTiles[c], bTiles[r]) for r, c in _zigzag_order(len(bTiles), len(aTiles))]
+            else:
+                abPairs = [(aTiles[r], bTiles[c]) for r, c in _zigzag_order(len(aTiles), len(bTiles))]
+        else:
+            abPairs = [(a, b) for a in aTiles for b in bTiles]
 
-                module.add(emitMfmaInstruction(
-                    self.writer, self.kernel, aTile, bTile, dTile, dTile,
-                    scaleAVgpr=scaleAVgpr, scaleBVgpr=scaleBVgpr,
-                    scaleAsel=sAsel, scaleBsel=sBsel,
-                    comment=f"MFMA C[{a},{b}] += A[{a},K={subIterK}] * B[{b},K={subIterK}]"))
+        for a, b in abPairs:
+            groupA = (a // self.config.lrA.mn) * self.config.lrA.mn
+            groupB = (b // self.config.lrB.mn) * self.config.lrB.mn
+            aTile = self.vgprTilesA[tile_maps['A'][groupA]]
+            bTile = self.vgprTilesB[tile_maps['B'][groupB]]
+            dTile = self.dtileInfo.vgprTiles[a + b * self.dtileInfo.localMMATileGrid[0]]
+
+            if self.hasScale:
+                scaleGroupA = (a // self.config.lrSA.mn) * self.config.lrSA.mn
+                scaleGroupB = (b // self.config.lrSB.mn) * self.config.lrSB.mn
+                scaleATile = self.vgprTilesSA[tile_maps['SA'][scaleGroupA]]
+                scaleBTile = self.vgprTilesSB[tile_maps['SB'][scaleGroupB]]
+                scaleAVgpr = next(iter(scaleATile))
+                scaleBVgpr = next(iter(scaleBTile))
+                mShapeA = self.tileInfoMap['SA'].lrSubtileShape[0]
+                mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
+                kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
+                kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
+                sAsel = (a % mShapeA) + mShapeA * (subIterK % kShapeA)
+                sBsel = (b % mShapeB) + mShapeB * (subIterK % kShapeB)
+            else:
+                scaleAVgpr = scaleBVgpr = -1
+                sAsel = sBsel = 0
+
+            module.add(emitMfmaInstruction(
+                self.writer, self.kernel, aTile, bTile, dTile, dTile,
+                scaleAVgpr=scaleAVgpr, scaleBVgpr=scaleBVgpr,
+                scaleAsel=sAsel, scaleBsel=sBsel,
+                comment=f"MFMA C[{a},{b}] += A[{a},K={subIterK}] * B[{b},K={subIterK}]"))
         return list(module.flatitems())
 
     def emit_lr(self, placement, unroll_iter=0):
@@ -298,6 +334,44 @@ class InstructionEmitter:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
+
+    def emit_gl2_prefetch(self):
+        """Emit GL2 prefetch loads (global_prefetch_b8) for all tensors."""
+        writer = self.writer
+        kernel = self.kernel
+        tPA = self.tensorParametersMap['A']
+        tPB = self.tensorParametersMap['B']
+        mod = writer.gl2PrefetchIssueLoad(kernel, tPA, tPB)
+        return list(mod.flatitems())
+
+    def emit_gl2_prefetch_inc(self):
+        """Emit GL2 prefetch address increment with end-of-K guard.
+
+        Mirrors the SIA path: when LoopCounterL <= PGR + PrefetchGL2,
+        zero the increment SGPRs so prefetch stops advancing past K.
+        Then advance all GL2 prefetch addresses by the (possibly zeroed) increment.
+        """
+        writer = self.writer
+        kernel = self.kernel
+        tPA = self.tensorParametersMap['A']
+        tPB = self.tensorParametersMap['B']
+        from rocisa.code import Module
+        from rocisa.instruction import SCmpLeU32, SCMovB32
+        from rocisa.container import sgpr
+        mod = Module("GL2 Prefetch Increment")
+        loopCounter = writer.loopCounter(kernel, writer.states.unrollIdx)
+        pgl = kernel["PrefetchGL2"]
+        pgr = kernel["PrefetchGlobalRead"]
+        mod.add(SCmpLeU32(src0=loopCounter, src1=pgr + pgl,
+                          comment=f"counterL <= PGR({pgr})+PGL({pgl})?"))
+        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncA"), src=0))
+        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncB"), src=0))
+        if kernel["ProblemType"].get("MXBlockA", 0):
+            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSA"), src=0))
+        if kernel["ProblemType"].get("MXBlockB", 0):
+            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSB"), src=0))
+        mod.add(writer.gl2PrefetchIncrementAddr(kernel, tPA, tPB))
+        return list(mod.flatitems())
 
     def emit_skip(self, source):
         """Emit skip guard: compare LoopCounterL and branch."""

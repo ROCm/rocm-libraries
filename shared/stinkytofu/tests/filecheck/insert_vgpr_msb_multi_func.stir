@@ -1,0 +1,25 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb8 --InsertVgprMsbPass --print-output
+#
+# Multi-function coverage for InsertVgprMsbPass. Single-function correctness
+# (s_set_vgpr_msb emitted for VGPRs >= 256, encoded operand value) is checked
+# elsewhere; here we only verify that every function in the module gets its own
+# s_set_vgpr_msb rather than just the first one. --vgpr-msb-mode=msb8 pins the
+# mode so the test does not depend on host toolchain probing.
+
+# CHECK-LABEL: @func0
+# CHECK: s_set_vgpr_msb"(69)
+# CHECK-NEXT: v_add_f32
+
+st.func @func0() {
+^entry:
+  v256 = "st.v_add_f32"(v257, v258) { issueCycles = 1, latencyCycles = 5 }
+}
+
+# CHECK-LABEL: @func1
+# CHECK: s_set_vgpr_msb"(69)
+# CHECK-NEXT: v_add_f32
+
+st.func @func1() {
+^entry:
+  v256 = "st.v_add_f32"(v257, v258) { issueCycles = 1, latencyCycles = 5 }
+}

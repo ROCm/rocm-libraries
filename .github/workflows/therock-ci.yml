@@ -12,6 +12,7 @@ on:
       - reopened
       - labeled
       - unlabeled
+      - ready_for_review
   workflow_dispatch:
     inputs:
       projects:
@@ -39,8 +40,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci-gate:
+    name: Check CI Label
+    runs-on: ubuntu-24.04
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - name: Check for single-arch opt-in
+        id: gate
+        run: |
+          echo "enabled=${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:single-arch')) }}" >> "${GITHUB_OUTPUT}"
+
   setup:
     name: "Setup"
+    needs: ci-gate
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-24.04
     outputs:
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
@@ -111,6 +125,7 @@ jobs:
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "linux"
           CI_CONFIG_PATH: ci-config
+          IS_DRAFT: ${{ github.event.pull_request.draft || false }}
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -120,13 +135,14 @@ jobs:
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "windows"
           CI_CONFIG_PATH: ci-config
+          IS_DRAFT: ${{ github.event.pull_request.draft || false }}
         run: |
           python .github/scripts/therock_configure_ci.py
 
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
-          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950' }}
+          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950, gfx125X' }}
           CI_CONFIG_PATH: ci-config
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
@@ -152,7 +168,9 @@ jobs:
         projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.linux_package_targets) }}
     uses: ./.github/workflows/therock-ci-linux.yml
-    secrets: inherit
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
       docker_image: ${{ needs.setup.outputs.docker_image }}
@@ -160,6 +178,7 @@ jobs:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}
+      run_rocjitsu_race_check: ${{ matrix.projects.run_rocjitsu_race_check }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
@@ -177,7 +196,9 @@ jobs:
         projects: ${{ fromJSON(needs.setup.outputs.windows_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.windows_package_targets) }}
     uses: ./.github/workflows/therock-ci-windows.yml
-    secrets: inherit
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
@@ -192,12 +213,20 @@ jobs:
     name: TheRock CI Summary
     if: always()
     needs:
+      - ci-gate
       - setup
       - therock-ci-linux
       - therock-ci-windows
     runs-on: ubuntu-24.04
     steps:
+      - name: Report skipped workflow
+        if: ${{ needs.ci-gate.outputs.enabled != 'true' }}
+        run: |
+          echo "TheRock CI is skipped by default for push and pull_request events."
+          echo "Use workflow_dispatch or add the ci:single-arch label to a pull request to enable it."
+
       - name: Output failed jobs
+        if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
         run: |
           echo '${{ toJson(needs) }}'
           FAILED_JOBS="$(echo '${{ toJson(needs) }}' \

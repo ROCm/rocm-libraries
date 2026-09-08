@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,6 @@ namespace rocsparse
     typedef rocsparse_status (*bellmm_t)(rocsparse_handle          handle,
                                          rocsparse_operation       trans_A,
                                          rocsparse_operation       trans_B,
-                                         rocsparse_direction       dir_A,
                                          int64_t                   mb,
                                          int64_t                   n,
                                          int64_t                   kb,
@@ -254,7 +253,6 @@ namespace rocsparse
 rocsparse_status rocsparse::bellmm(rocsparse_handle          handle,
                                    rocsparse_operation       trans_A,
                                    rocsparse_operation       trans_B,
-                                   rocsparse_direction       dir_A,
                                    int64_t                   mb,
                                    int64_t                   n,
                                    int64_t                   kb,
@@ -298,7 +296,6 @@ rocsparse_status rocsparse::bellmm(rocsparse_handle          handle,
     RETURN_IF_ROCSPARSE_ERROR(f(handle,
                                 trans_A,
                                 trans_B,
-                                dir_A,
                                 mb,
                                 n,
                                 kb,

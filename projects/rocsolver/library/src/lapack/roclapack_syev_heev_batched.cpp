@@ -30,19 +30,19 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename S, typename W>
+template <typename T, typename S, typename W, typename I>
 rocblas_status rocsolver_syev_heev_batched_impl(rocblas_handle handle,
                                                 const rocblas_evect evect,
                                                 const rocblas_fill uplo,
-                                                const rocblas_int n,
+                                                const I n,
                                                 W A,
-                                                const rocblas_int lda,
+                                                const I lda,
                                                 S* D,
                                                 const rocblas_stride strideD,
                                                 S* E,
                                                 const rocblas_stride strideE,
-                                                rocblas_int* info,
-                                                const rocblas_int batch_count)
+                                                I* info,
+                                                const I batch_count)
 try
 {
     const char* name = (!rocblas_is_complex<T> ? "syev_batched" : "heev_batched");
@@ -59,7 +59,7 @@ try
         return st;
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
+    rocblas_stride shiftA = 0;
 
     // batched execution
     rocblas_stride strideA = 0;
@@ -188,6 +188,94 @@ rocblas_status rocsolver_zheev_batched(rocblas_handle handle,
 {
     return rocsolver::rocsolver_syev_heev_batched_impl<rocblas_double_complex>(
         handle, evect, uplo, n, A, lda, D, strideD, E, strideE, info, batch_count);
+}
+
+rocblas_status rocsolver_ssyev_batched_64(rocblas_handle handle,
+                                          const rocblas_evect evect,
+                                          const rocblas_fill uplo,
+                                          const int64_t n,
+                                          float* const A[],
+                                          const int64_t lda,
+                                          float* D,
+                                          const rocblas_stride strideD,
+                                          float* E,
+                                          const rocblas_stride strideE,
+                                          int64_t* info,
+                                          const int64_t batch_count)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+
+    return rocsolver::rocsolver_syev_heev_batched_impl<float>(
+        handle, evect, uplo, n, A, lda, D, strideD, E, strideE, info, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_dsyev_batched_64(rocblas_handle handle,
+                                          const rocblas_evect evect,
+                                          const rocblas_fill uplo,
+                                          const int64_t n,
+                                          double* const A[],
+                                          const int64_t lda,
+                                          double* D,
+                                          const rocblas_stride strideD,
+                                          double* E,
+                                          const rocblas_stride strideE,
+                                          int64_t* info,
+                                          const int64_t batch_count)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+
+    return rocsolver::rocsolver_syev_heev_batched_impl<double>(
+        handle, evect, uplo, n, A, lda, D, strideD, E, strideE, info, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_cheev_batched_64(rocblas_handle handle,
+                                          const rocblas_evect evect,
+                                          const rocblas_fill uplo,
+                                          const int64_t n,
+                                          rocblas_float_complex* const A[],
+                                          const int64_t lda,
+                                          float* D,
+                                          const rocblas_stride strideD,
+                                          float* E,
+                                          const rocblas_stride strideE,
+                                          int64_t* info,
+                                          const int64_t batch_count)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+
+    return rocsolver::rocsolver_syev_heev_batched_impl<rocblas_float_complex>(
+        handle, evect, uplo, n, A, lda, D, strideD, E, strideE, info, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_zheev_batched_64(rocblas_handle handle,
+                                          const rocblas_evect evect,
+                                          const rocblas_fill uplo,
+                                          const int64_t n,
+                                          rocblas_double_complex* const A[],
+                                          const int64_t lda,
+                                          double* D,
+                                          const rocblas_stride strideD,
+                                          double* E,
+                                          const rocblas_stride strideE,
+                                          int64_t* info,
+                                          const int64_t batch_count)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+
+    return rocsolver::rocsolver_syev_heev_batched_impl<rocblas_double_complex>(
+        handle, evect, uplo, n, A, lda, D, strideD, E, strideE, info, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 } // extern C

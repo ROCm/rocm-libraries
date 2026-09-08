@@ -7,7 +7,7 @@ element-wise quant contracts. Arch-level facts that span multiple targets live
 in ``test/test_rocke_multiarch.py``; this file is the gfx1250-specific surface
 the operator sandboxes rely on.
 
-    PYTHONPATH=Python python3 -m pytest rocke/tests/test_gfx1250_foundation.py
+    PYTHONPATH=python python3 -m pytest rocke/tests/test_gfx1250_foundation.py
 """
 
 from __future__ import annotations

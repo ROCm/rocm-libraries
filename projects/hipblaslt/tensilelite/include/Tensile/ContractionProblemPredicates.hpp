@@ -244,29 +244,57 @@ namespace TensileLite
                                 * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
                                    * value[2] * value[4] * value[3] * problem.d().sizes()[2];
 
-                    if(problem.groupedGemm())
-                        return synchronizerUsage <= 409600 * 16 / problem.groupedGemmCount();
-                    else
-                        return synchronizerUsage <= 409600 * 16;
+                    // Guards the GSU (MBSK) region. A non-grouped GEMM is handed
+                    // the base of the buffer and may use every slot; a grouped
+                    // GEMM is handed the slot at its problem index, so one slot
+                    // bounds it and the group has to fit in the slots that exist.
+                    if(!problem.groupedGemm())
+                        return synchronizerUsage
+                               <= GsuSynchronizerElements * SynchronizerGroupedSlots;
+
+                    return synchronizerUsage <= GsuSynchronizerElements
+                           && problem.groupedGemmCount() <= SynchronizerGroupedSlots;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    uint32_t synchronizerSize = 409600 * 16;
-                    if(problem.groupedGemm())
-                        synchronizerSize /= problem.groupedGemmCount();
+                    // Mirrors operator(): an unsplit GSU never reaches the
+                    // flags, and printing a usage row for it would read as a
+                    // failure next to a passing verdict.
+                    int16_t gsu = problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[5];
+                    if(gsu == -1 || gsu == 1)
+                        return debugEvalCmp(problem, stream, "gsu", gsu, "in", "unsplit", "{-1,1}");
 
-                    return debugEvalCmp(
-                        problem,
-                        stream,
-                        "prob",
-                        (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
-                         * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
-                            * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2],
-                        ">=",
-                        "limit",
-                        synchronizerSize);
+                    uint32_t synchronizerUsage
+                        = (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
+                           * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
+                          * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2];
+
+                    // Report both halves of the grouped condition: a group wider
+                    // than the slots is rejected however small its usage, so a
+                    // usage row alone would read as a pass next to the verdict.
+                    if(problem.groupedGemm())
+                        return debugEvalCmp(problem,
+                                            stream,
+                                            "prob",
+                                            synchronizerUsage,
+                                            "<=",
+                                            "limit",
+                                            GsuSynchronizerElements,
+                                            "gemms",
+                                            problem.groupedGemmCount(),
+                                            "<=",
+                                            "slots",
+                                            SynchronizerGroupedSlots);
+
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        synchronizerUsage,
+                                        "<=",
+                                        "limit",
+                                        GsuSynchronizerElements * SynchronizerGroupedSlots);
                 }
             };
 
@@ -2300,6 +2328,43 @@ namespace TensileLite
                 }
             };
 
+            struct UseGateResidualEqual
+                : public Predicate_CRTP<UseGateResidualEqual, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                UseGateResidualEqual() = default;
+                UseGateResidualEqual(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "UseGateResidual";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.useGateResidual() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob=" << problem.useGateResidual() << ", sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct UseEEqual : public Predicate_CRTP<UseEEqual, ContractionProblemGemm>
             {
                 enum
@@ -2539,6 +2604,59 @@ namespace TensileLite
                 }
             };
 
+            struct GateResidualDataTypeWhiteList
+                : public Predicate_CRTP<GateResidualDataTypeWhiteList, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                GateResidualDataTypeWhiteList() = default;
+
+                std::vector<rocisa::DataType> value;
+
+                static std::string Type()
+                {
+                    return "GateResidualDataTypeWhiteList";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(problem.useGateResidual())
+                    {
+                        for(size_t i = 0; i < value.size(); i++)
+                        {
+                            if(value[i] == problem.gateResidual().dataType())
+                            {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "supported_types=[";
+                    for(size_t i = 0; i < value.size(); i++)
+                    {
+                        details << ToString(value[i]);
+                        if(i < value.size() - 1)
+                            details << ", ";
+                    }
+                    details << "]";
+                    if(problem.useGateResidual())
+                        details << ", prob_type=" << ToString(problem.gateResidual().dataType());
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct BiasSrcWhiteList
                 : public Predicate_CRTP<BiasSrcWhiteList, ContractionProblemGemm>
             {
@@ -2731,6 +2849,85 @@ namespace TensileLite
                 {
                     return debugEvalCmp(
                         problem, stream, "prob", problem.swizzleTensorB(), "==", "sol", value);
+                }
+            };
+
+            struct FusedGemmA2A : public Predicate_CRTP<FusedGemmA2A, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                FusedGemmA2A() = default;
+                FusedGemmA2A(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "FusedGemmA2A";
+                }
+
+                bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.fusedGemmA2A() == value;
+                }
+
+                bool debugEval(ContractionProblemGemm const& problem,
+                               std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.fusedGemmA2A(), "==", "sol", value);
+                }
+            };
+
+            // value is the solution's MacroTile0.
+            struct FusedA2ATileDivisible
+                : public Predicate_CRTP<FusedA2ATileDivisible, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int64_t value;
+
+                FusedA2ATileDivisible() = default;
+                FusedA2ATileDivisible(int64_t value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "FusedA2ATileDivisible";
+                }
+
+                bool divisible(ContractionProblemGemm const& problem) const
+                {
+                    if(!problem.fusedGemmA2A())
+                        return true;
+                    if(value <= 0 || problem.fusedA2AWorld() == 0)
+                        return false;
+                    const int64_t am    = problem.fusedA2AExtent();
+                    const int64_t width = value * (int64_t)problem.fusedA2AWorld();
+                    return am % width == 0 && (int64_t)problem.freeSizeA(0) % value == 0;
+                }
+
+                bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return divisible(problem);
+                }
+
+                bool debugEval(ContractionProblemGemm const& problem,
+                               std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", divisible(problem), "==", "sol", true);
                 }
             };
 
@@ -3023,69 +3220,6 @@ namespace TensileLite
                 {
                     return debugEvalCmp(
                         problem, stream, "prob", problem.mxTypeB(), "==", "sol", value);
-                }
-            };
-
-            struct ClusterDimCheck
-                : public Predicate_CRTP<ClusterDimCheck, ContractionProblemGemm>
-            {
-                enum
-                {
-                    HasIndex = false,
-                    HasValue = true
-                };
-                size_t             index;
-                std::array<int, 5> value;
-
-                ClusterDimCheck() = default;
-                ClusterDimCheck(size_t index, std::array<int, 5> value)
-                    : index(index)
-                    , value(value)
-                {
-                }
-
-                static std::string Type()
-                {
-                    return "ClusterDimCheck";
-                }
-                virtual bool operator()(ContractionProblemGemm const& problem) const override
-                {
-                    int gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : value[2];
-                    gsu     = gsu > 1 ? gsu : 1;
-                    int numWG_x = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
-                                  );
-                    int numWG_y = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
-                                  ) * gsu;
-
-                    bool divisible_x = (numWG_x % value[3]) == 0;
-                    bool divisible_y = (numWG_y % value[4]) == 0;
-
-                    return (divisible_x and divisible_y);
-                }
-                virtual bool debugEval(ContractionProblemGemm const& problem,
-                                       std::ostream&                 stream) const override
-                {
-                    int gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : value[2];
-                    gsu     = gsu > 1 ? gsu : 1;
-                    int numWG_x = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
-                                  );
-                    int numWG_y = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
-                                  ) * gsu;
-
-                    std::vector<int> numWG = {numWG_x, numWG_y};
-                    std::vector<int> clusterDim = {value[3], value[4]};
-
-                    return debugEvalCmp(problem,
-                                        stream,
-                                        "prob's workgroup number [x, y]",
-                                        numWG,
-                                        "%",
-                                        "cluster dimension [x, y]",
-                                        clusterDim);
                 }
             };
         } // namespace Contraction

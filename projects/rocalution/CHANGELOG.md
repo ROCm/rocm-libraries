@@ -7,6 +7,9 @@ Full documentation forrocALUTION is available at [https://rocm.docs.amd.com/proj
 ### Added
 * Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of rocALUTION.
 
+### Resolved issues
+* Fixed a GPU memory access fault in the Smoothed-Aggregation AMG preconditioner on wave32 (RDNA) hardware.
+
 ## rocALUTION 4.0.1 for ROCm 7.1.0
 
 ### Added

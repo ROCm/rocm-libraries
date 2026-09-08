@@ -18,6 +18,7 @@
     'DataTypeMXSB',
     'DestDataType',
     'F32XdlMathOp',
+    'FusedGemmA2A',
     'Gradient',
     'GroupedGemm',
     'HighPrecisionAccumulate',
@@ -41,6 +42,7 @@
     'SetConstStrideA',
     'SetConstStrideB',
     'SetConstStrideBias',
+    'SetConstStrideGate',
     'SilentHighPrecisionAccumulate',
     'Sparse',
     'StochasticRounding',
@@ -54,6 +56,7 @@
     'UseBeta',
     'UseBias',
     'UseE',
+    'UseGateResidual',
     'UseInitialStridesAB',
     'UseInitialStridesCD',
     'UseScaleAB',
@@ -114,6 +117,9 @@
     ]),
     'F32XdlMathOp': list([
       'int',
+    ]),
+    'FusedGemmA2A': list([
+      'bool',
     ]),
     'Gradient': list([
       'bool',
@@ -184,6 +190,9 @@
     'SetConstStrideBias': list([
       'list',
     ]),
+    'SetConstStrideGate': list([
+      'list',
+    ]),
     'SilentHighPrecisionAccumulate': list([
       'bool',
     ]),
@@ -221,6 +230,9 @@
       'int',
     ]),
     'UseE': list([
+      'bool',
+    ]),
+    'UseGateResidual': list([
       'bool',
     ]),
     'UseInitialStridesAB': list([

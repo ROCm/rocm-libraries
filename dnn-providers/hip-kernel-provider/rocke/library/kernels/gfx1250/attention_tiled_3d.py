@@ -1394,7 +1394,7 @@ def build_unified_attention_reduce_tiled(
         s = b.add(lane, b.const_i32(i * WAVE))
         valid = b.cmp_lt(s, b.const_i32(NUM_SEG))
         s_safe = b.select(valid, s, b.const_i32(0))
-        m = b.global_load(segm_max, b.add(ml_base, s_safe), F32, align=4)
+        m = b.global_load_f32(segm_max, b.add(ml_base, s_safe))
         local_max = b.fmax(local_max, b.select(valid, m, neg_inf))
     overall_max = wave_reduce_max(b, local_max, wave_size=WAVE, lanes_per_row=WAVE)
 
@@ -1404,9 +1404,9 @@ def build_unified_attention_reduce_tiled(
         s = b.add(lane, b.const_i32(i * WAVE))
         valid = b.cmp_lt(s, b.const_i32(NUM_SEG))
         s_safe = b.select(valid, s, b.const_i32(0))
-        m = b.global_load(segm_max, b.add(ml_base, s_safe), F32, align=4)
-        l = b.global_load(
-            segm_expsum, b.add(ml_base, s_safe), F32, align=4
+        m = b.global_load_f32(segm_max, b.add(ml_base, s_safe))
+        l = b.global_load_f32(
+            segm_expsum, b.add(ml_base, s_safe)
         )  # noqa: E741 -- l = per-segment expsum load
         m_finite = b.land(b.fcmp("oeq", m, m), b.fcmp("ogt", m, neg_inf))
         f = b.select(m_finite, b.exp2(b.fsub(m, overall_max)), zero_f)

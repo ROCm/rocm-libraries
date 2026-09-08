@@ -59,6 +59,19 @@ add_test_plugin(${TEST_GOOD_PLUGIN_NAME} TestGoodPlugin.cpp)
 # test_execute_fails_plugin is a plugin that fails during execution
 add_test_plugin(${TEST_EXECUTE_FAILS_PLUGIN_NAME} TestExecuteFailsPlugin.cpp)
 
+# test_hashed_name_plugin is a well-behaved plugin whose engine id is the hash of its own engine
+# name, mirroring what HIPDNN_REGISTER_ENGINE does for production plugins. It lives in custom/ so
+# that default/ keeps holding exactly one plugin.
+add_test_plugin(${TEST_HASHED_NAME_PLUGIN_NAME} TestHashedNamePlugin.cpp)
+
+# test_lying_engine_name_plugin exports the optional engine-name entry point and answers it
+# badly, one malformed answer per engine id, so the host's rejection branches are reachable.
+add_test_plugin(${TEST_LYING_ENGINE_NAME_PLUGIN_NAME} TestLyingEngineNamePlugin.cpp)
+
+# test_mismatched_name_plugin names its engine well but hardcodes an id the name does not hash
+# back to.
+add_test_plugin(${TEST_MISMATCHED_NAME_PLUGIN_NAME} TestMismatchedNamePlugin.cpp)
+
 # test_no_applicable_engines_a/b_plugin is a plugin that reports no applicable engines
 add_test_plugin(${TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME} TestNoApplicableEnginesAPlugin.cpp)
 add_test_plugin(${TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME} TestNoApplicableEnginesBPlugin.cpp)
@@ -97,6 +110,13 @@ add_test_plugin(${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET} TestMalformedVers
 
 # Version-zero fake reports a parseable but too-low API version.
 add_test_plugin(${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET} TestVersionZeroPlugin.cpp)
+
+# Runtime pass-by-value fake: reports K_PASS_BY_VALUE_MIN_API_VERSION ("1.2.0").
+add_test_plugin(${HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET} TestPassByValuePlugin.cpp)
+
+# Runtime pass-by-value RECORDER fake: records the scalar it resolves from
+# device_buffers at execute, for host-scalar delivery verification.
+add_test_plugin(${HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET} TestPassByValueRecorderPlugin.cpp)
 
 # test_autotune_plugin supports the autotune workflow with global.benchmarking and test knobs
 add_test_plugin(${TEST_AUTOTUNE_PLUGIN_NAME} TestAutotunePlugin.cpp)

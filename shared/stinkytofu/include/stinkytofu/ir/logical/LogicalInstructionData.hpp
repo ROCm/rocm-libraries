@@ -39,8 +39,24 @@ struct MFMAData {
     bool mfma1k;           ///< Whether this is a _1k variant
     bool neg;              ///< Negate operands
 
+    /// Per-matrix input format tokens for gfx1250 f8f6f4-family WMMA, e.g.
+    /// "MATRIX_FMT_FP6" (empty when the instruction needs no matrix_*_fmt).
+    std::string matrixAFmt;
+    std::string matrixBFmt;
+
+    /// gfx1250 forceScaledWMMA workaround: emit the scale-instruction mnemonic
+    /// (v_wmma_scale_*). rocisa gates this only on isaVersion (mfma.hpp
+    /// forceScaledWMMA()), independent of the assembler f8f6f4 capability.
+    bool scaled;
+
+    /// Append the two trailing zero scale source operands (", 0, 0"). rocisa
+    /// only emits these under the HasWMMA_f8f6f4 branch of getArgStr, so this
+    /// is tracked separately from `scaled` (which controls only the mnemonic).
+    bool scaleOperands;
+
     MFMAData(const std::string& instType_, const std::string& accType_, int m_, int n_, int k_,
-             int blocks_, bool mfma1k_, bool neg_ = false)
+             int blocks_, bool mfma1k_, bool neg_ = false, const std::string& matrixAFmt_ = "",
+             const std::string& matrixBFmt_ = "", bool scaled_ = false, bool scaleOperands_ = false)
         : instType(instType_),
           accType(accType_),
           m(m_),
@@ -48,7 +64,11 @@ struct MFMAData {
           k(k_),
           blocks(blocks_),
           mfma1k(mfma1k_),
-          neg(neg_) {}
+          neg(neg_),
+          matrixAFmt(matrixAFmt_),
+          matrixBFmt(matrixBFmt_),
+          scaled(scaled_),
+          scaleOperands(scaleOperands_) {}
 };
 
 /**
@@ -73,10 +93,13 @@ struct MXMFMAData {
     int block;                    ///< Block size
     bool reuseA;                  ///< Matrix A reuse flag
     bool reuseB;                  ///< Matrix B reuse flag
+    std::string matrixAFmt;       ///< Per-matrix input format for A (e.g. MATRIX_FMT_FP4)
+    std::string matrixBFmt;       ///< Per-matrix input format for B (e.g. MATRIX_FMT_FP4)
 
     MXMFMAData(const std::string& instType_, const std::string& accType_,
                const std::string& mxScaleATypeStr_, const std::string& mxScaleBTypeStr_, int m_,
-               int n_, int k_, int block_, bool reuseA_, bool reuseB_)
+               int n_, int k_, int block_, bool reuseA_, bool reuseB_,
+               const std::string& matrixAFmt_ = "", const std::string& matrixBFmt_ = "")
         : instType(instType_),
           accType(accType_),
           mxScaleATypeStr(mxScaleATypeStr_),
@@ -86,7 +109,9 @@ struct MXMFMAData {
           k(k_),
           block(block_),
           reuseA(reuseA_),
-          reuseB(reuseB_) {}
+          reuseB(reuseB_),
+          matrixAFmt(matrixAFmt_),
+          matrixBFmt(matrixBFmt_) {}
 };
 
 /**
@@ -123,6 +148,32 @@ struct SMFMAData {
 // ========================================================================
 // Control Flow
 // ========================================================================
+
+/**
+ * @brief Data for SWaitAlu instructions (logical IR)
+ *
+ * Carries the 7 optional dependency counter fields.
+ * A field value of -1 means "not specified" (omit from emitted instruction).
+ */
+struct SWaitAluLogicalData {
+    int va_vdst;
+    int va_sdst;
+    int va_ssrc;
+    int hold_cnt;
+    int vm_vsrc;
+    int va_vcc;
+    int sa_sdst;
+
+    SWaitAluLogicalData(int va_vdst_ = -1, int va_sdst_ = -1, int va_ssrc_ = -1, int hold_cnt_ = -1,
+                        int vm_vsrc_ = -1, int va_vcc_ = -1, int sa_sdst_ = -1)
+        : va_vdst(va_vdst_),
+          va_sdst(va_sdst_),
+          va_ssrc(va_ssrc_),
+          hold_cnt(hold_cnt_),
+          vm_vsrc(vm_vsrc_),
+          va_vcc(va_vcc_),
+          sa_sdst(sa_sdst_) {}
+};
 
 /**
  * @brief Data for Label instructions (logical IR)

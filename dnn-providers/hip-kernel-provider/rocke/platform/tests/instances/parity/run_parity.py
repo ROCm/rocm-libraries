@@ -28,8 +28,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # parity -> instances -> tests -> rocKE
-INCLUDE = ROCKE / "Cpp" / "include"
-PYROOT = ROCKE / "Python"
+INCLUDE = ROCKE / "cpp" / "include"
+PYROOT = ROCKE / "python"
 KERNELS = ["scalar", "memory", "forloop", "vector"]
 
 

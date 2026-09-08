@@ -599,6 +599,7 @@ using FieldMap = std::unordered_map<std::string, std::string>;
 /// not a reliable indicator).
 bool hasMatrixFmtFields(const FieldMap& fields) {
     return fields.count("matrix_a_fmt") || fields.count("matrix_b_fmt") ||
+           fields.count("matrix_a_scale") || fields.count("matrix_b_scale") ||
            fields.count("matrix_a_scale_fmt") || fields.count("matrix_b_scale_fmt") ||
            fields.count("matrix_a_reuse") || fields.count("matrix_b_reuse");
 }
@@ -869,6 +870,10 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         // form like "MATRIX_FMT_FP8" directly).
         if (fields.contains("matrix_a_fmt")) modFields["fmtA"] = fields["matrix_a_fmt"];
         if (fields.contains("matrix_b_fmt")) modFields["fmtB"] = fields["matrix_b_fmt"];
+        // MX scale-select (matrix_a_scale / matrix_b_scale) maps to the raw
+        // integer fields scaleSelA / scaleSelB on MatrixFmtModifiers.
+        if (fields.contains("matrix_a_scale")) modFields["scaleSelA"] = fields["matrix_a_scale"];
+        if (fields.contains("matrix_b_scale")) modFields["scaleSelB"] = fields["matrix_b_scale"];
         if (fields.contains("matrix_a_scale_fmt"))
             modFields["scaleFmtA"] = fields["matrix_a_scale_fmt"];
         if (fields.contains("matrix_b_scale_fmt"))
@@ -1048,9 +1053,10 @@ static std::optional<int> parseDirectiveInt(const std::string& line, const std::
     return v;
 }
 
-/// Determine the isaVersion array from the arch ID.
-static std::array<int, 3> archToIsaVersion(GfxArchID arch) {
-    if (arch == GfxArchID::Gfx1250) return {12, 5, 0};
+/// The isaVersion array to emit. Constant while gfx12.5 is the only family built.
+static std::array<int, 3> archToIsaVersion(GfxArchID /*arch*/) {
+    // Every gfx12.5 stepping reports {12,5,0}. Branching on a specific enumerator
+    // would not compile in a build that selected the other stepping.
     return {12, 5, 0};
 }
 
@@ -1579,6 +1585,30 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
             withComment += lineComment;
             return makeTextBlock(withComment);
         };
+
+        // Local/compiler-generated labels are dot-prefixed (e.g. ".LBB0_1:",
+        // ".Ltmp5:"). Detect these before the general directive branch below,
+        // since a bare "<dotted-identifier>:" line is a label, not a directive.
+        if (line[0] == '.' && line.back() == ':') {
+            std::string body = line.substr(1, line.size() - 2);
+            bool isLabelBody =
+                !body.empty() &&
+                (std::isalpha(static_cast<unsigned char>(body[0])) || body[0] == '_');
+            for (char c : body) {
+                if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '$' &&
+                    c != '.') {
+                    isLabelBody = false;
+                    break;
+                }
+            }
+            if (isLabelBody) {
+                std::string labelName = line.substr(0, line.size() - 1);
+                auto labelInst = std::make_unique<ParsedInstruction>(labelName, true);
+                labelInst->comment = lineComment;
+                block->instructions.push_back(std::move(labelInst));
+                continue;
+            }
+        }
 
         // Directives: lines starting with '.'
         if (line[0] == '.') {

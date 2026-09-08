@@ -36,6 +36,12 @@ FOLDER_PATH = os.path.join(_SCRIPT_DIR, "..", "gtest")
 #              (keep the list sorted to min. git conflicts)
 IGNORE_LIST = {
     "binary_tensor_ops.cpp",
+    # bn_activ_infer / bn_fwd_infer instantiate their suites through the
+    # BN_*_INFER_TIERS macro, so the INSTANTIATE_TEST_SUITE_P calls are hidden
+    # behind line continuations the regex cannot parse (same reason as the
+    # *_tensor_ops.cpp entries).
+    "bn_activ_infer.cpp",
+    "bn_fwd_infer.cpp",
     "graphapi_conv_bias_res_add_activ_fwd.cpp",
     "graphapi_operation_rng.cpp",
     "layout_transpose.cpp",

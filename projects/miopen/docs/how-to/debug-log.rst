@@ -95,7 +95,7 @@ Filtering by algorithm
 --------------------------------------------------------------------------------------------------------------
 
 These variables control the sets (families) of convolution solutions. For example, the direct algorithm
-is implemented in several solutions that use OpenCL and GCN assembly. The corresponding variable
+is implemented in several solutions that use GCN assembly. The corresponding variable
 is used to disable them.
 
 * ``MIOPEN_DEBUG_CONV_FFT``: FFT convolution algorithm.
@@ -112,9 +112,6 @@ Filtering by build method
   normalization.
 * ``MIOPEN_DEBUG_HIP_KERNELS``: Convolution kernels written in HIP. These implement the
   ImplicitGemm algorithm.
-* ``MIOPEN_DEBUG_OPENCL_CONVOLUTIONS``: Convolution kernels written in OpenCL. This only
-  affects convolutions.
-
 Filtering out all but one solution
 --------------------------------------------------------------------------------------------------------------
 
@@ -249,8 +246,6 @@ Implicit GEMM solutions:
     ``ConvHipImplicitGemmV4R4Fwd``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V1R1`` --
     ``ConvHipImplicitGemmBwdDataV1R1``
-  * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V4R1`` --
-    ``ConvHipImplicitGemmBwdDataV4R1``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R1`` --
     ``ConvHipImplicitGemmV4R1WrW``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R4`` --
@@ -259,8 +254,6 @@ Implicit GEMM solutions:
     ``ConvHipImplicitGemmForwardV4R4Xdlops``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_FWD_V4R5_XDLOPS`` --
     ``ConvHipImplicitGemmForwardV4R5Xdlops``
-  * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V1R1_XDLOPS`` --
-    ``ConvHipImplicitGemmBwdDataV1R1Xdlops``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V4R1_XDLOPS`` --
     ``ConvHipImplicitGemmBwdDataV4R1Xdlops``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R4_XDLOPS`` --
@@ -386,14 +379,6 @@ triaging possible problems related to the CO version:
 * ``MIOPEN_DEBUG_AMD_ROCM_METADATA_PREFER_OLDER``: This variable only affects assembly
   kernels and only applies when ROCm supports both v2 and v3 COs. By default, the newer
   format is used (v3 CO). When this variable is enabled, the behavior is reversed.
-* ``MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_VERSION``: Enforces the CO format for OpenCL
-  kernels. This only works with the HIP backend, when ``cmake ... -DMIOPEN_BACKEND=HIP...`` is used.
-
-  * Unset - Automatically detects the required CO version. This is the default.
-  * ``2``: Always build to v2 CO.
-  * ``3``: Always build to v3 CO.
-  * ``4``: Always build to v4 CO.
-
 Winograd multi-pass maximum workspace throttling
 -------------------------------------------------------------------------------------------------------------
 

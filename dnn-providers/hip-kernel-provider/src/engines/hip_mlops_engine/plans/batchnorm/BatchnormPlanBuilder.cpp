@@ -27,14 +27,6 @@ std::tuple<const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttribu
     getBatchnormBackwardFusionNodeAttrs(
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
-    if(opGraph.nodeCount() != 3)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm fusion requires exactly 3 nodes. Graph has "
-                + std::to_string(opGraph.nodeCount()) + " nodes");
-    }
-
     const auto& bnInfAttr
         = opGraph.getNodeWrapper(0)
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes>();
@@ -325,6 +317,15 @@ bool BatchnormPlanBuilder::isApplicable(
     [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    // Execute-time override shapes can diverge from the compile-time dims this
+    // builder matched exactly; the plan bakes those dims into the compiled kernel
+    // launch, so decline rather than risk a mismatch (RFC 0008 §4.6).
+    if(opGraph.getGraph().is_override_shape_enabled())
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Batchnorm plan builder does not support override shapes");
+        return false;
+    }
+
     auto anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {

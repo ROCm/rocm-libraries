@@ -67,7 +67,7 @@ def create_base_kernel():
         "TransposeLDS": 0,
         "ForceUnrollSubIter": False,
         "SwapGlobalReadOrder": False, # For asserting it gets set
-        "UsePLRPack": False, # For asserting it gets set
+        "UsePLRPack": 0, # For asserting it gets set
         "UseF32XEmulation": False,
         "VectorWidthA": 1,
         "VectorWidthB": 1,
@@ -502,7 +502,7 @@ class TestCustomScheduleBF16:
         mi = [16,16,32,1]
         mi_wave_group = [2, 2]
         mi_wave_tile = (mt0 // (mi[0] * mi_wave_group[0]), mt1 // (mi[1] * mi_wave_group[1]))
-        NT = (not transA and transB)
+        NT = int(not transA and transB)
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
         update_kernel(kernel, {
@@ -522,7 +522,7 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == (2 if NT else 1)
         assert schedule_info.numMfma == 56
-        assert bool(kernel.get("SwapGlobalReadOrder", False)) == NT
+        assert bool(kernel.get("SwapGlobalReadOrder", 0)) == NT
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 

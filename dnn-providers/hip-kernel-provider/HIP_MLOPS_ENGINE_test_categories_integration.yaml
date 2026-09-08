@@ -1,0 +1,121 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider external integration Test Categories Configuration.
+#
+# This file is applied to hipdnn_integration_tests when it is run against the
+# hip-kernel-provider plugin, pinned to HIP_MLOPS_ENGINE via --test-engine. These
+# patterns match hipdnn_integration_tests GTest names, not hip_kernel_provider_tests
+# or hip_kernel_provider_integration_tests names.
+#
+# Tier pattern shape mirrors miopen-provider/test_categories_integration.yaml:
+#   - "quick_*"/"standard_*" match the bundle suites (integration-test-bundles/
+#     {quick,standard}/...), whose names mirror the on-disk tier directory;
+#     bundles are the CI driver. "Smoke/*" (slash) matches the always-built,
+#     non-graph C++ parameterised suites -- most Smoke/* graph tests only build
+#     under -DBUILD_CPP_GRAPH_TESTS=ON (see that flag in
+#     dnn-providers/integration-tests/src/integration-tests/CMakeLists.txt),
+#     but keep the pattern regardless so a graph-tests-enabled build still
+#     picks them up. GTest treats '/' and '_' as literal chars, so both
+#     pattern shapes are needed. "*" (comprehensive/full) also matches the
+#     full-tier bundles (integration-test-bundles/full/...).
+#
+# hipdnn_integration_tests covers ops (conv, matmul, sdpa, reduction, ...) that
+# HIP_MLOPS_ENGINE doesn't implement; the harness's generic engine-support check
+# (checkEngineSupportOrSkip / verifyGraph) skips those automatically, so the
+# patterns below are safe even though they aren't narrowed to HIP_MLOPS_ENGINE's
+# actual op coverage (batchnorm, layernorm, RMSNorm, resample) -- unsupported
+# cases are skipped by the harness rather than filtered out here.
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  quick:
+    description: "Fast external integration coverage: quick-tier bundle sweeps plus always-built C++ tests"
+    test_patterns:
+      - "quick_*"
+      - "Smoke/*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard external integration coverage: quick coverage plus standard-tier bundles"
+    test_patterns:
+      - "quick_*"
+      - "standard_*"
+      - "Smoke/*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Nightly comprehensive external integration coverage"
+    test_patterns:
+      - "*"
+    # Layernorm backward is always built (HIPDNN_IT_ALWAYS_BUILT_SOURCES), so
+    # unlike the other C++ graph suites it runs in CI. At 2741 s on gfx1151 it
+    # timed this job out: ROCm/rocm-libraries#11529. Cost is host-side
+    # verification, ~450 ns per tensor element regardless of dtype, so a few big
+    # shapes repeated over 7 dtype fixtures x 2 layouts dominate. Excluding them
+    # brings it to 42 s measured; the "full" tier still runs everything.
+    #
+    # Explicit list because YAML cannot concatenate an aliased sequence, hence
+    # the repeated "*DISABLED*" instead of *common_excludes.
+    exclude:
+      - "*DISABLED*"
+      # 1162 s: batch-256/512 volumetric shapes, ~5-29 s a case. The engine's
+      # test-config TOML aims to skip these but its pattern is the forward
+      # suite's "Full5dLargeBatch/" prefix, which the always-built backward
+      # suites do not use, so they ran anyway.
+      - "Full/*IntegrationGpuLayernormBackwardLargeBatch*"
+      # 1274 s: 19 production shapes x 2 bias x 2 layouts x 7 fixtures. No dtype
+      # subset fits -- each fixture alone is ~180 s.
+      - "Full/*IntegrationGpuLayernormBackward*5D*"
+      # One shape, {32,32,14,25,59} (21.1M el), is 263 s of Smoke 5D's 288 s; the
+      # other 22 cases cost 24 s, so only these four go.
+      # Index rather than name because the shape is not in the test name:
+      # Combine(2 layouts, getLayernorm5DTestCases()) gives index = layout * 13 +
+      # case, and this shape is cases 10 and 12 in common/LayernormCommon.hpp.
+      # Re-derive if that list changes -- the indices shift silently.
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/10"
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/12"
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/23"
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/25"
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete external integration coverage"
+    test_patterns:
+      - "*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier: quick-tier bundle sweeps plus Smoke GPU cases"
+    test_patterns:
+      - "quick_*"
+      - "Smoke/*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 1200
+    standard: 2700
+    comprehensive: 7200
+    full: 28800
+    ffm-quick: 7200  # 2 hours

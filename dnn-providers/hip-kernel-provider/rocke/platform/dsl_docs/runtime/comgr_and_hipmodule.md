@@ -80,6 +80,12 @@ For the kernels in `rocke`, most performance comes from IR-level decisions (atom
 
 ## Adding Compiler Options
 
+For durable scheduler tuning, attach a validated `CodegenPolicy` to the kernel
+and compile through `compile_kernel()`. See
+[`../optimization/scheduler-policy.md`](../optimization/scheduler-policy.md).
+The policy is emitted as an `amdgpu-sched-strategy` LLVM function attribute and
+survives the serialized-IR handoff to either LLVM lowerer.
+
 `build_hsaco_from_llvm_ir(ir_text, options=[...])` passes any list of strings to `amd_comgr_action_info_set_option_list`. Useful examples:
 
 ```text
@@ -89,7 +95,9 @@ For the kernels in `rocke`, most performance comes from IR-level decisions (atom
 "-Wl,--strip-debug"
 ```
 
-This is not currently exposed through `compile_kernel`; call `build_hsaco_from_llvm_ir` directly when you need custom options.
+Arbitrary options are intentionally not exposed through `compile_kernel`; call
+`build_hsaco_from_llvm_ir` directly for isolated compiler diagnostics. Raw
+options are not automatically validated or included in artifact identity.
 
 ## HIP Module Layer
 
@@ -166,7 +174,7 @@ extra[] = {
 }
 ```
 
-`args_bytes` is the packed arg buffer (built by `runtime/torch_module.py::pack_args` from the signature dict list). For an `(A, B, C, M, N, K)` GEMM:
+`args_bytes` is the packed arg buffer (built by `runtime/packing.py::pack_args` from the signature dict list). For an `(A, B, C, M, N, K)` GEMM:
 
 ```text
 struct.pack("<QQQiii", A_dev, B_dev, C_dev, M, N, K)
@@ -193,7 +201,7 @@ For everyday DSL use, `KernelLauncher` and `compile_kernel` are the right abstra
 - You need fine-grained event control across multiple streams.
 - You're debugging a launch failure and want to inspect packed args + grid + block + stream manually.
 
-Numpy-only paths (the manifest runner) go through `Runtime.alloc` / `memcpy_h2d` / `launch` / `memcpy_d2h` directly with `struct.pack`-built args. Torch paths go through `runtime/torch_module.pack_args` + `KernelLauncher`. Both end up at the same `hipModuleLaunchKernel`.
+Numpy-only paths (the manifest runner) go through `Runtime.alloc` / `memcpy_h2d` / `launch` / `memcpy_d2h` directly with `struct.pack`-built args. Torch paths go through `runtime/packing.pack_args` + `KernelLauncher`. Both end up at the same `hipModuleLaunchKernel`.
 
 ## Common Failure Modes
 

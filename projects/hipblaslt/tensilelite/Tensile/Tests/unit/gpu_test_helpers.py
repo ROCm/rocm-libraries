@@ -6,6 +6,7 @@
 #   - TileConfig dataclass for parameterized tile configurations
 #   - Mock/kernel creation helpers (_mock_dtype, _create_kernel, create_writer)
 #   - rocIsa initialization (init_rocisa)
+#   - Scoped rocIsa state preservation (preserve_rocisa_kernel_state)
 #   - Unified kernel asm generator (generate_kernel_asm)
 #   - Prologue builder (generate_load_params) and export epilogue (generate_export_epilogue)
 #   - Assembly & GPU execution (assemble_kernel, assemble_and_run)
@@ -49,6 +50,7 @@ from rocisa.enum import RegisterType
 from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
 from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
 from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment, localReadDoSubtile
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 # ---- GPU target detection ----
 def _detect_gfx_target():
@@ -87,10 +89,31 @@ def _detect_gfx_target():
 # ---- Constants ----
 GFX_TARGET = _detect_gfx_target()
 HAS_GFX950 = GFX_TARGET == "gfx950"
-requires_gpu = pytest.mark.skipif(
-    hip is None or not HAS_GFX950,
-    reason=f"requires hip module and gfx950 (found hip={'yes' if hip else 'no'}, arch={GFX_TARGET})",
-)
+# GPU tests carry two composed marks so the tiering filters work correctly:
+#   - `gpu`   : selection marker so `pytest -m "not gpu"` (quick/standard tiers)
+#               deselects these tests at collection time.
+#   - `skipif`: runtime hardware guard so comprehensive/full tiers still skip
+#               when hip or a gfx950 device is unavailable.
+# Note: `pytest.mark.gpu(pytest.mark.skipif(...))` does NOT stack — the inner
+# MarkDecorator is swallowed as an argument and lost — so apply them separately.
+GPU_MARKS = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        hip is None or not HAS_GFX950,
+        reason=f"requires hip module and gfx950 (found hip={'yes' if hip else 'no'}, arch={GFX_TARGET})",
+    ),
+]
+
+
+def requires_gpu(func):
+    """Apply both the ``gpu`` selection marker and the hardware ``skipif``.
+
+    Usable as a decorator (``@requires_gpu``). For module-level marking, assign
+    ``pytestmark = GPU_MARKS`` directly (a function cannot be used there).
+    """
+    for mark in GPU_MARKS:
+        func = mark(func)
+    return func
 WAVESIZE   = 64
 NUM_WAVES  = 4
 NUM_THREADS = WAVESIZE * NUM_WAVES  # 256
@@ -177,6 +200,8 @@ def _create_kernel(cfg, mi_wave_group=None, inst_k=32, bpe=2):
             "DataTypeA": dtype,
             "DataTypeB": dtype,
             "ComputeDataType": _mock_dtype(4),
+            # Non-fused store-D default; GlobalWriteBatch reads this key unconditionally.
+            "FusedGemmA2A": False,
         },
     }
 

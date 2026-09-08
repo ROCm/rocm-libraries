@@ -1,0 +1,57 @@
+{
+  "_comment": "MLA prefill shapes for gfx950. seqlen_q = seqlen_k (full causal prefill). Covers DeepSeek V2/V3/V3.1/R1 (Hq=128) and Kimi-K2 (Hq=64). Canonical MLA geometry: qk_nope=128, qk_rope=64, v_head_dim=128, kv_lora_rank=512, q_lora_rank=1536, Hkv=1. block_size=16. fp8 variants included for the Phase 2 fp8 bench (gfx950+ only; see DESIGN.md S6 dtype plan).",
+  "_dtype_note": "The fp8_e4m3 entries are Phase 2 (see DESIGN.md S6 dtype plan); Phase 1 is bf16 only. The existing prefill harnesses (benchmark_prefill2d_live.py, both arches) do not read this field at all: they load ndjson UAShape records via _ua_shape_utils.load_shapes and key dtype off the torch dtype strings q_dtype/k_dtype, with is_fp8 = ('float8' in shape.k_dtype); filter_prefill_2d drops non-bf16/fp16 shapes rather than defaulting them. This 'dtype' key is metadata for a future MLA runner. Do NOT run the fp8 entries against a bf16/fp16 harness and read the result as an fp8 number.",
+  "_harness_note": "These shapes are a specification for a future MLA runner, not runnable input for the current one. The existing prefill harness loads ndjson UAShape records via _ua_shape_utils.load_shapes, not this nested-object JSON, so it parses zero shapes from this file and does so silently (undecodable lines are skipped). It also requires a per-shape 'head_size', which MLA has no single value for: d_nope+d_rope=192 for the score, d_V=128 for the output. Wiring MLA shapes into a runner is part of the kernel deliverable (DESIGN.md S9).",
+  "_batch_note": "The batch axis here is deliberately narrower than the decode files' B in {1,4,8,32}, and it is measuring a different thing. Decode needs batch because the pre-step is batch-invariant while the flash loop is not, so the two crossovers of DESIGN.md S4 only appear across B. Prefill has no such crossover: its pre-kernel amortizes over total_q = batch * seqlen_q, so batch and seqlen_q are interchangeable for it and a uniform-length batch sweep re-measures points the seqlen sweep already covers, at multiplied cost. What batch does buy at prefill is coverage of the packed-varlen path -- cu_seqlens_q/cu_seqlens_k prefix sums and the per-sequence causal mask -- which B=1 exercises only trivially. Hence B=4 at the two short lengths, where that coverage is cheapest, and B=1 above. The batched entries are bf16 only: fp8 is Phase 2, and crossing the two axes would double a set that is already specification rather than runnable input. Mixed sequence lengths within a batch are the case that most needs covering and this schema cannot express them; that belongs with the runner work (DESIGN.md S9).",
+  "mla_geometry": {
+    "qk_nope_dim": 128,
+    "qk_rope_dim": 64,
+    "v_head_dim": 128,
+    "kv_lora_rank": 512,
+    "q_lora_rank": 1536,
+    "num_kv_heads": 1
+  },
+  "models": [
+    {
+      "model": "DeepSeek-V3-R1",
+      "num_query_heads": 128,
+      "num_kv_heads": 1,
+      "block_size": 16,
+      "shapes": [
+        {"batch": 1, "seqlen_q": 512,  "seqlen_k": 512,  "dtype": "bf16",     "label": "ds_v3_prefill_s512"},
+        {"batch": 1, "seqlen_q": 1024, "seqlen_k": 1024, "dtype": "bf16",     "label": "ds_v3_prefill_s1024"},
+        {"batch": 1, "seqlen_q": 2048, "seqlen_k": 2048, "dtype": "bf16",     "label": "ds_v3_prefill_s2048"},
+        {"batch": 1, "seqlen_q": 4096, "seqlen_k": 4096, "dtype": "bf16",     "label": "ds_v3_prefill_s4096"},
+        {"batch": 1, "seqlen_q": 8192, "seqlen_k": 8192, "dtype": "bf16",     "label": "ds_v3_prefill_s8192"},
+        {"batch": 1, "seqlen_q": 512,  "seqlen_k": 512,  "dtype": "fp8_e4m3", "label": "ds_v3_fp8_prefill_s512"},
+        {"batch": 1, "seqlen_q": 1024, "seqlen_k": 1024, "dtype": "fp8_e4m3", "label": "ds_v3_fp8_prefill_s1024"},
+        {"batch": 1, "seqlen_q": 2048, "seqlen_k": 2048, "dtype": "fp8_e4m3", "label": "ds_v3_fp8_prefill_s2048"},
+        {"batch": 1, "seqlen_q": 4096, "seqlen_k": 4096, "dtype": "fp8_e4m3", "label": "ds_v3_fp8_prefill_s4096"},
+        {"batch": 1, "seqlen_q": 8192, "seqlen_k": 8192, "dtype": "fp8_e4m3", "label": "ds_v3_fp8_prefill_s8192"},
+        {"batch": 4, "seqlen_q": 512,  "seqlen_k": 512,  "dtype": "bf16",     "label": "ds_v3_prefill_b4_s512"},
+        {"batch": 4, "seqlen_q": 1024, "seqlen_k": 1024, "dtype": "bf16",     "label": "ds_v3_prefill_b4_s1024"}
+      ]
+    },
+    {
+      "model": "Kimi-K2",
+      "_note": "Hq=64 (differs from DeepSeek Hq=128); all other MLA geometry is identical.",
+      "num_query_heads": 64,
+      "num_kv_heads": 1,
+      "block_size": 16,
+      "shapes": [
+        {"batch": 1, "seqlen_q": 512,  "seqlen_k": 512,  "dtype": "bf16",     "label": "kimi_k2_prefill_s512"},
+        {"batch": 1, "seqlen_q": 1024, "seqlen_k": 1024, "dtype": "bf16",     "label": "kimi_k2_prefill_s1024"},
+        {"batch": 1, "seqlen_q": 2048, "seqlen_k": 2048, "dtype": "bf16",     "label": "kimi_k2_prefill_s2048"},
+        {"batch": 1, "seqlen_q": 4096, "seqlen_k": 4096, "dtype": "bf16",     "label": "kimi_k2_prefill_s4096"},
+        {"batch": 1, "seqlen_q": 8192, "seqlen_k": 8192, "dtype": "bf16",     "label": "kimi_k2_prefill_s8192"},
+        {"batch": 1, "seqlen_q": 512,  "seqlen_k": 512,  "dtype": "fp8_e4m3", "label": "kimi_k2_fp8_prefill_s512"},
+        {"batch": 1, "seqlen_q": 1024, "seqlen_k": 1024, "dtype": "fp8_e4m3", "label": "kimi_k2_fp8_prefill_s1024"},
+        {"batch": 1, "seqlen_q": 2048, "seqlen_k": 2048, "dtype": "fp8_e4m3", "label": "kimi_k2_fp8_prefill_s2048"},
+        {"batch": 1, "seqlen_q": 4096, "seqlen_k": 4096, "dtype": "fp8_e4m3", "label": "kimi_k2_fp8_prefill_s4096"},
+        {"batch": 1, "seqlen_q": 8192, "seqlen_k": 8192, "dtype": "fp8_e4m3", "label": "kimi_k2_fp8_prefill_s8192"},
+        {"batch": 4, "seqlen_q": 512,  "seqlen_k": 512,  "dtype": "bf16",     "label": "kimi_k2_prefill_b4_s512"},
+        {"batch": 4, "seqlen_q": 1024, "seqlen_k": 1024, "dtype": "bf16",     "label": "kimi_k2_prefill_b4_s1024"}
+      ]
+    }
+  ]
+}

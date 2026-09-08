@@ -113,6 +113,7 @@ void Arguments::init()
     norm_check     = 0;
     allclose_check = 0;
     unit_check     = 1;
+    ulp_check      = 0;
     timing         = 0;
 
     transA = '*';

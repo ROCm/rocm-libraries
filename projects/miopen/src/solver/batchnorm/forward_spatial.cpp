@@ -141,7 +141,7 @@ bool BnFwdTrainingSpatial::IsApplicable(
     if(!bn_problem.Is2D())
         return false;
 
-    if(!IsOCLFwdTrainTypeValid(bn_problem))
+    if(!IsFwdTrainTypeValid(bn_problem))
         return false;
 
     int activ_mode = bn_problem.GetActivationDesc().GetMode();

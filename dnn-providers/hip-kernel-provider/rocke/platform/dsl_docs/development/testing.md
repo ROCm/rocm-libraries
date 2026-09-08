@@ -4,21 +4,21 @@ This page covers how to run the `rocke` test suites, how to build and validate a
 
 ## Repo Layout For Testing
 
-All paths below are relative to the `rocKE/` root (with `PYTHONPATH=Python`).
+All paths below are relative to the `rocke/platform/` root (with `PYTHONPATH=python`).
 
 ```text
 tests/test_rocke.py                  # unit suite: IR/lowering/transforms (most no-GPU; ~20 harness/timer tests need a GPU)
 tests/run_all.py                      # the cross-platform entrypoint (guard + byte-identity gate + pytest + ctest)
-Python/rocke/examples/               # Python-owned example generators
-Python/rocke/examples/gfx950/attention/parity_unified_attention.py   # attention parity harness
-Python/rocke/examples/common/ck_tile_parity.py               # small-op parity harness
+python/rocke/examples/               # Python-owned example generators
+python/rocke/examples/gfx950/attention/parity_unified_attention.py   # attention parity harness
+python/rocke/examples/common/ck_tile_parity.py               # small-op parity harness
 tests/instances/differential/run_diff.py    # C++ vs Python engine byte-identity (cross-engine parity)
 ```
 
 > The upstream `python/test/test_rocke_examples.py` end-to-end harness and the
 > `example/ck_tile/dsl/<N>_*/gen.py` generators are **not** part of rocKE (they
 > drive the external composablekernel example tree); use `tests/run_all.py` and
-> the example modules under `Python/rocke/examples/` instead.
+> the example modules under `python/rocke/examples/` instead.
 
 ## Environment
 
@@ -32,7 +32,7 @@ Required environment:
 
 - ROCm 7.x with `libamd_comgr` and `libamdhip64` discoverable by the dynamic linker.
 - Python 3.12 with `torch` built for ROCm.
-- AMDGPU device visible to HIP (e.g. MI300X, MI325X, MI350X, MI355X for the gfx950 default ISA). gfx942 plus the RDNA targets gfx1151 / gfx1201 are also supported.
+- AMDGPU device visible to HIP (a `gfx950` part for the default ISA). `gfx942` plus the RDNA targets `gfx1151` / `gfx1201` are also supported.
 
 Verify quickly:
 
@@ -50,7 +50,7 @@ PY
 ## Static Unit Tests
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
   python tests/test_rocke.py
 ```
 
@@ -81,18 +81,18 @@ No GPU is required. For a one-shot run of the guard + gate + pytest (and ctest
 when the C++ test binaries are built), use `python tests/run_all.py`.
 
 The example generators that build HSACO + manifest and verify against a
-reference live under `Python/rocke/examples/` (run them as modules, e.g.
+reference live under `python/rocke/examples/` (run them as modules, e.g.
 `python -m rocke.examples.common.bake_off_implicit_gemm`); see the next
 section.
 
 ## Manual Build + Verify One Instance
 
 ```bash
-cd <rocKE>
+cd <rocke/platform>
 
 # Build the implicit-GEMM conv example.
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-PYTHONPATH=Python python \
+PYTHONPATH=python python \
     -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 
 # Inspect what was emitted.
@@ -102,7 +102,7 @@ ls "$OUT_DIR"
 # (and .ir.txt / .ll if write_ir_text / write_llvm_text are on)
 
 # Run + verify.
-PYTHONPATH=Python python \
+PYTHONPATH=python python \
     -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
@@ -111,11 +111,11 @@ The runner prints `verify max_abs_diff=... bad=K/N` and `Perf: <ms>, <TFlops>, <
 ## Distribution Demos
 
 ```bash
-PYTHONPATH=Python python \
-  Python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+PYTHONPATH=python python \
+  python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096
 
-PYTHONPATH=Python python \
-  Python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+PYTHONPATH=python python \
+  python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
 ```
 
 These exercise the distribution-driven `load_tile` / `store_tile` path end-to-end (build HSACO + launch + verify vs torch reference).
@@ -123,8 +123,8 @@ These exercise the distribution-driven `load_tile` / `store_tile` path end-to-en
 ## Small-Op Parity
 
 ```bash
-PYTHONPATH=Python python \
-  Python/rocke/examples/common/ck_tile_parity.py --op all
+PYTHONPATH=python python \
+  python/rocke/examples/common/ck_tile_parity.py --op all
 ```
 
 Runs every shipped small-op against a torch reference with per-op tolerance gates. Exit non-zero if any kernel exceeds its tolerance.
@@ -133,9 +133,9 @@ Runs every shipped small-op against a torch reference with per-op tolerance gate
 
 ```bash
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="Python:${AITER_PATH}" \
+PYTHONPATH="python:${AITER_PATH}" \
   python \
-  Python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
   --attempts 10 --warmup 5 \
   --paths auto,2d,3d \
   --set default \
@@ -175,7 +175,7 @@ write_sweep_manifest(
 Benchmark each with median + spread:
 
 ```bash
-PYTHONPATH=Python python \
+PYTHONPATH=python python \
   -m rocke.sweep_bench "$OUT_DIR"/sweep_manifest.json \
   --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
@@ -253,6 +253,10 @@ Reports MFMA delta, vector store delta, VGPR delta, LDS delta — the runbook-re
 - Pointer arg sized wrong: `gemm_args_signature()` is `ptr (8) ptr (8) ptr (8) i32 (4) i32 (4) i32 (4)`. Mismatched pack order fails.
 - Stride passed in bytes vs elements (or vice versa).
 - Pointer not aligned to declared `align=N`.
+- To get the *authoring line* that emitted the faulting instruction, plus the
+  workgroup and lane, run it under rocgdb — see
+  [`debugging_rocgdb.md`](./debugging_rocgdb.md). Turn on
+  `set amdgpu precise-memory on` first or the reported location is wrong.
 
 ### "Slow but correct"
 
@@ -272,9 +276,9 @@ Reports MFMA delta, vector store delta, VGPR delta, LDS delta — the runbook-re
 A two-minute smoke for a clean clone:
 
 ```bash
-cd <rocKE>
+cd <rocke/platform>
 export PYTHONDONTWRITEBYTECODE=1
-export PYTHONPATH=Python
+export PYTHONPATH=python
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
 python tests/test_rocke.py                             # unit (most no-GPU; ~20 need a GPU)
@@ -282,7 +286,7 @@ python -m rocke.examples.common.bake_off_implicit_gemm \
     --output-dir "$OUT_DIR"
 python -m rocke.run_manifest \
     "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
-python Python/rocke/examples/common/ck_tile_parity.py --op elementwise
+python python/rocke/examples/common/ck_tile_parity.py --op elementwise
 ```
 
 If all four pass, the build, COMGR, HIP module, launcher, manifest, and at least one production instance work end-to-end.

@@ -6,14 +6,14 @@ For every rule: what it is, *why* it exists, and *what breaks* if you ignore it.
 
 This page is for engine contributors. If you are authoring kernels, you mostly
 need [`onboarding.md`](./onboarding.md); come back here if you touch
-`rocke/core/`, `rocke/helpers/`, `rocke/instances/`, or `Cpp/`.
+`rocke/core/`, `rocke/helpers/`, `rocke/instances/`, or `cpp/`.
 
 ---
 
 ## 1. LLVM-IR emission is byte-identical across the two engines
 
 **The rule.** For every kernel family and config, the LLVM-IR text emitted by the
-Python engine (`rocke/`) and by the C++ engine (`Cpp/`) must be the *same
+Python engine (`rocke/`) and by the C++ engine (`cpp/`) must be the *same
 bytes*.
 
 **Why.** The C++ engine is what the hipDNN provider links so kernels can be served
@@ -88,7 +88,7 @@ golden snapshot.
 **The rule.** The public engine entry points (`rocke_lower_kernel_to_llvm`,
 `rocke_ir_serialize`, …) are `extern "C"` and unmangled. Don't give them C++
 linkage, don't change their signatures casually, and don't rename the headers
-under `Cpp/include/rocke/`.
+under `cpp/include/rocke/`.
 
 **Why.** The pybind binding and the hipDNN provider link against these symbols by
 their unmangled C names. C++ linkage would mangle them and break the `.so`/plugin

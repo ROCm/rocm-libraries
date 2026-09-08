@@ -374,22 +374,22 @@ private:
         {
             if constexpr(Scrambled)
             {
-                return rocrand_h_scrambled_sobol64_direction_vectors;
+                return rocrand_device::detail::rocrand_h_scrambled_sobol64_direction_vectors;
             }
             else
             {
-                return rocrand_h_sobol64_direction_vectors;
+                return rocrand_device::detail::rocrand_h_sobol64_direction_vectors;
             }
         }
         else
         {
             if constexpr(Scrambled)
             {
-                return rocrand_h_scrambled_sobol32_direction_vectors;
+                return rocrand_device::detail::rocrand_h_scrambled_sobol32_direction_vectors;
             }
             else
             {
-                return rocrand_h_sobol32_direction_vectors;
+                return rocrand_device::detail::rocrand_h_sobol32_direction_vectors;
             }
         }
 #pragma clang diagnostic pop
@@ -435,11 +435,11 @@ private:
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
         if constexpr(Is64)
         {
-            return h_scrambled_sobol64_constants;
+            return rocrand_device::detail::h_scrambled_sobol64_constants;
         }
         else
         {
-            return h_scrambled_sobol32_constants;
+            return rocrand_device::detail::h_scrambled_sobol32_constants;
         }
 #pragma clang diagnostic pop
     }

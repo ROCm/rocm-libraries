@@ -150,6 +150,15 @@ struct alignas(16) BufferResource
     Desc desc_;
 };
 
+INLINEDEVICE
+void const* splitBufferOffset(void const* base_ptr, uint64_t voffset, uint32_t& voffset_lo)
+{
+    voffset_lo     = static_cast<uint32_t>(voffset);
+    uint64_t base  = reinterpret_cast<uint64_t>(const_cast<void*>(base_ptr));
+    base          += voffset & 0xFFFFFFFF00000000ull;
+    return reinterpret_cast<void const*>(base);
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ///
@@ -534,6 +543,21 @@ struct buffer_store<AccessType, 1, cache_op>
         llvm_amdgcn_raw_buffer_store_i8(
             data, buffer_rsc, voffset, __builtin_amdgcn_readfirstlane(soffset), cache_op);
     }
+
+    INLINEDEVICE
+    buffer_store(const AccessType& D,
+                 void const*       base_ptr,
+                 uint64_t          voffset,
+                 uint32_t          soffset,
+                 uint32_t          num_records = (0xFFFFFFFF - 1))
+    {
+        uint32_t voffset_lo = 0;
+        base_ptr            = splitBufferOffset(base_ptr, voffset, voffset_lo);
+        BufferResource buffer_rsc(base_ptr, num_records);
+        char           data = *reinterpret_cast<char const*>(&D);
+        llvm_amdgcn_raw_buffer_store_i8(
+            data, buffer_rsc, voffset_lo, __builtin_amdgcn_readfirstlane(soffset), cache_op);
+    }
 };
 
 template <typename AccessType, CacheOperation::Kind cache_op>
@@ -550,6 +574,21 @@ struct buffer_store<AccessType, 2, cache_op>
         float16_t      data = *reinterpret_cast<float16_t const*>(&D);
         llvm_amdgcn_raw_buffer_store_f16(
             data, buffer_rsc, voffset, __builtin_amdgcn_readfirstlane(soffset), cache_op);
+    }
+
+    INLINEDEVICE
+    buffer_store(const AccessType& D,
+                 void const*       base_ptr,
+                 uint64_t          voffset,
+                 uint32_t          soffset,
+                 uint32_t          num_records = (0xFFFFFFFF - 1))
+    {
+        uint32_t voffset_lo = 0;
+        base_ptr            = splitBufferOffset(base_ptr, voffset, voffset_lo);
+        BufferResource buffer_rsc(base_ptr, num_records);
+        float16_t      data = *reinterpret_cast<float16_t const*>(&D);
+        llvm_amdgcn_raw_buffer_store_f16(
+            data, buffer_rsc, voffset_lo, __builtin_amdgcn_readfirstlane(soffset), cache_op);
     }
 };
 
@@ -568,6 +607,21 @@ struct buffer_store<AccessType, 4, cache_op>
         llvm_amdgcn_raw_buffer_store_f32(
             data, buffer_rsc, voffset, __builtin_amdgcn_readfirstlane(soffset), cache_op);
     }
+
+    INLINEDEVICE
+    buffer_store(const AccessType& D,
+                 void const*       base_ptr,
+                 uint64_t          voffset,
+                 uint32_t          soffset,
+                 uint32_t          num_records = (0xFFFFFFFF - 1))
+    {
+        uint32_t voffset_lo = 0;
+        base_ptr            = splitBufferOffset(base_ptr, voffset, voffset_lo);
+        BufferResource buffer_rsc(base_ptr, num_records);
+        float32_t      data = *reinterpret_cast<float32_t const*>(&D);
+        llvm_amdgcn_raw_buffer_store_f32(
+            data, buffer_rsc, voffset_lo, __builtin_amdgcn_readfirstlane(soffset), cache_op);
+    }
 };
 
 template <typename AccessType, CacheOperation::Kind cache_op>
@@ -585,6 +639,21 @@ struct buffer_store<AccessType, 8, cache_op>
         llvm_amdgcn_raw_buffer_store_f32x2(
             data, buffer_rsc, voffset, __builtin_amdgcn_readfirstlane(soffset), cache_op);
     }
+
+    INLINEDEVICE
+    buffer_store(const AccessType& D,
+                 void const*       base_ptr,
+                 uint64_t          voffset,
+                 uint32_t          soffset,
+                 uint32_t          num_records = (0xFFFFFFFF - 1))
+    {
+        uint32_t voffset_lo = 0;
+        base_ptr            = splitBufferOffset(base_ptr, voffset, voffset_lo);
+        BufferResource buffer_rsc(base_ptr, num_records);
+        float32x2_t    data = *reinterpret_cast<float32x2_t const*>(&D);
+        llvm_amdgcn_raw_buffer_store_f32x2(
+            data, buffer_rsc, voffset_lo, __builtin_amdgcn_readfirstlane(soffset), cache_op);
+    }
 };
 
 template <typename AccessType, CacheOperation::Kind cache_op>
@@ -601,6 +670,21 @@ struct buffer_store<AccessType, 16, cache_op>
         float32x4_t    data = *reinterpret_cast<float32x4_t const*>(&D);
         llvm_amdgcn_raw_buffer_store_f32x4(
             data, buffer_rsc, voffset, __builtin_amdgcn_readfirstlane(soffset), cache_op);
+    }
+
+    INLINEDEVICE
+    buffer_store(const AccessType& D,
+                 void const*       base_ptr,
+                 uint64_t          voffset,
+                 uint32_t          soffset,
+                 uint32_t          num_records = (0xFFFFFFFF - 1))
+    {
+        uint32_t voffset_lo = 0;
+        base_ptr            = splitBufferOffset(base_ptr, voffset, voffset_lo);
+        BufferResource buffer_rsc(base_ptr, num_records);
+        float32x4_t    data = *reinterpret_cast<float32x4_t const*>(&D);
+        llvm_amdgcn_raw_buffer_store_f32x4(
+            data, buffer_rsc, voffset_lo, __builtin_amdgcn_readfirstlane(soffset), cache_op);
     }
 };
 

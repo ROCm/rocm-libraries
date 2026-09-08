@@ -542,6 +542,72 @@ catch(...)
     return rocfft_handle_exception();
 }
 
+rocfft_status rocfft_plan_description_set_load_callback(rocfft_plan_description description,
+                                                        const char*             symbol_name,
+                                                        const void*             bitcode_data,
+                                                        size_t                  bitcode_len_bytes,
+                                                        size_t                  shared_mem_bytes)
+try
+{
+    log_trace(__func__,
+              "description",
+              description,
+              "symbol_name",
+              symbol_name,
+              "bitcode_data",
+              bitcode_data,
+              "bitcode_len_bytes",
+              bitcode_len_bytes,
+              "shared_mem_bytes",
+              shared_mem_bytes);
+    if(!description)
+        return rocfft_status_invalid_arg_value;
+
+    // shared memory for callbacks is not currently supported
+    if(shared_mem_bytes)
+        return rocfft_status_invalid_arg_value;
+
+    description->loadOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes);
+    return rocfft_status_success;
+}
+catch(...)
+{
+    return rocfft_handle_exception();
+}
+
+rocfft_status rocfft_plan_description_set_store_callback(rocfft_plan_description description,
+                                                         const char*             symbol_name,
+                                                         const void*             bitcode_data,
+                                                         size_t                  bitcode_len_bytes,
+                                                         size_t                  shared_mem_bytes)
+try
+{
+    log_trace(__func__,
+              "description",
+              description,
+              "symbol_name",
+              symbol_name,
+              "bitcode_data",
+              bitcode_data,
+              "bitcode_len_bytes",
+              bitcode_len_bytes,
+              "shared_mem_bytes",
+              shared_mem_bytes);
+    if(!description)
+        return rocfft_status_invalid_arg_value;
+
+    // shared memory for callbacks is not currently supported
+    if(shared_mem_bytes)
+        return rocfft_status_invalid_arg_value;
+
+    description->storeOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes);
+    return rocfft_status_success;
+}
+catch(...)
+{
+    return rocfft_handle_exception();
+}
+
 std::vector<size_t> rocfft_plan_t::get_user_facing_lengths() const
 {
     if(transformType == rocfft_transform_type_complex_forward
@@ -1543,6 +1609,13 @@ rocfft_status
         //    //
         //}
     }
+
+    // JIT callbacks cannot currently be combined with field
+    // decompositions, as we can't guarantee that a callback-running
+    // kernel will be first/last to load/store the data in the FFT.
+    if((!inFields.empty() || !outFields.empty()) && (loadOps.has_spirv() || storeOps.has_spirv()))
+        return rocfft_status_invalid_arg_value;
+
     return rocfft_status_success;
 }
 
@@ -2501,6 +2574,43 @@ std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        in
             "Inconsistent full data ranges between input and output field views given to "
             + ROCFFT_CURRENT_FUNCTION);
 
+#ifdef ROCFFT_RCCL_ENABLE
+    // single-process multi-device transposes prefer RCCL when a
+    // communicator is available; on any failure (e.g. mismatch
+    // between brick devices and the RCCL device set) fall through
+    // to the P2P / A2A paths below.
+    if(rccl && desc.get_local_comm_size() == 1)
+    {
+        // GlobalTransposeRCCL appends to multiPlan as it builds,
+        // on failure roll back to this size so the fallback path does not
+        // run alongside orphaned RCCL items
+        const size_t multiPlanRollback = multiPlan.size();
+        try
+        {
+            return GlobalTransposeRCCL(input, output, antecedents);
+        }
+        catch(const std::exception& e)
+        {
+            if(LOG_PLAN_ENABLED())
+                *LogSingleton::GetInstance().GetPlanOS()
+                    << "GlobalTransposeRCCL could not be used, falling back to P2P/A2A: "
+                    << e.what() << std::endl;
+        }
+        catch(...)
+        {
+            if(LOG_PLAN_ENABLED())
+                *LogSingleton::GetInstance().GetPlanOS()
+                    << "Unexpected exception type thrown by GlobalTransposeRCCL, "
+                       "falling back to P2P/A2A"
+                    << std::endl;
+        }
+
+        // discard any partially-built RCCL items before falling back
+        multiPlan.resize(multiPlanRollback);
+        multiPlanAntecedents.resize(multiPlanRollback);
+    }
+#endif
+
     // All-to-all transpose is preferred as it's faster. This requires
     // that each rank have a single base pointer to send/receive with
     // offsets for every other rank.
@@ -2523,6 +2633,380 @@ std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        in
         return GlobalTransposeA2A(input, output, antecedents);
     }
 }
+
+#ifdef ROCFFT_RCCL_ENABLE
+std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&        input,
+                                                       const field_view_t&        output,
+                                                       const std::vector<size_t>& antecedents)
+{
+    const auto        elem_size       = element_size(precision, input.array_type);
+    const auto        local_comm_rank = desc.get_local_comm_rank();
+    const std::string itemGroup
+        = "rccl_transpose_from_" + input.group_name + "_into_" + output.group_name;
+    std::vector<size_t> ret;
+
+    const size_t nbricks_in  = input.field.bricks.size();
+    const size_t nbricks_out = output.field.bricks.size();
+
+    // dependencies of an op that reads input brick i: the subset of
+    // antecedents that write to that brick's buffer.  matches the
+    // pattern used in GlobalTransposeP2P.
+    auto deps_reading_input = [&](size_t inBrickIdx) {
+        std::vector<size_t> deps;
+        std::for_each(antecedents.begin(), antecedents.end(), [&](const size_t& item) {
+            if(multiPlan[item]->WritesToBuffer(input.buffers[inBrickIdx]))
+                deps.push_back(item);
+        });
+        return deps;
+    };
+
+    // compute all input/output brick intersections and check alltoall eligibility.
+    // alltoall eligibility requires:
+    //   (a) same brick count on input and output (>= 2),
+    //   (b) one brick per device on both sides (no duplicates),
+    //   (c) input and output cover the same set of devices,
+    //   (d) the RCCL communicator covers exactly that device set,
+    //   (e) the intersection pattern is a complete N x N exchange with
+    //       a uniform per-pair element count.
+    struct IntersectionInfo
+    {
+        size_t        inBrickIdx;
+        size_t        outBrickIdx;
+        data_layout_t intersection;
+    };
+    std::vector<IntersectionInfo> intersections;
+
+    std::set<int> in_devices, out_devices;
+    for(const auto& brick : input.field.bricks)
+        in_devices.insert(brick.location.device);
+    for(const auto& brick : output.field.bricks)
+        out_devices.insert(brick.location.device);
+
+    const auto          rccl_devs_vec = rccl.get_devices();
+    const std::set<int> rccl_devices(rccl_devs_vec.begin(), rccl_devs_vec.end());
+
+    bool alltoall_eligible = (nbricks_in == nbricks_out) && (nbricks_in >= 2)
+                             && (in_devices.size() == nbricks_in)
+                             && (out_devices.size() == nbricks_in) && (in_devices == out_devices)
+                             && (rccl_devices == in_devices);
+
+    size_t uniform_count      = 0;
+    size_t cross_device_count = 0;
+
+    for(size_t inBrickIdx = 0; inBrickIdx < nbricks_in; ++inBrickIdx)
+    {
+        const auto& inBrick = input.field.bricks[inBrickIdx];
+        for(size_t outBrickIdx = 0; outBrickIdx < nbricks_out; ++outBrickIdx)
+        {
+            const auto& outBrick = output.field.bricks[outBrickIdx];
+
+            auto xsect
+                = data_layout_t::make_contiguous_intersection_of(inBrick.layout, outBrick.layout);
+            if(xsect.is_empty())
+                continue;
+
+            const bool   same_dev = (inBrick.location == outBrick.location);
+            const size_t count    = xsect.logical_count();
+            intersections.push_back({inBrickIdx, outBrickIdx, std::move(xsect)});
+
+            if(!same_dev)
+            {
+                ++cross_device_count;
+                if(uniform_count == 0)
+                    uniform_count = count;
+                else if(count != uniform_count)
+                    alltoall_eligible = false;
+            }
+        }
+    }
+
+    // (e): with (b)-(c) above this guarantees that each ordered pair
+    // of distinct devices contributes exactly one cross-device
+    // intersection of size uniform_count.
+    if(cross_device_count != nbricks_in * (nbricks_in - 1))
+        alltoall_eligible = false;
+
+    // two RCCL collective strategies are supported:
+    // 1. ncclAllToAll with disjoint per-device send/recv buffers.
+    //    used when the transpose pattern is alltoall_eligible.
+    // 2. grouped ncclSend/ncclRecv with per-transfer pack/recv
+    //    buffers.  used whenever the pattern is not alltoall_eligible:
+    //    2D/3D grid decompositions, non-uniform brick sizes, or sparse
+    //    intersection patterns.
+    // ROCFFT_RCCL_BACKEND=grouped overrides the selection and forces
+    // the grouped path even when alltoall is eligible.
+    enum class RcclBackend
+    {
+        AllToAll,
+        Grouped,
+    };
+    static const RcclBackend backend_choice = []() {
+        auto v = rocfft_getenv("ROCFFT_RCCL_BACKEND");
+        std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if(v == "grouped" || v == "send_recv")
+            return RcclBackend::Grouped;
+        return RcclBackend::AllToAll;
+    }();
+
+    const bool use_alltoall = alltoall_eligible && backend_choice == RcclBackend::AllToAll;
+
+    if(LOG_PLAN_ENABLED())
+    {
+        if(use_alltoall)
+            log_plan("RCCL backend: using ncclAllToAll (disjoint buffers, "
+                     "uniform count_per_rank="
+                     + std::to_string(uniform_count) + ", nbricks_in=" + std::to_string(nbricks_in)
+                     + ")\n");
+        else
+        {
+            const char* reason = (backend_choice == RcclBackend::Grouped)
+                                     ? (alltoall_eligible ? ", forced via ROCFFT_RCCL_BACKEND" : "")
+                                     : ", pattern not alltoall-eligible";
+            log_plan(std::string("RCCL backend: using grouped ncclSend/ncclRecv (")
+                     + std::to_string(cross_device_count) + " cross-device transfers, "
+                     + std::to_string(nbricks_in) + " input bricks" + reason + ")\n");
+        }
+    }
+
+    // same-device intersections are handled identically by both paths.
+    for(const auto& info : intersections)
+    {
+        const auto& inBrick  = input.field.bricks[info.inBrickIdx];
+        const auto& outBrick = output.field.bricks[info.outBrickIdx];
+        if(!(inBrick.location == outBrick.location))
+            continue;
+
+        auto transposeIdx
+            = AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                               inBrick.location,
+                                               info.intersection.lengths_and_batches(),
+                                               precision,
+                                               input.array_type,
+                                               input.buffers[info.inBrickIdx],
+                                               info.intersection.offset_in(inBrick.layout),
+                                               inBrick.layout.strides_and_distances(),
+                                               output.buffers[info.outBrickIdx],
+                                               info.intersection.offset_in(outBrick.layout),
+                                               outBrick.layout.strides_and_distances(),
+                                               "local transpose"),
+                               deps_reading_input(info.inBrickIdx));
+        multiPlan[transposeIdx]->group = itemGroup;
+        ret.push_back(transposeIdx);
+    }
+
+    if(use_alltoall)
+    {
+        // a2aSendBufs / a2aRecvBufs are indexed by RCCL rank: entry r
+        // lives on rccl_devs_vec[r], which is the device owning rank r.
+        //   a2aSendBufs[r]: slot[dst_rank] at offset dst_rank * uniform_count
+        //                   (written by pack kernels, read by ncclAllToAll)
+        //   a2aRecvBufs[r]: slot[src_rank] at offset src_rank * uniform_count
+        //                   (written by ncclAllToAll, read by unpack kernels)
+        const size_t                 nranks = rccl_devs_vec.size();
+        std::vector<TempBufferLease> a2aSendBufs;
+        std::vector<TempBufferLease> a2aRecvBufs;
+        a2aSendBufs.reserve(nranks);
+        a2aRecvBufs.reserve(nranks);
+        for(size_t r = 0; r < nranks; ++r)
+        {
+            const rocfft_location_t loc{local_comm_rank, rccl_devs_vec[r]};
+            a2aSendBufs.emplace_back(
+                tempBuffers, local_comm_rank, loc, nranks * uniform_count * elem_size);
+            a2aRecvBufs.emplace_back(
+                tempBuffers, local_comm_rank, loc, nranks * uniform_count * elem_size);
+        }
+
+        std::vector<size_t> packItems;
+
+        for(const auto& info : intersections)
+        {
+            const auto& inBrick  = input.field.bricks[info.inBrickIdx];
+            const auto& outBrick = output.field.bricks[info.outBrickIdx];
+            if(inBrick.location == outBrick.location)
+                continue;
+
+            const int src_rank = rccl.get_rank(inBrick.location.device);
+            const int dst_rank = rccl.get_rank(outBrick.location.device);
+
+            auto packIdx
+                = AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                   inBrick.location,
+                                                   info.intersection.lengths_and_batches(),
+                                                   precision,
+                                                   input.array_type,
+                                                   input.buffers[info.inBrickIdx],
+                                                   info.intersection.offset_in(inBrick.layout),
+                                                   inBrick.layout.strides_and_distances(),
+                                                   BufferPtr::temp(a2aSendBufs[src_rank].data()),
+                                                   dst_rank * uniform_count,
+                                                   info.intersection.strides_and_distances(),
+                                                   "pack for ncclAllToAll"),
+                                   deps_reading_input(info.inBrickIdx));
+            multiPlan[packIdx]->group = itemGroup;
+            packItems.push_back(packIdx);
+        }
+
+        // a2aSendBufs/a2aRecvBufs are already in RCCL-rank order, so
+        // build the agents vector directly.
+        std::vector<CommRCCLAllToAll::agent_t> agents(nranks);
+        for(size_t r = 0; r < nranks; ++r)
+        {
+            agents[r].sendBuffer = BufferPtr::temp(a2aSendBufs[r].data());
+            agents[r].recvBuffer = BufferPtr::temp(a2aRecvBufs[r].data());
+        }
+
+        auto rcclAllToAll = std::make_unique<CommRCCLAllToAll>(
+            rccl, precision, input.array_type, uniform_count, std::move(agents));
+        rcclAllToAll->group       = itemGroup;
+        rcclAllToAll->description = "RCCL ncclAllToAll";
+
+        auto a2aIdx              = AddMultiPlanItem(std::move(rcclAllToAll), packItems);
+        multiPlan[a2aIdx]->group = itemGroup;
+
+        for(const auto& info : intersections)
+        {
+            const auto& inBrick  = input.field.bricks[info.inBrickIdx];
+            const auto& outBrick = output.field.bricks[info.outBrickIdx];
+            if(inBrick.location == outBrick.location)
+                continue;
+
+            const int src_rank = rccl.get_rank(inBrick.location.device);
+            const int dst_rank = rccl.get_rank(outBrick.location.device);
+
+            auto unpackIdx
+                = AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                   outBrick.location,
+                                                   info.intersection.lengths_and_batches(),
+                                                   precision,
+                                                   input.array_type,
+                                                   BufferPtr::temp(a2aRecvBufs[dst_rank].data()),
+                                                   src_rank * uniform_count,
+                                                   info.intersection.strides_and_distances(),
+                                                   output.buffers[info.outBrickIdx],
+                                                   info.intersection.offset_in(outBrick.layout),
+                                                   outBrick.layout.strides_and_distances(),
+                                                   "unpack from ncclAllToAll"),
+                                   {a2aIdx});
+            multiPlan[unpackIdx]->group = itemGroup;
+            ret.push_back(unpackIdx);
+        }
+    }
+    else
+    {
+        // grouped send/recv path (general case).  every brick must live
+        // on a device known to the RCCL communicator; rccl.get_rank()
+        // called inside CommRCCLGrouped at execute time would throw
+        // otherwise.  validate up front so any mismatch is a clear
+        // plan-creation-time error rather than a deferred crash.
+        auto validate_brick_device = [&](const rocfft_brick_t& brick, const char* which) {
+            if(rccl_devices.count(brick.location.device) == 0)
+                throw std::runtime_error(std::string("GlobalTransposeRCCL grouped: ") + which
+                                         + " brick device " + std::to_string(brick.location.device)
+                                         + " is not in the RCCL communicator");
+        };
+        for(const auto& brick : input.field.bricks)
+            validate_brick_device(brick, "input");
+        for(const auto& brick : output.field.bricks)
+            validate_brick_device(brick, "output");
+
+        auto rcclGrouped   = std::make_unique<CommRCCLGrouped>(rccl, precision, input.array_type);
+        rcclGrouped->group = itemGroup;
+        rcclGrouped->description = "RCCL grouped send/recv";
+
+        // packBufs keeps the leases alive so the BufferPtr::temp aliases
+        // captured into the plan items remain valid; the leases themselves
+        // aren't needed after this loop because BufferPtr::temp co-owns the
+        // underlying buffers via shared_ptr.
+        std::vector<TempBufferLease> packBufs;
+        std::vector<size_t>          packItems;
+        // unpack items that need to wait for the grouped send/recv to
+        // complete, tracked separately so we don't wrongly add the RCCL
+        // antecedent to same-device transposes already pushed to ret.
+        std::vector<size_t> groupedUnpackItems;
+        packBufs.reserve(2 * cross_device_count);
+
+        for(const auto& info : intersections)
+        {
+            const auto& inBrick  = input.field.bricks[info.inBrickIdx];
+            const auto& outBrick = output.field.bricks[info.outBrickIdx];
+            if(inBrick.location == outBrick.location)
+                continue;
+            const size_t count = info.intersection.logical_count();
+
+            TempBufferLease& pack = packBufs.emplace_back(
+                tempBuffers, local_comm_rank, inBrick.location, count * elem_size);
+            TempBufferLease& recv = packBufs.emplace_back(
+                tempBuffers, local_comm_rank, outBrick.location, count * elem_size);
+
+            auto packIdx
+                = AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                   inBrick.location,
+                                                   info.intersection.lengths_and_batches(),
+                                                   precision,
+                                                   input.array_type,
+                                                   input.buffers[info.inBrickIdx],
+                                                   info.intersection.offset_in(inBrick.layout),
+                                                   inBrick.layout.strides_and_distances(),
+                                                   BufferPtr::temp(pack.data()),
+                                                   0,
+                                                   info.intersection.strides_and_distances(),
+                                                   "pack brick for RCCL transpose"),
+                                   deps_reading_input(info.inBrickIdx));
+            multiPlan[packIdx]->group = itemGroup;
+            packItems.push_back(packIdx);
+
+            // send pack -> peer that owns outBrick; recv into recv buffer
+            // from peer that owns inBrick.  brick devices were validated
+            // against the RCCL communicator above.
+            rcclGrouped->AddTransfer<rccl_op::send>(outBrick.location,
+                                                    inBrick.location,
+                                                    BufferPtr::temp(pack.data()),
+                                                    0 /* offset */,
+                                                    count,
+                                                    local_comm_rank);
+            rcclGrouped->AddTransfer<rccl_op::recv>(inBrick.location,
+                                                    outBrick.location,
+                                                    BufferPtr::temp(recv.data()),
+                                                    0 /* offset */,
+                                                    count,
+                                                    local_comm_rank);
+
+            auto unpackIdx
+                = AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                   outBrick.location,
+                                                   info.intersection.lengths_and_batches(),
+                                                   precision,
+                                                   input.array_type,
+                                                   BufferPtr::temp(recv.data()),
+                                                   0,
+                                                   info.intersection.strides_and_distances(),
+                                                   output.buffers[info.outBrickIdx],
+                                                   info.intersection.offset_in(outBrick.layout),
+                                                   outBrick.layout.strides_and_distances(),
+                                                   "unpack brick for RCCL transpose"),
+                                   {}); // rcclIdx added as antecedent below
+            multiPlan[unpackIdx]->group = itemGroup;
+            ret.push_back(unpackIdx);
+            groupedUnpackItems.push_back(unpackIdx);
+        }
+
+        if(rcclGrouped->HasTransfers())
+        {
+            auto rcclIdx              = AddMultiPlanItem(std::move(rcclGrouped), packItems);
+            multiPlan[rcclIdx]->group = itemGroup;
+
+            // every grouped unpack must wait for the ncclSend/ncclRecv
+            // group to complete.
+            for(auto unpackIdx : groupedUnpackItems)
+                AddAntecedent(unpackIdx, rcclIdx);
+        }
+    }
+
+    return ret;
+}
+#endif // ROCFFT_RCCL_ENABLE
 
 void rocfft_plan_t::GlobalTranspose(size_t                     elem_size,
                                     const rocfft_field_t&      inField,
@@ -3356,6 +3840,56 @@ rocfft_plan_t::field_view_t rocfft_plan_t::field_view_t::get_embedding_view() co
 
     return field_view_t(embedding_field, buffers, embedding_array_type, precision, group_name);
 }
+
+#ifdef ROCFFT_RCCL_ENABLE
+void rocfft_plan_t::InitRCCLCommunicator() noexcept
+{
+    // any failure here leaves rccl empty so the caller falls back to the P2P / A2A paths
+    try
+    {
+        // RCCL path is currently single-process multi-GPU, one comm spans the
+        // local devices and the grouped send/recv path uses device ids as
+        // NCCL peer ranks
+        if(desc.inFields.empty() || desc.outFields.empty())
+            return;
+        if(desc.get_local_comm_size() != 1)
+            return;
+
+        const auto local_comm_rank = desc.get_local_comm_rank();
+
+        std::set<int> device_set;
+        for(const auto& brick : desc.inFields.front().bricks)
+        {
+            if(brick.location.comm_rank == local_comm_rank)
+                device_set.insert(brick.location.device);
+        }
+        for(const auto& brick : desc.outFields.front().bricks)
+        {
+            if(brick.location.comm_rank == local_comm_rank)
+                device_set.insert(brick.location.device);
+        }
+
+        // include the device active at plan creation so it always
+        // participates in the communicator
+        device_set.insert(rocfft_scoped_device::current_device());
+        rccl = rocfft_rccl_comm_t::create(device_set);
+    }
+    catch(const std::exception& e)
+    {
+        if(LOG_PLAN_ENABLED())
+            *LogSingleton::GetInstance().GetPlanOS()
+                << "InitRCCLCommunicator failed, proceeding without RCCL: " << e.what()
+                << std::endl;
+    }
+    catch(...)
+    {
+        if(LOG_PLAN_ENABLED())
+            *LogSingleton::GetInstance().GetPlanOS()
+                << "InitRCCLCommunicator failed with unknown exception, proceeding without RCCL"
+                << std::endl;
+    }
+}
+#endif
 
 bool rocfft_plan_t::BuildOptMultiDevicePlan()
 {
@@ -4364,8 +4898,17 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
 // TODO allgather for placement, transform_type, precision, dimensions, {lengths}, and
 // number_of_transforms and validate that all ranks' args are identical, before proceeding
 #endif
-    if(dimensions > 3)
+    if(dimensions == 0 || dimensions > 3)
+    {
         return rocfft_status_invalid_dimensions;
+    }
+
+    if(std::any_of(lengths, lengths + dimensions, [](size_t length) { return length == 0; })
+       || number_of_transforms == 0)
+    {
+        return rocfft_status_invalid_arg_value;
+    }
+
     try
     {
         plan->placement     = placement;
@@ -4380,6 +4923,12 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
             transform_type, placement, lengths, dimensions, number_of_transforms);
         if(rcfft != rocfft_status_success)
             return rcfft;
+
+#ifdef ROCFFT_RCCL_ENABLE
+        // init rccl before any plan-building path is chosen.
+        // on failure it leaves rccl empty and we fall back to the P2P / A2A paths
+        plan->InitRCCLCommunicator();
+#endif
 
         log_bench(rocfft_bench_command(plan));
 
@@ -5291,9 +5840,11 @@ void TreeNode::Print(rocfft_ostream& os, const int indent) const
     os << indentStr << PrintOperatingBufferCode(obIn) << " -> " << PrintOperatingBufferCode(obOut)
        << "\n";
 
-    for(const auto& c : comments)
+    for(auto c = comments.begin(); c != comments.end(); c++)
     {
-        os << "\n" << indentStr << "comment: " << c;
+        if(c == comments.begin())
+            os << "\n";
+        os << indentStr << "comment: " << *c << "\n";
     }
 
     if(childNodes.size())
@@ -5489,14 +6040,31 @@ void RuntimeCompilePlan(ExecPlan& execPlan)
     std::string kernel_name;
     bool        is_tuning = TuningBenchmarker::GetSingleton().IsProcessingTuning();
 
+    TreeNode* load_node             = nullptr;
+    TreeNode* store_node            = nullptr;
+    std::tie(load_node, store_node) = execPlan.get_load_store_nodes();
+
+    const bool have_load_spirv_cb   = load_node->loadOps && load_node->loadOps->has_spirv();
+    const bool have_store_spirv_cb  = store_node->storeOps && store_node->storeOps->has_spirv();
+    const CallbackType load_cbtype  = load_node->GetCallbackType();
+    const CallbackType store_cbtype = store_node->GetCallbackType();
+
     for(size_t i = 0; i < execPlan.execSeq.size(); ++i)
     {
         auto& node = execPlan.execSeq[i];
 
-        // If this isn't for the local rank, don't compile.
+        // This loop is building kernels that don't need to run
+        // legacy callbacks.  But the compilation needs to know about
+        // the case where the kernel works with complex elements but
+        // the load or store SPIR-V callback works with reals.
+        CallbackType cbtype_real = CallbackType::NONE;
+        if(node == load_node && have_load_spirv_cb && load_cbtype != CallbackType::NONE)
+            cbtype_real = load_cbtype;
+        else if(node == store_node && have_store_spirv_cb && store_cbtype != CallbackType::NONE)
+            cbtype_real = store_cbtype;
 
         node->compiledKernel = RTCKernel::runtime_compile(
-            node->getLeafNode(), execPlan.deviceProp.gcnArchName, kernel_name);
+            node->getLeafNode(), execPlan.deviceProp.gcnArchName, kernel_name, cbtype_real);
 
         // Log kernel name when tuning
         if(is_tuning)
@@ -5508,24 +6076,33 @@ void RuntimeCompilePlan(ExecPlan& execPlan)
         }
     }
 
-    TreeNode* load_node             = nullptr;
-    TreeNode* store_node            = nullptr;
-    std::tie(load_node, store_node) = execPlan.get_load_store_nodes();
+    // Legacy callbacks require a separately-compiled kernel, and are
+    // only possible on plans that don't use planar format for input
+    // or output, and that don't already use JIT callbacks.
+    // gfx1250 hotswap fails with function pointer callbacks, so they
+    // can't work there either.
+    const bool need_legacy_callbacks
+        = !array_type_is_planar(load_node->inArrayType)
+          && !array_type_is_planar(store_node->outArrayType) && !have_load_spirv_cb
+          && !have_store_spirv_cb && strncmp(execPlan.deviceProp.gcnArchName, "gfx1250", 7) != 0;
 
-    // callbacks are only possible on plans that don't use planar format for input or output
-    bool need_callbacks = !array_type_is_planar(load_node->inArrayType)
-                          && !array_type_is_planar(store_node->outArrayType);
-
-    // don't spend time compiling callback
-    if(need_callbacks && !is_tuning)
+    // Only spend time compiling legacy callback kernel if it's
+    // possible for it to be called
+    if(need_legacy_callbacks && !is_tuning)
     {
-        load_node->compiledKernelWithCallbacks = RTCKernel::runtime_compile(
-            load_node->getLeafNode(), execPlan.deviceProp.gcnArchName, kernel_name, true);
+        load_node->compiledKernelWithCallbacks
+            = RTCKernel::runtime_compile(load_node->getLeafNode(),
+                                         execPlan.deviceProp.gcnArchName,
+                                         kernel_name,
+                                         load_node->GetCallbackType());
 
         if(store_node != load_node)
         {
-            store_node->compiledKernelWithCallbacks = RTCKernel::runtime_compile(
-                store_node->getLeafNode(), execPlan.deviceProp.gcnArchName, kernel_name, true);
+            store_node->compiledKernelWithCallbacks
+                = RTCKernel::runtime_compile(store_node->getLeafNode(),
+                                             execPlan.deviceProp.gcnArchName,
+                                             kernel_name,
+                                             store_node->GetCallbackType());
         }
     }
 

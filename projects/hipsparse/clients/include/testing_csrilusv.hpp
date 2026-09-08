@@ -320,7 +320,7 @@ void testing_csrilusv(Arguments argus)
     pivot_status_2 = hipsparseXcsrsv2_zeroPivot(handle, info_L, d_position);
 
     // Host csrsv
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
     CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, 0));
 
     position_gold = csr_lsolve(HIPSPARSE_OPERATION_NON_TRANSPOSE,

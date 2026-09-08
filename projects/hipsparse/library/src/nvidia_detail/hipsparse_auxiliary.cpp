@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -198,7 +198,7 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA)
 }
 #endif
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseCreateBsrsv2Info(bsrsv2Info_t* info)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCreateBsrsv2Info((bsrsv2Info_t*)info));
@@ -210,7 +210,7 @@ hipsparseStatus_t hipsparseDestroyBsrsv2Info(bsrsv2Info_t info)
 }
 #endif
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseCreateBsrsm2Info(bsrsm2Info_t* info)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCreateBsrsm2Info((bsrsm2Info_t*)info));
@@ -222,7 +222,7 @@ hipsparseStatus_t hipsparseDestroyBsrsm2Info(bsrsm2Info_t info)
 }
 #endif
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseCreateBsrilu02Info(bsrilu02Info_t* info)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
@@ -272,7 +272,7 @@ hipsparseStatus_t hipsparseDestroyColorInfo(hipsparseColorInfo_t info)
 }
 #endif
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseCreateCsrilu02Info(csrilu02Info_t* info)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
@@ -286,7 +286,7 @@ hipsparseStatus_t hipsparseDestroyCsrilu02Info(csrilu02Info_t info)
 }
 #endif
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseCreateBsric02Info(bsric02Info_t* info)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCreateBsric02Info((bsric02Info_t*)info));
@@ -298,7 +298,7 @@ hipsparseStatus_t hipsparseDestroyBsric02Info(bsric02Info_t info)
 }
 #endif
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseCreateCsric02Info(csric02Info_t* info)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCreateCsric02Info((csric02Info_t*)info));
@@ -324,7 +324,7 @@ hipsparseStatus_t hipsparseDestroyCsrgemm2Info(csrgemm2Info_t info)
 }
 #endif
 
-#if CUDART_VERSION < 13000
+#if CUDART_VERSION < 14000
 hipsparseStatus_t hipsparseCreatePruneInfo(pruneInfo_t* info)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCreatePruneInfo((pruneInfo_t*)info));

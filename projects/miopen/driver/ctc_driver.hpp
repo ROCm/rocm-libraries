@@ -288,9 +288,6 @@ int CTCDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
                                      &workSpaceSizeCPU);
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     probs_dev     = std::unique_ptr<GPUMem>(new GPUMem(ctx, probs_sz, sizeof(Tgpu)));
     losses_dev    = std::unique_ptr<GPUMem>(new GPUMem(ctx, batch_size, sizeof(Tgpu)));

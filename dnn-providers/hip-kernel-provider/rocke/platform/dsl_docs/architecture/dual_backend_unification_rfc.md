@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Proposed (enactable plan) |
-| **Scope** | `Python/rocke` (Python), `python/Cpp` (C → C++20), `dnn-providers/rocke-provider` (C++ hipDNN plugin) |
+| **Scope** | `python/rocke` (Python), `python/cpp` (C → C++20), `dnn-providers/rocke-provider` (C++ hipDNN plugin) |
 | **Type** | Architecture + Test Infrastructure + Migration |
 | **Supersedes / relates to** | `architecture/multi_arch_data_layout.md`, `hipdnn_provider/plan.md`, the existing `tests/parity` harness in `Cpp` |
 | **Owner** | rocke team |
@@ -329,10 +329,10 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 | #8320 gfx950 compv4 **schedule hints** | `gemm_universal.py` +76, `helpers/schedule.py` +178, `loads.py` +108 | mirror in C++ |
 | #8313 **fix backend drift llvm22** + #8293 ISA backend cracks | `core/lower_llvm.py`, `isa/backend.py`, `arch/target.py`, `arch_specs.json`, `ir.py` | reconcile C++ lowerer/isa |
 | #8486 verification improvements | verifier paths | reconcile with WS1 `verify.py` |
-| #8609 **gfx1250** (RDNA4) new arch | `instances/gfx1250/*` ~6k + examples + tests | **new** ckc gfx1250 backend + instances (large) |
+| #8609 **gfx1250** new arch | `instances/gfx1250/*` ~6k + examples + tests | **new** ckc gfx1250 backend + instances (large) |
 | attention/moe deltas | `attention_unified.py` +349, `moe_*`, `fused_moe_e2e.py` +124 | mirror in C++ |
 
-**Method.** Point the differential harness's **Python side at the target tree** (`PYTHONPATH=<target-worktree>/dnn-providers/hip-kernel-provider/rocKE/Python`) against the current C++ engine → `run_diff` enumerates the **exact per-family C++ drift** = the authoritative work-list. Mirror each codegen change in C++; gate `run_diff` GREEN vs target-Python.
+**Method.** Point the differential harness's **Python side at the target tree** (`PYTHONPATH=<target-worktree>/dnn-providers/hip-kernel-provider/rocke/platform/python`) against the current C++ engine → `run_diff` enumerates the **exact per-family C++ drift** = the authoritative work-list. Mirror each codegen change in C++; gate `run_diff` GREEN vs target-Python.
 
 **Tasks.** T11.1 core backend fixes (#8313/#8293) → C++ `lower_llvm`/`isa`. T11.2 conv (#8624/#8355) → C++ conv. T11.3 atoms fp32/bf16 (#8348) → C++ atoms/mma/catalog. T11.4 gemm/schedule (#8320). T11.5 attention/moe deltas. T11.6 **gfx1250** new arch (assess: new ckc backend + instances; prioritize after existing-family drift). T11.7 **capture-here** — ensure this branch's Python reflects target changes; **flag conflicts** with WS1/WS6 additions (`core/__init__.py`, `dispatch/gemm/*` both diverged from the #8237 base).
 
@@ -383,7 +383,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 - **Sweep targets** (committed source/scripts/CI/tests/docs, *not* build dirs): usernames/NTIDs, emails (e.g. `@amd.com`), internal hostnames (login hosts, node names), personal absolute paths (absolute `workspace`/`home` checkout paths, `~/work`, `/tmp/claude*`, personal venvs, `~/.ssh/<key>`).
 - **Replace with:** repo-relative paths (from `__file__`/script dir), **env vars** (`$USER`/`$TMPDIR`/`$HIPDNN_ROOT` etc.), or documented placeholders (`<login-host>`/`<user>`/`<repo>`); a gitignored-local-config pattern (e.g. `~/.rocke_env`) for remote-cluster scripts. Doc branch refs → keep if legitimately documenting an upstream branch, else `<target-branch>`.
-- **Guard:** the deny-list check `Cpp/ci/tiers/check_no_personal_ids.sh` rejects the personal-id/hostname/personal-path patterns; it is wired into the static CI tier and the pre-commit config. The deny-list of personal tokens lives at the top of that script and is easy to extend.
+- **Guard:** the deny-list check `cpp/ci/tiers/check_no_personal_ids.sh` rejects the personal-id/hostname/personal-path patterns; it is wired into the static CI tier and the pre-commit config. The deny-list of personal tokens lives at the top of that script and is easy to extend.
 
 **AC.** Zero personal usernames/emails/internal-hostnames + zero personal absolute paths in committed source/scripts/CI/tests; docs genericized/placeholdered; deny-list guard live; functionality preserved via env/relative. **Sequencing:** after WS10 (engine quiesces), coordinate the deny-list with WS19; sweep the final state once. Blocks the PR/merge.
 
@@ -391,12 +391,12 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ### WS19 — Build/config/artifact hygiene: make staleness loud-failing [defense-in-depth]
 
-**Premise.** *Every* observed false failure was a stale/wrong artifact used silently — the stale `Cpp/build` archive (`ROCKE_LIB` defaulted to it → "Conv C-JIT broken"), the cluster sync shipping stale `src` (→ phantom `-Werror=switch`), missing `-D__HIP_PLATFORM_AMD__`/`HIPDNN_BUILD_DIR` (→ "demos don't compile"), stale memory gap-lists. The engine was fine; the *periphery* drifted. Goal: staleness must **fail loud, not silently**.
+**Premise.** *Every* observed false failure was a stale/wrong artifact used silently — the stale `cpp/build` archive (`ROCKE_LIB` defaulted to it → "Conv C-JIT broken"), the cluster sync shipping stale `src` (→ phantom `-Werror=switch`), missing `-D__HIP_PLATFORM_AMD__`/`HIPDNN_BUILD_DIR` (→ "demos don't compile"), stale memory gap-lists. The engine was fine; the *periphery* drifted. Goal: staleness must **fail loud, not silently**.
 
 **Key constraint:** stamp **artifacts, not the emitted `.ll`** — a hash comment in the `.ll` would break the byte-identity differential gate (Python doesn't emit it). Stamps live in the archive/HSACO/manifest metadata; consumers validate those.
 
 - **L1 — Versioning / freshness stamps (the core guard).** Single `ROCKE_ENGINE_VERSION` (semver) + a build-id = content-hash of the engine source. Embed in artifacts: `rocke_build_id()`/`rocke_engine_version()` in `librocke_core.a`, a `.note` on the comgr HSACO, `engine_version`+`source_hash` in `kernels/<arch>/manifest.json`, engine ver in the `ck.dsl.ir/v1` header. **Consumers validate + fail loud on mismatch** (provider C-JIT checks the archive's source-hash vs current; runtime checks manifest compat).
-- **L2 — Commit guards.** `.gitignore` all engine build products (`build*/`, `*.a/.o/.so`, `CMakeCache`, `_deps/`); pre-commit hook **rejects** committing them (so `Cpp/build` never re-commits); remove the checked-in stale build dirs. Distinguish the *intentionally-shipped* `kernels/<arch>` bundles (committed, but L1-stamped + regeneratable).
+- **L2 — Commit guards.** `.gitignore` all engine build products (`build*/`, `*.a/.o/.so`, `CMakeCache`, `_deps/`); pre-commit hook **rejects** committing them (so `cpp/build` never re-commits); remove the checked-in stale build dirs. Distinguish the *intentionally-shipped* `kernels/<arch>` bundles (committed, but L1-stamped + regeneratable).
 - **L3 — Single canonical build entrypoint.** One script/top-CMake that builds engine+provider+demos with all correct flags/paths baked in (`HIPDNN_ROOT`/`HIPDNN_BUILD_DIR`/`-D__HIP_PLATFORM_AMD__`/the full `_deps` include set/`ROCKE_LIB`→**fresh** archive). The provider builds the engine fresh, not from a stale checked-in `.a`. No hand-rolled `g++`.
 - **L4 — CI gates (blocking).** Build-from-clean; the differential harness (vs Python + vs target); "no committed build artifacts"; L1 stamp validation; the golden gate.
 - **L5 — Sync integrity.** Replace rsync-with-gitignore-filter (shipped stale copies) with content-hash-verified sync / `git archive` snapshots; remote build verifies source-hash before building.

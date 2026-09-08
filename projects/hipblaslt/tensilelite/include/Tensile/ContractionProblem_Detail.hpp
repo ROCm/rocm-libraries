@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -134,6 +134,8 @@ namespace TensileLite
                                         rhs.biasSrc(),
                                         lhs.useE(),
                                         rhs.useE(),
+                                        lhs.useGateResidual(),
+                                        rhs.useGateResidual(),
                                         lhs.useScaleAB(),
                                         rhs.useScaleAB(),
                                         lhs.useScaleCD(),
@@ -148,6 +150,12 @@ namespace TensileLite
                                         rhs.swizzleTensorA(),
                                         lhs.swizzleTensorB(),
                                         rhs.swizzleTensorB(),
+                                        lhs.fusedGemmA2A(),
+                                        rhs.fusedGemmA2A(),
+                                        lhs.fusedA2AExtent(),
+                                        rhs.fusedA2AExtent(),
+                                        lhs.fusedA2AWorld(),
+                                        rhs.fusedA2AWorld(),
                                         lhs.mxBlockA(),
                                         rhs.mxBlockA(),
                                         lhs.mxBlockB(),
@@ -155,7 +163,13 @@ namespace TensileLite
                                         lhs.mxTypeA(),
                                         rhs.mxTypeA(),
                                         lhs.mxTypeB(),
-                                        rhs.mxTypeB());
+                                        rhs.mxTypeB(),
+                                        lhs.getParams().smCountTarget(),
+                                        rhs.getParams().smCountTarget(),
+                                        lhs.getParams().streamKTileSchedulingMode(),
+                                        rhs.getParams().streamKTileSchedulingMode(),
+                                        lhs.getParams().uniformSummationOrder(),
+                                        rhs.getParams().uniformSummationOrder());
         }
     };
 } // namespace TensileLite
@@ -167,6 +181,7 @@ namespace std
     {
         inline size_t operator()(TensileLite::ContractionProblemGemm const& problem) const
         {
+            // Cached lookups include this flag because selection depends on it.
             return TensileLite::hash_combine(problem.operationIdentifier(),
                                              problem.a(),
                                              problem.b(),
@@ -189,6 +204,7 @@ namespace std
                                              problem.useBias(),
                                              problem.biasSrc(),
                                              problem.useE(),
+                                             problem.useGateResidual(),
                                              problem.useScaleAB(),
                                              problem.useScaleCD(),
                                              problem.useScaleAlphaVec(),
@@ -196,10 +212,16 @@ namespace std
                                              problem.f32XdlMathOp(),
                                              problem.swizzleTensorA(),
                                              problem.swizzleTensorB(),
+                                             problem.fusedGemmA2A(),
+                                             problem.fusedA2AExtent(),
+                                             problem.fusedA2AWorld(),
                                              problem.mxBlockA(),
                                              problem.mxBlockB(),
                                              problem.mxTypeA(),
-                                             problem.mxTypeB());
+                                             problem.mxTypeB(),
+                                             problem.getParams().smCountTarget(),
+                                             problem.getParams().streamKTileSchedulingMode(),
+                                             problem.getParams().uniformSummationOrder());
         }
     };
 
@@ -235,6 +257,7 @@ namespace std
                                                   problem.useBias(),
                                                   problem.biasSrc(),
                                                   problem.useE(),
+                                                  problem.useGateResidual(),
                                                   problem.useScaleAB(),
                                                   problem.useScaleCD(),
                                                   problem.useScaleAlphaVec(),
@@ -242,6 +265,9 @@ namespace std
                                                   problem.f32XdlMathOp(),
                                                   problem.swizzleTensorA(),
                                                   problem.swizzleTensorB(),
+                                                  problem.fusedGemmA2A(),
+                                                  problem.fusedA2AExtent(),
+                                                  problem.fusedA2AWorld(),
                                                   problem.mxBlockA(),
                                                   problem.mxBlockB(),
                                                   problem.mxTypeA(),

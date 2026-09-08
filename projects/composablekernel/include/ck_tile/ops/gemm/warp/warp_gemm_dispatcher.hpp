@@ -361,23 +361,42 @@ template <typename AType,
           bool UseStructuredSparsity         = false,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
-          bool IsScale16                     = false>
+          bool IsScale16                     = false,
+          bool UsePackedNumAccess            = false,
+          bool UseMxScale                    = false>
 #if USE_NEW_UNIFIED_FRAMEWORK
-using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::UnificationDispatcher<
+// Note that we convert the SwizzleA bool to a SwizzleFactor. This used to be hardcoded in a number
+// of places in the original Dispatcher / WarpGemms, always ending up with SFactor = 2 for the
+// cases where the Dispatcher was used. The rare SFactor = 4 cases never went through the
+// Dispatcher.
+using WarpGemmDispatcher =
+    typename impl::warp_gemm_dispatcher::UnificationDispatcher<AType,
+                                                               BType,
+                                                               AccType,
+                                                               MPerWave,
+                                                               NPerWave,
+                                                               KPerWave,
+                                                               TransposeC,
+                                                               SwizzleA ? 2 : 1,
+                                                               UseStructuredSparsity,
+                                                               AttrNumAccessA,
+                                                               AttrNumAccessB,
+                                                               IsScale16,
+                                                               UsePackedNumAccess,
+                                                               UseMxScale>::Type;
 #else
-using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher<
+using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher<AType,
+                                                                           BType,
+                                                                           AccType,
+                                                                           MPerWave,
+                                                                           NPerWave,
+                                                                           KPerWave,
+                                                                           TransposeC,
+                                                                           SwizzleA,
+                                                                           UseStructuredSparsity,
+                                                                           AttrNumAccessA,
+                                                                           AttrNumAccessB,
+                                                                           IsScale16>::Type;
 #endif
-    AType,
-    BType,
-    AccType,
-    MPerWave,
-    NPerWave,
-    KPerWave,
-    TransposeC,
-    SwizzleA,
-    UseStructuredSparsity,
-    AttrNumAccessA,
-    AttrNumAccessB,
-    IsScale16>::Type;
 
 } // namespace ck_tile

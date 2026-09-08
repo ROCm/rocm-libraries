@@ -6,14 +6,12 @@
 #include "engines/hip_mlops_engine/plans/ApplicabilityChecks.hpp"
 
 #include <array>
-#include <optional>
-#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/layernorm_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/layernorm_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 namespace hip_kernel_provider::layernorm
@@ -37,9 +35,7 @@ public:
 
     // --- Component Validators ---
 
-    void checkTensorLayoutsAndDimsSupported() override;
-
-    void checkTensorIDLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds);
+    void checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds) override;
 
     void checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
                                        const std::vector<int64_t>& affineTensorIds,
@@ -54,6 +50,9 @@ public:
 
     void checkTensorConfigSupported(
         const hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes& lnAttr);
+
+    void checkTensorConfigSupported(
+        const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes& lnAttr);
 };
 
 // Layernorm Type Configuration ---

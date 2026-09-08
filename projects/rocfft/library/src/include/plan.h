@@ -37,6 +37,10 @@
 #include "rocfft_mpi.h"
 #include "tree_node.h"
 
+#ifdef ROCFFT_RCCL_ENABLE
+#include "rccl_wrapper.h"
+#endif
+
 // Calculate the maximum pow number with the given base number
 template <int base>
 constexpr size_t PowMax()
@@ -402,6 +406,15 @@ struct rocfft_plan_t
 
     rocfft_plan_description_t desc;
 
+#ifdef ROCFFT_RCCL_ENABLE
+    // RCCL communicator used by GlobalTransposeRCCL.  Populated only
+    // when the plan runs in a single process (local_comm_size == 1)
+    // and has >= 2 local devices; empty otherwise, in which case
+    // GlobalTransposeP2P / GlobalTransposeA2A handle the transpose.
+    // Value-semantic handle; copies share state via shared_ptr<Impl>.
+    rocfft_rccl_comm_t rccl;
+#endif
+
     rocfft_plan_t() = default;
 
     // Add a multi-plan item for execution.  Returns the index of the
@@ -430,6 +443,14 @@ struct rocfft_plan_t
     // returns `true` iff a successful multi-device computing plan configuration
     // was set up
     bool BuildMultiDevicePlan();
+
+#ifdef ROCFFT_RCCL_ENABLE
+    // populate the rccl communicator from the description's local devices,
+    // before any plan-building path is chosen,  empty when not applicable.
+    // any failure is swallowed internally, leaving rccl empty so
+    // the caller falls back to the P2P / A2A paths
+    void InitRCCLCommunicator() noexcept;
+#endif
 
     // check log level, log the topologically sorted plan if plan
     // logging is enabled
@@ -775,6 +796,15 @@ private:
     std::vector<size_t> GlobalTransposeA2A(const field_view_t&        input,
                                            const field_view_t&        output,
                                            const std::vector<size_t>& antecedents);
+
+#ifdef ROCFFT_RCCL_ENABLE
+    // RCCL-based global transpose for single-process multi-GPU plans.
+    // Dispatches to ncclAllToAll for uniform NxN patterns and to a
+    // grouped ncclSend/ncclRecv path for everything else.
+    std::vector<size_t> GlobalTransposeRCCL(const field_view_t&        input,
+                                            const field_view_t&        output,
+                                            const std::vector<size_t>& antecedents);
+#endif
 
     // fallback case for global transpose that uses point-to-point
     // communications, for when all-to-all isn't possible.

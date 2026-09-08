@@ -32,6 +32,9 @@ set(TEST_GOOD_DEFAULT_PLUGIN_NAME "test_good_default_plugin")
 set(TEST_KNOBS_PLUGIN_NAME "test_knobs_plugin")
 set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "test_knob_constraint_validation_plugin")
 set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "test_incompatible_version_plugin")
+set(TEST_HASHED_NAME_PLUGIN_NAME "test_hashed_name_plugin")
+set(TEST_LYING_ENGINE_NAME_PLUGIN_NAME "test_lying_engine_name_plugin")
+set(TEST_MISMATCHED_NAME_PLUGIN_NAME "test_mismatched_name_plugin")
 
 # Override-execute fake plugin names
 set(HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET "test_override_implementing_plugin")
@@ -40,6 +43,13 @@ set(HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET "test_version_liar_plugin")
 set(HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET "test_second_override_plugin")
 set(HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET "test_malformed_version_plugin")
 set(HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET "test_version_zero_plugin")
+
+# Runtime pass-by-value fake: reports K_PASS_BY_VALUE_MIN_API_VERSION ("1.2.0").
+set(HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET "test_pass_by_value_plugin")
+
+# Runtime pass-by-value RECORDER fake: reports "1.2.0" and records the scalar it
+# resolves from device_buffers at execute, for delivery verification.
+set(HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET "test_pass_by_value_recorder_plugin")
 
 # Heuristic plugin test names
 set(TEST_GOOD_HEURISTIC_PLUGIN_NAME "test_good_heuristic_plugin")

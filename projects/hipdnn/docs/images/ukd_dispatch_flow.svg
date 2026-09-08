@@ -1,0 +1,71 @@
+<svg viewBox="0 0 900 580" width="900" height="580" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+  <defs>
+    <marker id="arrowDF" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <!-- title -->
+  <text x="450" y="30" text-anchor="middle" font-size="16" font-weight="700">Dispatch: one generic path for every kernel</text>
+
+  <!-- symbol table (teal / match) -->
+  <rect x="230" y="48" width="440" height="58" rx="8" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
+  <text x="450" y="72" text-anchor="middle" font-size="12" font-weight="600">the KDP's matchers bind a symbol table</text>
+  <text x="450" y="92" text-anchor="middle" font-family="Consolas, monospace" font-size="11">$q, $k, seqlen_q, num_heads, batch, attrs, $kernel.*, knobs</text>
+
+  <!-- arrow into UDD -->
+  <line x1="450" y1="106" x2="450" y2="130" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
+
+  <!-- UDD box (purple / dispatch) -->
+  <rect x="40" y="130" width="820" height="200" rx="8" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="60" y="153" font-size="13" font-weight="700">UDD  (one per KDP, shared by all child kernels)</text>
+
+  <!-- (a) Formula evaluator -->
+  <rect x="60" y="166" width="360" height="150" rx="8" fill="#ffffff" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="80" y="189" font-size="12" font-weight="600">Formula evaluator</text>
+  <text x="80" y="213" font-family="Consolas, monospace" font-size="11">grid</text>
+  <text x="80" y="235" font-family="Consolas, monospace" font-size="11">block</text>
+  <text x="80" y="257" font-family="Consolas, monospace" font-size="11">shared_mem</text>
+  <text x="80" y="279" font-family="Consolas, monospace" font-size="11">workspace</text>
+  <text x="80" y="303" font-size="10" fill="#555">as formulas over symbols</text>
+
+  <!-- (b) args_signature resolver -->
+  <rect x="480" y="166" width="360" height="150" rx="8" fill="#ffffff" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="500" y="189" font-size="12" font-weight="600">args_signature resolver</text>
+  <text x="500" y="211" font-size="10" fill="#555">source tagged-union variants:</text>
+  <!-- chips -->
+  <rect x="500" y="222" width="70" height="22" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="535" y="237" text-anchor="middle" font-family="Consolas, monospace" font-size="11">tensor</text>
+  <rect x="578" y="222" width="55" height="22" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="605.5" y="237" text-anchor="middle" font-family="Consolas, monospace" font-size="11">dim</text>
+  <rect x="641" y="222" width="68" height="22" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="675" y="237" text-anchor="middle" font-family="Consolas, monospace" font-size="11">stride</text>
+  <rect x="717" y="222" width="58" height="22" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="746" y="237" text-anchor="middle" font-family="Consolas, monospace" font-size="11">attr</text>
+  <rect x="500" y="252" width="60" height="22" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="530" y="267" text-anchor="middle" font-family="Consolas, monospace" font-size="11">expr</text>
+  <rect x="568" y="252" width="98" height="22" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="617" y="267" text-anchor="middle" font-family="Consolas, monospace" font-size="11">workspace</text>
+  <text x="500" y="302" font-size="10" fill="#555">resolves each argument slot against symbols</text>
+
+  <!-- arrow down to pack arguments -->
+  <line x1="450" y1="330" x2="450" y2="356" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
+
+  <!-- pack arguments (neutral) -->
+  <rect x="300" y="356" width="300" height="42" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="450" y="382" text-anchor="middle" font-size="12" font-weight="600">pack arguments</text>
+  <line x1="450" y1="398" x2="450" y2="422" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
+
+  <!-- load code object (neutral) -->
+  <rect x="300" y="422" width="300" height="42" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="450" y="448" text-anchor="middle" font-size="12" font-weight="600">load code object (cached)</text>
+  <line x1="450" y1="464" x2="450" y2="488" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
+
+  <!-- launch kernel (execution red) -->
+  <rect x="300" y="488" width="300" height="42" rx="8" fill="#fdecec" stroke="#c65353" stroke-width="1.5"/>
+  <text x="450" y="514" text-anchor="middle" font-size="12" font-weight="600">launch kernel</text>
+
+  <!-- caption -->
+  <text x="450" y="558" text-anchor="middle" font-size="11" fill="#555">Symbols resolve at plan time; the safe interpreter fails closed on an unknown symbol.</text>
+</svg>

@@ -46,7 +46,7 @@ def _bootstrap_rocke() -> None:
         pass
     here = Path(__file__).resolve()
     for parent in here.parents:
-        candidate = parent / "Python"
+        candidate = parent / "python"
         if (candidate / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return

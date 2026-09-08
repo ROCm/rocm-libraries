@@ -4,13 +4,13 @@
 version: 2
 
 sphinx:
-   configuration: docs/conf.py
+   configuration: projects/rocalution/docs/conf.py
 
 formats: [htmlzip, epub]
 
 python:
    install:
-   - requirements: docs/sphinx/requirements.txt
+   - requirements: projects/rocalution/docs/sphinx/requirements.txt
 
 build:
    os: ubuntu-22.04

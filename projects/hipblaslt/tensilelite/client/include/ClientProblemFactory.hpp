@@ -69,6 +69,7 @@ namespace TensileLite
             std::vector<double>           m_constantValues;
 
             bool        m_stridedBatched;
+            int         m_batchMode;
             bool        m_groupedGemm;
             bool        m_highPrecisionAccumulate;
             bool        m_deterministicMode;
@@ -80,7 +81,8 @@ namespace TensileLite
             int         m_useScaleAlphaVec;
             bool        m_useSynchronizer;
             bool        m_useE;
-            bool        m_useGradient = false;
+            bool        m_useGradient     = false;
+            bool        m_useGateResidual = false;
             bool        m_outputAmaxD;
 
             int                              m_sparse;
@@ -88,6 +90,7 @@ namespace TensileLite
             PerformanceMetric                m_performanceMetric;
             ActivationType                   m_activationType;
             std::vector<rocisa::DataType>    m_biasTypeArgs;
+            std::vector<rocisa::DataType>    m_gateTypeArgs;
             std::vector<int>                 m_factorDimArgs;
             std::vector<bool>                m_icacheFlushArgs;
             bool                             m_activationNoGuard;
@@ -108,6 +111,7 @@ namespace TensileLite
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
+            bool                             m_fusedGemmA2A;
             int                              m_metadataLayout;
             int                              m_mxBlockA;
             int                              m_mxBlockB;

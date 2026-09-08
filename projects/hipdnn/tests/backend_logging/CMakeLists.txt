@@ -34,4 +34,4 @@ target_compile_definitions(
 add_dependencies(hipdnn_backend_logging_shutdown_tests test_good_default_plugin)
 
 clang_tidy_check(hipdnn_backend_logging_shutdown_tests)
-add_integration_test_target(hipdnn_backend_logging_shutdown_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_backend_logging_shutdown_tests ${CMAKE_CURRENT_BINARY_DIR})

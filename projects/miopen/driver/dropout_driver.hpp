@@ -226,9 +226,6 @@ int DropoutDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     size_t states_size = statesSizeInBytes / sizeof(rocrand_state_xorwow);
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     states_dev =
         std::unique_ptr<GPUMem>(new GPUMem(ctx, states_size, sizeof(rocrand_state_xorwow)));

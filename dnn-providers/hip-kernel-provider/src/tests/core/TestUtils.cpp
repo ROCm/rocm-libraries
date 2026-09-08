@@ -1,8 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <array>
-
 #include <gtest/gtest.h>
 
 #include "core/Utils.hpp"
@@ -55,58 +53,6 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
 }
 
 } // namespace
-
-// ============================================================================
-// findDeviceBuffer
-// ============================================================================
-
-TEST(TestFindDeviceBuffer, FindsBufferWithMatchingUid)
-{
-    int data1 = 0;
-    int data2 = 0;
-    std::array<hipdnnPluginDeviceBuffer_t, 2> buffers = {{{1, &data1}, {2, &data2}}};
-
-    auto result = findDeviceBuffer(2, buffers.data(), 2);
-
-    EXPECT_EQ(result.uid, 2);
-    EXPECT_EQ(result.ptr, &data2);
-}
-
-TEST(TestFindDeviceBuffer, FindsFirstBufferInArray)
-{
-    int data = 0;
-    std::array<hipdnnPluginDeviceBuffer_t, 1> buffers = {{{42, &data}}};
-
-    auto result = findDeviceBuffer(42, buffers.data(), 1);
-
-    EXPECT_EQ(result.uid, 42);
-    EXPECT_EQ(result.ptr, &data);
-}
-
-TEST(TestFindDeviceBuffer, ThrowsWhenUidNotFound)
-{
-    int data = 0;
-    std::array<hipdnnPluginDeviceBuffer_t, 1> buffers = {{{1, &data}}};
-
-    EXPECT_THROW(findDeviceBuffer(99, buffers.data(), 1), hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
-TEST(TestFindDeviceBuffer, ThrowsWhenBufferArrayIsEmpty)
-{
-    EXPECT_THROW(findDeviceBuffer(1, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
-TEST(TestFindDeviceBuffer, FindsFirstMatchWhenDuplicateUidsExist)
-{
-    int data1 = 0;
-    int data2 = 0;
-    std::array<hipdnnPluginDeviceBuffer_t, 2> buffers = {{{5, &data1}, {5, &data2}}};
-
-    auto result = findDeviceBuffer(5, buffers.data(), 2);
-
-    EXPECT_EQ(result.uid, 5);
-    EXPECT_EQ(result.ptr, &data1);
-}
 
 // ============================================================================
 // findTensorAttributes
@@ -419,6 +365,36 @@ TEST(TestParseActivation, TanhWithDefaults)
     EXPECT_EQ(params.mode, ActivationMode::TANH);
     EXPECT_DOUBLE_EQ(params.alpha, 1.0);
     EXPECT_DOUBLE_EQ(params.beta, 1.0);
+}
+
+TEST(TestParseActivation, TanhFwdWithDefaults)
+{
+    auto builder
+        = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_FWD);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::TANH);
+    EXPECT_DOUBLE_EQ(params.alpha, 1.0);
+    EXPECT_DOUBLE_EQ(params.beta, 1.0);
+}
+
+TEST(TestParseActivation, AbsWithDefaults)
+{
+    auto builder
+        = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ABS);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::ABS);
+    EXPECT_DOUBLE_EQ(params.alpha, 0.0);
+    EXPECT_DOUBLE_EQ(params.beta, 0.0);
 }
 
 TEST(TestParseActivation, Passthru)

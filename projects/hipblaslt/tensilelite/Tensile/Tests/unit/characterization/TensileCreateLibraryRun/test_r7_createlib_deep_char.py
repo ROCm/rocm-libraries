@@ -47,6 +47,10 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
+from Tensile.Common import IsaInfo, IsaVersion
+from Tensile.Common.TypeValidationErrors import ConfigTypeError
+from Tensile.Toolchain.Component import Assembler
+
 pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
@@ -508,6 +512,30 @@ class TestGenerateLogicDataAndSolutionsExtra:
             solutions, masterLibs, mapping = self._run(base_assembler, base_isa_map)
         # No arch key should be added when architectureName==""
         assert masterLibs == {}
+
+    def test_type_mismatch_summary_is_fatal(
+        self,
+        base_assembler: Assembler,
+        base_isa_map: dict[IsaVersion, IsaInfo],
+    ) -> None:
+        """Aggregate type mismatches from parsed logic files raise after merging."""
+        from Tensile.SolutionLibrary import MasterSolutionLibrary as MSL
+
+        mismatch = {
+            ("UseBeta", "int", "bool"): {
+                "count": 2,
+                "values": {"0", "1"},
+                "files": {"a.yaml", "b.yaml"},
+            }
+        }
+        fake_results = [(None, "", None, None, None, MSL({}, None), mismatch)]
+
+        with patch.object(M, "ParallelMap2", return_value=iter(fake_results)):
+            with pytest.raises(ConfigTypeError) as exc:
+                self._run(base_assembler, base_isa_map)
+
+        assert "ERROR: YAML parameter type mismatches detected" in str(exc.value)
+        assert "UseBeta" in str(exc.value)
 
     def test_fallback_merge_integrates_into_per_arch_masters(self, base_assembler, base_isa_map):
         """Lines 832-835: fallback key is merged into each non-fallback arch master,

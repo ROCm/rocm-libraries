@@ -223,24 +223,11 @@ void unit_check_general(int64_t M, int64_t N, int64_t lda, size_t* hCPU, size_t*
 // a wrapper will cause the loop keep going
 
 template <>
-void unit_check_near(int64_t M, int64_t N, int64_t lda, int8_t* hCPU, int8_t* hGPU)
+void unit_check_near(
+    int64_t M, int64_t N, int64_t lda, int8_t* hCPU, int8_t* hGPU, double rtol, double atol)
 {
-    for(int64_t j = 0; j < N; j++)
-    {
-        for(int64_t i = 0; i < M; i++)
-        {
-#ifdef GOOGLE_TEST
-            ASSERT_EQ(hCPU[i + j * lda], hGPU[i + j * lda]);
-#else
-            assert(hCPU[i + j * lda] == hGPU[i + j * lda]);
-#endif
-        }
-    }
-}
-
-template <>
-void unit_check_near(int64_t M, int64_t N, int64_t lda, int32_t* hCPU, int32_t* hGPU)
-{
+    (void)rtol;
+    (void)atol;
     for(int64_t j = 0; j < N; j++)
     {
         for(int64_t i = 0; i < M; i++)
@@ -256,15 +243,68 @@ void unit_check_near(int64_t M, int64_t N, int64_t lda, int32_t* hCPU, int32_t* 
 
 template <>
 void unit_check_near(
-    int64_t M, int64_t N, int64_t lda, hipsparseFloat16* hCPU, hipsparseFloat16* hGPU)
+    int64_t M, int64_t N, int64_t lda, int32_t* hCPU, int32_t* hGPU, double rtol, double atol)
 {
+    (void)rtol;
+    (void)atol;
+    for(int64_t j = 0; j < N; j++)
+    {
+        for(int64_t i = 0; i < M; i++)
+        {
+#ifdef GOOGLE_TEST
+            ASSERT_EQ(hCPU[i + j * lda], hGPU[i + j * lda]);
+#else
+            assert(hCPU[i + j * lda] == hGPU[i + j * lda]);
+#endif
+        }
+    }
+}
+
+template <>
+void unit_check_near(int64_t           M,
+                     int64_t           N,
+                     int64_t           lda,
+                     hipsparseFloat16* hCPU,
+                     hipsparseFloat16* hGPU,
+                     double            rtol,
+                     double            atol)
+{
+    const float r = (rtol < 0.0) ? 1e-2f : static_cast<float>(rtol);
+    const float a = (atol < 0.0) ? 1e-3f : static_cast<float>(atol);
     for(int64_t j = 0; j < N; j++)
     {
         for(int64_t i = 0; i < M; i++)
         {
             float cpu         = static_cast<float>(hCPU[i + j * lda]);
             float gpu         = static_cast<float>(hGPU[i + j * lda]);
-            float compare_val = std::max(std::abs(cpu * 1e-2f), 1e-3f);
+            float compare_val = std::max(std::abs(cpu) * r, a);
+#ifdef GOOGLE_TEST
+            ASSERT_NEAR(cpu, gpu, compare_val);
+#else
+            assert(std::abs(cpu - gpu) < compare_val);
+#endif
+        }
+    }
+}
+
+template <>
+void unit_check_near(int64_t            M,
+                     int64_t            N,
+                     int64_t            lda,
+                     hipsparseBfloat16* hCPU,
+                     hipsparseBfloat16* hGPU,
+                     double             rtol,
+                     double             atol)
+{
+    const float r = (rtol < 0.0) ? 1e-1f : static_cast<float>(rtol);
+    const float a = (atol < 0.0) ? 1e-2f : static_cast<float>(atol);
+    for(int64_t j = 0; j < N; j++)
+    {
+        for(int64_t i = 0; i < M; i++)
+        {
+            float cpu         = static_cast<float>(hCPU[i + j * lda]);
+            float gpu         = static_cast<float>(hGPU[i + j * lda]);
+            float compare_val = std::max(std::abs(cpu) * r, a);
 #ifdef GOOGLE_TEST
             ASSERT_NEAR(cpu, gpu, compare_val);
 #else
@@ -276,33 +316,16 @@ void unit_check_near(
 
 template <>
 void unit_check_near(
-    int64_t M, int64_t N, int64_t lda, hipsparseBfloat16* hCPU, hipsparseBfloat16* hGPU)
+    int64_t M, int64_t N, int64_t lda, float* hCPU, float* hGPU, double rtol, double atol)
 {
+    const float r = (rtol < 0.0) ? 1e-3f : static_cast<float>(rtol);
+    const float a
+        = (atol < 0.0) ? 10 * std::numeric_limits<float>::epsilon() : static_cast<float>(atol);
     for(int64_t j = 0; j < N; j++)
     {
         for(int64_t i = 0; i < M; i++)
         {
-            float cpu         = static_cast<float>(hCPU[i + j * lda]);
-            float gpu         = static_cast<float>(hGPU[i + j * lda]);
-            float compare_val = std::max(std::abs(cpu * 1e-1f), 1e-2f);
-#ifdef GOOGLE_TEST
-            ASSERT_NEAR(cpu, gpu, compare_val);
-#else
-            assert(std::abs(cpu - gpu) < compare_val);
-#endif
-        }
-    }
-}
-
-template <>
-void unit_check_near(int64_t M, int64_t N, int64_t lda, float* hCPU, float* hGPU)
-{
-    for(int64_t j = 0; j < N; j++)
-    {
-        for(int64_t i = 0; i < M; i++)
-        {
-            float compare_val = std::max(std::abs(hCPU[i + j * lda] * 1e-3f),
-                                         10 * std::numeric_limits<float>::epsilon());
+            float compare_val = std::max(std::abs(hCPU[i + j * lda]) * r, a);
 #ifdef GOOGLE_TEST
             ASSERT_NEAR(hCPU[i + j * lda], hGPU[i + j * lda], compare_val);
 #else
@@ -313,14 +336,16 @@ void unit_check_near(int64_t M, int64_t N, int64_t lda, float* hCPU, float* hGPU
 }
 
 template <>
-void unit_check_near(int64_t M, int64_t N, int64_t lda, double* hCPU, double* hGPU)
+void unit_check_near(
+    int64_t M, int64_t N, int64_t lda, double* hCPU, double* hGPU, double rtol, double atol)
 {
+    const double r = (rtol < 0.0) ? 1e-10 : rtol;
+    const double a = (atol < 0.0) ? 10 * std::numeric_limits<double>::epsilon() : atol;
     for(int64_t j = 0; j < N; j++)
     {
         for(int64_t i = 0; i < M; i++)
         {
-            double compare_val = std::max(std::abs(hCPU[i + j * lda] * 1e-10),
-                                          10 * std::numeric_limits<double>::epsilon());
+            double compare_val = std::max(std::abs(hCPU[i + j * lda]) * r, a);
 #ifdef GOOGLE_TEST
             ASSERT_NEAR(hCPU[i + j * lda], hGPU[i + j * lda], compare_val);
 #else
@@ -331,17 +356,19 @@ void unit_check_near(int64_t M, int64_t N, int64_t lda, double* hCPU, double* hG
 }
 
 template <>
-void unit_check_near(int64_t M, int64_t N, int64_t lda, hipComplex* hCPU, hipComplex* hGPU)
+void unit_check_near(
+    int64_t M, int64_t N, int64_t lda, hipComplex* hCPU, hipComplex* hGPU, double rtol, double atol)
 {
+    const float r = (rtol < 0.0) ? 1e-3f : static_cast<float>(rtol);
+    const float a
+        = (atol < 0.0) ? 10 * std::numeric_limits<float>::epsilon() : static_cast<float>(atol);
     for(int64_t j = 0; j < N; j++)
     {
         for(int64_t i = 0; i < M; i++)
         {
             hipComplex compare_val
-                = make_hipFloatComplex(std::max(std::abs(hCPU[i + j * lda].x * 1e-3f),
-                                                10 * std::numeric_limits<float>::epsilon()),
-                                       std::max(std::abs(hCPU[i + j * lda].y * 1e-3f),
-                                                10 * std::numeric_limits<float>::epsilon()));
+                = make_hipFloatComplex(std::max(std::abs(hCPU[i + j * lda].x) * r, a),
+                                       std::max(std::abs(hCPU[i + j * lda].y) * r, a));
 
 #ifdef GOOGLE_TEST
             ASSERT_NEAR(hCPU[i + j * lda].x, hGPU[i + j * lda].x, compare_val.x);
@@ -355,18 +382,23 @@ void unit_check_near(int64_t M, int64_t N, int64_t lda, hipComplex* hCPU, hipCom
 }
 
 template <>
-void unit_check_near(
-    int64_t M, int64_t N, int64_t lda, hipDoubleComplex* hCPU, hipDoubleComplex* hGPU)
+void unit_check_near(int64_t           M,
+                     int64_t           N,
+                     int64_t           lda,
+                     hipDoubleComplex* hCPU,
+                     hipDoubleComplex* hGPU,
+                     double            rtol,
+                     double            atol)
 {
+    const double r = (rtol < 0.0) ? 1e-10 : rtol;
+    const double a = (atol < 0.0) ? 10 * std::numeric_limits<double>::epsilon() : atol;
     for(int64_t j = 0; j < N; j++)
     {
         for(int64_t i = 0; i < M; i++)
         {
             hipDoubleComplex compare_val
-                = make_hipDoubleComplex(std::max(std::abs(hCPU[i + j * lda].x * 1e-10),
-                                                 10 * std::numeric_limits<double>::epsilon()),
-                                        std::max(std::abs(hCPU[i + j * lda].y * 1e-10),
-                                                 10 * std::numeric_limits<double>::epsilon()));
+                = make_hipDoubleComplex(std::max(std::abs(hCPU[i + j * lda].x) * r, a),
+                                        std::max(std::abs(hCPU[i + j * lda].y) * r, a));
 #ifdef GOOGLE_TEST
             ASSERT_NEAR(hCPU[i + j * lda].x, hGPU[i + j * lda].x, compare_val.x);
             ASSERT_NEAR(hCPU[i + j * lda].y, hGPU[i + j * lda].y, compare_val.y);

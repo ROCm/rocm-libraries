@@ -25,17 +25,60 @@
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
+
+#ifdef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
+#include <atomic>
+
+#include <hipdnn_frontend/detail/DynamicBackendLibrary.hpp>
+#endif
 
 namespace hipdnn_frontend
 {
 
 /// @cond INTERNAL
+namespace detail
+{
+// The logging callback is resolved here (not through hipdnnBackend()) because
+// initializeFrontendLogging() fires from every HIPDNN_FE_LOG_* macro, including
+// during hipdnnBackend() construction. Going through the instance would re-enter.
+#ifdef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
+
+HIPDNN_HIDDEN inline hipdnnCallback_t resolveBackendLoggingCallback()
+{
+    static std::atomic<void*> s_cache{nullptr};
+    return resolveBackendSymbol<hipdnnCallback_t>(s_cache, "hipdnnLoggingCallback_ext");
+}
+
+#else
+
+HIPDNN_HIDDEN inline hipdnnCallback_t resolveBackendLoggingCallback()
+{
+    return hipdnnLoggingCallback_ext;
+}
+
+#endif
+
+// Lazily initializes and returns the backend instance. Defined in
+// BackendWrapper.hpp (which can't be included here due to a circular
+// dependency). The definition is always available before any call site.
+static std::shared_ptr<IHipdnnBackend> hipdnnBackend();
+
+} // namespace detail
+
 /// @brief Component name used for all frontend log messages
 inline constexpr const char* K_COMPONENT_NAME = "hipdnn_frontend";
 
-HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
-                                                       = hipdnnLoggingCallback_ext)
+// Pass nullptr (the default) to route frontend logs to the backend's logging
+// callback, resolved according to the build's backend-loading mode. Returns -1
+// when no callback is available (e.g. the backend could not be loaded).
+HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = nullptr)
 {
+    if(fn == nullptr)
+    {
+        fn = detail::resolveBackendLoggingCallback();
+    }
+
     if(fn == nullptr)
     {
         return -1;
@@ -137,7 +180,7 @@ inline Error setUserLogCallback(hipdnnUserLogCallback_t callback,
                                 LogCallbackMode mode,
                                 hipdnnUserLogCallbackHandle_t userHandle)
 {
-    auto status = hipdnnSetUserLogCallback_ext(
+    auto status = detail::hipdnnBackend()->setUserLogCallbackExt(
         callback, minLevel, static_cast<hipdnnLogCallbackMode_t>(mode), userHandle);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
@@ -160,8 +203,7 @@ inline Error setGlobalLogLevel(hipdnnSeverity_t level)
     // Update frontend's cache (in user executable)
     hipdnn_data_sdk::logging::setLogLevel(level);
 
-    // Update backend's cache (in backend shared library)
-    auto status = hipdnnBackendSetGlobalLogLevel_ext(level);
+    auto status = detail::hipdnnBackend()->backendSetGlobalLogLevelExt(level);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to set global log level"};
@@ -177,7 +219,7 @@ inline Error setGlobalLogLevel(hipdnnSeverity_t level)
  */
 inline Error getGlobalLogLevel(hipdnnSeverity_t& level)
 {
-    auto status = hipdnnBackendGetGlobalLogLevel_ext(&level);
+    auto status = detail::hipdnnBackend()->backendGetGlobalLogLevelExt(&level);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to get global log level"};

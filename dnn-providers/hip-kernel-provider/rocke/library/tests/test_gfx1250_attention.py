@@ -13,7 +13,7 @@ Covers the wave32 WMMA attention surface:
 
 The GPU probe class is skipped unless run on a gfx1250 device.
 
-    PYTHONPATH=Python python3 -m pytest rocke/tests/test_gfx1250_attention.py -k "not Gpu"
+    PYTHONPATH=python python3 -m pytest rocke/tests/test_gfx1250_attention.py -k "not Gpu"
 """
 
 from __future__ import annotations
@@ -23,22 +23,14 @@ import subprocess
 import sys
 import unittest
 
+from rocke.runtime.hip_module import get_device_arch
+
 # Subprocess `-m` runs (rocke.*, kernels.*, builders.*) resolve through the
 # editable-installed rocke + library packages; no PYTHONPATH wiring needed
 # (see rocke/BUILDING.md).
 
-
-def _device_arch():
-    """(arch_str_or_None) via the rocke HIP runtime (no torch dependency)."""
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0)
-    except Exception:
-        return None
-
-
-_ARCH = _device_arch()
+# Running device's gfx arch via the rocke HIP runtime (no torch dependency).
+_ARCH = get_device_arch(0)
 
 
 class TestGfx1250DenseAttention(unittest.TestCase):
@@ -428,6 +420,22 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
 
 
 class TestGfx1250ScalarFp8Attention(unittest.TestCase):
+    # ``supports_native_unified_attention`` takes no arch argument -- it resolves
+    # the arch off the host device. Without a pin these gfx1250 gates inherit
+    # whatever the runner is, and on an fnuz-native arch (gfx942) the fp8 gate
+    # correctly rejects the OCP-declared problem built below. Pin the arch so the
+    # test asserts gfx1250 behaviour on any runner.
+    def setUp(self):
+        from kernels.common import attention_unified as au
+
+        self._old_arch = au._RESOLVED_ATTENTION_ARCH
+        au._RESOLVED_ATTENTION_ARCH = "gfx1250"
+
+    def tearDown(self):
+        from kernels.common import attention_unified as au
+
+        au._RESOLVED_ATTENTION_ARCH = self._old_arch
+
     @staticmethod
     def _small_fp8_problem(**overrides):
         from kernels.common.attention_unified import UnifiedAttentionProblem

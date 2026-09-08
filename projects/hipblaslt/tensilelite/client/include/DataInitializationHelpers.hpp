@@ -8,6 +8,8 @@
 #include <mxDataGen.hpp>                          // hipDataType, generateMXInput
 #include <mxDataGenerator/dataTypeInfo.hpp>       // DGen::toFloat / toFloatPacked
 #include <mxDataGenerator/ocp_e2m1_mxfp4.hpp>     // DGen::ocp_e2m1_mxfp4
+#include <mxDataGenerator/ocp_e2m3_mxfp6.hpp>     // DGen::ocp_e2m3_mxfp6
+#include <mxDataGenerator/ocp_e3m2_mxfp6.hpp>     // DGen::ocp_e3m2_mxfp6
 #include <mxDataGenerator/ocp_e4m3_mxfp8.hpp>     // DGen::ocp_e4m3_mxfp8
 #include <mxDataGenerator/ocp_e5m2_mxfp8.hpp>     // DGen::ocp_e5m2_mxfp8
 #include <hip/hip_runtime.h>                      // HIP_R_*
@@ -51,6 +53,8 @@ namespace TensileLite
             //  MX *data*-element dtype mapper. generateMXInput() takes a
             //  hipDataType for the data tensor too:
             //    Float4  -> HIP_R_4F_E2M1   (OCP E2M1, 2 elems / byte)
+            //    Float6  -> HIP_R_6F_E2M3   (OCP E2M3, 4 elems / 3 bytes)
+            //    BFloat6 -> HIP_R_6F_E3M2   (OCP E3M2, 4 elems / 3 bytes)
             //    Float8  -> HIP_R_8F_E4M3   (OCP E4M3, 1 elem / byte)
             //    BFloat8 -> HIP_R_8F_E5M2   (OCP E5M2, 1 elem / byte)
             // ----------------------------------------------------------------
@@ -60,6 +64,10 @@ namespace TensileLite
                 {
                 case rocisa::DataType::Float4:
                     return static_cast<hipDataType>(HIP_R_4F_E2M1);
+                case rocisa::DataType::Float6:
+                    return static_cast<hipDataType>(HIP_R_6F_E2M3);
+                case rocisa::DataType::BFloat6:
+                    return static_cast<hipDataType>(HIP_R_6F_E3M2);
                 case rocisa::DataType::Float8:
                     return HIP_R_8F_E4M3;
                 case rocisa::DataType::BFloat8:
@@ -70,162 +78,10 @@ namespace TensileLite
                 }
             }
             // ----------------------------------------------------------------
-            //  randomFP4DataAndFixScales:
-            //      scale[]  = scaleByte (default 0x7F = E8M0 bias 127 -> 2^0 = 1.0)
-            //      data[i]  = high|low nibbles drawn from the OCP E2M1 set
-            //                 {0x0,0x1,0x2, 0x8,0x9,0xA} so |value| <= 1.0.
-            // Usage:
-            //   randomFP4DataAndFixScales(pristineData.cpuInput.valid.get(),
-            //                             dataTensor.totalAllocatedBytes(),
-            //                             pristineE8.cpuInput.valid.get(),
-            //                             scaleTensor.totalAllocatedBytes());
-            // ----------------------------------------------------------------
-            inline void randomFP4DataAndFixScales(void*   data,
-                                                  size_t  numDataBytes,
-                                                  void*   scale,
-                                                  size_t  numScaleBytes,
-                                                  uint8_t scaleByte = 0x7F)
-            {
-                std::memset(scale, scaleByte, numScaleBytes);
-                static constexpr uint8_t kFP4Nibbles[6] = {0x0, 0x1, 0x2, 0x8, 0x9, 0xA};
-                auto* bytes = static_cast<uint8_t*>(data);
-                for(size_t i = 0; i < numDataBytes; ++i)
-                {
-                    uint8_t hi = kFP4Nibbles[getThreadLocalRandInt() % 6];
-                    uint8_t lo = kFP4Nibbles[getThreadLocalRandInt() % 6];
-                    bytes[i]   = static_cast<uint8_t>((hi << 4) | lo);
-                }
-            }
-            // ----------------------------------------------------------------
-            //  randomFP8DataAndFixScales:
-            //      scale[]  = scaleByte
-            //      data[i]  = sign(1b) | mag, mag uniform in [0, maxMag]
-            //                 maxMag = 0x38 for E4M3 (= +1.0)
-            //                 maxMag = 0x3C for E5M2 (= +1.0)
-            //
-            // Usage:
-            //   randomFP8DataAndFixScales(dataTensor.dataType(),
-            //                             pristineData.cpuInput.valid.get(),
-            //                             dataTensor.totalAllocatedBytes(),
-            //                             pristineE8.cpuInput.valid.get(),
-            //                             scaleTensor.totalAllocatedBytes());
-            // ----------------------------------------------------------------
-            inline void randomFP8DataAndFixScales(rocisa::DataType dataType,
-                                                  void*            data,
-                                                  size_t           numDataBytes,
-                                                  void*            scale,
-                                                  size_t           numScaleBytes,
-                                                  uint8_t          scaleByte = 0x7F)
-            {
-                std::memset(scale, scaleByte, numScaleBytes);
-                uint8_t maxMagByte;
-                if(dataType == rocisa::DataType::Float8)        // OCP E4M3
-                    maxMagByte = 0x38;                          // exp=7,  m=0 -> +1.0
-                else if(dataType == rocisa::DataType::BFloat8)  // OCP E5M2
-                    maxMagByte = 0x3C;                          // exp=15, m=0 -> +1.0
-                else
-                    throw std::runtime_error(
-                        "randomFP8DataAndFixScales: unsupported FP8 data type");
-                int const numMagValues = static_cast<int>(maxMagByte) + 1;
-                auto*     bytes        = static_cast<uint8_t*>(data);
-                for(size_t i = 0; i < numDataBytes; ++i)
-                {
-                    uint8_t mag  = static_cast<uint8_t>(getThreadLocalRandInt() % numMagValues);
-                    uint8_t sign = static_cast<uint8_t>((getThreadLocalRandInt() & 1) << 7);
-                    bytes[i]     = static_cast<uint8_t>(sign | mag);
-                }
-            }
-            // ----------------------------------------------------------------
-            //  fixBytes / fixDataAndScaleBytes: brute "memset-everywhere" knobs.
-            //  Useful for hand-checking the kernel against a single known byte
-            //  (e.g. 0x30 in E4M3 == 2^-7 = 0.0078125).
-            //
-            // Usage:
-            //
-            //   fixBytes(pristineData.cpuInput.valid.get(),
-            //            dataTensor.totalAllocatedBytes(),
-            //            0x38);                       // every elem == +1.0
-            //
-            //
-            //   fixDataAndScaleBytes(pristineData.cpuInput.valid.get(),
-            //                        dataTensor.totalAllocatedBytes(),
-            //                        pristineE8.cpuInput.valid.get(),
-            //                        scaleTensor.totalAllocatedBytes(),
-            //                        0x7E,            // scale = 2^-1 = 0.5
-            //                        0x30);           // payload = 2^-7
-            // ----------------------------------------------------------------
-            inline void fixBytes(void* data, size_t numBytes, uint8_t fillByte = 0x30)
-            {
-                std::memset(data, fillByte, numBytes);
-            }
-            inline void fixDataAndScaleBytes(void*   data,
-                                             size_t  numDataBytes,
-                                             void*   scale,
-                                             size_t  numScaleBytes,
-                                             uint8_t scaleByte    = 0x7E,
-                                             uint8_t dataFillByte = 0x30)
-            {
-                std::memset(scale, scaleByte, numScaleBytes);
-                fixBytes(data, numDataBytes, dataFillByte);
-            }
-            // ----------------------------------------------------------------
-            //  identityFP8DataAndFixScales:
-            //      scale[]               = scaleByte (default 0x7F = scale 1.0)
-            //      data[]                = 0x00
-            //      data[i, i] (diagonal) = +1.0 byte for the dtype
-            //          E4M3 (Float8)  -> 0x38  (exp=7,  m=0 -> 2^0 = 1.0)
-            //          E5M2 (BFloat8) -> 0x3C  (exp=15, m=0 -> 2^0 = 1.0)
-            //
-            //  Per-batch independent identity is written when the data tensor
-            //  is 3D. FP8 packing == 1, so the TensorDescriptor strides are
-            //  byte offsets and totalAllocatedBytes() == totalAllocatedElements().
-            //
-            // Usage:
-            //    identityFP8DataAndFixScales(tensorA.dataType(),
-            //                                pristineA.cpuInput.valid.get(),
-            //                                problem.a(),
-            //                                pristineE8A.cpuInput.valid.get(),
-            //                                problem.mxsa().totalAllocatedBytes());
-            // ----------------------------------------------------------------
-            inline void identityFP8DataAndFixScales(rocisa::DataType        dataType,
-                                                    void*                   data,
-                                                    TensorDescriptor const& dataTensor,
-                                                    void*                   scale,
-                                                    size_t                  numScaleBytes,
-                                                    uint8_t                 scaleByte = 0x7F)
-            {
-                std::memset(scale, scaleByte, numScaleBytes);
-                std::memset(data,  0x00,      dataTensor.totalAllocatedBytes());
-                uint8_t oneByte;
-                if(dataType == rocisa::DataType::Float8)
-                    oneByte = 0x38;
-                else if(dataType == rocisa::DataType::BFloat8)
-                    oneByte = 0x3C;
-                else
-                    throw std::runtime_error(
-                        "identityFP8DataAndFixScales: unsupported FP8 data type");
-                auto const& sizes       = dataTensor.sizes();
-                auto const& strides     = dataTensor.strides();
-                size_t      rows        = sizes[0];
-                size_t      cols        = sizes[1];
-                size_t      strideRow   = strides[0];
-                size_t      strideCol   = strides[1];
-                size_t      batchCount  = sizes.size()   > 2 ? sizes[2]   : 1;
-                size_t      batchStride = strides.size() > 2 ? strides[2] : 0;
-                size_t      diag        = std::min(rows, cols);
-                auto* bytes = static_cast<uint8_t*>(data);
-                for(size_t b = 0; b < batchCount; ++b)
-                {
-                    uint8_t* batchPtr = bytes + b * batchStride;
-                    for(size_t i = 0; i < diag; ++i)
-                        batchPtr[i * strideRow + i * strideCol] = oneByte;
-                }
-            }
-            // ----------------------------------------------------------------
             //  decodeE8M0  : matches mxScaleElementAsFloat(rocisa::DataType::E8,..)
             //                used by Reference.cpp - keep them in sync.
             //  decodeMXElement : thin dispatch over DGen::toFloatPacked / toFloat
-            //                for the three supported element types.
+            //                for supported MX element types.
             // ----------------------------------------------------------------
             inline float decodeE8M0(uint8_t b)
             {
@@ -243,6 +99,12 @@ namespace TensileLite
                 {
                 case rocisa::DataType::Float4:  // OCP E2M1, packed 2/byte
                     return DGen::toFloatPacked<DGen::ocp_e2m1_mxfp4>(
+                        scalePtr, dataPtr, scaleIndex, elemIndex);
+                case rocisa::DataType::Float6:  // OCP E2M3, packed 4/3 bytes
+                    return DGen::toFloatPacked<DGen::ocp_e2m3_mxfp6>(
+                        scalePtr, dataPtr, scaleIndex, elemIndex);
+                case rocisa::DataType::BFloat6: // OCP E3M2, packed 4/3 bytes
+                    return DGen::toFloatPacked<DGen::ocp_e3m2_mxfp6>(
                         scalePtr, dataPtr, scaleIndex, elemIndex);
                 case rocisa::DataType::Float8:  // OCP E4M3
                     return DGen::toFloat<DGen::ocp_e4m3_mxfp8>(

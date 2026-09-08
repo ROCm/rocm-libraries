@@ -223,6 +223,25 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->block_size = 256;
         spec->batched = false;
         break;
+    case 10: /* test_noalc: cshuffle with cshuffle_no_alias=True (idx 1 shape) */
+        spec->name = "test_noalc";
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 256,
+                                              .tile_n = 256,
+                                              .tile_k = 64,
+                                              .warp_m = 4,
+                                              .warp_n = 4,
+                                              .warp_k = 1,
+                                              .warp_tile_m = 32,
+                                              .warp_tile_n = 32,
+                                              .warp_tile_k = 16};
+        spec->trait.pipeline = "compv4";
+        spec->trait.epilogue = "cshuffle";
+        spec->trait.cshuffle_no_alias = true;
+        spec->data.dtype_a = "fp16";
+        spec->wave_size = 64;
+        spec->block_size = 1024;
+        spec->batched = false;
+        break;
     default:
         return -1;
     }
@@ -240,7 +259,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..9>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..10>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

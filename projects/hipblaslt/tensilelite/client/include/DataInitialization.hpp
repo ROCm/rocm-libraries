@@ -34,6 +34,8 @@
 #include "ClientProblemFactory.hpp"
 #include "Rotating.hpp"
 
+#include <mxDataGen.hpp>
+
 #include <cstddef>
 #include <random>
 
@@ -60,24 +62,16 @@ namespace TensileLite
                 return false;
             auto dt = tensor.dataType();
             return dt == rocisa::DataType::Float4
+                || dt == rocisa::DataType::Float6
+                || dt == rocisa::DataType::BFloat6
                 || dt == rocisa::DataType::Float8
                 || dt == rocisa::DataType::BFloat8;
         }
 
-        inline bool isF6(const TensorDescriptor& tensor)
+        inline bool isMXProblem(const ContractionProblemGemm& problem)
         {
-            auto const dt = tensor.dataType();
-
-            return dt == rocisa::DataType::Float6
-                || dt == rocisa::DataType::BFloat6;
-        }
-
-        inline bool isMXProblemExceptF6(const ContractionProblemGemm& problem)
-        {
-            bool isAnyF6 = isF6(problem.a()) or isF6(problem.b());
-            return !isAnyF6 &&
-                (isMXTensor(problem.a(), problem.mxBlockA())
-                || isMXTensor(problem.b(), problem.mxBlockB()));
+            return isMXTensor(problem.a(), problem.mxBlockA())
+                || isMXTensor(problem.b(), problem.mxBlockB());
         }
 
         // Problem-indept. from 0~7, and 16, and 23~26 (fixed values for every problem)
@@ -177,6 +171,17 @@ namespace TensileLite
             DataInitialization(po::variables_map const&    args,
                                ClientProblemFactory const& problemFactory);
             ~DataInitialization();
+
+            // True when the CPU reference must be recomputed for this solution
+            // because DataInitialization refreshes MX inputs per solution
+            // (solution-dependent HostPreSwizzle, gfx950). When false (e.g.
+            // gfx1250, gfx942, non-MX) the per-problem reference is still valid
+            // and can be reused across all solutions.
+            bool referenceNeedsPerSolutionRecompute(ContractionProblemGemm const& problem,
+                                                    ContractionSolution const*    solution) const
+            {
+                return needsSolutionDependentMXPreswizzle(problem, solution);
+            }
 
             /**
              * Returns a ContractionInputs object with pointers to CPU memory,
@@ -764,8 +769,8 @@ namespace TensileLite
             template <typename T, InitMode Mode>
             void initArray(T* array, size_t elements)
             {
-                size_t numPacks = elements / TypeInfo<T>::Packing;
-#pragma omp parallel for
+                const size_t numPacks = elements / TypeInfo<T>::Packing;
+#pragma omp parallel for shared(array) firstprivate(numPacks)
                 for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = getValue<T, Mode>();
@@ -775,8 +780,8 @@ namespace TensileLite
             template <typename T>
             void initArrayConvert(T* array, size_t elements)
             {
-                size_t numPacks = elements / TypeInfo<T>::Packing;
-#pragma omp parallel for
+                const size_t numPacks = elements / TypeInfo<T>::Packing;
+#pragma omp parallel for shared(array) firstprivate(numPacks)
                 for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = ConvertTo<T>(i);
@@ -793,9 +798,9 @@ namespace TensileLite
             template <typename T>
             void initArraySerialIdx(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -808,9 +813,9 @@ namespace TensileLite
             template <typename T>
             void initArraySerialDim(T* array, int dim, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count, dim)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -823,17 +828,16 @@ namespace TensileLite
             template <>
             void initArraySerialDim<Half>(Half* array, int dim, TensorDescriptor const& tensor)
             {
-                union
-                {
-                    uint16_t bits;
-                    Half     value;
-                } x;
-
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count, dim)
                 for(size_t idx = 0; idx < count; idx++)
                 {
+                    union
+                    {
+                        uint16_t bits;
+                        Half     value;
+                    } x;
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
                     x.bits                     = static_cast<uint16_t>(coord[dim]);
@@ -844,9 +848,9 @@ namespace TensileLite
             template <typename T>
             void initArrayIdentity(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -859,9 +863,9 @@ namespace TensileLite
             template <typename T, bool useCos, bool useAbs>
             void initArrayTrig(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -874,7 +878,7 @@ namespace TensileLite
             template <typename T, bool useCos, bool useAbs>
             void initArrayTrig(T* array, size_t elements)
             {
-#pragma omp parallel for
+#pragma omp parallel for shared(array) firstprivate(elements)
                 for(size_t i = 0; i < elements; i += TypeInfo<T>::Packing)
                 {
                     array[i / TypeInfo<T>::Packing] = getTrigValue<T>(i, useCos, useAbs);
@@ -907,46 +911,39 @@ namespace TensileLite
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-init MX FP4/FP8 inputs once the solution is known (MI-based preSwizzle when enabled).
-                // Gate on m_mxScaleFormat so we only re-init when the user requested an MX scale layout;
-                // useScaleAB may be empty for MX kernels that use MXSA/MXSB, so do not gate on it.
+                // Re-init MX inputs for solution-dependent HostPreSwizzle.
                 if(m_currentSolution != nullptr
-                   && m_mxScaleFormat > 0
                    && m_currentGemmProblem != nullptr
-                   && !m_gpuPtrs.empty())
+                   && !m_gpuPtrs.empty()
+                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
+                                                         m_currentSolution))
                 {
-                    bool isMX = isMXProblemExceptF6(*m_currentGemmProblem);
-                    if(isMX)
+                    initializeMXData(*m_currentGemmProblem);
+                    copyValidToGPUBuffer(*m_currentGemmProblem);
+                    copyInputs(m_gpuPtrs,
+                               m_gpuBatchPtrs,
+                               m_maxElements,
+                               m_groupedOffsets,
+                               *m_currentGemmProblem,
+                               hipMemcpyDeviceToDevice);
+                    // Sync CPU current buffers so the reference matches GPU data.
+                    for(int ti : {ContractionProblemGemm::TENSOR::A,
+                                  ContractionProblemGemm::TENSOR::B,
+                                  ContractionProblemGemm::TENSOR::MXSA,
+                                  ContractionProblemGemm::TENSOR::MXSB})
                     {
-                        initializeMXData(*m_currentGemmProblem);
-                        copyValidToGPUBuffer(*m_currentGemmProblem);
-                        copyInputs(m_gpuPtrs,
-                                   m_gpuBatchPtrs,
-                                   m_maxElements,
-                                   m_groupedOffsets,
-                                   *m_currentGemmProblem,
-                                   hipMemcpyDeviceToDevice);
-                        // Sync cpuInput.current from cpuInput.valid for MX
-                        // tensors so the CPU reference reads the regenerated
-                        // data that matches what the GPU received.
-                        for(int ti : {ContractionProblemGemm::TENSOR::A,
-                                      ContractionProblemGemm::TENSOR::B,
-                                      ContractionProblemGemm::TENSOR::MXSA,
-                                      ContractionProblemGemm::TENSOR::MXSB})
+                        auto& desc = m_currentGemmProblem->tensors()[ti];
+                        auto  it   = m_vdata[ti].pristine.find(desc.dataType());
+                        if(it == m_vdata[ti].pristine.end())
+                            continue;
+                        auto& p = it->second;
+                        if(p.cpuInput.valid && p.cpuInput.current)
                         {
-                            auto& desc = m_currentGemmProblem->tensors()[ti];
-                            auto  it   = m_vdata[ti].pristine.find(desc.dataType());
-                            if(it == m_vdata[ti].pristine.end())
-                                continue;
-                            auto& p = it->second;
-                            if(p.cpuInput.valid && p.cpuInput.current)
-                            {
-                                size_t bytes = multiplyElementSize(
-                                    p.maxElements, desc.elementBytes());
-                                std::memcpy(p.cpuInput.current.get(),
-                                            p.cpuInput.valid.get(),
-                                            bytes);
-                            }
+                            size_t bytes = multiplyElementSize(
+                                p.maxElements, desc.elementBytes());
+                            std::memcpy(p.cpuInput.current.get(),
+                                        p.cpuInput.valid.get(),
+                                        bytes);
                         }
                     }
                 }
@@ -1078,6 +1075,17 @@ namespace TensileLite
 
             void initializeMXData(ContractionProblemGemm const& problem);
 
+            // True when swizzled MX scales depend on the solution.
+            bool needsSolutionDependentMXPreswizzle(
+                ContractionProblemGemm const& problem,
+                ContractionSolution const*    solution) const
+            {
+                return isMXProblem(problem) && m_mxScaleFormat > 0
+                       && m_mxScaleLayout == MXScaleLayout::GFX950
+                       && solution != nullptr
+                       && solution->problemType.mxScaleFormat == 1;
+            }
+
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,
                             std::vector<size_t>&              maxElements,
@@ -1177,10 +1185,10 @@ namespace TensileLite
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
-            // True when the current GPU uses preswizzled MX scale layout (gfx950 subtile).
-            // False for architectures that use K-swizzle layout (e.g. gfx1250).
-            bool m_isMXPreswizzleArch = false;
-            // Set by initializeMXDataForFP4 when preswizzled scale was uploaded to gpuInput.valid.
+            MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
+            // Set by initializeMXData when a preswizzled scale was uploaded
+            // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
+            // hand back gpuInput.valid as-is rather than re-swizzling).
             bool m_mxPreswizzledA = false;
             bool m_mxPreswizzledB = false;
         };

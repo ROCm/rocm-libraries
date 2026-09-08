@@ -23,4 +23,4 @@ and details of the different hipSPARSE functions by category.
 * :ref:`hipsparse_reordering_functions` for reordering sparse matrices
 * :ref:`hipsparse_generic_functions` for manipulating sparse matrices
 
-For information about precision support in these functions, see :doc:`hipSPARSE precision support <./precision>`.
+For information about precision support in these functions, see :doc:`hipSPARSE precision support <./data-type-support>`.
