@@ -206,7 +206,6 @@ inline ComponentResult compareComplexMagnitude(const ComparisonValue& observed,
         return result;
     }
 
-    const double observedMagnitude = std::hypot(observed.real, observed.imaginary);
     const double expectedMagnitude = std::hypot(expected.real, expected.imaginary);
     result.difference =
         std::hypot(observed.real - expected.real, observed.imaginary - expected.imaginary);
@@ -365,8 +364,7 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
 
 template <typename Observed, typename Expected>
 bool valuesClose(Observed observed, Expected expected, const ComparisonOptions& options) {
-    if (!options.equalNaNs && options.absoluteTolerance == 0.0 &&
-        options.relativeTolerance == 0.0)
+    if (!options.equalNaNs && options.absoluteTolerance == 0.0 && options.relativeTolerance == 0.0)
         return observed == expected;
 
     return valuesCloseFast(observed, expected, options);

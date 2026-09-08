@@ -12,10 +12,9 @@ int main() {
     const std::array<float, 4> b{5, 7, 6, 8};
     const Layout layout(Shape{2, 2}, {1, 2});
     Tensor output(ScalarType::Float32, layout);
-    referenceGemmIntoWithBlasBackend(
-        Tensor::copyNativeStorage<float>(layout, std::span<const float>(a)),
-        Tensor::copyNativeStorage<float>(layout, std::span<const float>(b)), output, output,
-        GemmOptions{}, GemmBackend::Blas);
+    matmulIntoWithBlasBackend(Tensor::copyNativeStorage<float>(layout, std::span<const float>(a)),
+                              Tensor::copyNativeStorage<float>(layout, std::span<const float>(b)),
+                              output);
 
     return output.loadAs<float>({0, 0}) == 19 && output.loadAs<float>({1, 0}) == 43 &&
                    output.loadAs<float>({0, 1}) == 22 && output.loadAs<float>({1, 1}) == 50

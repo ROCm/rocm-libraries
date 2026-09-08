@@ -18,9 +18,7 @@ struct EpilogueOptions {
     explicit EpilogueOptions(ScalarType compute = ScalarType::Float32)
         : computeType(compute),
           outputScale(Tensor::scalar(compute, 1)),
-          auxiliaryScale(Tensor::scalar(compute, 1)),
-          activationParameter0(Tensor::scalar(compute, 0)),
-          activationParameter1(Tensor::scalar(compute, 0)) {}
+          auxiliaryScale(Tensor::scalar(compute, 1)) {}
 
     ScalarType computeType;
     std::optional<Tensor> auxiliaryInput;
@@ -29,10 +27,8 @@ struct EpilogueOptions {
     Tensor outputScale;
     Tensor auxiliaryScale;
     OutputConversion outputConversion = OutputConversion::Default;
-    Activation activation = Activation::None;
+    ActivationFunction activation;
     ActivationApplication activationApplication = ActivationApplication::Forward;
-    Tensor activationParameter0;
-    Tensor activationParameter1;
     OutputSelection outputSelection = OutputSelection::all();
     bool accumulateAmax = false;
 };

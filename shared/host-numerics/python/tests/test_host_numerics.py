@@ -586,7 +586,7 @@ class TensorAndGemmTests(unittest.TestCase):
             np.asarray([-6.0, -0.5, 1.5, 6.0], dtype=np.float32),
         )
 
-    def test_linear_combination_matches_numpy(self):
+    def test_tensor_arithmetic_matches_numpy(self):
         x_values = np.asarray(
             [[[1.0, -2.0], [3.0, 4.0]], [[-1.0, 2.0], [5.0, -6.0]]],
             dtype=np.float16,
@@ -597,13 +597,21 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         x = hv.from_numpy(x_values)
         y = hv.from_numpy(y_source, hv.ScalarType.BFloat16)
-        result = hv.linear_combination(
-            x=x,
-            y=y,
+        result = hv.add(
+            hv.multiply(
+                x,
+                0.5,
+                output_type=hv.ScalarType.Float32,
+                compute_type=hv.ScalarType.Float32,
+            ),
+            hv.multiply(
+                y,
+                -1.25,
+                output_type=hv.ScalarType.Float32,
+                compute_type=hv.ScalarType.Float32,
+            ),
             output_type=hv.ScalarType.Float32,
-            accumulator_type=hv.ScalarType.Float32,
-            alpha=0.5,
-            beta=-1.25,
+            compute_type=hv.ScalarType.Float32,
         )
 
         y_values = quantize_bfloat16(y_source)
@@ -615,19 +623,20 @@ class TensorAndGemmTests(unittest.TestCase):
             expected[index] = value
         np.testing.assert_array_equal(hv.to_numpy(result), expected)
 
-        y_only = hv.linear_combination(y=y, beta=3.0)
+        y_only = hv.multiply(y, 3.0)
         np.testing.assert_array_equal(
             hv.to_numpy(y_only),
             np.float32(3.0) * y_values,
         )
 
         scalar_coefficient = hv.from_numpy(np.asarray(2.0, dtype=np.float32))
-        tensor_scaled = hv.linear_combination(x=x, alpha=scalar_coefficient)
+        tensor_scaled = hv.multiply(x, scalar_coefficient)
         np.testing.assert_array_equal(
             hv.to_numpy(tensor_scaled), np.float32(2.0) * x_values
         )
-        with self.assertRaisesRegex(ValueError, "rank-zero"):
-            hv.linear_combination(x=x, alpha=x)
+        np.testing.assert_array_equal(
+            hv.to_numpy(hv.multiply(x, x)), x_values * x_values
+        )
 
         padded_x = hv.Tensor.from_storage(
             hv.ScalarType.Float32,
@@ -635,7 +644,7 @@ class TensorAndGemmTests(unittest.TestCase):
             np.asarray([1.0, 2.0, -99.0, 3.0, 4.0], dtype=np.float32).tobytes(),
             strides=[3, 1],
         )
-        contiguous = hv.linear_combination(x=padded_x)
+        contiguous = hv.multiply(padded_x, 1.0)
         self.assertEqual(contiguous.strides, [2, 1])
         self.assertEqual(contiguous.offset, 0)
         np.testing.assert_array_equal(
@@ -645,19 +654,47 @@ class TensorAndGemmTests(unittest.TestCase):
 
         column = np.asarray([[1.0], [2.0]], dtype=np.float32)
         row = np.asarray([[10.0, 20.0, 30.0]], dtype=np.float32)
-        broadcast = hv.linear_combination(
-            x=hv.from_numpy(column),
-            y=hv.from_numpy(row),
-            alpha=2.0,
-            beta=-1.0,
+        broadcast = hv.add(
+            hv.multiply(hv.from_numpy(column), 2.0),
+            hv.multiply(hv.from_numpy(row), -1.0),
         )
         np.testing.assert_array_equal(hv.to_numpy(broadcast), 2.0 * column - row)
 
-        empty = hv.linear_combination(
-            x=hv.from_numpy(np.empty((0, 3), dtype=np.float32)),
-            y=hv.from_numpy(row),
+        empty = hv.add(
+            hv.from_numpy(np.empty((0, 3), dtype=np.float32)),
+            hv.from_numpy(row),
         )
         self.assertEqual(empty.shape, [0, 3])
+
+        activation_values = np.asarray([-2.0, -0.5, 0.0, 2.0], dtype=np.float32)
+        activation_input = hv.from_numpy(activation_values)
+        np.testing.assert_array_equal(
+            hv.to_numpy(hv.relu(activation_input)), np.maximum(activation_values, 0.0)
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(hv.clip(activation_input, -1.0, 1.0)),
+            np.clip(activation_values, -1.0, 1.0),
+        )
+
+    def test_matmul_matches_numpy_and_supports_empty_reduction(self):
+        a_values = np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+        b_values = np.asarray([[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]], dtype=np.float32)
+        a = hv.from_numpy(a_values)
+        b = hv.from_numpy(b_values)
+
+        np.testing.assert_array_equal(hv.to_numpy(hv.matmul(a, b)), a_values @ b_values)
+
+        output = hv.from_numpy(np.full((2, 2), -99.0, dtype=np.float32))
+        self.assertIsNone(hv.matmul_into(a, b, output))
+        np.testing.assert_array_equal(hv.to_numpy(output), a_values @ b_values)
+
+        empty_a = hv.from_numpy(np.empty((2, 0), dtype=np.float32))
+        empty_b = hv.from_numpy(np.empty((0, 3), dtype=np.float32))
+        empty_product = hv.matmul(empty_a, empty_b)
+        self.assertEqual(empty_product.shape, [2, 3])
+        np.testing.assert_array_equal(
+            hv.to_numpy(empty_product), np.zeros((2, 3), dtype=np.float32)
+        )
 
     def test_reference_softmax_matches_numpy(self):
         source = np.asarray(
