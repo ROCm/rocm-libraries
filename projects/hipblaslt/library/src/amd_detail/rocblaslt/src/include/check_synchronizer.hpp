@@ -24,11 +24,15 @@
  *        the same buffers but are not scanned, so residue they leave is
  *        reported against the next scanned matmul.
  *
- *        The scan synchronizes the stream, stages the readback on an unguarded
- *        handle-wide host buffer, and zeroes whichever region it found dirty.
- *        All three rely on the handle being single-stream by contract (see
- *        hipblasLtHandle_t in hipblaslt.h). Skipped during HIP graph capture,
- *        where the synchronize and the memset are illegal.
+ *        The scan synchronizes the stream, stages the readback in a
+ *        thread-local host buffer, and zeroes whichever region it found dirty.
+ *        The two buffers differ in how safe that is. The Stream-K block is
+ *        private to its (stream, problem), so scanning and zeroing it is safe
+ *        with other streams running. The GSU `Synchronizer` region is shared
+ *        across streams and un-partitioned by design, so scanning and zeroing
+ *        it assumes no other stream is concurrently in an MBSK launch -- the
+ *        same assumption that region's own design already makes. Skipped during
+ *        HIP graph capture, where the synchronize and the memset are illegal.
  */
 
 #pragma once
@@ -54,14 +58,20 @@ namespace hipblaslt_check_synchronizer_detail
 
     // Reads `count` ints back from `region` and reports any nonzero one against
     // `buffer`. No-op when that buffer is absent.
-    inline void scan_region(
-        rocblaslt_handle handle, const char* label, const char* buffer, void* region, size_t count)
+    inline void scan_region(const char* label, const char* buffer, void* region, size_t count)
     {
         if(!region)
             return;
 
-        const size_t      bytes = count * sizeof(int);
-        std::vector<int>& host  = handle->check_synchronizer_host;
+        const size_t bytes = count * sizeof(int);
+
+        // Staging for the readback. Thread-local, and so unshared: one handle
+        // serves many streams, and two threads driving their own Stream-K
+        // blocks through the same handle both reach this scan. It grows to the
+        // larger of the two regions and is reused by both.
+        static thread_local std::vector<int> host;
+        if(host.size() < count)
+            host.assign(count, 0);
 
         // Reported, not swallowed: `host` still holds the previous scan, which
         // would otherwise read as a clean buffer.
@@ -138,11 +148,6 @@ inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
 
     constexpr size_t gsuCount = _rocblaslt_handle::c_syncGsuTotalElements;
     constexpr size_t skCount  = _rocblaslt_handle::c_syncSkSlotElements;
-    // One staging buffer, sized for the larger region and reused by both.
-    // Unguarded on the handle: a handle is single-stream by contract.
-    constexpr size_t staging = gsuCount > skCount ? gsuCount : skCount;
-    if(handle->check_synchronizer_host.size() != staging)
-        handle->check_synchronizer_host.assign(staging, 0);
 
     if(hipError_t err = hipStreamSynchronize(stream); err != hipSuccess)
     {
@@ -154,9 +159,8 @@ inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
     }
 
     hipblaslt_check_synchronizer_detail::scan_region(
-        handle, label, "Synchronizer", handle->Synchronizer, gsuCount);
-    hipblaslt_check_synchronizer_detail::scan_region(
-        handle, label, "StreamKFlags", streamKFlags, skCount);
+        label, "Synchronizer", handle->Synchronizer, gsuCount);
+    hipblaslt_check_synchronizer_detail::scan_region(label, "StreamKFlags", streamKFlags, skCount);
 }
 
 #endif // HIPBLASLT_CHECK_SYNCHRONIZER_HPP
