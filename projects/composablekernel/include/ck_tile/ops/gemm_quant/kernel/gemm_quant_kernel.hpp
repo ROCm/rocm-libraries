@@ -502,6 +502,28 @@ struct QuantGemmMultiDKernel
         index_t splitted_k;
     };
 
+    // Pad/guard sequence for a 2D block tile. The leading (strided) dimension carries the
+    // 64-bit global-path OOB guard (that path has no hardware bounds check); the contiguous
+    // dimension carries its tile pad, plus the guard when it is the contraction (K) dimension
+    // on the global path -- the prefetch-past-end case the ColumnMajor-B fault hit.
+    template <bool GlobalLoad,
+              bool LeadingIsDim0,
+              bool PadContiguous,
+              bool ContiguousIsContractionK>
+    CK_TILE_DEVICE static constexpr auto MakeBlockPadSequence()
+    {
+        constexpr bool leading_pad    = GlobalLoad;
+        constexpr bool contiguous_pad = (ContiguousIsContractionK && GlobalLoad) || PadContiguous;
+        if constexpr(LeadingIsDim0)
+        {
+            return sequence<leading_pad, contiguous_pad>{};
+        }
+        else
+        {
+            return sequence<contiguous_pad, leading_pad>{};
+        }
+    }
+
     CK_TILE_DEVICE static auto MakeABlockWindow(const ADataType* a_ptr,
                                                 const KernelArgs& kargs,
                                                 const index_t k_size,
@@ -541,17 +563,19 @@ struct QuantGemmMultiDKernel
         const auto& a_pad_view = [&]() {
             if constexpr(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
             {
-                return pad_tensor_view(a_tensor_view,
-                                       make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                  number<TilePartitioner::KPerBlock>{}),
-                                       sequence<false, GemmPipeline::kPadK>{});
+                return pad_tensor_view(
+                    a_tensor_view,
+                    make_tuple(number<TilePartitioner::MPerBlock>{},
+                               number<TilePartitioner::KPerBlock>{}),
+                    MakeBlockPadSequence<kAGlobalLoad, true, GemmPipeline::kPadK, true>());
             }
             else
             {
-                return pad_tensor_view(a_tensor_view,
-                                       make_tuple(number<TilePartitioner::KPerBlock>{},
-                                                  number<TilePartitioner::MPerBlock>{}),
-                                       sequence<kAGlobalLoad, GemmPipeline::kPadM>{});
+                return pad_tensor_view(
+                    a_tensor_view,
+                    make_tuple(number<TilePartitioner::KPerBlock>{},
+                               number<TilePartitioner::MPerBlock>{}),
+                    MakeBlockPadSequence<kAGlobalLoad, true, GemmPipeline::kPadM, false>());
             }
         }();
 
@@ -868,17 +892,19 @@ struct QuantGemmMultiDKernel
             {
                 // ColumnMajor B is (N, K), so K is dim1; on the unmasked 64-bit global path
                 // it must also carry the pad guard or the reduction-loop tail read faults.
-                return pad_tensor_view(b_tensor_view,
-                                       make_tuple(number<TilePartitioner::NPerBlock>{},
-                                                  number<TilePartitioner::KPerBlock>{}),
-                                       sequence<kBGlobalLoad, kBGlobalLoad || GemmPipeline::kPadK>{});
+                return pad_tensor_view(
+                    b_tensor_view,
+                    make_tuple(number<TilePartitioner::NPerBlock>{},
+                               number<TilePartitioner::KPerBlock>{}),
+                    MakeBlockPadSequence<kBGlobalLoad, true, GemmPipeline::kPadK, true>());
             }
             else
             {
-                return pad_tensor_view(b_tensor_view,
-                                       make_tuple(number<TilePartitioner::KPerBlock>{},
-                                                  number<TilePartitioner::NPerBlock>{}),
-                                       sequence<kBGlobalLoad, GemmPipeline::kPadN>{});
+                return pad_tensor_view(
+                    b_tensor_view,
+                    make_tuple(number<TilePartitioner::KPerBlock>{},
+                               number<TilePartitioner::NPerBlock>{}),
+                    MakeBlockPadSequence<kBGlobalLoad, true, GemmPipeline::kPadN, false>());
             }
         }();
 
@@ -1148,17 +1174,19 @@ struct QuantGemmMultiDKernel
                 using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
                 if constexpr(std::is_same_v<DiLayout, tensor_layout::gemm::RowMajor>)
                 {
-                    return pad_tensor_view(ds_tensor_view[i],
-                                           make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                      number<TilePartitioner::NPerBlock>{}),
-                                           sequence<kDGlobalLoad, GemmPipeline::kPadN>{});
+                    return pad_tensor_view(
+                        ds_tensor_view[i],
+                        make_tuple(number<TilePartitioner::MPerBlock>{},
+                                   number<TilePartitioner::NPerBlock>{}),
+                        MakeBlockPadSequence<kDGlobalLoad, true, GemmPipeline::kPadN, false>());
                 }
                 else
                 {
-                    return pad_tensor_view(ds_tensor_view[i],
-                                           make_tuple(number<TilePartitioner::NPerBlock>{},
-                                                      number<TilePartitioner::MPerBlock>{}),
-                                           sequence<kDGlobalLoad, GemmPipeline::kPadM>{});
+                    return pad_tensor_view(
+                        ds_tensor_view[i],
+                        make_tuple(number<TilePartitioner::NPerBlock>{},
+                                   number<TilePartitioner::MPerBlock>{}),
+                        MakeBlockPadSequence<kDGlobalLoad, true, GemmPipeline::kPadM, false>());
                 }
             },
             number<NumDTensor>{});
@@ -1243,17 +1271,19 @@ struct QuantGemmMultiDKernel
         const auto& c_pad_view = [&]() {
             if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
             {
-                return pad_tensor_view(c_tensor_view,
-                                       make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                  number<TilePartitioner::NPerBlock>{}),
-                                       sequence<kCGlobalLoad, GemmPipeline::kPadN>{});
+                return pad_tensor_view(
+                    c_tensor_view,
+                    make_tuple(number<TilePartitioner::MPerBlock>{},
+                               number<TilePartitioner::NPerBlock>{}),
+                    MakeBlockPadSequence<kCGlobalLoad, true, GemmPipeline::kPadN, false>());
             }
             else
             {
-                return pad_tensor_view(c_tensor_view,
-                                       make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                  number<TilePartitioner::NPerBlock>{}),
-                                       sequence<GemmPipeline::kPadM, kCGlobalLoad>{});
+                return pad_tensor_view(
+                    c_tensor_view,
+                    make_tuple(number<TilePartitioner::MPerBlock>{},
+                               number<TilePartitioner::NPerBlock>{}),
+                    MakeBlockPadSequence<kCGlobalLoad, false, GemmPipeline::kPadM, false>());
             }
         }();
 
@@ -1711,7 +1741,9 @@ struct QuantGemmMultiDKernel
         {
             if constexpr(IsLargeTensorMOffsettingSupported())
             {
-                // Large M handled by the M base-shift path (RowMajor A/Ds/C).
+                // Large M/N handled by the M base-shift path (RowMajor A/Ds/C); always
+                // supported, so accept without any further runtime check.
+                return true;
             }
             else if constexpr(UseLargeTensorGlobalLoad())
             {
