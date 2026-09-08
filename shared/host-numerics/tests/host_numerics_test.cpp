@@ -1128,8 +1128,8 @@ void testLinearCombination() {
     coefficientTensor.storeFrom({}, 7.0f);
     const Tensor tensorCoefficientOutput =
         linearCombination(x, std::nullopt, ScalarType::Float32, tensorCoefficientOptions);
-    require(tensorCoefficientOutput.loadAs<float>({1, 0, 1}) == 3.0f * x.loadAs<float>({1, 0, 1}),
-            "Rank-zero Tensor coefficient did not retain snapshot semantics.");
+    require(tensorCoefficientOutput.loadAs<float>({1, 0, 1}) == 7.0f * x.loadAs<float>({1, 0, 1}),
+            "Rank-zero Tensor coefficient did not retain tensor aliasing semantics.");
 
     const std::array<float, 2> columnValues{1.0f, 2.0f};
     const std::array<float, 3> rowValues{10.0f, 20.0f, 30.0f};

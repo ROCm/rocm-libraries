@@ -124,19 +124,18 @@ int main() {
 
     Tensor scalarTensor(ScalarType::Float32, Layout(Shape{}, {}, 2));
     scalarTensor.storeFrom({}, -3.5f);
-    const Scalar scalarSnapshot = scalarTensor.item();
+    const float scalarSnapshot = scalarTensor.item<float>();
     scalarTensor.storeFrom({}, 9.0f);
-    require(scalarSnapshot.type() == ScalarType::Float32 && scalarSnapshot.as<float>() == -3.5f,
+    require(scalarSnapshot == -3.5f,
             "Tensor item did not preserve independent scalar value semantics.");
     require(scalarTensor.item<float>() == 9.0f,
             "Typed Tensor item did not return a native scalar value.");
 
     Tensor packedScalarTensor(ScalarType::Float6E3M2, Layout(Shape{}, {}, 1));
     packedScalarTensor.storeFrom({}, 1.5f);
-    const Scalar packedScalar = packedScalarTensor;
-    require(packedScalar.type() == ScalarType::Float6E3M2 && packedScalar.as<float>() == 1.5f,
-            "Packed rank-zero Tensor did not convert to Scalar.");
-    requireInvalidArgument([&] { (void)nativeTensor.item(); },
+    require(packedScalarTensor.item<float>() == 1.5f,
+            "Packed rank-zero Tensor did not return its value.");
+    requireInvalidArgument([&] { (void)nativeTensor.item<float>(); },
                            "Tensor item accepted a non-scalar shape.");
 
     require(broadcastShapes(Shape{2, 1, 3}, Shape{1, 4, 1}) == Shape{2, 4, 3},
