@@ -64,6 +64,20 @@ class Request:
             raise ValueError("head_size must be 64 or 128")
 
 
+class Adapter:
+    """A request in the GENERATOR side's vocabulary.
+
+    Real integrations need one when the kernel's dispatch entry point wants a
+    different shape of argument than the library's registry does. It duck-types as a
+    request but is not a `Request`, which is the whole point of the test below.
+    """
+
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+        if int(kw.get("head_size", 128)) not in (64, 128):
+            raise ValueError("head_size must be 64 or 128")
+
+
 class Candidate:
     def __init__(self, spec_id, algorithm, min_seqlen, opt_in=False, arches=()):
         self.spec_id, self.algorithm = spec_id, algorithm
@@ -82,7 +96,15 @@ class Candidate:
         return True, ""
 
     def admits(self, req):
-        """The complete question: capability prefilter, then the predicate."""
+        """The complete question: capability prefilter, then the predicate.
+
+        The isinstance check mirrors the real library: rocKE's candidates refuse
+        anything that is not their own request type, and duck-typing does not
+        satisfy a type check. The refusal is per-request and reads exactly like an
+        ordinary decline.
+        """
+        if not isinstance(req, Request):
+            return False, f"expected Request, got {type(req).__name__}"
         if self.arches and getattr(req, "arch", None) not in self.arches:
             return False, f"capability: arch {getattr(req, 'arch', None)!r} not in {self.arches}"
         return self._supports(req)
@@ -453,6 +475,84 @@ class TestAGateThatCannotPassByAskingNothing:
         result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(declines))
         assert result.returncode == 2
         assert "must be a JSON mapping" in result.stderr
+
+
+class TestReferenceRequestOverride:
+    """A profile whose `request.class` is an ADAPTER cannot use it against the
+    reference, and the failure looks exactly like a decline.
+
+    rocKE's candidates isinstance-check their argument and refuse anything else with
+    "expected AttentionRequest, got X". Duck-typing does not satisfy a type check.
+    That refusal is raised per shape and is recorded as a decline, so the tool
+    reported RECONCILED -- every decline is one the reference makes too -- having
+    never consulted the reference on a single shape. Same failure mode as
+    `TestAGateThatCannotPassByAskingNothing`, reached a different way.
+
+    `reference_request:` overrides `request:` for the reference side only, with an
+    optional `via:` translator so the mapping lives in the integration's own adapter.
+    """
+
+    @staticmethod
+    def _adapter_profile(tmp_path, *, reference_request: str) -> Path:
+        """`request.class` is `Adapter`, which every candidate type-rejects."""
+        path = tmp_path / f"adapter_{bool(reference_request)}.yaml"
+        path.write_text(
+            textwrap.dedent(
+                f"""
+                provider_root: {tmp_path}
+                slug: stub
+                arch: gfxstub
+                source: stub.py
+                builder: build_stub
+                engine: {{name: "hipkernel:Stub"}}
+                kmd_fields: []
+                metadata_fields: []
+                dispatch: {{module: stublib, function: kernel_spec}}
+                request:
+                  module: stublib
+                  class: Adapter
+                  defaults: {{algorithm: dense}}
+                {reference_request}
+                reference_candidates:
+                  module: stublib
+                  function: candidates
+                  match: algorithm
+                  family: dense
+                """
+            )
+        )
+        return path
+
+    def test_an_adapter_request_reconciles_by_asking_nothing(self, env, tmp_path):
+        """Without the override: every shape the reference sees raises at the type
+        check, so nothing is ever compared and the run must NOT report success."""
+        result = env.run(
+            self._adapter_profile(tmp_path, reference_request=""),
+            env.shapes(_LONG),
+        )
+        assert result.returncode == 2, result.stdout
+        assert "RECONCILED" not in result.stdout
+
+    def test_reference_request_restores_a_live_comparison(self, env, tmp_path):
+        """With the override the reference is asked in its own vocabulary, and the
+        shape both sides serve reconciles for a real reason."""
+        override = textwrap.indent(
+            textwrap.dedent(
+                """
+                reference_request:
+                  module: stublib
+                  class: Request
+                  defaults: {algorithm: dense}
+                """
+            ).strip(),
+            " " * 16,
+        ).lstrip()
+        result = env.run(
+            self._adapter_profile(tmp_path, reference_request=override),
+            env.shapes(_LONG),
+        )
+        assert result.returncode == 0, result.stderr
+        assert "both serve              1" in result.stdout
 
 
 class TestServingWhatTheReferenceDeclines:

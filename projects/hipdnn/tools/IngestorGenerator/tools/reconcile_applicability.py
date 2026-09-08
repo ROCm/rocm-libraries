@@ -395,6 +395,37 @@ def main(argv=None) -> int:
         if not args.allow_empty:
             return 2
 
+    # The OTHER way this gate passes by asking nothing, and the one `reference_request`
+    # exists for. If the reference's request class is wrong for it -- typically because
+    # `request.class` is an ADAPTER in the generator side's vocabulary -- every
+    # candidate refuses it at its own type check. That refusal is per shape and is
+    # recorded as an ordinary decline, so the run reads as agreement while not one of
+    # the reference's answers is about applicability.
+    #
+    # The `nothing_served` guard above does NOT catch this: our side still serves, so
+    # the comparison looks live. What gives it away is that EVERY reference decline is
+    # a construction/type failure rather than a support answer.
+    reference_declines = [why for _, why in only_ours] + [
+        why for _, why in both_decline
+    ]
+    type_errors = [
+        why
+        for why in reference_declines
+        if "TypeError" in why or ("expected" in why and "got" in why)
+    ]
+    if reference_declines and len(type_errors) == len(reference_declines):
+        print(
+            "\nFAIL: EVERY reference decline is a type/construction error, not a "
+            "support answer.\n  The reference was asked in a vocabulary it does not "
+            "accept, so nothing was\n  actually reconciled. This is the failure "
+            "`reference_request:` exists for: declare\n  the reference's own request "
+            "class (and `via:` if the corpus needs translating)\n  so the reference is "
+            f"asked in its own terms.\n  First: {type_errors[0][:96]}",
+            file=sys.stderr,
+        )
+        if not args.allow_empty:
+            return 2
+
     if both_decline:
         print(
             "\n  Both decline -- record the reference's reason, it is independent evidence:"
