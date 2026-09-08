@@ -34,7 +34,6 @@
 #include "hipblaslt_datatype2string.hpp"
 #include <hipblaslt/host_numerics/hipblaslt_init.hpp>
 #include "hipblaslt_math.hpp"
-#include <hipblaslt/host_numerics/hipblaslt_vector.hpp>
 #ifdef CODE_COVERAGE
 #include "check_numerics_matrix.hpp"
 #include "hipblaslt_internal.hpp"
