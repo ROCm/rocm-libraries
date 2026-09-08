@@ -9,6 +9,9 @@
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_breg_creg_v2_custom_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_breg_creg_v2.hpp"
+#include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v2_custom_policy.hpp"
+#include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_trload_creg_v2_prefetch_n.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 
 // can remove all bank conflicts, but drop the performance for some cases
 // Probably it is limited by compiler optimization.
@@ -217,6 +220,36 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
     numeric_traits<typename Problem::KDataType>::PackedSize == 1 &&
     numeric_traits<typename Problem::VDataType>::PackedSize == 1;
 
+// The streamed fast path is qualified only for dense, aligned FP8->BF16 per-tensor
+// attention on the measured fp8 tiling. Other configurations retain the original
+// recurrence.
+template <typename Problem>
+inline constexpr bool is_qr_tdm_dense_fp8_v =
+    is_qr_tdm_padding_enabled_problem_v<Problem> &&
+    is_qr_tdm_measured_tiling_v<Problem, fp8_t, 128, 128> &&
+    Problem::BlockFmhaShape::kM0 == 64 &&
+    std::is_same_v<typename Problem::PDataType, fp8_t>&&
+        std::is_same_v<typename Problem::ODataType, bf16_t>&&
+            std::is_same_v<typename Problem::SaccDataType, float>&&
+                std::is_same_v<typename Problem::SMPLComputeDataType, float>&&
+                    std::is_same_v<typename Problem::OaccDataType, float> &&
+    !Problem::kIsGroupMode && !Problem::kPadSeqLenQ && !Problem::kPadSeqLenK &&
+    !Problem::kPadHeadDimQ && !Problem::kPadHeadDimV && !Problem::kStoreLSE && !Problem::kHasSink &&
+    !Problem::kHasDropout && !Problem::kHasLogitsSoftCap && !Problem::FmhaMask::IsMasking &&
+    !Problem::kUseTrLoad && !Problem::kSkipMinSeqlenQ &&
+    Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+    Problem::QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR;
+
+struct QrTdmScaledQK : WarpGemmWmma_f32_16x16x128_f8f6f4<fp8_t, fp8_t, true>
+{
+    template <typename... Params, typename C, typename A, typename B>
+    CK_TILE_DEVICE void operator()(C& c, const A& a, const B& b) const
+    {
+        WarpGemmWmma_f32_16x16x128_f8f6f4<fp8_t, fp8_t, true>{}.template operator()<Params...>(
+            c, a, b, int32_t{0x7f7f7f7f}, int32_t{0x7f7f7f7f});
+    }
+};
+
 template <typename Problem, bool Enabled = is_qr_tdm_padding_enabled_problem_v<Problem>>
 struct QrTdmPaddingSelection
 {
@@ -402,7 +435,8 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
         constexpr index_t kKPerBlock =
             LoadOnce ? Problem::BlockFmhaShape::kSubQKHeaddim : Problem::BlockFmhaShape::kK0;
-        constexpr index_t warpNum = kBlockSize / get_warp_size();
+        constexpr index_t warpNum =
+            detail::is_qr_tdm_dense_fp8_v<Problem> ? 2 : kBlockSize / get_warp_size();
 
         static_assert(kNPerBlock % warpNum == 0,
                       "kNPerBlock must be divisible by warpNum for trivial tile-major K dist");
@@ -458,7 +492,7 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     {
         // TODO: this is for 3d layout
         using QDataType = remove_cvref_t<typename Problem::QDataType>;
-        return static_cast<index_t>(detail::kQrTdmLdsAccessBytes / sizeof(QDataType));
+        return static_cast<index_t>(detail::qr_tdm_lds_access_bytes_v<QDataType> / sizeof(QDataType));
     }
 
     // Plain row-major Q LDS desc. TDM box-major write cannot produce an XOR'd
@@ -491,12 +525,30 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         using DataType = typename Problem::KDataType;
         using Padding  = LdsPaddingConfigK<Problem>;
 
-        return detail::make_qr_tdm_row_major_lds_descriptor<
-            DataType,
-            kNPerBlock,
-            kKPerBlock,
-            Padding,
-            detail::qr_tdm_lds_access_bytes_v<DataType>>();
+        if constexpr(detail::is_qr_tdm_dense_fp8_v<Problem>)
+        {
+            // Equivalent byte layout, with the two-row stride explicit to avoid
+            // division/modulo address materialization in the inner loop.
+            constexpr auto desc =
+                make_naive_tensor_descriptor(make_tuple(number<64>{}, number<2>{}, number<128>{}),
+                                             make_tuple(number<272>{}, number<128>{}, number<1>{}),
+                                             number<GetSmemKPackK<Problem>()>{},
+                                             number<1>{});
+            return transform_tensor_descriptor(
+                desc,
+                make_tuple(make_merge_transform(make_tuple(number<64>{}, number<2>{})),
+                           make_pass_through_transform(number<128>{})),
+                make_tuple(sequence<0, 1>{}, sequence<2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+        }
+        else
+        {
+            return detail::make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                                kNPerBlock,
+                                                                kKPerBlock,
+                                                                Padding,
+                                                                detail::qr_tdm_lds_access_bytes_v<DataType>>();
+        }
     }
 
     template <typename Problem, bool Xor = false>
@@ -508,12 +560,30 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         using Padding                = LdsPaddingConfigV<Problem>;
 
         static_assert(!Xor, "qr_tdm V LDS descriptor must remain row-major");
-        return detail::make_qr_tdm_row_major_lds_descriptor<
-            DataType,
-            kKPerBlock,
-            kNPerBlock,
-            Padding,
-            detail::qr_tdm_lds_access_bytes_v<DataType>>();
+        if constexpr(detail::is_qr_tdm_dense_fp8_v<Problem>)
+        {
+            // Equivalent byte layout, with the two-row stride explicit to avoid
+            // division/modulo address materialization in the inner loop.
+            constexpr auto desc =
+                make_naive_tensor_descriptor(make_tuple(number<64>{}, number<2>{}, number<128>{}),
+                                             make_tuple(number<272>{}, number<128>{}, number<1>{}),
+                                             number<GetSmemKPackV<Problem>()>{},
+                                             number<1>{});
+            return transform_tensor_descriptor(
+                desc,
+                make_tuple(make_merge_transform(make_tuple(number<64>{}, number<2>{})),
+                           make_pass_through_transform(number<128>{})),
+                make_tuple(sequence<0, 1>{}, sequence<2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+        }
+        else
+        {
+            return detail::make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                                kKPerBlock,
+                                                                kNPerBlock,
+                                                                Padding,
+                                                                detail::qr_tdm_lds_access_bytes_v<DataType>>();
+        }
     }
 
     template <typename Problem>
@@ -530,13 +600,18 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                            typename Problem::BlockFmhaShape::Gemm0BlockWarps,
                                            typename Problem::BlockFmhaShape::Gemm0WarpTile>>;
 
-        using WarpGemm = WarpGemmDispatcher<typename Problem::QDataType,
-                                            typename Problem::KDataType,
-                                            typename Problem::SaccDataType,
-                                            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
-                                            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
-                                            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}),
-                                            true>;
+        using DefaultWarpGemm =
+            WarpGemmDispatcher<typename Problem::QDataType,
+                               typename Problem::KDataType,
+                               typename Problem::SaccDataType,
+                               Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
+                               Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
+                               Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}),
+                               true>;
+
+        using WarpGemm = std::conditional_t<detail::is_qr_tdm_dense_fp8_v<Problem>,
+                                            detail::QrTdmScaledQK,
+                                            DefaultWarpGemm>;
 
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV2CustomPolicy<typename Problem::QDataType,
@@ -574,15 +649,28 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                             false,
                                             WGAttrNumAccessEnum::Default>;
 
-        using BlockGemmPolicy =
-            BlockGemmARegBRegCRegV2CustomPolicy<typename Problem::PDataType,
-                                                typename Problem::VDataType,
-                                                typename Problem::OaccDataType,
-                                                typename Problem::BlockFmhaShape::Gemm1BlockWarps,
-                                                WarpGemm,
-                                                GemmLoopOrder::KMN>;
+        if constexpr(detail::is_qr_tdm_dense_fp8_v<Problem>)
+        {
+            using BlockGemmPolicy = BlockGemmARegBSmemCRegV2CustomPolicy<
+                typename Problem::PDataType,
+                typename Problem::VDataType,
+                typename Problem::OaccDataType,
+                typename Problem::BlockFmhaShape::Gemm1BlockWarps,
+                WarpGemm>;
+            return BlockGemmARegBSmemTrLoadCRegV2PrefetchN<GemmProblem, BlockGemmPolicy, true>{};
+        }
+        else
+        {
+            using BlockGemmPolicy = BlockGemmARegBRegCRegV2CustomPolicy<
+                typename Problem::PDataType,
+                typename Problem::VDataType,
+                typename Problem::OaccDataType,
+                typename Problem::BlockFmhaShape::Gemm1BlockWarps,
+                WarpGemm,
+                GemmLoopOrder::KMN>;
 
-        return BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
+            return BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
+        }
     }
 
     template <typename Problem>
@@ -635,7 +723,8 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         constexpr index_t kBlockSize = Problem::kBlockSize;
         constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1; // V hdim,    128
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kN0; // V seq dim, 64
-        constexpr index_t warpNum    = kBlockSize / get_warp_size();
+        constexpr index_t warpNum =
+            detail::is_qr_tdm_dense_fp8_v<Problem> ? 2 : kBlockSize / get_warp_size();
 
         static_assert(kKPerBlock % warpNum == 0,
                       "V kN0 (seq) must be divisible by warpNum for trivial tile-major V dist");
