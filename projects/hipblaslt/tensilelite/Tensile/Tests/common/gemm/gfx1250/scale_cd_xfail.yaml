@@ -48,6 +48,10 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 256]
 
   # FP16 with OutputAmaxD=True
+  # Note: This is a rejection test. OutputAmaxD is FP8-only - FP16 destinations
+  # use even gwvw which takes the packed VMulPKF32 path that never writes AmaxOut,
+  # resulting in silently-wrong amaxD=0. This test validates that OutputAmaxD
+  # with non-F8 DestDataType is cleanly rejected.
   -
     - # ProblemType
       OperationType: GEMM
@@ -76,6 +80,10 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 256]
 
   # BF16 with UseScaleCD and OutputAmaxD combined
+  # Note: This is a rejection test. OutputAmaxD is FP8-only - BF16 destinations
+  # use even gwvw which takes the packed VMulPKF32 path that never writes AmaxOut,
+  # resulting in silently-wrong amaxD=0. This test validates that OutputAmaxD
+  # with non-F8 DestDataType is cleanly rejected.
   -
     - # ProblemType
       OperationType: GEMM

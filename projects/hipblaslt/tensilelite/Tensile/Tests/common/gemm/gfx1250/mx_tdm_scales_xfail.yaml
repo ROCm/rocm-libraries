@@ -22,11 +22,13 @@ GlobalParameters:
   Architecture: gfx1250
 
 BenchmarkProblems:
-  # MX FP4 with TDM (covers lines 4596-4837: TDM-populated scales)
+  # MX FP8 with TDM (covers lines 4596-4837: TDM-populated scales)
+  # Note: Changed from F4 to F8 because gfx1250 StinkyTofu has no instruction
+  # definition for F4 with MI [16,16,64], but F8 is supported for MX testing
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F4
+      DataType: F8
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
@@ -44,7 +46,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [1]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
         - DepthU: [64]
         - WavefrontSize: [32]
         - GlobalReadVectorWidthA: [16]
@@ -60,11 +62,13 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128]
           - Exact: [64, 128, 2, 64]   # Batched
 
-  # MX FP4 with batching (targets batch-offset MX logic)
+  # MX FP8 with batching (targets batch-offset MX logic)
+  # Note: Changed from F4 to F8 because gfx1250 StinkyTofu has no instruction
+  # definition for F4 with MI [16,16,64], but F8 is supported for MX testing
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F4
+      DataType: F8
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
@@ -82,7 +86,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [1]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
         - DepthU: [64]
         - WavefrontSize: [32]
         - GlobalReadVectorWidthA: [16]
@@ -159,10 +163,12 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128]
 
   # MX with different vector widths (stress scale handling)
+  # Note: Changed from F4 to F8 because gfx1250 StinkyTofu has no instruction
+  # definition for F4 with MI [16,16,64], but F8 is supported for MX testing
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F4
+      DataType: F8
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
@@ -180,7 +186,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [1]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
         - DepthU: [64]
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]
@@ -193,11 +199,13 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 64]
           - Exact: [128, 128, 1, 128]
 
-  # MX FP4 with odd problem sizes (NoSwizzle MX scale path)
+  # MX FP8 with odd problem sizes (NoSwizzle MX scale path)
+  # Note: Changed from F4 to F8 because gfx1250 StinkyTofu has no instruction
+  # definition for F4 with MI [16,16,64], but F8 is supported for MX testing
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: F4
+      DataType: F8
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
@@ -215,7 +223,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [1]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
         - DepthU: [64]
         - WavefrontSize: [32]
         - GlobalReadVectorWidthA: [16]

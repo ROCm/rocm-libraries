@@ -23,12 +23,14 @@ GlobalParameters:
 
 BenchmarkProblems:
   # XF32 (extended precision FP32) - KernelWriter.py XF32 paths
+  # Note: XF32 is not a distinct input DataType - it's a float GEMM with XF32 math op
   -
     - # ProblemType
       OperationType: GEMM
-      DataType: x
-      DestDataType: s
-      ComputeDataType: s
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      F32XdlMathOp: X
       TransposeA: False
       TransposeB: False
       UseBeta: True
@@ -40,7 +42,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]

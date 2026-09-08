@@ -104,6 +104,10 @@ BenchmarkProblems:
           - Exact: [384, 384, 1, 384]
 
   # FP16 with OutputAmaxD and DataTypeAmaxD
+  # Note: This is a rejection test. OutputAmaxD is FP8-only - FP16/BF16 destinations
+  # use even gwvw which takes the packed VMulPKF32 path that never writes AmaxOut.
+  # This test validates that OutputAmaxD with non-F8 DestDataType is cleanly rejected
+  # (missing UseScaleCD also prevents the amax accumulation gate from opening).
   -
     - # ProblemType
       OperationType: GEMM

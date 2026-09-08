@@ -87,6 +87,8 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 256]
 
   # Sparse with FP8 (targets line 10983: metadata handling in local read)
+  # Note: gfx1250 FP8 sparse uses K=128 SWMMAC (v_swmmac_f32_16x16x128_fp8_fp8)
+  # K=64 does not exist for FP8 sparse on this arch
   -
     - # ProblemType
       OperationType: GEMM
@@ -106,16 +108,16 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
-        - DepthU: [64]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+        - DepthU: [128]
         - WavefrontSize: [32]
         - ScheduleIterAlg: [4]
         - TransposeLDSMetadata: [0]
         - LdsPadMetadata: [0]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 64]
-          - Exact: [128, 128, 1, 128]
+          - Exact: [64, 64, 1, 128]
+          - Exact: [128, 128, 1, 256]
 
   # Sparse with different DepthU values (blocksPerTGroupSMFMA = 2 path)
   -

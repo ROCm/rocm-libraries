@@ -198,7 +198,7 @@ BenchmarkProblems:
           - [16, 16, 64, 1, 1, 2, 2, 2, 2]
         - DepthU: [64]
         - WavefrontSize: [32]
-        - WorkGroup: [[4, 4, 1]]  # For MacroTile [128,128] with MIWaveGroup=[2,2]
+        - WorkGroup: [[8, 8, 1]]  # For MacroTile [128,128] with MIWaveGroup=[2,2]
         - ScheduleIterAlg: [3]
         - StreamK: [3, 4]
       BenchmarkFinalParameters:
