@@ -525,7 +525,7 @@ TEST(ReferenceOutputSelection, ComputesPrimeStrideSubset)
     }
 }
 
-TEST(ReferenceFusedEpilogue, KeepsScaleCDInGemm)
+TEST(ReferenceEpilogueComposition, AppliesScaleCDOutsideMatmul)
 {
     const size_t M = 2;
     const size_t N = 2;
@@ -555,9 +555,6 @@ TEST(ReferenceFusedEpilogue, KeepsScaleCDInGemm)
     auto batch   = adapter.translateBatch(0);
     ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
     auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
-
-    EXPECT_EQ(translated.gemmOptions().scaleC.item<float>(), scaleC);
-    EXPECT_EQ(translated.gemmOptions().outputScale.item<float>(), scaleD);
 
     translated.runGemm();
     translated.runPostGemmOperationsAndCopyOutputs();
@@ -1224,10 +1221,7 @@ TEST(ReferenceInvocationAdapter, SnapshotsProblemPolicyBeforeBatchTranslation)
     auto batch = adapter->translateBatch(0);
     ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
     auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
-    ASSERT_TRUE(translated.gemmOptions().scaleAlpha);
-    EXPECT_EQ(translated.gemmOptions().scaleAlpha->shape(), (roc::host_numerics::Shape{M, 1}));
-    EXPECT_EQ(translated.gemmOptions().scaleAlpha->layout().stride(1), 0);
-    EXPECT_EQ(translated.gemmOptions().mathMode, roc::host_numerics::MathMode::XFloat32);
+    EXPECT_EQ(translated.matmulOptions().mathMode, roc::host_numerics::MathMode::XFloat32);
 
     translated.runGemm();
     translated.runPostGemmOperationsAndCopyOutputs();
@@ -1785,11 +1779,6 @@ TEST(ReferenceRuntimeGemm, AppliesScalarScaleBeforeComputeQuantization)
     auto batch   = adapter.translateBatch(0);
     ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
     auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
-
-    EXPECT_EQ(translated.gemmOptions().alpha.item<float>(), 1.0f);
-    ASSERT_TRUE(translated.gemmOptions().scaleB.has_value());
-    EXPECT_EQ(translated.gemmOptions().scaleB->shape(), (roc::host_numerics::Shape{1, 1}));
-    EXPECT_EQ(translated.gemmOptions().scaleB->loadAs<float>({0, 0}), scaleB);
 
     translated.runGemm();
     translated.runPostGemmOperationsAndCopyOutputs();

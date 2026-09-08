@@ -7,6 +7,8 @@
 #include <hipblaslt/host_numerics/HipblasltReferenceGemm.hpp>
 #include <hipblaslt/host_numerics/Types.hpp>
 #include <roc/host_numerics/backends/blas.hpp>
+#include <roc/host_numerics/epilogue.hpp>
+#include <roc/host_numerics/tensor_operations.hpp>
 
 #include <array>
 #include <utility>
@@ -60,7 +62,7 @@ namespace hipblaslt::host_numerics
                                             : referenceComputeType(dataTypes.computeInputB);
 
         const ScalarType accumulatorType = referenceAccumulatorType(dataTypes.coefficient);
-        GemmOptions      options(accumulatorType);
+        MatmulOptions    options(accumulatorType);
         options.conjugateA = problem.operationA == HIPBLAS_OP_C;
         options.conjugateB = problem.operationB == HIPBLAS_OP_C;
         if(computeTypeA != inputs.a.type())
@@ -73,16 +75,38 @@ namespace hipblaslt::host_numerics
             options.preQuantizationScalesA.push_back(inputs.alphaVector->expandDims(1));
         if(inputs.scaleB && !isBlockScaling(scaleBMode))
             options.preQuantizationScalesB.push_back(inputs.scaleB->expandDims(0));
-        options.alpha       = scalarValue(preparation.alpha, dataTypes.coefficient);
-        options.beta        = scalarValue(preparation.beta, dataTypes.coefficient);
-        options.scaleC      = inputs.scaleC.value_or(Tensor::scalar(accumulatorType, 1));
-        options.outputScale = inputs.scaleD.value_or(Tensor::scalar(accumulatorType, 1));
+        const Tensor alpha = scalarValue(preparation.alpha, dataTypes.coefficient);
+        const Tensor beta  = scalarValue(preparation.beta, dataTypes.coefficient);
+        const Tensor scaleC = inputs.scaleC.value_or(Tensor::scalar(accumulatorType, 1));
+        const Tensor outputScale = inputs.scaleD.value_or(Tensor::scalar(accumulatorType, 1));
+
+        const Shape outputShape{inputs.a.shape()[0], inputs.b.shape()[1]};
+        std::optional<Tensor> result;
+        if(alpha.item<std::complex<double>>() != std::complex<double>(0.0, 0.0)
+           && inputs.a.shape()[1] != 0)
+        {
+            Tensor product = matmulWithBlasBackend(
+                std::move(inputs.a), std::move(inputs.b), accumulatorType, options);
+            result = multiply(
+                std::move(product), alpha, accumulatorType, accumulatorType);
+        }
+        if(beta.item<std::complex<double>>() != std::complex<double>(0.0, 0.0))
+        {
+            const Tensor cScale = multiply(beta, scaleC, accumulatorType, accumulatorType);
+            Tensor       addend = multiply(
+                std::move(inputs.c), cScale, accumulatorType, accumulatorType);
+            result = result ? add(std::move(*result), std::move(addend), accumulatorType,
+                                  accumulatorType)
+                            : std::move(addend);
+        }
+        if(!result)
+            result.emplace(accumulatorType, outputShape);
+
+        EpilogueOptions epilogue(accumulatorType);
+        epilogue.outputScale = outputScale;
         if(inputs.d.type() == ScalarType::Int8)
-            options.outputConversion = OutputConversion::SaturatingInt8;
-        (void)referenceGemmIntoWithBlasBackend(std::move(inputs.a),
-                                               std::move(inputs.b),
-                                               std::move(inputs.c),
-                                               std::move(inputs.d),
-                                               options);
+            epilogue.outputConversion = OutputConversion::SaturatingInt8;
+        referenceEpilogueInto(
+            std::move(*result), {.output = std::move(inputs.d)}, epilogue);
     }
 } // namespace hipblaslt::host_numerics

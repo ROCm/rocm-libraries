@@ -104,20 +104,20 @@ inline const char* ToString(ActivationType act)
     }
 }
 
-roc::host_numerics::Activation toHostNumericsActivation(ActivationType activation)
+roc::host_numerics::ActivationFunction toHostNumericsActivation(ActivationType activation)
 {
     switch(activation)
     {
     case ActivationType::NONE:
-        return roc::host_numerics::Activation::None;
+        return roc::host_numerics::IdentityActivation{};
     case ActivationType::RELU:
-        return roc::host_numerics::Activation::Relu;
+        return roc::host_numerics::ReluActivation{};
     case ActivationType::GELU:
-        return roc::host_numerics::Activation::Gelu;
+        return roc::host_numerics::GeluActivation{};
     case ActivationType::SWISH:
-        return roc::host_numerics::Activation::Swish;
+        return roc::host_numerics::SwishActivation{1.0};
     case ActivationType::CLAMP:
-        return roc::host_numerics::Activation::Clamp;
+        return roc::host_numerics::ClampActivation{-1.0, 1.0};
     }
 
     throw std::invalid_argument("Unsupported grouped GEMM activation.");
@@ -922,9 +922,12 @@ int test_hipblaslt(hipDataType                 in_datatype,
                         c_ptr + i3 * stride_c[i],
                         cElements,
                         Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]}));
-                    GemmOptions options;
-                    options.alpha      = static_cast<double>(alpha[i]);
-                    options.beta       = static_cast<double>(beta[i]);
+                    Tensor product = matmul(std::move(a), std::move(b), ScalarType::Float32);
+                    Tensor combined
+                        = add(multiply(std::move(product), static_cast<float>(alpha[i])),
+                              multiply(std::move(c), static_cast<float>(beta[i])));
+
+                    EpilogueOptions options;
                     options.activation = toHostNumericsActivation(actType[i]);
                     if(bias_ptr)
                         options.bias
@@ -932,15 +935,8 @@ int test_hipblaslt(hipDataType                 in_datatype,
                                   Layout::contiguousLastDimensionFastest(Shape{size_t(m[i])}),
                                   std::span<const float>(bias_ptr, size_t(m[i])))
                                   .expandDims(1);
-                    if(actType[i] == ActivationType::SWISH)
-                        options.activationParameter0 = 1.0;
-                    else if(actType[i] == ActivationType::CLAMP)
-                    {
-                        options.activationParameter0 = -1.0;
-                        options.activationParameter1 = 1.0;
-                    }
-                    referenceGemmInto(
-                        std::move(a), std::move(b), std::move(c), referenceOutput, options);
+                    referenceEpilogueInto(
+                        std::move(combined), {.output = referenceOutput}, options);
                     copyTensorEncodedBackingStorageToBuffer(
                         d_ptr + i3 * stride_d[i], dElements, referenceOutput);
 

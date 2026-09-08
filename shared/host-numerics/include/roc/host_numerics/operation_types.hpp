@@ -9,6 +9,7 @@
 #include <roc/host_numerics/index_order.hpp>
 #include <stdexcept>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace roc::host_numerics {
@@ -16,8 +17,8 @@ namespace roc::host_numerics {
 // tensor ownership. Owning entry points return newly allocated tensors;
 // corresponding ...Into entry points write caller-owned destinations.
 
-// Shared pointwise activation selector for GEMM and standalone epilogue
-// descriptors. Consumers provide any activation parameters separately.
+// Stable activation identifiers used by product adapters and compatibility
+// bindings. Tensor-centric C++ callers use the typed ActivationFunction below.
 enum class Activation {
     None,
     Absolute,
@@ -34,6 +35,48 @@ enum class Activation {
     Swish,
     Clamp,
 };
+
+struct IdentityActivation {};
+struct AbsoluteActivation {};
+struct ReluActivation {};
+struct GeluActivation {};
+struct GeluDerivativeActivation {};
+struct ReluDerivativeActivation {};
+struct SigmoidActivation {};
+struct SiluActivation {};
+
+struct ClippedReluActivation {
+    double lower = 0.0;
+    double upper = 0.0;
+};
+
+struct GeluScalingActivation {
+    double scale = 1.0;
+};
+
+struct LeakyReluActivation {
+    double negativeSlope = 0.0;
+};
+
+struct TanhActivation {
+    double inputScale = 1.0;
+    double outputScale = 1.0;
+};
+
+struct SwishActivation {
+    double beta = 1.0;
+};
+
+struct ClampActivation {
+    double minimum = 0.0;
+    double maximum = 0.0;
+};
+
+using ActivationFunction =
+    std::variant<IdentityActivation, AbsoluteActivation, ClippedReluActivation, ReluActivation,
+                 GeluActivation, GeluDerivativeActivation, GeluScalingActivation,
+                 LeakyReluActivation, ReluDerivativeActivation, SigmoidActivation, TanhActivation,
+                 SiluActivation, SwishActivation, ClampActivation>;
 
 // Selects operand arithmetic applied after input quantization and before
 // multiplication.

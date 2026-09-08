@@ -7,10 +7,10 @@
 #include <roc/host_numerics/gemm.hpp>
 #include <roc/host_numerics/generation.hpp>
 #include <roc/host_numerics/layer_norm.hpp>
-#include <roc/host_numerics/linear_combination.hpp>
 #include <roc/host_numerics/reduction.hpp>
 #include <roc/host_numerics/softmax.hpp>
 #include <roc/host_numerics/structured_sparsity.hpp>
+#include <roc/host_numerics/tensor_operations.hpp>
 #include <span>
 #include <utility>
 
@@ -19,32 +19,27 @@ int main() {
 
     const std::array<float, 1> a{2};
     const std::array<float, 1> b{3};
-    const std::array<float, 1> c{0};
     Tensor d(ScalarType::Float32, Shape{1, 1});
 
     const Tensor operandA = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(a));
     const Tensor operandB = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b));
-    const Tensor inputC = Tensor::copyNativeStorage<float>(
-        Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(c));
-    referenceGemmInto(operandA, operandB, inputC, d);
+    matmulInto(operandA, operandB, d);
     if (d.loadAs<float>({0, 0}) != 6) return 1;
-    referenceGemmInto(operandA, operandB, inputC, d, GemmOptions{}, GemmBackend::Blocked);
+    matmulInto(operandA, operandB, d, MatmulOptions{}, GemmBackend::Blocked);
     if (d.loadAs<float>({0, 0}) != 6) return 1;
 
-    const Tensor ownedGemm = referenceGemm(
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                         std::span<const float>(a)),
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                         std::span<const float>(b)),
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                         std::span<const float>(c)),
-        ScalarType::Float32);
+    const Tensor ownedGemm =
+        matmul(Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                                std::span<const float>(a)),
+               Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                                std::span<const float>(b)),
+               ScalarType::Float32);
     if (ownedGemm.loadAs<float>({0, 0}) != 6) return 1;
 
     EpilogueOptions epilogueOptions;
-    epilogueOptions.activation = Activation::Relu;
+    epilogueOptions.activation = ReluActivation{};
     const EpilogueOutputs epilogue = referenceEpilogue(
         Tensor::copyNativeValues<float>(Shape{1, 1}, std::array<float, 1>{-2.0f}),
         {.output = ScalarType::Float32, .amax = ScalarType::Float32}, epilogueOptions);
@@ -71,16 +66,15 @@ int main() {
                GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 11.0})));
     if (generated.loadAs<float>({2}) != 11.0f) return 1;
 
-    LinearCombinationOptions linearCombinationOptions(ScalarType::Float32);
-    linearCombinationOptions.alpha = 2.0;
-    linearCombinationOptions.beta = -1.0;
-    const Tensor linearCombinationOutput = linearCombination(
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
-                                         std::span<const float>(a)),
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
-                                         std::span<const float>(b)),
-        ScalarType::Float32, linearCombinationOptions);
-    if (linearCombinationOutput.loadAs<float>({0}) != 1.0f) return 1;
+    const Tensor scaledA =
+        multiply(Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
+                                                  std::span<const float>(a)),
+                 Tensor(2.0f));
+    const Tensor scaledB =
+        multiply(Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
+                                                  std::span<const float>(b)),
+                 Tensor(-1.0f));
+    if (add(scaledA, scaledB).loadAs<float>({0}) != 1.0f) return 1;
 
     const std::array<float, 2> softmaxValues{1.0f, 2.0f};
     const Tensor softmaxInput =

@@ -18,21 +18,64 @@ using namespace nb::literals;
 
 namespace roc::host_numerics::python_bindings {
 namespace {
-Tensor linearCombinationOwned(std::optional<Tensor> x, std::optional<Tensor> y,
-                              ScalarType outputType, ScalarType accumulatorType, nb::object alpha,
-                              nb::object beta) {
-    LinearCombinationOptions options(accumulatorType);
-    options.alpha = scalarFromPython(alpha);
-    options.beta = scalarFromPython(beta);
-    return linearCombination(std::move(x), std::move(y), outputType, options);
+Tensor tensorOperand(nb::handle value, ScalarType scalarType) {
+    if (nb::isinstance<Tensor>(value)) return nb::cast<Tensor>(value);
+    Tensor scalar = scalarFromPython(value);
+    return Tensor::scalar(scalarType, scalar.item<std::complex<double>>());
 }
 
-void linearCombinationIntoBound(std::optional<Tensor> x, std::optional<Tensor> y, Tensor output,
-                                ScalarType accumulatorType, nb::object alpha, nb::object beta) {
-    LinearCombinationOptions options(accumulatorType);
-    options.alpha = scalarFromPython(alpha);
-    options.beta = scalarFromPython(beta);
-    linearCombinationInto(std::move(x), std::move(y), std::move(output), options);
+Tensor addOwned(Tensor left, nb::object right, ScalarType outputType, ScalarType computeType) {
+    Tensor rightTensor = tensorOperand(right, left.type());
+    return add(std::move(left), std::move(rightTensor), outputType, computeType);
+}
+
+void addIntoBound(Tensor left, nb::object right, Tensor output, ScalarType computeType) {
+    Tensor rightTensor = tensorOperand(right, left.type());
+    addInto(std::move(left), std::move(rightTensor), std::move(output), computeType);
+}
+
+Tensor multiplyOwned(Tensor left, nb::object right, ScalarType outputType, ScalarType computeType) {
+    Tensor rightTensor = tensorOperand(right, left.type());
+    return multiply(std::move(left), std::move(rightTensor), outputType, computeType);
+}
+
+void multiplyIntoBound(Tensor left, nb::object right, Tensor output, ScalarType computeType) {
+    Tensor rightTensor = tensorOperand(right, left.type());
+    multiplyInto(std::move(left), std::move(rightTensor), std::move(output), computeType);
+}
+
+ActivationFunction activationFunction(Activation activation, double parameter0, double parameter1) {
+    switch (activation) {
+        case Activation::None:
+            return IdentityActivation{};
+        case Activation::Absolute:
+            return AbsoluteActivation{};
+        case Activation::ClippedRelu:
+            return ClippedReluActivation{parameter0, parameter1};
+        case Activation::Relu:
+            return ReluActivation{};
+        case Activation::Gelu:
+            return GeluActivation{};
+        case Activation::GeluDerivative:
+            return GeluDerivativeActivation{};
+        case Activation::GeluScaling:
+            return GeluScalingActivation{parameter0};
+        case Activation::LeakyRelu:
+            return LeakyReluActivation{parameter0};
+        case Activation::ReluDerivative:
+            return ReluDerivativeActivation{};
+        case Activation::Sigmoid:
+            return SigmoidActivation{};
+        case Activation::Tanh:
+            return TanhActivation{parameter0, parameter1};
+        case Activation::Silu:
+            return SiluActivation{};
+        case Activation::Swish:
+            return SwishActivation{parameter0};
+        case Activation::Clamp:
+            return ClampActivation{parameter0, parameter1};
+    }
+    throw std::invalid_argument("Unsupported Python activation.");
 }
 
 Tensor referenceSoftmaxOwned(Tensor input, ScalarType outputType, ScalarType accumulatorType,
@@ -72,10 +115,9 @@ EpilogueOutputs referenceEpilogueOwned(Tensor input, ScalarType outputType, Scal
     options.outputScale = scalarFromPython(outputScale);
     options.auxiliaryScale = scalarFromPython(auxiliaryScale);
     options.outputConversion = outputConversion;
-    options.activation = activation;
+    options.activation = activationFunction(activation, nb::cast<double>(activationParameter0),
+                                            nb::cast<double>(activationParameter1));
     options.activationApplication = activationApplication;
-    options.activationParameter0 = scalarFromPython(activationParameter0);
-    options.activationParameter1 = scalarFromPython(activationParameter1);
     options.outputSelection = std::move(outputSelection);
     return referenceEpilogue(
         std::move(input),
@@ -185,11 +227,34 @@ void registerOperationBindings(nb::module_& module) {
             },
             nb::rv_policy::reference_internal);
 
-    module.def("linear_combination", &linearCombinationOwned, "x"_a = std::optional<Tensor>{},
-               "y"_a = std::optional<Tensor>{}, "output_type"_a = ScalarType::Float32,
-               "accumulator_type"_a = ScalarType::Float32, "alpha"_a = 1.0, "beta"_a = 1.0);
-    module.def("linear_combination_into", &linearCombinationIntoBound, "x"_a, "y"_a, "output"_a,
-               "accumulator_type"_a = ScalarType::Float32, "alpha"_a = 1.0, "beta"_a = 1.0);
+    module.def("add", &addOwned, "left"_a, "right"_a, "output_type"_a = ScalarType::Float32,
+               "compute_type"_a = ScalarType::Float32);
+    module.def("add_into", &addIntoBound, "left"_a, "right"_a, "output"_a,
+               "compute_type"_a = ScalarType::Float32);
+    module.def("multiply", &multiplyOwned, "left"_a, "right"_a,
+               "output_type"_a = ScalarType::Float32, "compute_type"_a = ScalarType::Float32);
+    module.def("multiply_into", &multiplyIntoBound, "left"_a, "right"_a, "output"_a,
+               "compute_type"_a = ScalarType::Float32);
+    module.def("absolute", [](Tensor input) { return absolute(std::move(input)); }, "input"_a);
+    module.def("relu", [](Tensor input) { return relu(std::move(input)); }, "input"_a);
+    module.def("gelu", [](Tensor input) { return gelu(std::move(input)); }, "input"_a);
+    module.def("sigmoid", [](Tensor input) { return sigmoid(std::move(input)); }, "input"_a);
+    module.def(
+        "tanh",
+        [](Tensor input, double inputScale, double outputScale) {
+            return tanh(std::move(input), inputScale, outputScale);
+        },
+        "input"_a, "input_scale"_a = 1.0, "output_scale"_a = 1.0);
+    module.def("silu", [](Tensor input) { return silu(std::move(input)); }, "input"_a);
+    module.def(
+        "swish", [](Tensor input, double beta) { return swish(std::move(input), beta); }, "input"_a,
+        "beta"_a = 1.0);
+    module.def(
+        "clip",
+        [](Tensor input, double minimum, double maximum) {
+            return clip(std::move(input), minimum, maximum);
+        },
+        "input"_a, "minimum"_a, "maximum"_a);
 
     module.def("reference_softmax", &referenceSoftmaxOwned, "input"_a,
                "output_type"_a = ScalarType::Float32, "accumulator_type"_a = ScalarType::Float32,

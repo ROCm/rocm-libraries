@@ -507,71 +507,6 @@ void testOutputSelection() {
     require(rejectedOutOfRange, "Out-of-range explicit selection materialization did not fail.");
 }
 
-void testStreamingGemmValidation() {
-    using namespace roc::host_numerics;
-
-    const std::array<float, 4> a{1, 2, 3, 4};
-    const std::array<float, 4> b{5, 6, 7, 8};
-    const std::array<float, 4> c{};
-    const Tensor tensorA = Tensor::copyNativeValues<float>(Shape{2, 2}, a);
-    const Tensor tensorB = Tensor::copyNativeValues<float>(Shape{2, 2}, b);
-    const Tensor tensorC = Tensor::copyNativeValues<float>(Shape{2, 2}, c);
-    const GemmOptions gemmOptions(ScalarType::Float32);
-
-    Tensor observed =
-        Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{19, 999, 43, 50});
-    GemmValidationOptions options;
-    options.comparison.computeFrobenius = false;
-    options.comparison.selection =
-        OutputSelection::explicitIndices({1}, IndexOrder::FirstDimensionFastest);
-
-    ComparisonReport selected =
-        validateGemm(tensorA, tensorB, tensorC, observed, gemmOptions, options);
-    require(selected.passed() && selected.compared == 1,
-            "Streaming GEMM validation did not isolate the selected output.");
-
-    observed.storeFrom({1, 0}, 44.0f);
-    ComparisonReport mismatch =
-        validateGemm(tensorA, tensorB, tensorC, observed, gemmOptions, options);
-    require(!mismatch.passed() && mismatch.mismatches == 1 &&
-                mismatch.reportedMismatches[0].index == 1 &&
-                mismatch.reportedMismatches[0].coordinates == std::vector<size_t>({1, 0}) &&
-                mismatch.reportedMismatches[0].observedOffset == 2,
-            "Streaming GEMM validation did not preserve the original logical location.");
-
-    constexpr size_t extent = 64;
-    std::vector<float> sparseA(extent);
-    std::vector<float> sparseB(extent);
-    std::vector<float> sparseExpected(extent * extent);
-    for (size_t row = 0; row < extent; ++row) sparseA[row] = static_cast<float>(row + 1);
-    for (size_t column = 0; column < extent; ++column)
-        sparseB[column] = static_cast<float>(column + 2);
-    for (size_t row = 0; row < extent; ++row)
-        for (size_t column = 0; column < extent; ++column)
-            sparseExpected[row * extent + column] = sparseA[row] * sparseB[column];
-
-    const Tensor sparseTensorA = Tensor::copyNativeValues<float>(Shape{extent, 1}, sparseA);
-    const Tensor sparseTensorB = Tensor::copyNativeValues<float>(Shape{1, extent}, sparseB);
-    const Tensor sparseTensorC(ScalarType::Float32, Shape{extent, extent});
-    Tensor sparseObserved = Tensor::copyNativeValues<float>(Shape{extent, extent}, sparseExpected);
-    options.comparison.selection = OutputSelection::explicitIndices(
-        {40 + extent, 35 + 35 * extent, 2 + 40 * extent, 1 + 63 * extent},
-        IndexOrder::FirstDimensionFastest);
-    require(validateGemm(sparseTensorA, sparseTensorB, sparseTensorC, sparseObserved, gemmOptions,
-                         options)
-                .passed(),
-            "Sparse streaming GEMM reordered compact expected values.");
-
-    sparseObserved.storeFrom({40, 1}, sparseObserved.loadAs<float>({40, 1}) + 1.0f);
-    mismatch = validateGemm(sparseTensorA, sparseTensorB, sparseTensorC, sparseObserved,
-                            gemmOptions, options);
-    require(!mismatch.passed() && mismatch.mismatches == 1 &&
-                mismatch.reportedMismatches[0].index == 40 + extent &&
-                mismatch.reportedMismatches[0].coordinates == std::vector<size_t>({40, 1}) &&
-                mismatch.reportedMismatches[0].observedOffset == 40 * extent + 1,
-            "Sparse streaming GEMM did not preserve compact-selection ordering.");
-}
-
 void testReferenceEpilogue() {
     using namespace roc::host_numerics;
 
@@ -587,14 +522,13 @@ void testReferenceEpilogue() {
     EpilogueOptions options(ScalarType::Float32);
     require(options.outputScale.type() == ScalarType::Float32 &&
                 options.auxiliaryScale.type() == ScalarType::Float32 &&
-                options.activationParameter0.type() == ScalarType::Float32 &&
-                options.activationParameter1.type() == ScalarType::Float32,
+                std::holds_alternative<IdentityActivation>(options.activation),
             "Reference epilogue defaults do not use the requested compute type.");
     options.bias = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2, 1}), std::span<const float>(bias));
     options.outputScale = 2.0;
     options.auxiliaryScale = 3.0;
-    options.activation = Activation::Relu;
+    options.activation = ReluActivation{};
     referenceEpilogueInto(
         inputTensor,
         {.output = output, .rawOutput = rawOutput, .auxiliaryOutput = auxiliary, .amax = amax},
@@ -619,7 +553,7 @@ void testReferenceEpilogue() {
     gradientOptions.auxiliaryInput =
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
                                          std::span<const float>(activationInput));
-    gradientOptions.activation = Activation::Relu;
+    gradientOptions.activation = ReluActivation{};
     gradientOptions.activationApplication = ActivationApplication::Gradient;
     referenceEpilogueInto(
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
@@ -659,7 +593,7 @@ void testReferenceEpilogue() {
     const std::array<double, 1> highPrecisionValues{highPrecisionInput};
     Tensor highPrecisionOutput(ScalarType::Float64, Shape{1, 1});
     EpilogueOptions highPrecisionOptions(ScalarType::Float64);
-    highPrecisionOptions.activation = Activation::Sigmoid;
+    highPrecisionOptions.activation = SigmoidActivation{};
     referenceEpilogueInto(
         Tensor::copyNativeStorage<double>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
                                           highPrecisionValues),
@@ -668,15 +602,14 @@ void testReferenceEpilogue() {
     require(std::abs(highPrecisionOutput.loadAs<double>({0, 0}) - expectedHighPrecision) < 1e-15,
             "Float64 reference activation used reduced-precision intermediates.");
 
-    for (const Activation activation : {Activation::Tanh, Activation::Swish}) {
+    for (const bool useTanh : {true, false}) {
         Tensor gradientResult(ScalarType::Float64, Shape{1, 1});
         EpilogueOptions highPrecisionGradient(ScalarType::Float64);
         highPrecisionGradient.auxiliaryInput = Tensor::copyNativeValues<double>(
             Shape{1, 1}, std::array<double, 1>{highPrecisionInput});
-        highPrecisionGradient.activation = activation;
+        highPrecisionGradient.activation =
+            useTanh ? ActivationFunction(TanhActivation{}) : ActivationFunction(SwishActivation{});
         highPrecisionGradient.activationApplication = ActivationApplication::Gradient;
-        highPrecisionGradient.activationParameter0 = 1.0;
-        highPrecisionGradient.activationParameter1 = 1.0;
         referenceEpilogueInto(
             Tensor::copyNativeValues<double>(Shape{1, 1}, std::array<double, 1>{1.0}),
             {.output = gradientResult}, highPrecisionGradient);
@@ -684,9 +617,8 @@ void testReferenceEpilogue() {
         const double sigmoid = 1.0 / (1.0 + std::exp(-highPrecisionInput));
         const double hyperbolicTangent = std::tanh(highPrecisionInput);
         const double expectedGradient =
-            activation == Activation::Tanh
-                ? 1.0 - hyperbolicTangent * hyperbolicTangent
-                : sigmoid + highPrecisionInput * sigmoid * (1.0 - sigmoid);
+            useTanh ? 1.0 - hyperbolicTangent * hyperbolicTangent
+                    : sigmoid + highPrecisionInput * sigmoid * (1.0 - sigmoid);
         require(std::abs(gradientResult.loadAs<double>({0, 0}) - expectedGradient) < 1e-15,
                 "Float64 reference activation gradient used reduced-precision intermediates.");
     }
@@ -1077,7 +1009,7 @@ void testIndexedGeneration() {
 #endif
 }
 
-void testLinearCombination() {
+void testTensorOperations() {
     using namespace roc::host_numerics;
 
     const Shape shape{2, 2, 2};
@@ -1094,13 +1026,9 @@ void testLinearCombination() {
         }
     }
 
-    LinearCombinationOptions options(ScalarType::Float32);
-    require(
-        options.alpha.type() == ScalarType::Float32 && options.beta.type() == ScalarType::Float32,
-        "Linear-combination defaults do not use the requested accumulator type.");
-    options.alpha = 2.0;
-    options.beta = -0.5;
-    linearCombinationInto(x, y, output, options);
+    const Tensor scaledX = multiply(x, Tensor(2.0f), ScalarType::Float32, ScalarType::Float32);
+    const Tensor scaledY = multiply(y, Tensor(-0.5f), ScalarType::Float32, ScalarType::Float32);
+    addInto(scaledX, scaledY, output, ScalarType::Float32);
 
     for (size_t batch = 0; batch < 2; ++batch) {
         for (size_t row = 0; row < 2; ++row) {
@@ -1109,25 +1037,21 @@ void testLinearCombination() {
                 const float expected =
                     2.0f * x.loadAs<float>(indices) - 0.5f * y.loadAs<float>(indices);
                 require(output.loadAs<float>(indices) == expected,
-                        "Linear-combination value mismatch.");
+                        "Tensor arithmetic value mismatch.");
             }
         }
     }
 
     Tensor yOnlyOutput(ScalarType::Float32, shape);
-    LinearCombinationOptions yOnlyOptions(ScalarType::Float32);
-    yOnlyOptions.beta = 3.0;
-    linearCombinationInto(std::nullopt, y, yOnlyOutput, yOnlyOptions);
+    multiplyInto(y, Tensor(3.0f), yOnlyOutput, ScalarType::Float32);
     require(yOnlyOutput.loadAs<float>({1, 0, 1}) == 3.0f * y.loadAs<float>({1, 0, 1}),
-            "Linear-combination optional-input mismatch.");
+            "Tensor-scalar multiplication mismatch.");
 
     Tensor coefficientTensor(ScalarType::Float32, Shape{});
     coefficientTensor.storeFrom({}, 3.0f);
-    LinearCombinationOptions tensorCoefficientOptions(ScalarType::Float32);
-    tensorCoefficientOptions.alpha = coefficientTensor;
     coefficientTensor.storeFrom({}, 7.0f);
     const Tensor tensorCoefficientOutput =
-        linearCombination(x, std::nullopt, ScalarType::Float32, tensorCoefficientOptions);
+        multiply(x, coefficientTensor, ScalarType::Float32, ScalarType::Float32);
     require(tensorCoefficientOutput.loadAs<float>({1, 0, 1}) == 7.0f * x.loadAs<float>({1, 0, 1}),
             "Rank-zero Tensor coefficient did not retain tensor aliasing semantics.");
 
@@ -1135,70 +1059,69 @@ void testLinearCombination() {
     const std::array<float, 3> rowValues{10.0f, 20.0f, 30.0f};
     const Tensor column = Tensor::copyNativeValues<float>(Shape{2, 1}, columnValues);
     const Tensor row = Tensor::copyNativeValues<float>(Shape{1, 3}, rowValues);
-    LinearCombinationOptions broadcastOptions(ScalarType::Float32);
-    broadcastOptions.alpha = 2.0f;
-    broadcastOptions.beta = -1.0f;
     const Tensor broadcastOutput =
-        linearCombination(column, row, ScalarType::Float32, broadcastOptions);
+        add(multiply(column, Tensor(2.0f), ScalarType::Float32, ScalarType::Float32),
+            multiply(row, Tensor(-1.0f), ScalarType::Float32, ScalarType::Float32),
+            ScalarType::Float32, ScalarType::Float32);
     require(broadcastOutput.shape() == Shape{2, 3} &&
                 broadcastOutput.loadAs<float>({0, 0}) == -8.0f &&
                 broadcastOutput.loadAs<float>({0, 2}) == -28.0f &&
                 broadcastOutput.loadAs<float>({1, 0}) == -6.0f &&
                 broadcastOutput.loadAs<float>({1, 2}) == -26.0f,
-            "Linear combination did not apply NumPy-style broadcasting.");
+            "Tensor arithmetic did not apply NumPy-style broadcasting.");
 
-    const Tensor emptyBroadcast = linearCombination(
-        Tensor(ScalarType::Float32, Shape{0, 3}),
-        Tensor::copyNativeValues<float>(Shape{1, 3}, rowValues), ScalarType::Float32);
+    const Tensor emptyBroadcast = add(Tensor(ScalarType::Float32, Shape{0, 3}),
+                                      Tensor::copyNativeValues<float>(Shape{1, 3}, rowValues));
     require(emptyBroadcast.shape() == Shape{0, 3} && emptyBroadcast.elementCount() == 0,
-            "Linear combination did not preserve a broadcast zero extent.");
+            "Tensor addition did not preserve a broadcast zero extent.");
 
     bool rejectedIncompatibleBroadcast = false;
     try {
-        (void)linearCombination(Tensor(ScalarType::Float32, Shape{2}),
-                                Tensor(ScalarType::Float32, Shape{3}), ScalarType::Float32);
+        (void)add(Tensor(ScalarType::Float32, Shape{2}), Tensor(ScalarType::Float32, Shape{3}));
     } catch (const std::invalid_argument&) {
         rejectedIncompatibleBroadcast = true;
     }
     require(rejectedIncompatibleBroadcast,
-            "Linear combination accepted incompatible broadcast shapes.");
+            "Tensor addition accepted incompatible broadcast shapes.");
 
     const std::array<std::complex<float>, 1> complexXValues{std::complex<float>(1, 2)};
     const std::array<std::complex<float>, 1> complexYValues{std::complex<float>(3, -1)};
     Tensor complexX = Tensor::copyNativeValues<std::complex<float>>(Shape{1}, complexXValues);
     Tensor complexY = Tensor::copyNativeValues<std::complex<float>>(Shape{1}, complexYValues);
     Tensor complexOutput(ScalarType::ComplexFloat32, Shape{1});
-    LinearCombinationOptions complexOptions(ScalarType::ComplexFloat32);
-    complexOptions.alpha = std::complex<double>(0.5, 1.0);
-    complexOptions.beta = -2.0;
-    linearCombinationInto(complexX, complexY, complexOutput, complexOptions);
+    const Tensor scaledComplexX = multiply(complexX, Tensor(std::complex<double>(0.5, 1.0)),
+                                           ScalarType::ComplexFloat32, ScalarType::ComplexFloat32);
+    const Tensor scaledComplexY =
+        multiply(complexY, Tensor(-2.0), ScalarType::ComplexFloat32, ScalarType::ComplexFloat32);
+    addInto(scaledComplexX, scaledComplexY, complexOutput, ScalarType::ComplexFloat32);
     require(complexOutput.loadAs<std::complex<float>>({0}) == std::complex<float>(-7.5f, 4.0f),
-            "Complex linear combination mismatch.");
+            "Complex tensor arithmetic mismatch.");
 
-    const Tensor owned = linearCombination(x, y, ScalarType::Float32, options);
+    const Tensor owned = add(scaledX, scaledY);
     require(owned.layout() == Layout::contiguousLastDimensionFastest(shape) &&
                 owned.type() == ScalarType::Float32 &&
                 owned.loadAs<float>({1, 0, 1}) ==
                     2.0f * x.loadAs<float>({1, 0, 1}) - 0.5f * y.loadAs<float>({1, 0, 1}),
-            "Owning linear combination result contract mismatch.");
+            "Owning tensor addition result contract mismatch.");
 
     bool rejectedBeforeAllocation = false;
     try {
-        (void)linearCombination(std::nullopt, std::nullopt, ScalarType::Float32);
+        (void)multiply(x, Tensor(std::complex<double>(1.0, 1.0)), ScalarType::Float32,
+                       ScalarType::Float32);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation, "Owning linear combination accepted an invalid problem.");
+    require(rejectedBeforeAllocation, "Tensor multiplication accepted an invalid coefficient.");
 
-    LinearCombinationOptions invalidCoefficient(ScalarType::Float32);
-    invalidCoefficient.alpha = std::complex<double>(1.0, 1.0);
-    rejectedBeforeAllocation = false;
-    try {
-        (void)linearCombination(x, std::nullopt, ScalarType::Float32, invalidCoefficient);
-    } catch (const std::invalid_argument&) {
-        rejectedBeforeAllocation = true;
-    }
-    require(rejectedBeforeAllocation, "Owning linear combination accepted invalid coefficients.");
+    const Tensor activationInput =
+        Tensor::copyNativeValues<float>(Shape{4}, std::array<float, 4>{-2.0f, -0.5f, 0.0f, 2.0f});
+    const Tensor reluOutput = relu(activationInput);
+    const Tensor clippedOutput = clip(activationInput, -1.0, 1.0);
+    require(reluOutput.shape() == Shape{4} && reluOutput.loadAs<float>({0}) == 0.0f &&
+                reluOutput.loadAs<float>({3}) == 2.0f,
+            "Named ReLU operation mismatch.");
+    require(clippedOutput.loadAs<float>({0}) == -1.0f && clippedOutput.loadAs<float>({3}) == 1.0f,
+            "Named clip operation mismatch.");
 }
 
 void testReferenceSoftmax() {
@@ -1319,34 +1242,31 @@ void testReferenceLayerNorm() {
 void testReferenceOperationAliasing() {
     using namespace roc::host_numerics;
 
-    Tensor linearCombinationInPlace =
+    Tensor arithmeticInPlace =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{1.0f, 2.0f});
-    const Tensor linearCombinationY =
+    const Tensor arithmeticY =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{3.0f, 4.0f});
-    LinearCombinationOptions linearCombinationOptions(ScalarType::Float32);
-    linearCombinationOptions.alpha = 2.0;
-    linearCombinationOptions.beta = 1.0;
-    linearCombinationInto(linearCombinationInPlace, linearCombinationY, linearCombinationInPlace,
-                          linearCombinationOptions);
-    require(linearCombinationInPlace.loadAs<float>({0}) == 5.0f &&
-                linearCombinationInPlace.loadAs<float>({1}) == 8.0f,
-            "Linear-combination rejected or corrupted an exact in-place mapping.");
+    multiplyInto(arithmeticInPlace, Tensor(2.0f), arithmeticInPlace, ScalarType::Float32);
+    addInto(arithmeticInPlace, arithmeticY, arithmeticInPlace, ScalarType::Float32);
+    require(arithmeticInPlace.loadAs<float>({0}) == 5.0f &&
+                arithmeticInPlace.loadAs<float>({1}) == 8.0f,
+            "Tensor arithmetic rejected or corrupted an exact in-place mapping.");
 
-    Tensor linearCombinationOverlap =
+    Tensor arithmeticOverlap =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{11.0f, 22.0f});
-    Tensor linearCombinationReversedOutput =
-        linearCombinationOverlap.shareStorageWithLayout(Layout(Shape{2}, {-1}, 1));
-    const std::vector<std::byte> linearCombinationOverlapBefore =
-        copyRawEncodedBackingStorage(linearCombinationOverlap);
+    Tensor arithmeticReversedOutput =
+        arithmeticOverlap.shareStorageWithLayout(Layout(Shape{2}, {-1}, 1));
+    const std::vector<std::byte> arithmeticOverlapBefore =
+        copyRawEncodedBackingStorage(arithmeticOverlap);
     requireInvalidArgument(
         [&] {
-            linearCombinationInto(linearCombinationOverlap, std::nullopt,
-                                  linearCombinationReversedOutput);
+            multiplyInto(arithmeticOverlap, Tensor(1.0f), arithmeticReversedOutput,
+                         ScalarType::Float32);
         },
-        "Linear-combination accepted differently mapped overlapping storage.");
+        "Tensor multiplication accepted differently mapped overlapping storage.");
     requireRawEncodedBackingStorageEquals(
-        linearCombinationOverlap, linearCombinationOverlapBefore,
-        "Linear-combination modified destination storage before rejecting overlap.");
+        arithmeticOverlap, arithmeticOverlapBefore,
+        "Tensor multiplication modified destination storage before rejecting overlap.");
 
     const Tensor distinctLinearCombinationInput =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{1.0f, 2.0f});
@@ -1356,13 +1276,13 @@ void testReferenceOperationAliasing() {
         copyRawEncodedBackingStorage(selfCollidingLinearCombinationOutput);
     requireInvalidArgument(
         [&] {
-            linearCombinationInto(distinctLinearCombinationInput, std::nullopt,
-                                  selfCollidingLinearCombinationOutput);
+            multiplyInto(distinctLinearCombinationInput, Tensor(1.0f),
+                         selfCollidingLinearCombinationOutput, ScalarType::Float32);
         },
-        "Linear-combination accepted a self-colliding destination.");
+        "Tensor multiplication accepted a self-colliding destination.");
     requireRawEncodedBackingStorageEquals(
         selfCollidingLinearCombinationOutput, selfCollidingLinearCombinationOutputBefore,
-        "Linear-combination modified a self-colliding destination before rejecting it.");
+        "Tensor multiplication modified a self-colliding destination before rejecting it.");
 
     Tensor softmaxInPlace =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{1.0f, 2.0f});
@@ -1415,7 +1335,7 @@ void testReferenceOperationAliasing() {
     referenceSumInto(reductionInPlace, reductionInPlace, {}, ScalarType::Float32);
     require(
         reductionInPlace.loadAs<float>({0}) == 5.0f && reductionInPlace.loadAs<float>({1}) == 7.0f,
-        "Reference reduction rejected or corrupted an exact pointwise mapping.");
+        "Reference reduction rejected or corrupted an exact element mapping.");
 
     Tensor reductionOverlap =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{5.0f, 7.0f});
@@ -2210,12 +2130,11 @@ int main() {
     testExactIntegerGemm();
     testRuntimeComplexAndExplicitAxisGemm();
     testOutputSelection();
-    testStreamingGemmValidation();
     testReferenceEpilogue();
     testReferenceReduction();
     testStructuredSparsity();
     testIndexedGeneration();
-    testLinearCombination();
+    testTensorOperations();
     testReferenceSoftmax();
     testReferenceLayerNorm();
     testReferenceOperationAliasing();

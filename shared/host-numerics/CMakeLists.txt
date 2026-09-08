@@ -73,12 +73,11 @@ add_library(
 )
 
 add_library(host-numerics STATIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/linear_combination.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/tensor_operations.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/comparison.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/epilogue.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/generation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gemm.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/gemm_validation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/layer_norm.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mx.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/reduction.cpp"
@@ -166,18 +165,17 @@ target_sources(host-numerics
         FILE_SET HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/linear_combination.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/comparison.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/epilogue.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/generation.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/gemm.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/gemm_validation.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/layer_norm.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/mx.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/operation_types.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/reduction.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/softmax.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/structured_sparsity.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/tensor_operations.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/validation.hpp"
 )
 set_target_properties(host-numerics

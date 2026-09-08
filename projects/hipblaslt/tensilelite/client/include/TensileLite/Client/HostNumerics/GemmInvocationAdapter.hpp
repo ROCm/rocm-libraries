@@ -50,12 +50,12 @@ namespace TensileLite::Client::HostNumerics
         TranslatedGemmBatch(const TranslatedGemmBatch&)            = delete;
         TranslatedGemmBatch& operator=(const TranslatedGemmBatch&) = delete;
 
-        roc::host_numerics::GemmOptions& gemmOptions()
+        roc::host_numerics::MatmulOptions& matmulOptions()
         {
             return options;
         }
 
-        const roc::host_numerics::GemmOptions& gemmOptions() const
+        const roc::host_numerics::MatmulOptions& matmulOptions() const
         {
             return options;
         }
@@ -75,6 +75,9 @@ namespace TensileLite::Client::HostNumerics
             , c(std::move(cTensor))
             , d(std::move(dTensor))
             , options(accumulatorType)
+            , alpha(roc::host_numerics::Tensor::scalar(accumulatorType, 1))
+            , beta(roc::host_numerics::Tensor::scalar(accumulatorType, 0))
+            , scaleC(roc::host_numerics::Tensor::scalar(accumulatorType, 1))
         {
         }
 
@@ -124,7 +127,13 @@ namespace TensileLite::Client::HostNumerics
         roc::host_numerics::Tensor      b;
         roc::host_numerics::Tensor      c;
         roc::host_numerics::Tensor      d;
-        roc::host_numerics::GemmOptions options;
+        roc::host_numerics::MatmulOptions options;
+        roc::host_numerics::Tensor        alpha;
+        roc::host_numerics::Tensor        beta;
+        roc::host_numerics::Tensor        scaleC;
+        std::optional<roc::host_numerics::Tensor> scaleAlpha;
+        std::optional<roc::host_numerics::Tensor> scaleA;
+        std::optional<roc::host_numerics::Tensor> scaleB;
         std::optional<BoundEpilogue>    epilogue;
         std::optional<BiasReduction>    biasReduction;
         std::vector<CopyBack>           copyBacks;

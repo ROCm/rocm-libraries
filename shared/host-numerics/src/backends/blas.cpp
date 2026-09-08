@@ -510,6 +510,30 @@ GemmExecutionInfo runTransformingBlasGemm(const GemmInvocation& problem) {
 }
 }  // namespace
 
+void matmulIntoWithBlasBackend(Tensor a, Tensor b, Tensor output, const MatmulOptions& options) {
+    GemmOptions gemmOptions(options);
+    Tensor zero = output;
+    (void)detail::executeBlasGemm(
+        GemmInvocation(std::move(a), std::move(b), std::move(zero), std::move(output), gemmOptions),
+        GemmBackend::Automatic);
+}
+
+Tensor matmulWithBlasBackend(Tensor a, Tensor b, ScalarType outputType,
+                             const MatmulOptions& options, std::optional<Layout> outputLayout) {
+    detail::requireRank(a.shape(), 2, "matmul", "A");
+    detail::requireRank(b.shape(), 2, "matmul", "B");
+    if (a.shape()[1] != b.shape()[0])
+        throw std::invalid_argument("matmul reduction dimension mismatch.");
+    const Shape outputShape{a.shape()[0], b.shape()[1]};
+    const Layout layout =
+        outputLayout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
+    if (layout.shape() != outputShape)
+        throw std::invalid_argument("matmul output layout shape mismatch.");
+    Tensor output(outputType, layout);
+    matmulIntoWithBlasBackend(std::move(a), std::move(b), output, options);
+    return output;
+}
+
 GemmSupportInfo detail::queryBlasGemmSupport(const GemmInvocation& problem, GemmBackend backend) {
     if (backend == GemmBackend::Blas) return queryTransformingBlasGemmSupport(problem);
     return detail::queryGemmSupport(problem, backend);
@@ -533,24 +557,4 @@ detail::GemmExecutionInfo detail::executeBlasGemm(const GemmInvocation& problem,
     return runInfo;
 }
 
-void referenceGemmIntoWithBlasBackend(Tensor a, Tensor b, Tensor c, Tensor d,
-                                      const GemmOptions& options, GemmBackend backend) {
-    (void)detail::executeBlasGemm(
-        GemmInvocation(std::move(a), std::move(b), std::move(c), std::move(d), options), backend);
-}
-
-Tensor referenceGemmWithBlasBackend(Tensor a, Tensor b, Tensor c, ScalarType outputType,
-                                    const GemmOptions& options, std::optional<Layout> outputLayout,
-                                    GemmBackend backend) {
-    const GemmSpecification problem(std::move(a), std::move(b), std::move(c), outputType, options);
-    const Shape outputShape{problem.a.shape()[0], problem.b.shape()[1]};
-    const Layout layout =
-        outputLayout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
-    if (layout.shape() != outputShape)
-        throw std::invalid_argument("Owning reference GEMM output layout shape mismatch.");
-    Tensor destination(outputType, layout);
-    referenceGemmIntoWithBlasBackend(
-        problem.a, problem.b, problem.c, destination, options, backend);
-    return destination;
-}
 }  // namespace roc::host_numerics

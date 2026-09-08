@@ -6,6 +6,7 @@
 
 #include <Tensile/TensorDescriptor_fwd.hpp>
 #include <Tensile/Utils.hpp>
+#include <roc/host_numerics/tensor_operations.hpp>
 
 #include <algorithm>
 #include <complex>
@@ -15,6 +16,7 @@
 #include <numeric>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -258,7 +260,7 @@ namespace TensileLite::Client::HostNumerics
 
     struct GemmInvocationAdapter::State
     {
-        using Activation = roc::host_numerics::Activation;
+        using ActivationFunction = roc::host_numerics::ActivationFunction;
         using Layout     = roc::host_numerics::Layout;
         using MathMode   = roc::host_numerics::MathMode;
         using MatrixAxis      = detail::MatrixAxis;
@@ -361,9 +363,6 @@ namespace TensileLite::Client::HostNumerics
                                        && problem.f32XdlMathOp() == rocisa::DataType::XFloat32
                                  ? MathMode::XFloat32
                                  : MathMode::Default;
-            useStandaloneEpilogue
-                = useGradient || problem.outputAmaxD() || problem.useE()
-                  || problem.useGateResidual();
             preQuantizationScaleA
                 = scalarTypeInfo(typeA).storageBits > scalarTypeInfo(computeTypeA).storageBits;
             preQuantizationScaleB
@@ -383,7 +382,7 @@ namespace TensileLite::Client::HostNumerics
             }
             if((operationAccumulatorType == ScalarType::ComplexFloat32
                 || operationAccumulatorType == ScalarType::ComplexFloat64)
-               && activation != Activation::None)
+               && !std::holds_alternative<IdentityActivation>(activation))
             {
                 return failure(TranslationFailureCode::UnsupportedActivation,
                                "Complex GEMM activation is unsupported.");
@@ -899,11 +898,10 @@ namespace TensileLite::Client::HostNumerics
         std::complex<double> beta                 = {0.0, 0.0};
         std::complex<double> scaleC               = {1.0, 0.0};
         std::complex<double> outputScale          = {1.0, 0.0};
-        Activation           activation           = Activation::None;
+        ActivationFunction   activation;
         double               activationParameter0 = 0.0;
         double               activationParameter1 = 0.0;
 
-        bool useStandaloneEpilogue = false;
         bool useGradient           = false;
         bool useBias               = false;
         bool preQuantizationScaleA = false;
@@ -975,7 +973,36 @@ namespace TensileLite::Client::HostNumerics
 
     void TranslatedGemmBatch::runGemm(roc::host_numerics::GemmBackend backend) const
     {
-        roc::host_numerics::referenceGemmInto(a, b, c, d, options, backend);
+        using namespace roc::host_numerics;
+
+        const auto isZero = [](const Tensor& value) {
+            return value.item<std::complex<double>>() == std::complex<double>(0.0, 0.0);
+        };
+        const ScalarType computeType = options.accumulatorType;
+        if(!isZero(alpha) && a.shape()[1] != 0)
+        {
+            matmulInto(a, b, d, options, backend);
+
+            Tensor effectiveScale = alpha;
+            if(scaleA)
+                effectiveScale = multiply(
+                    std::move(effectiveScale), *scaleA, computeType, computeType);
+            if(scaleB)
+                effectiveScale = multiply(
+                    std::move(effectiveScale), *scaleB, computeType, computeType);
+            if(scaleAlpha)
+                effectiveScale = multiply(
+                    std::move(effectiveScale), *scaleAlpha, computeType, computeType);
+            multiplyInto(d, std::move(effectiveScale), d, computeType, options.outputSelection);
+        }
+
+        if(!isZero(beta))
+        {
+            const Tensor cScale = multiply(beta, scaleC, computeType, computeType);
+            Tensor cTerm(computeType, d.shape());
+            multiplyInto(c, cScale, cTerm, computeType, options.outputSelection);
+            addInto(d, std::move(cTerm), d, computeType, options.outputSelection);
+        }
     }
 
     void TranslatedGemmBatch::runPostGemmOperationsAndCopyOutputs() const
@@ -1047,14 +1074,8 @@ namespace TensileLite::Client::HostNumerics
             const auto&         plan   = m_state->batchPlans.at(batch);
             const auto          source = m_state->materializeBatch(batch);
 
-            Tensor                productOutput = source.d;
-            Tensor                gemmOutput    = productOutput;
-            std::optional<Tensor> intermediate;
-            if(m_state->useStandaloneEpilogue)
-            {
-                intermediate.emplace(accumulatorType, Shape{m_state->m, m_state->n});
-                gemmOutput = *intermediate;
-            }
+            Tensor productOutput = source.d;
+            Tensor gemmOutput(accumulatorType, Shape{m_state->m, m_state->n});
 
             TranslatedGemmBatch translated(
                 source.a, source.b, source.c, gemmOutput, accumulatorType);
@@ -1070,7 +1091,7 @@ namespace TensileLite::Client::HostNumerics
                 translated.copyBacks.push_back({*source.auxiliaryOutputDestination,
                                                 *source.auxiliaryOutput,
                                                 source.outputSelection});
-            auto& request           = translated.gemmOptions();
+            auto& request           = translated.matmulOptions();
             request.computeTypeA    = m_state->computeTypeA != m_state->typeA
                                           ? std::optional<ScalarType>(m_state->computeTypeA)
                                           : std::nullopt;
@@ -1092,44 +1113,52 @@ namespace TensileLite::Client::HostNumerics
                 request.blockSizeA = m_state->mxBlockA;
                 request.blockSizeB = m_state->mxBlockB;
             }
-            request.alpha  = m_state->alpha;
-            request.beta   = m_state->beta;
-            request.scaleC = m_state->scaleC;
-            if(!m_state->useStandaloneEpilogue && m_state->typeD == ScalarType::Int8)
-                request.outputConversion = OutputConversion::SaturatingInt8;
-            if(!m_state->useStandaloneEpilogue)
-            {
-                request.activation           = m_state->activation;
-                request.activationParameter0 = m_state->activationParameter0;
-                request.activationParameter1 = m_state->activationParameter1;
-                request.outputScale          = m_state->outputScale;
-            }
+            translated.alpha  = Tensor::scalar(accumulatorType, m_state->alpha);
+            translated.beta   = Tensor::scalar(accumulatorType, m_state->beta);
+            translated.scaleC = Tensor::scalar(accumulatorType, m_state->scaleC);
             if(m_state->scaleAlpha)
-                request.scaleAlpha = detail::broadcastVectorAsMatrix(*m_state->scaleAlpha,
-                                                                     m_state->scaleAlphaAxis);
+                translated.scaleAlpha = detail::broadcastVectorAsMatrix(*m_state->scaleAlpha,
+                                                                        m_state->scaleAlphaAxis);
             if(!m_state->preQuantizationScaleA)
-                request.scaleA = m_state->scaleA
-                                     ? std::optional<Tensor>(m_state->scaleA->expandDims(1))
-                                     : std::nullopt;
+                translated.scaleA = m_state->scaleA
+                                        ? std::optional<Tensor>(m_state->scaleA->expandDims(1))
+                                        : std::nullopt;
             if(!m_state->preQuantizationScaleB)
-                request.scaleB = m_state->scaleB
-                                     ? std::optional<Tensor>(m_state->scaleB->expandDims(0))
-                                     : std::nullopt;
-            if(source.bias && !m_state->useStandaloneEpilogue)
-                request.bias = source.bias;
+                translated.scaleB = m_state->scaleB
+                                        ? std::optional<Tensor>(m_state->scaleB->expandDims(0))
+                                        : std::nullopt;
             request.mathMode       = m_state->mathMode;
             request.outputSelection = source.outputSelection;
 
-            if(m_state->useStandaloneEpilogue)
             {
                 TranslatedGemmBatch::BoundEpilogue epilogue(
-                    *intermediate, productOutput, accumulatorType);
+                    gemmOutput, productOutput, accumulatorType);
                 if(!m_state->useGradient)
                     epilogue.options.bias = source.bias;
-                epilogue.options.activation           = m_state->activation;
-                epilogue.options.activationParameter0 = m_state->activationParameter0;
-                epilogue.options.activationParameter1 = m_state->activationParameter1;
-                epilogue.options.outputScale          = m_state->outputScale;
+                epilogue.options.activation = m_state->activation;
+                std::visit(
+                    [&](auto& function) {
+                        using Function = std::remove_cvref_t<decltype(function)>;
+                        if constexpr(std::is_same_v<Function, ClippedReluActivation>)
+                        {
+                            function.lower = m_state->activationParameter0;
+                            function.upper = m_state->activationParameter1;
+                        }
+                        else if constexpr(std::is_same_v<Function, GeluScalingActivation>)
+                            function.scale = m_state->activationParameter0;
+                        else if constexpr(std::is_same_v<Function, LeakyReluActivation>)
+                            function.negativeSlope = m_state->activationParameter0;
+                        else if constexpr(std::is_same_v<Function, TanhActivation>)
+                        {
+                            function.inputScale  = m_state->activationParameter0;
+                            function.outputScale = m_state->activationParameter1;
+                        }
+                        else if constexpr(std::is_same_v<Function, SwishActivation>)
+                            function.beta = m_state->activationParameter0;
+                    },
+                    epilogue.options.activation);
+                epilogue.options.outputScale
+                    = Tensor::scalar(accumulatorType, m_state->outputScale);
                 if(m_state->typeD == ScalarType::Int8)
                     epilogue.options.outputConversion = OutputConversion::SaturatingInt8;
                 epilogue.options.outputSelection = request.outputSelection;
