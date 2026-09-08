@@ -131,6 +131,19 @@ namespace TensileLite
                                       bool hasNullPointer,
                                       bool hasZeroElements) const;
 
+            bool checkPartialRMSRowSums(ContractionProblemGemm const& problem,
+                                        TensorDescriptor const&       tensor,
+                                        void const*                   refPtr,
+                                        void const*                   resPtr,
+                                        bool                          isgpu);
+
+            int comparePartialRMSRowSums(float const* refBuf,
+                                         size_t       nDRef,
+                                         float const* gpuBuf,
+                                         size_t       nDGpu,
+                                         size_t       mTokens,
+                                         double       threshold);
+
             std::shared_ptr<DataInitialization> m_dataInit;
             std::shared_ptr<ProblemInputs>      m_referenceInputs;
 
@@ -163,6 +176,7 @@ namespace TensileLite
             bool   m_error             = false;
             bool   m_executedSolution  = false;
             size_t m_errorsReported    = 0;
+            size_t m_solutionMacroTile0 = 0;
 
             bool validateSolution(std::shared_ptr<ProblemInputs> inputs);
         };

@@ -132,49 +132,13 @@ namespace TensileLite
             m_errorInSolution   = false;
             m_executedSolution  = false;
 
-            // Re-run CPU reference after DataInitialization refreshes MX inputs.
-            if(!m_enabled || m_problem == nullptr || m_referenceInputs == nullptr
-               || solution == nullptr)
-                return;
-
-            if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
-            {
-                bool needsRerun = false;
-
-                // When a PartialRMS benchmark group contains solutions with different
-                // MT0 values, the client allocates partialBuf using minMT0 (the
-                // smallest MT0 across all solutions).  Each kernel computes its own
-                // n_d = ceil(N_hidden / MT0_kernel) at runtime and uses that as the
-                // partialBuf column stride.  The CPU reference must use the same MT0
-                // as the kernel being validated; otherwise the tile layout doesn't
-                // match and validation fails for kernels with MT0 > minMT0.
-                // TODO: for TileQuant, add a re-run path analogous to the PartialRMS
-                // per-solution MT0 re-run below, for mixed-tile benchmark groups (Phase 2).
-                if(gemm->usePartialRMS())
-                {
-                    int actualMT0 = static_cast<int>(solution->sizeMapping.macroTile.x);
-                    if(actualMT0 > 0 && actualMT0 != gemm->partialRMSMT0())
-                    {
-                        size_t nHidden = gemm->d().sizes()[0];
-                        size_t mPadded
-                            = gemm->tensors()[ContractionProblemGemm::TENSOR::PARTIALBUF]
-                                  .sizes()[0];
-                        size_t nTilesN = (nHidden + static_cast<size_t>(actualMT0) - 1)
-                                         / static_cast<size_t>(actualMT0);
-                        gemm->setPartialRMSMT0(actualMT0);
-                        gemm->setPartialBuf(mPadded, nTilesN);
-                        needsRerun = true;
-                    }
-                }
-
-                // Always re-run for MX problems; also re-run when the partialBuf
-                // layout changed for a PartialRMS solution.
-                if(isMXProblem(*gemm) || needsRerun)
-                {
-                    ScopedTimer timer("cpu_reference_gemm_per_solution");
-                    SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
-                }
-            }
+            // Capture the solution's MacroTile0 so PartialRMS per-row validation can
+            // collapse the tile axis: each kernel packs partialBuf with column stride
+            // ceil(N_hidden / MT0). The CPU reference is solution-independent (canonical
+            // MX scales, and per-row totals are tile-layout-independent), so no
+            // per-solution SolveCPU re-run is needed.
+            m_solutionMacroTile0
+                = solution != nullptr ? solution->sizeMapping.macroTile.x : 0;
         }
 
         bool ReferenceValidator::needMoreRunsInSolution() const
@@ -606,10 +570,110 @@ namespace TensileLite
                     throw std::runtime_error(ss.str());
                 }
 
+                if(static_cast<ContractionProblemGemm::TENSOR>(i)
+                       == ContractionProblemGemm::TENSOR::PARTIALBUF
+                   && problem.usePartialRMS())
+                {
+                    rv &= checkPartialRMSRowSums(problem, tensor, refPtr, resPtr, result.gpu);
+                    continue;
+                }
+
                 rv &= checkResults(
                     tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
             }
             return rv;
+        }
+
+        int ReferenceValidator::comparePartialRMSRowSums(float const* refBuf,
+                                                         size_t       nDRef,
+                                                         float const* gpuBuf,
+                                                         size_t       nDGpu,
+                                                         size_t       mTokens,
+                                                         double       threshold)
+        {
+            // Only the sum-of-squares rows [0, M_tokens) are row-reduced; the amax
+            // second half (partialRMSQuant) is a per-tile max, not a sum, so it is not
+            // validated here.
+            int errorCount   = 0;
+            int printedCount = 0;
+            for(size_t token = 0; token < mTokens; token++)
+            {
+                float refSum = 0.0f;
+                for(size_t t = 0; t < nDRef; t++)
+                    refSum += refBuf[token * nDRef + t];
+                float gpuSum = 0.0f;
+                for(size_t t = 0; t < nDGpu; t++)
+                    gpuSum += gpuBuf[token * nDGpu + t];
+
+                if(AlmostEqual(refSum, gpuSum, threshold))
+                    continue;
+
+                errorCount++;
+                if(m_printMax > 0 && printedCount < m_printMax)
+                {
+                    std::cout << "partialBuf row " << token << " mismatch: cpu=" << refSum
+                              << " gpu=" << gpuSum << std::endl;
+                    printedCount++;
+                }
+            }
+            return errorCount;
+        }
+
+        bool ReferenceValidator::checkPartialRMSRowSums(ContractionProblemGemm const& problem,
+                                                        TensorDescriptor const&       tensor,
+                                                        void const*                   refPtr,
+                                                        void const*                   resPtr,
+                                                        bool                          isgpu)
+        {
+            size_t nHidden = problem.d().sizes()[0];
+            size_t mTokens = problem.d().sizes()[1];
+            size_t batch   = problem.d().sizes().size() > 2 ? problem.d().sizes()[2] : 1;
+            if(batch != 1)
+                throw std::runtime_error(
+                    "partialRMS per-row validation supports batch size 1 only");
+            if(m_solutionMacroTile0 == 0)
+                throw std::runtime_error(
+                    "partialRMS per-row validation missing solution macroTile0");
+
+            // Reference buffer is packed [mPadded, nDRef]; the GPU kernel packs the same
+            // rows with its own column stride nDGpu = ceil(N_hidden / MT0_kernel) <= nDRef.
+            size_t nDRef = tensor.sizes()[1];
+            size_t nDGpu = (nHidden + m_solutionMacroTile0 - 1) / m_solutionMacroTile0;
+
+            // The client sizes partialBuf from minMT0 across the group, so the GPU tile
+            // count never exceeds the reference column count; guard it to avoid a
+            // buffer over-read if that invariant ever regresses.
+            if(nDGpu > nDRef)
+                throw std::runtime_error(
+                    "partialRMS gpu tile count exceeds reference column count");
+
+            // The GPU's used region (mPadded * nDGpu) fits inside the reference-sized
+            // allocation, so copying the whole allocation back is safe.
+            size_t bytesToCopy = tensor.totalAllocatedBytes();
+            allocateResultBuffer(bytesToCopy);
+            hipMemcpyKind copyKind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
+            {
+                ScopedTimer timer("validate_gpu_readback");
+                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(), resPtr, bytesToCopy, copyKind));
+            }
+
+            float const* refBuf = static_cast<float const*>(refPtr);
+            float const* gpuBuf = reinterpret_cast<float const*>(m_cpuResultBuffer.get());
+
+            // 1% relative tolerance absorbs summation-order and fp32 rounding drift across
+            // O(N_hidden) tile partials while still catching any real miscompute.
+            double rowThreshold = 1e-2;
+            int    errorCount
+                = comparePartialRMSRowSums(refBuf, nDRef, gpuBuf, nDGpu, mTokens, rowThreshold);
+
+            if(errorCount == 0)
+                return false;
+
+            m_errorInSolution = true;
+            m_error           = true;
+            std::cout << "Check failed in output tensor: " << tensor << " (per-row reduction, "
+                      << errorCount << " of " << mTokens << " rows)" << std::endl;
+            return true;
         }
 
         void ReferenceValidator::allocateResultBuffer(size_t bytes)
