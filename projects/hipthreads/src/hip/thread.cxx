@@ -730,6 +730,15 @@ __host__ __device__ void wthread::detach() {
 #endif // !__HIP_DEVICE_COMPILE__
 }
 
+// Returns how many CUs make up one HIP "multiprocessor" on device: 2 on RDNA, where
+// hipDeviceAttributeMultiprocessorCount reports WGPs, or 1 on CDNA/GCN, where it already reports
+// CUs. warpSize is the discriminator: wave32 is RDNA, wave64 is CDNA/GCN.
+[[gnu::const]] static __host__ uint32_t getCusPerMultiprocessor(int device) {
+    int warpSize = 0;
+    __LIBHIPTHREADS_HIP_CHECK__(hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, device));
+    return (warpSize == 32) ? 2U : 1U;
+}
+
 // Deliberately not [[gnu::const]]: the result depends on which device is current when the call is
 // made, so the compiler must not treat calls either side of a hipSetDevice as interchangeable.
 __host__ unsigned int wthread::hardware_concurrency() noexcept {
@@ -768,18 +777,13 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
         __LIBHIPTHREADS_HIP_CHECK__(
             hipDeviceGetAttribute(&multiprocessorCount, hipDeviceAttributeMultiprocessorCount, device));
 
-        int deviceWarpSize = 0;
-        __LIBHIPTHREADS_HIP_CHECK__(
-            hipDeviceGetAttribute(&deviceWarpSize, hipDeviceAttributeWarpSize, device));
-
         // threading_main is persistent: a vcore that cannot be made resident never runs, and the
         // resident ones never exit while work might arrive. Over-subscribe the grid and it wedges.
         //
         // multiprocessorCount counts WGPs on RDNA (2 CUs each) but CUs on CDNA, so one setting
         // means two densities - which is why the default hung on Instinct but not Navi. Normalise
-        // to CUs, treating 2 CUs as the WGP equivalent on CDNA. warpSize discriminates: wave32 is
-        // RDNA (multiprocessor == WGP), wave64 is CDNA/GCN (multiprocessor == CU).
-        const uint32_t cusPerMultiprocessor = (deviceWarpSize == 32) ? 2U : 1U;
+        // to CUs, treating 2 CUs as the WGP equivalent on CDNA.
+        const uint32_t cusPerMultiprocessor = getCusPerMultiprocessor(device);
         uint32_t vcoresPerMp = requestedVcoresPerWgp;
         if (cusPerMultiprocessor == 1U) {
             // Halve, but never to zero: an explicit request of 1 must still launch something.
@@ -793,7 +797,7 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
         // blocks/WGP, wedges at 36); CDNA far less - gfx942 reports 16 but wedges intermittently
         // at 8, likely because multi-XCD parts cannot pack the grid evenly and one oversubscribed
         // XCD is enough. Hence the wider margin there.
-        const int occupancySafetyDivisor = (deviceWarpSize == 32) ? 2 : 4;
+        const int occupancySafetyDivisor = (cusPerMultiprocessor == 2U) ? 2 : 4;
         int maxBlocksPerMp = 0;
         __LIBHIPTHREADS_HIP_CHECK__(hipOccupancyMaxActiveBlocksPerMultiprocessor(
             &maxBlocksPerMp, internal::threading_main, static_cast<int>(wthread::max_width()), 0));
