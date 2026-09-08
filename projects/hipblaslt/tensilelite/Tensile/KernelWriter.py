@@ -11518,17 +11518,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     return ""
 
-  def _ldsTokensRotate(self) -> bool:
-    """Whether the LDS tokens form a mod-``numLDSBlk`` ring, not a 0<->1 toggle.
-
-    ``TDMPlusLdsBuf == 1`` alone names that path: assignDerivedParameters clears
-    the parameter unless TDM A+B + PGR2, and pins NumLdsBlk to 3 wherever it stays
-    set (the one path that falls back to 2 buffers also clears it), so numLDSBlk
-    needs no separate check here. It is compared against 1 rather than tested for
-    truth because the unresolved auto value is -1, which is itself truthy.
-    """
-    return self.states.kernel.get("TDMPlusLdsBuf", 0) == 1
-
   def _nextLdsToken(self, idx: int) -> int:
     """Advance an LDS memory-token index to the next physical buffer.
 
@@ -11539,8 +11528,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     a write/read hazard or over-syncing the prefetch the 3rd buffer exists to
     hide. Every other configuration (2 buffers, DTL, PGR>=3) keeps the original
     binary 0<->1 toggle so its token stream is byte-for-byte unchanged.
+
+    ``TDMPlusLdsBuf == 1`` alone names this path: assignDerivedParameters clears
+    the parameter unless TDM A+B + PGR2, and pins NumLdsBlk to 3 wherever it stays
+    set (the one path that falls back to 2 buffers also clears it), so numLDSBlk
+    needs no separate check here. It is compared against 1 rather than tested for
+    truth because the unresolved auto value is -1, which is itself truthy.
     """
-    if self._ldsTokensRotate():
+    if self.states.kernel.get("TDMPlusLdsBuf", 0) == 1:
       return (idx + 1) % self.states.numLDSBlk
     return self.states.memTokenLdsBuffer1 if idx == self.states.memTokenLdsBuffer0 \
       else self.states.memTokenLdsBuffer0
@@ -11566,7 +11561,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     Tokens outside the table (the metadata token) name no rotating buffer and are
     left out, so the caller's lookup falls back to identity for them.
     """
-    if not self._ldsTokensRotate():
+    if self.states.kernel.get("TDMPlusLdsBuf", 0) != 1:
       return {}
     splitTable = self.states.memTokenLdsSplit
     backEdgeMap = {}

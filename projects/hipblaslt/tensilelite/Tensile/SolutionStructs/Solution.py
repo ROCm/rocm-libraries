@@ -5393,7 +5393,7 @@ class Solution(collections.abc.Mapping):
     # a slow wave is still reading). Silently fall back to 2 buffers for every
     # value (auto -1 and forced 1) so existing library logic that selected a
     # triple kernel keeps building. Re-enable once the race is fixed.
-    # state["TDMPlusLdsBuf"] = 0
+    state["TDMPlusLdsBuf"] = 0
 
     # disable TDMPlusLdsBuf if not applicable. TDMPlusLdsBuf asks for PGR+1 (3) LDS
     # buffers for PGR2 without requiring DirectToLds. -1 (auto) is still unresolved
