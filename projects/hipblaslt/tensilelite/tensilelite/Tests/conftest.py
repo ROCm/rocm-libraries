@@ -206,7 +206,7 @@ def visibleDeviceCount():
     if counts:
         return min(counts)
 
-    from Tensile.ParallelExecution import detectAvailableGpus
+    from tensilelite.ParallelExecution import detectAvailableGpus
     return detectAvailableGpus()
 
 def commSkipMark(config):

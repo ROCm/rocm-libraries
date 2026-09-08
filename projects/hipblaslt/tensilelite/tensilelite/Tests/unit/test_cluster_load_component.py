@@ -20,7 +20,7 @@ import sys
 import pytest
 from contextlib import contextmanager
 from types import SimpleNamespace
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 

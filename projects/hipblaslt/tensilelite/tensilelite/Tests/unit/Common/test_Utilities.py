@@ -28,10 +28,10 @@ import pytest
 from unittest.mock import mock_open, patch
 from pathlib import Path
 
-from Tensile.Common.Utilities import (
+from tensilelite.Common.Utilities import (
     swizzleGeometry,
 )
-from Tensile.Common.DataType import DataType
+from tensilelite.Common.DataType import DataType
 
 from tensilelite import __version__
 from tensilelite.Common import Utilities as UtilitiesModule
