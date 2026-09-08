@@ -38,6 +38,9 @@ public:
         getTensorMap() const
         = 0;
 
+    // ABI rule: `bytes()` is the last virtual in `IGraph`. Append new virtuals after it;
+    // never insert one before it, or existing vtable slots can change.
+
     /// The verified buffer this graph is a view over; the caller does not own it and
     /// may copy it to outlive the caller's storage.
     ///

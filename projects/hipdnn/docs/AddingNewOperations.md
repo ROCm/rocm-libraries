@@ -190,6 +190,10 @@ the right one. Both mistakes compile:
 A name is not evidence: `PointwiseAttributes.axis_tensor_uid` is an axis index despite the
 suffix, and is correctly unannotated.
 
+The schema must contain exactly one domain-shaped vector: a root vector of tables whose element
+carries one integer `cache_uid_key`. The generator refuses to emit when a second candidate
+exists, because ordinals would have no defined answer.
+
 ### Adding a field
 
 1. Annotate it, or deliberately leave it unannotated.

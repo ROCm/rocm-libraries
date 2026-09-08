@@ -280,6 +280,28 @@ class Emitter:
         ]
         if not domains:
             return None
+        candidates = []
+        for candidate in self.fields_of(root):
+            candidate_type = candidate["type"]
+            if (
+                candidate_type["base_type"] != "Vector"
+                or candidate_type.get("element") != "Obj"
+            ):
+                continue
+            candidate_element = self.schema["objects"][candidate_type.get("index", -1)]
+            candidate_keys = [
+                f for f in candidate_element["fields"] if self.is_uid_key(f)
+            ]
+            if len(candidate_keys) == 1 and self._is_integer_scalar(
+                candidate_keys[0]["type"]
+            ):
+                candidates.append(candidate)
+        if len(candidates) > 1:
+            names = ", ".join(f"'{f['name']}'" for f in candidates)
+            raise SystemExit(
+                f"ERROR: {UID_DOMAIN_ATTRIBUTE} has {len(candidates)} domain-shaped "
+                f"candidates ({names}); ordinals need exactly one"
+            )
         if len(domains) > 1:
             names = ", ".join(f"'{f['name']}'" for f in domains)
             raise SystemExit(
@@ -470,6 +492,7 @@ class Emitter:
         self.w("#pragma once")
         self.w("")
         self.w("#include <cstdint>")
+        self.w("#include <cstring>")
         self.w("#include <string_view>")
         self.w("#include <type_traits>")
         self.w("")
@@ -497,7 +520,7 @@ class Emitter:
         self.w("    {")
         self.w("        static_assert(std::is_trivially_copyable_v<TValue>);")
         self.w("        uint8_t bytes[sizeof(TValue)];")
-        self.w("        __builtin_memcpy(bytes, &value, sizeof(TValue));")
+        self.w("        std::memcpy(bytes, &value, sizeof(TValue));")
         self.w("        for(uint8_t byte : bytes)")
         self.w("        {")
         self.w("            tag(byte);")
@@ -906,6 +929,27 @@ class Emitter:
             self.w(f"    if(aCanon({left}) != bCanon({right}))")
             self.w("    {")
             self.w("        return false;")
+            self.w("    }")
+        elif base in ("Float", "Double"):
+            # Floats hash bitwise, so they must compare bitwise: IEEE `!=` makes a NaN
+            # payload unequal to itself and turns its cache entry into a permanent miss.
+            self.w("    {")
+            self.w(f"        const auto aValue = {left};")
+            self.w(f"        const auto bValue = {right};")
+            if field.get("optional"):
+                self.w("        if(aValue.has_value() != bValue.has_value())")
+                self.w("        {")
+                self.w("            return false;")
+                self.w("        }")
+                self.w(
+                    "        if(aValue.has_value() && "
+                    "std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)"
+                )
+            else:
+                self.w("        if(std::memcmp(&aValue, &bValue, sizeof(aValue)) != 0)")
+            self.w("        {")
+            self.w("            return false;")
+            self.w("        }")
             self.w("    }")
         elif base in SCALAR_BASE_TYPES:
             self.w(f"    if({left} != {right})")

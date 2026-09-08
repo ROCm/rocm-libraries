@@ -326,6 +326,17 @@ public:
         return _winnerCache.size();
     }
 
+    /// Is it worth building a WinnerKey for @p gcnArchName? True if the in-memory cache
+    /// holds anything, or this arch's shard has not been attempted yet. Probes the
+    /// stripped arch, matching how `loadShardIfAbsent()` latches.
+    bool mightHaveWinnerFor(const std::string& gcnArchName) const
+    {
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        return !_winnerCache.empty()
+               || _loadedWinnerShards.find(std::string(stripArchFeatures(gcnArchName)))
+                      == _loadedWinnerShards.end();
+    }
+
     /// Resolves how to size and launch @p kernel.
     /// @throws std::runtime_error if the kernel's dispatch descriptor is unknown.
     KernelDispatcher<THandle> getDispatchDetails(const KernelDefinition& kernel) const
@@ -515,9 +526,12 @@ private:
         // Pack pruning and matchers both read the device, so nothing below can be
         // answered without one. Checked here rather than in every provider's matchers,
         // where an omission is invisible.
-        if(context.deviceId == NO_DEVICE)
+        if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
         {
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: no device resolved; no kernel applies");
+            const auto* reason = context.deviceId == NO_DEVICE
+                                     ? "no device resolved"
+                                     : "resolved device reports no gcnArchName";
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: " << reason << "; no kernel applies");
             return Catalog{};
         }
 
@@ -743,17 +757,6 @@ private:
                                                            "record; heuristic ranking skipped");
         }
         return ordered;
-    }
-
-    /// Is it worth building a WinnerKey for @p gcnArchName? True if the in-memory cache
-    /// holds anything, or this arch's shard has not been attempted yet. Probes the
-    /// stripped arch, matching how `loadShardIfAbsent()` latches.
-    bool mightHaveWinnerFor(const std::string& gcnArchName) const
-    {
-        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
-        return !_winnerCache.empty()
-               || _loadedWinnerShards.find(std::string(stripArchFeatures(gcnArchName)))
-                      == _loadedWinnerShards.end();
     }
 
     /// Loads the on-disk shard covering @p gcnArchName into `_winnerCache` once, tracked

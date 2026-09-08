@@ -49,6 +49,8 @@ public:
         int64_t in0TensorUid = 1;
         int64_t out0TensorUid = 2;
         std::optional<int64_t> in1TensorUid = std::nullopt;
+        /// A real float knob, so tests can prove float fields key on their bytes.
+        std::optional<float> reluLowerClip = std::nullopt;
     };
 
     /// Describes one valid two-tensor, one-node graph by default.
@@ -174,6 +176,10 @@ private:
             if(node.in1TensorUid.has_value())
             {
                 attributesBuilder.add_in_1_tensor_uid(*node.in1TensorUid);
+            }
+            if(node.reluLowerClip.has_value())
+            {
+                attributesBuilder.add_relu_lower_clip(*node.reluLowerClip);
             }
             const auto attributes = attributesBuilder.Finish();
 
