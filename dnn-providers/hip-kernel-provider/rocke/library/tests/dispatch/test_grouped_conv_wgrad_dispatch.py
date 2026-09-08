@@ -139,13 +139,111 @@ class TestGroupedWgradDispatch(unittest.TestCase):
 class TestGroupedConvDirectionSurface(unittest.TestCase):
     """The grouped-conv directions handled here are reachable from one module.
 
-    ``dispatch.grouped_convolution`` covers forward and backward-weight (wgrad);
-    both share a single ``ConvGroupedRequest`` import surface.
+    ``dispatch.grouped_convolution`` covers forward, backward-weight (wgrad) and
+    backward-data (dgrad); all three share a single ``ConvGroupedRequest``
+    import surface.
     """
 
     def test_each_direction_returns_candidates(self):
-        for direction in ("fwd", "wgrad"):
+        for direction in ("fwd", "wgrad", "dgrad"):
             self.assertGreater(len(conv_grouped_candidates(direction)), 0, direction)
+
+
+def _dgrad(arch="gfx950", **kw):
+    base = dict(
+        N=2,
+        C=64,
+        K=64,
+        Hi=14,
+        Wi=14,
+        Y=3,
+        X=3,
+        pad_h=1,
+        pad_w=1,
+        arch=arch,
+        direction="dgrad",
+    )
+    base.update(kw)
+    return ConvGroupedRequest(**base)
+
+
+class TestGroupedDgradDispatch(unittest.TestCase):
+    """Selection + grid + K-outer policy for the gfx950 dgrad candidate.
+
+    The grid contract differs from wgrad's: dgrad's M-tile count is not a closed
+    form over the problem dims, because stride > 1 splits the convolution into
+    ``y_tilde * x_tilde`` sub-GEMMs of differing sizes. The x extent is the
+    cumulative tile count of the last sub-GEMM, and the group rides ``blockIdx.y``
+    rather than sharing z with the K-slice.
+    """
+
+    def _select(self, req):
+        cands = [c for c in conv_grouped_candidates("dgrad") if c.admits(req)[0]]
+        self.assertEqual(len(cands), 1, f"expected exactly one candidate: {cands}")
+        return cands[0], cands[0].select_spec(req)
+
+    def test_admitted_and_grid_matches_sub_gemm_tiling(self):
+        req = _dgrad()
+        cand, spec = self._select(req)
+        p = _problem(req)
+        # Independent re-derivation: stride 1 is a single sub-GEMM, so the flat
+        # tile count is just the M/N tiling of that one GEMM.
+        gemm_m = p.N * p.Hi * p.Wi
+        expected_x = math.ceil(gemm_m / spec.tile_m) * math.ceil(
+            (p.C // p.groups) / spec.tile_n
+        )
+        self.assertEqual(cand.grid(spec, req), (expected_x, 1, 1))
+
+    def test_strided_grid_uses_tilde_decomposition(self):
+        # stride 2 gives y_tilde = x_tilde = 2: four sub-GEMMs over a quarter of
+        # the rows each. The flat tile count must therefore differ from the
+        # stride-1 count rather than reusing a single-GEMM formula.
+        strided = _dgrad(stride_h=2, stride_w=2)
+        cand, spec = self._select(strided)
+        gx_strided = cand.grid(spec, strided)[0]
+
+        plain = _dgrad()
+        cand1, spec1 = self._select(plain)
+        gx_plain = cand1.grid(spec1, plain)[0]
+
+        self.assertNotEqual(gx_strided, gx_plain)
+        self.assertGreater(gx_strided, 0)
+
+    def test_group_rides_block_id_y(self):
+        req = _dgrad(C=64, K=64, G=4)
+        cand, spec = self._select(req)
+        self.assertEqual(cand.grid(spec, req)[1], 4)
+
+    def test_k_outer_selected_on_even_channel_run(self):
+        _cand, spec = self._select(_dgrad())
+        self.assertTrue(spec.lds_k_outer)
+        self.assertEqual(spec.direction, "dgrad")
+
+    def test_k_outer_declined_on_odd_channel_run(self):
+        # cpg = 48 / 16 = 3. The B load width collapses to 1, axis_b is already
+        # "col", and there is no transpose-on-store left to remove -- K-outer
+        # would only add the read-side cost. The predicate must decline.
+        _cand, spec = self._select(_dgrad(C=48, G=16))
+        self.assertFalse(spec.lds_k_outer)
+
+    def test_dgrad_candidate_rejects_other_directions(self):
+        cand = conv_grouped_candidates("dgrad")[0]
+        for direction in ("fwd", "wgrad"):
+            ok, why = cand.admits(_dgrad(direction=direction))
+            self.assertFalse(ok, direction)
+            self.assertIn("dgrad", why)
+
+    def test_spec_round_trips_to_instance_spec(self):
+        req = _dgrad()
+        _cand, spec = self._select(req)
+        inst = spec.to_dgrad_spec(_problem(req))
+        # The dispatcher's K-outer decision must survive into the instance spec;
+        # a spec that silently reverts to M-outer would still run and still be
+        # correct, so nothing else would catch it.
+        self.assertEqual(inst.lds_k_outer, spec.lds_k_outer)
+        self.assertEqual(inst.tile_m, spec.tile_m)
+        self.assertEqual(inst.warp_tile_n, spec.warp_tile_mn)
+        inst.validate()
 
 
 if __name__ == "__main__":
