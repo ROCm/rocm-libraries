@@ -3,7 +3,10 @@
 
 #pragma once
 
+#include <algorithm>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 #include "test_gemm_quant_base.hpp"
 #include "ck_tile/host/permute_pk_int4.hpp"
@@ -1618,15 +1621,39 @@ class TestCkTileGemmRowColQuant
         }
     }
 
-    // Launch-only path for tensors whose single-dimension byte extent exceeds the 2GB
-    // buffer-addressing limit, where a full host reference is infeasible. Materializes the
-    // inputs and scale vectors on the host, allocates the (uninitialized) output on the
-    // device, dispatches the kernel and synchronizes. invoke_quant_gemm throws if
-    // IsSupportedArgument rejects the configuration; the post-launch synchronize surfaces
-    // any asynchronous device-side fault on the 64-bit addressing path as a failure of
-    // this test. No numerical validation is performed.
-    void run_test_launch_only(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K)
+    // Combined A+B+C device-byte requirement shared by every large-tensor
+    // memory-availability guard below, so the estimate has one source of truth instead of
+    // being duplicated per method.
+    static size_t required_device_bytes(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K)
     {
+        return static_cast<size_t>(M) * N * sizeof(CDataType) +
+               static_cast<size_t>(M) * K * sizeof(ADataType) +
+               static_cast<size_t>(K) * N * sizeof(BDataType);
+    }
+
+    // Boundary correctness check for the large-tensor (64-bit global load/store) path.
+    // A full host GEMM reference is infeasible at the scales this path targets (M*N*K can
+    // reach ~1e12), and a crash-only launch would only prove the kernel does not fault -- it
+    // cannot catch a silent out-of-bounds-but-still-valid address computation. This uses a
+    // sparse, exactly-computable input instead: A and B are zero everywhere except a single
+    // K-index `hot_k`, where A(m, hot_k) = m % 8 and B(hot_k, n) = n % 8, with unit row/col
+    // scales. Every other K contributes zero, so C(m, n) reduces to the exact integer
+    // product (m % 8) * (n % 8) -- representable exactly in FP8/Half, so no floating-point
+    // reference implementation or tolerance derivation is needed. The caller supplies
+    // `hot_k` and the (m, n) coordinates to spot-check, so each call site can target
+    // whichever tensor's addressing crosses the 2^31-byte boundary for its shape. Only the
+    // requested elements are read back (one hipMemcpy each), not the full (potentially
+    // multi-GiB) C buffer.
+    void run_test_boundary_check(
+        ck_tile::index_t M,
+        ck_tile::index_t N,
+        ck_tile::index_t K,
+        ck_tile::index_t hot_k,
+        const std::vector<std::pair<ck_tile::index_t, ck_tile::index_t>>& spot_checks)
+    {
+        ASSERT_GE(hot_k, 0);
+        ASSERT_LT(hot_k, K);
+
         const ck_tile::index_t stride_A =
             ck_tile::get_default_stride(M, K, 0, this->is_row_major(ALayout{}));
         const ck_tile::index_t stride_B =
@@ -1637,18 +1664,15 @@ class TestCkTileGemmRowColQuant
         const ck_tile::index_t stride_row_scales = 1;
         const ck_tile::index_t stride_col_scales = 1;
 
-        // The ~2GB output allocation can exceed free device memory on shared or
-        // small-memory devices. Skip (rather than hard-fail) when capacity is insufficient.
+        // Same memory-availability guard as the other large-tensor helpers.
         {
             size_t free_mem = 0, total_mem = 0;
             ASSERT_EQ(hipMemGetInfo(&free_mem, &total_mem), hipSuccess);
-            const size_t required = static_cast<size_t>(M) * N * sizeof(CDataType) +
-                                    static_cast<size_t>(M) * K * sizeof(ADataType) +
-                                    static_cast<size_t>(K) * N * sizeof(BDataType);
+            const size_t required = required_device_bytes(M, N, K);
             if(free_mem < required + (size_t{256} << 20)) // 256 MiB headroom
             {
-                GTEST_SKIP() << "Insufficient device memory for large-tensor launch-only test: "
-                             << "need ~" << ((required >> 20) + 256) << " MiB, have "
+                GTEST_SKIP() << "Insufficient device memory for large-tensor boundary-check "
+                             << "test: need ~" << ((required >> 20) + 256) << " MiB, have "
                              << (free_mem >> 20) << " MiB free";
             }
         }
@@ -1662,10 +1686,20 @@ class TestCkTileGemmRowColQuant
         ck_tile::HostTensor<QDataType> col_scales_n(ck_tile::host_tensor_descriptor(
             N, 1, stride_col_scales, ck_tile::bool_constant<true>{}));
 
-        ck_tile::FillUniformDistribution<ADataType>{-0.5f, 0.5f}(a_m_k);
-        ck_tile::FillUniformDistribution<BDataType>{-0.5f, 0.5f}(b_k_n);
-        ck_tile::FillUniformDistribution<QDataType>{0.001f, 0.01f}(row_scales_m);
-        ck_tile::FillUniformDistribution<QDataType>{0.001f, 0.01f}(col_scales_n);
+        // A and B are zero everywhere except the single K-index `hot_k`; unit scales make
+        // C(m, n) reduce to the exact integer product (m % 8) * (n % 8).
+        a_m_k.SetZero();
+        b_k_n.SetZero();
+        for(ck_tile::index_t m = 0; m < M; ++m)
+        {
+            a_m_k(m, hot_k) = ck_tile::type_convert<ADataType>(static_cast<float>(m % 8));
+        }
+        for(ck_tile::index_t n = 0; n < N; ++n)
+        {
+            b_k_n(hot_k, n) = ck_tile::type_convert<BDataType>(static_cast<float>(n % 8));
+        }
+        std::fill(row_scales_m.begin(), row_scales_m.end(), ck_tile::type_convert<QDataType>(1.0f));
+        std::fill(col_scales_n.begin(), col_scales_n.end(), ck_tile::type_convert<QDataType>(1.0f));
 
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size() * sizeof(ADataType));
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size() * sizeof(BDataType));
@@ -1680,14 +1714,23 @@ class TestCkTileGemmRowColQuant
         row_scales_dev_buf.ToDevice(row_scales_m.data());
         col_scales_dev_buf.ToDevice(col_scales_n.data());
 
+        // No D tensors in these test tuples (NumDTensor == 0 in every use of this helper).
+        // Zero-filled (rather than random) so the exact
+        // (m % 8) * (n % 8) expectation below still holds if a future tuple adds Ds. Guarded
+        // by a static_assert below because HostTensor::SetZero() special-cases e8m0_t to 1.f
+        // rather than 0 (host_tensor.hpp), which would silently violate this invariant.
         auto ds_m_n = ck_tile::generate_tuple(
             [&](auto i) {
                 using DiLayout = ck_tile::remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
                 using DiDataType =
                     ck_tile::remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
+                static_assert(!std::is_same_v<DiDataType, ck_tile::e8m0_t>,
+                              "run_test_boundary_check assumes SetZero() produces a value that "
+                              "contributes 0 to the sum; e8m0_t's SetZero() fills 1.f instead. "
+                              "Use an explicit zero fill for this DiDataType.");
                 ck_tile::HostTensor<DiDataType> d_m_n(ck_tile::host_tensor_descriptor(
                     M, N, stride_C, this->is_row_major(DiLayout{})));
-                ck_tile::FillUniformDistribution<DiDataType>{-10.0f, 10.0f}(d_m_n);
+                d_m_n.SetZero();
                 return d_m_n;
             },
             ck_tile::number<NumDTensor>{});
@@ -1726,16 +1769,182 @@ class TestCkTileGemmRowColQuant
 
         ck_tile::stream_config stream_config{};
         this->invoke_quant_gemm(args, stream_config);
+        ASSERT_EQ(hipStreamSynchronize(stream_config.stream_id_), hipSuccess)
+            << "Device-side fault while executing the large-tensor RowColQuant boundary "
+            << "check (M=" << M << ", N=" << N << ", K=" << K << ")";
 
-        // invoke_quant_gemm only enqueues the kernel; launch_and_check inspects
-        // hipPeekAtLastError() at enqueue time and does not synchronize. A device-side
-        // fault in the 64-bit addressing path (e.g. an out-of-range global address on the
-        // far-corner tiles, whose C byte offset exceeds 2^31) is reported asynchronously
-        // and would otherwise be swallowed by the DeviceMem destructors' hipFree. Force
-        // completion and surface any execution error as a failure of this test.
+        // Spot-check only the requested elements via targeted single-element reads,
+        // instead of pulling the full (potentially multi-GiB) C buffer back to host.
+        const auto c_desc =
+            ck_tile::host_tensor_descriptor(M, N, stride_C, this->is_row_major(CLayout{}));
+
+        for(const auto& [m, n] : spot_checks)
+        {
+            ASSERT_GE(m, 0);
+            ASSERT_LT(m, M);
+            ASSERT_GE(n, 0);
+            ASSERT_LT(n, N);
+
+            const auto byte_offset = c_desc.GetOffsetFromMultiIndex(m, n) * sizeof(CDataType);
+
+            CDataType actual{};
+            ASSERT_EQ(
+                hipMemcpy(&actual,
+                          static_cast<const char*>(c_m_n_dev_buf.GetDeviceBuffer()) + byte_offset,
+                          sizeof(CDataType),
+                          hipMemcpyDeviceToHost),
+                hipSuccess)
+                << "Failed to read back C(" << m << ", " << n << ")";
+
+            const float expected = static_cast<float>(m % 8) * static_cast<float>(n % 8);
+            EXPECT_NEAR(ck_tile::type_convert<float>(actual), expected, 1e-3f)
+                << "Boundary-check mismatch at C(" << m << ", " << n << ") (M=" << M << ", N=" << N
+                << ", K=" << K << ", hot_k=" << hot_k << ")";
+        }
+    }
+
+    // Full-output validation for the large-tensor (64-bit global load/store) path. A host
+    // reference is intractable at these scales, so the reference is computed on the device by
+    // reference_gemm_gpu (naive_gemm_kernel, which uses 64-bit indexing) and compared against
+    // the kernel output on the host. Row/column scales are 1 so the RowColQuant result equals a
+    // plain A*B GEMM -- exactly what the GPU reference computes; non-unit scale math is already
+    // covered by the small validated tests above. A and B are drawn from [-0.25, 0.25] so the K
+    // reduction cannot overflow the Half output even at the largest K exercised here (worst case
+    // K * 0.25 * 0.25 stays below Half's finite max for every shape in this file).
+    void run_test_with_gpu_reference(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K)
+    {
+        static_assert(NumDTensor == 0,
+                      "run_test_with_gpu_reference validates against a plain A*B GPU GEMM, which "
+                      "has no multi-D epilogue; use a test tuple without D tensors.");
+
+        const ck_tile::index_t stride_A =
+            ck_tile::get_default_stride(M, K, 0, this->is_row_major(ALayout{}));
+        const ck_tile::index_t stride_B =
+            ck_tile::get_default_stride(K, N, 0, this->is_row_major(BLayout{}));
+        const ck_tile::index_t stride_C =
+            ck_tile::get_default_stride(M, N, 0, this->is_row_major(CLayout{}));
+
+        const ck_tile::index_t stride_row_scales = 1;
+        const ck_tile::index_t stride_col_scales = 1;
+
+        // Device-memory guard: the kernel output C, the reference C and the A/B inputs must all
+        // fit at once (required_device_bytes covers A+B+one C; the reference adds a second C).
+        {
+            size_t free_mem = 0, total_mem = 0;
+            ASSERT_EQ(hipMemGetInfo(&free_mem, &total_mem), hipSuccess);
+            const size_t required =
+                required_device_bytes(M, N, K) + static_cast<size_t>(M) * N * sizeof(CDataType);
+            if(free_mem < required + (size_t{256} << 20)) // 256 MiB headroom
+            {
+                GTEST_SKIP() << "Insufficient device memory for large-tensor GPU-reference test: "
+                             << "need ~" << ((required >> 20) + 256) << " MiB, have "
+                             << (free_mem >> 20) << " MiB free";
+            }
+        }
+
+        ck_tile::HostTensor<ADataType> a_m_k(
+            ck_tile::host_tensor_descriptor(M, K, stride_A, this->is_row_major(ALayout{})));
+        ck_tile::HostTensor<BDataType> b_k_n(
+            ck_tile::host_tensor_descriptor(K, N, stride_B, this->is_row_major(BLayout{})));
+        ck_tile::HostTensor<QDataType> row_scales_m(ck_tile::host_tensor_descriptor(
+            M, 1, stride_row_scales, ck_tile::bool_constant<true>{}));
+        ck_tile::HostTensor<QDataType> col_scales_n(ck_tile::host_tensor_descriptor(
+            N, 1, stride_col_scales, ck_tile::bool_constant<true>{}));
+
+        // Signed inputs in a small range keep the K reduction inside the Half output range; unit
+        // scales make the RowColQuant result equal the plain A*B GEMM the GPU reference computes.
+        ck_tile::FillUniformDistribution<ADataType>{-0.25f, 0.25f}(a_m_k);
+        ck_tile::FillUniformDistribution<BDataType>{-0.25f, 0.25f}(b_k_n);
+        std::fill(row_scales_m.begin(), row_scales_m.end(), ck_tile::type_convert<QDataType>(1.0f));
+        std::fill(col_scales_n.begin(), col_scales_n.end(), ck_tile::type_convert<QDataType>(1.0f));
+
+        ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size() * sizeof(ADataType));
+        ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size() * sizeof(BDataType));
+        ck_tile::DeviceMem row_scales_dev_buf(row_scales_m.get_element_space_size() *
+                                              sizeof(QDataType));
+        ck_tile::DeviceMem col_scales_dev_buf(col_scales_n.get_element_space_size() *
+                                              sizeof(QDataType));
+        ck_tile::DeviceMem c_m_n_dev_buf(static_cast<size_t>(M) * N * sizeof(CDataType));
+
+        a_m_k_dev_buf.ToDevice(a_m_k.data());
+        b_k_n_dev_buf.ToDevice(b_k_n.data());
+        row_scales_dev_buf.ToDevice(row_scales_m.data());
+        col_scales_dev_buf.ToDevice(col_scales_n.data());
+
+        // NumDTensor == 0 for every tuple that uses this helper (enforced above), so the D
+        // pointer and stride arrays are empty.
+        std::array<const void*, NumDTensor> ds_ptr_buf;
+        std::array<ck_tile::index_t, NumDTensor> stride_Ds;
+
+        ck_tile::QuantGemmMultiDHostArgs<NumDTensor> args{
+            a_m_k_dev_buf.GetDeviceBuffer(),      // a_ptr
+            b_k_n_dev_buf.GetDeviceBuffer(),      // b_ptr
+            ds_ptr_buf,                           // ds_ptr
+            c_m_n_dev_buf.GetDeviceBuffer(),      // c_ptr
+            row_scales_dev_buf.GetDeviceBuffer(), // aq_ptr (row scales)
+            col_scales_dev_buf.GetDeviceBuffer(), // bq_ptr (col scales)
+            1,                                    // k_batch
+            M,
+            N,
+            K, // M, N, K
+            1, // QK_A (row scales)
+            1, // QK_B (col scales)
+            stride_A,
+            stride_B,
+            stride_Ds,
+            stride_C,
+            stride_row_scales,
+            stride_col_scales // strides
+        };
+
+        ck_tile::stream_config stream_config{};
+        this->invoke_quant_gemm(args, stream_config);
         ASSERT_EQ(hipStreamSynchronize(stream_config.stream_id_), hipSuccess)
             << "Device-side fault while executing the large-tensor RowColQuant kernel "
             << "(M=" << M << ", N=" << N << ", K=" << K << ")";
+
+        ck_tile::HostTensor<CDataType> c_m_n_dev_result(
+            ck_tile::host_tensor_descriptor(M, N, stride_C, this->is_row_major(CLayout{})));
+        c_m_n_dev_buf.FromDevice(c_m_n_dev_result.mData.data());
+
+        // GPU reference: plain A*B GEMM with 64-bit addressing. reads the same A/B device buffers
+        // (they are only read by the kernel above), writes into its own C buffer.
+        ck_tile::DeviceMem c_ref_dev_buf(static_cast<size_t>(M) * N * sizeof(CDataType));
+        c_ref_dev_buf.SetZero();
+
+        ADataType* a_ref_ptr = static_cast<ADataType*>(a_m_k_dev_buf.GetDeviceBuffer());
+        BDataType* b_ref_ptr = static_cast<BDataType*>(b_k_n_dev_buf.GetDeviceBuffer());
+        CDataType* c_ref_ptr = static_cast<CDataType*>(c_ref_dev_buf.GetDeviceBuffer());
+        ck_tile::reference_gemm_gpu<ADataType,
+                                    BDataType,
+                                    AccDataType,
+                                    CDataType,
+                                    ALayout,
+                                    BLayout,
+                                    CLayout>(
+            a_ref_ptr, b_ref_ptr, c_ref_ptr, M, N, K, stride_A, stride_B, stride_C);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess)
+            << "Device-side fault while executing the GPU reference GEMM " << "(M=" << M
+            << ", N=" << N << ", K=" << K << ")";
+
+        ck_tile::HostTensor<CDataType> c_m_n_gpu_ref(
+            ck_tile::host_tensor_descriptor(M, N, stride_C, this->is_row_major(CLayout{})));
+        c_ref_dev_buf.FromDevice(c_m_n_gpu_ref.mData.data());
+
+        const float max_accumulated_value =
+            *std::max_element(c_m_n_gpu_ref.mData.begin(), c_m_n_gpu_ref.mData.end());
+        const auto rtol_atol =
+            this->template calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
+                K, 1, max_accumulated_value);
+
+        bool pass = ck_tile::check_err(c_m_n_dev_result,
+                                       c_m_n_gpu_ref,
+                                       "Error: Incorrect results!",
+                                       rtol_atol.at(ck_tile::number<0>{}),
+                                       rtol_atol.at(ck_tile::number<1>{}));
+
+        EXPECT_TRUE(pass) << "RowColQuant GPU-reference validation failed with M=" << M
+                          << ", N=" << N << ", K=" << K;
     }
 
     private:
