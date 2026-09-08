@@ -4710,6 +4710,122 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipConv final : ConvTunableSolver<Performance
                              const PerformanceConfigConvHipConv&) const override;
 };
 
+/// Common base for NCHW->NHWC transposing wrappers around NHWC-native solvers
+/// (currently ConvHipConv). This is the inverse of ConvWinogradNHWCTransposingBase:
+/// Winograd wraps an NCHW-native inner solver to serve NHWC problems (transpose to NCHW),
+/// whereas here we wrap an NHWC-native inner solver (hipconv) to serve NCHW/NCDHW problems
+/// by transposing the tensors to NHWC/NDHWC, running the inner solver, and transposing the
+/// results back. The only structural difference from the Winograd base is the transpose
+/// target layout ("NDHWC" instead of "NCDHW"); the is_input flags are direction-determined
+/// and therefore identical.
+/// Template params:
+///   Derived    - CRTP derived class
+///   Inner      - the inner (NHWC) solver
+///   SolverBase - ConvSolver or ConvTunableSolver<PerformanceConfigType>
+template <class Derived, class Inner, class SolverBase>
+struct ConvHipConvNCHWTransposingBase : TransposingSolver<Derived,
+                                                          SolverBase,
+                                                          miopen::conv::ProblemDescription,
+                                                          miopen::conv::TransposeConvInvokeParams,
+                                                          Inner>
+{
+    using Problem      = miopen::conv::ProblemDescription;
+    using InvokeParams = miopen::conv::TransposeConvInvokeParams;
+    using Base         = TransposingSolver<Derived, SolverBase, Problem, InvokeParams, Inner>;
+
+    /// Convert from API params to TransposeConvInvokeParams.
+    /// The API passes DataInvokeParams for Fwd/Bwd and WrWInvokeParams for WrW.
+    static InvokeParams ConvertFromApiParams(const AnyInvokeParams& any_params)
+    {
+        if(any_params.IsOfType<miopen::conv::WrWInvokeParams>())
+        {
+            const auto& wrw_params = any_params.CastTo<miopen::conv::WrWInvokeParams>();
+            return InvokeParams{wrw_params};
+        }
+        const auto& data_params = any_params.CastTo<miopen::conv::DataInvokeParams>();
+        return InvokeParams{data_params};
+    }
+
+    /// Convert TransposeConvInvokeParams back to the correct type for the inner solver.
+    /// ConvHipConv expects DataInvokeParams for Fwd/Bwd and WrWInvokeParams for WrW.
+    static AnyInvokeParams ConvertForInnerSolver(const InvokeParams& params)
+    {
+        if(params.is_wrw)
+            return params.ToWrWInvokeParams();
+        return params.ToDataInvokeParams();
+    }
+
+    /// Override Transpose to recompute layout strings after transposing tensors.
+    /// conv::ProblemDescription caches layout strings at construction; they must be updated
+    /// to reflect the new NHWC-like strides so the inner solver's NHWC applicability checks
+    /// (ConvHipConv::IsApplicable) see a channel-last problem.
+    inline static Problem Transpose(const Problem& problem)
+    {
+        auto transposed_problem = Base::Transpose(problem);
+        transposed_problem.HeuristicUpdateLayouts();
+        return transposed_problem;
+    }
+
+    inline static auto GetTransposes(const Problem& problem)
+    {
+        const bool is_wrw = problem.IsDirectionBackwardWrW();
+
+        // Layout string "NDHWC" supports both 4D (NHWC) and 5D (NDHWC) tensors:
+        // SyncLayoutDims collapses "NDHWC"->"NHWC" for 4D problems and keeps "NDHWC" for 5D.
+        // This transposes the NCHW/NCDHW API tensors into the NHWC/NDHWC layout the inner
+        // hipconv solver requires.
+        return std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 3>{{
+            {
+                &Problem::GetIn,
+                &InvokeParams::inDesc,
+                &InvokeParams::in, // in (dy for WrW): always an input
+                nullptr,
+                "NDHWC", // transpose NCHW/NCDHW->NHWC/NDHWC
+                true,
+            },
+            {
+                &Problem::GetWeights,
+                &InvokeParams::wDesc,
+                is_wrw ? nullptr : &InvokeParams::w,           // Fwd/Bwd: w is input
+                is_wrw ? &InvokeParams::w_as_output : nullptr, // WrW: dw is output
+                "NDHWC", // weights: layout adapts to tensor dimensionality
+                !is_wrw, // Fwd/Bwd: input; WrW: output
+            },
+            {
+                &Problem::GetOut,
+                &InvokeParams::outDesc,
+                is_wrw ? &InvokeParams::out_as_input : nullptr, // WrW: x is input
+                is_wrw ? nullptr : &InvokeParams::out,          // Fwd/Bwd: out is output
+                "NDHWC", // out: layout adapts to tensor dimensionality
+                is_wrw,  // Fwd/Bwd: output; WrW: input
+            },
+        }};
+    }
+};
+
+/// Tunable NCHW->NHWC transposing wrapper. ConvHipConv is a ConvTunableSolver, so the tunable
+/// TransposingSolver specialization delegates the tuning methods to the inner solver on the
+/// transposed (NHWC) problem.
+template <class Inner>
+struct ConvHipConvNCHWTransposingTunableSolver
+    : ConvHipConvNCHWTransposingBase<ConvHipConvNCHWTransposingTunableSolver<Inner>,
+                                     Inner,
+                                     ConvTunableSolver<typename Inner::PerformanceConfigType>>
+{
+};
+
+/// NCHW-capable transposing wrapper around the NHWC-only hipconv solver. Transposes the
+/// NCHW/NCDHW tensors to NHWC/NDHWC, runs ConvHipConv, and transposes results back. Inert
+/// when hipconv is not compiled in (MIOPEN_USE_HIPCONV off): the inner ConvHipConv stub
+/// declines, so this wrapper declines too.
+struct TransposedConvHipConv final : ConvHipConvNCHWTransposingTunableSolver<ConvHipConv>
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<TransposedConvHipConv>();
+    }
+};
+
 } // namespace conv
 } // namespace solver
 } // namespace miopen
