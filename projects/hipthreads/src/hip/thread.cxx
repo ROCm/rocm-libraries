@@ -790,22 +790,22 @@ __host__ __device__ void wthread::detach() {
     // there.
     const int occupancySafetyDivisor = (getCusPerMultiprocessor(device) == 2U) ? 2 : 4;
 
-    int maxBlocksPerMp = 0;
+    int theoreticalBlocksPerMp = 0;
     __LIBHIPTHREADS_HIP_CHECK__(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-        &maxBlocksPerMp, internal::threading_main, static_cast<int>(wthread::max_width()), 0));
-    if (maxBlocksPerMp <= 0) {
+        &theoreticalBlocksPerMp, internal::threading_main, static_cast<int>(wthread::max_width()), 0));
+    if (theoreticalBlocksPerMp <= 0) {
         return UINT64_MAX;
     }
 
-    const uint64_t blocksPerMp = static_cast<uint64_t>(maxBlocksPerMp) / occupancySafetyDivisor;
-    if (blocksPerMp == 0) {
+    const uint64_t safeBlocksPerMp = static_cast<uint64_t>(theoreticalBlocksPerMp) / occupancySafetyDivisor;
+    if (safeBlocksPerMp == 0) {
         return UINT64_MAX;
     }
 
     int multiprocessorCount = 0;
     __LIBHIPTHREADS_HIP_CHECK__(
         hipDeviceGetAttribute(&multiprocessorCount, hipDeviceAttributeMultiprocessorCount, device));
-    return blocksPerMp * static_cast<uint64_t>(multiprocessorCount);
+    return safeBlocksPerMp * static_cast<uint64_t>(multiprocessorCount);
 }
 
 // Derives hardware_concurrency() for a specific device - see the individual helpers above for how
