@@ -387,7 +387,48 @@ pipeline {
             steps {
                 script {
                     loadCk()
-                    ck.runDownstreamTestsStages(this.&rocmnode, params)
+                    parallel([
+                        "Run Pytorch Tests on gfx942": {
+                            if (params.RUN_PYTORCH_TESTS.toBoolean()) {
+                                ck.runOnHealthyNode(rocmnode("gfx942")) {
+                                    ck.run_downstream_tests(image: "${env.CK_PYTORCH_IMAGE}", timeoutHours: 2, execute_cmds: ck.getPytorchTestsCmds())
+                                    cleanWs()
+                                }
+                            }
+                        },
+                        "Run AITER Tests on gfx942": {
+                            if (params.RUN_AITER_TESTS.toBoolean()) {
+                                ck.runOnHealthyNode(rocmnode("gfx942")) {
+                                    ck.run_downstream_tests(image: "${env.CK_AITER_IMAGE}", timeoutHours: 5, execute_cmds: ck.getAiterTestsCmds())
+                                    cleanWs()
+                                }
+                            }
+                        },
+                        "Run AITER Tests on gfx950": {
+                            if (params.RUN_AITER_TESTS.toBoolean()) {
+                                ck.runOnHealthyNode(rocmnode("gfx950")) {
+                                    ck.run_downstream_tests(image: "${env.CK_AITER_IMAGE}", timeoutHours: 5, execute_cmds: ck.getAiterTestsCmds())
+                                    cleanWs()
+                                }
+                            }
+                        },
+                        "Run FA Tests on gfx942": {
+                            if (params.RUN_FA_TESTS.toBoolean()) {
+                                ck.runOnHealthyNode(rocmnode("gfx942")) {
+                                    ck.run_downstream_tests(image: "${env.CK_FA_IMAGE}", timeoutHours: 5, execute_cmds: ck.getFaTestsCmds())
+                                    cleanWs()
+                                }
+                            }
+                        },
+                        "Run FA Tests on gfx950": {
+                            if (params.RUN_FA_TESTS.toBoolean()) {
+                                ck.runOnHealthyNode(rocmnode("gfx950")) {
+                                    ck.run_downstream_tests(image: "${env.CK_FA_IMAGE}", timeoutHours: 5, execute_cmds: ck.getFaTestsCmds())
+                                    cleanWs()
+                                }
+                            }
+                        }
+                    ])
                 }
             }
         }

@@ -1864,7 +1864,7 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
 // Jenkinsfile (`def rocmnode(name)`), and a vars/ script does not inherit
 // Jenkinsfile-local methods, so calling it here throws MissingMethodException
 // before runOnHealthyNode is ever reached. Same convention as
-// runDownstreamTestsStages / runFMHATestsStages / runBuildCKStages; the caller
+// runFMHATestsStages / runBuildCKStages; the caller
 // passes `this.&rocmnode`.
 def runDispatcherTests(def rocmnode, boolean runCorrectness, boolean runPerf, String compiler) {
     def branches = [:]
@@ -1955,51 +1955,6 @@ def runBuildInstancesOnly(String compiler) {
                 -DGPU_ARCHS="gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic" \
                 -D CMAKE_BUILD_TYPE=Release .. && ninja -j${nthreads()}"""
     )
-}
-
-def runDownstreamTestsStages(def rocmnode, def params) {
-    parallel([
-        "Run Pytorch Tests on gfx942": {
-            if (params.RUN_PYTORCH_TESTS.toBoolean()) {
-                runOnHealthyNode(rocmnode("gfx942")) {
-                    run_downstream_tests(image: "${env.CK_PYTORCH_IMAGE}", timeoutHours: 2, execute_cmds: getPytorchTestsCmds())
-                    cleanWs()
-                }
-            }
-        },
-        "Run AITER Tests on gfx942": {
-            if (params.RUN_AITER_TESTS.toBoolean()) {
-                runOnHealthyNode(rocmnode("gfx942")) {
-                    run_downstream_tests(image: "${env.CK_AITER_IMAGE}", timeoutHours: 5, execute_cmds: getAiterTestsCmds())
-                    cleanWs()
-                }
-            }
-        },
-        "Run AITER Tests on gfx950": {
-            if (params.RUN_AITER_TESTS.toBoolean()) {
-                runOnHealthyNode(rocmnode("gfx950")) {
-                    run_downstream_tests(image: "${env.CK_AITER_IMAGE}", timeoutHours: 5, execute_cmds: getAiterTestsCmds())
-                    cleanWs()
-                }
-            }
-        },
-        "Run FA Tests on gfx942": {
-            if (params.RUN_FA_TESTS.toBoolean()) {
-                runOnHealthyNode(rocmnode("gfx942")) {
-                    run_downstream_tests(image: "${env.CK_FA_IMAGE}", timeoutHours: 5, execute_cmds: getFaTestsCmds())
-                    cleanWs()
-                }
-            }
-        },
-        "Run FA Tests on gfx950": {
-            if (params.RUN_FA_TESTS.toBoolean()) {
-                runOnHealthyNode(rocmnode("gfx950")) {
-                    run_downstream_tests(image: "${env.CK_FA_IMAGE}", timeoutHours: 5, execute_cmds: getFaTestsCmds())
-                    cleanWs()
-                }
-            }
-        }
-    ])
 }
 
 def runFMHATestsStages(def rocmnode, def params) {
