@@ -119,6 +119,34 @@ namespace rocsparse
             total += sum[u];
         }
 
+        // A single wavefront block holds the whole sub-row sum of its rows in
+        // registers already, so there is nothing to reduce across wavefronts:
+        // skip the LDS staging and its barriers entirely.
+        if constexpr(BLOCKSIZE == WFSIZE)
+        {
+            if(hipGridDim_y == 1)
+            {
+                if(row < m)
+                {
+                    if(beta != static_cast<T>(0))
+                    {
+                        y[row] = rocsparse::fma(alpha, total, beta * y[row]);
+                    }
+                    else
+                    {
+                        y[row] = alpha * total;
+                    }
+                }
+            }
+            else
+            {
+                workspace[WFSIZE * hipGridDim_y * hipBlockIdx_x + WFSIZE * hipBlockIdx_y + lid]
+                    = total;
+            }
+
+            return;
+        }
+
         // Having the sub-row sums spread over multiple wavefronts (actually
         // each wavefront contains 64 sub-row sums), we need to use LDS for
         // the row sum reduction.
