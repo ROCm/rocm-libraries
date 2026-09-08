@@ -833,11 +833,17 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
         // on both. Even at the right density the device may not hold that many blocks, so
         // getOccupancyBasedMaxVcores caps against measured occupancy. MAX_VCORES is the hard
         // bound imposed by currentWorkNode's fixed size, independent of either.
-        uint64_t total = ::std::min({
-            getTotalRequestedVcores(device),
-            getOccupancyBasedMaxVcores(device),
-            static_cast<uint64_t>(MAX_VCORES),
-        });
+        const uint64_t requestedTotal = getTotalRequestedVcores(device);
+        const uint64_t occupancyBasedMaxVcores = getOccupancyBasedMaxVcores(device);
+        const uint64_t maxVcores = static_cast<uint64_t>(MAX_VCORES);
+        uint64_t total = ::std::min({requestedTotal, occupancyBasedMaxVcores, maxVcores});
+
+        if (total < requestedTotal) {
+            // Runs at most once per device: this whole function only executes on a cache miss.
+            ::std::cerr << "[hipthreads] device " << device << ": requested " << requestedTotal
+                        << " vcores, but the occupancy-based maximum is " << occupancyBasedMaxVcores
+                        << " and MAX_VCORES is " << maxVcores << "; using " << total << ".\n";
+        }
         if (total == 0) {
             // Never report zero: callers size loops off this, and the scheduler needs a grid.
             total = 1;
