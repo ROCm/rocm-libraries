@@ -193,7 +193,8 @@ struct rocfft_field_t
      * (complete, non-overlapping coverage of the global data range), identifies
      * undistributed length dimensions, and sorts bricks by increasing comm rank.
      *
-     * @note Ownership of the bricks is transferred to the constructed object.
+     * @note The bricks are taken by value: callers may `std::move` their vector
+     * in to transfer ownership, or pass an lvalue to keep their own copy.
      *
      * @param[in] field_bricks vector of bricks composing the field. Must be
      * non-empty and dimensionally consistent (all bricks must have the same
@@ -203,7 +204,7 @@ struct rocfft_field_t
      * not dimensionally consistent, or if the bricks do not form a valid
      * tessellation of the field's global data range.
      */
-    rocfft_field_t(std::vector<rocfft_brick_t>&& field_bricks);
+    rocfft_field_t(std::vector<rocfft_brick_t> field_bricks);
 
     rocfft_field_t(const rocfft_field_t&) = default;
     rocfft_field_t& operator=(const rocfft_field_t&) = default;
