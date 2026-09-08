@@ -433,6 +433,12 @@ DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .flags = {G
     .logical = "GlobalPrefetchB8",
     .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
 
+// FLAT-addressed form of the same prefetch: identical operands and semantics. Being FLAT it
+// enqueues into both the LDS and TEX order FIFOs, which is the only reason to prefer it.
+// No .logical: never lowered from logical IR, only substituted for global_prefetch_b8.
+DEF_T(FlatPrefetchB8Inst, "flat_prefetch_b8", .format = FLAT, .flags = {FLATPrefetch},
+    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
+
 // Global load with transpose-read (TR) — gfx1250 only.
 // global_load_tr_b64: 64-bit TR load; D0 = 64-bit vgpr dest,
 // S0 = 32-bit vaddr (offset), S1 = 64-bit saddr (base).

@@ -1,0 +1,29 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass --print-output
+#
+# flat_prefetch_b8 is the FLAT-addressed form of global_prefetch_b8: same operands,
+# same semantics (cache hint, no dest, no completion counter). It exists only on the
+# asm IR -- nothing lowers to it -- so this pins that it parses, round-trips, and is
+# classified FLAT rather than TEX, which is the only reason to prefer it.
+
+#--- Parses and round-trips with both operands intact.
+# CHECK-LABEL: @flat_prefetch_roundtrip
+# CHECK: "st.flat_prefetch_b8"(v[0:1], s[64:65])
+st.func @flat_prefetch_roundtrip() {
+^entry:
+  "st.flat_prefetch_b8"(v[0:1], s[64:65]) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- A VALU overwriting the prefetch's address vgpr must be ordered against it, so a
+#--- vm_vsrc wait is emitted. This is what proves the prefetch was tracked at all.
+# CHECK-LABEL: @flat_prefetch_war
+# CHECK: "st.flat_prefetch_b8"(v[0:1], s[64:65])
+# CHECK: "st.s_wait_alu"
+# CHECK-SAME: vm_vsrc
+# CHECK-NEXT: v0 = "st.v_mov_b32"
+st.func @flat_prefetch_war() {
+^entry:
+  "st.flat_prefetch_b8"(v[0:1], s[64:65]) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_mov_b32"(v3) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
