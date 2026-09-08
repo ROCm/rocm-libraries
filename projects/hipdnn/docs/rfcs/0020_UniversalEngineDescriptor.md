@@ -53,8 +53,8 @@ Concretely, this RFC delivers:
   FlatBuffers annotations that makes a UID-centric graph readable by name (§ 5, Appendix B).
 - The **symbol table matching publishes**: the five namespaces, the auto-binding formula, and the
   normative published field set every consumer's references are validated against (§ 6, § 6.1).
-- **Stage one of matching**: pattern compilation, the root-opcode index over engines, the bind
-  step, and the parity a lowered pattern must hold to (§ 7).
+- **Stage one of matching**: pattern compilation, the root-opcode index over engines, and the bind
+  step (§ 7).
 - The **engine-identity model**, including the two distinct id spaces a descriptor engine
   lives in: the descriptor-cross-reference UUID and the hipDNN 64-bit engine id (§ 3).
 - **Engine registration**: the process that instantiates the generic engine from UED data and
@@ -98,7 +98,9 @@ a follow-up, filling 0017's deferred scope is expected and is not itself a diver
   than a first-graph surprise.
 - **The graph-schema floor on the engine (§ 4.2).** 0017 § 4 requires a UED to declare the hipDNN
   schema version its pattern was authored against; this RFC gives it a field (`sdk_version`), a
-  default, and a comparison rule.
+  default, and a comparison rule. It is also the sole such floor: RFC 0018 § 10 keeps no
+  `sdk_version` on the UMD, so a matcher runs under the floor of the engine of each pack that
+  lists it.
 
 **Divergences (this RFC departs from an 0017 convention):**
 
@@ -211,7 +213,7 @@ two arms (§ 4.3, § 4.5) this engine matches with.
 | `version` | yes | string | `<major>.<minor>`, both numeric, and one of the values the schema enumerates (§ 14.3), e.g. `1.0`. The compatibility field the accept rule gates on (§ 14). |
 | `id` | yes | string | A UUID (RFC 4122) in canonical `8-4-4-4-12` hex form. Unique across all loaded descriptors, except that content-identical UEDs may share an `id` (§ 13.2.1). The cross-reference key a KDP's `engine` field uses (§ 3a). |
 | `name` | yes | string | Globally-unique, scoped engine name matching `^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$` (a `namespace:local` form, e.g. `rocke:SDPA`). Hashed (FNV-1a, 64-bit) into the hipDNN engine-id space (§ 3b). Non-empty; unique by both literal name and by hash. |
-| `sdk_version` | no | string | `<major>.<minor>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0` when omitted. Compared numerically by `(major, minor)`: refused at load when newer than the runtime's own graph schema, and at match time the whole engine declines a graph whose reported floor is above it, before binding and taking every pack naming it ([RFC 0018 § 11](0018_UniversalMatchDescriptor.md#11-serialization-and-versioning)). Independent of `version`, which gates the UED *format*. |
+| `sdk_version` | no | string | `<major>.<minor>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0` when omitted. Compared numerically by `(major, minor)`: refused at load when newer than the runtime's own graph schema, and at match time the whole engine declines a graph whose reported floor is above it, before binding and taking every pack naming it ([RFC 0018 § 10](0018_UniversalMatchDescriptor.md#10-serialization-and-versioning)). This is the **only** graph-schema floor in the system: no UMD carries one, and a matcher runs under the floor of the engine of each pack that lists it, so raising this field is a review point for every matcher on the engine. Independent of `version`, which gates the UED *format*. |
 | `heuristic` | no | string | UUID of this engine's one UHD. Must resolve to a loadable UHD at load (§ 13.2). Absent => the engine ships no heuristic and its catalog is ordered by the declared fallback, `priority` then descriptor `id` (§ 8, RFC 0017 § 5). A key present but naming nothing is still an error. |
 | `metadata` | yes | string | UUID of this engine's one KMD. Must resolve to a loadable KMD at load (§ 13.2). |
 | `graph_match` | no | object | Stage one: how this engine decides a graph and binds the tokens every later stage reads (§ 6, § 7). Exactly one arm, and they are mutually exclusive: **`nodes`**, the declarative pattern of **§ 4.3**, or **`native`**, the escape-hatch symbol of **§ 4.5**. Absent => the engine binds nothing, publishes an empty symbol table, and is admitted or declined by its packs' UMDs alone. |
@@ -714,9 +716,16 @@ the interpreter fails closed on anything undeclared:
   override shapes. That flag is the graph's state and is distinct from a matcher's
   `allow_override_shape`, which is the matcher's opt-in to accepting such a graph at all
   ([RFC 0018 § A.1](0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)).
-- **Attributes** — a matched node's scalar attributes, named by the node's pattern `id`: an
+- **Attributes** — a matched node's scalars, named by the node's pattern `id`: an
   `{"id": "sdpa_fwd"}` node exposes `$sdpa_fwd.dropout_probability`, a `{"id": "conv"}` node
   `$conv.dilation`. An optional attribute is asked about the same way, with those same operators.
+  The namespace spans two schema tables, which a reader never has to distinguish: the op's own
+  attribute table (the union arm `NodeAttributes` selects), **and the `Node` table's own scalars**,
+  of which `compute_data_type` is the one that is not `cache_ignore`. A node's compute precision is
+  a property of the node exactly as its dropout probability is, and a criterion gating it —
+  `{"==": ["$sdpa_fwd.compute_data_type", "FLOAT"]}` — would otherwise have nowhere to read it
+  from. Appendix B.3 states the generator rule, and the two tables cannot collide because a
+  duplicate bind name within one op is a build error.
 - **Kernel metadata** — `$kernel.<field>`, the values a UKD supplies for the fields its KMD declares
   (tile and vector constants, the dtype it targets, [RFC 0017 § 4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)).
   These are the one namespace the pattern does not bind: they come from the engine's KMD, and a
@@ -769,7 +778,7 @@ uint         = digit , { digit } ;
 |---|---|---|---|---|
 | Tensor | a pattern variable (`$q`) | the pattern | `uid`, `rank`, `dtype`, `stride_order`, `packed`, `virtual`, `is_runtime_pass_by_value`, `value_f32`, `dims[i]`, `strides[i]` | `Tensor` / `Int` / `Dtype` / `IntArray` / `Bool` / `Float` |
 | Graph | `$graph` | the pattern | `node_count`, `is_override_shape_enabled` | `Int` / `Bool` |
-| Attributes | a node `id` (`$sdpa_fwd`) | the pattern | `<attr-name>` | scalar |
+| Attributes | a node `id` (`$sdpa_fwd`) | the pattern | `<attr-name>`, from the op's attribute table or the `Node` table (Appendix B.3) | scalar |
 | Kernel | `$kernel` | the UKD, per candidate | `<field>` a UKD supplies ([RFC 0017 § 4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)) | scalar |
 | Device | `$device` | the `Handle` | `<field>` (`lds_size`, `warp_size`, …) | scalar |
 
@@ -805,8 +814,8 @@ knowable at a given stage, which is the drift the shared order exists to prevent
 ## 7. Pattern Matching: Stage One
 
 Matching a graph is two stages, and the pattern is the first of them. This section specifies the
-pattern's half: when it is compiled, how engines are pruned before any pattern runs, what the bind
-step does, and the parity a lowered form must hold to. The second stage — a pack's criteria
+pattern's half: when it is compiled, how engines are pruned before any pattern runs, and what the
+bind step does. The second stage — a pack's criteria
 evaluated over the published table, its per-kernel memoization, and the applicability-time cache
 both stages share — is [RFC 0018 §
 8](0018_UniversalMatchDescriptor.md#8-the-matcher-compilation-indexing-and-caching).
@@ -843,18 +852,6 @@ laziness changes when the work happens, never how often. This is RFC 0017 § 8.1
 a re-ordering of it: its step 4 resolves the packs and applies the arch gate as it goes, and its
 step 5 runs the match lazily on the first pack that cleared that gate, reasoning the all-excluded
 case the same way.
-
-**Lowering parity, if the pattern is ever lowered.** [RFC 0018 §
-9](0018_UniversalMatchDescriptor.md#9-static-matcher-sketch) sketches pre-compiling a matcher into a
-static form. However a static matcher is produced, it must be behaviorally identical to the runtime
-one on the same descriptors and graph — over **both** stages, the engine's pattern and the criteria
-evaluated against its binding, since a lowering that agreed on criteria while binding differently
-would be wrong in exactly the way that is hardest to see. The criteria half of that requirement is
-the expression language's; **the pattern half is this document's, and neither lowers without the
-other.** Build-time and drop-in descriptors run through one generic engine ([RFC 0017 §
-3](0017_UniversalKernelDescriptor.md#3-how-it-works)), so a kernel that is AOT-packed today and
-dropped in tomorrow must match the same graphs either way. Parity is testable as a cross-path
-equivalence check (§ 16).
 
 ## 8. Knobs
 
@@ -1532,6 +1529,21 @@ build** rather than emitting a wrong registry:
   insulates an operand from a field rename. If a scalar ever needs that insulation, the additive
   extension is an optional `umd_name` on an unflagged field, used purely as a bind-name override; the
   flag remains the operand/result discriminator.
+- **The `Node` table's own scalars bind too.** The rules above run over each op's attribute table,
+  which is the table `NodeAttributes` selects. A node carries scalars outside it, on the `Node`
+  table itself, and `compute_data_type` is the one that matters: it is a per-node value the
+  frontend stamps, it is the field an author reaches for to gate a node's compute precision, and
+  under the attribute-table-only rule it would be unreachable — a criterion naming
+  `$sdpa_fwd.compute_data_type` would fail § 13.2's reference check at load while looking
+  perfectly ordinary. The generator therefore classifies the `Node` table's non-`cache_ignore`
+  scalar fields by the same rules and merges them into **every** op's scalar-attribute set, so
+  `$<node_id>.compute_data_type` binds on any matched node. Two properties keep the merge safe.
+  The names cannot collide: a `Node`-table name equal to an attribute-table name in the same op is
+  the existing duplicate-bind-name build error. And the set stays derived rather than hand-listed,
+  so a `Node` scalar added later binds without a spec edit, exactly as an attribute-table one
+  does. The graph-level `Graph` table is **not** merged: its `compute_data_type` is a default the
+  frontend stamps onto nodes that left theirs unset, so the node's own field is already the
+  resolved value, and publishing both would offer two spellings of one fact.
 
 ### B.4 Generation pipeline
 
@@ -1592,7 +1604,7 @@ graph is reported by `not_present` and is read only through a guarded reference 
   ([RFC 0018 A.5](0018_UniversalMatchDescriptor.md#a5-compile-time-validation-normative)).
 - **Unknown op or name at match compile.** The matcher fails closed: a pattern node whose opcode or
   name is absent from the registry is refused, never bound to a guessed field
-  ([RFC 0018 § 17](0018_UniversalMatchDescriptor.md#17-risks)).
+  ([RFC 0018 § 16](0018_UniversalMatchDescriptor.md#16-risks)).
 - **Generation is deterministic and diffable.** The generated registry is a build artifact; a schema
   change that alters bindings shows up as a registry diff, which is the review surface for a binding
   change.

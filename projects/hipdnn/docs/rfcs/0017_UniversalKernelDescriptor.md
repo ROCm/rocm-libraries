@@ -127,7 +127,7 @@ stays a full provider, one per dependency. This complements build-time codegen.
 
 This document was revised alongside its first two follow-ups, [RFC 0018](0018_UniversalMatchDescriptor.md)
 and [RFC 0020](0020_UniversalEngineDescriptor.md), so a reader of the original finds the model
-moved in seven places. RFC 0020 § 2 keeps the converse ledger, of where those follow-ups tighten or
+moved in eight places. RFC 0020 § 2 keeps the converse ledger, of where those follow-ups tighten or
 diverge from this document; this one records what changed *here*.
 
 - **The pattern moved from the UMD to the UED.** A matcher no longer carries `nodes`. The engine
@@ -140,7 +140,7 @@ diverge from this document; this one records what changed *here*.
 - **Dims are read positionally.** `{"shape": ["$q", ["batch", "num_heads", ...]]}` and the named
   dims it bound are gone; a criterion reads `$q.dims[3]` and relates tensors with explicit
   cross-tensor equalities. Axis meaning is carried by comment and convention, which
-  [RFC 0018 §17](0018_UniversalMatchDescriptor.md#17-risks) records as a risk.
+  [RFC 0018 §16](0018_UniversalMatchDescriptor.md#16-risks) records as a risk.
 - **`shape`, `rank`-as-binder, and `all` left the operator set.** With dims positional they bound
   nothing, and the variable-rank case they served is deferred to the shape-matching follow-up
   ([§14.2](#142-follow-up-rfcs)).
@@ -155,6 +155,12 @@ diverge from this document; this one records what changed *here*.
 - **Fused and unfused kernels separate by engine, not by `node_count`.** Each topology is its own
   pattern and therefore its own engine, so the two never share a candidate set by construction
   rather than by a criterion.
+- **The graph-schema floor moved onto the engine alone.** A UMD no longer carries `sdk_version`;
+  the UED declares it, and a matcher runs under the floor of the engine of each pack that lists it
+  ([§4](#4-descriptor-formats)). The per-matcher floor an earlier revision described — a stale
+  matcher skipped while other packs on the same engine carried on — is given up for one gate at the
+  level that owns the symbol table the criteria read, so a matcher and its engine can no longer
+  state contradictory floors.
 
 Two conventions changed with them: the in-band `schema` type tag is gone from every example, the
 kind being carried by the filename and compatibility by `version`
@@ -388,33 +394,39 @@ versions should move rarely in practice, since the formats carry expressions rat
 fixed fields, so new behavior is usually authored in the expression language instead of a
 schema change.
 
-**The graph-schema floor applies to both descriptors that read the graph.** Besides its own
-format version, a UED and a UMD each declare the hipDNN schema (SDK) version they were
-authored against. Every other descriptor needs only its own version.
+**The graph-schema floor is declared once, by the engine.** Besides its own format version,
+a UED declares the hipDNN schema (SDK) version its pattern was authored against. No other
+descriptor carries one — a UMD included — and every other descriptor needs only its own
+format version.
 
 The rule takes the same reject-what-you-do-not-understand shape, applied to the graph. A
 graph reports the schema version its own contents require, computed from the optional fields
-it sets. A descriptor declaring a version below that floor is declined before it runs: the
-graph uses a feature its author never accounted for.
+it sets. An engine declaring a version below that floor is declined before it runs, before it
+binds anything and taking every pack that names it: the graph uses a feature its author never
+accounted for.
 
-The two are scoped differently, because they read the graph differently. A UED reads graph
-*structure*, the op tables, operand names, and UID fields its pattern walks, so below the
-floor the **engine declines** before it binds anything. A UMD reads graph *values* through
-its criteria, and because binding is registry-driven a newly added attribute is bound whether
-or not the engine's pattern was revised; what goes stale is a criteria set that does not gate
-the new field. Below the floor **that matcher is skipped**, declining the packs that list it.
+The engine is the right level because it is the level that reads the graph. Its pattern walks
+graph *structure*, the op tables, operand names, and UID fields, and it publishes the symbol
+table every one of its packs' criteria then reads. A matcher constrains only what that pattern
+already bound, and is already validated against the engine of each pack that lists it
+([Section 5](#5-matching-the-ueds-pattern-and-the-umds-criteria)), so it inherits the engine's
+floor rather than stating one of its own.
 
-Concretely: a matcher is authored against schema `1.0`, and its engine accepts SDPA graphs.
-hipDNN later adds an optional SDPA field at `1.1`.
+Concretely: an engine accepts SDPA graphs and is authored against schema `1.0`. hipDNN later
+adds an optional SDPA field at `1.1`.
 
-- A graph that leaves the new field unset still requires only `1.0`, so the matcher runs as before.
-- A graph that sets it requires `1.1`. The matcher declares `1.0`, so it is skipped instead
-  of asked: it would otherwise match on the fields it knows and silently ignore a field that
-  changes what the graph means.
+- A graph that leaves the new field unset still requires only `1.0`, so the engine and its
+  packs run as before.
+- A graph that sets it requires `1.1`. The engine declares `1.0`, so it is skipped instead of
+  asked: its packs would otherwise match on the fields they know and silently ignore a field
+  that changes what the graph means.
 
-The matcher is not broken and needs no reauthoring; it has stopped claiming graphs it was never
-written for. Its author adopts `1.1` when the kernel can honor the new field, or stays on `1.0`
-when it cannot.
+Nothing is broken and nothing needs reauthoring; the engine has stopped claiming graphs it was
+never written for. Adopting `1.1` is a deliberate step whose cost is that **every** matcher on
+that engine must be reviewed at the same time, since binding is registry-driven — the new
+attribute is bound whether or not the pattern was touched, and what goes stale is a criteria
+set that never gates it. Declaring the floor once makes that a single, visible decision instead
+of a per-matcher one that can silently disagree with its engine.
 
 This mirrors an existing hipDNN mechanism instead of inventing one: a graph already
 carries a minimum-required engine-plugin API version, computed in the plugin SDK from the
@@ -606,8 +618,8 @@ IDs its kernels require.
 
 ```jsonc
 {
-  "version":     "1.0",   // matcher format version, gated at load (Section 4)
-  "sdk_version": "1.0",   // hipDNN graph schema version these criteria were authored against (Section 4)
+  "version":     "1.0",   // matcher format version, gated at load (Section 4); the graph-schema
+                          // floor is the engine's and is not restated here (Section 4)
   "id":     "968156a8-ee21-4827-bcd7-893a8a72dccc",    // stable; listed in KDP matchers[], shared across packs
   "name":   "Example attention forward (d128, bf16) criteria",
   "scope":  "kernel",   // criteria read $kernel.*, so they are re-evaluated per candidate kernel
@@ -993,19 +1005,30 @@ graph fields (Tensor/Graph/Attributes/Device) runs once for the whole graph (*ru
 memoization*). On failure it disqualifies every pack that lists it (*fail-prune*), so evaluating the
 most-shared checks first (dtype, layout) prunes the candidate set fast. A matcher that also reads
 `$kernel.*` is the same matcher re-evaluated once per distinct value of the `$kernel.*` fields it
-reads, memoized on those, and disqualifies per kernel rather than per pack. The projection matters:
-a kernel's full metadata tuple is unique by construction, so memoizing on the whole tuple would save
-nothing, while a matcher that reads one field collapses an engine's whole catalog to that field's
-handful of distinct values. The loader already computes which `$kernel.*` fields each matcher reads,
-so the memoization key is available with no extra work. Kernel-level checks run only for kernels
-whose packs survived the graph-only pruning. Results are cached across queries, and a kernel whose
-matchers all pass goes to the heuristic to be ranked.
+reads, memoized on those, and disqualifies per kernel rather than per pack. The projection matters,
+and so does its cardinality: a kernel's full metadata tuple is unique by construction, so memoizing
+on the whole tuple would save nothing, while a matcher that reads one low-cardinality field
+collapses an engine's whole catalog to that field's handful of distinct values. A shape-specialized
+pack sits at the unhelpful end — pinning every baked quantity is exactly what this section requires
+of it, so its projection is nearly the full tuple — and there the win is the catalog index the
+projection keys rather than the cache hit
+([RFC 0018 §8](0018_UniversalMatchDescriptor.md#8-the-matcher-compilation-indexing-and-caching)
+sizes both on a shipped catalog). The loader already computes which `$kernel.*` fields each
+matcher reads, so the memoization key is available with no extra work; a matcher naming native C++
+has no expression to derive it from and declares the set instead
+([RFC 0018 §6](0018_UniversalMatchDescriptor.md#6-the-native-matcher-escape-hatch)). Kernel-level
+checks run only for kernels whose packs survived the graph-only pruning. Results are cached across
+queries, and a kernel whose matchers all pass goes to the heuristic to be ranked.
 
 **Arbitration is deterministic.** When several UKDs accept the same graph, the heuristic ranks them
 and the top-scored kernel wins. Ties break in a fixed order: explicit `priority`, then the
 descriptor's stable `id`, compared as raw bytes. That byte order carries no meaning; it is a
 tie-break chosen for being stable across runs, load orders, and machines, not because a lower id is
-better. When the decision falls to `id`, the provider logs the conflict to the warning log.
+better. When the decision falls to `id`, the provider logs the conflict to the warning log. A tie
+is only a last resort while the tiers above it discriminate: an engine whose heuristic scores on an
+axis its catalog holds constant sends nearly every graph to that byte order, which is a real
+performance hazard rather than a rare one
+([RFC 0018 §9](0018_UniversalMatchDescriptor.md#9-arbitration)).
 
 **Optional operands and optional fields.** The engine's pattern marks an operand optional with a `?`
 suffix, `"bias": "$bias?"`, binding it only when the graph supplies it. Whether something optional
@@ -1801,7 +1824,7 @@ Because that walkthrough runs to several hundred lines of descriptor data, it li
 document:
 **[RFC 0017 Worked Example: SDPA as a UKD](./examples/0017_UniversalKernelDescriptor_WorkedExample.md)**.
 It covers the engine's pattern and the complete criteria set,
-the mask-mode classifier encoded as criteria data, one accept and two declines traced end to end,
+the mask-mode classifier encoded as criteria data, one accept and three declines traced end to end,
 the dispatch geometry for both of the family's performance cohorts, and the engine, metadata
 schema, and two kernel packs that bind them. Three results from it are load-bearing for this RFC
 and are worth stating here:
@@ -1811,10 +1834,14 @@ and are worth stating here:
   native matcher. That is the half that matters for an allowlist: an under-specified decline
   accepts a graph the kernel cannot serve, which is a wrong answer rather than a missed
   optimization.
-- **A 5-input precedence classifier needs no escape hatch.** The mask-mode state machine inverts
-  into a boolean disjunction over `$kernel.mask_mode`, because the kernel's own metadata supplies
-  the value the C++ would have computed and compared. That inversion is the general recipe for
-  porting a classifier into criteria data.
+- **A 5-input precedence classifier needs no escape hatch, but does need its precedence.** The
+  mask-mode state machine inverts into a boolean disjunction over `$kernel.mask_mode`, because the
+  kernel's own metadata supplies the value the C++ would have computed and compared. That
+  inversion is the general recipe for porting a classifier into criteria data. It carries one
+  obligation the recipe must state: the machine is first-match-wins, so each arm has to negate the
+  arms above it. Transcribing the arms in source order encodes a different function, and in this
+  family it reproduces a defect that shipped — a windowed causal graph served as plain causal,
+  with the window silently discarded.
 - **Per-instance geometry rides on `$kernel.*`.** Measured cohorts that a formula over graph
   dimensions cannot derive become distinct UKDs with fixed metadata, and the shared dispatch
   descriptor's formulas read that metadata, so the cohort split costs kernel entries rather than
@@ -1897,7 +1924,7 @@ golden-reference tolerance chain ([RFC 0011](0011_GoldenReferenceValidation.md))
 descriptor-backed engine carries support claims ([RFC 0015](0015_EngineSupportClaims.md)) like any
 other. New tests go into those tiers.
 
-Three areas are new here:
+Four areas are new here:
 
 - **Fuzzing the descriptor pipeline.** The loader, matcher, and expression interpreter parse
   untrusted input on the drop-in path. This adds a seed corpus and a fuzzer over them, run under
@@ -1911,6 +1938,17 @@ Three areas are new here:
   [RFC 0013](0013_Autotune.md)) matures, this overhead is validated against the hand-written
   baseline. Loading is on demand and cached, so that cost is paid once, at first use, and only for
   descriptors a graph reaches.
+- **Worked examples are executed against the shipped corpus.** Every criteria set this series
+  publishes claims to encode a real kernel family's applicability, and
+  [Section 13](#13-worked-example-sdpa-as-a-ukd) rests that claim on the format's adequacy. So each
+  documented set is run against the integration bundles and the shipped descriptor catalog for the
+  family it describes, and must decide as that family's native code decides. The mechanism is
+  [RFC 0018 §13](0018_UniversalMatchDescriptor.md#13-testing-and-performance)'s match-equivalence
+  harness pointed at the documents. It is here because a document that claims to prove the format
+  sufficient is only evidence while something checks it: reviewing this series against a shipped
+  integration of the same family turned up a layout gate that false-declines a real graph, a
+  classifier whose arms encoded the wrong precedence, and two attribute references that do not
+  resolve — all of them mechanically detectable, none of them caught by reading.
 
 ### 14.2 Follow-up RFCs
 
