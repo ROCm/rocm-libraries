@@ -58,9 +58,10 @@ jobs:
       - name: Guard against blanket .ambr snapshot regeneration
         if: github.event_name == 'pull_request'
         shell: bash
-        working-directory: projects/hipblaslt/tensilelite
         run: |
-          python3 Tensile/Tests/unit/characterization/tools/check_snapshot_diff.py \
+          python3 projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/tools/check_snapshot_diff.py \
+            --repo-root "${{ github.workspace }}" \
+            --characterization-dir projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization \
             --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}"
 

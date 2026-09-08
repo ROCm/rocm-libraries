@@ -261,7 +261,7 @@ An opt-in local **pre-commit hook** runs the unit + characterization tests affec
      ```
 
      Read every changed line in the `.ambr` diff and explain the behavior change in your PR description. If the change pins or flips a known-wrong behavior, record a new ADR under `adr/` (or supersede the existing one). A golden diff is a reviewed behavior change, not a chore.
-2. **Never** run a bare, suite-wide `pytest --snapshot-update`. It silently rewrites every golden and destroys the net. That is, one could introduce a bug, update the goldens to make the tests green, and thereby *pin the bug* — rendering the tests useless. A CI guard enforces this (see "Legitimate bulk regeneration" below): it fails a PR that changes more than a small number of `.ambr` files unless the PR also carries the reviewed override.
+2. **Never** run a bare, suite-wide `pytest --snapshot-update`. It silently rewrites every golden and destroys the net. That is, one could introduce a bug, update the goldens to make the tests green, and thereby *pin the bug* — rendering the tests useless. A CI guard enforces this (see "Legitimate bulk regeneration" below): it fails a PR that changes more than 3 `.ambr` files unless the PR also carries the reviewed override.
 3. After recording, re-run the node **without** `--snapshot-update` twice — it must be byte-identical. Churn means the test isn't deterministic; fix it via the `{basename, err}` digest / canonicalization, not by re-recording.
 4. For **stable archs** (gfx908/90a/942) a codegen golden change is a *signal* — treat a digest diff as a suspected compiler/codegen regression and justify it in an **ADR** (and the PR description) before committing the new golden. Newer, still-churning archs may keep a small number of compiler generations side by side.
 
@@ -269,7 +269,19 @@ An opt-in local **pre-commit hook** runs the unit + characterization tests affec
 
 A real mass update (e.g. an intended change to the snapshot format itself) is allowed, but it must be a **conscious, reviewed act**: do it in its own PR that touches nothing else, and explain why in the description.
 
-CI enforces this mechanically (`characterization/tools/check_snapshot_diff.py`, AIHPBLAS-3876): a PR that changes more than a small threshold of `.ambr` files fails unless the same PR also adds or updates an ADR under `adr/` (see [`adr/README.md`](adr/README.md)) carrying a `Bulk-Snapshot-Update: yes` line. This is an unbypassable backstop — it runs in CI against the PR's actual diff, so it cannot be skipped with `git commit --no-verify` the way the local pre-commit hook can.
+CI enforces this mechanically (`characterization/tools/check_snapshot_diff.py`, AIHPBLAS-3876): a PR that changes more than 3 `.ambr` files (the guard's default `--threshold`) fails unless the same PR also adds or updates an ADR under `adr/` (see [`adr/README.md`](adr/README.md)) carrying a `Bulk-Snapshot-Update: yes` line. This is an unbypassable backstop — it runs in CI against the PR's actual diff, so it cannot be skipped with `git commit --no-verify` the way the local pre-commit hook can.
+
+When the guard trips, CI fails at **Component CI → TensileLite coverage → "Guard against blanket .ambr snapshot regeneration"**. To reproduce locally from the `rocm-libraries` repo root (after fetching the PR's base):
+
+```bash
+python3 projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/tools/check_snapshot_diff.py \
+  --repo-root . \
+  --characterization-dir projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization \
+  --base origin/develop \
+  --head HEAD
+```
+
+Adjust `--base` if the PR targets a branch other than `develop`.
 
 ### Reviewer checklist
 
