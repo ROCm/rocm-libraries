@@ -50,6 +50,7 @@ bool contains(const std::string& text, const std::string& needle) {
 
 constexpr const char* kSmemRule = "SmemSelfOverlapUnderXnackReplay";
 constexpr const char* kAlignRule = "ScalarTupleAlignment";
+constexpr const char* kVectorAlignRule = "VectorTupleAlignment";
 
 /// Looked up by name rather than by index, so adding a rule does not renumber
 /// every other test.
@@ -117,7 +118,7 @@ class Gfx1250AllocationRulesTest : public ::testing::Test {
 
 }  // namespace
 
-TEST_F(Gfx1250AllocationRulesTest, DeclaresBothRulesWithTheRightKinds) {
+TEST_F(Gfx1250AllocationRulesTest, DeclaresEveryRuleWithTheRightKind) {
     const AllocationRules rules = gfx1250Rules(/*xnack=*/true);
     EXPECT_TRUE(rules.problems().empty()) << rules.toString();
 
@@ -128,22 +129,24 @@ TEST_F(Gfx1250AllocationRulesTest, DeclaresBothRulesWithTheRightKinds) {
     // access reads versus writes.
     EXPECT_EQ(smem->kind(), RuleKind::Interference);
 
-    const AllocationRule* align = findRule(rules, kAlignRule);
-    ASSERT_NE(align, nullptr) << rules.toString();
-    EXPECT_FALSE(align->description.empty());
-    // Placement: it is about which index a tuple may start on, full stop.
-    EXPECT_EQ(align->kind(), RuleKind::Placement);
+    // Both alignment rows are about which index a tuple may start on, full stop.
+    for (const char* name : {kAlignRule, kVectorAlignRule}) {
+        const AllocationRule* align = findRule(rules, name);
+        ASSERT_NE(align, nullptr) << name << " missing from " << rules.toString();
+        EXPECT_FALSE(align->description.empty()) << name;
+        EXPECT_EQ(align->kind(), RuleKind::Placement) << name;
+    }
 }
 
-TEST_F(Gfx1250AllocationRulesTest, BothRulesAreActive) {
-    // The SMEM one was promoted after its audit came back silent; alignment is an
-    // encoding requirement that was never optional. Demoting either should have
-    // to change this line and say why.
+TEST_F(Gfx1250AllocationRulesTest, EveryRuleIsActive) {
+    // The SMEM one was promoted after its audit came back silent; both alignment
+    // rows are encoding requirements that were never optional. Demoting any of
+    // them should have to change this line and say why.
     const AllocationRules rules = gfx1250Rules(/*xnack=*/true);
-    ASSERT_NE(findRule(rules, kSmemRule), nullptr);
-    ASSERT_NE(findRule(rules, kAlignRule), nullptr);
-    EXPECT_EQ(findRule(rules, kSmemRule)->status, RuleStatus::Active);
-    EXPECT_EQ(findRule(rules, kAlignRule)->status, RuleStatus::Active);
+    for (const char* name : {kSmemRule, kAlignRule, kVectorAlignRule}) {
+        ASSERT_NE(findRule(rules, name), nullptr) << name;
+        EXPECT_EQ(findRule(rules, name)->status, RuleStatus::Active) << name;
+    }
 }
 
 TEST_F(Gfx1250AllocationRulesTest, WithoutXnackReplayOnlyTheGatedRuleGoesInert) {
@@ -154,10 +157,12 @@ TEST_F(Gfx1250AllocationRulesTest, WithoutXnackReplayOnlyTheGatedRuleGoesInert) 
     ASSERT_NE(findRule(rules, kSmemRule), nullptr) << rules.toString();
     EXPECT_EQ(findRule(rules, kSmemRule)->status, RuleStatus::Off);
 
-    // Alignment is an encoding requirement of every gfx1250 module, so no
-    // capability can switch it off.
-    ASSERT_NE(findRule(rules, kAlignRule), nullptr);
-    EXPECT_EQ(findRule(rules, kAlignRule)->status, RuleStatus::Active);
+    // Both alignment rows are encoding requirements of every gfx1250 module, so
+    // no capability can switch either off.
+    for (const char* name : {kAlignRule, kVectorAlignRule}) {
+        ASSERT_NE(findRule(rules, name), nullptr) << name;
+        EXPECT_EQ(findRule(rules, name)->status, RuleStatus::Active) << name;
+    }
 }
 
 TEST_F(Gfx1250AllocationRulesTest, WithoutTheCapabilityNoRangeIsWidened) {
@@ -290,13 +295,85 @@ TEST_F(Gfx1250AllocationRulesTest, AlignmentForbidsExactlyTheBasesTheAssemblerRe
     EXPECT_NE(rules.forbidsBase(RegType::S, 2, 16), nullptr);
 }
 
-TEST_F(Gfx1250AllocationRulesTest, AlignmentDoesNotConstrainVectorRegisters) {
-    // gfx1250 has no alignment requirement on VGPR tuples, and the pipeline does
-    // not allocate them anyway. Constraining them would cost registers for
-    // nothing.
+// ---------------------------------------------------------------------------
+// VectorTupleAlignment
+// ---------------------------------------------------------------------------
+
+TEST_F(Gfx1250AllocationRulesTest, VectorAlignmentForbidsExactlyTheBasesTheAssemblerRejects) {
     const AllocationRules rules = gfx1250Rules(/*xnack=*/true);
-    EXPECT_EQ(rules.forbidsBase(RegType::V, 1, 2), nullptr);
-    EXPECT_EQ(rules.forbidsBase(RegType::V, 3, 4), nullptr);
+
+    // A single VGPR sits anywhere.
+    EXPECT_EQ(rules.forbidsBase(RegType::V, 1, 1), nullptr);
+
+    // Every width above one needs an even base and nothing more. Probed against
+    // the assembler: v[2:9] and ds_load_b96 v[2:4] assemble, v[3:10] and v[3:5]
+    // are rejected with "vgpr tuples must be 64 bit aligned". The odd bases are
+    // the two the bf16 kernel emitted -- v[3:10] for a WMMA destination, v[9:12]
+    // for a buffer_load_b128 (st_register_allocation.md issue 1).
+    for (uint32_t width : {2u, 3u, 4u, 8u, 16u}) {
+        EXPECT_EQ(rules.forbidsBase(RegType::V, 2, width), nullptr) << "even, width " << width;
+        for (uint32_t base : {3u, 9u}) {
+            ASSERT_NE(rules.forbidsBase(RegType::V, base, width), nullptr)
+                << "odd base " << base << ", width " << width;
+            EXPECT_EQ(rules.forbidsBase(RegType::V, base, width)->name, kVectorAlignRule);
+        }
+    }
+
+    // Flat where the scalar rule is width-based: the 4-DWORD tuple at base 2
+    // accepted above is illegal for scalars, so neither rule's answer can stand
+    // in for the other's. That is why these are two rows and not one predicate.
+    EXPECT_NE(rules.forbidsBase(RegType::S, 2, 4), nullptr);
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TheVectorRangeMovesOffAnOddBase) {
+    // The reported failure, reduced. Lifting VGPRs put multi-DWORD vector ranges
+    // in front of an allocator with no vector placement rule, and a 4-DWORD load
+    // landed on v[9:12], which the assembler rejects. v0 is a live-in, so it is
+    // pinned and leaves v1 as the lowest free index for compaction to reach for.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* load = createDsReadB128InBlock(entry, kRaTestArch, /*destReg=*/40,
+                                                      /*addrReg=*/24);
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    StinkyInstruction* use = builder.create(getMCIDByUOp(GFX::v_add_f32, kRaTestArch));
+    use->addDestReg(StinkyRegister("v", 5, 1));
+    use->addSrcReg(StinkyRegister("v", 40, 1));
+    use->addSrcReg(StinkyRegister("v", 0, 1));  // live-in, pinned, live across the load
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* first = ssaDefinedValue(*load, 0);
+    ASSERT_NE(first, nullptr);
+
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), {}, gfx1250Rules(/*xnack=*/true));
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> coloured = allocator.allocate(setup.context());
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, setup.context()).ok());
+
+    const RegKey base = coloured->assignmentOf(first->valueId());
+    EXPECT_EQ(base.idx % 2, 0u) << "the range landed on odd " << regKeyToString(base);
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TheVerifierRejectsAMisalignedVectorRange) {
+    // The enforcement point. Before this rule existed the verifier read the same
+    // empty specification as the allocator and reported nothing, so a misaligned
+    // range reached the assembler instead of being refused here.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* load = createDsReadB128InBlock(entry, kRaTestArch, /*destReg=*/40,
+                                                      /*addrReg=*/24);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationResult misaligned = createLegacyColoring(*func);
+    for (unsigned unit = 0; unit < 4; ++unit) {
+        const StinkySSAValue* value = ssaDefinedValue(*load, unit);
+        ASSERT_NE(value, nullptr) << "unit " << unit;
+        misaligned.assign(value->valueId(), RegKey{RegType::V, 9 + unit, RegHalf::NONE});
+    }
+
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), {}, gfx1250Rules(/*xnack=*/true));
+    const AllocationVerificationResult checked =
+        verifyAllocation(*func, misaligned, setup.context());
+    EXPECT_FALSE(checked.ok());
+    EXPECT_TRUE(contains(checked.toString(), kVectorAlignRule)) << checked.toString();
 }
 
 TEST_F(Gfx1250AllocationRulesTest, AlignmentSurvivesWithoutAnyCapability) {
