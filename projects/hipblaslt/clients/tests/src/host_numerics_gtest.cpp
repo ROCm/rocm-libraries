@@ -107,13 +107,11 @@ namespace
         const auto layoutB = matrixLayout(k, n, ldb, transB);
         const auto layoutC = matrixLayout(m, n, ldc, HIPBLAS_OP_N);
         const auto layoutD = matrixLayout(m, n, ldd, HIPBLAS_OP_N);
-        const auto matrix = [](hipDataType type, const roc::host_numerics::Layout& layout) {
+        const auto matrix  = [](hipDataType type, const roc::host_numerics::Layout& layout) {
             return hipblaslt::client::MatmulMatrix{
                 type,
-                hipblaslt::host_numerics::scalarType(type),
                 roc::host_numerics::Layout(
-                    roc::host_numerics::Shape{
-                        layout.shape()[0], layout.shape()[1], 1},
+                    roc::host_numerics::Shape{layout.shape()[0], layout.shape()[1], 1},
                     {layout.stride(0), layout.stride(1), 0}),
                 layout.shape()[1] * static_cast<size_t>(layout.stride(1)),
             };
@@ -1116,8 +1114,7 @@ TEST(HostNumericsCblasBridge, ConsumesNormalizedMatmulProblemAndTensorBindings)
 
     const Layout matrixLayout = Layout::contiguousLastDimensionFastest(Shape{2, 2});
     const Layout batchedLayout(Shape{2, 2, 1}, {1, 2, 4});
-    const hipblaslt::client::MatmulMatrix matrix{
-        HIP_R_32F, ScalarType::Float32, batchedLayout, 4};
+    const hipblaslt::client::MatmulMatrix  matrix{HIP_R_32F, batchedLayout, 4};
     const hipblaslt::client::MatmulProblem problem{
         .m          = 2,
         .n          = 2,
@@ -1687,8 +1684,7 @@ TEST(HostNumericsCblasBridge, UsesResolvedComplexReferenceTypes)
 
     const Layout matrixLayout = Layout::contiguousLastDimensionFastest(Shape{1, 1});
     const Layout batchedLayout(Shape{1, 1, 1}, {1, 1, 1});
-    const hipblaslt::client::MatmulMatrix matrix{
-        HIP_C_32F, ScalarType::ComplexFloat32, batchedLayout, 1};
+    const hipblaslt::client::MatmulMatrix  matrix{HIP_C_32F, batchedLayout, 1};
     const hipblaslt::client::MatmulProblem problem{
         .m          = 1,
         .n          = 1,
@@ -1734,8 +1730,7 @@ TEST(HostNumericsCblasBridge, BuildsEmptyBatchLayoutsWithoutAddressingAnElement)
 {
     using namespace roc::host_numerics;
 
-    const hipblaslt::client::MatmulMatrix matrix{
-        HIP_R_32F, ScalarType::Float32, Layout(Shape{4, 0, 3}, {1, 4, 17}), 51};
+    const hipblaslt::client::MatmulMatrix matrix{HIP_R_32F, Layout(Shape{4, 0, 3}, {1, 4, 17}), 51};
 
     const Layout emptyColumns
         = hipblaslt::host_numerics::referenceBatchLayout(matrix, 4, 0, HIPBLAS_OP_N, 2, false);

@@ -74,17 +74,25 @@ namespace hipblaslt::client
 
             const int64_t matrixElements
                 = checkedProduct(leadingDimension, columns, "matrix storage size");
-            const int64_t allocationElements
-                = batchCount == 0                                   ? 0
-                  : batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? batchStride
-                  : batchStride == 0
-                      ? checkedProduct(matrixElements, batchCount, "matrix allocation size")
-                  : leadingDimension <= batchStride
-                      ? checkedProduct(batchStride, batchCount, "matrix allocation size")
-                      : matrixElements;
+            const int64_t allocationElements = [&] {
+                if(batchCount == 0)
+                    return int64_t{0};
+                if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                    return matrixElements;
+                if(batchStride == 0)
+                    return checkedProduct(matrixElements, batchCount, "matrix allocation size");
+
+                const int64_t addressedElements
+                    = checkedProduct(batchStride, batchCount - 1, "matrix batch offset");
+                if(addressedElements > std::numeric_limits<int64_t>::max() - matrixElements)
+                    throw std::overflow_error("matrix allocation size overflow.");
+                const int64_t addressedAllocation = addressedElements + matrixElements;
+                const int64_t completeBatchSlots
+                    = checkedProduct(batchStride, batchCount, "matrix allocation size");
+                return std::max(addressedAllocation, completeBatchSlots);
+            }();
             return {
                 type,
-                hipblaslt::host_numerics::scalarType(type),
                 Layout(Shape{normalizeExtent(rows, "matrix rows"),
                              normalizeExtent(columns, "matrix columns"),
                              static_cast<size_t>(batchCount)},
