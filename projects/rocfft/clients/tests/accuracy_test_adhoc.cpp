@@ -567,6 +567,34 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_token(test_prob, adhoc_nondefault_layout_real_tokens)),
     accuracy_test::TestName);
 
+// Cross the 32-bit MaxKernelIndex boundary for the realcomplex kernels.
+// Each case pads exactly one I/O side of one node; all strides and dists stay
+// below UINT32_MAX so the index computation, not the packed stride, is what
+// forces the 64-bit kernel. Sizes are large; these are skipped when VRAM
+// cannot hold them.
+const auto adhoc_realcomplex_64bit_index_tokens = {
+    // clang-format off
+    // r2c_copy_rtc      (CS_KERNEL_COPY_R_TO_CMPLX):    32 * 2^27 = 2^32, real in,      17.2 GB
+    "real_forward_len_33_single_op_batch_1_istride_134217728_R_ostride_1_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // c2r_copy_rtc      (CS_KERNEL_COPY_CMPLX_TO_R):    32 * 2^27 = 2^32, real out,     17.2 GB
+    "real_inverse_len_33_single_op_batch_1_istride_1_HI_ostride_134217728_R_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // c2herm_copy_rtc   (CS_KERNEL_COPY_CMPLX_TO_HERM): 16 * 2^28 = 2^32, complex out,  34.4 GB
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_268435456_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // herm2c_copy_rtc   (CS_KERNEL_COPY_HERM_TO_CMPLX): 16 * 2^28 = 2^32, complex in,   34.4 GB
+    "real_inverse_len_33_single_op_batch_1_istride_268435456_HI_ostride_1_R_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // r2c_even_post     (CS_KERNEL_R_TO_CMPLX): 32767 + 2*2147467265 = 2^32+1, in,      34.4 GB
+    "real_forward_len_65536_single_op_batch_3_istride_1_R_ostride_1_HI_idist_4294934530_odist_32769_ioffset_0_0_ooffset_0_0",
+    // c2r_even_pre      (CS_KERNEL_CMPLX_TO_R): 32768 + 2*2147467264 = 2^32,   in,      34.4 GB
+    "real_inverse_len_65536_single_op_batch_3_istride_1_HI_ostride_1_R_idist_2147467264_odist_65536_ioffset_0_0_ooffset_0_0",
+    // clang-format on
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    adhoc_realcomplex_64bit_index,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob, adhoc_realcomplex_64bit_index_tokens)),
+    accuracy_test::TestName);
+
 inline auto param_even_real_odd_base_index()
 {
     std::vector<fft_params> params;
