@@ -264,10 +264,15 @@ actually contains, but the step is forwarded unchanged. **OPEN:** whether the st
 [Open Question 12](#operational).
 
 Filtering and ranking **commute**: setting `split_k = 4` keeps only kernels whose `split_k` is 4 and the
-UHD ranks those. That holds only because **a UHD scores each kernel on its own metadata and the problem,
-never relative to the rest of the catalog** — a hard requirement on any UHD adapter
-([Section 5](#5-selection-flow)), not an assumption. A scorer that normalizes across the candidate set
-is out of scope.
+UHD ranks those. That holds only because **`sort_kernel_catalog` scores each kernel on its own metadata
+and the problem, never relative to the rest of the catalog** — a hard requirement on any adapter serving
+that role ([Section 5](#5-selection-flow)), not an assumption. A scorer that normalizes across the
+candidate set is out of scope for it.
+
+The constraint is scoped to that role deliberately. `predict_engine_tflops` takes no candidate at all, and
+`predict_applicable_kernels` *produces* a candidate set rather than scoring one
+([Section 4.3](#43-future-predict_applicable_kernels-when-there-is-no-catalog-to-rank)); neither is a
+per-candidate scorer, so neither is bound by the commuting requirement.
 
 **Knobs are dynamic choices, not a static parameter space.** A knob does not describe a dimension the
 user may freely set; it names a field whose *currently selectable values* are whatever the applicable
