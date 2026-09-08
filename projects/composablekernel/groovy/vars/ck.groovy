@@ -1405,135 +1405,6 @@ def runComprehensiveConvDatasetTests() {
 }
 
 @NonCPS
-String _tileEngineBasicCmd(String compiler) {
-    return """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx942" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_UNIVERSAL_CONFIG_FILE="default_ci_config.json" \
-                -D GEMM_MULTI_D_DATATYPE="fp16" \
-                -D GEMM_MULTI_D_LAYOUT="rcrr;rrrr;crrr;ccrr" \
-                -D GEMM_MULTI_D_CONFIG_FILE="default_ci_config.json" \
-                -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
-                -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
-                -D GEMM_PRESHUFFLE_CONFIG_FILE="default_ci_config.json" .. && \
-            ninja -j\$(nproc) benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json"""
-}
-
-def runTileEngineBasicTests(String compiler) {
-    buildAndTest(
-        setup_args: "NO_CK_BUILD",
-        build_type: 'Release',
-        execute_cmd: _tileEngineBasicCmd(compiler)
-    )
-}
-
-@NonCPS
-String _tileEngineGemmCmd_gfx942(String compiler) {
-    return """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx942" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16;bf8;bf16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_STREAMK_DATATYPE="fp8;fp16" \
-                -D GEMM_STREAMK_LAYOUT="rcr" \
-                -D GEMM_MULTI_D_DATATYPE="fp16" \
-                -D GEMM_MULTI_D_LAYOUT="rcrr;rrrr;crrr;ccrr" \
-                -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
-                -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
-                -D GROUPED_GEMM_DATATYPE="fp8;fp16" \
-                -D GROUPED_GEMM_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_MULTI_ABD_DATATYPE="fp16" \
-                -D GEMM_MULTI_ABD_LAYOUT="rcrr" \
-                -D BATCHED_CONTRACTION_DATATYPE="fp16" \
-                -D BATCHED_CONTRACTION_LAYOUT="rcr" \
-                -D GEMM_ROWCOLQUANT_DATATYPE="fp8;bf8" \
-                -D GEMM_ROWCOLQUANT_LAYOUT="rcr" \
-                -D GEMM_TENSOR_QUANT_DATATYPE="fp8;bf8" \
-                -D GEMM_TENSOR_QUANT_LAYOUT="rcr" \
-                -D GROUPED_GEMM_ROWCOLQUANT_DATATYPE="fp8;bf8" \
-                -D GROUPED_GEMM_ROWCOLQUANT_LAYOUT="rcr" \
-                -D GROUPED_GEMM_TENSORQUANT_DATATYPE="fp8;bf8" \
-                -D GROUPED_GEMM_TENSORQUANT_LAYOUT="rcr" \
-                -D BATCHED_GEMM_DATATYPE="fp16" \
-                -D BATCHED_GEMM_LAYOUT="rcr" \
-                -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j\$(nproc) benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all  benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_gemm_rowcolquant_all benchmark_gemm_tensor_quant_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all benchmark_batched_gemm_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm/grouped_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --group-counts 8 --warmup 5 --repeat 5 --verbose --json grouped_gemm_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_abd/gemm_multi_abd_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_abd_results.json && \
-            python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs "g=2;m=1024;n=1024;k=1024" --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_rowcolquant/gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_rowcolquant_results.json && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_tensor_quant/gemm_tensor_quant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_tensor_quant_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json  && \
-            python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json batched_gemm_results.json """
-}
-
-@NonCPS
-String _tileEngineGemmCmd_gfx950(String compiler) {
-    return """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx950" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_MULTI_D_DATATYPE="fp16" \
-                -D GEMM_MULTI_D_LAYOUT="rcrr;rrrr;crrr;ccrr" \
-                -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
-                -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
-                -D MX_GEMM_DATATYPE="fp4;fp8" \
-                -D MX_GEMM_LAYOUT="rcr" \
-                -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j\$(nproc) benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
-            python3 ../tile_engine/ops/gemm/mx_gemm/mx_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json mx_gemm_results.json """
-}
-
-@NonCPS
-String _tileEngineGemmCmd_gfx1201(String compiler) {
-    return """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx1201" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j\$(nproc) benchmark_gemm_universal_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json"""
-}
-
-def runTileEngineGemmTests(String arch, String compiler) {
-    def execute_cmd
-    if (arch == "gfx942") {
-        execute_cmd = _tileEngineGemmCmd_gfx942(compiler)
-    } else if (arch == "gfx950") {
-        execute_cmd = _tileEngineGemmCmd_gfx950(compiler)
-    } else if (arch == "gfx1201") {
-        execute_cmd = _tileEngineGemmCmd_gfx1201(compiler)
-    }
-    buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
-}
-
-@NonCPS
 String _dispatcherPerfCmd(String compiler, String gpuTarget, String samplingTier,
                           String gemmDatatype, String gemmLayout, String multiLayout,
                           String quantDatatype, String quantLayout,
@@ -1690,9 +1561,21 @@ def runDispatcherPerfTests(String compiler, String gpuTarget = "gfx942") {
         // reasoning as runDispatcherCorrectnessTests: execute_cmd runs from
         // projects/composablekernel/build while archiveArtifacts resolves against
         // the workspace root, so the build-relative path is spelled out in full.
-        // dispatcher_* prefix matches the correctness lane and avoids accidentally
-        // capturing tile_engine benchmark JSONs that share the same build dir.
-        archiveArtifacts artifacts: "projects/composablekernel/build/dispatcher_*_results.json",
+        //
+        // *_results.json, NOT dispatcher_*: this lane drives tile_engine's own
+        // benchmark drivers, and every file it produces is a tile_engine JSON
+        // (gemm_universal_results.json, gemm_aquant_results.json, ...). Nothing
+        // here is written with a dispatcher_ prefix -- only the correctness lane
+        // writes those -- so the narrower glob matched zero files and
+        // allowEmptyArchive turned that into a silent success.
+        //
+        // allowEmptyArchive stays true only because this is a finally block: on a
+        // cmake/ninja failure no JSON exists yet, and a throwing archive step
+        // would mask the real exception. The signal that the run actually
+        // produced results comes from the drivers, which now exit non-zero when
+        // no kernels were discovered or the result set is empty, and record
+        // launches_attempted/succeeded/failed in each JSON.
+        archiveArtifacts artifacts: "projects/composablekernel/build/*_results.json",
                          allowEmptyArchive: true
     }
 }
@@ -1969,7 +1852,14 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
 // Orchestrate correctness and perf dispatcher lanes in parallel.
 // Called from the Jenkinsfile as a scripted step to keep the declarative
 // pipeline method small enough to avoid the JVM 64KB method-size limit.
-def runDispatcherTests(boolean runCorrectness, boolean runPerf, String compiler) {
+//
+// rocmnode is passed in rather than called directly: it is defined in the
+// Jenkinsfile (`def rocmnode(name)`), and a vars/ script does not inherit
+// Jenkinsfile-local methods, so calling it here throws MissingMethodException
+// before runOnHealthyNode is ever reached. Same convention as
+// runDownstreamTestsStages / runFMHATestsStages / runBuildCKStages; the caller
+// passes `this.&rocmnode`.
+def runDispatcherTests(def rocmnode, boolean runCorrectness, boolean runPerf, String compiler) {
     def branches = [:]
     if (runCorrectness) {
         branches["DISPATCHER_CORRECTNESS gfx942"] = {

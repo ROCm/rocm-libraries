@@ -500,6 +500,7 @@ pipeline {
                 script {
                     loadCk()
                     ck.runDispatcherTests(
+                        this.&rocmnode,
                         params.RUN_DISPATCHER_CORRECTNESS_TESTS.toBoolean(),
                         params.RUN_DISPATCHER_PERF_TESTS.toBoolean(),
                         params.BUILD_COMPILER)
