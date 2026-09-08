@@ -2834,16 +2834,23 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         if(!(std::abs(a) <= std::abs(worst_alpha)))
                             worst_alpha = a;
                     }
-                    // The largest per-head |alpha| a correct kernel produced over the
-                    // forward matrix, measured on this base, was 2.3e-3.
-                    constexpr double alpha_max = 1e-2;
-                    cur_pass = (over == 0) && (std::abs(worst_alpha) <= alpha_max);
+                    // P's rounding spans a whole row, so alpha averages unmasked rows, not points.
+                    const double alpha_rows = static_cast<double>(
+                        mask.type == mask_enum::no_mask ? real_seqlen_q
+                                                        : std::min(real_seqlen_q, real_seqlen_k));
+                    // The one policy constant: the worst correct head measured needed 1.07.
+                    constexpr double alpha_k = 2;
+                    // 1/12 is the variance of a half-ULP round-to-nearest.
+                    const double alpha_tol =
+                        alpha_k * std::sqrt(u_p * u_p / (12 * alpha_rows) +
+                                            u_o * u_o / (12 * alpha_rows * hdim_v));
+                    cur_pass = (over == 0) && (std::abs(worst_alpha) <= alpha_tol);
                     if(over != 0)
                         std::cerr << "OUT accuracy bound: " << over << " elements over, worst "
                                   << worst << "x" << std::endl;
-                    if(!(std::abs(worst_alpha) <= alpha_max))
+                    if(!(std::abs(worst_alpha) <= alpha_tol))
                         std::cerr << "OUT systematic gain: per-head alpha " << worst_alpha
-                                  << " exceeds " << alpha_max << std::endl;
+                                  << " exceeds " << alpha_tol << std::endl;
                 }
             }
             else
