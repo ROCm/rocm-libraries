@@ -56,6 +56,13 @@ ordinary TensileLite builds and tests do not depend on them.
    timeout, transport, interruption, and restoration failures are inconclusive;
    they never prove a kill.
 8. Run `scripts/tests/run-selftests.sh` after changing any bundled helper.
+9. Compare a report against an earlier one only when their inputs are
+   compatible, following
+   [references/regression-comparison.md](references/regression-comparison.md).
+   Require nonempty, unique mutant identities and an explicit decision for
+   every missing or new mutant. Comparison does not block any automated GitHub
+   check today; the repository has neither a standard report generator nor a
+   workflow that consumes one.
 
 ## Report the outcome
 
