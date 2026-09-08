@@ -165,10 +165,6 @@ def main():
                 log.warning(f"Skipping due to JSONDecodeError: {file_path}")
                 continue
 
-            for key in data:
-                print(key)
-                if key == 'key_type':
-                    print(data[key])
             # Record the target: gen, arch, gpu, rep
             target_info = derive_target(data, gfx_mapping)
             # Create hashable key
