@@ -123,6 +123,14 @@ using TestFmhaShape =
                            ck_tile::sequence<16, 16, TestTypeConfig<DataType>::kK>,
                            true>;
 
+// fp8 d=128 qr_tdm tile: each gemm consumes a whole 128-key block in one K step.
+using TestFmhaShapeFp8 = ck_tile::TileFmhaShape<ck_tile::sequence<64, 128, 128, 128, 128, 128>,
+                                                ck_tile::sequence<4, 1, 1>,
+                                                ck_tile::sequence<16, 16, 128>,
+                                                ck_tile::sequence<4, 1, 1>,
+                                                ck_tile::sequence<16, 16, 128>,
+                                                true>;
+
 using TestFmhaTraits = ck_tile::TileFmhaTraits<false,
                                                false,
                                                false,
@@ -153,6 +161,91 @@ using TestFmhaProblem =
                                       ck_tile::SimplifiedGenericAttentionMask<false>,
                                       false,
                                       TestFmhaTraits>;
+
+// fp8 in, bf16 out, matching the generated fp8bf16 qr_tdm instances.
+using TestFmhaProblemFp8 =
+    ck_tile::BlockFmhaPipelineProblem<ck_tile::fp8_t,
+                                      ck_tile::fp8_t,
+                                      ck_tile::fp8_t,
+                                      float,
+                                      float,
+                                      ck_tile::bf16_t,
+                                      uint8_t,
+                                      float,
+                                      ck_tile::fp8_t,
+                                      float,
+                                      ck_tile::bf16_t,
+                                      TestFmhaShapeFp8,
+                                      false,
+                                      ck_tile::ComposedAttention<0>,
+                                      ck_tile::SimplifiedGenericAttentionMask<false>,
+                                      false,
+                                      TestFmhaTraits>;
+
+struct DenseFp8Problem : TestFmhaProblemFp8
+{
+    static constexpr auto QScaleEnum = ck_tile::BlockAttentionQuantScaleEnum::PERTENSOR;
+};
+
+template <int ExcludedFeature>
+struct DenseFp8FallbackProblem : DenseFp8Problem
+{
+    static constexpr bool kIsGroupMode      = ExcludedFeature == 0;
+    static constexpr bool kPadSeqLenQ       = ExcludedFeature == 1;
+    static constexpr bool kPadSeqLenK       = ExcludedFeature == 2;
+    static constexpr bool kPadHeadDimQ      = ExcludedFeature == 3;
+    static constexpr bool kPadHeadDimV      = ExcludedFeature == 4;
+    static constexpr bool kStoreLSE         = ExcludedFeature == 5;
+    static constexpr bool kHasSink          = ExcludedFeature == 6;
+    static constexpr bool kHasDropout       = ExcludedFeature == 7;
+    static constexpr bool kHasLogitsSoftCap = ExcludedFeature == 8;
+    static constexpr bool kUseTrLoad        = ExcludedFeature == 9;
+    static constexpr bool kSkipMinSeqlenQ   = ExcludedFeature == 10;
+    using FmhaMask  = ck_tile::SimplifiedGenericAttentionMask<ExcludedFeature == 11>;
+    using ODataType = std::conditional_t<ExcludedFeature == 12, float, ck_tile::bf16_t>;
+    static constexpr auto BiasEnum = ExcludedFeature == 13
+                                         ? ck_tile::BlockAttentionBiasEnum::ELEMENTWISE_BIAS
+                                         : ck_tile::BlockAttentionBiasEnum::NO_BIAS;
+    static constexpr auto QScaleEnum =
+        ExcludedFeature == 14   ? ck_tile::BlockAttentionQuantScaleEnum::PERHEAD
+        : ExcludedFeature == 15 ? ck_tile::BlockAttentionQuantScaleEnum::BLOCKSCALE
+        : ExcludedFeature == 16 ? ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE
+                                : ck_tile::BlockAttentionQuantScaleEnum::PERTENSOR;
+};
+
+template <std::size_t... I>
+constexpr bool dense_fp8_fallbacks(std::index_sequence<I...>)
+{
+    return (!ck_tile::detail::is_qr_tdm_dense_fp8_v<DenseFp8FallbackProblem<I>> && ...);
+}
+static_assert(dense_fp8_fallbacks(std::make_index_sequence<17>{}));
+static_assert(ck_tile::detail::is_qr_tdm_dense_fp8_v<DenseFp8Problem> ==
+              ck_tile::detail::is_qr_tdm_padding_supported_arch_v);
+
+#if(defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)) || \
+    (!defined(__HIP_DEVICE_COMPILE__) && defined(CK_USE_GFX1250))
+constexpr bool dense_fp8_descriptor_offsets()
+{
+    using Policy     = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+    constexpr auto k = Policy::MakeKLdsBlockDescriptor<DenseFp8Problem>();
+    constexpr auto v = Policy::MakeVLdsBlockDescriptor<DenseFp8Problem>();
+    // Exhaust every row's endpoints and the padding boundary, independently of
+    // either descriptor implementation.
+    for(int row = 0; row < 128; ++row)
+    {
+        for(int col : {0, 127})
+        {
+            const int logical  = row * 128 + col;
+            const int expected = logical + (logical / 256) * 16;
+            if(k.calculate_offset(ck_tile::make_tuple(row, col)) != expected ||
+               v.calculate_offset(ck_tile::make_tuple(row, col)) != expected)
+                return false;
+        }
+    }
+    return k.get_element_space_size() == 17392 && v.get_element_space_size() == 17392;
+}
+static_assert(dense_fp8_descriptor_offsets());
+#endif
 
 template <typename BaseProblem, typename QDataType_, typename KDataType_, typename VDataType_>
 struct TestProblemWithDataTypes : BaseProblem
@@ -246,6 +339,15 @@ using VColumnMajorProblem =
     TestProblemWithShape<SelectionBaseProblem,
                          TestShapeWithVLayout<TestFmhaShape<ck_tile::half_t, 128>, false>>;
 
+// Each fp8 near miss keeps every other condition of the enabled fp8 tile.
+using Fp8On16BitShapeProblem =
+    TestProblemWithDataTypes<SelectionBaseProblem, ck_tile::fp8_t, ck_tile::fp8_t, ck_tile::fp8_t>;
+using HalfOnFp8ShapeProblem = TestProblemWithShape<SelectionBaseProblem, TestFmhaShapeFp8>;
+using Fp8QK64Problem =
+    TestProblemWithShape<TestFmhaProblemFp8, TestShapeWithHeadDims<TestFmhaShapeFp8, 64, 128>>;
+using Fp8VColumnMajorProblem =
+    TestProblemWithShape<TestFmhaProblemFp8, TestShapeWithVLayout<TestFmhaShapeFp8, false>>;
+
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<MixedTypeProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<FloatProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<PackedProblem>>());
@@ -260,6 +362,13 @@ static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<SubQK
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<VColumnMajorProblem>>());
 static_assert(
     is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<SelectionBaseProblem, false>>());
+static_assert(
+    is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<Fp8On16BitShapeProblem>>());
+static_assert(
+    is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<HalfOnFp8ShapeProblem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<Fp8QK64Problem>>());
+static_assert(
+    is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<Fp8VColumnMajorProblem>>());
 
 static_assert(ck_tile::detail::is_valid_lds_padding_config_v<true, 256, 16>);
 static_assert(ck_tile::detail::is_valid_lds_padding_config_v<true, 256, 32>);
@@ -341,6 +450,23 @@ static_assert(v_fp8_wide_desc.get_element_space_size() * sizeof(ck_tile::fp8_t) 
 
 static_assert(!ck_tile::is_detected<PaddedQDescriptor, ck_tile::pk_fp4_t>::value);
 
+// An fp8 K/V row is 128 B, so one 256 B interval spans two rows: the odd row
+// starts inside an interval and only every second row boundary is shifted.
+constexpr auto kv_fp8_desc =
+    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::fp8_t, 128, 128, QKPad, 16>();
+static_assert(byte_offset<ck_tile::fp8_t>(kv_fp8_desc, 0, 0) == 0);
+static_assert(byte_offset<ck_tile::fp8_t>(kv_fp8_desc, 0, 127) == 127);
+static_assert(byte_offset<ck_tile::fp8_t>(kv_fp8_desc, 1, 0) == 128);
+static_assert(byte_offset<ck_tile::fp8_t>(kv_fp8_desc, 2, 0) == 272);
+static_assert(byte_offset<ck_tile::fp8_t>(kv_fp8_desc, 3, 0) == 400);
+static_assert(byte_offset<ck_tile::fp8_t>(kv_fp8_desc, 127, 127) == 17391);
+static_assert(kv_fp8_desc.get_element_space_size() * sizeof(ck_tile::fp8_t) == 17392);
+
+constexpr auto q_fp8_desc =
+    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::fp8_t, 64, 128, NoPad, 16>();
+static_assert(byte_offset<ck_tile::fp8_t>(q_fp8_desc, 1, 0) == 128);
+static_assert(q_fp8_desc.get_element_space_size() * sizeof(ck_tile::fp8_t) == 8192);
+
 template <typename DataType>
 constexpr bool validate_production_geometries()
 {
@@ -360,6 +486,7 @@ constexpr bool validate_production_geometries()
            ck_tile::detail::validate_qr_tdm_reader_segments<KTag, DecodeProblem>() &&
            ck_tile::detail::validate_qr_tdm_reader_segments<VTag<DataType>, DecodeProblem>();
 }
+
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
 static_assert(validate_production_geometries<ck_tile::bf16_t>());
@@ -538,35 +665,6 @@ constexpr bool validate_policy_coupling()
     return true;
 }
 
-#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
-static_assert(validate_policy_coupling<ck_tile::bf16_t, 128>());
-static_assert(validate_policy_coupling<ck_tile::bf16_t, 64>());
-static_assert(validate_policy_coupling<ck_tile::half_t, 128>());
-static_assert(validate_policy_coupling<ck_tile::half_t, 64>());
-static_assert(validate_policy_coupling<ck_tile::fp8_t, 128>());
-static_assert(validate_policy_coupling<ck_tile::fp8_t, 64>());
-#else
-static_assert(is_disabled_selection<
-              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 128>>>());
-static_assert(is_disabled_selection<
-              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 64>>>());
-static_assert(is_disabled_selection<
-              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 128>>>());
-static_assert(is_disabled_selection<
-              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 64>>>());
-static_assert(is_disabled_selection<
-              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::fp8_t, 64>>>());
-#endif
-
-using DispatchProblem = TestFmhaProblem<ck_tile::half_t, 128>;
-static_assert(
-    ck_tile::detail::uses_qr_tdm_lds_arena_v<ck_tile::BlockFmhaPipelineQRKSVSTdm<DispatchProblem>>);
-static_assert(
-    !ck_tile::detail::uses_qr_tdm_lds_arena_v<ck_tile::BlockFmhaPipelineQRKSVS<DispatchProblem>>);
-static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
-              ck_tile::BlockFmhaPipelineQRKSVSAsync<DispatchProblem>>);
-static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
-              ck_tile::BlockFmhaPipelineQRKSVSAsyncTrload<DispatchProblem>>);
 
 struct RoundTripArgs
 {
@@ -652,7 +750,17 @@ struct QrTdmRoundTripKernel
         config.pad_enable              = Raw::kEnabled;
         config.pad_config.pad_interval = Raw::kPadInterval;
         config.pad_config.pad_amount   = Raw::kPadAmount;
-        load_tile_tdm(config, lds_write_window, input_window);
+        if constexpr(ck_tile::detail::is_qr_tdm_dense_fp8_v<Problem> && TensorTag::Id != 0)
+        {
+            // Match the fast pipeline's disjoint two-wave producer cohorts.
+            if((TensorTag::Id == 1 && get_warp_id() < 2) ||
+               (TensorTag::Id == 2 && get_warp_id() >= 2))
+                load_tile_tdm(config, lds_write_window, input_window);
+        }
+        else
+        {
+            load_tile_tdm(config, lds_write_window, input_window);
+        }
         s_wait_tensorcnt_barrier<0>();
 
         if constexpr(TensorTag::Id == 0)
@@ -758,7 +866,18 @@ bool run_qr_tdm_round_trip()
     std::vector<DataType> output(Rows * Cols);
     for(ck_tile::index_t row = 0; row < Rows; ++row)
         for(ck_tile::index_t col = 0; col < Cols; ++col)
-            input[row * Cols + col] = static_cast<DataType>((row * 17 + col * 3) % 127);
+        {
+            if constexpr(sizeof(DataType) == 1)
+            {
+                // Raw encodings exercise a byte permutation, not FP8 arithmetic.
+                const auto pattern = static_cast<uint8_t>((row * 37 + col * 5) & 0xff);
+                std::memcpy(&input[row * Cols + col], &pattern, sizeof(DataType));
+            }
+            else
+            {
+                input[row * Cols + col] = static_cast<DataType>((row * 17 + col * 3) % 127);
+            }
+        }
 
     ck_tile::DeviceMem input_device(input.size() * sizeof(DataType));
     ck_tile::DeviceMem output_device(output.size() * sizeof(DataType));
@@ -849,6 +968,68 @@ bool run_round_trip_matrix()
            run_qr_tdm_round_trip<VTag<DataType>, Problem, NoPad, NoPad, ProductionVPad>();
 }
 
+
+struct DenseFp8MassKernel
+{
+    static constexpr ck_tile::index_t kBlockSize = DenseFp8Problem::kBlockSize;
+
+    CK_TILE_DEVICE void operator()(float* output) const
+    {
+        using namespace ck_tile;
+        using PV =
+            decltype(BlockFmhaPipelineQRKSVSTdmDefaultPolicy::GetPVBlockGemm<DenseFp8Problem>());
+        using WG = typename PV::WarpGemm;
+        typename WG::AWarpTensor p;
+        typename WG::BWarpTensor ones;
+        typename WG::CWarpTensor mass;
+        const auto distribution = p.get_tile_distribution();
+        using Y = decltype(to_sequence(distribution.get_ys_to_d_descriptor().get_lengths()));
+        static_ford<Y>{}([&](auto y) {
+            constexpr auto yi     = to_array<index_t, Y::size()>(y);
+            constexpr auto offset = distribution.get_ys_to_d_descriptor().calculate_offset(yi);
+            const auto coord      = make_tensor_adaptor_coordinate(
+                distribution.get_ps_ys_to_xs_adaptor(),
+                container_concat(get_partition_index(distribution), yi));
+            const auto x = coord.get_bottom_index();
+            // Exactly representable values, different in every row/wave and scale block.
+            const float value = static_cast<float>((x[0] + 1) * (1 << get_warp_id()));
+            p.get_thread_buffer()(number<offset>{}) =
+                type_convert<fp8_t>(x[1] / 32 == 0 ? 0.0f : value);
+        });
+        set_tile(ones, type_convert<fp8_t>(1.0f));
+        clear_tile(mass);
+        WG{}(mass, p, ones, static_cast<int32_t>(0x807f7e7du), int32_t{0x7f7f7f7f});
+        auto block_c = PV::MakeCBlockTile();
+        clear_tile(block_c);
+        auto ml = block_tile_reduce<float>(
+            block_c, sequence<1>{}, [](float a, float b) { return a + b; }, 0.0f);
+        const auto row      = ml.get_tile_distribution().calculate_index()[0];
+        const auto expected = static_cast<float>((row % 16 + 1) * (1 << (row / 16)) * 112);
+        const auto tid      = get_thread_local_1d_id();
+        output[2 * tid]     = mass.get_thread_buffer()[number<0>{}];
+        output[2 * tid + 1] = expected;
+    }
+};
+
+TEST(QrTdmLdsPadding, DenseFp8MassRowMapping)
+{
+    ck_tile::DeviceMem device(128 * 2 * sizeof(float));
+    device.SetZero();
+    const ck_tile::stream_config stream{nullptr, false, 0, 0, 1};
+    const auto block_size =
+        ck_tile::is_wave32() ? DenseFp8Problem::kBlockSize / 2 : DenseFp8Problem::kBlockSize;
+    ck_tile::launch_kernel(stream,
+                           ck_tile::make_kernel(DenseFp8MassKernel{},
+                                                dim3(1),
+                                                dim3(block_size),
+                                                0,
+                                                static_cast<float*>(device.GetDeviceBuffer())));
+    std::vector<float> output(128 * 2);
+    device.FromDevice(output.data());
+    for(int tid = 0; tid < 128; ++tid)
+        EXPECT_EQ(output[2 * tid], output[2 * tid + 1]) << "thread " << tid;
+}
+
 TEST(QrTdmLdsPadding, CompileTimeConfiguration) { SUCCEED(); }
 
 TEST(QrTdmLdsPadding, DeviceRoundTrip)
@@ -859,6 +1040,13 @@ TEST(QrTdmLdsPadding, DeviceRoundTrip)
     EXPECT_TRUE((run_round_trip_matrix<ck_tile::half_t, 64>()));
     EXPECT_TRUE((run_round_trip_matrix<ck_tile::fp8_t, 128>()));
     EXPECT_TRUE((run_round_trip_matrix<ck_tile::fp8_t, 64>()));
+}
+
+TEST(QrTdmLdsPadding, DenseFp8ProducerCohorts)
+{
+    EXPECT_TRUE((run_qr_tdm_round_trip<QTag, DenseFp8Problem, NoPad, QKPad, QKPad>()));
+    EXPECT_TRUE((run_qr_tdm_round_trip<KTag, DenseFp8Problem, NoPad, QKPad, QKPad>()));
+    EXPECT_TRUE((run_qr_tdm_round_trip<VTag<ck_tile::fp8_t>, DenseFp8Problem, NoPad, QKPad, QKPad>()));
 }
 
 } // namespace

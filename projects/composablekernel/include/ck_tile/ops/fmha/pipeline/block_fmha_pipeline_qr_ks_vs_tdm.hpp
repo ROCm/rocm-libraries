@@ -23,6 +23,7 @@ struct BlockFmhaPipelineQRKSVSTdm
 
     using Problem               = remove_cvref_t<Problem_>;
     using Policy                = remove_cvref_t<Policy_>;
+    static constexpr bool kDenseFp8 = detail::is_qr_tdm_dense_fp8_v<Problem>;
     using QDataType             = remove_cvref_t<typename Problem::QDataType>;
     using KDataType             = remove_cvref_t<typename Problem::KDataType>;
     using VDataType             = remove_cvref_t<typename Problem::VDataType>;
@@ -585,7 +586,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k1_loops);
 
         block_sync_lds();
-        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+        if(!kDenseFp8 || get_warp_id() < 2)
+            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
         do
         {
@@ -593,13 +595,12 @@ struct BlockFmhaPipelineQRKSVSTdm
             // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
             [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
 
-            block_sync_lds();
-            // V uses load_tile_tdm (single-box plain LDS write). Both K and V
-            // are on the tensorcnt counter (s_wait_tensorcnt_barrier for sync).
-            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window); // prefetch load v tile
-
-            // move V tile windows
-            move_tile_window(v_dram_window, {kN0, 0});
+            if constexpr(!kDenseFp8)
+            {
+                block_sync_lds();
+                load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+                move_tile_window(v_dram_window, {kN0, 0});
+            }
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
@@ -607,8 +608,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             if constexpr(1 < k0_loops)
             {
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
-                    // TDM retires in order: only the first K tile has the V prefetch behind it
-                    s_wait_tensorcnt_barrier<(decltype(i_k0)::value == 0) ? 1 : 0>();
+                    // TDM retires in order: only the first K tile has the V prefetch
+                    // behind it. The dense fp8 path issues V after this sub-loop, so K is
+                    // the only transfer outstanding and nothing may be left in flight.
+                    s_wait_tensorcnt_barrier<(!kDenseFp8 && decltype(i_k0)::value == 0) ? 1 : 0>();
 
                     auto k_tile = load_tile(k_lds_read_window);
 
@@ -621,14 +624,28 @@ struct BlockFmhaPipelineQRKSVSTdm
                     // loop over along the [K]ey head dimension
                     move_tile_window(k_dram_window, {0, kK0});
                     block_sync_lds();
-                    load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+                    if(!kDenseFp8 || get_warp_id() < 2)
+                        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
                 });
                 // move back to the origin
                 move_tile_window(k_dram_window, {0, -kK0 * (k0_loops - 1)});
             }
 
-            // the V prefetch trails this K tile only when the k0 sub-loop issued nothing after it
-            s_wait_tensorcnt_barrier<(k0_loops == 1) ? 1 : 0>();
+            if constexpr(kDenseFp8)
+            {
+                // Join K arrival and completion of the previous V reads once. This path
+                // issues V below rather than ahead of the k0 sub-loop, so nothing else is
+                // outstanding here.
+                s_wait_tensorcnt_barrier<0, 0>();
+                if(get_warp_id() >= 2)
+                    load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+                move_tile_window(v_dram_window, {kN0, 0});
+            }
+            else
+            {
+                // the V prefetch trails this K tile only when the k0 sub-loop issued nothing after it
+                s_wait_tensorcnt_barrier<(k0_loops == 1) ? 1 : 0>();
+            }
 
             auto k_tile = load_tile(k_lds_read_window);
 
@@ -764,7 +781,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             move_tile_window(bias_dram_window, {0, kN0});
 
             block_sync_lds();
-            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+            if(!kDenseFp8 || get_warp_id() < 2)
+                load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
             // Gemm1
             auto s_new = [&]() {
@@ -782,12 +800,29 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }();
 
-            auto m_local = block_tile_reduce<SMPLComputeDataType>(
-                s_new,
-                sequence<1>{},
-                f_max,
-                -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
-            block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
+            auto m_local = [&]() {
+                if constexpr(kDenseFp8)
+                {
+                    BlockReduce2D<decltype(s_new)> reduce_max{
+                        s_new, -numeric<SMPLComputeDataType>::infinity()};
+                    return reduce_max(
+                        [](auto acc, auto a, auto b, auto c, auto d) {
+                            return max(acc, max(max(a, b), max(c, d)));
+                        },
+                        f_max,
+                        sequence<1, 4>{});
+                }
+                else
+                {
+                    auto reduced_max = block_tile_reduce<SMPLComputeDataType>(
+                        s_new,
+                        sequence<1>{},
+                        f_max,
+                        -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
+                    block_tile_reduce_sync(reduced_max, f_max, bool_constant<false>{});
+                    return reduced_max;
+                }
+            }();
 
             const auto m_old = m; // m{j-1}
             tile_elementwise_inout(
@@ -837,13 +872,37 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
 
-            auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
-                p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0}); // rowsum(Pcompute{j})
-
-            block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
-
+            auto rowsum_p = MLBlockTileType{};
+            if constexpr(!kDenseFp8)
+            {
+                rowsum_p = block_tile_reduce<SMPLComputeDataType>(
+                    p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
+                block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
+            }
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
+            if constexpr(kDenseFp8)
+            {
+                // Normalize by the represented probability mass used by PV.
+                using MassWG = typename decltype(gemm_1)::WarpGemm;
+                typename MassWG::AWarpTensor mass_p;
+                typename MassWG::BWarpTensor mass_ones;
+                typename MassWG::CWarpTensor mass_tile;
+                static_assert(decltype(p_tile)::get_thread_buffer_size() ==
+                              MassWG::AWarpTensor::get_thread_buffer_size());
+                static_assert(MLBlockTileType::get_thread_buffer_size() == 1);
+                mass_p.get_thread_buffer() = p_tile.get_thread_buffer();
+                // Materialize at use to avoid holding sixteen constants across QK.
+                static_for<0, 16, 1>{}([&](auto j) {
+                    int32_t word;
+                    asm volatile("v_mov_b32 %0, 0x38383838" : "=v"(word));
+                    mass_ones.get_thread_buffer().template set_as<int32_t>(j, word);
+                });
+                clear_tile(mass_tile);
+                MassWG{}(mass_tile, mass_p, mass_ones, p_scale, int32_t{0x7f7f7f7f});
+                rowsum_p.get_thread_buffer()(number<0>{}) =
+                    mass_tile.get_thread_buffer()[number<0>{}];
+            }
 
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
@@ -869,17 +928,28 @@ struct BlockFmhaPipelineQRKSVSTdm
                     }
                 }();
                 l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
-                sweep_tile_span(o_spans[I1], [&](auto idx1) {
-                    constexpr auto i_j_idx = make_tuple(idx0, idx1);
-
-                    o_acc(i_j_idx) *= tmp;
-                });
+                if(!kDenseFp8 || tmp != SMPLComputeDataType{1})
+                {
+                    sweep_tile_span(o_spans[I1], [&](auto idx1) {
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                        o_acc(i_j_idx) *= tmp;
+                    });
+                }
             });
 
-            // TDM retires in order, so V has committed once only the next-tile K prefetch is left
-            s_wait_tensorcnt_barrier<1>();
+            if constexpr(kDenseFp8)
+            {
+                // Only half the waves issued the next K tile here, so the outstanding count
+                // is not uniform across the workgroup and V must be drained outright.
+                s_wait_tensorcnt_barrier<0>();
+            }
+            else
+            {
+                // TDM retires in order, so V has committed once only the next-tile K prefetch
+                // is left
+                s_wait_tensorcnt_barrier<1>();
+            }
 
-            auto v_tile = load_tile_transpose(v_lds_read_window);
 
             const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
 
@@ -896,32 +966,43 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             };
 
-            if constexpr(1 < k1_loops)
+            if constexpr(kDenseFp8)
             {
-                static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
-                    gemm_1(o_acc,
-                           get_slice_tile(p_tile,
-                                          sequence<0, i_k1 * kK1>{},
-                                          sequence<kM0, (i_k1 + 1) * kK1>{}),
-                           v_tile,
-                           p_scale_arg,
-                           v_scale(i_k1));
-
-                    // loop over along the [V]alue Sequence length
-                    move_tile_window(v_lds_read_window, {kK1, 0});
-                    v_tile = load_tile_transpose(v_lds_read_window);
-                });
-                // move back to the origin
-                move_tile_window(v_lds_read_window, {-kK1 * (k1_loops - 1), 0});
+                auto v_scale_stream = [&](auto n_iter, auto i_k1) {
+                    return v_scale(i_k1)(n_iter, i_k1);
+                };
+                gemm_1(o_acc, p_tile, v_lds_read_window, p_scale_arg, v_scale_stream);
             }
+            else
+            {
+                auto v_tile = load_tile_transpose(v_lds_read_window);
+                if constexpr(1 < k1_loops)
+                {
+                    static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
+                        gemm_1(o_acc,
+                               get_slice_tile(p_tile,
+                                              sequence<0, i_k1 * kK1>{},
+                                              sequence<kM0, (i_k1 + 1) * kK1>{}),
+                               v_tile,
+                               p_scale_arg,
+                               v_scale(i_k1));
 
-            gemm_1(o_acc,
-                   get_slice_tile(p_tile,
-                                  sequence<0, (k1_loops - 1) * kK1>{},
-                                  sequence<kM0, k1_loops * kK1>{}),
-                   v_tile,
-                   p_scale_arg,
-                   v_scale(number<k1_loops - 1>{}));
+                        // loop over along the [V]alue Sequence length
+                        move_tile_window(v_lds_read_window, {kK1, 0});
+                        v_tile = load_tile_transpose(v_lds_read_window);
+                    });
+                    // move back to the origin
+                    move_tile_window(v_lds_read_window, {-kK1 * (k1_loops - 1), 0});
+                }
+
+                gemm_1(o_acc,
+                       get_slice_tile(p_tile,
+                                      sequence<0, (k1_loops - 1) * kK1>{},
+                                      sequence<kM0, k1_loops * kK1>{}),
+                       v_tile,
+                       p_scale_arg,
+                       v_scale(number<k1_loops - 1>{}));
+            }
 
         } while(++i_total_loops < num_total_loop);
 

@@ -214,6 +214,20 @@ if(FMHA_HAS_RDNA_TARGET)
   endif()
 endif()
 
+# The dense fp8 d128 instance streams V through the block gemm, and its schedule only
+# holds with these two options: the store/load optimizer merges the streamed LDS reads
+# into forms that cost registers, and the post-RA scheduler is needed to hide them.
+# Without both, this instance builds at 199 VGPRs instead of 192, loses a wave of
+# occupancy and runs ~44% slower. Scoped to the one instance so nothing else moves.
+# If codegen ever renames it this stops matching and the loss is silent.
+foreach(fwd_blob ${FMHA_FWD_GEN_BLOBS})
+  if(fwd_blob MATCHES "fmha_fwd_d128_fp8bf16_batch_b64x128x128x128x128x128_r4x1x1_r4x1x1_w16x16x128_w16x16x128_qr_tdm_vr_npad_nlogits_nbias_nmask_nlse_ndropout_nskip_pertensor_ntrload_nsink_gfx125\\.cpp$")
+    set_property(SOURCE ${fwd_blob} APPEND PROPERTY COMPILE_OPTIONS
+      "-mllvm=-enable-post-misched=1"
+      "-mllvm=-opt-disable=si-load-store-opt")
+  endif()
+endforeach()
+
 # use RTN_ASM on float to bfloat16 conversion by default, align with FA upstream
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3)
 list(APPEND FMHA_BWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3)
