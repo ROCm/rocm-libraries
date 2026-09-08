@@ -86,8 +86,14 @@ def _import_rocisa():
 # ``rocisa_stinkytofu_adaptor`` shim (a rocisa-shaped facade backed by the
 # stinkytofu Python binding ``_stinkytofu.so``). Anything else (or unset)
 # keeps the original nanobind bindings in ``_rocisa``.
+#
+# The default is ALWAYS the native rocisa backend -- there is no hardware
+# auto-detection. Even on gfx1250 the stinkytofu backend is selected only when
+# it is *explicitly* requested via ``ROCISA_BACKEND=stinkytofu``.
 
-_BACKEND = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+_BACKEND_RAW = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+# No hardware auto-detection: unset (or anything != "stinkytofu") -> native rocisa.
+_BACKEND = _BACKEND_RAW
 
 _ADAPTER_PKG = "rocisa_stinkytofu_adaptor"
 
@@ -246,19 +252,21 @@ def _stinkytofu_available() -> "tuple[bool, str]":
     return True, ""
 
 
-def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn) -> bool:
+def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn,
+                     auto_detected=False) -> bool:
     """Decide whether to use the stinkytofu adapter (True) or native rocisa (False).
 
     Emits a warning *only* when the stinkytofu backend was explicitly requested
-    but we have to fall back to native — so an unnoticed silent fallback becomes
-    visible, with a cause-specific reason attached. ``available_fn`` and
-    ``load_fn`` share the same ``(ok, reason)`` contract; the reason is surfaced
-    verbatim so each distinct failure mode produces its own warning. Requesting
-    anything else (or unset) selects native without touching the probes and
-    without warning.
+    (or auto-detected) but we have to fall back to native — so an unnoticed
+    silent fallback becomes visible, with a cause-specific reason attached.
+    ``available_fn`` and ``load_fn`` share the same ``(ok, reason)`` contract;
+    the reason is surfaced verbatim so each distinct failure mode produces its
+    own warning. Requesting anything else (or unset) selects native without
+    touching the probes and without warning.
     """
     if requested != "stinkytofu":
         return False
+    _origin = "auto-detected for gfx1250" if auto_detected else "ROCISA_BACKEND=stinkytofu"
     available, avail_reason = available_fn()
     if not available:
         warn(avail_reason, stacklevel=2)
@@ -266,15 +274,16 @@ def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn) -> bo
     ok, reason = load_fn()
     if not ok:
         warn(
-            f"ROCISA_BACKEND=stinkytofu requested but the adapter failed to load "
-            f"({reason}){_FALLBACK}",
+            f"stinkytofu backend ({_origin}) requested but the adapter failed "
+            f"to load ({reason}){_FALLBACK}",
             stacklevel=2,
         )
         return False
     return True
 
 
-if _resolve_backend(_BACKEND, _stinkytofu_available, _load_stinkytofu_adapter):
+if _resolve_backend(_BACKEND, _stinkytofu_available, _load_stinkytofu_adapter,
+                    auto_detected=False):
     # stinkytofu adapter active; wiring done inside _load_stinkytofu_adapter.
     pass
 else:

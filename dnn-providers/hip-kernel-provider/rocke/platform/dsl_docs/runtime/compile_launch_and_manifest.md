@@ -34,6 +34,10 @@ kernel_name  : str
 hsaco_bytes  : int
 ```
 
+Scheduler selection is a typed per-kernel policy rather than an arbitrary
+`compile_kernel(options=...)` escape hatch. See
+[`../optimization/scheduler-policy.md`](../optimization/scheduler-policy.md).
+
 Timing keys:
 
 ```text

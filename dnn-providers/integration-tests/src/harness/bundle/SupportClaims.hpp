@@ -16,6 +16,20 @@
 namespace hipdnn_integration_tests::bundle
 {
 
+/// Locates a specific support claim: the sidecar file, which case (if sweep),
+/// and the display path for reports. Constructed once at registration time and
+/// threaded through LoadedBundle -> harness -> observeSupport.
+struct SupportClaimLocator
+{
+    std::filesystem::path sidecarPath; // X.support.json or sweepDir/support.json
+    std::string caseId; // empty for single-graph
+    std::string diagnosticPath; // for reports/messages (e.g. "dir/sweep.json#caseId")
+    bool isSweep() const
+    {
+        return !caseId.empty();
+    }
+};
+
 /// Per-engine support: arch token (e.g. "gfx942") -> set of supported platforms
 /// ("linux" / "windows"). Same shape/meaning in both claim shapes below.
 using ArchPlatformMap = std::map<std::string, std::set<std::string>>;
@@ -35,6 +49,10 @@ struct SupportClaims
     bool isClaimed(const std::string& engine,
                    const std::string& arch,
                    const std::string& platform) const;
+
+    /// Engine names that claim support for this (arch, platform).
+    std::set<std::string> claimedEngineNames(const std::string& arch,
+                                             const std::string& platform) const;
 };
 
 /// One template-sweep claim group (RFC 0015 §5.4): a shared support footprint
@@ -59,6 +77,11 @@ struct SweepSupportClaims
                    const std::string& engine,
                    const std::string& arch,
                    const std::string& platform) const;
+
+    /// Engine names that claim support for `caseId` on this (arch, platform).
+    std::set<std::string> claimedEngineNames(const std::string& caseId,
+                                             const std::string& arch,
+                                             const std::string& platform) const;
 };
 
 /// Parse single-graph support claims from an already-loaded JSON value.
@@ -95,19 +118,20 @@ SweepSupportClaims parseSweepSupportClaimsJson(const nlohmann::json& json,
 ///   "dir/Small.json" -> "dir/Small.support.json"
 std::filesystem::path supportJsonPath(const std::filesystem::path& bundleJsonPath);
 
+/// Load and parse a single-graph .support.json at `sidecarPath`.
+/// The file must exist; throws std::runtime_error if it cannot be opened or parsed.
+SupportClaims loadSupportClaimsFromPath(const std::filesystem::path& sidecarPath);
+
+/// Load and parse a template-sweep support.json at `sidecarPath`.
+/// The file must exist; throws std::runtime_error if it cannot be opened or parsed.
+SweepSupportClaims loadSweepSupportClaimsFromPath(const std::filesystem::path& sidecarPath);
+
 /// Load single-graph support claims from the {Name}.support.json companion of
-/// `bundleJsonPath`.
-///
-/// Returns std::nullopt when the file does not exist — this is the normal,
-/// "not gated" case (RFC 0015 §5.3). If the file exists but is unparseable or
-/// fails validation, the parse error propagates as a thrown
-/// std::runtime_error: a checked-in support.json is machine-owned, so a
-/// broken one must fail the run rather than silently degrade.
+/// `bundleJsonPath`. Returns std::nullopt when the file does not exist.
 std::optional<SupportClaims> loadSupportClaims(const std::filesystem::path& bundleJsonPath);
 
-/// Load template-sweep support claims from support.json directly under
-/// `sweepDir`. Same optional-file / throw-on-malformed contract as
-/// loadSupportClaims().
+/// Load template-sweep support claims from support.json under `sweepDir`.
+/// Returns std::nullopt when the file does not exist.
 std::optional<SweepSupportClaims> loadSweepSupportClaims(const std::filesystem::path& sweepDir);
 
 } // namespace hipdnn_integration_tests::bundle

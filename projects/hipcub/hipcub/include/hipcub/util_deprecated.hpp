@@ -30,7 +30,7 @@
 
 #include "config.hpp"
 
-#include <iostream>
+#include <hip/hip_common.h>
 
 #ifdef DOXYGEN_SHOULD_SKIP_THIS // Documentation only
 
