@@ -170,6 +170,19 @@ struct HeuristicDescriptor
     /// `$q.*` and `$derived.*`. Order is part of the contract: it is the order the model
     /// was trained on. Empty for static_order, which consumes no features.
     std::vector<std::string> featuresSignature;
+
+    /// RFC 0019 §6.5's string-to-code map, generated with the model from the corpus it
+    /// was fitted on, and folded into @ref featuresHash -- §6.5 is explicit that the
+    /// signature text alone does not catch a changed encoding.
+    ///
+    /// Keyed by the whole `$`-reference, matching an entry in @ref featuresSignature.
+    /// Not by the trailing field name: `$kernel.dtype` may hold the KMD's `"BF16"` where
+    /// `$q.attention_dense.dtype` holds the runtime's `"bf16"`, and a per-field key
+    /// merges two vocabularies into one category whose codes then depend on which side
+    /// was seen first.
+    ///
+    /// Empty when the signature reads no string field, which is most of them.
+    std::map<std::string, std::map<std::string, int32_t>> categoricalEncoding;
     /// Guards @ref featuresSignature against the model that was trained on it. The
     /// extractor recomputes it and refuses to load on a mismatch (RFC 0019 §6.3).
     std::string featuresHash;

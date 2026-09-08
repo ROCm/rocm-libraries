@@ -34,21 +34,14 @@ import string
 MAX_SAFE_NUMERIC_LITERAL = 1e15
 
 __all__ = [
-    "CATEGORICAL_ENCODING",
-    "CATEGORICAL_ENCODING_FROZEN_DIGEST",
-    "CATEGORICAL_ENCODING_FROZEN_ENTRIES",
-    "CATEGORICAL_ENCODING_VERSION",
     "FEATURE_NAMESPACES",
     "MAX_SAFE_NUMERIC_LITERAL",
     "build_features_signature",
     "canonicalize_signature",
-    "categorical_encoding_canonical_form",
-    "categorical_encoding_digest",
-    "categorical_encoding_entries",
-    "category_of_reference",
     "compute_features_hash",
-    "encode_categorical",
+    "derive_categorical_encoding",
     "encode_feature_value",
+    "feature_reference",
     "parse_signature_entry",
 ]
 
@@ -59,183 +52,18 @@ __all__ = [
 FEATURE_NAMESPACES = ("device", "kernel", "q")
 
 
-# ---- Categorical encoding (RFC 0019 6.5) ---------------------------------------
-#
-# A mirror, not a source. The authoritative table is CATEGORICAL_ENCODING_TABLE in
-# plugin_sdk/include/hipdnn_plugin_sdk/ingestor/uhd/CategoricalEncoding.hpp, which is
-# what the runtime reads; this copy is what training encodes with. Two hand-maintained
-# copies is the defect class that already shipped here once -- a Python FlatBuffer
-# writer whose layout the C++ reader disagreed with, undetected for months -- so
-# tests/test_categorical_encoding.py reads the header itself and fails when either side
-# moves alone. Editing this dict without editing the header is caught, and vice versa.
-#
-# The mapping is global and fixed, not observed per training set: two engines that both
-# feed dtype="fp16" to their models have to produce the same number, or a model trained
-# on one corpus is meaningless against another and the cross-engine score comparison of
-# RFC 0019 11.3 compares two unrelated axes. Assignments are append-only and permanent;
-# a trained model.bin has them baked into its split thresholds, so renumbering one
-# silently re-points every threshold in every model in the field.
-#
-# Ordering, per-category, matches the header (a tree splits on these numbers, so the
-# order has to mean something): dtype by element byte width ascending, layout by tensor
-# rank with channel-first before channel-last.
-CATEGORICAL_ENCODING_VERSION = 1
-
-CATEGORICAL_ENCODING: dict[str, dict[str, int]] = {
-    # Every spelling to_string(DataType) produces in hipdnn_frontend/Types.hpp. Its
-    # "unknown" fallthrough is deliberately absent: an unrecognized data type must fail
-    # loudly rather than encode to something a model can split on.
-    "dtype": {
-        "fp4_e2m1": 0,
-        "int4": 1,
-        "fp6_e2m3": 2,
-        "fp6_e3m2": 3,
-        "fp8_e4m3": 4,
-        "fp8_e4m3_fnuz": 5,
-        "fp8_e5m2": 6,
-        "fp8_e5m2_fnuz": 7,
-        "fp8_e8m0": 8,
-        "int8": 9,
-        "uint8": 10,
-        "boolean": 11,
-        "bf16": 12,
-        "fp16": 13,
-        "fast_float_for_fp8": 14,
-        "fp32": 15,
-        "int32": 16,
-        "int8x4": 17,
-        "uint8x4": 18,
-        "complex_fp32": 19,
-        "fp64": 20,
-        "int64": 21,
-        "complex_fp64": 22,
-        "int8x32": 23,
-    },
-    # The TensorLayout constants in hipdnn_data_sdk/utilities/Tensor.hpp, by their name.
-    "layout": {
-        "NCL": 0,
-        "NLC": 1,
-        "NCHW": 2,
-        "NHWC": 3,
-        "NCDHW": 4,
-        "NDHWC": 5,
-        "BHSD": 6,
-        "BSHD": 7,
-    },
-}
-
-#: How many leading entries the pinned digest covers, mirroring the header. Appending
-#: past this leaves the digest alone; extending the freeze means raising both literals.
-CATEGORICAL_ENCODING_FROZEN_ENTRIES = 32
-
-#: Pinned fingerprint of the frozen prefix. Equal to CATEGORICAL_ENCODING_FROZEN_DIGEST
-#: in CategoricalEncoding.hpp, which the Python test asserts by reading that file.
-CATEGORICAL_ENCODING_FROZEN_DIGEST = "sha256:bf20c5a8243803c2"
-
-
-def categorical_encoding_entries() -> list[tuple[str, str, int]]:
-    """The table flattened to (category, value, code), in declaration order.
-
-    Insertion order carries the ordering rule and the digest depends on it, so this
-    must not sort.
-    """
-    return [
-        (category, value, code)
-        for category, members in CATEGORICAL_ENCODING.items()
-        for value, code in members.items()
-    ]
-
-
-def categorical_encoding_canonical_form() -> str:
-    """The exact bytes the frozen digest is taken over.
-
-    Mirrors ``categoricalEncodingCanonicalForm`` in CategoricalEncoding.hpp, which
-    renders the same compact JSON by hand. The header static_asserts that no category
-    or value needs escaping, which is what lets the two renderings agree byte for byte.
-    """
-    frozen = categorical_encoding_entries()[:CATEGORICAL_ENCODING_FROZEN_ENTRIES]
-    payload = [CATEGORICAL_ENCODING_VERSION, [[c, v, n] for c, v, n in frozen]]
-    return json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-
-
-def categorical_encoding_digest() -> str:
-    """Fingerprint of the frozen prefix, in the same ``sha256:<16 hex>`` form as
-    features_hash."""
-    digest = hashlib.sha256(categorical_encoding_canonical_form().encode()).hexdigest()[:16]
-    return f"sha256:{digest}"
-
-
-def category_of_reference(reference: str) -> str:
-    """The category a ``$namespace.field`` reference names: the field, no namespace.
-
-    ``$kernel.dtype`` and ``$q.dtype`` are both ``dtype`` on purpose -- the category is
-    a property of the value, not of who holds it. Mirrors ``categoryOfReference``.
-    Returns "" for anything that is not a namespaced reference, so a bare string literal
-    never encodes.
-    """
-    if not reference.startswith("$") or "." not in reference:
-        return ""
-    return reference.rsplit(".", 1)[1]
-
-
-#: Fold table for the 26 ASCII letters, and nothing else.
-#:
-#: Deliberately not ``str.lower()``: that is Unicode-aware, so 'İ' and the Kelvin sign
-#: 'K' fold into ASCII and a value would resolve to a code the C++ side -- which folds
-#: bytes 'A'-'Z' only -- never gives it. The two sides have to agree on one number for
-#: one value, so they have to agree on the fold, character for character.
-_ASCII_CASE_FOLD = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
-
-
-def _lookup_folding_ascii_case(mapping: dict, key: str):
-    """``mapping[key]`` ignoring ASCII letter case, or None.
-
-    Mirrors ``detail::equalsFoldingAsciiCase`` in CategoricalEncoding.hpp. Compares
-    whole folded keys, so it accepts a different case of the same spelling and nothing
-    else -- ``float16`` does not reach ``fp16``.
-    """
-    if key in mapping:
-        return mapping[key]
-    folded = key.translate(_ASCII_CASE_FOLD)
-    for candidate, entry in mapping.items():
-        if candidate.translate(_ASCII_CASE_FOLD) == folded:
-            return entry
-    return None
-
-
-def encode_categorical(category: str, value: str) -> int | None:
-    """The number ``value`` takes in ``category``, or None if the pair is not in the
-    table.
-
-    Category and value are matched ignoring ASCII letter case, mirroring
-    ``encodeCategorical``. A rocKE KMD declares ``"BF16"`` where ``to_string(DataType)``
-    produces ``"bf16"``; those are one value spelled with different shift keys, and
-    refusing one of them stopped a real gfx942 sweep at training for no safety in
-    return. The fold is applied here, at lookup, rather than by adding uppercase rows:
-    rows would double the table, move the frozen digest, and claim ``BF16`` and ``bf16``
-    are two members that happen to share a code.
-
-    It stays a fold, never an alias table. ``float16`` still returns None, because a
-    second vocabulary's spelling is a genuine difference and bridging it silently trains
-    the model on numbers the runtime never emits.
-    """
-    members = _lookup_folding_ascii_case(CATEGORICAL_ENCODING, category)
-    if members is None:
-        return None
-    return _lookup_folding_ascii_case(members, value)
-
-
 def encode_feature_value(reference: str, value) -> float:
-    """Turn one raw logged value into the number the model trains on.
+    """Turn one raw logged numeric value into the number the model trains on.
 
-    The training-side mirror of ``JsonLogicEvaluator::evaluateDouble``: the benchmark
-    log carries raw values (``dtype`` is logged as the string ``"fp16"``), and this is
-    the single point where a string becomes a number. Anything that encodes here
-    encodes identically at inference, because both sides read the same table.
+    Strings are deliberately not handled here. A categorical value's number comes from
+    the encoding the descriptor carries (RFC 0019 §6.5), and ``build_feature_matrix``
+    applies that before reaching this function. There is no process-wide table left to
+    consult, so a string arriving here means no encoding declared this reference
+    categorical -- which is a corpus and a signature that disagree, not a lookup miss.
 
-    A string with no code raises rather than falling back to NaN or to a hash of the
-    text. NaN is a missing value to a GBDT, which routes it down ``default_left`` and
-    returns an ordinary leaf -- the row trains as data and nothing in the log says so.
+    It raises rather than falling back to NaN or to a hash of the text. NaN is a missing
+    value to a GBDT, which routes it down ``default_left`` and returns an ordinary leaf
+    -- the row trains as data and nothing in the log says so.
     """
     if isinstance(value, bool):
         return 1.0 if value else 0.0
@@ -243,23 +71,44 @@ def encode_feature_value(reference: str, value) -> float:
         return float(value)
     if not isinstance(value, str):
         raise TypeError(f"{reference}: cannot use {type(value).__name__} as a feature value")
-
-    category = category_of_reference(reference)
-    code = encode_categorical(category, value)
-    if code is not None:
-        return float(code)
-    if _lookup_folding_ascii_case(CATEGORICAL_ENCODING, category) is not None:
-        raise ValueError(
-            f"{reference}: categorical value {value!r} has no code in category "
-            f"'{category}'. Append it to CATEGORICAL_ENCODING here and to "
-            "CATEGORICAL_ENCODING_TABLE in CategoricalEncoding.hpp; existing codes "
-            "must not move."
-        )
     raise ValueError(
-        f"{reference}: {value!r} is a string and '{category}' has no categorical "
-        "encoding, so there is no number this can mean. Reduce the field through an "
-        "explicit expression, or add the category to both tables."
+        f"{reference}: {value!r} is a string and no categorical_encoding declares this "
+        "reference, so there is no number it can mean. Derive an encoding from the corpus "
+        "with derive_categorical_encoding and pass it, or reduce the field through an "
+        "explicit expression."
     )
+
+
+def _reject_unqualified(feature_cols: list[str]) -> None:
+    """Raise unless every column names one of the runtime's namespaces.
+
+    Reports the whole offending set at once: an author fixing a CSV wants the list, not
+    one name per run.
+    """
+    unqualified = [
+        col for col in feature_cols if not col.startswith(tuple(f"{ns}." for ns in FEATURE_NAMESPACES))
+    ]
+    if unqualified:
+        raise ValueError(
+            "features must be namespace-qualified with one of "
+            f"{', '.join(FEATURE_NAMESPACES)}; got {unqualified}. "
+            "Rename the CSV columns (e.g. 'batch' -> 'q.batch', 'tile_m' -> "
+            "'kernel.tile_m', 'cu_count' -> 'device.cu_count'). An unqualified name "
+            "produces a descriptor that loads but never scores."
+        )
+
+
+def feature_reference(column: str) -> str:
+    """The signature reference one training column resolves to.
+
+    The single place that knows the column -> ``$reference`` rule. The signature, the
+    categorical encoding and the feature matrix all key off it, and they have to agree
+    character for character: the runtime looks the encoding up by the reference it read
+    out of features_signature, so a second spelling here is a map the runtime never
+    finds.
+    """
+    _reject_unqualified([column])
+    return f"${column}"
 
 
 def build_features_signature(feature_cols: list[str]) -> list[str]:
@@ -275,18 +124,64 @@ def build_features_signature(feature_cols: list[str]) -> list[str]:
     downstream catches it -- registration only inspects ``$kernel.``-prefixed
     references -- so the descriptor would load, validate, and silently never score.
     """
-    unqualified = [
-        col for col in feature_cols if not col.startswith(tuple(f"{ns}." for ns in FEATURE_NAMESPACES))
-    ]
-    if unqualified:
-        raise ValueError(
-            "features must be namespace-qualified with one of "
-            f"{', '.join(FEATURE_NAMESPACES)}; got {unqualified}. "
-            "Rename the CSV columns (e.g. 'batch' -> 'q.batch', 'tile_m' -> "
-            "'kernel.tile_m', 'cu_count' -> 'device.cu_count'). An unqualified name "
-            "produces a descriptor that loads but never scores."
-        )
-    return [f"${col}" for col in feature_cols]
+    _reject_unqualified(feature_cols)
+    return [feature_reference(col) for col in feature_cols]
+
+
+def derive_categorical_encoding(df, feature_cols: list[str]) -> dict[str, dict[str, int]]:
+    """The string-to-code map for the corpus being trained on (RFC 0019 6.5).
+
+    Per-descriptor, not global: the vocabulary is whatever the corpus holds, and the
+    map is written into the descriptor beside the signature it belongs to, so the
+    runtime encodes with the map this model was fitted with rather than a table both
+    sides have to be kept in step with by hand.
+
+    Keyed by the full ``$``-reference, never by the trailing field name. Two columns
+    can share a trailing name and not a vocabulary -- ``kernel.dtype`` holding ``"BF16"``
+    beside ``q.attention_dense.dtype`` holding ``"bf16"`` -- and merging those is one
+    vocabulary claiming to describe two columns.
+
+    Values are taken exactly as the corpus spells them, with no case folding: the map
+    ships with the model, so an unfolded key is the key the runtime looks up. Codes run
+    from 0 in ``sorted()`` order of the values, which makes the map, the hash and every
+    split threshold reproducible from the corpus alone.
+
+    Numeric columns are absent: they already are numbers, and an entry for one would
+    claim the runtime should encode something it must read straight through.
+    """
+    encoding: dict[str, dict[str, int]] = {}
+    for column in feature_cols:
+        series = df[column]
+        # numpy kinds b/i/u/f are the numeric ones; object, string and pandas
+        # `category` report something else. Mirrors build_feature_matrix, which must
+        # take the same columns down the same branch.
+        if getattr(series.dtype, "kind", "O") in "biuf":
+            continue
+
+        values: set[str] = set()
+        other_types: set[str] = set()
+        for value in series:
+            if isinstance(value, str):
+                values.add(value)
+            else:
+                other_types.add(type(value).__name__)
+
+        if not values:
+            # An object column holding only numbers (a CSV with a blank cell, say).
+            # It encodes as itself, so there is nothing to map.
+            continue
+        if other_types:
+            raise ValueError(
+                f"feature column {column!r} mixes strings with "
+                f"{', '.join(sorted(other_types))}. A categorical column is encoded "
+                "by position, so a raw number in it would collide with whichever "
+                "value took that code. Make the column one or the other."
+            )
+
+        encoding[feature_reference(column)] = {
+            value: code for code, value in enumerate(sorted(values))
+        }
+    return encoding
 
 
 def parse_signature_entry(entry: str):

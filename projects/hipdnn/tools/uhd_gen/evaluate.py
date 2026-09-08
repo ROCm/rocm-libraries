@@ -768,7 +768,11 @@ class ModelBundle:
     training_rows: int | None
 
 
-def _flatbuffer_scorer(artifact: Path, features: list[str]) -> Scorer:
+def _flatbuffer_scorer(
+    artifact: Path,
+    features: list[str],
+    categorical_encoding: dict[str, dict[str, int]] | None = None,
+) -> Scorer:
     """Score with the artifact that actually ships.
 
     `train` deletes `model.lgbm` unless `--keep-lgbm`, so on an ordinary model
@@ -804,7 +808,7 @@ def _flatbuffer_scorer(artifact: Path, features: list[str]) -> Scorer:
     base = float(model.baseScore)
 
     def score(frame: pd.DataFrame) -> np.ndarray:
-        matrix = build_feature_matrix(frame, features)
+        matrix = build_feature_matrix(frame, features, categorical_encoding)
         total = np.full(len(frame), base, dtype=np.float64)
         for feature_index, threshold, left, right, leaf, default_left, lte in trees:
             node = np.zeros(len(frame), dtype=np.int64)
@@ -826,7 +830,11 @@ def _flatbuffer_scorer(artifact: Path, features: list[str]) -> Scorer:
     return score
 
 
-def _booster_scorer(model_file: Path, features: list[str]) -> Scorer:
+def _booster_scorer(
+    model_file: Path,
+    features: list[str],
+    categorical_encoding: dict[str, dict[str, int]] | None = None,
+) -> Scorer:
     import lightgbm as lgb
 
     from .train_uhd import build_feature_matrix, predict
@@ -834,7 +842,7 @@ def _booster_scorer(model_file: Path, features: list[str]) -> Scorer:
     booster = lgb.Booster(model_file=str(model_file))
 
     def score(frame: pd.DataFrame) -> np.ndarray:
-        return predict(booster, build_feature_matrix(frame, features))
+        return predict(booster, build_feature_matrix(frame, features, categorical_encoding))
 
     return score
 
@@ -860,6 +868,15 @@ def load_model(model_dir: Path, model_file: Path | None = None) -> ModelBundle:
     # is the oracle, and getting it backwards inverts every number in the report.
     objective = descriptor.get("objective") or manifest.get("objective")
 
+    # The map the model was FITTED with, read from what shipped rather than recomputed:
+    # scoring a model through a different string-to-code map ranks by thresholds that
+    # mean something else, and every regret number below would then describe a model
+    # nobody has. A model trained before the map was per-descriptor has neither key,
+    # and build_feature_matrix falls back to the fixed table it was fitted with.
+    categorical_encoding = descriptor.get("categorical_encoding") or manifest.get(
+        "categorical_encoding"
+    )
+
     if model_file is not None:
         candidate = model_file
     elif (model_dir / "model.lgbm").exists():
@@ -871,9 +888,9 @@ def load_model(model_dir: Path, model_file: Path | None = None) -> ModelBundle:
         raise ValueError(f"no model artifact at {candidate}")
 
     if candidate.suffix in (".lgbm", ".txt"):
-        scorer = _booster_scorer(candidate, features)
+        scorer = _booster_scorer(candidate, features, categorical_encoding)
     else:
-        scorer = _flatbuffer_scorer(candidate, features)
+        scorer = _flatbuffer_scorer(candidate, features, categorical_encoding)
 
     return ModelBundle(
         scorer=scorer,

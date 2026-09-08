@@ -738,7 +738,8 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
                       "native",
                       "tree_data",
                       "table",
-                      "trained_against"},
+                      "trained_against",
+                      "categorical_encoding"},
                      where);
 
     HeuristicDescriptor heuristic;
@@ -748,6 +749,36 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
     heuristic.baseDir = path.parent_path();
 
     heuristic.featuresSignature = optionalStringArray(root, "features_signature", where);
+
+    // RFC 0019 §6.5. Rejected rather than ignored when malformed: the encoding is folded
+    // into features_hash, so a map the loader skipped would produce a hash mismatch at
+    // the extractor and be reported as a signature problem, which it is not.
+    if(const auto encoding = root.find("categorical_encoding"); encoding != root.end())
+    {
+        const std::string encodingWhere = where + " 'categorical_encoding'";
+        requireObject(*encoding, encodingWhere);
+        for(const auto& field : encoding->items())
+        {
+            const std::string fieldWhere = encodingWhere + " '" + field.key() + "'";
+            requireObject(field.value(), fieldWhere);
+            std::map<std::string, int32_t> codes;
+            for(const auto& entry : field.value().items())
+            {
+                if(!entry.value().is_number_integer())
+                {
+                    fail("categorical code for '" + entry.key() + "' must be an integer in "
+                         + fieldWhere);
+                }
+                codes.emplace(entry.key(), entry.value().get<int32_t>());
+            }
+            if(codes.empty())
+            {
+                fail(fieldWhere + " declares a categorical field with no values; omit the field "
+                                  "rather than declaring an empty vocabulary");
+            }
+            heuristic.categoricalEncoding.emplace(field.key(), std::move(codes));
+        }
+    }
     if(const auto hash = root.find("features_hash"); hash != root.end())
     {
         heuristic.featuresHash = requireString(root, "features_hash", where);

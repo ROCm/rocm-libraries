@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "id": "309ca709-dcb0-496e-9c4c-1dbdd92ddda1",
+  "name": "Dtype Selector UHD",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$kernel.dtype",
+    "$kernel.tile_m",
+    "$q.seqlen"
+  ],
+  "features_hash": "sha256:8dd749a39a1bf51f",
+  "objective": "max",
+  "score": {
+    "units": "tflops",
+    "calibrated": false,
+    "transform": "log1p"
+  },
+  "tree_data": {
+    "artifact": "model.bin"
+  },
+  "categorical_encoding": {
+    "$kernel.dtype": {
+      "BF16": 0,
+      "FP16": 1
+    }
+  }
+}

@@ -253,9 +253,10 @@ TEST(TestGraphBuilderRegistry, EveryDataTypeTheBackendAcceptsCanBeNamed)
     EXPECT_EQ(detail::dataTypeFor("fp64"), detail::dataTypeFor("double"));
 
     // The numpy spellings are refused, not quietly accepted. Resolving them would build a valid
-    // graph and then write `float32` into the corpus's `q.dtype` column, which the encoder in
-    // plugin_sdk .../ingestor/uhd/CategoricalEncoding.hpp throws on -- a corpus that fails only
-    // at training time. Failing here names the offending declaration instead.
+    // graph and then write `float32` into the corpus's `q.dtype` column, so the
+    // `categorical_encoding` generated from that corpus would hold `float32` while the runtime
+    // binds `fp32` -- a spelling that corpus never held, with no code, refused at scoring.
+    // Failing here names the offending declaration instead.
     EXPECT_FALSE(detail::dataTypeFor("float32").has_value());
     EXPECT_FALSE(detail::dataTypeFor("float16").has_value());
     EXPECT_FALSE(detail::dataTypeFor("float64").has_value());

@@ -273,6 +273,7 @@ public:
         config.uhdId = toString(descriptor.id);
         config.name = descriptor.name;
         config.featuresSignature = descriptor.featuresSignature;
+        config.categoricalEncoding = descriptor.categoricalEncoding;
         config.featuresHash = descriptor.featuresHash;
         config.objective = descriptor.objective;
         config.scoreUnits = descriptor.score.units;

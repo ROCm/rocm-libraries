@@ -19,7 +19,7 @@ import lightgbm as lgb
 import numpy as np
 from sklearn.model_selection import GroupKFold
 
-from .features import encode_feature_value
+from .features import encode_feature_value, feature_reference
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -41,18 +41,26 @@ _DEFAULT_PARAMS = {
 }
 
 
-def build_feature_matrix(df: pd.DataFrame, feature_cols: list[str]) -> np.ndarray:
+def build_feature_matrix(
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    categorical_encoding: dict[str, dict[str, int]] | None = None,
+) -> np.ndarray:
     """Turn the raw benchmark-log columns into the float matrix LightGBM trains on.
 
     The log carries raw values: a string field such as `kernel.dtype` arrives as the
     string `"fp16"`, not a number. This is the training side of RFC 0019 §6.5 -- every
-    string-valued column is encoded through the fixed table in features.py, which is
-    the same table the C++ runtime reads, so a split threshold learned here means the
-    same data type when the runtime recomputes the feature.
+    string-valued column becomes a number here, and the map that does it is the one
+    that ships in the descriptor, so a split threshold learned here means the same data
+    type when the runtime recomputes the feature.
 
-    Applied unconditionally, with nothing for the caller to select. The mapping is
-    global and fixed, so a switch could only ever produce a model whose numbers
-    disagree with what the runtime will compute.
+    `categorical_encoding` is that map, keyed by `$reference` exactly as
+    features.derive_categorical_encoding builds it and exactly as the descriptor
+    carries it. Passing the map the model will ship with is what makes the two agree;
+    passing a second, independently computed one is the silent-wrongness this argument
+    exists to remove. Omitted, encoding falls back to the fixed global table -- which is
+    how models predating the per-descriptor map were fitted, so that is how they must
+    still be scored.
 
     An unencodable value raises. Dropping the column, coercing it, or handing the
     string to LightGBM as a pandas `category` would each yield a model that trains and
@@ -74,11 +82,24 @@ def build_feature_matrix(df: pd.DataFrame, feature_cols: list[str]) -> np.ndarra
             columns.append(series.to_numpy(dtype=np.float64))
             continue
 
-        reference = f"${name}"
+        reference = feature_reference(name)
+        codes = categorical_encoding.get(reference) if categorical_encoding else None
         encoded = np.empty(len(series), dtype=np.float64)
         for row, raw in enumerate(series):
             try:
-                encoded[row] = encode_feature_value(reference, raw)
+                if codes is not None and isinstance(raw, str):
+                    code = codes.get(raw)
+                    if code is None:
+                        raise ValueError(
+                            f"categorical value {raw!r} is not in the encoding for "
+                            f"{reference}, whose vocabulary is {sorted(codes)}. The "
+                            "encoding is derived from the training corpus and ships "
+                            "with the model, so a value outside it has no number here "
+                            "and none at inference either."
+                        )
+                    encoded[row] = float(code)
+                else:
+                    encoded[row] = encode_feature_value(reference, raw)
             except (TypeError, ValueError) as error:
                 raise ValueError(f"feature column {name!r}, row {row}: {error}") from error
         columns.append(encoded)
@@ -147,6 +168,7 @@ def train_model(
     num_boost_round: int = 500,
     early_stopping_rounds: int = 50,
     n_splits: int = 5,
+    categorical_encoding: dict[str, dict[str, int]] | None = None,
 ) -> lgb.Booster:
     """Train LightGBM regressor on log1p(target).
 
@@ -163,11 +185,16 @@ def train_model(
         num_boost_round: Maximum number of boosting rounds.
         early_stopping_rounds: Early stopping patience.
         n_splits: Number of cross-validation folds.
+        categorical_encoding: The `$reference` -> value -> code map to encode string
+            columns with, as derived from this corpus by
+            features.derive_categorical_encoding. This is the map the model is fitted
+            with, so it is the map the descriptor must ship. Omitted, the fixed global
+            table is used.
 
     Returns:
         Trained LightGBM Booster.
     """
-    X = build_feature_matrix(df, feature_cols)
+    X = build_feature_matrix(df, feature_cols, categorical_encoding)
     y = np.log1p(df[target_col].values)
 
     if params is None:

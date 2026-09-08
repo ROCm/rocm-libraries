@@ -379,12 +379,13 @@ AttentionDenseProblem problemFor(const data_objects::TensorAttributes& q,
 /// The two runtime facts about a dtype the BINDING publishes.
 ///
 /// `spelling` is what `to_string(DataType)` in hipdnn_frontend/Types.hpp answers -- the
-/// only vocabulary a `.dtype` binding may hold, and the one CategoricalEncoding.hpp
-/// encodes. It is restated here rather than called because this provider does not link the
-/// frontend. It is emphatically NOT `supportedDataTypeName`'s vocabulary above: that one
-/// answers the KMD's spelling ("BF16") so kernelMatches can compare against a kernel's
-/// baked metadata, and crossing the two would hand CategoricalEncoding.hpp a string it
-/// refuses as unknown -- losing the feature rather than warning.
+/// only vocabulary a `.dtype` binding may hold, and the one a UHD's own
+/// `categorical_encoding` (RFC 0019 §6.5) is generated from. It is restated here rather than
+/// called because this provider does not link the frontend. It is emphatically NOT
+/// `supportedDataTypeName`'s vocabulary above: that one answers the KMD's spelling ("BF16")
+/// so kernelMatches can compare against a kernel's baked metadata, and crossing the two would
+/// hand the encoding a spelling its corpus never held -- nothing folds case, so "BF16" is not
+/// "bf16" -- which has no code and loses the feature rather than warning.
 ///
 /// An empty `spelling` is `to_string`'s "unknown" fallthrough, and `bytes == 0` is a width
 /// this pack will not state: both make the dependent token absent instead of silently
@@ -865,9 +866,10 @@ std::optional<BoundTokens> gfx942AttentionDenseGraphMatches(const MatchContext& 
     bound[std::string(HEAD_SIZE_TOKEN)] = problem.headSize;
 
     // dtype binds as the runtime spelling STRING, never a pre-encoded number: the integer
-    // code space is CategoricalEncoding.hpp's and is applied downstream by the feature
-    // extractor, so a number here would freeze that code space inside the matcher and let
-    // the two drift apart silently.
+    // code space belongs to the descriptor that ships the model -- its own
+    // `categorical_encoding` (RFC 0019 §6.5) -- and is applied downstream by the feature
+    // extractor, so a number here would freeze one model's code space inside the matcher and
+    // let the two drift apart silently.
     const auto facts = dataTypeFacts(problem.dataType);
     if(!facts.spelling.empty())
     {

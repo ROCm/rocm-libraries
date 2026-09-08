@@ -834,9 +834,10 @@ TEST(TestGfx942AttentionDenseBinding, BindsDtypeAsTheRuntimeSpellingNotTheKmdSpe
     ASSERT_TRUE(fp16.has_value());
 
     // "bf16" -- NOT the KMD's "BF16" that kernel_match compares against, and not the
-    // flatbuffer enum's "BFLOAT16". CategoricalEncoding.hpp knows only the lowercase
-    // to_string() vocabulary and refuses anything else as unknown, which costs the
-    // feature silently rather than failing loudly.
+    // flatbuffer enum's "BFLOAT16". A UHD's `categorical_encoding` (RFC 0019 §6.5) holds
+    // exactly the spellings its corpus held -- the lowercase to_string() vocabulary -- and
+    // nothing folds case, so anything else has no code, which costs the feature silently
+    // rather than failing loudly.
     EXPECT_EQ(boundString(*bf16, "attention_dense.dtype"), "bf16");
     EXPECT_EQ(boundString(*fp16, "attention_dense.dtype"), "fp16");
 
