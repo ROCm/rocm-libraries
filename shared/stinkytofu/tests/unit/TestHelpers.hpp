@@ -33,6 +33,15 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
+
+// Cross-loop tests: wrap in IF_RULE3_CROSS_LOOP(...). Omitted from the binary when
+// STINKY_KRULE3_CROSS_LOOP is 0 (see InsertClusterBarrierPass.hpp; kRule3CrossLoop mirrors it).
+#if STINKY_KRULE3_CROSS_LOOP
+#define IF_RULE3_CROSS_LOOP(...) __VA_ARGS__
+#else
+#define IF_RULE3_CROSS_LOOP(...)
+#endif
 
 namespace stinkytofu {
 namespace test {

@@ -123,9 +123,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             b, ROCKE_ERR_VALUE, "invalid conv_igemm spec for %s: %s", ctx->arch, reason);
         return false;
     }
-    /* Forward-conv-only: reject default epilogue when vec_c > 1 (auto-derived from K).
+    /* Forward-conv-only: reject default epilogue when vec_c > 1 (auto-derived from kpg).
      * Python build_implicit_gemm_conv calls is_valid_spec which now checks:
-     *   _eff_vec_c = vector_size_c if set else default_vector_sizes(C,K,dtype_d)[2]
+     *   _eff_vec_c = vector_size_c if set else default_vector_sizes(cpg,kpg,dtype_d)[2]
      *   if _eff_vec_c > 1 and epilogue == "default": raise ValueError(...)
      * This gate is NOT part of rocke_implicit_gemm_conv_is_valid_spec because
      * wgrad calls that function with a dummy forward spec and uses a separate
@@ -139,7 +139,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
         else
         {
-            int _K = spec->problem.K;
+            int _K = rocke_conv_problem_kpg(&spec->problem);
             bool _is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
             if(_is_fp32_d)
                 _eff_vec_c = (_K % 4 == 0) ? 4 : (_K % 2 == 0) ? 2 : 1;
@@ -429,9 +429,13 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem");
         ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_shape, 2, "B_smem");
 
-        /* double_buffer = compv4 || async_dma || unroll_k */
-        ctx->double_buffer = (spec->pipeline != NULL && strcmp(spec->pipeline, "compv4") == 0)
-                             || spec->async_dma || spec->unroll_k;
+        /* Only async_dma and unroll_k reach a K-loop that alternates buffers:
+         * async_dma takes the SoftwarePipeline branch and unroll_k hand-rolls a
+         * ping-pong.  "compv4" alone shares the plain single-buffer loop with
+         * "mem"/"compv3" and differs only in scheduling hints, so allocating a
+         * second A/B tile for it was dead and charged LDS the kernel never used.
+         * Mirrors the Python double_buffer condition. */
+        ctx->double_buffer = spec->async_dma || spec->unroll_k;
         if(ctx->double_buffer)
         {
             ctx->A_smem2 = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem2");
@@ -571,10 +575,15 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     if(ctx->async_dma)
     {
+        /* contig_cols = cpg: the tile's col axis is the reduction index (y, x, c)
+         * and only the inner c is stride-1, so a chunk wider than cpg -- or one
+         * that does not divide it -- would straddle a filter position and fetch
+         * the wrong elements with no diagnostic. Mirrors the Python call. */
+        const int cpg = rocke_conv_problem_cpg(&spec->problem);
         rocke_status_t sa = rocke_async_tile_loader_from_tile(
-            ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->a_loader);
+            ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, cpg, &ctx->a_loader);
         rocke_status_t sb = rocke_async_tile_loader_from_tile(
-            ctx->block_n, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->b_loader);
+            ctx->block_n, ctx->block_k, ctx->threads, spec->wave_size, 4, cpg, &ctx->b_loader);
         if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: async tile loader from_tile failed");

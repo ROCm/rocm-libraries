@@ -21,13 +21,17 @@
 #   8  -- 3-D conv (Z/Di), mem/default, gfx950
 #   9  -- split-K=4 bf16 output (packed bf16 atomic + accumulation-error path), gfx950
 #   10 -- chiplet swizzle enabled, gfx950
+#   11 -- K-outer LDS + ds_read_b64_tr_b16 transpose reads, gfx950
+#   12 -- K-outer + async_dma (direct global->LDS load), gfx950
 #   (async_dma omitted: C++ async load path does not yet honour the wgrad A-descriptor
 #    override, so it would produce different IR and break the byte-identity gate)
 #
 # Negative cases (configs 100+) verify that invalid specs are rejected:
 #   100 -- odd C with fp16 split-K (must raise ValueError)
-#   101 -- groups=2 (must raise ValueError)
 #   102 -- split_k > 1 on RDNA gfx1151 (must raise ValueError)
+# (These illustrate the validator contract. The C emitter defines only cases
+# 0-10, so run_diff.py stops at the shared END before reaching 100+; these
+# configs are not exercised by the differential gate.)
 from rocke.instances.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     build_implicit_gemm_conv_wgrad,
@@ -40,7 +44,9 @@ def _spec(idx: int):
     """Return (spec, arch) for config index `idx`.
 
     For negative cases (idx >= 100) the spec is expected to raise ValueError
-    on build; the harness checks that the exception is raised.
+    when built (run this file with that index to confirm it raises). These are
+    illustrative of the validator contract; no differential harness consumes
+    them (see the module header).
     """
     if idx == 0:
         # Baseline: 3x3 conv, mem pipeline, default epilogue, gfx950.
@@ -265,6 +271,115 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    if idx == 11:
+        # K-outer LDS tile + gfx950 ds_read_b64_tr_b16 transpose reads.
+        # Exercises the swapped loader axes, the K-outer smem shapes and the
+        # transpose-read fragment feed in one config.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                # cshuffle, not default: the validator rejects dtype_d in
+                # (fp16, bf16) with epilogue="default", so a "default" config
+                # would land as BOTH_REJECTED and the gate would never actually
+                # compare the two engines.
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 12:
+        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+
+        # K-outer + direct load. Exercises the async loader on the swapped tile
+        # axes, the contig_cols guard and the packed (pad-0) LDS shape.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                # fp32 output + the direct-store epilogue. split-K with the
+                # cshuffle atomic epilogue is separately divergent between the
+                # engines (reproducible with neither async nor K-outer), so this
+                # config isolates the async / K-outer path under split-K.
+                epilogue="default",
+                data=ConvDataSpec(dtype_d="fp32"),
+                lds_k_outer=True,
+                async_dma=True,
+                split_k=4,
+            ),
+            "gfx950",
+        )
+
+    if idx == 13:
+        # K-outer with the 16x16x16 atom: the only 16-bit atom whose MFMA
+        # operand is 4 elements per lane rather than 8, so the transpose-read
+        # k-stride between lane groups is 4. Configs 11 and 12 both use
+        # 32x32x16 (8 per lane) and cannot catch a stride hardcoded to 8.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=16,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 14:
+        # pipeline="basic": the CK pipeline_basic loop, unrolled at build time
+        # with the global read for tile it+1 issued before the MFMA for tile it
+        # and the LDS write deferred past the second barrier. Needs a
+        # compile-time trip count, hence the fixed split_k.
+        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="basic",
+                epilogue="default",
+                data=ConvDataSpec(dtype_d="fp32"),
+                split_k=4,
+            ),
+            "gfx950",
+        )
+
     # ----------------------------------------------------------------
     # Negative cases: these specs must be REJECTED by the validator.
     # The harness (run_emit) expects a ValueError / SystemExit when
@@ -287,25 +402,6 @@ def _spec(idx: int):
                 pipeline="mem",
                 epilogue="default",
                 split_k=4,
-            ),
-            "gfx950",
-        )
-    if idx == 101:
-        # groups=2 -- must raise (wgrad does not support grouped conv).
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, groups=2)
-        return (
-            WgradConvSpec(
-                problem=p,
-                tile_m=64,
-                tile_n=64,
-                tile_k=64,
-                warp_m=2,
-                warp_n=2,
-                warp_tile_m=32,
-                warp_tile_n=32,
-                warp_tile_k=16,
-                pipeline="mem",
-                epilogue="default",
             ),
             "gfx950",
         )

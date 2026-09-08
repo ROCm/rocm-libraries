@@ -300,11 +300,9 @@ namespace TensileLite
     using TypedGemm_F4_S_S = TypedGemm<Float4x2, Float4x2, float, float>;
     // F4 data, Half dest/C, Float alpha/beta
     using TypedGemm_F4_H_S = TypedGemm<Float4x2, Float4x2, Half, Half, float, float, Float4x2, Float4x2>;
-#endif // TENSILE_USE_FP4
-#if defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
     // F4 data, BFloat16 dest/C, Float alpha/beta
-    using TypedGemm_F4_B_S = TypedGemm<Float4x2, Float4x2, BFloat16, BFloat16, float, float>;
-#endif // defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
+    using TypedGemm_F4_B_S = TypedGemm<Float4x2, Float4x2, BFloat16, BFloat16, float, float, Float4x2, Float4x2>;
+#endif // TENSILE_USE_FP4
 #if defined(TENSILE_USE_FP4) && defined(TENSILE_USE_FP6)
     using TypedGemm_F4F6_S_S = TypedGemm<Float4x2, Float6x32, float, float, float, float, Float4x2, Float6x32>;
     using TypedGemm_F6F4_S_S = TypedGemm<Float6x32, Float4x2, float, float, float, float, Float6x32, Float4x2>;

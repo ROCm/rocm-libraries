@@ -288,13 +288,23 @@ bool serializeVisit(const DPPModifiers& mod, std::ostream& os) {
 // VOP3Modifiers
 bool serializeVisit(const VOP3Modifiers& mod, std::ostream& os) {
     os << ", mod.vop3 = {";
-    os << " neg_src0 = " << (mod.neg_src0 ? "true" : "false")
-       << ", neg_src1 = " << (mod.neg_src1 ? "true" : "false")
-       << ", neg_src2 = " << (mod.neg_src2 ? "true" : "false")
-       << ", abs_src0 = " << (mod.abs_src0 ? "true" : "false")
-       << ", abs_src1 = " << (mod.abs_src1 ? "true" : "false")
-       << ", abs_src2 = " << (mod.abs_src2 ? "true" : "false")
-       << ", clamp = " << (mod.clamp ? "true" : "false") << ", omod = " << mod.omod;
+    bool first = true;
+    auto emitFlag = [&](const char* name, bool val) {
+        if (!val) return;
+        os << (first ? " " : ", ") << name << " = true";
+        first = false;
+    };
+    emitFlag("neg_src0", mod.neg_src0);
+    emitFlag("neg_src1", mod.neg_src1);
+    emitFlag("neg_src2", mod.neg_src2);
+    emitFlag("abs_src0", mod.abs_src0);
+    emitFlag("abs_src1", mod.abs_src1);
+    emitFlag("abs_src2", mod.abs_src2);
+    emitFlag("clamp", mod.clamp);
+    if (mod.omod != 0) {
+        os << (first ? " " : ", ") << "omod = " << mod.omod;
+        first = false;
+    }
     os << " }";
     return true;
 }

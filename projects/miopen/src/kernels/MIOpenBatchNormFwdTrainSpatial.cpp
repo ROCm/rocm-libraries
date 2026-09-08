@@ -211,9 +211,10 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
         unsigned int index       = 0;
         const unsigned int lid   = threadIdx.x;
         const unsigned int grpid = blockIdx.x;
+        FpPrecType curN          = cast<FpPrecType>(0.);
 
         // Note: this variable is only used when mio_config::layout_nhwc is false.
-        unsigned int chwid;
+        [[maybe_unused]] unsigned int chwid;
         if constexpr(!mio_config::layout_nhwc)
         {
             chwid = grpid * mio_bn_config::hw;
@@ -242,8 +243,10 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                     hwidx = (k + (lid << 2)) - (nidx * mio_bn_config::hw);
                     index = nidx * mio_bn_config::chw + chwid + hwidx;
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                    miopen::batchnorm::_accumulate(mean, read4);
-                    miopen::batchnorm::_accumulate_mad(variance, read4, read4);
+                    typename mapped_vector_type<FpPrecType, 4>::type read4Prec =
+                        cast<typename mapped_vector_type<FpPrecType, 4>::type>(read4);
+
+                    miopen::reduction::welford_step_unroll4(read4Prec, mean, variance, curN);
                 }
             }};
 
@@ -260,8 +263,10 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                 if(index + 3 < (mio_bn_config::nchw))
                 {
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                    miopen::batchnorm::_accumulate(mean, read4);
-                    miopen::batchnorm::_accumulate_mad(variance, read4, read4);
+                    typename mapped_vector_type<FpPrecType, 4>::type read4Prec =
+                        cast<typename mapped_vector_type<FpPrecType, 4>::type>(read4);
+
+                    miopen::reduction::welford_step_unroll4(read4Prec, mean, variance, curN);
                 }
             }
         }
@@ -281,17 +286,19 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         {
                             index = nidx * mio_bn_config::chw + chwid + hwidx;
                         }
-                        const auto xin = cast<FpPrecType>(in[index]);
-                        mean += xin;
-                        variance = fma(xin, xin, variance);
+                        const auto xin     = cast<FpPrecType>(in[index]);
+                        FpPrecType oldMean = mean;
+                        mean               = (mean * curN + xin) / (curN + 1.f);
+                        curN += 1.f;
+                        variance = fma(xin - mean, xin - oldMean, variance);
                     }
                 }};
 
             if constexpr(rem > 0u)
             {
-                // Note: hip compiler has a bug, it throws compiler warning for comparing unsigned
-                // int with 0 value, when rem is 0. but when rem is 0, this code block should not be
-                // compiled due to the if constexpr used above.
+                // Note: The HIP compiler has a bug, it throws compiler warning for comparing
+                // unsigned int with 0 value, when rem is 0. but when rem is 0, this code block
+                // should not be compiled due to the if constexpr used above.
                 if(lid < rem)
                 {
                     unsigned int remkey = lid + less;
@@ -306,24 +313,40 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         index = nidx * mio_bn_config::chw + chwid + hwidx;
                     }
 
-                    const auto xin =
-                        index < mio_bn_config::nchw ? cast<FpPrecType>(in[index]) : FpPrecType{0};
-                    mean += xin;
-                    variance = fma(xin, xin, variance);
+                    bool contributeToVariance = (index < mio_bn_config::nchw);
+                    FpPrecType xin =
+                        contributeToVariance ? cast<FpPrecType>(in[index]) : cast<FpPrecType>(0.);
+                    FpPrecType oldMean = mean;
+                    mean = contributeToVariance ? ((mean * curN + xin) / (curN + 1.f)) : mean;
+                    curN += contributeToVariance ? 1.f : 0.f;
+                    variance += contributeToVariance ? ((xin - mean) * (xin - oldMean)) : 0;
                 }
             }
         }
 
         __syncthreads();
 
-        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
-            reinterpret_cast<FpAccumType&>(mean),
-            reinterpret_cast<FpAccumType&>(variance),
+        constexpr auto lcl_data_size = mio_bn_config::lds_gcn_size;
+        __shared__ FpAccumType lcl_data_x[lcl_data_size];
+        __shared__ FpAccumType lcl_data_y[lcl_data_size];
+        __shared__ FpAccumType lcl_data_c[lcl_data_size];
+
+        __builtin_amdgcn_sched_barrier(0);
+
+        miopen::reduction::reduce2_welford<FpAccumType, lcl_data_size>(
+            mean,
+            variance,
+            curN,
             static_cast<FpAccumType>(INHW),
+            lcl_data_x,
+            lcl_data_y,
+            lcl_data_c,
             lid);
 
+        __builtin_amdgcn_sched_barrier(0);
+
         // REDUCTION COMPLETE ---------------------------
-        variance = fma(-mean, mean, variance);
+
         if(variance < FpPrecType{0})
         {
             variance = FpPrecType{0};
@@ -674,9 +697,9 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
     FinalMeanVariance(FpType* __restrict__ meanvarbuff,
                       FpPrecType INHW,
                       double epsilon,
-                      unsigned int& xgid,
-                      unsigned int& ygid,
-                      unsigned int& zgid,
+                      const unsigned int& xgid,
+                      const unsigned int& ygid,
+                      const unsigned int& zgid,
                       unsigned int& commitID,
                       FpPrecType_C& mean,
                       FpPrecType_C& variance,
@@ -687,8 +710,6 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         mean        = cast<FpPrecType_C>(0.);
 
         unsigned int xgrp_id = blockIdx.x;
-        unsigned int ygrp_id = blockIdx.y;
-        unsigned int zgrp_id = blockIdx.z;
 
         // These values (?grp_sz) cannot be substituted with mio_bn_config::launch_dim.grp? because
         // the dimensions of the blocks for this kernel may be different from the other
@@ -703,17 +724,10 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         unsigned int ylid = threadIdx.y;
         unsigned int zlid = threadIdx.z;
 
-        xgid = xgrp_id * xgrp_sz + xlid;
-        ygid = ygrp_id * ygrp_sz + ylid;
-        zgid = zgrp_id * zgrp_sz + zlid;
-
         unsigned int xstride = mio_config::layout_nhwc ? 1 : mio_bn_config::hw;
         unsigned int ystride = mio_config::layout_nhwc ? mio_bn_config::c : 1;
 
         commitID = 0;
-
-        if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
-            return;
 
         for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
         {
@@ -1034,10 +1048,13 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     fp_prec_c_type variance;
     fp_prec_c_type invVariance;
 
-    unsigned int xgid;
-    unsigned int ygid;
-    unsigned int zgid;
+    unsigned int xgid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int ygid = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int zgid = blockIdx.z * blockDim.z + threadIdx.z;
     unsigned int commitID;
+
+    if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
+        return;
 
     miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.FinalMeanVariance(
         meanvarbuff, INHW, epsilon, xgid, ygid, zgid, commitID, mean, variance, invVariance);
