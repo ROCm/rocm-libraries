@@ -414,6 +414,10 @@ inline bool isFLATLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATLoad);
 }
 
+inline bool isFLATPrefetch(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_FLATPrefetch);
+}
+
 inline bool isFLATStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATStore);
 }
@@ -571,7 +575,7 @@ inline bool isAsyncMemOp(const StinkyInstruction& inst) {
 inline bool isVmemTex(const StinkyInstruction& inst) {
     return isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) ||
            isGLOBALOrAtomic(inst) || isAsyncMemOp(inst) || isGlobalPrefetch(inst) ||
-           isTensorLoad(inst);
+           isFLATPrefetch(inst) || isTensorLoad(inst);
 }
 
 inline bool isDSRead(const StinkyInstruction& inst) {
