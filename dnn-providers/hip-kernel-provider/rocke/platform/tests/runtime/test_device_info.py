@@ -111,7 +111,7 @@ def test_get_device_info_reports_identity_without_capability_policy() -> None:
 
     target_id.assert_called_once_with(4)
     revision.assert_called_once_with(4)
-    assert info == device_info.RuntimeDeviceInfo(
+    assert info == device_info.DeviceInfo(
         target_id="gfx1250-strict",
         base_arch="gfx1250",
         asic_revision=0,
@@ -126,7 +126,7 @@ def test_get_device_info_preserves_unknown_properties() -> None:
     ):
         info = device_info.get_device_info()
 
-    assert info == device_info.RuntimeDeviceInfo(
+    assert info == device_info.DeviceInfo(
         target_id=None,
         base_arch=None,
         asic_revision=None,
@@ -134,9 +134,9 @@ def test_get_device_info_preserves_unknown_properties() -> None:
 
 
 def test_runtime_exports_device_info_api() -> None:
-    assert runtime.RuntimeDeviceInfo is device_info.RuntimeDeviceInfo
+    assert runtime.DeviceInfo is device_info.DeviceInfo
     assert runtime.get_device_info is device_info.get_device_info
-    assert "RuntimeDeviceInfo" in runtime.__all__
+    assert "DeviceInfo" in runtime.__all__
     assert "get_device_info" in runtime.__all__
     assert not hasattr(runtime, "DeviceCapability")
     assert not hasattr(runtime, "DeviceCapabilities")

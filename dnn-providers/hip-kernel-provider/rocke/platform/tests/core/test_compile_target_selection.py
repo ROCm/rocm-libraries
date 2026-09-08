@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import importlib
 import subprocess
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -17,6 +19,23 @@ compile_module = importlib.import_module("rocke.helpers.compile")
 
 def _kernel() -> SimpleNamespace:
     return SimpleNamespace(name="target_contract", attrs={})
+
+
+@contextmanager
+def _forbid_device_discovery() -> Iterator[None]:
+    with ExitStack() as stack:
+        for target in (
+            "rocke.runtime.hip_module.get_device_arch",
+            "rocke.runtime.hip_module.get_device_target_id",
+            "rocke.runtime.device_info.get_device_info",
+        ):
+            stack.enter_context(
+                mock.patch(
+                    target,
+                    side_effect=AssertionError("device discovery must not run"),
+                )
+            )
+        yield
 
 
 def test_compile_kernel_preserves_exact_isa_without_device_discovery() -> None:
@@ -33,16 +52,13 @@ def test_compile_kernel_preserves_exact_isa_without_device_discovery() -> None:
             "build_hsaco_from_llvm_ir",
             return_value=(b"hsaco", ComgrTimings()),
         ) as build,
-        mock.patch(
-            "rocke.runtime.hip_module.get_device_arch", autospec=True
-        ) as device_arch,
+        _forbid_device_discovery(),
     ):
         artifact = compile_module.compile_kernel(kernel, isa=isa)
 
     assert lower.call_args.kwargs["arch"] == "gfx1250"
     assert build.call_args.kwargs["isa"] == isa
     assert artifact.isa == isa
-    device_arch.assert_not_called()
 
 
 def test_compile_kernel_base_arch_derives_ordinary_isa() -> None:
@@ -86,13 +102,35 @@ def test_hipcc_preserves_profile_but_lowers_for_base_arch() -> None:
         mock.patch.object(
             compile_module.subprocess, "run", side_effect=run_hipcc
         ) as run,
-        mock.patch(
-            "rocke.runtime.hip_module.get_device_arch", autospec=True
-        ) as device_arch,
+        _forbid_device_discovery(),
     ):
         artifact = compile_module.compile_kernel_via_hipcc(kernel, arch=target_id)
 
     lower.assert_called_once_with(kernel, arch="gfx1250")
     assert f"--offload-arch={target_id}" in run.call_args.args[0]
     assert artifact.isa == f"amdgcn-amd-amdhsa--{target_id}"
-    device_arch.assert_not_called()
+
+
+def test_hipcc_ir_preserves_profile_but_lowers_for_base_arch() -> None:
+    target_id = "gfx1250-strict:xnack-"
+    kernel = _kernel()
+
+    def run_hipcc(args, **kwargs):
+        output = Path(args[args.index("-o") + 1])
+        output.write_text('target datalayout = "test"\n', encoding="utf-8")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    with (
+        mock.patch.object(
+            compile_module, "lower_kernel_to_hip", return_value="hip"
+        ) as lower,
+        mock.patch.object(
+            compile_module.subprocess, "run", side_effect=run_hipcc
+        ) as run,
+        _forbid_device_discovery(),
+    ):
+        llvm_ir = compile_module.emit_device_llvm_ir_via_hipcc(kernel, arch=target_id)
+
+    lower.assert_called_once_with(kernel, arch="gfx1250")
+    assert f"--offload-arch={target_id}" in run.call_args.args[0]
+    assert 'target datalayout = "test"' in llvm_ir

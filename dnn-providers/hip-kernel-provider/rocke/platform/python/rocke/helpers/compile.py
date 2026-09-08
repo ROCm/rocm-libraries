@@ -47,6 +47,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from ..core.arch import (
+    ArchTarget,
+    arch_from_isa,
+    base_arch_from_target_id,
+    known_arches,
+)
 from ..core.codegen_policy import codegen_policy_for_kernel
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
@@ -115,16 +121,12 @@ def compile_kernel(
     for backward compatibility but is no longer consulted).
     """
     if arch is not None:
-        from ..core.arch import ArchTarget
-
         isa = ArchTarget.from_gfx(arch).isa_triple
         _lower_arch = arch
     else:
         # Derive the lowering arch from the isa triple so the ISA backend
         # (datalayout/triple/waitcnt) matches the comgr target even when a
         # caller passes isa= directly.
-        from ..core.arch import arch_from_isa, known_arches
-
         _gfx = arch_from_isa(isa)
         _lower_arch = _gfx if _gfx in known_arches() else None
 
@@ -292,8 +294,6 @@ def compile_kernel_via_hipcc(
     t0 = time.perf_counter()
     ir_text = print_ir(kernel)
     t1 = time.perf_counter()
-    from ..core.arch import base_arch_from_target_id
-
     lower_arch = base_arch_from_target_id(arch)
     hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     t2 = time.perf_counter()
@@ -352,6 +352,10 @@ def emit_device_llvm_ir_via_hipcc(
 ) -> str:
     """Lower ``kernel`` to HIP C++, then emit device LLVM IR via hipcc.
 
+    ``arch`` may include a compiler target profile or feature suffix. The exact
+    value is passed to ``hipcc --offload-arch`` while rocKE lowering uses its
+    normalized base architecture.
+
     This is the **ground-truth datalayout oracle**: it asks the project's
     own ``hipcc --offload-arch=<arch>`` to emit textual LLVM IR
     (``-S -emit-llvm --cuda-device-only``) instead of HSACO. The returned
@@ -377,7 +381,8 @@ def emit_device_llvm_ir_via_hipcc(
         RuntimeError: If hipcc is not in PATH or the compile fails.
         FileNotFoundError: If hipcc cannot be located.
     """
-    hip_src = lower_kernel_to_hip(kernel, arch=arch)
+    lower_arch = base_arch_from_target_id(arch)
+    hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     flags = ["-O3"]
     if extra_flags:
         flags.extend(extra_flags)

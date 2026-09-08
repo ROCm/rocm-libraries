@@ -20,9 +20,11 @@ We expose only what the GEMM kernel needs:
 from __future__ import annotations
 
 import ctypes
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..core.arch import base_arch_from_target_id
 from ._ctypes_bind import _LazyFn
 from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
 
@@ -224,8 +226,6 @@ def get_device_target_id(device: int = 0) -> Optional[str]:
     contains no ``gfx`` token, so the first NUL-terminated string beginning with
     ``gfx`` in the raw buffer is the target ID.
     """
-    import re
-
     raw = _device_props(device)
     if raw is None:
         return None
@@ -246,8 +246,6 @@ def get_device_arch(device: int = 0) -> Optional[str]:
     feature suffixes. Use :func:`get_device_target_id` when the exact identity is
     required.
     """
-
-    from ..core.arch import base_arch_from_target_id
 
     target_id = get_device_target_id(device)
     return base_arch_from_target_id(target_id) if target_id is not None else None

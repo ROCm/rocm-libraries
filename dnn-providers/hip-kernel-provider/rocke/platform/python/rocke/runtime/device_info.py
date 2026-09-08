@@ -1,11 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Runtime identity reported for a HIP device.
+"""Identity facts reported for a HIP device.
 
-This module reports facts obtained from the destination runtime. It does not
-describe the static instruction catalog and does not predict whether an
-arbitrary code object can be translated or loaded.
+Static instruction facts remain in :class:`rocke.core.arch.ArchTarget`, while
+the destination runtime determines code-object loading and compatibility.
 """
 
 from __future__ import annotations
@@ -17,8 +16,8 @@ from .hip_module import _get_device_asic_revision, get_device_target_id
 
 
 @dataclass(frozen=True)
-class RuntimeDeviceInfo:
-    """Runtime identity for one HIP device.
+class DeviceInfo:
+    """Identity reported by HIP for one device.
 
     ``target_id`` preserves the complete runtime/compiler target string,
     including profiles and feature suffixes such as
@@ -28,8 +27,7 @@ class RuntimeDeviceInfo:
     :class:`~rocke.core.arch.ArchTarget` lookup. It intentionally omits target
     profiles and feature suffixes.
 
-    ``asic_revision`` is the runtime-reported revision. It carries no
-    instruction-support or artifact-compatibility guarantee.
+    ``asic_revision`` is the revision value reported by HIP.
     """
 
     target_id: str | None
@@ -37,15 +35,14 @@ class RuntimeDeviceInfo:
     asic_revision: int | None
 
 
-def get_device_info(device: int = 0) -> RuntimeDeviceInfo:
+def get_device_info(device: int = 0) -> DeviceInfo:
     """Query identity properties for one HIP device.
 
-    Unknown properties remain ``None``. In particular, an unknown property is
-    not interpreted as lack of instruction or artifact compatibility.
+    Properties that HIP cannot report remain ``None``.
     """
 
     target_id = get_device_target_id(device)
-    return RuntimeDeviceInfo(
+    return DeviceInfo(
         target_id=target_id,
         base_arch=(
             base_arch_from_target_id(target_id) if target_id is not None else None
@@ -54,4 +51,4 @@ def get_device_info(device: int = 0) -> RuntimeDeviceInfo:
     )
 
 
-__all__ = ["RuntimeDeviceInfo", "get_device_info"]
+__all__ = ["DeviceInfo", "get_device_info"]

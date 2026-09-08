@@ -33,8 +33,8 @@ edge:
                       `HIP_LAUNCH_PARAM_BUFFER_POINTER` arg-buffer
                       lifetime race.
 
-  - ``device_info``  : reports exact and normalized HIP device identity
-                      without instruction or artifact-compatibility policy.
+  - ``device_info``  : reports exact and normalized HIP device identity for
+                      target selection and diagnostics.
 
   - ``packing``     : torch-agnostic kernel-arg packing (`pack_args`,
                       `pack_args_kernelparams`) for the AMDGPU kernarg
@@ -87,7 +87,7 @@ When to drop to the lower-level APIs:
 from __future__ import annotations
 
 from .comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
-from .device_info import RuntimeDeviceInfo, get_device_info
+from .device_info import DeviceInfo, get_device_info
 from .hip_module import HipError, Runtime
 from .launcher import (
     DeviceMem,
@@ -113,6 +113,7 @@ from .torch_interop import (
 __all__ = [
     "ComgrError",
     "ComgrTimings",
+    "DeviceInfo",
     "DeviceMem",
     "HipError",
     "KernelLauncher",
@@ -120,7 +121,6 @@ __all__ = [
     "LaunchSummary",
     "PipelineLauncher",
     "Runtime",
-    "RuntimeDeviceInfo",
     "TorchLaunchSummary",
     "WorkspacePool",
     "build_hsaco_from_llvm_ir",
