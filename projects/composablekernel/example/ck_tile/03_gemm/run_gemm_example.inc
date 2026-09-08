@@ -353,8 +353,6 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     c_m_n_dev_buf.SetZero();
     c_m_n_dev_result.SetZero();
 
-#if defined(CK_USE_GFX1250)
-
     constexpr bool APacksK = std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>;
     constexpr bool BPacksN = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
     constexpr bool CPacksN = std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>;
@@ -371,10 +369,6 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
         ck_tile::numeric_traits<ADataTypeBuf>::PackedSize == 1 &&
         ck_tile::numeric_traits<BDataTypeBuf>::PackedSize == 1 &&
         ck_tile::numeric_traits<CDataType>::PackedSize == 1;
-#else
-    constexpr bool k_pad_fallback_eligible  = false;
-    constexpr bool mn_pad_fallback_eligible = false;
-#endif
 
     constexpr ck_tile::index_t ABVectorSize = 16 / sizeof(ADataTypeBuf);
     constexpr ck_tile::index_t CVectorSize  = 16 / sizeof(CDataType);
@@ -382,7 +376,8 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     const bool needsScalarAB =
         k_pad_fallback_eligible && (((APacksK ? K : M) % ABVectorSize != 0) ||
                                     ((BPacksN ? N : K) % ABVectorSize != 0));
-    const bool needsScalarC = mn_pad_fallback_eligible && ((CPacksN ? N : M) < CVectorSize);
+    const bool needsScalarC =
+        mn_pad_fallback_eligible && ((CPacksN ? N : M) % CVectorSize != 0);
 
     auto invoke = [&](auto cfg_tag) {
         using Cfg = typename decltype(cfg_tag)::type;
