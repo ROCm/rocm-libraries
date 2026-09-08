@@ -174,7 +174,7 @@ if(NOT USE_CUDA)
   endif( )
 
 else( )
-  target_link_libraries( hipblas-test PRIVATE CUDA::cublas )
+  target_link_libraries( hipblas-test PRIVATE hip::host CUDA::cudart )
 endif( )
 
 if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
