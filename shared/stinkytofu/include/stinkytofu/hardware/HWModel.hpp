@@ -100,6 +100,10 @@ struct HWModel {
         int csmaccVaVdst;
         /// Same-class reads after a read that satisfy its vm_vsrc wait.
         int vmVsrc;
+        /// Reads in the *other* order FIFO that satisfy the vm_vsrc wait of an op
+        /// occupying both. Gates rewriting an op into its both-FIFO form to earn that
+        /// second source of followers. 0 when the arch has no such form.
+        int vmVsrcBridge;
     };
 
     Lds lds;

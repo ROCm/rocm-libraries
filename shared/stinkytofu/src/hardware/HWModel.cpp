@@ -57,6 +57,7 @@ constexpr HWModel kGfx1250Model = {
             .xdlVaVdst = 12,
             .csmaccVaVdst = 13,
             .vmVsrc = 11,
+            .vmVsrcBridge = 11,
         },
 };
 

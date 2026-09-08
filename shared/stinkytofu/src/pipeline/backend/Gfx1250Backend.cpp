@@ -52,6 +52,7 @@
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
+#include "stinkytofu/transforms/asm/PrefetchBridgeSubstitutionPass.hpp"
 #include "stinkytofu/transforms/asm/RegionClonePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
@@ -271,6 +272,9 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
     // Whole-kernel expert SCHED_MODE=2: wait-alu insertion + mode2 enable.
     if (moduleOptions.EnableESM2) {
+        // Must be the last pass to rewrite or move instructions before the wait pass: it
+        // measures distances that pass then relies on.
+        mpm.addPass(createFunctionToModuleAdaptor(createPrefetchBridgeSubstitutionPass()));
         mpm.addPass(createInsertWaitAluModulePass(moduleOptions.EnableESM2TrackValuVsrc));
     }
 
