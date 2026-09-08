@@ -299,4 +299,137 @@ INSTANTIATE(int64_t, float);
 INSTANTIATE(int64_t, double);
 INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
-void testing_dense_to_sparse_bell_extra(const Arguments& arg) {}
+
+void testing_dense_to_sparse_bell_extra_687(const Arguments& arg)
+{
+    if(!arg.unit_check)
+    {
+        return;
+    }
+
+    using I = int32_t;
+    using T = float;
+
+    int             device;
+    hipDeviceProp_t prop;
+    CHECK_HIP_ERROR(hipGetDevice(&device));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, device));
+
+    // One thread block converts one block-row, so a block size of one makes the number of
+    // block-rows exceed the maximum grid dimension by exactly one block-row. The single
+    // trailing block-row is only reached if the grid is clamped and the kernels stride.
+    const int64_t ell_block_size = 1;
+    const int64_t m              = static_cast<int64_t>(prop.maxGridSize[0]) + 1;
+    const int64_t n              = 1;
+    const int64_t ld             = m;
+
+    const int64_t mb = (m - 1) / ell_block_size + 1;
+    const int64_t nb = (n - 1) / ell_block_size + 1;
+
+    const rocsparse_index_base          base  = rocsparse_index_base_one;
+    const rocsparse_order               order = rocsparse_order_column;
+    const rocsparse_dense_to_sparse_alg alg   = rocsparse_dense_to_sparse_alg_default;
+
+    const rocsparse_indextype itype = get_indextype<I>();
+    const rocsparse_datatype  ttype = get_datatype<T>();
+
+    rocsparse_local_handle handle;
+
+    // The dense matrix is zero everywhere but in its very last row, so that the converted
+    // blocked ELL matrix has a single occupied slot and that slot sits in the trailing
+    // block-row that an unclamped or non-striding grid does not reach.
+    const T h_last_val = static_cast<T>(3);
+
+    device_vector<T> d_dense_val(ld * n);
+    CHECK_HIP_ERROR(hipMemset(d_dense_val, 0, sizeof(T) * ld * n));
+    CHECK_HIP_ERROR(
+        hipMemcpy(d_dense_val.data() + (m - 1), &h_last_val, sizeof(T), hipMemcpyHostToDevice));
+
+    rocsparse_local_dnmat mat_dense(m, n, ld, d_dense_val, ttype, order);
+
+    rocsparse_local_spmat mat_sparse(mb * ell_block_size,
+                                     nb * ell_block_size,
+                                     rocsparse_direction_row,
+                                     ell_block_size,
+                                     0,
+                                     nullptr,
+                                     nullptr,
+                                     itype,
+                                     base,
+                                     ttype);
+
+    size_t buffer_size;
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_dense_to_sparse(handle, mat_dense, mat_sparse, alg, &buffer_size, nullptr));
+
+    device_vector<int64_t> d_temp_buffer(buffer_size / sizeof(int64_t));
+
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_dense_to_sparse(handle, mat_dense, mat_sparse, alg, nullptr, d_temp_buffer));
+
+    int64_t              rows_tmp;
+    int64_t              cols_tmp;
+    int64_t              ell_block_dim_tmp;
+    int64_t              ell_cols;
+    rocsparse_direction  ell_block_dir_tmp;
+    rocsparse_indextype  itype_tmp;
+    rocsparse_index_base base_tmp;
+    rocsparse_datatype   ttype_tmp;
+    void*                ell_col_ind_tmp;
+    void*                ell_val_tmp;
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_bell_get(mat_sparse,
+                                             &rows_tmp,
+                                             &cols_tmp,
+                                             &ell_block_dir_tmp,
+                                             &ell_block_dim_tmp,
+                                             &ell_cols,
+                                             &ell_col_ind_tmp,
+                                             &ell_val_tmp,
+                                             &itype_tmp,
+                                             &base_tmp,
+                                             &ttype_tmp));
+
+    unit_check_scalar<int64_t>(ell_cols, ell_block_size);
+
+    const int64_t ell_block_width = ell_cols / ell_block_size;
+
+    device_vector<I> d_bell_col_ind(mb * ell_block_width);
+    device_vector<T> d_bell_val(m * ell_cols);
+
+    // Poison the column indices so that a block-row the fill kernel never visits cannot be
+    // mistaken for either an occupied or a padded slot.
+    CHECK_HIP_ERROR(hipMemset(d_bell_col_ind, 0xff, sizeof(I) * mb * ell_block_width));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_bell_set_pointers(mat_sparse, d_bell_col_ind, d_bell_val));
+
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_dense_to_sparse(handle, mat_dense, mat_sparse, alg, &buffer_size, d_temp_buffer));
+
+    I h_col_ind[2];
+    T h_val[2];
+
+    // Leading block-row: empty, so its single slot is padded and its value is zero.
+    CHECK_HIP_ERROR(
+        hipMemcpy(&h_col_ind[0], d_bell_col_ind.data(), sizeof(I), hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(hipMemcpy(&h_val[0], d_bell_val.data(), sizeof(T), hipMemcpyDeviceToHost));
+
+    // Trailing block-row: holds the only non-zero of the matrix in block-column zero.
+    CHECK_HIP_ERROR(hipMemcpy(&h_col_ind[1],
+                              d_bell_col_ind.data() + (mb - 1) * ell_block_width,
+                              sizeof(I),
+                              hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(hipMemcpy(
+        &h_val[1], d_bell_val.data() + (m - 1) * ell_cols, sizeof(T), hipMemcpyDeviceToHost));
+
+    unit_check_scalar<I>(h_col_ind[0], static_cast<I>(base) - 1);
+    unit_check_scalar<T>(h_val[0], static_cast<T>(0));
+
+    unit_check_scalar<I>(h_col_ind[1], static_cast<I>(base));
+    unit_check_scalar<T>(h_val[1], h_last_val);
+}
+
+void testing_dense_to_sparse_bell_extra(const Arguments& arg)
+{
+    testing_dense_to_sparse_bell_extra_687(arg);
+}
