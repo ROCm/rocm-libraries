@@ -55,26 +55,18 @@ the boundary instead of passing an untracked pointer beside separate type and
 stride metadata.
 
 `broadcastTo()` creates a shallow zero-stride view using NumPy's trailing-axis
-broadcasting rules. Operations that support broadcasting, such as
-`linearCombination`, therefore consume ordinary tensors without separate
-axis or replication descriptors.
+broadcasting rules. Elementwise `add` and `multiply` therefore consume ordinary
+tensors without separate axis or replication descriptors.
 
 `ScalarType` includes ordinary integer, floating-point, and complex types as
 well as the packed FP4, FP6, and Int4 encodings and the scale formats used by
 MX. Strides are measured in logical elements even when several encoded values
 share one byte.
 
-`Scalar` represents one runtime-typed numerical value, primarily an operation
-coefficient such as alpha or beta. It is deliberately distinct from a rank-zero
-`Tensor`: it has ordinary value semantics, stores its encoding inline, and has
-no shape, layout, aliasing, or shared-lifetime behavior. A sub-byte scalar still
-occupies a private whole-byte slot; only the format's defined low bits belong to
-the value. This distinction is about semantics and API clarity rather than a
-measured performance requirement, and mirrors the distinction between a NumPy
-scalar and a zero-dimensional `ndarray`. Operation coefficients accept native
-numbers directly; `Tensor::item()` snapshots a zero-dimensional tensor when a
-tensor-backed scalar is more convenient, and `Tensor::item<T>()` returns a
-chosen native C++ type directly.
+Rank-zero tensors represent runtime-typed numerical values without a parallel
+scalar container. Operations also accept ordinary native C++ numbers where that
+is convenient; they are converted to a rank-zero tensor of the other operand's
+type. `Tensor::item<T>()` returns a rank-zero value as a chosen native C++ type.
 
 ## Deterministic generation
 
@@ -120,13 +112,56 @@ it is the equivalent of sampling from a finite list, like NumPy's
 mapping, or coordinate-based sign pattern without introducing mutable global
 generator state.
 
+## C++ tutorial
+
+The complete, compiled version of this walkthrough is
+[`examples/tutorial.cpp`](examples/tutorial.cpp).
+
+Create tensors from native values, multiply them, and compose the result with
+ordinary broadcast operations:
+
+```cpp
+#include <array>
+#include <roc/host_numerics/gemm.hpp>
+#include <roc/host_numerics/tensor_operations.hpp>
+
+using namespace roc::host_numerics;
+
+const std::array<float, 6> aValues{1, 2, 3, 4, 5, 6};
+const std::array<float, 6> bValues{7, 8, 9, 10, 11, 12};
+Tensor a = Tensor::copyNativeValues<float>(Shape{2, 3}, aValues);
+Tensor b = Tensor::copyNativeValues<float>(Shape{3, 2}, bValues);
+
+Tensor product = matmul(a, b, ScalarType::Float32);
+Tensor bias = Tensor::copyNativeValues<float>(
+    Shape{2}, std::array<float, 2>{-100.0f, 1.0f});
+Tensor result = relu(add(multiply(product, 0.5f), bias));
+```
+
+The last dimension of `bias` broadcasts over the columns. Native `0.5f` is
+treated like a NumPy scalar. A rank-zero tensor can be supplied instead when
+its encoded type matters.
+
+Generation is similarly tensor-first:
+
+```cpp
+GenerationRecipe recipe = GenerationRecipe::realOnly(
+    GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}),
+    {.seed = 17});
+Tensor random = generate(ScalarType::Float32, Shape{2, 2}, recipe);
+```
+
+Products needing a particular destination layout or a sparse validation
+selection use the corresponding `...Into` operation. The ordinary forms own
+and return their outputs.
+
 ## Reference operations
 
-The component provides CPU references for GEMM, GEMM epilogues, linear tensor
-combinations, softmax, LayerNorm, reductions, and structured sparsity. Storage,
-compute, accumulator, and result types stay explicit because the purpose is to
-model low-precision behavior rather than silently promote every calculation to
-the host's preferred type.
+The component provides CPU references for matrix multiplication, elementwise
+tensor arithmetic and activations, product epilogues, softmax, LayerNorm,
+reductions, and structured sparsity. Storage, compute, accumulator, and result
+types stay explicit because the purpose is to model low-precision behavior
+rather than silently promote every calculation to the host's preferred type.
 
 Operations have two forms. The ordinary form accepts tensors and options, then
 allocates and returns its output tensors. An `...Into` form accepts
@@ -134,32 +169,30 @@ caller-owned destinations when a product needs a particular layout, wants
 in-place operation where it is valid, or needs only selected outputs. Product
 adapters translate raw pointers and enums before calling either form.
 
-Zero-length dimensions are valid. A GEMM with zero M or N does no work, while
-zero K skips A and B and still applies the requested C and epilogue terms.
-Product adapters likewise preserve a zero batch count as empty work.
+Zero-length dimensions are valid. A matrix multiplication with zero M or N
+does no work, while zero K produces the additive-identity product. Product
+adapters compose any C or epilogue terms afterward and preserve a zero batch
+count as empty work.
 
-`linearCombination` implements `alpha * x + beta * y` with NumPy-style input
-broadcasting for the hipBLASLt matrix-transform reference while sharing the
-component's conversion, layout, ownership, and aliasing rules. It is a small
-operation rather than a parallel tensor-algebra framework.
+`add`, `multiply`, and named activations such as `relu`, `gelu`, and `clip`
+follow NumPy-style trailing-dimension broadcasting. Product adapters express
+`alpha * product + beta * c` by composing those operations; it is not encoded
+as a special GEMM request.
 
-Reference GEMM supports ordinary and complex arithmetic, explicit
-low-precision input quantization and accumulation behavior, scaling, bias,
-activation, block scales, and selected-output validation. A built-in blocked
-CPU implementation accelerates common cases, and an optional CBLAS backend can
-accelerate compatible dense problems. Backend choice changes execution, not the
-numerical request. Bias and non-block scale tensors use the same trailing-axis
-broadcasting rules as ordinary tensor operations; callers express row factors
-with shape `[M, 1]` and column factors with `[N]` or `[1, N]`.
+`matmul` supports ordinary and complex arithmetic, explicit low-precision input
+quantization and accumulation behavior, block scales, and selected outputs. A
+built-in blocked CPU implementation accelerates common cases, and an optional
+CBLAS backend can accelerate compatible dense problems. Backend choice changes
+execution, not the numerical request. Scales, bias, activation, and output
+conversion are separate tensor or epilogue operations.
 
 ## Numerical comparison
 
 Comparison consumes two tensors and a policy, then returns structured evidence
 rather than printing or depending on a test framework. Policies cover exact,
-absolute, relative, symmetric-relative, and ULP comparisons; NaN, infinity,
-and signed-zero behavior; norms; selected logical elements; and unwritten
-sentinel regions. Product code decides how to render the result and attach its
-own problem context.
+absolute, relative, and ULP comparisons; NaN and infinity behavior; norms;
+selected logical elements; and unwritten sentinel regions. Product code decides
+how to render the result and attach its own problem context.
 
 Default relative and absolute tolerances follow the component's documented
 type policy, while explicit tolerances use NumPy's `allclose` relationship:
@@ -200,23 +233,19 @@ import roc_host_numerics as hv
 
 a_np = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
 b_np = np.asarray([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
-c_np = np.zeros((2, 2), dtype=np.float32)
-
 a = hv.from_numpy(a_np)
 b = hv.from_numpy(b_np)
-c = hv.from_numpy(c_np)
-d = hv.reference_gemm(
-    a,
-    b,
-    c,
+product = hv.matmul(
+    a, b,
     output_type=hv.ScalarType.Float32,
     accumulator_type=hv.ScalarType.Float32,
 )
-d_np = hv.to_numpy(d)
+result = hv.relu(hv.add(hv.multiply(product, 0.5), 1.0))
+result_np = hv.to_numpy(result)
 ```
 
-Both Python GEMM forms take tensors and ordinary keyword arguments directly;
-there is no public request, operand, or options wrapper to construct.
+Python operations take tensors and ordinary keyword arguments directly; there
+is no public request, operand, scalar, or result wrapper to construct.
 
 `from_numpy` creates an owning tensor and `to_numpy` returns an owning decoded
 array. Packed and custom encodings remain packed in `Tensor.storage`; their
@@ -231,7 +260,7 @@ find_package(ROCHostNumerics CONFIG REQUIRED)
 target_link_libraries(my_target PRIVATE roc::host-numerics)
 ```
 
-`roc::host-numerics-core` contains only the tensor and scalar model.
+`roc::host-numerics-core` contains the tensor and scalar-type model.
 `roc::host-numerics` adds generation, reference operations, and comparison.
 `roc::host-numerics-blas` adds the optional CBLAS GEMM backend, and
 `roc::host-numerics-amd-gpu-layout` provides the independent CPU transforms for

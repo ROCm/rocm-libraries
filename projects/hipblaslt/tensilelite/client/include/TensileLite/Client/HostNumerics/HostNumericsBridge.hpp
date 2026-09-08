@@ -6,6 +6,7 @@
 // TensileLite client-private adapter.
 
 #include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/epilogue.hpp>
 #include <roc/host_numerics/operation_types.hpp>
 #include <roc/host_numerics/tensor.hpp>
 
@@ -108,41 +109,45 @@ namespace TensileLite::Client
         }
     }
 
-    inline roc::host_numerics::Activation
+    inline roc::host_numerics::ActivationFunction
         toHostNumericsActivation(ActivationType activation, bool gradientApplication = false)
     {
         switch(activation)
         {
         case ActivationType::None:
-            return roc::host_numerics::Activation::None;
+            return roc::host_numerics::IdentityActivation{};
         case ActivationType::Abs:
-            return roc::host_numerics::Activation::Absolute;
+            return roc::host_numerics::AbsoluteActivation{};
         case ActivationType::Clippedrelu:
-            return roc::host_numerics::Activation::ClippedRelu;
+            return roc::host_numerics::ClippedReluActivation{};
         case ActivationType::Relu:
-            return roc::host_numerics::Activation::Relu;
+            return roc::host_numerics::ReluActivation{};
         case ActivationType::Gelu:
-            return roc::host_numerics::Activation::Gelu;
+            return roc::host_numerics::GeluActivation{};
         case ActivationType::Geluscaling:
-            return roc::host_numerics::Activation::GeluScaling;
+            return roc::host_numerics::GeluScalingActivation{};
         case ActivationType::Leakyrelu:
-            return roc::host_numerics::Activation::LeakyRelu;
+            return roc::host_numerics::LeakyReluActivation{};
         case ActivationType::Sigmoid:
-            return roc::host_numerics::Activation::Sigmoid;
+            return roc::host_numerics::SigmoidActivation{};
         case ActivationType::Tanh:
-            return roc::host_numerics::Activation::Tanh;
+            return roc::host_numerics::TanhActivation{};
         case ActivationType::DGelu:
-            return gradientApplication ? roc::host_numerics::Activation::Gelu
-                                       : roc::host_numerics::Activation::GeluDerivative;
+            return gradientApplication ? roc::host_numerics::ActivationFunction(
+                                             roc::host_numerics::GeluActivation{})
+                                       : roc::host_numerics::ActivationFunction(
+                                             roc::host_numerics::GeluDerivativeActivation{});
         case ActivationType::DRelu:
-            return gradientApplication ? roc::host_numerics::Activation::Relu
-                                       : roc::host_numerics::Activation::ReluDerivative;
+            return gradientApplication ? roc::host_numerics::ActivationFunction(
+                                             roc::host_numerics::ReluActivation{})
+                                       : roc::host_numerics::ActivationFunction(
+                                             roc::host_numerics::ReluDerivativeActivation{});
         case ActivationType::Silu:
-            return roc::host_numerics::Activation::Silu;
+            return roc::host_numerics::SiluActivation{};
         case ActivationType::Swish:
-            return roc::host_numerics::Activation::Swish;
+            return roc::host_numerics::SwishActivation{};
         case ActivationType::Clamp:
-            return roc::host_numerics::Activation::Clamp;
+            return roc::host_numerics::ClampActivation{};
         default:
             throw std::invalid_argument("Activation has no runtime host-numerics mapping.");
         }

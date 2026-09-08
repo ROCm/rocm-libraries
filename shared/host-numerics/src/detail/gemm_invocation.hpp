@@ -9,6 +9,36 @@
 #include <utility>
 
 namespace roc::host_numerics::detail {
+// Internal fused form retained for the implementation and exact compatibility
+// tests. Public callers compose matmul with tensor and epilogue operations.
+struct GemmOptions : MatmulOptions {
+    explicit GemmOptions(ScalarType accumulator = ScalarType::Float32)
+        : MatmulOptions(accumulator),
+          alpha(Tensor::scalar(accumulator, 1)),
+          beta(Tensor::scalar(accumulator, 0)),
+          scaleC(Tensor::scalar(accumulator, 1)),
+          outputScale(Tensor::scalar(accumulator, 1)),
+          activationParameter0(Tensor::scalar(accumulator, 0)),
+          activationParameter1(Tensor::scalar(accumulator, 0)) {}
+
+    explicit GemmOptions(const MatmulOptions& options) : GemmOptions(options.accumulatorType) {
+        static_cast<MatmulOptions&>(*this) = options;
+    }
+
+    Tensor alpha;
+    Tensor beta;
+    Tensor scaleC;
+    std::optional<Tensor> bias;
+    std::optional<Tensor> scaleAlpha;
+    std::optional<Tensor> scaleA;
+    std::optional<Tensor> scaleB;
+    Tensor outputScale;
+    OutputConversion outputConversion = OutputConversion::Default;
+    Activation activation = Activation::None;
+    Tensor activationParameter0;
+    Tensor activationParameter1;
+};
+
 struct GemmSupportInfo {
     bool supported = false;
     std::string reason;
@@ -42,7 +72,7 @@ struct GemmSpecification : GemmOptions {
 };
 
 // Private bound execution state shared by the built-in and optional BLAS
-// implementations. Public callers use referenceGemm() or referenceGemmInto().
+// implementations. Public callers use matmul() or matmulInto().
 struct GemmInvocation : GemmSpecification {
     GemmInvocation(Tensor aTensor, Tensor bTensor, Tensor cTensor, Tensor dTensor,
                    ScalarType accumulator)
@@ -82,4 +112,5 @@ namespace roc::host_numerics {
 using GemmSpecification = detail::GemmSpecification;
 using GemmInvocation = detail::GemmInvocation;
 using GemmExecutionInfo = detail::GemmExecutionInfo;
+using GemmOptions = detail::GemmOptions;
 }  // namespace roc::host_numerics

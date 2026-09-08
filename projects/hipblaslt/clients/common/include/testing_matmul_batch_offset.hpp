@@ -277,11 +277,15 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                                                     + cPlan.logicalStart(),
                                                 cPlan.matrixElements,
                                                 Layout(Shape{size_t(M), size_t(N)}, {1, ldc}));
-        GemmOptions options(scalarType<Tc>());
-        options.alpha = static_cast<double>(alpha);
-        options.beta  = static_cast<double>(beta);
+        const ScalarType computeType = scalarType<Tc>();
+        Tensor product = roc::host_numerics::matmul(
+            std::move(a), std::move(b), computeType, MatmulOptions(computeType));
+        Tensor scaledProduct = multiply(
+            std::move(product), Tensor::scalar(computeType, alpha), computeType, computeType);
+        Tensor scaledC
+            = multiply(std::move(c), Tensor::scalar(computeType, beta), computeType, computeType);
         result.copyLogicalElementsFrom(
-            referenceGemm(std::move(a), std::move(b), std::move(c), result.type(), options));
+            add(std::move(scaledProduct), std::move(scaledC), computeType, computeType));
         copyTensorEncodedBackingStorageToBuffer(
             expectedD.data() + batch * dPlan.matrixElements, dPlan.matrixElements, result);
     }

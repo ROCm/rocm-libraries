@@ -205,6 +205,139 @@ def _gemm_options(
     return options
 
 
+def _matmul_options(
+    accumulator_type,
+    compute_type_a,
+    compute_type_b,
+    math_mode,
+    output_selection,
+    block_scale_a,
+    block_scale_b,
+    block_size_a,
+    block_size_b,
+    pre_quantization_scales_a,
+    pre_quantization_scales_b,
+    accumulation_rounding,
+    conjugate_a,
+    conjugate_b,
+):
+    if block_scale_a is not None and block_size_a == 0:
+        raise ValueError("Python matmul A block scale requires a nonzero size.")
+    if block_scale_a is None and block_size_a != 0:
+        raise ValueError("Python matmul A block size requires a scale tensor.")
+    if block_scale_b is not None and block_size_b == 0:
+        raise ValueError("Python matmul B block scale requires a nonzero size.")
+    if block_scale_b is None and block_size_b != 0:
+        raise ValueError("Python matmul B block size requires a scale tensor.")
+
+    options = _native._MatmulOptions(accumulator_type)
+    options.accumulation_rounding = accumulation_rounding
+    options.math_mode = math_mode
+    options.compute_type_a = compute_type_a
+    options.compute_type_b = compute_type_b
+    options.pre_quantization_scales_a = _pre_quantization_scales(
+        pre_quantization_scales_a, 1
+    )
+    options.pre_quantization_scales_b = _pre_quantization_scales(
+        pre_quantization_scales_b, 0
+    )
+    options.block_scale_a = block_scale_a
+    options.block_scale_b = block_scale_b
+    options.block_size_a = block_size_a
+    options.block_size_b = block_size_b
+    options.conjugate_a = conjugate_a
+    options.conjugate_b = conjugate_b
+    options.output_selection = (
+        OutputSelection.all()  # noqa: F405
+        if output_selection is None
+        else output_selection
+    )
+    return options
+
+
+def matmul(
+    a,
+    b,
+    output_type=ScalarType.Float32,  # noqa: F405
+    accumulator_type=ScalarType.Float32,  # noqa: F405
+    *,
+    compute_type_a=None,
+    compute_type_b=None,
+    math_mode=MathMode.Default,  # noqa: F405
+    output_selection=None,
+    block_scale_a=None,
+    block_scale_b=None,
+    block_size_a=0,
+    block_size_b=0,
+    pre_quantization_scales_a=None,
+    pre_quantization_scales_b=None,
+    accumulation_rounding=AccumulationRounding.TypeDefault,  # noqa: F405
+    conjugate_a=False,
+    conjugate_b=False,
+    output_layout=None,
+):
+    """Return the matrix product of two rank-two tensors."""
+
+    options = _matmul_options(
+        accumulator_type,
+        compute_type_a,
+        compute_type_b,
+        math_mode,
+        output_selection,
+        block_scale_a,
+        block_scale_b,
+        block_size_a,
+        block_size_b,
+        pre_quantization_scales_a,
+        pre_quantization_scales_b,
+        accumulation_rounding,
+        conjugate_a,
+        conjugate_b,
+    )
+    return _native._matmul(a, b, output_type, options, output_layout)
+
+
+def matmul_into(
+    a,
+    b,
+    output,
+    accumulator_type=ScalarType.Float32,  # noqa: F405
+    *,
+    compute_type_a=None,
+    compute_type_b=None,
+    math_mode=MathMode.Default,  # noqa: F405
+    output_selection=None,
+    block_scale_a=None,
+    block_scale_b=None,
+    block_size_a=0,
+    block_size_b=0,
+    pre_quantization_scales_a=None,
+    pre_quantization_scales_b=None,
+    accumulation_rounding=AccumulationRounding.TypeDefault,  # noqa: F405
+    conjugate_a=False,
+    conjugate_b=False,
+):
+    """Write the matrix product of two rank-two tensors into output."""
+
+    options = _matmul_options(
+        accumulator_type,
+        compute_type_a,
+        compute_type_b,
+        math_mode,
+        output_selection,
+        block_scale_a,
+        block_scale_b,
+        block_size_a,
+        block_size_b,
+        pre_quantization_scales_a,
+        pre_quantization_scales_b,
+        accumulation_rounding,
+        conjugate_a,
+        conjugate_b,
+    )
+    return _native._matmul_into(a, b, output, options)
+
+
 def reference_gemm(
     a,
     b,
