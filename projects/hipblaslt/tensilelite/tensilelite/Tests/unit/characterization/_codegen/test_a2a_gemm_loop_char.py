@@ -170,6 +170,14 @@ class TestA2AGemmShardLoop:
             "the back edge lands after endSummation"
         )
 
+    @pytest.mark.parametrize("mat", ["C", "D"])
+    def test_store_srd_accumulation_is_outside_the_shard_loop(self, mat):
+        src = self._src()
+        accum = "s[sgprSrd%s+0], s[sgprSrd%s+0]" % (mat, mat)
+        assert accum in src, "computeStoreSrdStart no longer accumulates into Srd%s" % mat
+        body = src[src.index("label_A2AShardLoopBegin:"):src.rindex("A2AShardLoopBegin")]
+        assert accum not in body, "Srd%s accumulation is inside the shard loop" % mat
+
 
 class TestA2AGemmTransitionPhase:
     """The transition phase sits between the tail loop and the back edge."""
