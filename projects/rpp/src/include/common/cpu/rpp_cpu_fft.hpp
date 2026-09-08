@@ -89,7 +89,7 @@ inline void rpp_fft_build_bitrev(std::vector<Rpp32u>& bitRev, Rpp32s len) {
 inline void rpp_fft_build_twiddles(std::vector<RppFftComplex>& tw, Rpp32s len) {
     tw.resize(len / 2);
     for (Rpp32s k = 0; k < len / 2; k++) {
-        Rpp64f ang = -2.0 * M_PI * (Rpp64f)k / (Rpp64f)len;
+        Rpp64f ang = -2.0 * 3.14159265358979323846 * (Rpp64f)k / (Rpp64f)len;
         tw[k] = RppFftComplex((Rpp32f)std::cos(ang), (Rpp32f)std::sin(ang));
     }
 }
