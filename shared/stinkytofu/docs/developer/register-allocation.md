@@ -902,7 +902,7 @@ It must precede every consumer of physical numbers: `InsertVgprMsbPass`, `Insert
 `RegisterAllocationOptions::report` emits one line per kernel comparing the colouring against the producer's, as a `ShadowReport` analysis remark. `stinkytofu-opt` exposes it as `report` (needs `--remarks`):
 
 ```text
-@kernel: greedy-compact shadow: values=230 v[peak=62 highest=65->65 regionPeak=40 waves=14->14] s[peak=5 highest=69->69] rule[SmemSelfOverlapUnderXnackReplay=active] rule[ScalarTupleAlignment=active]
+@kernel: greedy-compact shadow: values=230 v[peak=62 highest=65->65 regionPeak=40 waves=14->14] s[peak=5 highest=69->69] rule[SmemSelfOverlapUnderXnackReplay=active] rule[ScalarTupleAlignment=active] rule[VectorTupleAlignment=active]
 ```
 
 `peak` is the pressure floor from the live intervals, `highest` is the high-water mark before and after, `regionPeak` is pressure over `[0, cut)` when `regionEnd` is set, and `waves` is `getWavesPerSimd()` on the VGPR count each implies. Occupancy moves in granule steps, so a lower index need not buy a wave. A region run cannot lower `highest` unless the function peak is inside the region — the pinned tail still contributes. Each declared rule is listed as `rule[<Name>=<status>]` so a report is interpretable without knowing the triple or the caps.
@@ -1113,6 +1113,16 @@ Ungated: it is a property of the instruction encoding, true of every module of t
 `forbidsBase`, and this is the shape the framework was designed around: a fact about which indexes are legal, no instruction, every scalar tuple. `greedy-compact` packs against the lowest free index; a pinned live-in at `s0` would otherwise land a pair on `s[1:2]`. `tests/filecheck/allocation_rule_scalar_alignment.stir` pins the fixed colouring.
 
 The rule constrains a *block's* base. A block wider than any single operand — overlapping tuple runs — could still place an interior operand oddly. Section 14.7 records that; the common case of one operand per block is exact.
+
+#### `VectorTupleAlignment` — placement, `Active` always
+
+A VGPR tuple must start on an even index at every width above one; a single VGPR sits anywhere. The assembler rejects anything else with `vgpr tuples must be 64 bit aligned`.
+
+This is a *different* requirement from the scalar one, which is why it is a separate row rather than another arm of `ScalarTupleAlignment`. Scalars align to their width, vectors to a flat 64 bits, so `v[2:5]` is legal where `s[2:5]` is not, and `ds_load_b96 v[2:4]` is legal at a width the scalar rule would round up to four. Neither predicate can answer for the other.
+
+Ungated, for the same reason as its scalar sibling: it is a property of the instruction encoding. It also wants no Audit stage — the producer's own VGPR tuples assemble today.
+
+The row was added after enabling VGPR lifting, and its absence is worth remembering as a category of bug rather than a one-off. `Gfx1250Backend` lifted SGPRs alone for as long as this table had only scalar rows, so every allocated multi-DWORD range was covered by the one rule that existed. Widening the lift scope to `RegType::V` moved allocation into a class the table said nothing about, and because the verifier reads the same table as the allocator, both agreed there was nothing to check and a `v[3:10]` WMMA destination reached the assembler. See `st_register_allocation.md` issue 1. `tests/filecheck/allocation_rule_vector_alignment.stir` pins the fixed colouring.
 
 ### 14.6. Diagnostics
 

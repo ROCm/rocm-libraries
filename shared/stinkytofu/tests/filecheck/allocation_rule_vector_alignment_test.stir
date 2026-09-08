@@ -1,0 +1,45 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=v --RegisterAllocationPass=allocator=greedy-compact,classes=v,apply --print-output
+#
+# gfx1250's VectorTupleAlignment rule, end to end.
+#
+# The assembler rejects a misaligned VGPR tuple with "vgpr tuples must be 64 bit
+# aligned". Unlike the scalar rule this is flat: every width above one needs an
+# even base and nothing more, so v[2:4] is legal where s[2:5] is not.
+#
+# Compaction is what makes this reachable. v0 and v24 are live-ins, so both are
+# pinned where they arrive, which leaves v1 as the lowest free index. Without
+# this rule greedy-compact takes it and emits
+#
+#     v[1:4] = "st.ds_load_b128"(v24)
+#
+# which will not assemble. The rule removes the odd bases from the search, so
+# each range packs to the lowest *legal* index instead of the lowest one.
+#
+# Every loaded value is consumed before either range dies, so the two ranges
+# cannot share registers and each has to find its own aligned base.
+#
+# CHECK-LABEL: @allocation_rule_vector_alignment
+# CHECK: ^entry:
+#
+# The quad skips v1 and lands even. Width plays no part in how far it skips: it
+# needs v2, not the v4 a scalar quad would need.
+# CHECK-NEXT: v[2:5] = "st.ds_load_b128"(v24)
+#
+# The triple is only even-aligned too, so it takes the next even base.
+# CHECK-NEXT: v[6:8] = "st.ds_load_b96"(v24)
+#
+# CHECK-NOT: v[1:4] = "st.ds_load_b128"
+# CHECK-NOT: %
+
+st.func @allocation_rule_vector_alignment() {
+^entry:
+  v[40:43] = "st.ds_load_b128"(v24)
+  v[44:46] = "st.ds_load_b96"(v24)
+  v5 = "st.v_add_f32"(v40, v41)
+  v6 = "st.v_add_f32"(v42, v43)
+  v7 = "st.v_add_f32"(v44, v45)
+  v8 = "st.v_add_f32"(v46, v0)
+  v9 = "st.v_add_f32"(v5, v6)
+  v10 = "st.v_add_f32"(v7, v8)
+  v11 = "st.v_add_f32"(v9, v10)
+}
