@@ -8,7 +8,7 @@
 #include <vector>
 
 int main() {
-    const roc::host_numerics::Scalar scalar{std::complex<float>{1.5f, -2.0f}};
+    const roc::host_numerics::Tensor scalar{std::complex<float>{1.5f, -2.0f}};
     roc::host_numerics::Tensor tensor(roc::host_numerics::ScalarType::Float32,
                                       roc::host_numerics::Shape{2, 3});
     roc::host_numerics::Tensor mxTensor(roc::host_numerics::ScalarType::Float4E2M1,
@@ -27,7 +27,7 @@ int main() {
     const roc::host_numerics::Shape shape{2, 3};
     const std::array<size_t, 2> coordinates{1, 2};
     return scalar.type() == roc::host_numerics::ScalarType::ComplexFloat32 &&
-                   scalar.as<std::complex<float>>() == std::complex<float>{1.5f, -2.0f} &&
+                   scalar.item<std::complex<float>>() == std::complex<float>{1.5f, -2.0f} &&
                    tensor.shape().elementCount() == 6 &&
                    reshaped.shape() == roc::host_numerics::Shape{3, 2} &&
                    padded.shape() == roc::host_numerics::Shape{3, 4} &&

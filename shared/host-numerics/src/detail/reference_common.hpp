@@ -498,19 +498,21 @@ Accumulator checkedRuntimeScalar(auto value, const char* name) {
 }
 
 template <typename Accumulator>
-Accumulator runtimeScalar(const Scalar& value, const char* name) {
+Accumulator runtimeScalar(const Tensor& value, const char* name) {
+    if (value.shape().rank() != 0)
+        throw std::invalid_argument(std::string("Reference ") + name + " must be rank zero.");
     switch (scalarTypeInfo(value.type()).category) {
         case ScalarCategory::Boolean:
-            return checkedRuntimeScalar<Accumulator>(value.as<bool>(), name);
+            return checkedRuntimeScalar<Accumulator>(value.item<bool>(), name);
         case ScalarCategory::SignedInteger:
-            return checkedRuntimeScalar<Accumulator>(value.as<int64_t>(), name);
+            return checkedRuntimeScalar<Accumulator>(value.item<int64_t>(), name);
         case ScalarCategory::UnsignedInteger:
-            return checkedRuntimeScalar<Accumulator>(value.as<uint64_t>(), name);
+            return checkedRuntimeScalar<Accumulator>(value.item<uint64_t>(), name);
         case ScalarCategory::FloatingPoint:
         case ScalarCategory::Scale:
-            return checkedRuntimeScalar<Accumulator>(value.as<double>(), name);
+            return checkedRuntimeScalar<Accumulator>(value.item<double>(), name);
         case ScalarCategory::Complex:
-            return checkedRuntimeScalar<Accumulator>(value.as<std::complex<double>>(), name);
+            return checkedRuntimeScalar<Accumulator>(value.item<std::complex<double>>(), name);
     }
     throw std::invalid_argument("Invalid runtime scalar type.");
 }

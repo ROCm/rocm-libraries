@@ -90,19 +90,18 @@ nb::list tensorValues(Tensor tensor) {
 }
 
 nb::object tensorItem(const Tensor& tensor) {
-    const Scalar value = tensor.item();
-    switch (scalarTypeInfo(value.type()).category) {
+    switch (scalarTypeInfo(tensor.type()).category) {
         case ScalarCategory::Boolean:
-            return nb::cast(value.as<bool>());
+            return nb::cast(tensor.item<bool>());
         case ScalarCategory::SignedInteger:
-            return nb::cast(value.as<int64_t>());
+            return nb::cast(tensor.item<int64_t>());
         case ScalarCategory::UnsignedInteger:
-            return nb::cast(value.as<uint64_t>());
+            return nb::cast(tensor.item<uint64_t>());
         case ScalarCategory::Complex:
-            return nb::cast(value.as<std::complex<double>>());
+            return nb::cast(tensor.item<std::complex<double>>());
         case ScalarCategory::FloatingPoint:
         case ScalarCategory::Scale:
-            return nb::cast(value.as<double>());
+            return nb::cast(tensor.item<double>());
     }
     throw std::invalid_argument("Tensor item has an invalid scalar type.");
 }
@@ -309,9 +308,13 @@ Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::by
 }  // namespace
 
 namespace roc::host_numerics::python_bindings {
-Scalar scalarFromPython(nb::handle value) {
-    if (nb::isinstance<Tensor>(value)) return nb::cast<Tensor>(value).item();
-    return Scalar(nb::cast<std::complex<double>>(value));
+Tensor scalarFromPython(nb::handle value) {
+    if (nb::isinstance<Tensor>(value)) {
+        Tensor tensor = nb::cast<Tensor>(value);
+        (void)tensor.item<std::complex<double>>();
+        return tensor.deepCopy();
+    }
+    return Tensor(nb::cast<std::complex<double>>(value));
 }
 }  // namespace roc::host_numerics::python_bindings
 

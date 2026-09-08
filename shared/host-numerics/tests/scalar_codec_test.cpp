@@ -25,7 +25,6 @@ using roc::host_numerics::IntegerRounding;
 using roc::host_numerics::isConcreteScalarType;
 using roc::host_numerics::Layout;
 using roc::host_numerics::nativeScalarType;
-using roc::host_numerics::Scalar;
 using roc::host_numerics::ScalarCategory;
 using roc::host_numerics::ScalarConversionOptions;
 using roc::host_numerics::ScalarType;
@@ -245,8 +244,8 @@ void testScalarTypeInfoContract() {
             "Float6 cross-byte metadata contract mismatch.");
 
     requireThrows<std::invalid_argument>(
-        [] { (void)Scalar::zero(ScalarType::Count); },
-        "Runtime scalar construction accepted the Count sentinel.");
+        [] { (void)Tensor::scalar(ScalarType::Count, 0); },
+        "Rank-zero tensor construction accepted the Count sentinel.");
 }
 
 void testExhaustiveBinaryFormat(ScalarType type) {
@@ -551,13 +550,13 @@ void testIntegerCodecPolicies() {
     requireThrows<std::overflow_error>([&] { packedInteger.storeFrom({0}, 8, rejectNearestEven); },
                                        "Packed integer store did not reject overflow.");
 
-    const Scalar zeroImaginary(std::complex<double>{3.5, 0.0});
-    require(zeroImaginary.as<int32_t>(rejectNearestEven) == 4,
-            "Runtime scalar zero-imaginary conversion mismatch.");
-    const Scalar nonzeroImaginary(std::complex<double>{3.5, 1.0});
+    const Tensor zeroImaginary(std::complex<double>{3.5, 0.0});
+    require(zeroImaginary.item<int32_t>(rejectNearestEven) == 4,
+            "Rank-zero tensor zero-imaginary conversion mismatch.");
+    const Tensor nonzeroImaginary(std::complex<double>{3.5, 1.0});
     requireThrows<std::domain_error>(
-        [&] { (void)nonzeroImaginary.as<double>(rejectNearestEven); },
-        "Runtime scalar conversion discarded a nonzero imaginary component.");
+        [&] { (void)nonzeroImaginary.item<double>(rejectNearestEven); },
+        "Rank-zero tensor conversion discarded a nonzero imaginary component.");
 
     Tensor realTensor(ScalarType::Float32, Shape{1});
     realTensor.storeFrom({0}, std::complex<double>{1.25, 0.0}, rejectNearestEven);
@@ -582,28 +581,29 @@ int main() {
     testIntegerCodecPolicies();
 
     const int64_t exactInteger = 9'007'199'254'740'993;
-    const Scalar integerScalar(exactInteger);
+    const Tensor integerScalar(exactInteger);
     require(
-        integerScalar.type() == ScalarType::Int64 && integerScalar.as<int64_t>() == exactInteger,
-        "Runtime scalar did not preserve an integer above 2^53.");
+        integerScalar.type() == ScalarType::Int64 && integerScalar.item<int64_t>() == exactInteger,
+        "Rank-zero tensor did not preserve an integer above 2^53.");
 
     const std::complex<float> complexValue{1.25f, -2.5f};
-    const Scalar complexScalar(complexValue);
+    const Tensor complexScalar(complexValue);
     require(complexScalar.type() == ScalarType::ComplexFloat32 &&
-                complexScalar.as<std::complex<float>>() == complexValue,
-            "Runtime scalar did not preserve a complex native value.");
+                complexScalar.item<std::complex<float>>() == complexValue,
+            "Rank-zero tensor did not preserve a complex native value.");
 
-    // Float6 retains the cross-byte packing coverage while also verifying that
-    // an individual Scalar canonicalizes unused high bits.
+    // Float6 retains the cross-byte packing coverage while a rank-zero tensor
+    // preserves all caller-owned storage bits.
     const std::array<std::byte, 1> float6Storage{std::byte{0xcc}};
-    const Scalar float6Scalar = Scalar::fromStorage(ScalarType::Float6E3M2, float6Storage);
-    require(float6Scalar.as<float>() == 1.0f,
-            "Runtime scalar did not decode a packed Float6 value.");
-    require(std::to_integer<uint8_t>(float6Scalar.rawEncodedBackingStorage()[0]) == 0x0c,
-            "Runtime scalar did not clear packed padding bits.");
-    require(Scalar::zero(ScalarType::Float6E2M3).as<float>() == 0.0f &&
-                Scalar::one(ScalarType::Float6E2M3).as<float>() == 1.0f,
-            "Runtime scalar zero/one construction failed for a packed type.");
+    const Tensor float6Scalar = Tensor::copyEncodedBackingStorage(
+        ScalarType::Float6E3M2, Layout::contiguousLastDimensionFastest(Shape{}), float6Storage);
+    require(float6Scalar.item<float>() == 1.0f,
+            "Rank-zero tensor did not decode a packed Float6 value.");
+    require(std::to_integer<uint8_t>(float6Scalar.rawEncodedBackingStorage()[0]) == 0xcc,
+            "Rank-zero tensor did not preserve packed padding bits.");
+    require(Tensor::scalar(ScalarType::Float6E2M3, 0).item<float>() == 0.0f &&
+                Tensor::scalar(ScalarType::Float6E2M3, 1).item<float>() == 1.0f,
+            "Rank-zero tensor zero/one construction failed for a packed type.");
     require(scalarElementGroupSize(ScalarType::Float32) == 1 &&
                 scalarElementGroupSize(ScalarType::Int4) == 2 &&
                 scalarElementGroupSize(ScalarType::Float6E2M3) == 4,
@@ -611,11 +611,12 @@ int main() {
 
     bool invalidScalarStorageRejected = false;
     try {
-        (void)Scalar::fromStorage(ScalarType::Float6E3M2, std::span<const std::byte>{});
+        (void)Tensor::copyEncodedBackingStorage(
+            ScalarType::Float6E3M2, Layout::contiguousLastDimensionFastest(Shape{}), {});
     } catch (const std::invalid_argument&) {
         invalidScalarStorageRejected = true;
     }
-    require(invalidScalarStorageRejected, "Runtime scalar accepted incorrectly sized storage.");
+    require(invalidScalarStorageRejected, "Rank-zero tensor accepted incorrectly sized storage.");
 
     const std::array<float, 16> fp4Expected{
         0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f,

@@ -130,13 +130,15 @@ namespace hipblaslt::host_numerics
     }
 
     template <typename T>
-    inline ::roc::host_numerics::Scalar encodedScalar(const T& value)
+    inline ::roc::host_numerics::Tensor encodedScalar(const T& value)
     {
-        return ::roc::host_numerics::Scalar::fromStorage(
-            scalarType<T>(), std::as_bytes(std::span<const T>(&value, 1)));
+        return ::roc::host_numerics::Tensor::copyEncodedBackingStorage(
+            scalarType<T>(),
+            ::roc::host_numerics::Layout::contiguousLastDimensionFastest({}),
+            std::as_bytes(std::span<const T>(&value, 1)));
     }
 
-    inline ::roc::host_numerics::Scalar scalarValue(const computeTypeInterface& value,
+    inline ::roc::host_numerics::Tensor scalarValue(const computeTypeInterface& value,
                                                      hipDataType                type)
     {
         switch(type)
@@ -159,9 +161,9 @@ namespace hipblaslt::host_numerics
         }
     }
 
-    inline ::roc::host_numerics::Scalar scalarValue(const void* storage, hipDataType type);
+    inline ::roc::host_numerics::Tensor scalarValue(const void* storage, hipDataType type);
 
-    inline ::roc::host_numerics::Scalar realOnlyScalarValue(const void* storage,
+    inline ::roc::host_numerics::Tensor realOnlyScalarValue(const void* storage,
                                                              hipDataType type)
     {
         if(storage == nullptr)
@@ -179,14 +181,16 @@ namespace hipblaslt::host_numerics
         return scalarValue(storage, type);
     }
 
-    inline ::roc::host_numerics::Scalar scalarValue(const void* storage, hipDataType type)
+    inline ::roc::host_numerics::Tensor scalarValue(const void* storage, hipDataType type)
     {
         if(storage == nullptr)
             throw std::invalid_argument("Cannot read a host-numerics scalar from null storage.");
         const ScalarType scalar = scalarType(type);
         const size_t     bytes  = (scalarTypeInfo(scalar).storageBits + 7U) / 8U;
-        return ::roc::host_numerics::Scalar::fromStorage(
-            scalar, std::span<const std::byte>(static_cast<const std::byte*>(storage), bytes));
+        return ::roc::host_numerics::Tensor::copyEncodedBackingStorage(
+            scalar,
+            ::roc::host_numerics::Layout::contiguousLastDimensionFastest({}),
+            std::span<const std::byte>(static_cast<const std::byte*>(storage), bytes));
     }
 
     inline ScalarType referenceAccumulatorType(hipDataType coefficientType)

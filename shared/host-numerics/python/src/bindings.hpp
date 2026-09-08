@@ -5,10 +5,10 @@
 
 #include <nanobind/nanobind.h>
 
-#include <roc/host_numerics/scalar.hpp>
+#include <roc/host_numerics/tensor.hpp>
 
 namespace roc::host_numerics::python_bindings {
-Scalar scalarFromPython(nanobind::handle value);
+Tensor scalarFromPython(nanobind::handle value);
 
 void registerComparisonBindings(nanobind::module_& module);
 void registerGenerationBindings(nanobind::module_& module);
