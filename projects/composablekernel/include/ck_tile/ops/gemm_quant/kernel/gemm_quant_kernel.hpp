@@ -1739,37 +1739,33 @@ struct QuantGemmMultiDKernel
 
         if(any_large_tensor)
         {
-            if constexpr(IsLargeTensorMOffsettingSupported())
-            {
-                // Large M/N handled by the M base-shift path (RowMajor A/Ds/C); always
-                // supported, so accept without any further runtime check.
-                return true;
-            }
-            else if constexpr(UseLargeTensorGlobalLoad())
-            {
-                // 64-bit global load/store covers a large B, C or D (any layout) and a
-                // large ColumnMajor A.  RowMajor A is kept on the base-shift path, so a
-                // large RowMajor A whose outputs are not all RowMajor cannot be supported.
-                if constexpr(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
-                {
-                    if(is_large_tensor(ALayout{}, kargs.M, kargs.K, kargs.stride_A, ADataType{}))
-                    {
-                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                        {
-                            CK_TILE_ERROR("Large RowMajor A requires RowMajor Ds/C for the M "
-                                          "base-shift path; global load/store cannot cover it!");
-                        }
-                        return false;
-                    }
-                }
-            }
-            else
+            // Two paths can service a large single dimension:
+            //   * M base-shift (RowMajor A/Ds/C): handles large M/N unconditionally.
+            //   * 64-bit global load/store: handles large B/C/D (any layout) and large
+            //     ColumnMajor A.
+            // Reject only the configurations that neither path can cover.
+            if constexpr(!IsLargeTensorMOffsettingSupported() && !UseLargeTensorGlobalLoad())
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
                     CK_TILE_ERROR("Can't support large tensors with the provided layouts!");
                 }
                 return false;
+            }
+            else if constexpr(!IsLargeTensorMOffsettingSupported() && UseLargeTensorGlobalLoad() &&
+                              std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
+            {
+                // A large RowMajor A stays on the M base-shift path (which needs RowMajor
+                // Ds/C, not satisfied here), so global load/store cannot cover it.
+                if(is_large_tensor(ALayout{}, kargs.M, kargs.K, kargs.stride_A, ADataType{}))
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR("Large RowMajor A requires RowMajor Ds/C for the M "
+                                      "base-shift path; global load/store cannot cover it!");
+                    }
+                    return false;
+                }
             }
         }
 
