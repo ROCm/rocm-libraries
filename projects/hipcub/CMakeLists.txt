@@ -125,10 +125,14 @@ endfunction()
 
 check_fetch_method(ROCPRIM_FETCH_METHOD)
 
-# Add hipCUB's CMake modules
-list(APPEND CMAKE_MODULE_PATH 
+# Add project and ROCm-related CMake module paths.
+list(APPEND CMAKE_MODULE_PATH
+  # Shared within monorepo:
   ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+  # ROCm related:
+  $ENV{ROCM_PATH}
+  $ENV{ROCM_PATH}/share
+  $ENV{ROCM_PATH}/lib/cmake
 )
 
 # Set a default build type if none was specified
@@ -140,9 +144,8 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
-# rocm-cmake has to be included early so that it's available to set GPU_TARGETS
-# If hip is included prior to setting that then it defaults to building only for the current architecture
-include(ROCmCMakeBuildToolsDependency)
+# rocm-cmake must be included before processing 'GPU_TARGETS'.
+include(dependencies/rocm-cmake)
 
 # Detect compiler through use of result from 'check_language(...)'
 if(USE_HIPCXX)
@@ -182,47 +185,32 @@ elseif(CMAKE_CUDA_COMPILER)
   set(CMAKE_CUDA_SOURCE_FILE_EXTENSIONS hip;cu)
 endif()
 
+# HIP must be included before checking for 'OFFLOAD_COMPRESS'. This is because
+# adding '--offload-compress' to a CXX target (i.e. non -xhip), causes compiler
+# warnings that may be treated as error, and thus failing detection of certain
+# depedencies in subsequent 'find_package'-calls.
+include(dependencies/hip)
+
+# TODO: this should be moved to toolchain-*.cmake, but this requires a hard
+# depedency of CMake HIP language support due to '--offload-compress' only
+# working with '-xhip'.
+include(flags/offload_compress)
+
+# Find and verify HIP.
+include(cmake/VerifyCompiler.cmake)
+
+# Get dependencies (except rocm-cmake, included earlier)
+include(cmake/Dependencies.cmake)
+
 # Setup the library version
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR hipcub_VERSION_NUMBER "${hipcub_VERSION_MAJOR} * 100000 + ${hipcub_VERSION_MINOR} * 100 + ${hipcub_VERSION_PATCH}")
 math(EXPR HIPCUB_CCCL_VERSION_NUMBER "${HIPCUB_CCCL_VERSION_MAJOR} * 100000 + ${HIPCUB_CCCL_VERSION_MINOR} * 100 + ${HIPCUB_CCCL_VERSION_PATCH}")
 
-# Find and verify HIP.
-include(VerifyCompiler)
-
-# Get dependencies (except rocm-cmake, included earlier)
-include(Dependencies)
 
 if(BUILD_ADDRESS_SANITIZER)
   add_compile_options(-fsanitize=address -shared-libasan)
   add_link_options(-fuse-ld=lld)
-endif()
-
-include(CheckCXXCompilerFlag)
-
-# Function that checks if a HIP compiler function exists.
-function(hip_check_compiler_flag _flag _var)
-  if(USE_HIPCXX)
-    cmake_check_compiler_flag(HIP "${_flag}" ${_var})
-  else()
-    check_cxx_compiler_flag("-xhip ${_flag}" ${_var})
-  endif()
-endfunction(hip_check_compiler_flag)
-
-# Enable offload compress.
-if(BUILD_OFFLOAD_COMPRESS)
-  # Except on SPIR-V!
-  if ("amdgcnspirv" IN_LIST HIP_ARCHITECTURES)
-    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
-  endif()
-
-  # Detect capability and add flag.
-  hip_check_compiler_flag("--offload-compress" HIP_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-  if(HIP_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    add_compile_options($<$<COMPILE_LANGUAGE:HIP>:--offload-compress>)
-  else()
-    message(WARNING "BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
-  endif()
 endif()
 
 # hipCUB library
