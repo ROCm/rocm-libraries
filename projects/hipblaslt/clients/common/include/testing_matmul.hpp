@@ -27,6 +27,7 @@
 #pragma once
 
 #include "benchmark_timing.hpp"
+#include "device_vector.hpp"
 #include "efficiency_monitor.hpp"
 #include "flops.hpp"
 #include "hipBuffer.hpp"
@@ -52,7 +53,6 @@
 #include <hipblaslt/host_numerics/MatmulValidation.hpp>
 #include <hipblaslt/host_numerics/Reduction.hpp>
 #include <hipblaslt/host_numerics/hipblaslt_init.hpp>
-#include <hipblaslt/host_numerics/hipblaslt_vector.hpp>
 #include <hipblaslt/host_numerics/near.hpp>
 #include <iomanip>
 #include <limits>
@@ -445,7 +445,8 @@ void testing_matmul(const Arguments& arg)
         }
     }
 
-    // FP16 full-matrix accumulator probe (see hipblaslt_init_device fp16_accumulator_probe).
+    // FP16 full-matrix accumulator probe: alternate large products so premature
+    // Float16 accumulation rounding is visible without overflowing the final sum.
     if(arg.initialization == hipblaslt_initialization::fp16_accumulator_probe)
     {
         if(arg.a_type != HIP_R_16F || arg.b_type != HIP_R_16F || arg.c_type != HIP_R_16F
@@ -1110,6 +1111,57 @@ void testing_matmul_with_bias(const Arguments&                                  
               && (arg.initialization == hipblaslt_initialization::hpl
                   || arg.initialization == hipblaslt_initialization::trig_float);
 
+        const uint64_t initializationBaseSeed
+            = arg.initialization == hipblaslt_initialization::norm_dist_one_special
+                  ? hipblaslt::host_numerics::oneSpecialInitializationSeed
+                  : hipblaslt::host_numerics::defaultInitializationSeed;
+        const auto matrixSeed = [&](hipblaslt::host_numerics::MatrixRole role, size_t batch = 0) {
+            constexpr uint64_t matrixRoles = 3;
+            const uint64_t     roleIndex   = [&] {
+                switch(role)
+                {
+                case hipblaslt::host_numerics::MatrixRole::A:
+                    return uint64_t{0};
+                case hipblaslt::host_numerics::MatrixRole::B:
+                    return uint64_t{1};
+                case hipblaslt::host_numerics::MatrixRole::C:
+                    return uint64_t{2};
+                }
+                throw std::invalid_argument("Unsupported hipBLASLt matrix role.");
+            }();
+            const uint64_t batchesPerProblem
+                = static_cast<uint64_t>(std::max(problem.batchCount, 1));
+            const uint64_t sequence
+                = (static_cast<uint64_t>(i) * batchesPerProblem + batch) * matrixRoles + roleIndex;
+            return hipblaslt::host_numerics::initialization::seedForSequence(initializationBaseSeed,
+                                                                             sequence);
+        };
+
+        const auto initializeHostMatrix = [&](HipHostBuffer&                         buffer,
+                                              const hipblaslt::client::MatmulMatrix& matrix,
+                                              hipblaslt::host_numerics::MatrixRole   role,
+                                              bool                                   forceNaN,
+                                              bool   separateBatchStorage,
+                                              size_t batch) {
+            const size_t                     rows    = static_cast<size_t>(matrix.rows());
+            const size_t                     columns = static_cast<size_t>(matrix.columns());
+            const roc::host_numerics::Layout layout
+                = separateBatchStorage ? roc::host_numerics::Layout(
+                                             roc::host_numerics::Shape{rows, columns},
+                                             {matrix.layout.stride(0), matrix.layout.stride(1)})
+                                       : matrix.layout;
+            auto tensor
+                = buffer.tensor(hipblaslt::host_numerics::scalarType(matrix.apiType), layout);
+            std::ranges::fill(tensor.rawEncodedBackingStorage(), std::byte{0});
+            hipblaslt::host_numerics::initializeMatrix(tensor,
+                                                       role,
+                                                       arg.initialization,
+                                                       matrixSeed(role, batch),
+                                                       forceNaN,
+                                                       std::nullopt,
+                                                       positiveOnlyInitialization);
+        };
+
         hipDeviceProp_t mxProp{};
         if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
             CHECK_HIP_ERROR(hipGetDeviceProperties(&mxProp, 0));
@@ -1131,7 +1183,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                   uint64_t                                                 leadingDimension,
                   size_t                                                   blockRows,
                   size_t                                                   blockColumns,
-                  roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayout) {
+                  roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayout,
+                  uint32_t                                                 seed) {
                   if(blockRows == 0 || blockColumns == 0
                      || blockColumns > std::numeric_limits<size_t>::max() / blockRows)
                       throw std::invalid_argument("Invalid hipBLASLt MX scale block dimensions.");
@@ -1143,7 +1196,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                       leadingDimension,
                       blockColumns > 1 ? 1 : 0,
                       blockRows * blockColumns,
-                      arg.initialization);
+                      arg.initialization,
+                      seed);
                   const auto dataStorage = generated.data.rawEncodedBackingStorage();
                   if(dataOutput.size() < dataStorage.size())
                       throw std::invalid_argument("hipBLASLt MX data output is too small.");
@@ -1213,16 +1267,19 @@ void testing_matmul_with_bias(const Arguments&                                  
                 auto dataOutputA = mxBatchOutput(hA[i], b * dataBatchBytesA, dataBatchBytesA);
                 auto scaleOutputA
                     = mxBatchOutput(hScaleA[i], b * scaleBatchBytesA, scaleBatchBytesA);
-                auto batchRef = generateMxBatch(TiA,
-                                                scaleDataType(arg.scaleA),
-                                                dataOutputA,
-                                                scaleOutputA,
-                                                problem.a.rows(),
-                                                problem.a.columns(),
-                                                problem.a.leadingDimension(),
-                                                scaleA_row,
-                                                scaleA_col,
-                                                scaleLayoutA);
+                auto batchRef = generateMxBatch(
+                    TiA,
+                    scaleDataType(arg.scaleA),
+                    dataOutputA,
+                    scaleOutputA,
+                    problem.a.rows(),
+                    problem.a.columns(),
+                    problem.a.leadingDimension(),
+                    scaleA_row,
+                    scaleA_col,
+                    scaleLayoutA,
+                    static_cast<uint32_t>(matrixSeed(hipblaslt::host_numerics::MatrixRole::A,
+                                                     static_cast<size_t>(b))));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -1233,39 +1290,25 @@ void testing_matmul_with_bias(const Arguments&                                  
         {
             if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
             {
-                hipblaslt_init_device(ABC_dims::A,
-                                      arg.initialization,
-                                      alpha_isnan_type(arg, Talpha),
-                                      dA[i].buf(),
-                                      problem.a.rows(),
-                                      problem.a.columns(),
-                                      do_swizzle_a ? problem.a.rows()
-                                                   : problem.a.leadingDimension(),
-                                      TiA,
-                                      do_swizzle_a && problem.a.batchStride() != 0
-                                          ? problem.a.rows() * problem.a.columns()
-                                          : problem.a.batchStride(),
-                                      problem.batchCount,
-                                      positiveOnlyInitialization);
+                initializeHostMatrix(hA[i],
+                                     problem.a,
+                                     hipblaslt::host_numerics::MatrixRole::A,
+                                     alpha_isnan_type(arg, Talpha),
+                                     false,
+                                     0);
             }
             else
             {
                 for(int batchCount = 0; batchCount < problem.batchCount; batchCount++)
                 {
-                    hipblaslt_init_device(ABC_dims::A,
-                                          arg.initialization,
-                                          alpha_isnan_type(arg, Talpha),
-                                          dA[batchCount].buf(),
-                                          problem.a.rows(),
-                                          problem.a.columns(),
-                                          do_swizzle_a ? problem.a.rows()
-                                                       : problem.a.leadingDimension(),
-                                          TiA,
-                                          do_swizzle_a && problem.a.batchStride() != 0
-                                              ? problem.a.rows() * problem.a.columns()
-                                              : problem.a.batchStride(),
-                                          1,
-                                          positiveOnlyInitialization);
+                    initializeHostMatrix(hA[batchCount],
+                                         problem.a,
+                                         hipblaslt::host_numerics::MatrixRole::A,
+                                         alpha_isnan_type(arg, Talpha),
+                                         true,
+                                         static_cast<size_t>(batchCount));
+                    if(!do_swizzle_a)
+                        CHECK_HIP_ERROR(synchronize(dA[batchCount], hA[batchCount], block_count));
                 }
             }
         }
@@ -1317,16 +1360,19 @@ void testing_matmul_with_bias(const Arguments&                                  
                 auto dataOutputB = mxBatchOutput(hB[i], b * dataBatchBytesB, dataBatchBytesB);
                 auto scaleOutputB
                     = mxBatchOutput(hScaleB[i], b * scaleBatchBytesB, scaleBatchBytesB);
-                auto batchRef = generateMxBatch(TiB,
-                                                scaleDataType(arg.scaleB),
-                                                dataOutputB,
-                                                scaleOutputB,
-                                                problem.b.rows(),
-                                                problem.b.columns(),
-                                                problem.b.leadingDimension(),
-                                                scaleB_row,
-                                                scaleB_col,
-                                                scaleLayoutB);
+                auto batchRef = generateMxBatch(
+                    TiB,
+                    scaleDataType(arg.scaleB),
+                    dataOutputB,
+                    scaleOutputB,
+                    problem.b.rows(),
+                    problem.b.columns(),
+                    problem.b.leadingDimension(),
+                    scaleB_row,
+                    scaleB_col,
+                    scaleLayoutB,
+                    static_cast<uint32_t>(matrixSeed(hipblaslt::host_numerics::MatrixRole::B,
+                                                     static_cast<size_t>(b))));
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
@@ -1337,117 +1383,74 @@ void testing_matmul_with_bias(const Arguments&                                  
         {
             if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
             {
-                hipblaslt_init_device(ABC_dims::B,
-                                      arg.initialization,
-                                      alpha_isnan_type(arg, Talpha),
-                                      dB[i].buf(),
-                                      problem.b.rows(),
-                                      problem.b.columns(),
-                                      do_swizzle_b ? problem.b.rows()
-                                                   : problem.b.leadingDimension(),
-                                      TiB,
-                                      do_swizzle_b && problem.b.batchStride() != 0
-                                          ? problem.b.rows() * problem.b.columns()
-                                          : problem.b.batchStride(),
-                                      problem.batchCount,
-                                      positiveOnlyInitialization);
+                initializeHostMatrix(hB[i],
+                                     problem.b,
+                                     hipblaslt::host_numerics::MatrixRole::B,
+                                     alpha_isnan_type(arg, Talpha),
+                                     false,
+                                     0);
             }
             else
             {
                 for(int batchCount = 0; batchCount < problem.batchCount; batchCount++)
                 {
-                    hipblaslt_init_device(ABC_dims::B,
-                                          arg.initialization,
-                                          alpha_isnan_type(arg, Talpha),
-                                          dB[batchCount].buf(),
-                                          problem.b.rows(),
-                                          problem.b.columns(),
-                                          do_swizzle_b ? problem.b.rows()
-                                                       : problem.b.leadingDimension(),
-                                          TiB,
-                                          do_swizzle_b && problem.b.batchStride() != 0
-                                              ? problem.b.rows() * problem.b.columns()
-                                              : problem.b.batchStride(),
-                                          1,
-                                          positiveOnlyInitialization);
+                    initializeHostMatrix(hB[batchCount],
+                                         problem.b,
+                                         hipblaslt::host_numerics::MatrixRole::B,
+                                         alpha_isnan_type(arg, Talpha),
+                                         true,
+                                         static_cast<size_t>(batchCount));
+                    if(!do_swizzle_b)
+                        CHECK_HIP_ERROR(synchronize(dB[batchCount], hB[batchCount], block_count));
                 }
             }
         }
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
-            hipblaslt_init_device(ABC_dims::C,
-                                  arg.initialization,
-                                  beta_isnan_type(arg, Talpha),
-                                  dC[i].buf(),
-                                  problem.m,
-                                  problem.n,
-                                  problem.c.leadingDimension(),
-                                  TiC,
-                                  problem.c.batchStride(),
-                                  problem.batchCount,
-                                  positiveOnlyInitialization);
+            initializeHostMatrix(hC[i],
+                                 problem.c,
+                                 hipblaslt::host_numerics::MatrixRole::C,
+                                 beta_isnan_type(arg, Talpha),
+                                 false,
+                                 0);
+
+            if(!isBlockScaling(arg.scaleA) && !do_swizzle_a)
+                CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count, stream));
+            if(!isBlockScaling(arg.scaleB) && !do_swizzle_b)
+                CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count, stream));
+            CHECK_HIP_ERROR(synchronize(dC[i], hC[i], block_count, stream));
 
             // The MX path already produced reference values and the
             // kernel-ready scale layout for both A and B.
-            // broadcast first block
-            CHECK_HIP_ERROR(broadcast(dA[i], block_count));
-            CHECK_HIP_ERROR(broadcast(dB[i], block_count));
-            CHECK_HIP_ERROR(broadcast(dC[i], block_count));
-
-            if(arg.unit_check || arg.norm_check || arg.allclose_check || do_swizzle_a
-               || do_swizzle_b)
+            if(arg.dump_matrix)
             {
-                CHECK_HIP_ERROR(synchronize(hA[i],
-                                            dA[i],
-                                            problem.batchCount,
-                                            problem.a.rows(),
-                                            problem.a.columns(),
-                                            problem.a.leadingDimension(),
-                                            realDataTypeSize(TiA),
-                                            do_swizzle_a,
-                                            stream));
-                // B is always stored as K×N in memory; use (K, N, ldb) not (B_row, B_col) to avoid row > lda when transB=T
-                CHECK_HIP_ERROR(synchronize(hB[i],
-                                            dB[i],
-                                            problem.batchCount,
-                                            problem.k,
-                                            problem.n,
-                                            problem.b.leadingDimension(),
-                                            realDataTypeSize(TiB),
-                                            do_swizzle_b,
-                                            stream));
-                CHECK_HIP_ERROR(synchronize(hC[i], dC[i], 0, 0, 0, 0, 1, false, stream));
-
-                if(arg.dump_matrix)
+                for(int batchId = 0; batchId < problem.batchCount; batchId++)
                 {
-                    for(int batchId = 0; batchId < problem.batchCount; batchId++)
-                    {
-                        hipblasltDispatchValuesToFile(transA,
-                                                      TiA,
-                                                      problem.m,
-                                                      problem.k,
-                                                      problem.a.leadingDimension(),
-                                                      hA[i].buf(),
-                                                      "batch_" + std::to_string(batchId) + "_"
-                                                          + std::to_string(i) + "_A_input.txt");
-                        hipblasltDispatchValuesToFile(transB,
-                                                      TiB,
-                                                      problem.k,
-                                                      problem.n,
-                                                      problem.b.leadingDimension(),
-                                                      hB[i].buf(),
-                                                      "batch_" + std::to_string(batchId) + "_"
-                                                          + std::to_string(i) + "_B_input.txt");
-                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                      TiC,
-                                                      problem.m,
-                                                      problem.n,
-                                                      problem.c.leadingDimension(),
-                                                      hC[i].buf(),
-                                                      "batch_" + std::to_string(batchId) + "_"
-                                                          + std::to_string(i) + "_C_input.txt");
-                    }
+                    hipblasltDispatchValuesToFile(transA,
+                                                  TiA,
+                                                  problem.m,
+                                                  problem.k,
+                                                  problem.a.leadingDimension(),
+                                                  hA[i].buf(),
+                                                  "batch_" + std::to_string(batchId) + "_"
+                                                      + std::to_string(i) + "_A_input.txt");
+                    hipblasltDispatchValuesToFile(transB,
+                                                  TiB,
+                                                  problem.k,
+                                                  problem.n,
+                                                  problem.b.leadingDimension(),
+                                                  hB[i].buf(),
+                                                  "batch_" + std::to_string(batchId) + "_"
+                                                      + std::to_string(i) + "_B_input.txt");
+                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                  TiC,
+                                                  problem.m,
+                                                  problem.n,
+                                                  problem.c.leadingDimension(),
+                                                  hC[i].buf(),
+                                                  "batch_" + std::to_string(batchId) + "_"
+                                                      + std::to_string(i) + "_C_input.txt");
                 }
             }
 
@@ -1811,43 +1814,13 @@ void testing_matmul_with_bias(const Arguments&                                  
             runtimeProblem.alphaPointer = &(preparedProblem.alpha);
             for(int batchCount = 0; batchCount < problem.batchCount; batchCount++)
             {
-                hipblaslt_init_device(ABC_dims::C,
-                                      arg.initialization,
-                                      beta_isnan_type(arg, Talpha),
-                                      dC[batchCount].buf(),
-                                      problem.m,
-                                      problem.n,
-                                      problem.c.leadingDimension(),
-                                      TiC,
-                                      problem.c.batchStride(),
-                                      1,
-                                      positiveOnlyInitialization);
-                // broadcast first block
-                CHECK_HIP_ERROR(broadcast(dA[batchCount], block_count));
-                CHECK_HIP_ERROR(broadcast(dB[batchCount], block_count));
-                CHECK_HIP_ERROR(broadcast(dC[batchCount], block_count));
-
-                if(arg.unit_check || arg.norm_check || arg.allclose_check || do_swizzle_a
-                   || do_swizzle_b)
-                {
-                    CHECK_HIP_ERROR(synchronize(hA[batchCount],
-                                                dA[batchCount],
-                                                1,
-                                                problem.a.rows(),
-                                                problem.a.columns(),
-                                                problem.a.leadingDimension(),
-                                                realDataTypeSize(TiA),
-                                                do_swizzle_a));
-                    CHECK_HIP_ERROR(synchronize(hB[batchCount],
-                                                dB[batchCount],
-                                                1,
-                                                problem.b.rows(),
-                                                problem.b.columns(),
-                                                problem.b.leadingDimension(),
-                                                realDataTypeSize(TiB),
-                                                do_swizzle_b));
-                    CHECK_HIP_ERROR(synchronize(hC[batchCount], dC[batchCount]));
-                }
+                initializeHostMatrix(hC[batchCount],
+                                     problem.c,
+                                     hipblaslt::host_numerics::MatrixRole::C,
+                                     beta_isnan_type(arg, Talpha),
+                                     true,
+                                     static_cast<size_t>(batchCount));
+                CHECK_HIP_ERROR(synchronize(dC[batchCount], hC[batchCount], block_count));
                 if(arg.dump_matrix)
                 {
                     hipblasltDispatchValuesToFile(transA,

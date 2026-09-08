@@ -10,32 +10,12 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
 
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 
-enum class ABC_dims
-{
-    A,
-    B,
-    C
-};
-
-void hipblaslt_init_device(ABC_dims                 ABC_dims,
-                           hipblaslt_initialization init,
-                           bool                     is_nan,
-                           void*                    A,
-                           size_t                   M,
-                           size_t                   N,
-                           size_t                   lda,
-                           hipDataType              type,
-                           size_t                   stride,
-                           size_t                   batch_count,
-                           bool                     positiveOnly = false,
-                           std::optional<hipblaslt::host_numerics::OneSpecialValue> oneSpecialValue
-                           = std::nullopt);
+struct Arguments;
 
 namespace hipblaslt::host_numerics::detail
 {
