@@ -808,6 +808,36 @@ __host__ __device__ void wthread::detach() {
     return blocksPerMp * static_cast<uint64_t>(multiprocessorCount);
 }
 
+// Derives hardware_concurrency() for a specific device - see the individual helpers above for how
+// the total is bounded. Unlike the public API, this can be [[gnu::const]]: for a fixed device the
+// result doesn't depend on anything else. wthread::hardware_concurrency() is what has to worry
+// about which device is current and about caching per device.
+[[gnu::const]] static __host__ uint32_t getDeviceSpecificHardwareConcurrency(int device) {
+    // multiprocessorCount counts WGPs on RDNA (2 CUs each) but CUs on CDNA, so one setting
+    // means two densities - which is why the default hung on Instinct but not Navi.
+    // getTotalRequestedVcores normalises to CUs so the configured value means the same thing
+    // on both. Even at the right density the device may not hold that many blocks, so
+    // getOccupancyBasedMaxVcores caps against measured occupancy. MAX_VCORES is the hard
+    // bound imposed by currentWorkNode's fixed size, independent of either.
+    const uint64_t requestedTotal = getTotalRequestedVcores(device);
+    const uint64_t occupancyBasedMaxVcores = getOccupancyBasedMaxVcores(device);
+    const uint64_t maxVcores = static_cast<uint64_t>(MAX_VCORES);
+    uint64_t total = ::std::min({requestedTotal, occupancyBasedMaxVcores, maxVcores});
+
+    if (total < requestedTotal) {
+        // Called at most once per device: wthread::hardware_concurrency() only reaches here on a
+        // cache miss.
+        ::std::cerr << "[hipthreads] device " << device << ": requested " << requestedTotal
+                    << " vcores, but the occupancy-based maximum is " << occupancyBasedMaxVcores
+                    << " and MAX_VCORES is " << maxVcores << "; using " << total << ".\n";
+    }
+    if (total == 0) {
+        // Never report zero: callers size loops off this, and the scheduler needs a grid.
+        total = 1;
+    }
+    return static_cast<uint32_t>(total);
+}
+
 // Deliberately not [[gnu::const]]: the result depends on which device is current when the call is
 // made, so the compiler must not treat calls either side of a hipSetDevice as interchangeable.
 __host__ unsigned int wthread::hardware_concurrency() noexcept {
@@ -827,29 +857,7 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
             }
         }
 
-        // multiprocessorCount counts WGPs on RDNA (2 CUs each) but CUs on CDNA, so one setting
-        // means two densities - which is why the default hung on Instinct but not Navi.
-        // getTotalRequestedVcores normalises to CUs so the configured value means the same thing
-        // on both. Even at the right density the device may not hold that many blocks, so
-        // getOccupancyBasedMaxVcores caps against measured occupancy. MAX_VCORES is the hard
-        // bound imposed by currentWorkNode's fixed size, independent of either.
-        const uint64_t requestedTotal = getTotalRequestedVcores(device);
-        const uint64_t occupancyBasedMaxVcores = getOccupancyBasedMaxVcores(device);
-        const uint64_t maxVcores = static_cast<uint64_t>(MAX_VCORES);
-        uint64_t total = ::std::min({requestedTotal, occupancyBasedMaxVcores, maxVcores});
-
-        if (total < requestedTotal) {
-            // Runs at most once per device: this whole function only executes on a cache miss.
-            ::std::cerr << "[hipthreads] device " << device << ": requested " << requestedTotal
-                        << " vcores, but the occupancy-based maximum is " << occupancyBasedMaxVcores
-                        << " and MAX_VCORES is " << maxVcores << "; using " << total << ".\n";
-        }
-        if (total == 0) {
-            // Never report zero: callers size loops off this, and the scheduler needs a grid.
-            total = 1;
-        }
-
-        const uint32_t result = static_cast<uint32_t>(total);
+        const uint32_t result = getDeviceSpecificHardwareConcurrency(device);
 
         if (cacheable) {
             cache[device].store(result, ::std::memory_order_relaxed);
