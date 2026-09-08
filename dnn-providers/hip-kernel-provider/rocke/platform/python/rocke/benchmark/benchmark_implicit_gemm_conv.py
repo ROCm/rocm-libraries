@@ -793,6 +793,19 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--two-stage",
+        default="auto",
+        choices=["auto", "always", "never"],
+        dest="two_stage",
+        help=(
+            "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce): "
+            "auto = enable when C/groups is odd (atomics require even channel count); "
+            "always = force two-stage for all split_k>1 configs; "
+            "never = skip two-stage entirely (default: auto)"
+        ),
+    )
+
+    parser.add_argument(
         "--split-k-prune",
         type=float,
         default=None,
@@ -2231,11 +2244,30 @@ def _run_wgrad_sweep(
     pending.sort(key=lambda r: (r[0][:9], -r[2]))
     n_skipped = len(combos) - len(pending)
 
-    # Two-stage path: build Stage 1 (two_stage=True) + Stage 2 (workspace-reduce)
-    # for all combos where split_k > 1.  Runtime split-K (split_k=0) is atomic,
-    # not two-stage, so _build_wgrad_two_stage_one filters those out.
-    pending_2s = _build_ir_parallel(work, _build_wgrad_two_stage_one, jobs)
-    pending_2s.sort(key=lambda r: (r[0][:8], -r[2]))
+    # Two-stage path: build Stage 1 (two_stage=True) + Stage 2 (workspace-reduce).
+    # Enabled when:
+    #   --two-stage always  → force regardless of C/groups parity
+    #   --two-stage auto    → only when C/groups is odd (atomics require even channel
+    #                         pairing: the packed 16-bit atomic pairs (c, c+1) within
+    #                         one filter position and silently produces wrong results
+    #                         for odd cpg; two-stage is the correct path there)
+    #   --two-stage never   → skip
+    # Runtime split-K (split_k=0) is atomic-only; _build_wgrad_two_stage_one filters
+    # those out regardless.
+    _cpg_is_odd = (p.C // p.groups) % 2 != 0
+    _run_two_stage = args.two_stage == "always" or (
+        args.two_stage == "auto" and _cpg_is_odd
+    )
+    if _run_two_stage:
+        if args.two_stage == "auto":
+            print(
+                f"  C/groups={p.C // p.groups} is odd — enabling two-stage deterministic path.",
+                flush=True,
+            )
+        pending_2s = _build_ir_parallel(work, _build_wgrad_two_stage_one, jobs)
+        pending_2s.sort(key=lambda r: (r[0][:8], -r[2]))
+    else:
+        pending_2s = []
 
     # ---------------------------------------------------------------------------
     # Phase 2 – compile: fan out compile_kernel across processes (or serial).
