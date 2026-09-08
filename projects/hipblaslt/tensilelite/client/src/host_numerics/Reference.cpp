@@ -28,10 +28,10 @@ namespace TensileLite
                                         + failure.reason);
         }
 
-        GemmBackend executeTranslatedGemm(ContractionProblemGemm const& problem,
-                                          ContractionInputs const&      inputs,
-                                          OutputSelection               outputSelection,
-                                          GemmBackend                   backend)
+        void executeTranslatedGemm(ContractionProblemGemm const& problem,
+                                   ContractionInputs const&      inputs,
+                                   OutputSelection               outputSelection,
+                                   GemmBackend                   backend)
         {
             using namespace Client::HostNumerics;
 
@@ -40,52 +40,47 @@ namespace TensileLite
             if(std::holds_alternative<TranslationFailure>(translation))
                 throwTranslationFailure(std::get<TranslationFailure>(translation));
             GemmInvocationAdapter adapter = std::move(std::get<GemmInvocationAdapter>(translation));
-            return adapter.execute(backend);
+            adapter.execute(backend);
         }
     } // namespace
 
     namespace Client
     {
-        roc::host_numerics::GemmBackend
-            executeReferenceGemm(ContractionProblemGemm const&       problem,
-                                 ContractionInputs const&            inputs,
-                                 roc::host_numerics::OutputSelection outputSelection,
-                                 roc::host_numerics::GemmBackend     backend)
+        void executeReferenceGemm(ContractionProblemGemm const&       problem,
+                                  ContractionInputs const&            inputs,
+                                  roc::host_numerics::OutputSelection outputSelection,
+                                  roc::host_numerics::GemmBackend     backend)
         {
-            return executeTranslatedGemm(
-                problem, inputs, std::move(outputSelection), backend);
+            executeTranslatedGemm(problem, inputs, std::move(outputSelection), backend);
         }
 
-        roc::host_numerics::GemmBackend
-            executeReferenceGemm(ContractionProblemGemm const&   problem,
-                                 ContractionInputs const&        inputs,
-                                 size_t                          elementsToValidate,
-                                 roc::host_numerics::GemmBackend backend)
+        void executeReferenceGemm(ContractionProblemGemm const&   problem,
+                                  ContractionInputs const&        inputs,
+                                  size_t                          elementsToValidate,
+                                  roc::host_numerics::GemmBackend backend)
         {
-            return executeReferenceGemm(problem,
-                                        inputs,
-                                        referenceOutputSelection(problem.d(), elementsToValidate),
-                                        backend);
+            executeReferenceGemm(problem,
+                                 inputs,
+                                 referenceOutputSelection(problem.d(), elementsToValidate),
+                                 backend);
         }
 
-        roc::host_numerics::GemmBackend
-            SolveGemmCPU(ContractionProblemGemm const&       problem,
-                         ContractionInputs const&            inputs,
-                         roc::host_numerics::OutputSelection outputSelection)
+        void SolveGemmCPU(ContractionProblemGemm const&       problem,
+                          ContractionInputs const&            inputs,
+                          roc::host_numerics::OutputSelection outputSelection)
         {
             ScopedTimer timer("solve_cpu_reference");
-            return executeReferenceGemm(problem,
-                                        inputs,
-                                        std::move(outputSelection),
-                                        roc::host_numerics::GemmBackend::Automatic);
+            executeReferenceGemm(problem,
+                                 inputs,
+                                 std::move(outputSelection),
+                                 roc::host_numerics::GemmBackend::Automatic);
         }
 
-        roc::host_numerics::GemmBackend SolveGemmCPU(ContractionProblemGemm const& problem,
-                                                     ContractionInputs const&      inputs,
-                                                     size_t elementsToValidate)
+        void SolveGemmCPU(ContractionProblemGemm const& problem,
+                          ContractionInputs const&      inputs,
+                          size_t                        elementsToValidate)
         {
-            return SolveGemmCPU(
-                problem, inputs, referenceOutputSelection(problem.d(), elementsToValidate));
+            SolveGemmCPU(problem, inputs, referenceOutputSelection(problem.d(), elementsToValidate));
         }
 
         void SolveCPU(ContractionProblem const* problem,

@@ -65,11 +65,6 @@ detail::GemmSupportInfo detail::queryGemmSupport(const GemmInvocation& request,
                 .supported = false,
                 .reason = "The BLAS strategy requires the optional host-numerics BLAS component.",
             };
-        case GemmBackend::Mixed:
-            return {
-                .supported = false,
-                .reason = "Mixed is a reporting-only GEMM backend value.",
-            };
     }
     return {.supported = false, .reason = "Invalid reference GEMM backend."};
 }
@@ -82,12 +77,11 @@ detail::GemmExecutionInfo detail::executeGemm(const GemmInvocation& request, Gem
     return detail::runBlockedGemm(request);
 }
 
-GemmBackend referenceGemmInto(Tensor a, Tensor b, Tensor c, Tensor d, const GemmOptions& options,
-                              GemmBackend backend) {
-    return detail::executeGemm(detail::GemmInvocation(std::move(a), std::move(b), std::move(c),
-                                                      std::move(d), options),
-                               backend)
-        .backendUsed;
+void referenceGemmInto(Tensor a, Tensor b, Tensor c, Tensor d, const GemmOptions& options,
+                       GemmBackend backend) {
+    (void)detail::executeGemm(detail::GemmInvocation(std::move(a), std::move(b), std::move(c),
+                                                     std::move(d), options),
+                              backend);
 }
 
 Tensor referenceGemm(Tensor a, Tensor b, Tensor c, ScalarType outputType,

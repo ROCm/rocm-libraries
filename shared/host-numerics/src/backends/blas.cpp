@@ -533,12 +533,10 @@ detail::GemmExecutionInfo detail::executeBlasGemm(const GemmInvocation& problem,
     return runInfo;
 }
 
-GemmBackend referenceGemmIntoWithBlasBackend(Tensor a, Tensor b, Tensor c, Tensor d,
-                                             const GemmOptions& options, GemmBackend backend) {
-    return detail::executeBlasGemm(
-               GemmInvocation(std::move(a), std::move(b), std::move(c), std::move(d), options),
-               backend)
-        .backendUsed;
+void referenceGemmIntoWithBlasBackend(Tensor a, Tensor b, Tensor c, Tensor d,
+                                      const GemmOptions& options, GemmBackend backend) {
+    (void)detail::executeBlasGemm(
+        GemmInvocation(std::move(a), std::move(b), std::move(c), std::move(d), options), backend);
 }
 
 Tensor referenceGemmWithBlasBackend(Tensor a, Tensor b, Tensor c, ScalarType outputType,
@@ -548,9 +546,11 @@ Tensor referenceGemmWithBlasBackend(Tensor a, Tensor b, Tensor c, ScalarType out
     const Shape outputShape{problem.a.shape()[0], problem.b.shape()[1]};
     const Layout layout =
         outputLayout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
+    if (layout.shape() != outputShape)
+        throw std::invalid_argument("Owning reference GEMM output layout shape mismatch.");
     Tensor destination(outputType, layout);
-    (void)detail::executeBlasGemm(GemmInvocation(problem, destination, options.outputSelection),
-                                  backend);
+    referenceGemmIntoWithBlasBackend(
+        problem.a, problem.b, problem.c, destination, options, backend);
     return destination;
 }
 }  // namespace roc::host_numerics

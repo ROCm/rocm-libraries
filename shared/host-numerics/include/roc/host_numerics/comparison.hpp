@@ -37,23 +37,15 @@ enum class ComplexComparisonMode {
 ///
 ///   difference = |observed - expected|
 ///   tolerance = absoluteTolerance + relativeTolerance * |expected|
-///               + symmetricRelativeTolerance * (|observed| + |expected| + 1)
 ///
-/// The elementwise component passes when the values are exactly equal or `difference <= tolerance`.
-/// `strictTolerance` changes the elementwise and relative-Frobenius tolerance tests to strict
-/// inequality; exact elementwise equality still passes. Opposite signed zeros fail when
-/// `equalSignedZero` is false. NaNs pass only when both values are NaN and `equalNaNs` is true.
-/// Infinities pass only when they are equal.
-///
-/// With `symmetricRelativeTolerance == 0` and `strictTolerance == false`, this is NumPy's
-/// asymmetric real-valued isclose rule: expected is the reference value. The symmetric term and
-/// strict inequality are legacy host-numerics behavior, not NumPy behavior.
+/// A finite component passes when `difference <= tolerance`. Signed zeros compare equal. NaNs pass
+/// only when both values are NaN and `equalNaNs` is true. Infinities pass only when they are equal.
+/// This is NumPy's asymmetric real-valued `isclose` rule: expected is the reference value.
 ///
 /// In `ComplexComparisonMode::Magnitude`, the finite-value rule instead uses
 ///
 ///   difference = |observed - expected|
 ///   tolerance = absoluteTolerance + relativeTolerance * |expected|
-///               + symmetricRelativeTolerance * (|observed| + |expected| + 1)
 ///
 /// where each absolute value is a complex magnitude. This is NumPy's finite complex `isclose`
 /// formula when the symmetric term is zero and the comparison is non-strict. Magnitude mode
@@ -76,10 +68,7 @@ struct ComparisonOptions {
     bool allClose = true;
     double absoluteTolerance = 0.0;
     double relativeTolerance = 0.0;
-    double symmetricRelativeTolerance = 0.0;
-    bool strictTolerance = false;
     bool equalNaNs = false;
-    bool equalSignedZero = true;
     /// Preserve IEEE 0/0 = NaN instead of defining an exact zero norm ratio as zero.
     bool zeroExpectedNormIsNaN = false;
     /// Make relative norm evidence NaN when either tensor contains any non-finite value.
@@ -148,19 +137,14 @@ struct ComparisonReport {
     size_t mismatches = 0;
 
     // Elementwise evidence. matchedNaNs and matchedInfinities count real components in
-    // componentwise mode and logical values in magnitude mode. nonFiniteMismatches and
-    // signedZeroMismatches always count logical values. For complex values, maxAbsoluteDifference
-    // uses the complex-difference magnitude. The relative maxima use the maximum component ratio in
-    // componentwise mode and the complex-magnitude ratio in magnitude mode. Relative evidence uses
-    // expected as the reference; symmetric-relative evidence divides by
-    // |observed| + |expected| + 1 using the corresponding component or complex magnitudes.
+    // componentwise mode and logical values in magnitude mode. nonFiniteMismatches always counts
+    // logical values. For complex values, maxAbsoluteDifference uses the complex-difference
+    // magnitude. Relative evidence uses expected as the reference.
     size_t matchedNaNs = 0;
     size_t matchedInfinities = 0;
     size_t nonFiniteMismatches = 0;
-    size_t signedZeroMismatches = 0;
     double maxAbsoluteDifference = 0.0;
     double maxRelativeDifference = 0.0;
-    double maxSymmetricRelativeDifference = 0.0;
 
     // Norm evidence over selected finite values. Matched non-finite values are excluded.
     // A non-finite mismatch makes the difference and relative errors infinite unless
@@ -242,35 +226,6 @@ struct SentinelReport {
     }
 };
 
-/// Legacy symmetric-relative tolerance used by `defaultComparisonOptions`.
-inline constexpr double defaultSymmetricRelativeTolerance(ScalarType type) {
-    switch (type) {
-        case ScalarType::Float16:
-            return 0.01;
-        case ScalarType::BFloat16:
-            return 0.1;
-        case ScalarType::Float8E4M3:
-        case ScalarType::Float8E4M3Fnuz:
-            return 0.125;
-        case ScalarType::Float8E5M2:
-        case ScalarType::Float8E5M2Fnuz:
-            return 0.25;
-        case ScalarType::Float32:
-        case ScalarType::ComplexFloat32:
-            return 0.0002;
-        case ScalarType::Float64:
-        case ScalarType::ComplexFloat64:
-            return 1e-12;
-        default:
-            return 0.0;
-    }
-}
-
-/// Legacy host-numerics policy: type-specific symmetric-relative tolerance, strict inequality
-/// when that tolerance is nonzero, unequal NaNs, elementwise statistics, and Frobenius evidence.
-ComparisonOptions defaultComparisonOptions(
-    ScalarType type, std::optional<double> symmetricRelativeTolerance = std::nullopt);
-
 /// Absolute-only elementwise comparison with equal NaNs. This is not NumPy's default policy.
 ComparisonOptions nearComparisonOptions(double absoluteTolerance);
 
@@ -292,8 +247,8 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
 
 /// Returns the first candidate pair, in absolute-major then relative-minor input order, for which
 /// all enabled criteria pass. The search sets the asymmetric absolute and relative tolerances and
-/// clears `symmetricRelativeTolerance`; all other supplied options remain active. The default uses
-/// `allCloseComparisonOptions()`, including magnitude comparison for complex values.
+/// all other supplied options remain active. The default uses `allCloseComparisonOptions()`,
+/// including magnitude comparison for complex values.
 std::optional<ComparisonTolerance> findAllCloseTolerance(
     const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
     std::span<const double> relativeCandidates,

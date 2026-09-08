@@ -60,8 +60,8 @@ namespace TensileLite::Client::HostNumerics
             return options;
         }
 
-        roc::host_numerics::GemmBackend runGemm(roc::host_numerics::GemmBackend backend
-                                                = roc::host_numerics::GemmBackend::Automatic) const;
+        void runGemm(roc::host_numerics::GemmBackend backend
+                     = roc::host_numerics::GemmBackend::Automatic) const;
         void runPostGemmOperationsAndCopyOutputs() const;
 
     private:
@@ -155,7 +155,7 @@ namespace TensileLite::Client::HostNumerics
 
         // Executes every preflighted batch in the required order, including
         // post-GEMM operations and copies back to caller-owned storage.
-        roc::host_numerics::GemmBackend execute(roc::host_numerics::GemmBackend backend) const;
+        void execute(roc::host_numerics::GemmBackend backend) const;
 
         std::variant<TranslatedGemmBatch, TranslationFailure>
             translateBatch(size_t batch) const;

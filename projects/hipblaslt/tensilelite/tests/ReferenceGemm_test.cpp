@@ -94,10 +94,8 @@ TEST(ReferenceInvocationAdapter, ZeroOutputOrBatchIsNoOpWithoutBindings)
             problem, inputs, roc::host_numerics::OutputSelection::all());
         ASSERT_TRUE(std::holds_alternative<HostNumerics::GemmInvocationAdapter>(translation));
         EXPECT_EQ(std::get<HostNumerics::GemmInvocationAdapter>(translation).batchCount(), 0);
-        EXPECT_EQ(
-            executeReferenceGemm(
-                problem, inputs, roc::host_numerics::OutputSelection::all(), automaticExecution),
-            roc::host_numerics::GemmBackend::Blocked);
+        executeReferenceGemm(
+            problem, inputs, roc::host_numerics::OutputSelection::all(), automaticExecution);
     }
 }
 
@@ -112,9 +110,8 @@ TEST(ReferenceInvocationAdapter, ZeroReductionDoesNotRequireProductOrAddendBindi
     inputs.alpha = std::numeric_limits<float>::quiet_NaN();
     inputs.beta  = 0.0f;
 
-    EXPECT_EQ(executeReferenceGemm(
-                  problem, inputs, roc::host_numerics::OutputSelection::all(), automaticExecution),
-              roc::host_numerics::GemmBackend::Blocked);
+    executeReferenceGemm(
+        problem, inputs, roc::host_numerics::OutputSelection::all(), automaticExecution);
     EXPECT_EQ(output, (std::array<float, 6>{}));
 }
 
@@ -435,8 +432,7 @@ TEST(ReferenceGemmSelection, ZeroRequestedElementsUsesSelectAllPolicy)
     }
     ASSERT_NE(stepwiseExpected, Half(fullPrecisionExpected));
 
-    const auto backendUsed = SolveGemmCPU(problem, inputs, /*elementsToValidate=*/0);
-    EXPECT_EQ(backendUsed, roc::host_numerics::GemmBackend::Blocked);
+    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/0);
     EXPECT_EQ(d, std::vector<Half>(M * N, stepwiseExpected));
 }
 
@@ -454,8 +450,7 @@ TEST(ReferenceGemmSelection, UsesBlockedForSparseFloatValidation)
     std::vector<float> d(M * N, -99.0f);
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
-    const auto backendUsed = SolveGemmCPU(problem, inputs, elementsToValidate);
-    EXPECT_EQ(backendUsed, roc::host_numerics::GemmBackend::Blocked);
+    SolveGemmCPU(problem, inputs, elementsToValidate);
 
     const auto selection
         = roc::host_numerics::OutputSelection::primeStride(problem.d().totalLogicalElements(),
@@ -979,9 +974,7 @@ TEST(ReferenceGemmSelection, UsesBlockedAcrossPartiallySelectedBatches)
     std::vector<float> d(2, -99.0f);
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
-    const auto backendUsed
-        = executeReferenceGemm(problem, inputs, /*elementsToValidate=*/1, automaticExecution);
-    EXPECT_EQ(backendUsed, roc::host_numerics::GemmBackend::Blocked);
+    executeReferenceGemm(problem, inputs, /*elementsToValidate=*/1, automaticExecution);
     EXPECT_EQ(d, (std::vector<float>{static_cast<float>(K), -99.0f}));
 }
 

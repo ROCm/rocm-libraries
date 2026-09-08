@@ -182,7 +182,6 @@ namespace rocRoller::HostNumerics
         options.computeUlp                             = false;
         options.maxReportedMismatches                  = 0;
         options.relativeFrobeniusTolerance             = acceptableError.relativeL2Tolerance;
-        options.strictTolerance                        = true;
         options.zeroExpectedNormIsNaN                  = true;
         options.nonFiniteValuesInvalidateRelativeNorms = true;
 

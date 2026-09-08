@@ -21,13 +21,13 @@ namespace hipblaslt::host_numerics
 {
     using ::roc::host_numerics::allCloseComparisonOptions;
     using ::roc::host_numerics::compare;
+    using ::roc::host_numerics::ComplexComparisonMode;
     using ::roc::host_numerics::ComparisonOptions;
     using ::roc::host_numerics::ComparisonReport;
     using ::roc::host_numerics::ComparisonTolerance;
     using ::roc::host_numerics::findAllCloseTolerance;
     using ::roc::host_numerics::IndexOrder;
     using ::roc::host_numerics::Layout;
-    using ::roc::host_numerics::nearComparisonOptions;
     using ::roc::host_numerics::ScalarType;
     using ::roc::host_numerics::scalarTypeInfo;
     using ::roc::host_numerics::Shape;
@@ -41,13 +41,9 @@ namespace hipblaslt::host_numerics
         /// storage, or at most four encoded ULPs for float32/float64 real or complex storage.
         Unit,
 
-        /// Apply an absolute all-close tolerance supplied by HostComparisonRequest.
-        Near,
-
-        /// Apply the scale-aware symmetric tolerance
-        ///   |observed - expected| < tolerance * (|observed| + |expected| + 1).
-        /// The +1 term supplies an absolute floor for cancellation near zero.
-        SymmetricRelative,
+        /// Apply NumPy-style absolute and relative tolerances supplied by
+        /// HostComparisonRequest.
+        AllClose,
     };
 
     struct HostComparisonRequest
@@ -79,11 +75,11 @@ namespace hipblaslt::host_numerics
         /// Finite-value all-close acceptance policy.
         HostAllCloseMode allCloseMode = HostAllCloseMode::Disabled;
 
-        /// Absolute tolerance used only when allCloseMode is Near.
+        /// Absolute tolerance used only when allCloseMode is AllClose.
         double absoluteTolerance = 0.0;
 
-        /// Symmetric relative coefficient used only when allCloseMode is SymmetricRelative.
-        double symmetricRelativeTolerance = 0.0;
+        /// Relative tolerance used only when allCloseMode is AllClose.
+        double relativeTolerance = 0.0;
 
         /// Collect NaN/infinity agreement statistics in comparison, independently of finite
         /// all-close acceptance.
@@ -193,16 +189,10 @@ namespace hipblaslt::host_numerics
         case HostAllCloseMode::Unit:
             options = detail::unitComparisonOptions(request.type);
             break;
-        case HostAllCloseMode::Near:
-            options                            = nearComparisonOptions(request.absoluteTolerance);
-            options.computeElementwiseStatistics = false;
-            options.computeFrobenius           = false;
-            options.maxReportedMismatches      = 10;
-            break;
-        case HostAllCloseMode::SymmetricRelative:
-            options.symmetricRelativeTolerance = request.symmetricRelativeTolerance;
-            options.strictTolerance            = true;
-            options.equalNaNs                  = true;
+        case HostAllCloseMode::AllClose:
+            options = allCloseComparisonOptions(
+                request.absoluteTolerance, request.relativeTolerance, true);
+            options.complexComparisonMode        = ComplexComparisonMode::Componentwise;
             options.computeElementwiseStatistics = false;
             options.computeFrobenius           = false;
             options.maxReportedMismatches      = 10;

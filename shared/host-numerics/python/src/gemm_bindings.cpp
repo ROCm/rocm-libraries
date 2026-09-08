@@ -24,8 +24,6 @@ namespace {
 void validatePythonGemmBackend(GemmBackend backend) {
     if (backend == GemmBackend::Blas)
         throw std::invalid_argument("Python reference_gemm exposes the Blocked backend.");
-    if (backend == GemmBackend::Mixed)
-        throw std::invalid_argument("Mixed is a reporting-only GEMM backend value.");
 }
 
 Tensor referenceGemmOwned(Tensor a, Tensor b, Tensor c, ScalarType outputType, GemmOptions options,
@@ -35,11 +33,11 @@ Tensor referenceGemmOwned(Tensor a, Tensor b, Tensor c, ScalarType outputType, G
                          std::move(outputLayout), backend);
 }
 
-GemmBackend referenceGemmIntoBound(Tensor a, Tensor b, Tensor c, Tensor d, GemmOptions options,
-                                   GemmBackend backend) {
+void referenceGemmIntoBound(Tensor a, Tensor b, Tensor c, Tensor d, GemmOptions options,
+                            GemmBackend backend) {
     validatePythonGemmBackend(backend);
-    return referenceGemmInto(std::move(a), std::move(b), std::move(c), std::move(d), options,
-                             backend);
+    referenceGemmInto(
+        std::move(a), std::move(b), std::move(c), std::move(d), options, backend);
 }
 
 }  // namespace
