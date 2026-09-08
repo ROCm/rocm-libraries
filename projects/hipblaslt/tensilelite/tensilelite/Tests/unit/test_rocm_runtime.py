@@ -16,7 +16,6 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def enable_runtime_validation(monkeypatch):
-    monkeypatch.setattr(_rocm, "_ENABLE_ROCM_VERSION_VALIDATION", True)
     monkeypatch.setattr(_rocm, "_ENABLE_PYTHON_ROCM_RUNTIME", True)
 
 
