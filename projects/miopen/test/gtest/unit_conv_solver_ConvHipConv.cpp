@@ -6,6 +6,7 @@
 // Restrictions enforced by ConvHipConv::IsApplicable:
 //   - 2D convolution only
 //   - fp16 or bf16
+//   - NHWC, or NCHW with packed tensors (served by transposing through NHWC scratch)
 //   - architectures recognised by hipconv (gfx950)
 //   - the hipconv library must have a valid kernel for the (params, direction) tuple
 
@@ -18,9 +19,11 @@ namespace {
 using TestCase = miopen::unit_tests::ConvTestCase;
 
 // Small representative cases (one per channels-per-group family) for smoke runs.
-auto GetConvSmokeTestCases(miopenDataType_t datatype)
+//
+// Run in both layouts: NHWC reaches hipconv directly, NCHW exercises the solver's
+// NCHW<->NHWC staging (input/weight transposes in, result transposed back out).
+auto GetConvSmokeTestCases(miopenDataType_t datatype, miopenTensorLayout_t layout)
 {
-    constexpr auto layout = miopenTensorNHWC;
     return std::vector<TestCase>{
         // clang-format off
         TestCase{{datatype, layout, {4, 64, 8, 1}}, {datatype, layout, {64,  4, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 16}}, // 4c
@@ -81,43 +84,90 @@ TEST_P(GPU_UnitTestConvSolverConvHipConvWrw_BFP16, ConvHipConv)
     this->RunTest(miopen::solver::conv::ConvHipConv{});
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolverConvHipConvFwd_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
-                                          testing::Values(miopenConvolutionAlgoDirect),
-                                          testing::ValuesIn(GetConvSmokeTestCases(miopenHalf))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvFwd_FP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNHWC))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolverConvHipConvBwd_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
-                                          testing::Values(miopenConvolutionAlgoDirect),
-                                          testing::ValuesIn(GetConvSmokeTestCases(miopenHalf))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvBwd_FP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNHWC))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolverConvHipConvWrw_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
-                                          testing::Values(miopenConvolutionAlgoDirect),
-                                          testing::ValuesIn(GetConvSmokeTestCases(miopenHalf))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvWrw_FP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNHWC))));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_UnitTestConvSolverConvHipConvFwd_BFP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
-                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNHWC))));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_UnitTestConvSolverConvHipConvBwd_BFP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
-                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNHWC))));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_UnitTestConvSolverConvHipConvWrw_BFP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
-                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNHWC))));
+
+// NCHW: same shapes through the solver's NCHW<->NHWC staging path.
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeNchw,
+    GPU_UnitTestConvSolverConvHipConvFwd_FP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNCHW))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeNchw,
+    GPU_UnitTestConvSolverConvHipConvBwd_FP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNCHW))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeNchw,
+    GPU_UnitTestConvSolverConvHipConvWrw_FP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNCHW))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeNchw,
+    GPU_UnitTestConvSolverConvHipConvFwd_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNCHW))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeNchw,
+    GPU_UnitTestConvSolverConvHipConvBwd_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNCHW))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeNchw,
+    GPU_UnitTestConvSolverConvHipConvWrw_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNCHW))));
 
 #endif // MIOPEN_USE_HIPCONV
