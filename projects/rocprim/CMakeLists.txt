@@ -79,22 +79,10 @@ option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 option(ROCPRIM_INSTALL "Enable installation of rocPRIM (projects embedding rocPRIM may want to turn this OFF)" ON)
 option(ROCPRIM_ENABLE_ASSERTS "Enable asserts in release build)" OFF)
 cmake_dependent_option(ROCPRIM_ENABLE_TOPK "Enable the device level topk and segmented topk algorithms" OFF BUILD_TEST ON)
-option(BUILD_OFFLOAD_COMPRESS "Build rocPRIM with offload compression" ON)
 cmake_dependent_option(USE_SYSTEM_LIB "Use installed ROCm libs when building tests" OFF BUILD_TEST OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
-
-include(CheckCXXCompilerFlag)
-
-if(BUILD_OFFLOAD_COMPRESS)
-  check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-  if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
-  else()
-    message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
-  endif()
-endif()
 
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   set(ROCPRIM_PROJECT_IS_TOP_LEVEL TRUE)
@@ -109,11 +97,14 @@ else()
   set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
 endif()
 
-# CMake modules
+# Add project and ROCm-related CMake module paths.
 list(APPEND CMAKE_MODULE_PATH
+  # Shared within monorepo:
   ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${ROCM_PATH}/lib/cmake/hip ${HIP_PATH}/cmake ${ROCM_ROOT}/lib/cmake/hip ${ROCM_ROOT}/hip/cmake # FindHIP.cmake
+  # ROCm related:
+  $ENV{ROCM_PATH}
+  $ENV{ROCM_PATH}/share
+  $ENV{ROCM_PATH}/lib/cmake
 )
 
 # Set a default build type if none was specified
@@ -125,26 +116,26 @@ endif()
 
 if(ROCPRIM_ENABLE_ASSERTS)
   if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "")
-      string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
-      set(BUILD_TYPE_CXX_FLAGS "CMAKE_CXX_FLAGS_${BUILD_TYPE}")
-      set(BUILD_TYPE_C_FLAGS "CMAKE_C_FLAGS_${BUILD_TYPE}")
+    string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
+    set(BUILD_TYPE_CXX_FLAGS "CMAKE_CXX_FLAGS_${BUILD_TYPE}")
+    set(BUILD_TYPE_C_FLAGS "CMAKE_C_FLAGS_${BUILD_TYPE}")
   endif()
 
   string(REGEX REPLACE "-DNDEBUG( |$)" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
   string(REGEX REPLACE "-DNDEBUG( |$)" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
   if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "")
-      string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_CXX_FLAGS} "${${BUILD_TYPE_CXX_FLAGS}}")
-      string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_C_FLAGS} "${${BUILD_TYPE_C_FLAGS}}")
+    string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_CXX_FLAGS} "${${BUILD_TYPE_CXX_FLAGS}}")
+    string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_C_FLAGS} "${${BUILD_TYPE_C_FLAGS}}")
   endif()
 endif()
 
 # Check if mold linker is available and use it if so
 find_program(MOLD_LINKER mold)
 if(MOLD_LINKER)
-    message(STATUS "Using mold linker")
-    add_link_options(-fuse-ld=mold)
+  message(STATUS "Using mold linker")
+  add_link_options(-fuse-ld=mold)
 else()
-    message(STATUS "mold not found, using default linker")
+  message(STATUS "mold not found, using default linker")
 endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
@@ -156,8 +147,8 @@ else()
 endif()
 set(BUILD_SHARED_LIBS OFF) # don't build client dependencies as shared
 
-# Get dependencies (required here to get rocm-cmake)
-include(cmake/Dependencies.cmake)
+# rocm-cmake must be included before processing 'GPU_TARGETS'.
+include(dependencies/rocm-cmake)
 
 # Use target ID syntax if supported for GPU_TARGETS
 if(USE_HIPCXX)
@@ -185,12 +176,25 @@ else()
   endif()
 endif()
 
+# HIP must be included before checking for 'OFFLOAD_COMPRESS'. This is because
+# adding '--offload-compress' to a CXX target (i.e. non -xhip), causes compiler
+# warnings that may be treated as error, and thus failing detection of certain
+# depedencies in subsequent 'find_package'-calls.
+include(dependencies/hip)
+
+# TODO: this should be moved to toolchain-*.cmake, but this requires a hard
+# depedency of CMake HIP language support due to '--offload-compress' only
+# working with '-xhip'.
+include(flags/offload_compress)
+
+# Other depedencies must be included after adding in offload compress to
+# reduce the size of kernels contained in depedencies.
+include(cmake/Dependencies.cmake)
+
 # TODO: Fix VerifyCompiler for HIP on Windows
 if (NOT WIN32)
   include(cmake/VerifyCompiler.cmake)
 endif()
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm ${ROCM_ROOT}/llvm ${ROCM_ROOT} ${ROCM_ROOT}/hip)
-find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
 # Setup VERSION
 set(VERSION_STRING "4.7.0")

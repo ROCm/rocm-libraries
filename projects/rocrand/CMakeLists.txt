@@ -46,7 +46,7 @@ cmake_dependent_option(RUN_SLOW_TESTS "Run extra tests with CTest. These cover n
 cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 
 if (NOT DEFINED ENV{ROCM_PATH})
-#Path to ROCm installation
+  #Path to ROCm installation
   set(ENV{ROCM_PATH} "/opt/rocm")
 endif()
 
@@ -54,32 +54,33 @@ endif()
 set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "Install path prefix, prepended onto install directories")
 
 if(WIN32)
-    set(CPACK_SOURCE_GENERATOR "ZIP")
-    set(CPACK_GENERATOR "ZIP")
-    set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path")
-    set(INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-    set(CPACK_SET_DESTDIR OFF)
-    set(CPACK_PACKAGE_INSTALL_DIRECTORY "${CMAKE_INSTALL_PREFIX}")
-    set(CPACK_PACKAGING_INSTALL_PREFIX "")
-    set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+  set(CPACK_SOURCE_GENERATOR "ZIP")
+  set(CPACK_GENERATOR "ZIP")
+  set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path")
+  set(INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+  set(CPACK_SET_DESTDIR OFF)
+  set(CPACK_PACKAGE_INSTALL_DIRECTORY "${CMAKE_INSTALL_PREFIX}")
+  set(CPACK_PACKAGING_INSTALL_PREFIX "")
+  set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
 else()
-    set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "Install path prefix, prepended onto install directories")
-    #Adding CMAKE_PREFIX_PATH
-    if(NOT DEFINED CMAKE_PREFIX_PATH)
-      list( APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH}/llvm $ENV{ROCM_PATH})
-    endif()
-    if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
-        set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-    endif()
+  set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "Install path prefix, prepended onto install directories")
+  #Adding CMAKE_PREFIX_PATH
+  if(NOT DEFINED CMAKE_PREFIX_PATH)
+    list( APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH}/llvm $ENV{ROCM_PATH})
+  endif()
+  if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+    set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+  endif()
 endif()
 
-# CMake modules
+# Add project and ROCm-related CMake module paths.
 list(APPEND CMAKE_MODULE_PATH
+  # Shared within monorepo:
   ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  $ENV{ROCM_PATH}/lib/cmake/hip
-  ${HIP_PATH}/cmake $ENV{ROCM_PATH}/hip/cmake # FindHIP.cmake
-  $ENV{ROCM_PATH}/llvm
+  # ROCm related:
+  $ENV{ROCM_PATH}
+  $ENV{ROCM_PATH}/share
+  $ENV{ROCM_PATH}/lib/cmake
 )
 
 #
@@ -88,9 +89,9 @@ list(APPEND CMAKE_MODULE_PATH
 project(rocRAND CXX)
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    message(STATUS "Setting build type to 'Release' as none was specified.")
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+  message(STATUS "Setting build type to 'Release' as none was specified.")
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
 set(ROCRAND_PROJECT_IS_TOP_LEVEL FALSE)
@@ -107,17 +108,17 @@ include(cmake/HaveASMIncbin.cmake)
 
 rocrand_check_have_asm_incbin(ROCRAND_HAVE_ASM_INCBIN)
 
-# Get dependencies
-include(cmake/Dependencies.cmake)
-
 # Detect compiler support for target ID
 if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
-    execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
+  execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
     OUTPUT_VARIABLE CXX_OUTPUT
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_STRIP_TRAILING_WHITESPACE)
-    string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
+  string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
 endif()
+
+# rocm-cmake must be included before processing 'GPU_TARGETS'.
+include(dependencies/rocm-cmake)
 
 # Verify that hipcc compiler is used on ROCM platform
 # TODO: Fix VerifyCompiler for Windows
@@ -148,8 +149,25 @@ if(GPU_TARGETS STREQUAL "all")
   set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
 endif()
 
-# Verify the compiler settings and include the HIP CMake package
-include(cmake/VerifyCompiler.cmake)
+# HIP must be included before checking for 'OFFLOAD_COMPRESS'. This is because
+# adding '--offload-compress' to a CXX target (i.e. non -xhip), causes compiler
+# warnings that may be treated as error, and thus failing detection of certain
+# depedencies in subsequent 'find_package'-calls.
+include(dependencies/hip)
+
+# TODO: this should be moved to toolchain-*.cmake, but this requires a hard
+# depedency of CMake HIP language support due to '--offload-compress' only
+# working with '-xhip'.
+include(flags/offload_compress)
+
+# Other depedencies must be included after adding in offload compress to
+# reduce the size of kernels contained in depedencies.
+include(cmake/Dependencies.cmake)
+
+# TODO: Fix VerifyCompiler for HIP on Windows
+if (NOT WIN32)
+  include(cmake/VerifyCompiler.cmake)
+endif()
 
 # Build option to disable -Werror
 option(DISABLE_WERROR "Disable building with Werror" ON)
@@ -161,13 +179,13 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 if(DISABLE_WERROR)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
 if(CODE_COVERAGE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
-    add_definitions(-DCODE_COVERAGE_ENABLED)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
+  add_definitions(-DCODE_COVERAGE_ENABLED)
 endif()
 
 if (CMAKE_CXX_STANDARD EQUAL 14)
@@ -215,22 +233,22 @@ endif()
 
 # Tests
 if (BUILD_TEST)
-    if(USE_SYSTEM_LIB)
-        find_package(rocrand REQUIRED CONFIG PATHS "$ENV{ROCM_PATH}/rocrand")
-        if (NOT ${rocrand_VERSION} VERSION_EQUAL ${rocRAND_VERSION})
-            message(WARNING "The installed rocrand version, ${rocrand_VERSION}, does not match project version ${rocRAND_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
-        endif()
+  if(USE_SYSTEM_LIB)
+    find_package(rocrand REQUIRED CONFIG PATHS "$ENV{ROCM_PATH}/rocrand")
+    if (NOT ${rocrand_VERSION} VERSION_EQUAL ${rocRAND_VERSION})
+      message(WARNING "The installed rocrand version, ${rocrand_VERSION}, does not match project version ${rocRAND_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
     endif()
+  endif()
 
-    enable_testing()
-    rocm_package_setup_client_component(tests)
-    add_subdirectory(test)
+  enable_testing()
+  rocm_package_setup_client_component(tests)
+  add_subdirectory(test)
 endif()
 
 # Benchmarks
 if (BUILD_BENCHMARK)
-    rocm_package_setup_client_component(benchmarks)
-    add_subdirectory(benchmark)
+  rocm_package_setup_client_component(benchmarks)
+  add_subdirectory(benchmark)
 endif()
 
 # Package (make package)
@@ -239,22 +257,22 @@ if(ROCRAND_PROJECT_IS_TOP_LEVEL)
   set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
   if( HIP_RUNTIME_LOWER STREQUAL "rocclr" )
-      if(BUILD_ADDRESS_SANITIZER)
-          set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
-      else()
-          set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
-      endif()
-      rocm_package_add_dependencies("${DEPENDS_HIP_RUNTIME} >= 4.5.0")
+    if(BUILD_ADDRESS_SANITIZER)
+      set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
+    else()
+      set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
+    endif()
+    rocm_package_add_dependencies("${DEPENDS_HIP_RUNTIME} >= 4.5.0")
   elseif( HIP_RUNTIME STREQUAL "cuda" )
-      rocm_package_add_dependencies("hip-nvcc >= 3.5.0")
+    rocm_package_add_dependencies("hip-nvcc >= 3.5.0")
   endif( )
 
   set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
 
   if(HIP_COMPILER STREQUAL "nvcc")
-      set(package_name rocrand-alt)
+    set(package_name rocrand-alt)
   else()
-      set(package_name rocrand)
+    set(package_name rocrand)
   endif()
 
   set(ROCRAND_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
