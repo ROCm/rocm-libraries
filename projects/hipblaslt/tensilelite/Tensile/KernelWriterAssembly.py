@@ -245,8 +245,7 @@ class KernelWriterAssembly(KernelWriter):
   def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
 
     deviceLdsSize = self.states.archCaps["DeviceLDS"]
-    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(
-        deviceLdsSize, ldsSize, self.states.archCaps["LdsGranularity"])
+    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(deviceLdsSize, ldsSize)
 
     if not doubleVgpr:
       vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr)
@@ -280,20 +279,14 @@ class KernelWriterAssembly(KernelWriter):
     return lastVgprs, initOccupancy
 
   @staticmethod
-  def getLdsLimitedOccupancy(deviceLdsSize, ldsSize, granularity):
-    """Max. number of workgroups that can run on the same CU due to LDS size
-
-    granularity is the archCaps["LdsGranularity"] allocation granule: a workgroup
-    occupies a whole number of granules, so the rounding can cost a workgroup at a
-    boundary.
-    """
+  def getLdsLimitedOccupancy(deviceLdsSize, ldsSize):
     if ldsSize == 0:
       # No LDS usage: LDS is not the binding constraint.
       # Return a large sentinel so other limits (VGPR, wave cap) win in min().
-      return deviceLdsSize // granularity
+      return deviceLdsSize // 256
     # As ldsSize gets large, rounding might push us slightly higher than deviceLdsSize.
     # Clamp at deviceLdsSize
-    ldsSize = min(ldsSize + granularity - 1, deviceLdsSize) & ~(granularity - 1)
+    ldsSize = min(ldsSize + 255, deviceLdsSize) & 0xffffff00 # 256-byte granularity
 
     ldsLimitedOccupancy = deviceLdsSize//ldsSize
     return ldsLimitedOccupancy
@@ -4816,8 +4809,12 @@ class KernelWriterAssembly(KernelWriter):
     moduleLoadGeneralBatch.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr("Address%s+0"%tc), comment="Offsetting to the location [Lower half of address]"))
     moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
     moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
-    # Load and apply batch offset for General Batched GEMM
+    # ArgType 3 keeps KernArgAddress at the current GEMM's argument block, and
+    # Signature records these offsets relative to that block.
     if not kernel["ProblemType"]["GroupedGemm"]:
+      # gfx1250 XNACK replay re-reads outstanding scalar-load base SGPRs.
+      # Quiesce the pointer-array load before the batchOffset load overwrites stmp.
+      moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for pointer-array SRD load before reusing base SGPR"))
       batchOffsetKernArgOffset = self.states.batchOffsetAKernArgOffset if tc == "A" else self.states.batchOffsetBKernArgOffset
       moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr(stmp, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%tc))
       moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
@@ -19393,6 +19390,100 @@ class KernelWriterAssembly(KernelWriter):
     selectByParity(scratchIdx, ldsBoundB, ldsBoundA, "ldsSplit = parity ? B : A")
     return sgpr(scratchIdx)
 
+  def _resolveTDMGlobalAddr(self, kernel: Mapping, tc: str, dstAddr: str,
+                            tmpSgprResource: ContinuousRegister,
+                            restoreDescriptorType: bool = False) -> Module:
+    """Resolve a general-batched A/B pointer and apply its byte offset."""
+    mod = Module(f"Resolve TDM Global Address {tc}")
+
+    if (tc not in ("A", "B")
+        or not kernel["ProblemType"]["SupportUserArgs"]
+        or not kernel["ProblemType"]["Batched"]
+        or kernel["ProblemType"]["GroupedGemm"]):
+      return mod
+
+    addressReady = Label(
+        self.labels.getNameInc(f"TDMGeneralBatchedAddress{tc}Ready"),
+        f"TDM {tc} matrix address is ready")
+    tmpSgpr = tmpSgprResource.idx
+    laneSC = self.states.laneSGPRCount
+
+    self.cmpNamedArgTypeEq(mod, 3, "ArgType == 3 for General Batched GEMM")
+    mod.add(SCBranchSCC0(labelName=addressReady.getLabelName(),
+                        comment="Keep the direct matrix address"))
+
+    # Match loadBatchedAddress: a null A/B pointer array is valid when the
+    # contraction is unused (K==0 or alpha==0), so do not dereference it.
+    mod.add(SMovB32(dst=sgpr(tmpSgpr), src=1, comment="check summation size"))
+    for i in range(self.states.numSgprSizesSum):
+      mod.add(SMulI32(dst=sgpr(tmpSgpr),
+                     src0=sgpr(f"SizesSum+{i}"),
+                     src1=sgpr(tmpSgpr),
+                     comment="check summation size"))
+    mod.add(SCmpEQU32(src0=sgpr(tmpSgpr), src1=0,
+                     comment="skip pointer dereference when summation size is zero"))
+    mod.add(SCBranchSCC1(labelName=addressReady.getLabelName()))
+    mod.add(BranchIfZero("Alpha",
+                        kernel["ProblemType"]["ComputeDataType"].toEnum(),
+                        tmpSgpr,
+                        laneSC,
+                        addressReady,
+                        kernel["WavefrontSize"]))
+
+    mod.add(SMulI32(dst=sgpr(tmpSgpr),
+                   src0=sgpr("WorkGroup2"),
+                   src1=8,
+                   comment=f"offset of {tc} pointer-array entry"))
+    mod.add(SAddU32(dst=sgpr(tmpSgpr),
+                   src0=sgpr(tmpSgpr),
+                   src1=sgpr(f"Address{tc}+0"),
+                   comment=f"address of {tc}[batch] (low)"))
+    mod.add(SAddCU32(dst=sgpr(tmpSgpr+1),
+                    src0=sgpr(f"Address{tc}+1"),
+                    src1=0,
+                    comment=f"address of {tc}[batch] (high)"))
+    mod.add(SLoadB64(dst=sgpr(dstAddr, 2),
+                     base=sgpr(tmpSgpr, 2),
+                     soffset=0,
+                     comment=f"load {tc} matrix address from pointer array"))
+    mod.add(SWaitCnt(kmcnt=0, comment=f"wait for {tc} matrix address"))
+
+    batchOffsetKernArgOffset = (
+        self.states.batchOffsetAKernArgOffset
+        if tc == "A"
+        else self.states.batchOffsetBKernArgOffset)
+    mod.add(SLoadB64(dst=sgpr(tmpSgpr, 2),
+                     base=sgpr("KernArgAddress", 2),
+                     soffset=hex(batchOffsetKernArgOffset),
+                     comment=f"load batchOffset{tc} from kernel args"))
+    mod.add(SWaitCnt(kmcnt=0, comment=f"wait for batchOffset{tc}"))
+    mod.add(SAddU32(dst=sgpr(dstAddr),
+                   src0=sgpr(dstAddr),
+                   src1=sgpr(tmpSgpr),
+                   comment=f"apply batchOffset{tc} (low)"))
+    mod.add(SAddCU32(dst=sgpr(f"{dstAddr}+1"),
+                    src0=sgpr(f"{dstAddr}+1"),
+                    src1=sgpr(tmpSgpr+1),
+                    comment=f"apply batchOffset{tc} (high)"))
+    if restoreDescriptorType:
+      # The pointer load overwrites the descriptor's type bits.
+      mod.add(SOrB32(dst=sgpr(f"{dstAddr}+1"),
+                    src0=sgpr(f"{dstAddr}+1"),
+                    src1=hex(2 << 30),
+                    comment="restore type field to 2(image)"))
+    mod.add(addressReady)
+    return mod
+
+  def _setTDMGlobalAddr(self, kernel: Mapping, tc: str, group0Name: str,
+                        tmpSgprResource: ContinuousRegister) -> Module:
+    """Initialize a TDM descriptor from a direct or general-batched address."""
+    comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+    mod = Module(f"Set TDM Global Address {tc}")
+    mod.add(comp.setGlobalAddr(group0Name, f"Address{tc}"))
+    mod.add(self._resolveTDMGlobalAddr(
+        kernel, tc, f"{group0Name}+2", tmpSgprResource, True))
+    return mod
+
   def initTDMDescriptor(self, kernel: Mapping, tP: Mapping) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
@@ -19442,14 +19533,15 @@ class KernelWriterAssembly(KernelWriter):
     # would be redundant. Pass None to skip it.
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), group2Name, None))
     mod.add(comp.setDataType(dtype, descSgprName(1), isMetadata))
-    mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
     clusterComp = ClusterLoadTDM.find(self)
     if clusterComp:
       mod.add(clusterComp.applyToDescriptor(self, kernel, descSgprName(1), tc))
 
-    with self.allocTmpSgpr(2, tag="initTDMDescriptor_tmpSgprRes") as tmpSgprRes:
+    with self.allocTmpSgpr(max(2, self.states.laneSGPRCount),
+                           tag="initTDMDescriptor_tmpSgprRes") as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
+      mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
       dataBytes = mt // numWaves * du * int(bpe * 4) // (4 * dim1Divisor)
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), dataBytes, f"woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
@@ -19617,14 +19709,15 @@ class KernelWriterAssembly(KernelWriter):
     # Group 3 aliases Group 2; skip the redundant alias-side zero-init.
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), group2Name, None))
     mod.add(comp.setDataType(dtype, descSgprName(1), tc == "Metadata"))
-    mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
     clusterComp = ClusterLoadTDM.find(self)
     if clusterComp:
       mod.add(clusterComp.applyToDescriptor(self, kernel, descSgprName(1), tc, waveSeparated=True))
 
-    with self.allocTmpSgpr(2, tag="initTDMDescriptorWaveSeparatedImpl_tmpSgprRes") as tmpSgprRes:
+    with self.allocTmpSgpr(max(2, self.states.laneSGPRCount),
+                           tag="initTDMDescriptorWaveSeparatedImpl_tmpSgprRes") as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
+      mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
       _segOffAB = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
@@ -19792,10 +19885,12 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(tdmInitLblEnd)
     return mod
 
-  def tdmGlobalOffset(self, kernel: Mapping, tP: Mapping) -> Module:
+  def tdmGlobalOffset(self, kernel: Mapping, tP: Mapping,
+                      useDescriptor: bool = False) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
-    return comp.calculateStartAddr(self, kernel, tP, f"Address{tc}")
+    address = f"tdm{tc}Group0+2" if useDescriptor else f"Address{tc}"
+    return comp.calculateStartAddr(self, kernel, tP, address)
 
   def tdmGlobalOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping, waveIdxSgpr: int | str = "WaveIdx") -> Module:
     mod = Module("TDM Global Offset Wave Separated")
