@@ -32,56 +32,6 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gemvi_kernel(I m,
-                      I n,
-                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                      const T* __restrict__ A,
-                      int64_t lda,
-                      I       nnz,
-                      const T* __restrict__ x_val,
-                      const I* __restrict__ x_ind,
-                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                      T* __restrict__ y,
-                      rocsparse_index_base idx_base,
-                      bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-
-        if(alpha != static_cast<T>(0) || beta != static_cast<T>(1))
-        {
-            rocsparse::gemvi_device<BLOCKSIZE, WFSIZE>(
-                m, n, alpha, A, lda, nnz, x_val, x_ind, beta, y, idx_base);
-        }
-    }
-
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t UNROLL, typename I, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gemvi_kernel2(I m,
-                       I n,
-                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                       const T* __restrict__ A,
-                       int64_t lda,
-                       I       nnz,
-                       const T* __restrict__ x_val,
-                       const I* __restrict__ x_ind,
-                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                       T* __restrict__ y,
-                       rocsparse_index_base idx_base,
-                       bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-
-        if(alpha != static_cast<T>(0) || beta != static_cast<T>(1))
-        {
-            rocsparse::gemvi_device2<BLOCKSIZE, WFSIZE, UNROLL>(
-                m, n, alpha, A, lda, nnz, x_val, x_ind, beta, y, idx_base);
-        }
-    }
-
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t UNROLL, typename I, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gemvi_kernel_part1(I m,
@@ -197,26 +147,6 @@ namespace rocsparse
 
         return rocsparse::max(1, rocsparse::min(ny_work, ny_occ));
     }
-
-#define LAUNCH_GEMVI_WAVE32(DIM_)                                     \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
-        (rocsparse::gemvi_kernel<DIM_, 32>),                          \
-        gemvi_blocks,                                                 \
-        dim3(DIM_),                                                   \
-        0,                                                            \
-        handle->stream,                                               \
-        m,                                                            \
-        n,                                                            \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
-        A,                                                            \
-        lda,                                                          \
-        nnz,                                                          \
-        x_val,                                                        \
-        x_ind,                                                        \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
-        y,                                                            \
-        idx_base,                                                     \
-        handle->pointer_mode == rocsparse_pointer_mode_host)
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t UNROLL, typename I, typename T>
     rocsparse_status gemvi_kernel_dispatch(rocsparse_handle     handle,
