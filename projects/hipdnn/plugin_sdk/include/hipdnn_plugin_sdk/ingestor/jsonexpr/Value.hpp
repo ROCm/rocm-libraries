@@ -18,18 +18,34 @@
 #include <hipdnn_data_sdk/utilities/Visitor.hpp>
 
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <limits>
 #include <ostream>
 #include <string>
+#include <system_error>
 #include <variant>
 #include <vector>
 
 namespace hipdnn_plugin_sdk::ingestor::jsonexpr
 {
+/// How deeply a Value handed back by a data source may nest.
+///
+/// A Value is a tree, and every consumer of one walks it recursively:
+/// containsUnresolved, dump, toNumber over an array, variant equality, and the
+/// destructor. None of those can bound their own depth after the fact, so the
+/// bound belongs where a Value is built.
+///
+/// MAX_EXPRESSION_DEPTH bounds a *rule*; this bounds a *document*. The two are
+/// separate limits on separate inputs that happen to share a magnitude, and a
+/// document is no more trusted than a rule: both are read off disk. A data
+/// source must not build a Value deeper than this. JsonDataSource stops at the
+/// bound and yields null, which the language reads as unresolved, so the
+/// enclosing predicate declines rather than the process overflowing its stack.
+inline constexpr std::size_t MAX_VALUE_DEPTH = 256;
+
 // ---- runtime value --------------------------------------------------------
 // Json-like, with no nlohmann dependency.
 class Value
@@ -244,10 +260,28 @@ public:
     };
 
     /// Three-way comparison. Two strings compare lexically. An int64 and a
-    /// double compare without rounding the integer through double. Anything
-    /// else compares as a number, and a non-finite operand gives UNORDERED.
+    /// double compare without rounding the integer through double. A string
+    /// opposite a non-string is UNORDERED, and so is a non-finite operand.
+    /// Anything else compares as a number.
+    ///
+    /// Ordering agrees with operator== on what a kind mismatch means. `==`
+    /// answers false for "1" against 1, because the two are different kinds
+    /// rather than different values; ordering must not then answer true for
+    /// "1" <= 1 by quietly coercing the string. One expression reporting a
+    /// pair as unequal *and* as ordered is a contradiction a rule author
+    /// cannot reason about, and the coercing answer is the widening one: it
+    /// lets a criterion pass on a comparison that was never really made.
+    ///
+    /// Declining instead is fail-closed and surfaces the real fault, which is
+    /// a data source modelling a number as a string. Arithmetic still coerces,
+    /// so {"+": ["2", "3"]} is 5; only the predicates that gate criteria are
+    /// strict.
     static Ordering compare(const Value& a, const Value& b)
     {
+        if(a.isString() != b.isString())
+        {
+            return Ordering::UNORDERED; // a kind mismatch is not an ordering
+        }
         if(a.isString() && b.isString())
         {
             const auto& x = a.asString();
@@ -386,6 +420,28 @@ private:
         }
         return Ordering::EQUAL;
     }
+    /// Read a numeric string, the way JS Number() does for the spellings this
+    /// language accepts. Surrounding whitespace is trimmed and an empty string
+    /// reads as 0; anything else must be a number in full, or the result is
+    /// NaN and every operator downstream declines.
+    ///
+    /// std::from_chars rather than std::strtod, for two reasons:
+    ///
+    ///   - strtod is locale-dependent. Under a comma-decimal LC_NUMERIC it
+    ///     reads "1.5" as 1, and a library evaluating rules off disk does not
+    ///     control the host process's locale. from_chars is locale-independent
+    ///     by specification.
+    ///   - strtod reports a range error only through errno, which this code
+    ///     did not check, so "1e-999" underflowed to a clean 0 - a number the
+    ///     language never represented, which then compares equal to a literal
+    ///     0 and divides as a zero divisor. from_chars reports the same case
+    ///     as result_out_of_range, and reports it *without* flagging a genuine
+    ///     denormal such as "5e-324", which errno would have.
+    ///
+    /// The switch narrows two spellings, both deliberately. A hexadecimal
+    /// float ("0x10") is no longer read as 16: in a descriptor that is a typo,
+    /// not a value. A leading '+' is restored by hand below, because
+    /// from_chars rejects it and "+5" is an ordinary way to write 5.
     static double stringToNumber(const std::string& s)
     {
         std::size_t b = 0;
@@ -402,13 +458,25 @@ private:
         {
             return 0.0; // JS Number("") == 0
         }
-        const std::string t = s.substr(b, e - b);
-        const char* first = t.c_str();
-        char* last = nullptr;
-        const double d = std::strtod(first, &last);
-        if(last != first + t.size())
+        if(s[b] == '+')
         {
-            return std::nan(""); // trailing garbage -> NaN
+            ++b; // from_chars rejects the sign strtod accepted
+            if(b == e)
+            {
+                return std::nan(""); // a bare sign is not a number
+            }
+        }
+        const char* first = s.data() + b;
+        const char* last = s.data() + e;
+        double d = 0.0;
+        const std::from_chars_result r = std::from_chars(first, last, d);
+        if(r.ec != std::errc() || r.ptr != last)
+        {
+            // Trailing garbage, an unreadable spelling, or a magnitude outside
+            // the double range in either direction. NaN is unorderable, so the
+            // enclosing predicate declines rather than answering from a value
+            // that was never read.
+            return std::nan("");
         }
         return d;
     }

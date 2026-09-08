@@ -224,7 +224,19 @@ private:
         return true;
     }
 
-    static Value toValue(const nlohmann::json& j)
+    /// Convert one JSON node into a Value, stopping at MAX_VALUE_DEPTH.
+    ///
+    /// `depth` is the level of the node being built, counting the root as 1,
+    /// so the Value handed back nests no deeper than MAX_VALUE_DEPTH levels.
+    ///
+    /// A document is untrusted input just as a rule is, and unlike a rule it
+    /// is not depth-checked before it is read. Past the bound this yields null
+    /// rather than recursing: the language reads null as unresolved, an array
+    /// holding one is unresolved throughout, and the enclosing predicate
+    /// declines. That is the same treatment an unsigned integer past
+    /// INT64_MAX already gets - a value this source could not represent is
+    /// reported as unread, never as a substitute.
+    static Value toValue(const nlohmann::json& j, std::size_t depth = 1)
     {
         if(j.is_boolean())
         {
@@ -253,11 +265,15 @@ private:
         }
         if(j.is_array())
         {
+            if(depth >= MAX_VALUE_DEPTH)
+            {
+                return {}; // deeper than a Value may nest
+            }
             Value::Array a;
             a.reserve(j.size());
             for(const auto& e : j)
             {
-                a.push_back(toValue(e));
+                a.push_back(toValue(e, depth + 1));
             }
             return {std::move(a)};
         }

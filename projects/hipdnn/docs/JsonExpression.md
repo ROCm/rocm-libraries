@@ -339,14 +339,29 @@ Otherwise a `null` operand makes the whole fold `null`. See
 | --- | --- | --- | --- |
 | `==` | 2 | any | Strict equality. No type coercion, so `1 == "1"` is false. |
 | `!=` | 2 | any | Strict inequality, the negation of `==`. |
-| `<` | 2–3 | number (coerced); strings compare lexicographically | Less-than. The 3-operand form is the between-chain `a < b < c`. |
-| `<=` | 2–3 | number (coerced); strings compare lexicographically | Less-than-or-equal, with the same between-chain form. |
-| `>` | 2 | number (coerced); strings compare lexicographically | Greater-than. |
-| `>=` | 2 | number (coerced); strings compare lexicographically | Greater-than-or-equal. |
+| `<` | 2–3 | two numbers, or two strings | Less-than. The 3-operand form is the between-chain `a < b < c`. |
+| `<=` | 2–3 | two numbers, or two strings | Less-than-or-equal, with the same between-chain form. |
+| `>` | 2 | two numbers, or two strings | Greater-than. |
+| `>=` | 2 | two numbers, or two strings | Greater-than-or-equal. |
 
 Equality compares two integers exactly, so magnitudes past 2^53 are not
 conflated by a detour through `double`. For the same reason, an integer and a
 double compare equal only when the double names that integer exactly.
+
+**Ordering agrees with equality about kinds.** Two numbers compare numerically
+and two strings compare lexicographically, but a string opposite a number is a
+kind mismatch, and the ordering operators decline rather than coercing it. So
+`"1" == 1` is false and `"1" <= 1` is `null`, not true.
+
+> **Why it declines.** These are the predicates that gate criteria, and
+> coercing is the answer that widens one. A rule reporting a pair as unequal
+> *and* as ordered is a contradiction its author cannot reason about, so the
+> operator that would have answered from a coercion declines instead.
+
+This is the one place the language is stricter than `Number()` coercion. A data
+source that models a number as a string (`"tile_m": "128"`) stops ordering and
+starts declining, which is that modelling error surfacing rather than passing
+quietly. Arithmetic is unaffected: `{"+": ["2", "3"]}` is still `5`.
 
 ### Arithmetic
 
@@ -477,6 +492,28 @@ value is neither wholly supplied nor wholly absent, so `present` and
 `not_present` are both `false` on it. That is what keeps the guard above from
 accepting such a value through its `not_present` arm.
 
+### A document nested past the depth bound is unresolved
+
+A `Value` is a tree, and every consumer of one walks it recursively. A data
+source must therefore hand back nothing deeper than `MAX_VALUE_DEPTH` (256)
+levels, or the recursion overflows the stack inside the language rather than
+inside the accessor.
+
+`MAX_EXPRESSION_DEPTH` bounds a *rule*; this bounds a *document*. Both are read
+off disk and neither is more trusted than the other, but only the rule is
+checked at compile time, so a document needs its own bound at the point a
+`Value` is built.
+
+`JsonDataSource` enforces it: at the bound it yields `null` for the subtree
+beneath rather than recursing. By the rule above, an array holding that `null`
+is unresolved throughout, so the enclosing predicate declines — and so does its
+negation, and both presence operators report `false`.
+
+A data source of your own carries the same obligation. The bound is not
+re-checked when a value crosses the `IDataSource` boundary, because that would
+cost a full traversal of every value read on every evaluation to catch a
+mistake in one accessor.
+
 ## Unresolvable arithmetic declines
 
 `null` is not the only way a value can fail to resolve. `Number()` coercion turns
@@ -503,6 +540,29 @@ above: the enclosing predicate declines, and so does its negation.
 `min` and `max` decline outright rather than skipping an unresolvable operand.
 Answering from fewer operands than were written is the same failure in quieter
 form.
+
+### Numeric strings
+
+`Number()` coercion reads a string with `std::from_chars`, not `std::strtod`,
+so parsing does not consult the host process's locale. Under a comma-decimal
+`LC_NUMERIC`, `strtod` reads `"1.5"` as `1`; a library evaluating rules read off
+disk does not control that setting.
+
+Accepted: an optional leading `+` or `-`, decimal digits, a decimal point, and
+an exponent, with surrounding whitespace trimmed. The empty string is `0`, as
+`Number("")` is.
+
+Rejected — the whole string coerces to `NaN`, so the enclosing operator
+declines: trailing garbage (`"5abc"`), interior whitespace (`"1 5"`), a bare
+sign, and a hexadecimal float (`"0x10"`, a typo in a descriptor rather than
+`16`).
+
+A magnitude outside the `double` range declines in **both** directions.
+Overflow (`"1e309"`) yields an infinity, which is not finite. Underflow
+(`"1e-999"`) is the subtler one: it would otherwise read as a clean `0` — a
+number the language never represented, which then compares equal to a literal
+`0` and divides as a zero divisor. A genuine denormal such as `"5e-324"` is
+representable and keeps its value.
 
 ## Compile-time errors
 
@@ -538,8 +598,12 @@ The collection and string operators are not supported either: `map`, `reduce`,
 
 Unit tests live in
 [`TestJsonExpression.cpp`](../plugin_sdk/tests/ingestor/TestJsonExpression.cpp)
-and
-[`TestJsonDataSource.cpp`](../plugin_sdk/tests/ingestor/TestJsonDataSource.cpp).
+(the language through compiled rules),
+[`TestJsonValue.cpp`](../plugin_sdk/tests/ingestor/TestJsonValue.cpp) (the
+`Value` type directly: coercion, the comparison ladder, and every producer of
+an unorderable result), and
+[`TestJsonDataSource.cpp`](../plugin_sdk/tests/ingestor/TestJsonDataSource.cpp)
+(the sample data source).
 They build into the `hipdnn_plugin_sdk_tests` GTest binary. Like the rest of
 `ingestor/`, they are compiled only when `HIPDNN_ENABLE_KERNEL_INGESTOR` is set.
 
@@ -548,5 +612,5 @@ Run them with:
 ```bash
 ctest -R hipdnn_plugin_sdk_tests
 # or, filtered directly on the binary:
-./hipdnn_plugin_sdk_tests --gtest_filter='TestJsonExpression.*:TestJsonDataSource.*'
+./hipdnn_plugin_sdk_tests --gtest_filter='TestJsonExpression.*:TestJsonValue.*:TestJsonDataSource.*'
 ```

@@ -129,6 +129,36 @@ TEST(TestJsonExpression, ComparisonIsStrict)
     EXPECT_EQ(eval(json({{"<", json::array({"abc", "abd"})}})), V(true));
 }
 
+TEST(TestJsonExpression, OrderingDeclinesOnAKindMismatchJustAsEqualityRefuses)
+{
+    // `==` reports "1" and 1 as different kinds rather than different values.
+    // Ordering must not then coerce the string and answer true: one rule
+    // reporting a pair as unequal *and* as ordered is a contradiction, and the
+    // coercing answer is the one that widens a criterion.
+    for(const char* op : {"<", "<=", ">", ">="})
+    {
+        const json forward = json({{op, json::array({"1", 1})}});
+        const json backward = json({{op, json::array({1, "1"})}});
+        EXPECT_TRUE(eval(forward).isNull()) << op;
+        EXPECT_TRUE(eval(backward).isNull()) << op;
+        // And the negation declines too, so `!` cannot recover a pass from it.
+        EXPECT_TRUE(eval(json({{"!", json::array({forward})}})).isNull()) << op;
+    }
+
+    // A chained comparison is undecided as soon as one link is.
+    EXPECT_TRUE(eval(json({{"<", json::array({0, "1", 2})}})).isNull());
+
+    // Two strings still order lexically, and two numbers still order
+    // numerically: only the mismatch declines.
+    EXPECT_EQ(eval(json({{"<", json::array({"1", "2"})}})), V(true));
+    EXPECT_EQ(eval(json({{"<", json::array({1, 2})}})), V(true));
+
+    // Arithmetic is untouched. A numeric string still coerces, because `+`
+    // does not gate a criterion the way an ordering predicate does.
+    EXPECT_EQ(eval(json({{"+", json::array({"2", "3"})}})), V(5));
+    EXPECT_EQ(eval(json({{"<", json::array({{{"+", json::array({"2", "3"})}}, 6})}})), V(true));
+}
+
 TEST(TestJsonExpression, TruthinessAndLogic)
 {
     EXPECT_EQ(eval(json({{"!", 0}})), V(true));
