@@ -181,6 +181,12 @@ float invoke_gemm(ck_tile::DeviceMem& a_m_k_dev_buf,
     return ave_time;
 }
 
+template <typename T>
+struct GemmConfigTag
+{
+    using type = T;
+};
+
 template <typename CDataType>
 bool do_verify(const ck_tile::HostTensor<CDataType>& c_m_n_dev_result,
                const ck_tile::HostTensor<CDataType>& c_m_n_ref,
@@ -348,7 +354,6 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     c_m_n_dev_result.SetZero();
 
 #if defined(CK_USE_GFX1250)
-    // PR #11537: RCR, K % 8 != 0 -- forces VectorSizeA=VectorSizeB=1 (C stays natural).
     constexpr bool k_pad_fallback_eligible =
         GemmConfig::EnableKPadFallback && !GemmConfig::FixedVectorSize &&
         std::is_same_v<ADataTypeBuf, BDataTypeBuf> &&
@@ -358,8 +363,6 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
         ck_tile::numeric_traits<ADataTypeBuf>::PackedSize == 1 &&
         ck_tile::numeric_traits<BDataTypeBuf>::PackedSize == 1;
 
-    // This repo's addition on top of #11537: N < 8, the RCR C-side (N-packed)
-    // analogue of K-tail -- #11537 never touches C's vector size.
     constexpr bool mn_pad_fallback_eligible =
         GemmConfig::EnableMNPadFallback && !GemmConfig::FixedVectorSize &&
         std::is_same_v<ADataTypeBuf, BDataTypeBuf> &&
@@ -377,303 +380,74 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     constexpr ck_tile::index_t ABVectorSize = 16 / sizeof(ADataTypeBuf);
     constexpr ck_tile::index_t CVectorSize  = 16 / sizeof(CDataType);
 
+    // Two independent conditions this dispatcher must combine: K misaligned
+    // (needs scalar A/B, PR #11537) and N too small (needs scalar C, this
+    // repo's addition) -- named separately since we pick among 4 outcomes.
     const bool needsScalarAB = k_pad_fallback_eligible && (K % ABVectorSize != 0);
     const bool needsScalarC  = mn_pad_fallback_eligible && (N < CVectorSize);
+
+    auto invoke = [&](auto cfg_tag) {
+        using Cfg = typename decltype(cfg_tag)::type;
+        return invoke_gemm<Cfg,
+                           Invoker,
+                           ADataTypeBuf,
+                           BDataTypeBuf,
+                           ck_tile::tuple<>,
+                           AccDataType,
+                           CDataType,
+                           ALayout,
+                           BLayout,
+                           ck_tile::tuple<>,
+                           CLayout>(a_m_k_dev_buf,
+                                    b_k_n_dev_buf,
+                                    c_m_n_dev_buf,
+                                    M,
+                                    N,
+                                    K,
+                                    stride_A,
+                                    stride_B,
+                                    stride_C,
+                                    kbatch,
+                                    n_warmup,
+                                    n_repeat,
+                                    persistent,
+                                    flush_cache,
+                                    rotating_count);
+    };
 
     float ave_time;
     if constexpr(k_pad_fallback_eligible && mn_pad_fallback_eligible)
     {
         if(needsScalarAB && needsScalarC)
-        {
-            using FallbackConfig = GemmConfigFixedVectorSize<GemmConfig, 1, 1, 1>;
-            ave_time             = invoke_gemm<FallbackConfig,
-                                    Invoker,
-                                    ADataTypeBuf,
-                                    BDataTypeBuf,
-                                    ck_tile::tuple<>,
-                                    AccDataType,
-                                    CDataType,
-                                    ALayout,
-                                    BLayout,
-                                    ck_tile::tuple<>,
-                                    CLayout>(a_m_k_dev_buf,
-                                             b_k_n_dev_buf,
-                                             c_m_n_dev_buf,
-                                             M,
-                                             N,
-                                             K,
-                                             stride_A,
-                                             stride_B,
-                                             stride_C,
-                                             kbatch,
-                                             n_warmup,
-                                             n_repeat,
-                                             persistent,
-                                             flush_cache,
-                                             rotating_count);
-        }
+            ave_time = invoke(GemmConfigTag<GemmConfigFixedVectorSize<GemmConfig, 1, 1, 1>>{});
         else if(needsScalarAB)
-        {
-            using FallbackConfig = GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>;
-            ave_time             = invoke_gemm<FallbackConfig,
-                                    Invoker,
-                                    ADataTypeBuf,
-                                    BDataTypeBuf,
-                                    ck_tile::tuple<>,
-                                    AccDataType,
-                                    CDataType,
-                                    ALayout,
-                                    BLayout,
-                                    ck_tile::tuple<>,
-                                    CLayout>(a_m_k_dev_buf,
-                                             b_k_n_dev_buf,
-                                             c_m_n_dev_buf,
-                                             M,
-                                             N,
-                                             K,
-                                             stride_A,
-                                             stride_B,
-                                             stride_C,
-                                             kbatch,
-                                             n_warmup,
-                                             n_repeat,
-                                             persistent,
-                                             flush_cache,
-                                             rotating_count);
-        }
+            ave_time =
+                invoke(GemmConfigTag<GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>>{});
         else if(needsScalarC)
-        {
-            using FallbackConfig =
-                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>;
-            ave_time = invoke_gemm<FallbackConfig,
-                                   Invoker,
-                                   ADataTypeBuf,
-                                   BDataTypeBuf,
-                                   ck_tile::tuple<>,
-                                   AccDataType,
-                                   CDataType,
-                                   ALayout,
-                                   BLayout,
-                                   ck_tile::tuple<>,
-                                   CLayout>(a_m_k_dev_buf,
-                                            b_k_n_dev_buf,
-                                            c_m_n_dev_buf,
-                                            M,
-                                            N,
-                                            K,
-                                            stride_A,
-                                            stride_B,
-                                            stride_C,
-                                            kbatch,
-                                            n_warmup,
-                                            n_repeat,
-                                            persistent,
-                                            flush_cache,
-                                            rotating_count);
-        }
+            ave_time = invoke(
+                GemmConfigTag<GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>{});
         else
-        {
-            ave_time = invoke_gemm<GemmConfig,
-                                   Invoker,
-                                   ADataTypeBuf,
-                                   BDataTypeBuf,
-                                   ck_tile::tuple<>,
-                                   AccDataType,
-                                   CDataType,
-                                   ALayout,
-                                   BLayout,
-                                   ck_tile::tuple<>,
-                                   CLayout>(a_m_k_dev_buf,
-                                            b_k_n_dev_buf,
-                                            c_m_n_dev_buf,
-                                            M,
-                                            N,
-                                            K,
-                                            stride_A,
-                                            stride_B,
-                                            stride_C,
-                                            kbatch,
-                                            n_warmup,
-                                            n_repeat,
-                                            persistent,
-                                            flush_cache,
-                                            rotating_count);
-        }
+            ave_time = invoke(GemmConfigTag<GemmConfig>{});
     }
     else if constexpr(k_pad_fallback_eligible)
     {
         if(needsScalarAB)
-        {
-            using FallbackConfig = GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>;
-            ave_time             = invoke_gemm<FallbackConfig,
-                                    Invoker,
-                                    ADataTypeBuf,
-                                    BDataTypeBuf,
-                                    ck_tile::tuple<>,
-                                    AccDataType,
-                                    CDataType,
-                                    ALayout,
-                                    BLayout,
-                                    ck_tile::tuple<>,
-                                    CLayout>(a_m_k_dev_buf,
-                                             b_k_n_dev_buf,
-                                             c_m_n_dev_buf,
-                                             M,
-                                             N,
-                                             K,
-                                             stride_A,
-                                             stride_B,
-                                             stride_C,
-                                             kbatch,
-                                             n_warmup,
-                                             n_repeat,
-                                             persistent,
-                                             flush_cache,
-                                             rotating_count);
-        }
+            ave_time =
+                invoke(GemmConfigTag<GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>>{});
         else
-        {
-            ave_time = invoke_gemm<GemmConfig,
-                                   Invoker,
-                                   ADataTypeBuf,
-                                   BDataTypeBuf,
-                                   ck_tile::tuple<>,
-                                   AccDataType,
-                                   CDataType,
-                                   ALayout,
-                                   BLayout,
-                                   ck_tile::tuple<>,
-                                   CLayout>(a_m_k_dev_buf,
-                                            b_k_n_dev_buf,
-                                            c_m_n_dev_buf,
-                                            M,
-                                            N,
-                                            K,
-                                            stride_A,
-                                            stride_B,
-                                            stride_C,
-                                            kbatch,
-                                            n_warmup,
-                                            n_repeat,
-                                            persistent,
-                                            flush_cache,
-                                            rotating_count);
-        }
+            ave_time = invoke(GemmConfigTag<GemmConfig>{});
     }
     else if constexpr(mn_pad_fallback_eligible)
     {
         if(needsScalarC)
-        {
-            using FallbackConfig =
-                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>;
-            ave_time = invoke_gemm<FallbackConfig,
-                                   Invoker,
-                                   ADataTypeBuf,
-                                   BDataTypeBuf,
-                                   ck_tile::tuple<>,
-                                   AccDataType,
-                                   CDataType,
-                                   ALayout,
-                                   BLayout,
-                                   ck_tile::tuple<>,
-                                   CLayout>(a_m_k_dev_buf,
-                                            b_k_n_dev_buf,
-                                            c_m_n_dev_buf,
-                                            M,
-                                            N,
-                                            K,
-                                            stride_A,
-                                            stride_B,
-                                            stride_C,
-                                            kbatch,
-                                            n_warmup,
-                                            n_repeat,
-                                            persistent,
-                                            flush_cache,
-                                            rotating_count);
-        }
+            ave_time = invoke(
+                GemmConfigTag<GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>{});
         else
-        {
-            ave_time = invoke_gemm<GemmConfig,
-                                   Invoker,
-                                   ADataTypeBuf,
-                                   BDataTypeBuf,
-                                   ck_tile::tuple<>,
-                                   AccDataType,
-                                   CDataType,
-                                   ALayout,
-                                   BLayout,
-                                   ck_tile::tuple<>,
-                                   CLayout>(a_m_k_dev_buf,
-                                            b_k_n_dev_buf,
-                                            c_m_n_dev_buf,
-                                            M,
-                                            N,
-                                            K,
-                                            stride_A,
-                                            stride_B,
-                                            stride_C,
-                                            kbatch,
-                                            n_warmup,
-                                            n_repeat,
-                                            persistent,
-                                            flush_cache,
-                                            rotating_count);
-        }
+            ave_time = invoke(GemmConfigTag<GemmConfig>{});
     }
     else
     {
-        ave_time = invoke_gemm<GemmConfig,
-                               Invoker,
-                               ADataTypeBuf,
-                               BDataTypeBuf,
-                               ck_tile::tuple<>,
-                               AccDataType,
-                               CDataType,
-                               ALayout,
-                               BLayout,
-                               ck_tile::tuple<>,
-                               CLayout>(a_m_k_dev_buf,
-                                        b_k_n_dev_buf,
-                                        c_m_n_dev_buf,
-                                        M,
-                                        N,
-                                        K,
-                                        stride_A,
-                                        stride_B,
-                                        stride_C,
-                                        kbatch,
-                                        n_warmup,
-                                        n_repeat,
-                                        persistent,
-                                        flush_cache,
-                                        rotating_count);
-    }
-        ave_time = invoke_gemm<GemmConfig,
-                               Invoker,
-                               ADataTypeBuf,
-                               BDataTypeBuf,
-                               ck_tile::tuple<>,
-                               AccDataType,
-                               CDataType,
-                               ALayout,
-                               BLayout,
-                               ck_tile::tuple<>,
-                               CLayout>(a_m_k_dev_buf,
-                                        b_k_n_dev_buf,
-                                        c_m_n_dev_buf,
-                                        M,
-                                        N,
-                                        K,
-                                        stride_A,
-                                        stride_B,
-                                        stride_C,
-                                        kbatch,
-                                        n_warmup,
-                                        n_repeat,
-                                        persistent,
-                                        flush_cache,
-                                        rotating_count);
+        ave_time = invoke(GemmConfigTag<GemmConfig>{});
     }
 
     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
