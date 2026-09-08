@@ -143,14 +143,41 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
             f"exist would report EVERY shape as unreconciled."
         )
 
-    request_decl = profile.get("request") or {}
-    request_cls = _import(*_required(request_decl, "request", "module", "class"))
+    # The REFERENCE's request class, which is not always the one the generator side
+    # uses. `reference_request:` overrides `request:` when present.
+    #
+    # Why the override exists. A profile whose `request.class` is an ADAPTER -- because
+    # the kernel's own dispatch entry point needs a different vocabulary than the
+    # library's registry does -- cannot use that adapter here: rocKE's candidates
+    # `isinstance`-check their argument and refuse anything else with
+    # "expected AttentionRequest, got X". Duck-typing does not satisfy a type check.
+    #
+    # That refusal is per-shape and looks exactly like a decline, so WITHOUT this the
+    # tool reports `RECONCILED: every decline is one the reference makes too` having
+    # never consulted the reference at all -- the "gate that passes by asking nothing"
+    # this file's own header warns about, and indistinguishable from a real pass.
+    reference_decl = profile.get("reference_request") or profile.get("request") or {}
+    request_cls = _import(
+        *_required(reference_decl, "reference_request", "module", "class")
+    )
     arch = profile.get("arch")
     # Opt-in defaults ARE inherited here, unlike a library-wide oracle. A candidate that
     # only matches when the request names it declines everything without its selector,
     # and every decline would then reconcile trivially -- a gate that passes by asking
     # nothing at all.
-    defaults = dict(request_decl.get("defaults") or {})
+    defaults = dict(reference_decl.get("defaults") or {})
+
+    # An optional TRANSLATOR, for the case where the corpus is written in the
+    # generator side's vocabulary and the reference wants its own. Declared as
+    # `reference_request.via: {module, function}`; it takes the shape dict and returns
+    # the reference request object, so the mapping lives in the integration's own
+    # adapter rather than being guessed here.
+    via = None
+    via_decl = reference_decl.get("via") or {}
+    if via_decl:
+        via = _import(
+            *_required(via_decl, "reference_request.via", "module", "function")
+        )
 
     out = {}
     for index, shape in enumerate(shapes):
@@ -161,7 +188,7 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
         if arch and "arch" not in fields:
             fields["arch"] = arch
         try:
-            request = request_cls(**fields)
+            request = via(fields) if via is not None else request_cls(**fields)
         except Exception as exc:
             out[index] = (False, f"{type(exc).__name__}: {exc}")
             continue
