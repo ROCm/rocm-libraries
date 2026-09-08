@@ -28,7 +28,6 @@ from ..core.arch import base_arch_from_target_id
 from ._ctypes_bind import _LazyFn
 from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
 
-
 HIP_LAUNCH_PARAM_BUFFER_POINTER = ctypes.c_void_p(1)
 HIP_LAUNCH_PARAM_BUFFER_SIZE = ctypes.c_void_p(2)
 HIP_LAUNCH_PARAM_END = ctypes.c_void_p(3)
@@ -302,8 +301,8 @@ def get_device_num_cus(device: int = 0) -> Optional[int]:
     dispatch/benchmark layers can size split-KV device subscription without a torch
     dependency. Best-effort and side-effect-free (``hipDeviceGetAttribute`` lazily
     inits the runtime internally). NOTE: this reports CUs on CU-mode devices (CDNA);
-    a WGP-mode (RDNA) device reports half the CU count — irrelevant to the current
-    gfx942-only caller.
+    a WGP-mode (RDNA) device reports half the CU count — inert for the current
+    CDNA-only callers (gfx942 / gfx950), but a non-CDNA caller must account for it.
     """
     v = ctypes.c_int(0)
     try:
