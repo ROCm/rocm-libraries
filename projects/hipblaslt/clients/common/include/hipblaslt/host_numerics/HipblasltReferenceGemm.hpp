@@ -37,8 +37,8 @@ namespace hipblaslt::host_numerics
         std::optional<roc::host_numerics::Tensor> alphaVector;
         std::optional<roc::host_numerics::Tensor> scaleA;
         std::optional<roc::host_numerics::Tensor> scaleB;
-        std::optional<roc::host_numerics::Scalar> scaleC;
-        std::optional<roc::host_numerics::Scalar> scaleD;
+        std::optional<roc::host_numerics::Tensor> scaleC;
+        std::optional<roc::host_numerics::Tensor> scaleD;
     };
 
     roc::host_numerics::Layout referenceBatchLayout(const hipblaslt::client::MatmulMatrix& matrix,

@@ -17,22 +17,22 @@ enum class ActivationApplication {
 struct EpilogueOptions {
     explicit EpilogueOptions(ScalarType compute = ScalarType::Float32)
         : computeType(compute),
-          outputScale(Scalar::one(compute)),
-          auxiliaryScale(Scalar::one(compute)),
-          activationParameter0(Scalar::zero(compute)),
-          activationParameter1(Scalar::zero(compute)) {}
+          outputScale(Tensor::scalar(compute, 1)),
+          auxiliaryScale(Tensor::scalar(compute, 1)),
+          activationParameter0(Tensor::scalar(compute, 0)),
+          activationParameter1(Tensor::scalar(compute, 0)) {}
 
     ScalarType computeType;
     std::optional<Tensor> auxiliaryInput;
     std::optional<Tensor> gateResidual;
     std::optional<Tensor> bias;  // Any shape broadcast-compatible with input.
-    Scalar outputScale;
-    Scalar auxiliaryScale;
+    Tensor outputScale;
+    Tensor auxiliaryScale;
     OutputConversion outputConversion = OutputConversion::Default;
     Activation activation = Activation::None;
     ActivationApplication activationApplication = ActivationApplication::Forward;
-    Scalar activationParameter0;
-    Scalar activationParameter1;
+    Tensor activationParameter0;
+    Tensor activationParameter1;
     OutputSelection outputSelection = OutputSelection::all();
     bool accumulateAmax = false;
 };

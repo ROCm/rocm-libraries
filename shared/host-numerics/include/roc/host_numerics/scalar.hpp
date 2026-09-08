@@ -16,12 +16,10 @@
 #include <utility>
 
 namespace roc::host_numerics {
-class Tensor;
-
 // Scalar types define the runtime numeric vocabulary shared by every host-numerics component.
 // This header owns type identity, metadata, native C++ mappings, runtime dispatch, conversion
-// policy, and the owning Scalar value. Scalar and Tensor templates require the definitions in
-// scalar_codec.hpp; callers include scalar.hpp.
+// policy. Tensor conversion templates require the definitions in scalar_codec.hpp; callers include
+// scalar.hpp.
 enum class ScalarCategory : uint8_t {
     Boolean,
     SignedInteger,
@@ -382,91 +380,7 @@ Target convertScalar(Source source, const ScalarConversionOptions& options = {})
     return detail::convertScalarValue<Target>(std::move(source), options);
 }
 
-// One runtime-typed encoded value stored inline. Scalar has ordinary deep value
-// semantics, no shape or strides, and never aliases external storage.
-class Scalar {
-   public:
-    // Snapshots one rank-zero tensor value. Tensor storage is never retained.
-    Scalar(const Tensor& tensor);
-
-    template <typename Source>
-        requires(!std::is_same_v<std::remove_cvref_t<Source>, Scalar> &&
-                 requires { nativeScalarType<std::remove_cvref_t<Source>>; })
-    Scalar(Source value) : m_type(nativeScalarType<std::remove_cvref_t<Source>>) {
-        detail::encodeScalar(m_type, m_storage, 0, std::move(value));
-    }
-
-    static Scalar fromStorage(ScalarType type, std::span<const std::byte> storage) {
-        Scalar result(type);
-        if (storage.size() != result.storageSize())
-            throw std::invalid_argument("Scalar storage size does not match its type.");
-        std::copy(storage.begin(), storage.end(), result.m_storage.begin());
-        const uint16_t remainder = scalarTypeInfo(type).storageBits % 8;
-        if (remainder != 0) {
-            const uint8_t mask = static_cast<uint8_t>((1U << remainder) - 1U);
-            const size_t finalByte = result.storageSize() - 1;
-            result.m_storage[finalByte] = static_cast<std::byte>(
-                std::to_integer<uint8_t>(result.m_storage[finalByte]) & mask);
-        }
-        return result;
-    }
-
-    static Scalar zero(ScalarType type) {
-        Scalar result(type);
-        detail::encodeScalar(type, result.m_storage, 0, int64_t{0});
-        return result;
-    }
-
-    static Scalar one(ScalarType type) {
-        Scalar result(type);
-        detail::encodeScalar(type, result.m_storage, 0, int64_t{1});
-        return result;
-    }
-
-    ScalarType type() const {
-        return m_type;
-    }
-
-    std::span<const std::byte> rawEncodedBackingStorage() const {
-        return std::span<const std::byte>(m_storage).first(storageSize());
-    }
-
-    template <typename Target>
-    Target as() const {
-        return detail::decodeScalar<Target>(m_type, m_storage, 0);
-    }
-
-    template <typename Target>
-    Target as(const ScalarConversionOptions& options) const {
-        return detail::decodeScalar<Target>(m_type, m_storage, 0, options);
-    }
-
-    friend bool operator==(const Scalar& left, const Scalar& right) {
-        return left.m_type == right.m_type && std::equal(left.rawEncodedBackingStorage().begin(),
-                                                         left.rawEncodedBackingStorage().end(),
-                                                         right.rawEncodedBackingStorage().begin(),
-                                                         right.rawEncodedBackingStorage().end());
-    }
-
-   private:
-    static constexpr size_t maximumStorageBytes = 16;
-
-    explicit Scalar(ScalarType type) : m_type(type) {
-        if (!isConcreteScalarType(type))
-            throw std::invalid_argument("Scalar requires a concrete scalar type.");
-        if (storageSize() > maximumStorageBytes)
-            throw std::invalid_argument("Scalar type exceeds inline scalar storage.");
-    }
-
-    size_t storageSize() const {
-        const uint16_t bits = scalarTypeInfo(m_type).storageBits;
-        return bits / 8 + static_cast<size_t>(bits % 8 != 0);
-    }
-
-    ScalarType m_type;
-    std::array<std::byte, maximumStorageBytes> m_storage{};
-};
 }  // namespace roc::host_numerics
 
-// Scalar and Tensor are header-only.
+// Scalar conversion and Tensor are header-only.
 #include <roc/host_numerics/scalar_codec.hpp>

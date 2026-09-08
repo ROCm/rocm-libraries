@@ -75,8 +75,8 @@ namespace hipblaslt::host_numerics
             options.preQuantizationScalesB.push_back(inputs.scaleB->expandDims(0));
         options.alpha       = scalarValue(preparation.alpha, dataTypes.coefficient);
         options.beta        = scalarValue(preparation.beta, dataTypes.coefficient);
-        options.scaleC      = inputs.scaleC.value_or(Scalar::one(accumulatorType));
-        options.outputScale = inputs.scaleD.value_or(Scalar::one(accumulatorType));
+        options.scaleC      = inputs.scaleC.value_or(Tensor::scalar(accumulatorType, 1));
+        options.outputScale = inputs.scaleD.value_or(Tensor::scalar(accumulatorType, 1));
         if(inputs.d.type() == ScalarType::Int8)
             options.outputConversion = OutputConversion::SaturatingInt8;
         (void)referenceGemmIntoWithBlasBackend(std::move(inputs.a),

@@ -60,15 +60,15 @@ void registerGemmBindings(nb::module_& module) {
         .def_rw("conjugate_b", &GemmOptions::conjugateB)
         .def_prop_rw(
             "alpha",
-            [](const GemmOptions& options) { return options.alpha.as<std::complex<double>>(); },
+            [](const GemmOptions& options) { return options.alpha.item<std::complex<double>>(); },
             [](GemmOptions& options, nb::object value) { options.alpha = scalarFromPython(value); })
         .def_prop_rw(
             "beta",
-            [](const GemmOptions& options) { return options.beta.as<std::complex<double>>(); },
+            [](const GemmOptions& options) { return options.beta.item<std::complex<double>>(); },
             [](GemmOptions& options, nb::object value) { options.beta = scalarFromPython(value); })
         .def_prop_rw(
             "scale_c",
-            [](const GemmOptions& options) { return options.scaleC.as<std::complex<double>>(); },
+            [](const GemmOptions& options) { return options.scaleC.item<std::complex<double>>(); },
             [](GemmOptions& options, nb::object value) {
                 options.scaleC = scalarFromPython(value);
             })
@@ -79,7 +79,7 @@ void registerGemmBindings(nb::module_& module) {
         .def_prop_rw(
             "output_scale",
             [](const GemmOptions& options) {
-                return options.outputScale.as<std::complex<double>>();
+                return options.outputScale.item<std::complex<double>>();
             },
             [](GemmOptions& options, nb::object value) {
                 options.outputScale = scalarFromPython(value);
@@ -88,13 +88,13 @@ void registerGemmBindings(nb::module_& module) {
         .def_rw("activation", &GemmOptions::activation)
         .def_prop_rw(
             "activation_parameter0",
-            [](const GemmOptions& options) { return options.activationParameter0.as<double>(); },
+            [](const GemmOptions& options) { return options.activationParameter0.item<double>(); },
             [](GemmOptions& options, nb::object value) {
                 options.activationParameter0 = scalarFromPython(value);
             })
         .def_prop_rw(
             "activation_parameter1",
-            [](const GemmOptions& options) { return options.activationParameter1.as<double>(); },
+            [](const GemmOptions& options) { return options.activationParameter1.item<double>(); },
             [](GemmOptions& options, nb::object value) {
                 options.activationParameter1 = scalarFromPython(value);
             })

@@ -14,11 +14,12 @@ namespace hipblaslt::host_numerics
 
     namespace
     {
-        Scalar scalarValue(const void* pointer, ScalarType type)
+        Tensor scalarValue(const void* pointer, ScalarType type)
         {
             const size_t storageBytes = (scalarTypeInfo(type).storageBits + 7U) / 8U;
-            return Scalar::fromStorage(
+            return Tensor::copyEncodedBackingStorage(
                 type,
+                Layout::contiguousLastDimensionFastest(Shape{}),
                 std::span<const std::byte>(static_cast<const std::byte*>(pointer), storageBytes));
         }
     } // namespace

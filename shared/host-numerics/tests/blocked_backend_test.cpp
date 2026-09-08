@@ -135,17 +135,17 @@ Tensor expectedFloatResult(const GemmTestCase& problem) {
             blockBase = blockEnd;
         }
 
-        float result = problem.alpha.as<float>() * scaleValue(problem.scaleA, row, column) *
+        float result = problem.alpha.item<float>() * scaleValue(problem.scaleA, row, column) *
                            scaleValue(problem.scaleB, row, column) *
                            scaleValue(problem.scaleAlpha, row, column) * accumulation +
-                       problem.beta.as<float>() * problem.scaleC.as<float>() *
+                       problem.beta.item<float>() * problem.scaleC.item<float>() *
                            problem.c.loadAs<float>({row, column});
         if (problem.bias)
             result += problem.bias->broadcastTo(Shape{rows, columns}).loadAs<float>({row, column});
         if (problem.activation == Activation::Relu) result = std::max(0.0f, result);
         require(problem.activation == Activation::None || problem.activation == Activation::Relu,
                 "The test-only float oracle received an unsupported activation.");
-        result *= problem.outputScale.as<float>();
+        result *= problem.outputScale.item<float>();
         expected.storeFrom({row, column}, result);
     }
     return expected;

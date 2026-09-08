@@ -198,18 +198,18 @@ void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
             blockBase = blockEnd;
         }
 
-        Accumulator effectiveAlpha = problem.alpha.as<Accumulator>();
+        Accumulator effectiveAlpha = problem.alpha.item<Accumulator>();
         effectiveAlpha *= scaleValue(problem.scaleA, row, column);
         effectiveAlpha *= scaleValue(problem.scaleB, row, column);
         effectiveAlpha *= scaleValue(problem.scaleAlpha, row, column);
         Accumulator result = effectiveAlpha * accumulation;
-        if (problem.beta.as<Accumulator>() != Accumulator(0))
-            result += problem.beta.as<Accumulator>() * problem.scaleC.as<Accumulator>() *
+        if (problem.beta.item<Accumulator>() != Accumulator(0))
+            result += problem.beta.item<Accumulator>() * problem.scaleC.item<Accumulator>() *
                       problem.c.loadAs<Accumulator>({row, column});
         if (problem.bias)
             result += problem.bias->broadcastTo(outputShape).loadAs<Accumulator>({row, column});
         if (problem.activation == Activation::Relu) result = std::max(Accumulator(0), result);
-        result *= problem.outputScale.as<Accumulator>();
+        result *= problem.outputScale.item<Accumulator>();
         destination.storeFrom({row, column}, result);
     }
 }

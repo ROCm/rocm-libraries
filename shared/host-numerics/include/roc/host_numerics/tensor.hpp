@@ -378,6 +378,12 @@ inline bool byteRangesOverlap(std::span<const std::byte> left, std::span<const s
 // retains a caller-supplied lifetime anchor and performs no copy.
 class Tensor {
    public:
+    template <typename Source>
+        requires requires { nativeScalarType<std::remove_cvref_t<Source>>; }
+    Tensor(Source value) : Tensor(nativeScalarType<std::remove_cvref_t<Source>>, Shape{}) {
+        detail::encodeScalar(m_type, rawEncodedBackingStorage(), 0, std::move(value));
+    }
+
     Tensor(ScalarType type, Shape shape)
         : Tensor(type, Layout::contiguousLastDimensionFastest(shape)) {}
 
@@ -399,6 +405,14 @@ class Tensor {
 
     static Tensor allocateUninitialized(ScalarType type, Shape shape) {
         return allocateUninitialized(type, Layout::contiguousLastDimensionFastest(shape));
+    }
+
+    template <typename Source>
+        requires requires { nativeScalarType<std::remove_cvref_t<Source>>; }
+    static Tensor scalar(ScalarType type, Source value) {
+        Tensor result(type, Shape{});
+        detail::encodeScalar(type, result.rawEncodedBackingStorage(), 0, std::move(value));
+        return result;
     }
 
     // Copies the complete encoded backing storage. The span may include
@@ -504,14 +518,13 @@ class Tensor {
         return m_layout.shape().elementCount();
     }
 
-    // Returns an independent scalar snapshot of a rank-zero tensor.
-    Scalar item() const {
-        return Scalar(*this);
-    }
-
     template <typename Target>
     Target item(const ScalarConversionOptions& options = {}) const {
-        return Scalar(*this).template as<Target>(options);
+        if (shape().rank() != 0)
+            throw std::invalid_argument("Tensor item requires a rank-zero tensor.");
+        return detail::decodeScalar<Target>(
+            type(), rawEncodedBackingStorage(), layout().elementOffset(std::span<const size_t>{}),
+            options);
     }
 
     std::span<std::byte> rawEncodedBackingStorage() const {
@@ -910,22 +923,4 @@ inline Tensor Tensor::copyConvertedTo(ScalarType destinationType, Layout destina
     return result;
 }
 
-inline Scalar::Scalar(const Tensor& tensor) : Scalar(tensor.type()) {
-    if (tensor.shape().rank() != 0)
-        throw std::invalid_argument("Scalar conversion requires a rank-zero Tensor.");
-
-    const uint16_t bits = scalarTypeInfo(tensor.type()).storageBits;
-    const ptrdiff_t elementOffset = tensor.layout().elementOffset(std::span<const size_t>{});
-    const uint64_t sourceBitOffset = detail::bitOffset(tensor.type(), elementOffset);
-    if (bits % 8 == 0) {
-        const size_t bytes = bits / 8;
-        const size_t sourceByteOffset = static_cast<size_t>(sourceBitOffset / 8);
-        std::copy_n(tensor.rawEncodedBackingStorage().begin() + sourceByteOffset, bytes,
-                    m_storage.begin());
-    } else {
-        const uint32_t raw =
-            detail::readPackedBits(tensor.rawEncodedBackingStorage(), sourceBitOffset, bits);
-        detail::writePackedBits(m_storage, 0, bits, raw);
-    }
-}
 }  // namespace roc::host_numerics

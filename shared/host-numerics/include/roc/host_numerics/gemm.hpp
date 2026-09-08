@@ -31,12 +31,12 @@ enum class AccumulationRounding {
 struct GemmOptions {
     explicit GemmOptions(ScalarType accumulator = ScalarType::Float32)
         : accumulatorType(accumulator),
-          alpha(Scalar::one(accumulator)),
-          beta(Scalar::zero(accumulator)),
-          scaleC(Scalar::one(accumulator)),
-          outputScale(Scalar::one(accumulator)),
-          activationParameter0(Scalar::zero(accumulator)),
-          activationParameter1(Scalar::zero(accumulator)) {}
+          alpha(Tensor::scalar(accumulator, 1)),
+          beta(Tensor::scalar(accumulator, 0)),
+          scaleC(Tensor::scalar(accumulator, 1)),
+          outputScale(Tensor::scalar(accumulator, 1)),
+          activationParameter0(Tensor::scalar(accumulator, 0)),
+          activationParameter1(Tensor::scalar(accumulator, 0)) {}
 
     ScalarType accumulatorType;  // Dot-product and epilogue arithmetic type.
     AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
@@ -53,18 +53,18 @@ struct GemmOptions {
     bool conjugateA = false;
     bool conjugateB = false;
 
-    Scalar alpha;                      // Multiplies the accumulated A*B term.
-    Scalar beta;                       // Multiplies C.
-    Scalar scaleC;                     // Multiplies C before beta.
+    Tensor alpha;                      // Rank-zero tensor multiplying the accumulated A*B term.
+    Tensor beta;                       // Rank-zero tensor multiplying C.
+    Tensor scaleC;                     // Rank-zero tensor multiplying C before beta.
     std::optional<Tensor> bias;        // Broadcast addend after alpha*A*B + beta*scaleC*C.
     std::optional<Tensor> scaleAlpha;  // Broadcast factor applied to alpha.
     std::optional<Tensor> scaleA;      // Broadcast factor applied to alpha.
     std::optional<Tensor> scaleB;      // Broadcast factor applied to alpha.
-    Scalar outputScale;                // Applied after activation.
+    Tensor outputScale;                // Rank-zero tensor applied after activation.
     OutputConversion outputConversion = OutputConversion::Default;  // Final D encoding.
     Activation activation = Activation::None;                       // Applied before outputScale.
-    Scalar activationParameter0;  // First activation-specific scalar.
-    Scalar activationParameter1;  // Second activation-specific scalar.
+    Tensor activationParameter0;  // First activation-specific rank-zero tensor.
+    Tensor activationParameter1;  // Second activation-specific rank-zero tensor.
 
     OutputSelection outputSelection = OutputSelection::all();  // Logical D coordinates to write.
 };
