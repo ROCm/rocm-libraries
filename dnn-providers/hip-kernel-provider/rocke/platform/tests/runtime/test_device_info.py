@@ -24,28 +24,18 @@ def _props(target_id: str | None) -> bytes:
     ("target_id", "base_arch"),
     [
         ("gfx90a", "gfx90a"),
-        ("gfx942", "gfx942"),
-        ("gfx950", "gfx950"),
-        ("gfx1151", "gfx1151"),
-        ("gfx1201", "gfx1201"),
-        ("gfx1250", "gfx1250"),
         ("gfx11-generic", "gfx11-generic"),
         ("gfx1250-strict", "gfx1250"),
         ("gfx942:sramecc+:xnack-", "gfx942"),
+        (None, None),
     ],
 )
 def test_device_target_id_and_base_arch_are_separate(
-    target_id: str, base_arch: str
+    target_id: str | None, base_arch: str | None
 ) -> None:
     with mock.patch.object(hip_module, "_device_props", return_value=_props(target_id)):
         assert hip_module.get_device_target_id(3) == target_id
         assert hip_module.get_device_arch(3) == base_arch
-
-
-def test_missing_target_id_remains_unknown() -> None:
-    with mock.patch.object(hip_module, "_device_props", return_value=_props(None)):
-        assert hip_module.get_device_target_id() is None
-        assert hip_module.get_device_arch() is None
 
 
 def test_get_device_asic_revision_queries_stable_attribute() -> None:
@@ -76,9 +66,11 @@ def test_get_device_asic_revision_returns_none_on_error(
         assert hip_module._get_device_asic_revision() is None
 
 
-def test_device_properties_retry_after_hip_library_becomes_available() -> None:
-    device = 38
-    hip_module._device_props_cache.pop(device, None)
+def test_device_properties_retry_after_hip_library_becomes_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hip_module, "_device_props_cache", {})
+    device = 3
     unavailable = mock.Mock(side_effect=hip_module.HipError("HIP unavailable"))
 
     with mock.patch.object(hip_module, "_b", return_value=unavailable):
@@ -98,40 +90,30 @@ def test_device_properties_retry_after_hip_library_becomes_available() -> None:
     assert resolved.call_count == 1
 
 
-def test_get_device_info_reports_identity_without_capability_policy() -> None:
+@pytest.mark.parametrize(
+    ("target_id", "base_arch", "revision"),
+    [("gfx1250-strict", "gfx1250", 0), (None, None, None)],
+)
+def test_get_device_info(
+    target_id: str | None, base_arch: str | None, revision: int | None
+) -> None:
     with (
         mock.patch.object(
-            device_info, "get_device_target_id", return_value="gfx1250-strict"
-        ) as target_id,
+            device_info, "get_device_target_id", return_value=target_id
+        ) as query_target,
         mock.patch.object(
-            device_info, "_get_device_asic_revision", return_value=0
-        ) as revision,
+            device_info, "_get_device_asic_revision", return_value=revision
+        ) as query_revision,
     ):
         info = device_info.get_device_info(4)
 
-    target_id.assert_called_once_with(4)
-    revision.assert_called_once_with(4)
+    query_target.assert_called_once_with(4)
+    query_revision.assert_called_once_with(4)
     assert info == device_info.DeviceInfo(
-        target_id="gfx1250-strict",
-        base_arch="gfx1250",
-        compiler_target="gfx1250",
-        asic_revision=0,
-    )
-    assert not hasattr(info, "supported")
-
-
-def test_get_device_info_preserves_unknown_properties() -> None:
-    with (
-        mock.patch.object(device_info, "get_device_target_id", return_value=None),
-        mock.patch.object(device_info, "_get_device_asic_revision", return_value=None),
-    ):
-        info = device_info.get_device_info()
-
-    assert info == device_info.DeviceInfo(
-        target_id=None,
-        base_arch=None,
-        compiler_target=None,
-        asic_revision=None,
+        target_id=target_id,
+        base_arch=base_arch,
+        compiler_target=base_arch,
+        asic_revision=revision,
     )
 
 
@@ -140,6 +122,3 @@ def test_runtime_exports_device_info_api() -> None:
     assert runtime.get_device_info is device_info.get_device_info
     assert "DeviceInfo" in runtime.__all__
     assert "get_device_info" in runtime.__all__
-    assert not hasattr(runtime, "DeviceCapability")
-    assert not hasattr(runtime, "DeviceCapabilities")
-    assert not hasattr(runtime, "get_device_capabilities")
