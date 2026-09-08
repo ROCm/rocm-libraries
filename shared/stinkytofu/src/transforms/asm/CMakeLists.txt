@@ -22,6 +22,7 @@ target_sources(stinkytofu_objs PRIVATE
     AsmMovePropagationPass.cpp
     LegalizationUtils.cpp
     ExecMaskGrouping.cpp
+    TieExecMaskedWritesPass.cpp
     StinkyDAGSchedulerPass.cpp
     dag/RegionDAG.cpp
     WaitAwareScheduleRepairPass.cpp
