@@ -51,6 +51,9 @@ jobs:
         run: |
           LOGNAME=github-runner dvc pull -v
 
+      # MIOPEN_TEST_GFX94X names the target explicitly instead of letting the test tree probe
+      # for a GPU. This runner has none, and a probe that concludes so sets MIOPEN_NO_GPU,
+      # which drops the parity harness the count assertion below requires.
       - name: Configure build
         run: |
           export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
@@ -69,7 +72,8 @@ jobs:
             -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
             -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
-            -DGPU_TARGETS="gfx942"
+            -DGPU_TARGETS="gfx942" \
+            -DMIOPEN_TEST_GFX94X=ON
 
       - name: Build
         run: cmake --build build --target install --target miopen_gtest -j$(nproc)

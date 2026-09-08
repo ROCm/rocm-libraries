@@ -296,30 +296,21 @@ function(add_gtest TEST_NAME TEST_CPP)
 
     # Forwarding parity harness: replay the hipDNN shim surface twice, changing only which
     # implementation serves each entry point, and require the two runs to agree test for
-    # test. Run it with
-    # `ctest -j1 -L forwarding_parity`; DEPENDS orders the three entries under a serial run
-    # only, and does not hold the comparison back when ctest runs tests concurrently.
+    # test.
+    #
+    # DEPENDS orders the comparison after both replays, under -j as well as serially, but it
+    # does not propagate failure: if a replay fails, the comparison still runs and reports a
+    # stale or missing XML rather than the divergence that caused it. Read the replay result
+    # first when the whole label goes red.
     #
     # Not registered in the discrete branch, where each test would need its own doubled
     # replay for the same signal. Deliberately unsharded: sharding would split each run
     # across GTEST_PARALLEL_LEVEL files that would have to be stitched back together
     # before the two could be compared.
-    if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
-      # Only the tests written against the shim surface are replayed. The rest of the suite
-      # reaches compute through internal headers that bypass the wrapper entirely, so
-      # replaying it would cost two full runs to prove nothing, and any flaky test in it
-      # would surface as a parity failure indistinguishable from a real divergence.
-      # HipdnnShim rather than a generic word so the filter cannot pick up unrelated tests
-      # that happen to mention forwarding; see README.md.
-      #
-      # Not a cache entry, so that a -D on the configure line wins and nothing freezes a
-      # stale value across reconfigures.
-      if(NOT DEFINED MIOPEN_FORWARDING_PARITY_FILTER)
-        set(MIOPEN_FORWARDING_PARITY_FILTER "*HipdnnShim*")
-      endif()
-      # Published upwards for the install-tree mirror at directory scope.
-      set(MIOPEN_FORWARDING_PARITY_FILTER "${MIOPEN_FORWARDING_PARITY_FILTER}" PARENT_SCOPE)
-
+    #
+    # Skipped when there is no GPU: the shim surface is all *GPU* tests, which the shard
+    # filter drops in that configuration and this filter does not.
+    if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU)
       foreach(FORWARDING_MODE disabled enabled)
         add_test(NAME ${TEST_NAME}_forwarding_${FORWARDING_MODE}
           COMMAND ${TEST_NAME}
@@ -327,7 +318,11 @@ function(add_gtest TEST_NAME TEST_CPP)
             --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_forwarding_${FORWARDING_MODE}.xml
           WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
         )
+        # RUN_SERIAL for the same reason the HipGraphExist entry above carries it: these are
+        # GPU tests registered outside the shards, so without it ctest -j would run them
+        # against a GPU the shards are already using.
         set_tests_properties(${TEST_NAME}_forwarding_${FORWARDING_MODE} PROPERTIES
+          RUN_SERIAL TRUE
           LABELS "forwarding_parity"
           ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;MIOPEN_HIPDNN_FORWARDING=${FORWARDING_MODE}"
         )
@@ -390,6 +385,19 @@ endif()
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.
   target_compile_options(miopen_gtest_common PRIVATE $<BUILD_INTERFACE:$<$<CXX_COMPILER_ID:Clang>:-U__LP64__>>)
+endif()
+
+# Which tests the forwarding parity harness replays. Only the tests written against the shim
+# surface qualify: the rest of the suite reaches compute through internal headers that bypass
+# the wrapper entirely, so replaying it would cost two full runs to prove nothing, and any
+# flaky test in it would surface as a parity failure indistinguishable from a real divergence.
+# HipdnnShim rather than a generic word so the filter cannot pick up unrelated tests that
+# happen to mention forwarding; see README.md.
+#
+# Not a cache entry, so that a -D on the configure line wins and nothing freezes a stale value
+# across reconfigures.
+if(NOT DEFINED MIOPEN_FORWARDING_PARITY_FILTER)
+  set(MIOPEN_FORWARDING_PARITY_FILTER "*HipdnnShim*")
 endif()
 
 if( MIOPEN_TEST_DISCRETE )
@@ -465,11 +473,11 @@ endif()
 # They are here so artifacts built with it on need no further change on either side. Only
 # the single-binary build packages a test executable and registers the harness mirrored
 # here.
-if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE AND NOT MIOPEN_NO_GPU)
   foreach(FORWARDING_MODE disabled enabled)
     file(APPEND "${INSTALL_TEST_FILE}"
 "add_test(miopen_gtest_forwarding_${FORWARDING_MODE} \"../miopen_gtest\" \"--gtest_filter=${MIOPEN_FORWARDING_PARITY_FILTER}\" \"--gtest_output=xml:miopen_gtest_forwarding_${FORWARDING_MODE}.xml\")
-set_tests_properties(miopen_gtest_forwarding_${FORWARDING_MODE} PROPERTIES LABELS \"forwarding_parity\" ENVIRONMENT \"MIOPEN_INVOKED_FROM_CTEST=1;MIOPEN_HIPDNN_FORWARDING=${FORWARDING_MODE}\")
+set_tests_properties(miopen_gtest_forwarding_${FORWARDING_MODE} PROPERTIES RUN_SERIAL TRUE LABELS \"forwarding_parity\" ENVIRONMENT \"MIOPEN_INVOKED_FROM_CTEST=1;MIOPEN_HIPDNN_FORWARDING=${FORWARDING_MODE}\")
 
 ")
   endforeach()

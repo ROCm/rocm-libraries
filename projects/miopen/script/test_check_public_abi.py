@@ -608,6 +608,23 @@ def test_a_name_merely_containing_impl_is_not_a_leak(tmp_path):
     assert abi.check_installed_headers(str(root), []) is True
 
 
+def test_only_headers_are_scanned(tmp_path, capsys):
+    """A CMake package file staged alongside the headers is not a header.
+
+    Nothing compiles against it, and counting it would inflate the number the
+    check reports as scanned.
+    """
+    root = staged(
+        tmp_path,
+        {
+            "miopen/miopen.h": "miopenStatus_t miopenFoo(int);\n",
+            "miopen/miopen-config.cmake": "# miopenFoo_impl\n",
+        },
+    )
+    assert abi.check_installed_headers(str(root), []) is True
+    assert "1 installed headers" in capsys.readouterr().out
+
+
 # --------------------------------------------------------------------------
 # The binary stand-in
 #

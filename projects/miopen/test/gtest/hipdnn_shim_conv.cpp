@@ -1,11 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Convolution coverage for the hipDNN shim surface. Setup and execution go entirely through
-// public miopen.h entry points so that swapping the implementation behind them is the only
-// thing these tests can observe, and results are checked against an independent CPU reference
-// rather than a second MIOpen run. The "HipdnnShim" token in each suite name is what selects
-// them into the parity surface; see README.md. Built only under MIOPEN_ENABLE_HIPDNN_WRAPPER,
+// Convolution coverage for the hipDNN shim surface. Every call that selects or performs
+// compute goes through a public miopen.h entry point, so that swapping the implementation
+// behind them is the only thing these tests can observe; the handle and the host/device
+// buffer staging around them come from the shared test infrastructure, which the wrapper
+// does not sit in front of. Results are checked against an independent CPU reference rather
+// than a second MIOpen run. The "HipdnnShim" token in each suite name is what selects them
+// into the parity surface; see README.md. Built only under MIOPEN_ENABLE_HIPDNN_WRAPPER,
 // which keeps ctest -N identical to the flag-off baseline.
 //
 // Convolution is covered through both public entry points into it, because they are separate
@@ -50,18 +52,56 @@ tensor<float> MakeWeights()
     return w;
 }
 
-miopenConvolutionDescriptor_t MakeConvDescriptor()
+// Releases the handle on scope exit, so an ASSERT_* that stops a test early does not leak
+// it into an ASAN lane.
+template <class T, miopenStatus_t (*Destroy)(T)>
+struct Owned
 {
-    miopenConvolutionDescriptor_t conv_desc = nullptr;
-    EXPECT_EQ(miopenCreateConvolutionDescriptor(&conv_desc), miopenStatusSuccess);
-    EXPECT_EQ(miopenInitConvolutionNdDescriptor(conv_desc,
+    Owned()                        = default;
+    Owned(const Owned&)            = delete;
+    Owned& operator=(const Owned&) = delete;
+    ~Owned()
+    {
+        if(handle != nullptr)
+            EXPECT_EQ(Destroy(handle), miopenStatusSuccess);
+    }
+
+    T handle = nullptr;
+};
+
+using OwnedConvDescriptor =
+    Owned<miopenConvolutionDescriptor_t, miopenDestroyConvolutionDescriptor>;
+using OwnedProblem = Owned<miopenProblem_t, miopenDestroyProblem>;
+
+// Every solution the find call handed back, released together on scope exit. Declared after
+// the vector it refers to so it runs before the vector goes away.
+struct OwnedSolutions
+{
+    explicit OwnedSolutions(const std::vector<miopenSolution_t>& s) : solutions(s) {}
+    OwnedSolutions(const OwnedSolutions&)            = delete;
+    OwnedSolutions& operator=(const OwnedSolutions&) = delete;
+    ~OwnedSolutions()
+    {
+        for(auto* solution : solutions)
+        {
+            if(solution != nullptr)
+                EXPECT_EQ(miopenDestroySolution(solution), miopenStatusSuccess);
+        }
+    }
+
+    const std::vector<miopenSolution_t>& solutions;
+};
+
+void InitConvDescriptor(OwnedConvDescriptor& conv)
+{
+    EXPECT_EQ(miopenCreateConvolutionDescriptor(&conv.handle), miopenStatusSuccess);
+    EXPECT_EQ(miopenInitConvolutionNdDescriptor(conv.handle,
                                                 static_cast<int>(pads.size()),
                                                 pads.data(),
                                                 strides.data(),
                                                 dilations.data(),
                                                 miopenConvolution),
               miopenStatusSuccess);
-    return conv_desc;
 }
 
 // Ask the library for the output shape rather than recomputing it here, so the shape is part
@@ -103,10 +143,11 @@ TEST(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
     auto& handle_deref    = get_handle();
     miopenHandle_t handle = &handle_deref;
 
-    auto x                 = MakeInput();
-    auto w                 = MakeWeights();
-    auto conv_desc         = MakeConvDescriptor();
-    const auto out_lengths = OutputLengths(conv_desc, x, w);
+    auto x = MakeInput();
+    auto w = MakeWeights();
+    OwnedConvDescriptor conv;
+    InitConvDescriptor(conv);
+    const auto out_lengths = OutputLengths(conv.handle, x, w);
     tensor<float> y{out_lengths};
 
     auto x_dev = handle_deref.Write(x.data);
@@ -115,7 +156,7 @@ TEST(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
 
     std::size_t workspace_size = 0;
     ASSERT_EQ(miopenConvolutionForwardGetWorkSpaceSize(
-                  handle, &w.desc, &x.desc, conv_desc, &y.desc, &workspace_size),
+                  handle, &w.desc, &x.desc, conv.handle, &y.desc, &workspace_size),
               miopenStatusSuccess);
     Workspace wspace{workspace_size};
 
@@ -126,7 +167,7 @@ TEST(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
                                                     x_dev.get(),
                                                     &w.desc,
                                                     w_dev.get(),
-                                                    conv_desc,
+                                                    conv.handle,
                                                     &y.desc,
                                                     y_dev.get(),
                                                     1,
@@ -146,7 +187,7 @@ TEST(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
                                        x_dev.get(),
                                        &w.desc,
                                        w_dev.get(),
-                                       conv_desc,
+                                       conv.handle,
                                        perf.fwd_algo,
                                        &beta,
                                        &y.desc,
@@ -156,8 +197,6 @@ TEST(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
               miopenStatusSuccess);
 
     y.data = handle_deref.Read<float>(y_dev, y.data.size());
-
-    ASSERT_EQ(miopenDestroyConvolutionDescriptor(conv_desc), miopenStatusSuccess);
 
     ExpectMatchesCpuReference(x, w, y);
 }
@@ -169,31 +208,33 @@ TEST(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
     auto& handle_deref    = get_handle();
     miopenHandle_t handle = &handle_deref;
 
-    auto x                 = MakeInput();
-    auto w                 = MakeWeights();
-    auto conv_desc         = MakeConvDescriptor();
-    const auto out_lengths = OutputLengths(conv_desc, x, w);
+    auto x = MakeInput();
+    auto w = MakeWeights();
+    OwnedConvDescriptor conv;
+    InitConvDescriptor(conv);
+    const auto out_lengths = OutputLengths(conv.handle, x, w);
     tensor<float> y{out_lengths};
 
     auto x_dev = handle_deref.Write(x.data);
     auto w_dev = handle_deref.Write(w.data);
     auto y_dev = handle_deref.Write(y.data);
 
-    miopenProblem_t problem;
-    ASSERT_EQ(miopenCreateConvProblem(&problem, conv_desc, miopenProblemDirectionForward),
+    OwnedProblem problem;
+    ASSERT_EQ(miopenCreateConvProblem(&problem.handle, conv.handle, miopenProblemDirectionForward),
               miopenStatusSuccess);
-    ASSERT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionX, &x.desc),
+    ASSERT_EQ(miopenSetProblemTensorDescriptor(problem.handle, miopenTensorConvolutionX, &x.desc),
               miopenStatusSuccess);
-    ASSERT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionW, &w.desc),
+    ASSERT_EQ(miopenSetProblemTensorDescriptor(problem.handle, miopenTensorConvolutionW, &w.desc),
               miopenStatusSuccess);
-    ASSERT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionY, &y.desc),
+    ASSERT_EQ(miopenSetProblemTensorDescriptor(problem.handle, miopenTensorConvolutionY, &y.desc),
               miopenStatusSuccess);
 
     std::vector<miopenSolution_t> solutions(1);
+    OwnedSolutions owned_solutions{solutions};
     std::size_t found = 0;
-    ASSERT_EQ(
-        miopenFindSolutions(handle, problem, nullptr, solutions.data(), &found, solutions.size()),
-        miopenStatusSuccess);
+    ASSERT_EQ(miopenFindSolutions(
+                  handle, problem.handle, nullptr, solutions.data(), &found, solutions.size()),
+              miopenStatusSuccess);
     ASSERT_GT(found, 0);
     solutions.resize(found);
 
@@ -217,11 +258,8 @@ TEST(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
     ASSERT_EQ(
         miopenRunSolution(handle, solutions[0], 3, arguments.get(), wspace.ptr(), wspace.size()),
         miopenStatusSuccess);
-    ASSERT_EQ(miopenDestroyProblem(problem), miopenStatusSuccess);
 
     y.data = handle_deref.Read<float>(y_dev, y.data.size());
-
-    ASSERT_EQ(miopenDestroyConvolutionDescriptor(conv_desc), miopenStatusSuccess);
 
     ExpectMatchesCpuReference(x, w, y);
 }

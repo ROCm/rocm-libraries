@@ -133,6 +133,10 @@ IMPL_RE = re.compile(r"^miopen[A-Za-z0-9_]*_impl$")
 # rediscovering why this check started failing.
 PRIVATE_INCLUDE_DIRS = ("miopen/private",)
 
+# What counts as a header in the staged include tree. MIOpen stages .h and .hpp;
+# the rest are here because a consumer can include any of them.
+HEADER_SUFFIXES = frozenset({".h", ".hpp", ".hh", ".hxx", ".inc", ".ipp"})
+
 
 class AbiError(Exception):
     """Fatal, non-assertion problem (bad file, missing input, unreadable ELF)."""
@@ -958,6 +962,10 @@ def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
     carry the private declarations. Exempting by directory rather than by file
     name keeps a leak into a similarly-named header elsewhere in the tree from
     slipping through.
+
+    Only header files are read. Anything else staged here is not something a
+    consumer compiles against, and counting it as scanned would overstate what
+    the reported number covers.
     """
     root = Path(include_dir)
     if not root.is_dir():
@@ -969,6 +977,8 @@ def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
 
     for path in sorted(root.rglob("*")):
         if not path.is_file():
+            continue
+        if path.suffix not in HEADER_SUFFIXES:
             continue
         if any(path.is_relative_to(d) for d in exempt_roots):
             continue
