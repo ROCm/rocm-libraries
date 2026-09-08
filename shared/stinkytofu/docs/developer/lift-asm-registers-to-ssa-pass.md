@@ -226,8 +226,8 @@ struct RegKey {
 `RegKey` is the lifter's internal storage key, and `PhysicalBinding` is the legacy-colouring provenance it becomes.
 Neither is an SSA value identity: one key has as many values as it has reaching definitions, which is the entire reason attached SSA exists.
 
-Today `half` is always `RegHalf::NONE`, and the lifter expands an operand with `toRegKey(reg, unit)` for `unit` in `[0, reg.num)`.
-That is correct precisely because True16 is rejected, so every unit is a whole DWORD.
+Today `half` is always `RegHalf::NONE`, and the lifter expands an operand with `toRegKey(reg, unit)` for `unit` in `[0, reg.num)`, so every unit is a whole DWORD.
+That is correct because a True16 half *write* is rejected: a half read occupies the DWORD it selects from rather than half of one, so the expansion only needs every definition to be DWORD-wide.
 
 The rest of this subsection is future work.
 Before supporting True16, introduce one authoritative allocator operand-expansion helper using the architecture rules already encoded by `VGPRHalfKeyer` in `RegHalfKeyer.hpp`:
@@ -483,8 +483,9 @@ Rejected, each with a located diagnostic rather than a silent mishandling:
 accumulator classes  an AGPR and a VGPR can name the same storage on some
                      architectures, so two values over one register would be
                      unsound; needs target register information
-True16 halves        needs sub-DWORD atomic units, normalised from the
-                     architecture rules in RegHalfKeyer.hpp
+True16 half writes   the destination preserves the other half, so it reads the
+                     DWORD it writes, and that read has no operand to bind yet.
+                     Half *reads* are lifted, as reads of the whole DWORD
 unreachable blocks   dominance is undefined there; run
                      StinkyUnreachableBlockElimPass after CFG construction
 entry loop headers   a live-in reaching a loop header has no predecessor edge
