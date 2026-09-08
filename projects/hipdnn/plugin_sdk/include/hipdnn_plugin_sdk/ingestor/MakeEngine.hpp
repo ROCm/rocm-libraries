@@ -36,7 +36,8 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
     makeStateManager(DescriptorSet set,
                      const std::string& graphMatchSymbol,
                      std::string describedBy = {},
-                     std::string engineName = {})
+                     std::string engineName = {},
+                     const std::vector<std::string>& knobs = {})
 {
     if(describedBy.empty())
     {
@@ -46,8 +47,12 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
     {
         engineName = set.engine.name;
     }
-    auto heuristic = makeKernelHeuristic(
-        set.heuristic, describedBy, set.engine.knobs, set.heuristicsByArch);
+    // knobs is a parameter, not read from set.engine here. makeEngine moves the UED before
+    // calling this, so `set.engine.knobs` was a moved-from vector -- always empty. RFC 0019
+    // §6.3 compares those knobs against the model's $kernel.* axes, so the check it defines
+    // ran on an empty set and passed vacuously for every engine that has ever shipped.
+    auto heuristic
+        = makeKernelHeuristic(set.heuristic, describedBy, knobs, set.heuristicsByArch);
     return std::make_unique<KernelIngestorStateManager<THandle>>(
         std::move(set.schema),
         std::move(set.matchers),
@@ -72,6 +77,7 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     // disabling the disk cache.
     auto describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
     auto engineName = set.engine.name;
+    auto knobs = set.engine.knobs;
     auto engine = std::move(set.engine);
     auto graphMatchSymbol = engine.graphMatchNativeSymbol;
     return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
@@ -79,7 +85,8 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
         makeStateManager<THandle>(std::move(set),
                                   std::move(graphMatchSymbol),
                                   std::move(describedBy),
-                                  std::move(engineName)),
+                                  std::move(engineName),
+                                  knobs),
         deviceResolver);
 }
 
