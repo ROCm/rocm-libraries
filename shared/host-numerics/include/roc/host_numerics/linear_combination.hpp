@@ -11,12 +11,12 @@ namespace roc::host_numerics {
 struct LinearCombinationOptions {
     explicit LinearCombinationOptions(ScalarType accumulator = ScalarType::Float32)
         : accumulatorType(accumulator),
-          alpha(Scalar::one(accumulator)),
-          beta(Scalar::one(accumulator)) {}
+          alpha(Tensor::scalar(accumulator, 1)),
+          beta(Tensor::scalar(accumulator, 1)) {}
 
     ScalarType accumulatorType;  // Arithmetic type before output conversion.
-    Scalar alpha;                // X coefficient; ignored when X is absent.
-    Scalar beta;                 // Y coefficient; ignored when Y is absent.
+    Tensor alpha;                // Rank-zero X coefficient; ignored when X is absent.
+    Tensor beta;                 // Rank-zero Y coefficient; ignored when Y is absent.
 };
 
 // Allocates a contiguous output tensor. At least one input must be present;
