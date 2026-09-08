@@ -29,11 +29,18 @@ namespace asm_sdpa_engine::asm_kernels
 /// Input:  "gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co"
 /// Output: "fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co"
 ///
-/// Edge case: if no slash is present, returns the input unchanged.
+/// Edge cases:
+/// - If no slash is present, returns the input unchanged.
+/// - If the first component does not start with "gfx", returns unchanged.
 inline auto getAsmKernelTocKey(const std::string& coName) -> std::string
 {
     auto pos = coName.find('/');
     if(pos == std::string::npos)
+    {
+        return coName;
+    }
+    // Only strip if the leading component is an arch prefix (e.g. "gfx942").
+    if(pos < 3 || coName.substr(0, 3) != "gfx")
     {
         return coName;
     }

@@ -13,16 +13,13 @@ namespace
 {
 
 // =============================================================================
-// Archive-miss error mapping
+// Error mapping
 // =============================================================================
-// Opening a non-existent archive or requesting a missing TOC key should throw
-// HipdnnPluginException with INTERNAL_ERROR status.
 
-TEST(TestAsmKpackArchive, GetKernelThrowsOnMissingTocKey)
+TEST(TestAsmKpackArchive, GetKernelThrowsOnMissingArchive)
 {
-    // The singleton's archive for a bogus arch will fail to open because no
-    // .kpack file exists for it. This validates the error mapping from
-    // kpack_open failure to HipdnnPluginException.
+    // Opening a non-existent archive (bogus arch) should throw
+    // HipdnnPluginException from kpack_open failure.
     EXPECT_THROW(
         {
             auto& archive = AsmKpackArchive::instance();
@@ -66,6 +63,18 @@ TEST(TestAsmKpackArchive, Gfx950TocKeyNoVariant)
 {
     // gfx950: no MI300/MI308 variant insertion
     EXPECT_EQ(getAsmKernelTocKey("gfx950/fmha_v3_fwd/fwd_hd128_bf16.co"),
+              "fmha_v3_fwd/fwd_hd128_bf16.co");
+}
+
+TEST(TestAsmKpackArchive, TocKeyNoSlashReturnsUnchanged)
+{
+    EXPECT_EQ(getAsmKernelTocKey("kernel.co"), "kernel.co");
+}
+
+TEST(TestAsmKpackArchive, TocKeyNonGfxPrefixReturnsUnchanged)
+{
+    // A path whose first component is not a gfx arch should be returned as-is.
+    EXPECT_EQ(getAsmKernelTocKey("fmha_v3_fwd/fwd_hd128_bf16.co"),
               "fmha_v3_fwd/fwd_hd128_bf16.co");
 }
 

@@ -442,10 +442,7 @@ install(TARGETS hip_kernel_provider EXPORT hip-kernel-provider
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
 
-if(ENABLE_ASM_SDPA_ENGINE)
-    # .kpack archives are installed by src/engines/asm_sdpa_engine/CMakeLists.txt.
-    # Loose .co files are no longer installed — the runtime loads from .kpack.
-endif()
+# .kpack archives are installed by src/engines/asm_sdpa_engine/CMakeLists.txt.
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPDNN_DESCRIPTOR_SOURCE_DIR

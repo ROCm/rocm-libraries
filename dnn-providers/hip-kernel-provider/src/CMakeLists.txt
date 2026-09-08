@@ -18,7 +18,9 @@ add_subdirectory(engines)
 # find_package lives here (not in asm_sdpa_engine/) so the imported target is
 # visible to _impl, _private, and the shared hip_kernel_provider.
 if(ENABLE_ASM_SDPA_ENGINE)
-    find_package(rocm-kpack CONFIG REQUIRED)
+    if(NOT TARGET rocm::rocm_kpack)
+        find_package(rocm-kpack CONFIG REQUIRED)
+    endif()
 endif()
 
 target_include_directories(hip_kernel_provider_impl PUBLIC

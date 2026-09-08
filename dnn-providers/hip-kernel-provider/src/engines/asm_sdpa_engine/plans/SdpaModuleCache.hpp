@@ -47,7 +47,6 @@ public:
         auto& archive = asm_kernels::AsmKpackArchive::instance();
         auto kernelData = archive.getKernel(tocKey, arch);
         auto loaded = loadKernelModuleFromMemory(kernelData.data, kernelData.size, funcName);
-        kpack_free_kernel(kernelData.data);
         if(!loaded)
         {
             return nullptr;

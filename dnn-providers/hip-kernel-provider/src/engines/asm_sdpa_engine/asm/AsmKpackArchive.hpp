@@ -19,6 +19,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace asm_sdpa_engine::asm_kernels
 {
@@ -32,14 +33,41 @@ public:
         return s_singleton;
     }
 
+    /// RAII wrapper for kernel bytes extracted from a kpack archive.
+    /// Automatically calls kpack_free_kernel on destruction.
     struct KernelData
     {
-        void* data;
-        size_t size;
+        void* data = nullptr;
+        size_t size = 0;
+
+        ~KernelData()
+        {
+            if(data)
+            {
+                kpack_free_kernel(data);
+            }
+        }
+
+        KernelData() = default;
+        KernelData(void* d, size_t s) : data(d), size(s) {}
+
+        KernelData(KernelData&& o) noexcept
+            : data(std::exchange(o.data, nullptr)), size(o.size)
+        {
+        }
+
+        KernelData& operator=(KernelData&& o) noexcept
+        {
+            std::swap(data, o.data);
+            size = o.size;
+            return *this;
+        }
+
+        KernelData(const KernelData&) = delete;
+        KernelData& operator=(const KernelData&) = delete;
     };
 
     /// Extract kernel bytes from the archive for a given TOC key and arch.
-    /// Caller must call kpack_free_kernel(data) after hipModuleLoadData.
     KernelData getKernel(const std::string& tocKey, const std::string& arch)
     {
         kpack_archive_t archive = getOrOpenArchive(arch);
@@ -85,7 +113,7 @@ private:
             return it->second;
         }
 
-        auto kpackPath = currentPluginDirectory() / "asm_kernels" / ".kpack"
+        auto kpackPath = currentPluginDirectory() / "asm_kernels" / "kpack"
                          / ("hip_kernel_provider_sdpa_" + arch + ".kpack");
 
         kpack_archive_t archive = nullptr;

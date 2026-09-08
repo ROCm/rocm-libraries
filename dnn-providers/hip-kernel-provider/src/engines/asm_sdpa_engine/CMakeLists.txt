@@ -93,12 +93,11 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/
 )
 
 # ============================================================================
-# Kpack Packing (Phase 1 — build-time .co → .kpack)
+# Kpack Packing (build-time .co → .kpack)
 # ============================================================================
 #
-# Nothing reads these archives yet: the runtime still loads the loose .co files
-# (SdpaModuleCache / loadKernelModule). Hence the skip below rather than a hard
-# error. Make it fatal when Phase 2 loads .kpack at runtime.
+# The runtime loads kernels exclusively from .kpack archives (AsmKpackArchive).
+# Loose .co files are no longer installed or loaded. Packing failures are fatal.
 
 include(KpackPython)
 
@@ -107,17 +106,15 @@ kpack_resolve_python_dir(_KPACK_PYTHON_DIR)
 set(ASM_KPACK_ENABLED TRUE)
 if("${_KPACK_PYTHON_DIR}" STREQUAL "")
     kpack_unset_reason(_kpack_reason)
-    message(STATUS "ASM SDPA: skipping .kpack packing -- ${_kpack_reason}.")
-    set(ASM_KPACK_ENABLED FALSE)
+    message(FATAL_ERROR "ASM SDPA: .kpack packing is required but failed -- ${_kpack_reason}.")
 else()
     kpack_check_python_deps("${Python3_EXECUTABLE}" "${_KPACK_PYTHON_DIR}"
                             _KPACK_MISSING_DEPS)
     if(_KPACK_MISSING_DEPS)
         string(REPLACE ";" ", " _missing_csv "${_KPACK_MISSING_DEPS}")
-        message(STATUS "ASM SDPA: skipping .kpack packing -- "
+        message(FATAL_ERROR "ASM SDPA: .kpack packing is required but "
             "${Python3_EXECUTABLE} cannot import ${_missing_csv} from "
             "${_KPACK_PYTHON_DIR} (rocm_kpack needs zstandard>=0.20.0 and msgpack).")
-        set(ASM_KPACK_ENABLED FALSE)
     endif()
 endif()
 
@@ -161,10 +158,12 @@ if(ASM_KPACK_ENABLED)
     )
     add_dependencies(asm_kernel_kpack asm_kernel_codegen)
 
-    # --- Copy .kpack files to build directory for local testing ---
+    # --- Copy .kpack files next to the plugin .so for build-tree testing ---
+    # The runtime resolves kpack archives relative to the plugin directory
+    # (currentPluginDirectory() / "asm_kernels" / "kpack" / "<file>.kpack").
     foreach(ARCH ${ASM_SDPA_GPU_ARCHS})
         set(_SRC "${ASM_KPACK_OUTPUT_DIR}/hip_kernel_provider_sdpa_${ARCH}.kpack")
-        set(_DST "${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels/.kpack/")
+        set(_DST "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/asm_kernels/kpack/")
         add_custom_command(TARGET asm_kernel_kpack POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_DST}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_SRC}" "${_DST}"
@@ -172,8 +171,8 @@ if(ASM_KPACK_ENABLED)
         )
     endforeach()
 
-    # --- Install .kpack archives (Phase 2 runtime will load from these) ---
+    # --- Install .kpack archives next to the installed plugin ---
     install(FILES ${ASM_KPACK_OUTPUTS}
-        DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels/.kpack
+        DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/asm_kernels/kpack
     )
 endif()
