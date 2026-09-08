@@ -2,6 +2,12 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 4.7.0 for ROCm 10.1.0
+
+### Optimizations
+
+* Updated existing `ordered_block_id` and `lookback_scan` optimizations to include gfx1250.
+
 ## rocPRIM 4.6.0 for ROCm 10.0.0
 
 ### Added
