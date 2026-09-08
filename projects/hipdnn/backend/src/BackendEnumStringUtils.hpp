@@ -1003,6 +1003,10 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT";
     case HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT:
         return "HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT";
+    case HIPDNN_ATTR_PROFILING_STALL_ARM_EXT:
+        return "HIPDNN_ATTR_PROFILING_STALL_ARM_EXT";
+    case HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT:
+        return "HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT";
 
     default:
         return "HIPDNN_ATTR_UNKNOWN";

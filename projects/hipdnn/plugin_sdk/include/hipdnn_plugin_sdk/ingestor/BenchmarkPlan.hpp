@@ -21,6 +21,7 @@
 #include <hip/hip_runtime.h>
 
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -173,11 +174,17 @@ private:
     static Timer makeHipEventTimer()
     {
         auto events = std::make_shared<std::optional<detail::HipEventPair>>();
-        return [events](const IPlan<THandle>& plan,
-                        const THandle& handle,
-                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                        uint32_t numDeviceBuffers,
-                        void* workspace) -> std::optional<double> {
+        // Created on first use, like the event pair above: the timer is built in the
+        // BenchmarkPlan constructor, which can run before any device context exists, and
+        // a gate created then would be permanently unusable. Created once and then
+        // reused, since acquiring signal memory and a control stream on every sample
+        // would cost more than the submission gap the gate removes.
+        auto gate = std::make_shared<std::optional<hipdnn_data_sdk::utilities::StallGate>>();
+        return [events, gate](const IPlan<THandle>& plan,
+                              const THandle& handle,
+                              const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                              uint32_t numDeviceBuffers,
+                              void* workspace) -> std::optional<double> {
             if(!events->has_value())
             {
                 events->emplace();
@@ -197,6 +204,27 @@ private:
             const auto stop = (*events)->stop.get();
             const auto stream = handle.getStream();
 
+            if(!gate->has_value())
+            {
+                gate->emplace();
+            }
+
+            // Stall the stream so the measured span excludes host submission. A false
+            // return means no stall is available and the timer keeps its prior behavior.
+            static_cast<void>((*gate)->arm(stream));
+
+            // Mandatory here, unlike the autotune path: plan.execute() below can throw,
+            // and an escaping exception with the gate armed would stall the stream
+            // permanently. release() is idempotent, so the explicit release below wins.
+            struct Release
+            {
+                hipdnn_data_sdk::utilities::StallGate* target;
+                ~Release()
+                {
+                    target->release();
+                }
+            } releaseGuard{&gate->value()};
+
             if(hipEventRecord(start, stream) != hipSuccess)
             {
                 return std::nullopt;
@@ -204,8 +232,15 @@ private:
 
             plan.execute(handle, deviceBuffers, numDeviceBuffers, workspace);
 
-            if(hipEventRecord(stop, stream) != hipSuccess
-               || hipEventSynchronize(stop) != hipSuccess)
+            if(hipEventRecord(stop, stream) != hipSuccess)
+            {
+                return std::nullopt;
+            }
+
+            // Must precede the synchronize: a still-stalled stream never signals stop.
+            (*gate)->release();
+
+            if(hipEventSynchronize(stop) != hipSuccess)
             {
                 return std::nullopt;
             }
@@ -315,6 +350,11 @@ protected:
             {
                 candidate.plan->execute(handle, deviceBuffers, numDeviceBuffers, workspace);
             }
+
+            // Start the first armed iteration from a drained stream, so leftover warmup
+            // work is not measured. A failure only means that sample carries the prior
+            // behavior; throwing would score an otherwise-good candidate unusable.
+            static_cast<void>(hipStreamSynchronize(handle.getStream()));
 
             std::vector<double> samples;
             samples.reserve(BENCHMARK_ITERATIONS);

@@ -10,7 +10,10 @@
 #include <gtest/gtest.h>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <chrono>
+#include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <string>
+#include <thread>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
@@ -194,6 +197,26 @@ protected:
         desc->setAttribute(HIPDNN_ATTR_PROFILING_STOP_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value);
     }
 
+    static void armStall(const std::shared_ptr<ProfilingControlDescriptor>& desc)
+    {
+        bool value = true;
+        desc->setAttribute(HIPDNN_ATTR_PROFILING_STALL_ARM_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value);
+    }
+
+    static void releaseStall(const std::shared_ptr<ProfilingControlDescriptor>& desc)
+    {
+        bool value = true;
+        desc->setAttribute(HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value);
+    }
+
+    // The stall needs hipStreamWaitValue32; a device without it degrades to the
+    // unstalled path, which the timing assertions below would read as a failure.
+    static bool stallGateAvailable()
+    {
+        const hipdnn_data_sdk::utilities::StallGate gate;
+        return gate.isUsable();
+    }
+
     std::unique_ptr<NiceMock<MockHandle>> _mockHandle = nullptr;
     hipStream_t _testStream = nullptr;
 };
@@ -303,4 +326,111 @@ TEST_F(TestGpuProfilingControlDescriptor, GetAttributeUnsupportedNameThrows)
         desc->getAttribute(
             HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &elementCount, &value),
         HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
+// The defect the stall gate fixes: a start event recorded on an idle stream completes
+// immediately, so every microsecond the host spends before the work is queued lands
+// inside the measured span. The sleep stands in for descriptor validation, dispatch,
+// and logging, which is host work of the same shape but not a fixed duration.
+//
+// Both runs measure the same trivial device work, so the elapsed difference is the
+// host delay and nothing else.
+TEST_F(TestGpuProfilingControlDescriptor, StallGateExcludesHostSubmissionDelay)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    constexpr auto HOST_DELAY = std::chrono::milliseconds(20);
+    constexpr size_t BUFFER_BYTES = 256;
+
+    void* buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, BUFFER_BYTES), hipSuccess);
+
+    const auto measure = [&](bool useStall) {
+        // A fresh descriptor per run: the fixture's descriptor is finalized by the first
+        // measurement, and setAttribute rejects everything after finalize.
+        const auto wrapper = createDescriptor<ProfilingControlDescriptor>();
+        const auto desc = wrapper->asDescriptor<ProfilingControlDescriptor>();
+        setHandle(desc);
+        if(useStall)
+        {
+            armStall(desc);
+        }
+        recordStart(desc);
+        std::this_thread::sleep_for(HOST_DELAY);
+        EXPECT_EQ(hipMemsetAsync(buffer, 0, BUFFER_BYTES, _testStream), hipSuccess);
+        recordStop(desc);
+        if(useStall)
+        {
+            releaseStall(desc);
+        }
+        desc->finalize();
+
+        float elapsed = -1.0f;
+        int64_t elementCount = 0;
+        desc->getAttribute(
+            HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed);
+        return elapsed;
+    };
+
+    float unstalledMs = 0.0f;
+    ASSERT_NO_THROW(unstalledMs = measure(/*useStall=*/false));
+    float stalledMs = 0.0f;
+    ASSERT_NO_THROW(stalledMs = measure(/*useStall=*/true));
+
+    EXPECT_EQ(hipFree(buffer), hipSuccess);
+
+    // Reported unconditionally: a timing bound that flakes in CI is not diagnosable
+    // without the two numbers that produced it.
+    GTEST_LOG_(INFO) << "unstalled=" << unstalledMs << " ms, stalled=" << stalledMs << " ms";
+
+    // The 20 ms host sleep lands inside the unstalled span, and outside the stalled one.
+    // The bounds are loose on both sides so scheduling jitter cannot flip the result.
+    EXPECT_GE(unstalledMs, 15.0f) << "unstalled timing did not absorb the host delay";
+    EXPECT_LT(stalledMs, 5.0f) << "stalled timing still includes the host delay";
+}
+
+// An armed gate holds the stop event unsignalled, so a caller that arms and then hits an
+// error path before releasing would hang in hipEventSynchronize forever. finalize()
+// releases first; this test hangs on regression rather than reporting a wrong number.
+TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesUnreleasedStall)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(armStall(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(desc->finalize());
+
+    float elapsed = -1.0f;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed));
+    EXPECT_GE(elapsed, 0.0f);
+}
+
+// Releasing a gate that was never armed is a no-op success, so a caller that arms
+// conditionally need not track whether the arm took effect.
+TEST_F(TestGpuProfilingControlDescriptor, StallReleaseWithoutArmSucceeds)
+{
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(releaseStall(desc));
+}
+
+// Arming creates no events of its own, so it must reject a descriptor with no handle
+// rather than stalling a null stream.
+TEST_F(TestGpuProfilingControlDescriptor, StallArmBeforeHandleThrows)
+{
+    auto desc = getDescriptor();
+    bool value = true;
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(HIPDNN_ATTR_PROFILING_STALL_ARM_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value),
+        HIPDNN_STATUS_BAD_PARAM);
 }

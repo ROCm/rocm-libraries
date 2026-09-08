@@ -1464,6 +1464,12 @@ typedef enum
     /** @brief Trigger: call hipDeviceSynchronize before benchmarking (HIPDNN_TYPE_BOOLEAN, write-only) */
     HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT = 60404,
 
+    /** @brief Trigger: stall the stream so the measured span excludes host submission (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_STALL_ARM_EXT = 60405,
+
+    /** @brief Trigger: release the stall so the queued work runs (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT = 60406,
+
     /** @} */
 
 } hipdnnBackendAttributeName_t;

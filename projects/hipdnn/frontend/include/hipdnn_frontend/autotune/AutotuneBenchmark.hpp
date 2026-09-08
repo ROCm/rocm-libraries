@@ -56,6 +56,19 @@ inline Error
             static_cast<const void*>(&handle)),
         "Failed to set handle on profiling descriptor");
 
+    // Stall the stream before recording start, so the measured span begins when the
+    // device starts the work rather than when the host started submitting it. Arming is
+    // silently skipped on a device without stream-wait-value support.
+    bool stallVal = true;
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+            profilingDesc.get(),
+            HIPDNN_ATTR_PROFILING_STALL_ARM_EXT,
+            HIPDNN_TYPE_BOOLEAN,
+            1,
+            &stallVal),
+        "Failed to arm profiling stall");
+
     // Record start event
     bool startVal = true;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -77,6 +90,18 @@ inline Error
         ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
             profilingDesc.get(), HIPDNN_ATTR_PROFILING_STOP_EXT, HIPDNN_TYPE_BOOLEAN, 1, &stopVal),
         "Failed to set profiling stop");
+
+    // Release the stall so the queued work runs. An early return before this point
+    // destroys profilingDesc, and the descriptor's StallGate releases and drains; a
+    // return after it leaves nothing armed.
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+            profilingDesc.get(),
+            HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT,
+            HIPDNN_TYPE_BOOLEAN,
+            1,
+            &stallVal),
+        "Failed to release profiling stall");
 
     // Finalize synchronizes events and computes elapsed time
     HIPDNN_RETURN_ON_BACKEND_FAILURE(

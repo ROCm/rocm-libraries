@@ -7,6 +7,7 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 #include "handle/Handle.hpp"
+#include "logging/Logging.hpp"
 
 #include <spdlog/fmt/fmt.h>
 
@@ -69,6 +70,10 @@ void ProfilingControlDescriptor::finalize()
                    HIPDNN_STATUS_BAD_PARAM,
                    "ProfilingControlDescriptor::finalize() failed: "
                    "Stop event was not recorded.");
+
+    // An armed gate holds the stop event unsignalled, so hipEventSynchronize below would
+    // hang forever if the caller armed but never released.
+    _stallGate.release();
 
     auto status = hipEventSynchronize(_stopEvent.get());
     THROW_IF_NE(status,
@@ -208,6 +213,54 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                     HIPDNN_STATUS_INTERNAL_ERROR,
                     "ProfilingControlDescriptor::setAttribute(DEVICE_SYNC): "
                     "hipDeviceSynchronize failed.");
+        break;
+    }
+    case HIPDNN_ATTR_PROFILING_STALL_ARM_EXT:
+    {
+        checkSetArgs(HIPDNN_TYPE_BOOLEAN,
+                     attributeType,
+                     arrayOfElements,
+                     "ProfilingControlDescriptor::setAttribute(STALL_ARM)");
+        THROW_IF_NE(elementCount,
+                    static_cast<int64_t>(1),
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "ProfilingControlDescriptor::setAttribute(STALL_ARM): "
+                    "elementCount must be 1.");
+        THROW_IF_FALSE(_startEvent != nullptr,
+                       HIPDNN_STATUS_BAD_PARAM,
+                       "ProfilingControlDescriptor::setAttribute(STALL_ARM): "
+                       "Handle must be set before arming the stall.");
+
+        // The boolean value passed via arrayOfElements is intentionally unused: the
+        // setAttribute call itself is the trigger, as it is for DEVICE_SYNC above.
+        //
+        // A false return is success, not an error. On a device without
+        // hipStreamWaitValue32 support the descriptor degrades to the unstalled
+        // behavior, which still measures, just with host submission included.
+        if(!_stallGate.arm(_stream))
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "ProfilingControlDescriptor: stall gate unavailable ({}); timing includes "
+                "host submission overhead",
+                _stallGate.lastOperation() == nullptr ? "unknown" : _stallGate.lastOperation());
+        }
+        break;
+    }
+    case HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT:
+    {
+        checkSetArgs(HIPDNN_TYPE_BOOLEAN,
+                     attributeType,
+                     arrayOfElements,
+                     "ProfilingControlDescriptor::setAttribute(STALL_RELEASE)");
+        THROW_IF_NE(elementCount,
+                    static_cast<int64_t>(1),
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "ProfilingControlDescriptor::setAttribute(STALL_RELEASE): "
+                    "elementCount must be 1.");
+
+        // Releasing a gate that was never armed is a no-op, not an error, so a caller
+        // need not track whether arming succeeded.
+        _stallGate.release();
         break;
     }
     default:

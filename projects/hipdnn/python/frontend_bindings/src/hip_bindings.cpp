@@ -5,8 +5,10 @@
 
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -148,121 +150,68 @@ void deviceSynchronize()
     throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize");
 }
 
-// Host-released device-side stall: the work stream waits on a host-writable
-// signal value; the host releases by writing the value from a private control
-// stream. Uses hipStreamWaitValue32/hipStreamWriteValue32 on hipMallocSignalMemory
-// so the bindings stay CXX-only (no device-code compilation).
+// Thin adapter over the shared stall gate, which owns the signal-memory sequence. This
+// class only adds the binding's throwing contract and the explicit destroy() that Python
+// callers use.
 class HipStallGate
 {
 private:
-    uint32_t* _signal = nullptr;
-    hipStream_t _control = nullptr;
+    // The optional models destroy(): the core gate has no destroyed state, and arm or
+    // release on a destroyed gate must raise rather than touch a freed signal.
+    std::optional<hipdnn_data_sdk::utilities::StallGate> _gate;
 
-    // A destroyed gate has null signal/control; arm/release would otherwise
-    // issue stream-wait/write ops on a null signal pointer (UB-adjacent).
-    void throwIfDestroyed() const
+    hipdnn_data_sdk::utilities::StallGate& getChecked()
     {
-        if(_signal == nullptr || _control == nullptr)
+        if(!_gate.has_value())
         {
             throw std::runtime_error("HIP stall gate has been destroyed");
         }
+        return *_gate;
     }
 
 public:
     HipStallGate()
     {
-        if(!canUseStreamWaitValue())
+        _gate.emplace();
+        if(!_gate->isUsable())
         {
-            throw std::runtime_error("hipStreamWaitValue32 unsupported on this device");
-        }
-        // Signal memory is an 8-byte HSA signal; a smaller size is rejected with
-        // hipErrorInvalidValue. The 32-bit wait/write ops act on its low word.
-        throwOnHipError(hipExtMallocWithFlags(reinterpret_cast<void**>(&_signal),
-                                              sizeof(uint64_t),
-                                              hipMallocSignalMemory),
-                        "hipExtMallocWithFlags");
-        // Any failure after the allocation above must free what was already
-        // acquired: a throwing constructor does not run the destructor, so
-        // _signal (and _control, once created) would otherwise leak.
-        try
-        {
-            // Non-blocking so the release write runs concurrently with a stalled
-            // work stream; a blocking control stream would implicitly serialize
-            // with the legacy default stream and deadlock when the gate stalls it.
-            throwOnHipError(hipStreamCreateWithFlags(&_control, hipStreamNonBlocking),
-                            "hipStreamCreateWithFlags");
-            throwOnHipError(hipStreamWriteValue32(_control, _signal, 0U, 0),
-                            "hipStreamWriteValue32");
-            throwOnHipError(hipStreamSynchronize(_control), "hipStreamSynchronize");
-        }
-        catch(...)
-        {
-            destroy();
-            throw;
+            // hipSuccess means no HIP call failed, so the device simply lacks support.
+            if(_gate->lastError() == hipSuccess)
+            {
+                throw std::runtime_error("hipStreamWaitValue32 unsupported on this device");
+            }
+            throwOnHipError(_gate->lastError(), _gate->lastOperation());
         }
     }
 
-    ~HipStallGate()
-    {
-        destroy();
-    }
+    ~HipStallGate() = default;
 
     HipStallGate(const HipStallGate&) = delete;
     HipStallGate& operator=(const HipStallGate&) = delete;
+    HipStallGate(HipStallGate&&) noexcept = default;
+    HipStallGate& operator=(HipStallGate&&) noexcept = default;
 
-    HipStallGate(HipStallGate&& other) noexcept
-        : _signal(other._signal)
-        , _control(other._control)
-    {
-        other._signal = nullptr;
-        other._control = nullptr;
-    }
-
-    HipStallGate& operator=(HipStallGate&& other) noexcept
-    {
-        if(this != &other)
-        {
-            destroy();
-            _signal = other._signal;
-            _control = other._control;
-            other._signal = nullptr;
-            other._control = nullptr;
-        }
-        return *this;
-    }
-
-    // Reset the signal, then enqueue a wait packet on the work stream that blocks
-    // all later work on that stream until the host releases the gate.
+    // Reset the signal, then enqueue a wait packet that blocks all later work on the
+    // stream until the host releases the gate.
     void arm(uintptr_t stream)
     {
-        throwIfDestroyed();
-        throwOnHipError(hipStreamWriteValue32(_control, _signal, 0U, 0), "hipStreamWriteValue32");
-        throwOnHipError(hipStreamSynchronize(_control), "hipStreamSynchronize");
-        throwOnHipError(hipStreamWaitValue32(
-                            toHipStream(stream), _signal, 1U, hipStreamWaitValueGte, 0xFFFFFFFFU),
-                        "hipStreamWaitValue32");
+        auto& gate = getChecked();
+        if(!gate.arm(toHipStream(stream)))
+        {
+            throwOnHipError(gate.lastError(), gate.lastOperation());
+        }
     }
 
-    // Release the gate from the (otherwise idle) control stream; the work stream
-    // proceeds device-side, no host sync needed.
+    // Release the gate from the otherwise idle control stream; the work stream proceeds
+    // device-side, no host sync needed.
     void release()
     {
-        throwIfDestroyed();
-        throwOnHipError(hipStreamWriteValue32(_control, _signal, 1U, 0), "hipStreamWriteValue32");
+        getChecked().release();
     }
 
     void destroy() noexcept
     {
-        if(_control != nullptr)
-        {
-            (void)hipStreamDestroy(_control);
-            _control = nullptr;
-        }
-        if(_signal != nullptr)
-        {
-            (void)hipFree(_signal);
-            _signal = nullptr;
-        }
+        _gate.reset();
     }
 };
 

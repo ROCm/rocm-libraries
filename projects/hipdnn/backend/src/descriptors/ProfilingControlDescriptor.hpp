@@ -5,6 +5,7 @@
 
 #include "BackendDescriptor.hpp"
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/StallGate.hpp>
 
 #include <memory>
 #include <type_traits>
@@ -35,13 +36,15 @@ using HipEventGuard = std::unique_ptr<std::remove_pointer_t<hipEvent_t>, HipEven
  *
  * Provides event-based GPU profiling for autotuning workloads.
  * The lifecycle is:
- *   1. setAttribute(PROFILING_HANDLE_EXT) -- store handle, extract stream, create events
- *   2. setAttribute(PROFILING_DEVICE_SYNC_EXT) -- optional: sync device before benchmark
- *   3. setAttribute(PROFILING_START_EXT)  -- record start event
- *   4. (run kernel on the same stream)
- *   5. setAttribute(PROFILING_STOP_EXT)   -- record stop event
- *   6. finalize()                         -- synchronize stop event, compute elapsed time
- *   7. getAttribute(PROFILING_ELAPSED_MS_EXT) -- read elapsed milliseconds
+ *   1. setAttribute(PROFILING_HANDLE_EXT)        -- store handle, extract stream, create events
+ *   2. setAttribute(PROFILING_DEVICE_SYNC_EXT)   -- optional: sync device before benchmark
+ *   3. setAttribute(PROFILING_STALL_ARM_EXT)     -- optional: stall the stream
+ *   4. setAttribute(PROFILING_START_EXT)         -- record start event
+ *   5. (run kernel on the same stream)
+ *   6. setAttribute(PROFILING_STOP_EXT)          -- record stop event
+ *   7. setAttribute(PROFILING_STALL_RELEASE_EXT) -- release the stall
+ *   8. finalize()                                -- synchronize stop event, compute elapsed time
+ *   9. getAttribute(PROFILING_ELAPSED_MS_EXT)    -- read elapsed milliseconds
  */
 class ProfilingControlDescriptor : public HipdnnBackendDescriptorImpl<ProfilingControlDescriptor>
 {
@@ -79,6 +82,8 @@ private:
     float _elapsedMs = 0.0F;
     bool _startRecorded = false;
     bool _stopRecorded = false;
+    // Destroyed with the descriptor, which releases the stall if the caller never did.
+    hipdnn_data_sdk::utilities::StallGate _stallGate;
 
     void createEvents();
 };

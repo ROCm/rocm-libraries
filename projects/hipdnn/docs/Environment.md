@@ -580,6 +580,87 @@ Error setGlobalLogLevel(hipdnnSeverity_t level)
 ```
 Sets hipDNN to the specified log level. Use `HIPDNN_SEV_OFF` to disable logging.
 
+## Measuring device kernel time
+
+### The problem
+
+A single HIP-event bracket around `hipdnnBackendExecute` does not measure kernel time:
+
+```c
+hipEventRecord(start, stream);
+hipdnnBackendExecute(handle, plan, variantPack);
+hipEventRecord(stop, stream);
+```
+
+The stream is idle when `start` is recorded, so `start` completes immediately. The device then
+stays idle while the host validates descriptors, dispatches the plan, and formats log records. All
+of that host time falls inside the `start`-to-`stop` span, so `hipEventElapsedTime` reports host
+submission cost added to kernel time. For a kernel below about 15 microseconds the host cost is
+most of the number, and a comparison between two engines can rank the slower kernel first.
+
+### The fix
+
+Use `HIPDNN_BACKEND_PROFILING_CONTROL_EXT` and stall the stream before recording `start`. The
+stall holds every later item on the stream -- the start event, the kernels, the stop event --
+until you release it. The host finishes all submission work while the stream is stalled, so the
+measured span begins when the device starts the work.
+
+```c
+hipdnnBackendDescriptor_t profiling;
+hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_PROFILING_CONTROL_EXT, &profiling);
+
+bool trigger = true;
+
+// 1. Bind the handle. This also creates the HIP events on the handle's stream.
+hipdnnBackendSetAttribute(profiling, HIPDNN_ATTR_PROFILING_HANDLE_EXT,
+                          HIPDNN_TYPE_HANDLE, 1, &handle);
+
+// 2. Stall the stream. Everything queued after this point waits for the release.
+hipdnnBackendSetAttribute(profiling, HIPDNN_ATTR_PROFILING_STALL_ARM_EXT,
+                          HIPDNN_TYPE_BOOLEAN, 1, &trigger);
+
+// 3. Queue the start event, the work, and the stop event. None of them run yet.
+hipdnnBackendSetAttribute(profiling, HIPDNN_ATTR_PROFILING_START_EXT,
+                          HIPDNN_TYPE_BOOLEAN, 1, &trigger);
+hipdnnBackendExecute(handle, plan, variantPack);
+hipdnnBackendSetAttribute(profiling, HIPDNN_ATTR_PROFILING_STOP_EXT,
+                          HIPDNN_TYPE_BOOLEAN, 1, &trigger);
+
+// 4. Release. The queued work now runs back to back with no host gap inside it.
+hipdnnBackendSetAttribute(profiling, HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT,
+                          HIPDNN_TYPE_BOOLEAN, 1, &trigger);
+
+// 5. Finalize synchronizes the stop event and computes the elapsed time.
+hipdnnBackendFinalize(profiling);
+
+float elapsedMs = 0.0f;
+hipdnnBackendGetAttribute(profiling, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT,
+                          HIPDNN_TYPE_FLOAT, 1, NULL, &elapsedMs);
+
+hipdnnBackendDestroyDescriptor(profiling);
+```
+
+Both attributes are write-only triggers. The boolean value is unused; the `setAttribute` call
+itself performs the action, as it does for `START`, `STOP`, and `DEVICE_SYNC`.
+
+`Graph::autotune()` and kernel-ingestor benchmark mode (`HIPDNN_FORCE_BENCHMARKING`) already use
+this sequence internally, so their reported times exclude host submission.
+
+**Notes:**
+- Set `HIPDNN_ATTR_PROFILING_HANDLE_EXT` before arming. Arming without a handle fails with
+  `HIPDNN_STATUS_BAD_PARAM`.
+- The stall needs `hipStreamWaitValue32` support. On a device without it, arming is silently
+  skipped and logs one informational message; the measurement still succeeds, but it includes host
+  submission overhead as it did before.
+- `hipdnnBackendFinalize` releases the stall before it synchronizes, and destroying the descriptor
+  releases and drains as well. An error path that skips `STALL_RELEASE` therefore cannot leave the
+  stream stalled.
+- Releasing without a preceding arm is a no-op success, so a caller need not track whether arming
+  worked.
+- Run one or more untimed warmup executions and one `HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT` before
+  the first timed iteration. The stall removes the submission gap inside a measurement; it does not
+  drain work that was queued before it.
+
 ## Error Handling
 
 hipDNN provides functions for retrieving error information:
