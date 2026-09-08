@@ -150,10 +150,10 @@ def _check(s: int, where: str) -> None:
 
 
 _hip_inited = False
-# Raw hipDeviceProp_t buffers, cached per device. The struct layout churns across
+# Raw hipDeviceProp_t buffers, cached per device. The struct layout varies across
 # ROCm releases (and the props symbol was versioned to ``...R0600`` in ROCm 6.x), so
 # we keep the raw bytes and let each query read the field it needs rather than mirror
-# the struct. See get_device_arch (gcnArchName) / get_device_name (name).
+# the struct. See get_device_target_id (gcnArchName) and get_device_name (name).
 _device_props_cache: Dict[int, bytes] = {}
 
 
@@ -181,20 +181,15 @@ def _ensure_hip_init() -> None:
 
 
 def _device_props(device: int = 0) -> Optional[bytes]:
-    """Raw ``hipDeviceProp_t`` bytes for a HIP device, or None if unavailable.
+    """Read ``hipDeviceProp_t`` bytes, or return ``None`` if the query fails.
 
-    Best-effort and **side-effect-free**: this is a *query*, not a context bind, so
-    it deliberately does not call ``_ensure_hip_init()`` (which would ``hipSetDevice``
-    and create a primary context). ``hipGetDeviceProperties*`` lazily inits the runtime
-    internally and needs no bound context, so a pure ctypes process — no torch, no
-    prior HIP call — still gets valid properties. Keeping it context-free means a probe
-    can run before a later ``import torch`` without perturbing torch's device discovery.
+    Tries ``hipGetDevicePropertiesR0600`` first, then the legacy symbol.
+    The struct layout varies across ROCm versions, so callers extract the
+    fields they need from a zeroed buffer. Successful results are cached
+    per device; failures are retried on the next call.
 
-    The struct layout changes across ROCm releases (the symbol was versioned to
-    ``...R0600`` in ROCm 6.x), so we fill a generous zeroed buffer and let callers read
-    the field they need rather than mirror the struct. The first properties symbol that
-    returns success wins and its buffer is cached; we do not retry the legacy symbol once
-    one has succeeded.
+    This does not call ``_ensure_hip_init()`` or select a device. HIP may
+    initialize its runtime internally when handling the query.
     """
     device = int(device)
     if device in _device_props_cache:
@@ -214,16 +209,15 @@ def _device_props(device: int = 0) -> Optional[bytes]:
 
 
 def get_device_target_id(device: int = 0) -> Optional[str]:
-    """Best-effort exact target ID of a HIP device.
+    """Read the target ID from HIP device properties, or return ``None``.
 
-    Mirrors the ``Name`` field ``rocminfo`` prints for a GPU agent. Returns ``None``
-    when it can't be determined (no GPU present, or the properties symbol is
-    unavailable). Profiles and feature suffixes are preserved, for example
-    ``gfx1250-strict`` and ``gfx942:sramecc+:xnack-``.
+    Calls :func:`_device_props` and extracts the ``gcnArchName`` string,
+    preserving suffixes such as ``-strict`` and ``:sramecc+:xnack-``.
+    This is a target ID such as ``gfx1250-strict``, without a COMGR ISA prefix.
 
-    ``gcnArchName`` carries the gfx token; the marketing ``name`` field (offset 0)
-    contains no ``gfx`` token, so the first NUL-terminated string beginning with
-    ``gfx`` in the raw buffer is the target ID.
+    To avoid depending on the struct layout, this scans for the first
+    ``gfx`` token and reads through the next NUL byte. It assumes that token
+    belongs to ``gcnArchName``. Returns ``None`` if no token is found.
     """
     raw = _device_props(device)
     if raw is None:
@@ -239,11 +233,11 @@ def get_device_target_id(device: int = 0) -> Optional[str]:
 
 
 def get_device_arch(device: int = 0) -> Optional[str]:
-    """Best-effort normalized rocKE architecture of a HIP device.
+    """Return the device's base architecture, or ``None`` if unavailable.
 
-    This compatibility query intentionally removes runtime/compiler profiles and
-    feature suffixes. Use :func:`get_device_target_id` when the exact identity is
-    required.
+    Applies :func:`base_arch_from_target_id` to :func:`get_device_target_id`
+    so existing callers get names such as ``gfx942`` for catalog lookup and
+    lowering. Use :func:`get_device_target_id` to retain profiles and features.
     """
 
     target_id = get_device_target_id(device)
@@ -287,9 +281,8 @@ def get_device_count() -> int:
 # is far more durable than reading a field offset out of the churny hipDeviceProp_t.
 _HIP_ATTR_MULTIPROCESSOR_COUNT = 63
 
-# hipDeviceAttributeAsicRevision. This lives in the AMD-specific portion of the stable
-# ``hipDeviceAttribute_t`` ABI. Querying it through ``hipDeviceGetAttribute`` avoids
-# depending on the ROCm-version-specific offset of ``hipDeviceProp_t::asicRevision``.
+# hipDeviceAttributeAsicRevision, queried with hipDeviceGetAttribute so we do not
+# depend on the offset of asicRevision in hipDeviceProp_t.
 _HIP_ATTR_ASIC_REVISION = 10012
 
 
@@ -315,11 +308,10 @@ def get_device_num_cus(device: int = 0) -> Optional[int]:
 
 
 def _get_device_asic_revision(device: int = 0) -> Optional[int]:
-    """ASIC revision of a HIP device, or ``None`` when it cannot be queried.
+    """Read HIP's ``hipDeviceAttributeAsicRevision`` for the device ordinal.
 
-    Revision ``0`` is a valid result and must remain distinguishable from a failed
-    query. This remains a raw runtime identity property; it does not by itself
-    promise that a particular code object or instruction is usable.
+    Returns the nonnegative revision value, including zero, or ``None`` if
+    the query fails. This reports the value without assigning feature support.
     """
 
     v = ctypes.c_int(-1)

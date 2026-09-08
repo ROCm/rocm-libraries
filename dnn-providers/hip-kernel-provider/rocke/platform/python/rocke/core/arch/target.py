@@ -1097,12 +1097,15 @@ def known_arches() -> Tuple[str, ...]:
 
 
 def target_id_from_isa(isa: str) -> str:
-    """Return the exact target ID carried by an AMDGPU ISA string.
+    """Extract the target ID from a caller-supplied COMGR ISA name.
 
-    The target ID starts at the final ``gfx`` component and continues to the end.
-    This handles LLVM triples with either empty or populated OS/environment
-    components. Profiles such as ``gfx1250-strict`` and feature suffixes such as
-    ``:sramecc+:xnack-`` are preserved.
+    ``compile_kernel(..., isa=...)`` accepts names such as
+    ``amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-``. This returns
+    ``gfx942:sramecc+:xnack-``, keeping any profile or feature suffix.
+    It also accepts a target ID without the ISA prefix.
+
+    The result starts at the last ``gfx`` in the input. If there is no
+    ``gfx``, the input is returned unchanged. This does not validate the name.
     """
 
     start = isa.rfind("gfx")
@@ -1110,12 +1113,16 @@ def target_id_from_isa(isa: str) -> str:
 
 
 def base_arch_from_target_id(target_id: str) -> str:
-    """Normalize an exact AMDGPU target ID to a rocKE architecture key.
+    """Derive the architecture name used for rocKE catalog lookup and lowering.
 
-    Runtime profiles and feature suffixes are not separate
-    :class:`ArchTarget` rows. For example, ``gfx1250-strict`` uses the static
-    ``gfx1250`` hardware facts, while ``gfx942:sramecc+:xnack-`` uses
-    ``gfx942``.
+    Removes features after ``:`` and profile suffixes such as ``-strict``:
+    ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
+    ``gfx942``. Names already in :func:`known_arches`, including
+    ``gfx11-generic``, are preserved.
+
+    An unknown name is reduced to its leading ``gfx`` token when possible.
+    This does not check support; :meth:`ArchTarget.from_gfx` requires a
+    matching catalog entry.
     """
 
     target_without_features = target_id.split(":", 1)[0]
@@ -1130,13 +1137,15 @@ def base_arch_from_target_id(target_id: str) -> str:
 
 
 def compiler_target_from_target_id(target_id: str) -> str:
-    """Return the compiler-form target for a runtime target ID.
+    """Derive the target name that the compile helpers pass to COMGR or hipcc.
 
-    Runtime profiles such as ``-strict`` identify the destination device but
-    are not processor names accepted by COMGR or hipcc. The compiler-form target
-    therefore uses the normalized base architecture. Target feature suffixes
-    remain attached for compiler validation; unsupported feature combinations
-    are rejected by the selected compiler.
+    Removes profile suffixes such as ``-strict`` using
+    :func:`base_arch_from_target_id`, but keeps features after ``:``.
+    For example, ``gfx1250-strict`` becomes ``gfx1250``, while
+    ``gfx942:sramecc+:xnack-`` stays unchanged.
+
+    This only converts the string. COMGR or hipcc checks whether the target
+    and its features are supported when compilation runs.
     """
 
     target_without_features, separator, features = target_id.partition(":")
@@ -1149,7 +1158,11 @@ def compiler_target_from_target_id(target_id: str) -> str:
 
 
 def arch_from_isa(isa: str) -> str:
-    """Return the normalized rocKE architecture carried by an ISA string."""
+    """Extract a target ID from a COMGR ISA name, then derive its base architecture.
+
+    Combines :func:`target_id_from_isa` and :func:`base_arch_from_target_id`.
+    For example, ``amdgcn-amd-amdhsa--gfx942:xnack-`` becomes ``gfx942``.
+    """
 
     return base_arch_from_target_id(target_id_from_isa(isa))
 

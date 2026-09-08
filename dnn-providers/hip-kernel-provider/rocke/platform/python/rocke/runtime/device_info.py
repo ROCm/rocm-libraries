@@ -1,11 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Identity facts reported for a HIP device.
-
-Static instruction facts remain in :class:`rocke.core.arch.ArchTarget`, while
-the destination runtime determines code-object loading and compatibility.
-"""
+"""HIP device properties and the target names rocKE derives from them."""
 
 from __future__ import annotations
 
@@ -17,21 +13,21 @@ from .hip_module import _get_device_asic_revision, get_device_target_id
 
 @dataclass(frozen=True)
 class DeviceInfo:
-    """Identity reported by HIP for one device.
+    """HIP device properties with derived names for compilation and lowering.
 
-    ``target_id`` preserves the complete runtime target string, including
-    profiles such as ``gfx1250-strict`` and feature suffixes such as
-    ``gfx942:sramecc+:xnack-``.
+    ``target_id`` is the string read from HIP's ``gcnArchName`` property,
+    such as ``gfx1250-strict`` or ``gfx942:sramecc+:xnack-``.
 
-    ``base_arch`` is the normalized rocKE architecture used for static
-    :class:`~rocke.core.arch.ArchTarget` lookup. It intentionally omits target
-    profiles and feature suffixes.
+    ``base_arch`` is derived from ``target_id`` by
+    :func:`~rocke.core.arch.base_arch_from_target_id`. rocKE uses this name
+    with :meth:`~rocke.core.arch.ArchTarget.from_gfx` for catalog lookup.
 
-    ``compiler_target`` is the compiler-form target derived from ``target_id``.
-    Runtime-only profiles are removed while feature suffixes are retained for
-    compiler validation.
+    ``compiler_target`` is derived by
+    :func:`~rocke.core.arch.compiler_target_from_target_id`. The compile
+    helpers use this name in the COMGR ISA name or hipcc's ``--offload-arch``.
 
-    ``asic_revision`` is the revision value reported by HIP.
+    ``asic_revision`` comes from HIP's ``hipDeviceAttributeAsicRevision``.
+    A successful query may return zero.
     """
 
     target_id: str | None
@@ -41,9 +37,11 @@ class DeviceInfo:
 
 
 def get_device_info(device: int = 0) -> DeviceInfo:
-    """Query identity properties for one HIP device.
+    """Read properties for a HIP device ordinal and derive its target names.
 
-    Properties that HIP cannot report remain ``None``.
+    Uses :func:`get_device_target_id` and :func:`_get_device_asic_revision`.
+    If the target ID is unavailable, all three target names are ``None``.
+    The revision query is independent and returns ``None`` on failure.
     """
 
     target_id = get_device_target_id(device)

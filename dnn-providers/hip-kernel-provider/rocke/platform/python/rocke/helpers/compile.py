@@ -20,7 +20,7 @@ takes a `KernelDef` produced by an instance builder and returns a
 Use `compile_kernel(...)` from a kernel-author script when:
 
   - You want to *run* the kernel: feed `artifact.hsaco` into
-    `rocke._hip_module.Runtime.load_module()`.
+    `rocke.runtime.Runtime.load_module()`.
 
   - You want to *inspect* the lowered IR: write `artifact.llvm_text`
     next to a `.ll` file and run `llc -mtriple=amdgcn-amd-amdhsa
@@ -66,7 +66,11 @@ from ..runtime.comgr import build_hsaco_from_llvm_ir
 
 @dataclass
 class KernelArtifact:
-    """The compiled output of one `compile_kernel(...)` call."""
+    """Output from ``compile_kernel`` or ``compile_kernel_via_hipcc``.
+
+    ``isa`` records the COMGR ISA name for the compiler target used to build
+    ``hsaco``, including any target features. It is not a device query result.
+    """
 
     kernel: KernelDef
     ir_text: str
@@ -97,15 +101,16 @@ def compile_kernel(
 ) -> KernelArtifact:
     """Lower `kernel` to a `KernelArtifact` ready for HIP module load.
 
-    `arch` is the preferred way to select the target (e.g. ``"gfx942"``,
-    ``"gfx1250-strict"``): when given, the comgr ISA triple is derived from
-    the corresponding compiler target. `arch` takes precedence over `isa`.
+    Pass a target ID through `arch`, such as ``"gfx942"`` or ``"gfx1250-strict"``.
+    Alternatively, pass a COMGR ISA name through `isa`, such as
+    ``"amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"``. `arch` takes precedence;
+    if neither is supplied, the target is ``gfx950``. No GPU query is made.
 
-    `isa` stays accepted for backward compatibility. Runtime-only target
-    profiles are normalized to a compiler-supported target, target feature
-    suffixes are preserved for compiler validation, and the corresponding base
-    architecture drives rocKE lowering. `gfx950` is the historical default
-    every example uses.
+    The target helpers remove profile suffixes such as ``-strict`` from the
+    compiler target and retain features such as ``:sramecc+:xnack-``. The base
+    architecture selects rocKE lowering. The resulting COMGR ISA name is
+    passed to `build_hsaco_from_llvm_ir` and recorded in `KernelArtifact.isa`.
+    COMGR checks compiler support when compilation runs.
 
     `capture_ir_text` controls whether the MLIR-style textual dump is
     populated. Disable for tight sweep loops where the dump is
@@ -128,9 +133,8 @@ def compile_kernel(
         base_isa = ArchTarget.from_gfx(_lower_arch).isa_triple
         isa = f"{base_isa[: -len(_lower_arch)]}{compiler_target}"
     else:
-        # Derive the lowering arch from the isa triple so the ISA backend
-        # (datalayout/triple/waitcnt) matches the comgr target even when a
-        # caller passes isa= directly.
+        # Derive both names from the caller's ISA name. Use the base architecture
+        # for lowering and preserve compiler features in the COMGR ISA name.
         target_id = target_id_from_isa(isa)
         compiler_target = compiler_target_from_target_id(target_id)
         isa = f"{isa[: -len(target_id)]}{compiler_target}"
@@ -260,35 +264,18 @@ def compile_kernel_via_hipcc(
     extra_flags: Optional[List[str]] = None,
     timeout_s: int = 240,
 ) -> KernelArtifact:
-    """Lower ``kernel`` to HIP C++, compile through ``hipcc --genco``, and
-    return a :class:`KernelArtifact` whose ``hsaco`` is the hipcc output.
+    """Lower ``kernel`` to HIP C++ and compile it with ``hipcc --genco``.
 
-    ``arch`` may be a runtime target ID with a profile or feature suffix. hipcc
-    receives the corresponding compiler target while rocKE lowering uses the
-    normalized base architecture.
+    ``arch`` accepts the same target IDs as :func:`compile_kernel`. The base
+    architecture is passed to ``lower_kernel_to_hip``; the compiler target
+    is passed to hipcc as ``--offload-arch``. Neither is discovered from a GPU.
 
-    Use this **only** when the LLVM-direct pipeline (``compile_kernel``)
-    is leaving performance on the table for a specific workload. The HIP
-    path goes through the full clang frontend + AMDGPU backend, which
-    sometimes generates better-scheduled code for long-running attention
-    kernels (we measured a ~5% win on prefill_b4_q1000 with the kernel
-    in ``instances/attention_tiled_2d.py``). The trade-offs:
+    Requires hipcc on ``PATH`` and a kernel supported by the HIP lowerer.
+    An explicit scheduler policy is rejected because this path does not emit
+    the LLVM function attribute used by the COMGR path.
 
-      - Compile is ~5× slower (~450ms vs ~90ms via libamd_comgr) due
-        to the heavier clang frontend.
-      - Requires ``hipcc`` in ``$PATH`` (build-time only, since the HSACO
-        bytes are cacheable and identical to the LLVM-direct path's
-        runtime ABI).
-      - The HIP debug backend has narrower op coverage than the LLVM
-        backend; verify the kernel actually lowers via ``lower_kernel_to_hip``
-        before relying on this path.
-      - An explicit scheduler policy is rejected because this path does not
-        carry the LLVM function attribute used by the COMGR path.
-
-    Returns the same ``KernelArtifact`` shape as :func:`compile_kernel`;
-    ``ir_text`` is the textual MLIR-style IR, ``llvm_text`` is empty
-    (this path doesn't go through the LLVM-direct lowering), ``hsaco``
-    is the hipcc output, and ``timings`` records the lower + hipcc steps.
+    Returns a :class:`KernelArtifact` with hipcc's output in ``hsaco``, an
+    empty ``llvm_text``, and timings for HIP lowering and compilation.
     """
     policy = codegen_policy_for_kernel(kernel)
     if policy.scheduler_strategy is not None:
@@ -358,36 +345,28 @@ def emit_device_llvm_ir_via_hipcc(
     extra_flags: Optional[List[str]] = None,
     timeout_s: int = 120,
 ) -> str:
-    """Lower ``kernel`` to HIP C++, then emit device LLVM IR via hipcc.
+    """Lower ``kernel`` to HIP C++ and ask hipcc to emit device LLVM IR.
 
-    ``arch`` may be a runtime target ID with a profile or feature suffix. hipcc
-    receives the corresponding compiler target while rocKE lowering uses the
-    normalized base architecture.
+    Target selection matches :func:`compile_kernel_via_hipcc`: the base
+    architecture selects HIP lowering and the compiler target becomes
+    hipcc's ``--offload-arch`` argument.
 
-    This is the **ground-truth datalayout oracle**: it asks the project's
-    own ``hipcc --offload-arch=<arch>`` to emit textual LLVM IR
-    (``-S -emit-llvm --cuda-device-only``) instead of HSACO. The returned
-    IR carries the authoritative ``target datalayout`` and intrinsic
-    signatures for whatever ROCm/clang version is installed — exactly what
-    ``compile_kernel_via_hipcc`` feeds to the backend when compiling real
-    kernels. Use this in drift-guard tests to assert rocke's hardcoded
-    constants (``_DATALAYOUT_LLVM20`` / ``_DATALAYOUT_LLVM22``) match the
-    toolchain byte-for-byte.
+    Uses ``-S -emit-llvm --cuda-device-only``. Tests can compare the returned
+    ``target datalayout`` with rocKE's LLVM lowering for the same target.
 
     Args:
         kernel: The kernel to lower.
-        arch: Target architecture (e.g., ``"gfx950"``).
-        extra_flags: Optional hipcc flags appended to the default ``["-O3"]``.
-        timeout_s: Timeout in seconds (default 120).
+        arch: Target ID, such as ``gfx950`` or ``gfx1250-strict``.
+        extra_flags: hipcc flags appended after ``-O3``.
+        timeout_s: Subprocess timeout in seconds.
 
     Returns:
-        The device LLVM IR text emitted by hipcc. If hipcc produces
-        multiple ``.ll`` files (rare), this concatenates them with a
-        separator comment.
+        The generated ``.ll`` files joined with filename comments.
 
     Raises:
-        RuntimeError: If hipcc is not in PATH or the compile fails.
+        RuntimeError: If hipcc fails or produces no ``.ll`` files.
         FileNotFoundError: If hipcc cannot be located.
+        subprocess.TimeoutExpired: If hipcc exceeds ``timeout_s``.
     """
     lower_arch = base_arch_from_target_id(arch)
     compiler_target = compiler_target_from_target_id(arch)

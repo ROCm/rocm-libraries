@@ -33,8 +33,8 @@ edge:
                       `HIP_LAUNCH_PARAM_BUFFER_POINTER` arg-buffer
                       lifetime race.
 
-  - ``device_info``  : reports exact, compiler, and normalized HIP device
-                      identity for target selection and diagnostics.
+  - ``device_info``  : reads HIP's target ID and ASIC revision, and derives
+                      target names for compilation and architecture lookup.
 
   - ``packing``     : torch-agnostic kernel-arg packing (`pack_args`,
                       `pack_args_kernelparams`) for the AMDGPU kernarg
