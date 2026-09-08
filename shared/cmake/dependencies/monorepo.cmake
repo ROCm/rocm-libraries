@@ -121,7 +121,8 @@ macro(fetch_monorepo_dep)
     restore_variable(ROCM_DISABLE_CHECKS)
   else()
     message(FATAL_ERROR
-      "Unknown fetch method in 'fetch_monorepo_dep': ${${fetch_method_name}}"
+      "Unknown value ${${fetch_method_name}} in ${fetch_method_name}. Valid "
+      "values are: PACKAGE, MONOREPO."
     )
   endif()
 endmacro()
