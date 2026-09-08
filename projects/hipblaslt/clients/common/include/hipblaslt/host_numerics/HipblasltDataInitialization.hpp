@@ -47,21 +47,6 @@ namespace hipblaslt::host_numerics
         NaN,
     };
 
-    struct MatrixInitialization
-    {
-        MatrixRole                     role             = MatrixRole::A;
-        hipblaslt_initialization       initialization   = hipblaslt_initialization::zero;
-        bool                           forceNaN         = false;
-        hipDataType                    type             = HIP_R_32F;
-        size_t                         rows             = 0;
-        size_t                         columns          = 0;
-        size_t                         leadingDimension = 0;
-        size_t                         batchStride      = 0;
-        size_t                         batchCount       = 1;
-        std::optional<OneSpecialValue> oneSpecialValue;
-        bool                           positiveOnly = false;
-    };
-
     inline constexpr uint32_t mxDefaultSeed = 1713573849U;
 
     ::roc::host_numerics::MxTensor generateMxData(hipDataType                 dataType,
@@ -71,7 +56,7 @@ namespace hipblaslt::host_numerics
                                                   size_t                      blockAxis,
                                                   size_t                      blockSize,
                                                   hipblaslt_initialization    initialization,
-                                                  uint32_t                    seed = mxDefaultSeed);
+                                                  uint32_t                    seed);
 
     ::roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout
         mxScaleStorageLayoutForArchName(std::string_view archName);
@@ -80,7 +65,16 @@ namespace hipblaslt::host_numerics
         mxScaleStorageLayoutForFormat(hipblaslt_scaling_format scalingFormat,
                                       std::string_view         archName);
 
-    ::roc::host_numerics::Tensor generateMatrix(const MatrixInitialization& initialization);
+    // Applies the hipBLASLt initialization policy directly to an existing
+    // Tensor. The caller owns storage and supplies the exact seed used by the
+    // selected recipe; MatrixRole only selects operand-specific value rules.
+    void initializeMatrix(::roc::host_numerics::Tensor   destination,
+                          MatrixRole                     role,
+                          hipblaslt_initialization       initialization,
+                          uint64_t                       seed,
+                          bool                           forceNaN        = false,
+                          std::optional<OneSpecialValue> oneSpecialValue = std::nullopt,
+                          bool                           positiveOnly    = false);
 
     namespace detail
     {
