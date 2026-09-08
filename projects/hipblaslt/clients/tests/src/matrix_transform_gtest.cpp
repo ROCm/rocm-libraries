@@ -227,54 +227,30 @@ namespace
                     bool        transA,
                     bool        transB)
     {
-        const auto   scalarType = hipblaslt::host_numerics::scalarType(datatype);
-        const size_t elementBytes
-            = roc::host_numerics::scalarTypeInfo(scalarType).storageBits / 8;
-        const size_t           storageBytes = size_t(m) * n * batchSize * elementBytes;
-        std::vector<std::byte> hA(storageBytes);
-        std::vector<std::byte> hB(storageBytes);
-        std::vector<std::byte> hC(storageBytes);
-        auto                   err = hipSuccess;
+        using namespace roc::host_numerics;
+        const ScalarType type    = hipblaslt::host_numerics::scalarType(datatype);
+        const Layout     aLayout = hipblaslt::host_numerics::matrixTransformLayout(
+            m, n, batchSize, ldA, batchStride, rowMajA, transA);
+        const Layout bLayout = hipblaslt::host_numerics::matrixTransformLayout(
+            m, n, batchSize, ldB, batchStride, rowMajB, transB);
+        const Layout outputLayout = hipblaslt::host_numerics::matrixTransformLayout(
+            m, n, batchSize, ldC, batchStride, rowMajC, false);
+        const auto readDeviceTensor = [&](void* pointer, const Layout& layout) {
+            std::vector<std::byte> storage(storageBytesForLayout(type, layout));
+            const hipError_t       error = hipMemcpyDtoH(storage.data(), pointer, storage.size());
+            EXPECT_EQ(error, hipSuccess);
+            return Tensor::takeOwnershipOfEncodedBackingStorage(type, layout, std::move(storage));
+        };
 
-        if(a)
-        {
-            err = hipMemcpyDtoH(hA.data(), a, storageBytes);
-        }
-
-        if(b)
-        {
-            err = hipMemcpyDtoH(hB.data(), b, storageBytes);
-        }
-
-        err = hipMemcpyDtoH(hC.data(), c, storageBytes);
-
-        ASSERT_EQ(err, hipSuccess);
-
-        hipblaslt::host_numerics::MatrixTransformReferenceArguments arguments;
-        arguments.observed                     = hC.data();
-        arguments.observedStorageBytes         = storageBytes;
-        arguments.a                            = a ? hA.data() : nullptr;
-        arguments.aStorageBytes                = a ? storageBytes : 0;
-        arguments.b                            = b ? hB.data() : nullptr;
-        arguments.bStorageBytes                = b ? storageBytes : 0;
-        arguments.type                         = datatype;
-        arguments.rows                         = m;
-        arguments.columns                      = n;
-        arguments.batchCount                   = batchSize;
-        arguments.leadingDimensionA            = ldA;
-        arguments.leadingDimensionB            = ldB;
-        arguments.leadingDimensionOutput       = ldC;
-        arguments.batchStride                  = batchStride;
-        arguments.rowMajorA                    = rowMajA;
-        arguments.rowMajorB                    = rowMajB;
-        arguments.rowMajorOutput               = rowMajC;
-        arguments.transposeA                   = transA;
-        arguments.transposeB                   = transB;
-        arguments.alpha                        = alpha;
-        arguments.beta                         = beta;
-        arguments.comparison.absoluteTolerance = 1e-5;
-
-        const auto comparison = hipblaslt::host_numerics::referenceMatrixTransform(arguments);
+        const Tensor                observed = readDeviceTensor(c, outputLayout);
+        const std::optional<Tensor> inputA
+            = a ? std::optional(readDeviceTensor(a, aLayout)) : std::nullopt;
+        const std::optional<Tensor> inputB
+            = b ? std::optional(readDeviceTensor(b, bLayout)) : std::nullopt;
+        ComparisonOptions options;
+        options.absoluteTolerance = 1e-5;
+        const auto comparison     = hipblaslt::host_numerics::referenceMatrixTransform(
+            observed, inputA, inputB, alpha, beta, options);
         std::ostringstream diagnostics;
         hipblaslt::host_numerics::reportMatrixTransformMismatches(diagnostics, comparison);
         ASSERT_TRUE(comparison.passed()) << diagnostics.str();
