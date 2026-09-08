@@ -207,7 +207,8 @@ public:
         const WinnerKey winnerKey{
             hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
             DeviceKey{context.deviceProperties}};
-        if(const auto record = _stateManager.winnerFor(winnerKey); record.has_value())
+        const auto record = _stateManager.winnerFor(winnerKey);
+        if(record.has_value())
         {
             if(const auto ranked = orderIfFullyCovered(*record, filtered); ranked.has_value())
             {
@@ -358,11 +359,18 @@ public:
         std::ostringstream deviceId;
         deviceId << std::hex << winnerKey.device.hash();
 
+        // A record that exists but did not serve this graph -- either it failed the coverage gate
+        // or none of its ranked entries still resolved -- is being superseded, so its write must
+        // append rather than adopt.
+        const auto cause = record.has_value() ? WinnerWriteCause::COVERAGE_REBENCHMARK
+                                              : WinnerWriteCause::FRESH_MISS;
+
         executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
             handle,
-            [&stateManager = _stateManager, winnerKey](const std::vector<RankedEntry>& ranking) {
-                stateManager.recordWinner(winnerKey, ranking);
+            [&stateManager = _stateManager, winnerKey, cause](
+                const std::vector<RankedEntry>& ranking) {
+                stateManager.recordWinner(winnerKey, ranking, cause);
             },
             benchmarkId.str(),
             deviceId.str()));
