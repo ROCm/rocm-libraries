@@ -313,15 +313,9 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
         test_tile_gemm_quant_bquant_preshuffleQuant_prefill_2d
         # Other quant tests
         test_tile_gemm_quant_rowcol
+        test_tile_gemm_quant_rowcol_large_tensor
         test_tile_gemm_quant_tensor
     )
-
-    # gfx1250-only large-tensor target: add to the umbrella list only when it was
-    # registered above, so the labeling foreach and umbrella dependencies below do
-    # not reference a nonexistent target on other architectures.
-    if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
-        list(APPEND CK_TILE_GEMM_BLOCK_SCALE_TEST_TARGETS test_tile_gemm_quant_rowcol_large_tensor)
-    endif()
 
     # Label all ck_tile gemm_block_scale tests with CK_TILE_GEMM_BLOCK_SCALE_TESTS for selective execution
     foreach(test_target ${CK_TILE_GEMM_BLOCK_SCALE_TEST_TARGETS})
