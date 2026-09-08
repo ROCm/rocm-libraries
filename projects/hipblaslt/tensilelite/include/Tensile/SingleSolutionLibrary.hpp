@@ -28,6 +28,7 @@
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 
 #include <tensilelitehost/export.h>
 
@@ -159,7 +160,12 @@ namespace TensileLite
                     Task task(hardware, problem, *(solution));
                     problem.setWorkspaceSizeGroupedGemm(ws);
                     problem.setGroupedGemmCount(problems.size());
-                    if(!(*solution->problemPredicate)(problem) || !(*solution->taskPredicate)(task))
+                    problem.setGroupedGemm(true);
+                    if(!softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                          task,
+                                          hardware,
+                                          (*solution),
+                                          problem))
                     {
                         if(debug)
                             PredicateDebugger::printFooter(std::cout, false);
@@ -253,8 +259,8 @@ namespace TensileLite
                         Task task(hardware, problem, (*solution));
                         problem.setWorkspaceSizeGroupedGemm(ws);
                         problem.setGroupedGemmCount(problems.size());
-                        if(!(*solution->problemPredicate)(problem)
-                           || !(*solution->taskPredicate)(task))
+                        problem.setGroupedGemm(true);
+                        if(!softwarePredicate(searchType, task, hardware, (*solution), problem))
                             useSolution = false;
                     }
                 }

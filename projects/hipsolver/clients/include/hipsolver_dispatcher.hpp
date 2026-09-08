@@ -37,6 +37,7 @@
 #include "testing_gesvdj.hpp"
 #include "testing_getrf.hpp"
 #include "testing_getrs.hpp"
+#include "testing_larft.hpp"
 #include "testing_orgbr_ungbr.hpp"
 #include "testing_orgqr_ungqr.hpp"
 #include "testing_orgtr_ungtr.hpp"
@@ -94,6 +95,7 @@ class hipsolver_dispatcher
             {"getrf_64", testing_getrf<API_COMPAT, false, false, false, T, int64_t, size_t>},
             {"getrs", testing_getrs<API_NORMAL, false, false, T, int, int>},
             {"getrs_64", testing_getrs<API_COMPAT, false, false, T, int64_t, size_t>},
+            {"larft_64", testing_larft<API_COMPAT, false, false, T, int64_t, size_t>},
             {"potrf", testing_potrf<API_NORMAL, false, false, T>},
             {"potrf_batched", testing_potrf<API_NORMAL, true, false, T>},
             {"potri", testing_potri<API_NORMAL, false, false, T>},

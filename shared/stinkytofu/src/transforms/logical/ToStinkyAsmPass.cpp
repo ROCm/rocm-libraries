@@ -39,6 +39,7 @@
 // For ArchHelper access
 using namespace stinkytofu;
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -174,7 +175,7 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         return asmInst;
     } else if (irInst->getOpcode() == logical::SchedulingFence) {
         static const HwInstDesc fenceMCID{
-            GFX::FENCE, GFX::FENCE, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::FENCE, GFX::FENCE, 0, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
         StinkyInstruction* asmInst = IRBase::createIR<StinkyInstruction>(&fenceMCID);
         if (!irInst->comment.empty()) {
             asmInst->addModifier(CommentData(irInst->comment));
@@ -267,15 +268,37 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
                 if (f.isReadWrite) hasRWDest = true;
             }
         }
-        if (hasRWDest && numDestFields > destRegs.size()) {
-            size_t need = numDestFields - destRegs.size();
-            for (size_t k = 0; k < need && k < srcRegs.size(); ++k) {
-                destRegs.push_back(srcRegs[k]);
+        if (hasRWDest) {
+            // v_swap_b32 / v_permlane16_swap_b32 carry a RW dest as a logical
+            // *source*, leaving destRegs one register short; pad it from the
+            // leading srcRegs so the dest field is still emitted.
+            if (numDestFields > destRegs.size()) {
+                size_t need = numDestFields - destRegs.size();
+                for (size_t k = 0; k < need && k < srcRegs.size(); ++k) {
+                    destRegs.push_back(srcRegs[k]);
+                }
             }
-            // RW dest operands are also reads; keep them in srcRegs for
-            // dependency/use-def tracking (not re-emitted: emitSrcCount == 0).
-            for (const auto& d : irInst->dests) {
-                srcRegs.push_back(d);
+            // Every RW dest field is ALSO a read (v_swap exchange; s_cmov_b32
+            // conditionally preserves its old dest). rocisa models these in both
+            // getDstParams and getSrcParams; the generic logical->asm mapping only
+            // put them in destRegs, so use-def tracking (and the DAG scheduler)
+            // missed the read. Mirror rocisa: every RW dest must also appear in
+            // srcRegs (emitSrcCount ignores dest fields, so it is not re-emitted).
+            size_t destIdx = 0;
+            for (const auto& f : desc->operandFields) {
+                if (!f.isDest) continue;
+                if (f.isReadWrite && destIdx < destRegs.size()) {
+                    const StinkyRegister& rw = destRegs[destIdx];
+                    bool present = false;
+                    for (const auto& s : srcRegs) {
+                        if (s == rw) {
+                            present = true;
+                            break;
+                        }
+                    }
+                    if (!present) srcRegs.push_back(rw);
+                }
+                ++destIdx;
             }
         }
 
@@ -299,6 +322,25 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         }
     }
 
+    // v_add_co_u32 / v_sub_co_u32 / v_add_co_ci_u32 carry VCC as EXPLICIT ISA
+    // operands: the carry-out is a second dest (dst1) and, for the _ci form, the
+    // carry-in is a trailing src. rocisa emits these (dst1=VCC / src2=VCC) and the
+    // rocisa->asm converter keeps them, so the DAG scheduler and wait passes see
+    // the VCC def/use. The logical factory (and adaptor's to_stinky_logical) drop
+    // them, which left the scheduler blind to the VCC hazard and relied on a text
+    // post-process to re-insert vcc *after* scheduling. Re-attach them here so the
+    // asm IR matches the native converter (dst, vcc, src0, src1[, vcc]).
+    {
+        const logical::Opcode op = irInst->getOpcode();
+        if (op == logical::VAddCOU32 || op == logical::VSubCoU32 || op == logical::VAddCCOU32) {
+            const StinkyRegister vcc = StinkyRegister::getVCCRegister(getWaveFrontSize(arch));
+            asmInst->addDestReg(vcc);  // carry-out (dst1)
+            if (op == logical::VAddCCOU32) {
+                asmInst->addSrcReg(vcc);  // carry-in (src2)
+            }
+        }
+    }
+
     // Copy comment
     if (!irInst->comment.empty()) {
         asmInst->addModifier(CommentData(irInst->comment));
@@ -319,6 +361,20 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     }
     if (irInst->vop3.has_value()) {
         asmInst->addModifier<VOP3PModifiers>(irInst->vop3.value());
+    }
+    if (irInst->memtoken.has_value()) {
+        asmInst->addModifier<MemTokenData>(MemTokenData{irInst->memtoken.value()});
+    }
+    if (irInst->swaitcnt.has_value()) {
+        // Per-counter wait values {vlcnt, vscnt, dlcnt, dscnt, kmcnt} forwarded
+        // from the logical SWaitCnt. The rocisa->asm path attaches the same
+        // SWaitCntData in handleSWaitCntModifiers so legalizeWaitCnt (invoked in
+        // lowerToAsm) can split the combined s_waitcnt into the gfx12+ typed
+        // waits. Without it the adaptor's s_waitcnt reaches O3 as an opaque
+        // combined wait that waitReconstruction() cannot rebuild, so it is never
+        // removed/re-inserted and perturbs scheduling.
+        const auto& w = irInst->swaitcnt.value();
+        asmInst->addModifier<SWaitCntData>(SWaitCntData{w[0], w[1], w[2], w[3], w[4]});
     }
 
     // MFMA/SMFMA/MXMFMA: attach MFMAModifiers so downstream passes
@@ -440,6 +496,20 @@ class ToStinkyAsmPassImpl : public Pass {
 
                     logicalInst->safeErase();
 
+                    // Attach implicit special registers (SCC/VCC/EXEC) declared by
+                    // the HW flags (Flags.def: IF_ImplicitRead/WriteSCC,
+                    // IF_ImplicitReadVCC, IF_ImplicitRead/WriteEXEC). The
+                    // rocisa->asm path does this in
+                    // ToStinkyTofuUtils::legalizeInstruction; the logical/adaptor
+                    // path must do the same, otherwise scalar carry/compare/branch
+                    // chains (s_add/s_addc/s_and/s_cmp/s_cbranch_scc ...) reach the
+                    // DAG scheduler with no SCC def/use edges. The scheduler is then
+                    // free to reorder across the hidden SCC dependency, which (via
+                    // the software-prefetch/scheduling passes) duplicates LDS loads
+                    // and corrupts results. Run it before the opcode-specific
+                    // legalizations below so, e.g., v_cmpx gets its EXEC dest first.
+                    legalizeImplicitSpecialRegisters(asmInst, getWaveFrontSize(arch));
+
                     // gfx1250 (and other RDNA) have no ds_*_b192 encoding. Match
                     // rocisa's DSStoreB192/DSLoadB192::toString(), which always splits
                     // into a b128 + b64 pair. The rocisa->stinky conversion path handles
@@ -460,6 +530,38 @@ class ToStinkyAsmPassImpl : public Pass {
                         // s_barrier_wait -1 exists as a distinct instruction for
                         // InsertClusterBarrierPass to anchor its Rule 3/4 handshakes on.
                         legalizeBarrier(asmInst, irBuilder, arch);
+                    } else if (asmInst->is(InstFlag::IF_VCmpX)) {
+                        // gfx10/11/12 (RDNA, CMPXWritesSGPR=false) have no
+                        // scheduler-visible exec-writing v_cmpx form; split into
+                        // v_cmp (writes vcc) + s_mov exec, vcc — exactly what the
+                        // rocisa->stinky path does in
+                        // ToStinkyTofuUtils::legalizeInstruction (IF_VCmpX ->
+                        // legalizeVCmpX). Doing it HERE (before the asm pipeline)
+                        // makes the logical/adaptor path feed the DAG scheduler the
+                        // same instruction stream native does, so scheduling and
+                        // depctr_va_vdst wait-insertion match; leaving the raw
+                        // v_cmpx (legalized only in a text post-process) perturbs
+                        // the schedule and drops required waits.
+                        const auto* archInfo = ArchHelper::getInstance().getArchInfo(arch);
+                        std::map<std::string, int> archCaps;
+                        archCaps["CMPXWritesSGPR"] =
+                            (archInfo && archInfo->major != 10 && archInfo->major != 11 &&
+                             archInfo->major != 12)
+                                ? 1
+                                : 0;
+                        legalizeVCmpX(asmInst, irBuilder, arch, archCaps);
+                    } else if (asmInst->getUnifiedOpcode() == GFX::s_waitcnt) {
+                        // Split the combined s_waitcnt into the gfx12+ typed waits
+                        // (s_wait_loadcnt / s_wait_dscnt / s_wait_kmcnt / ...) using
+                        // the SWaitCntData forwarded above. The rocisa->stinky path
+                        // does the same in ToStinkyTofuUtils::legalizeInstruction
+                        // (GFX::s_waitcnt -> legalizeWaitCnt). Doing it before the
+                        // asm pipeline is required: waitReconstruction() returns
+                        // None for a bare s_waitcnt on gfx1250, so StinkyRemoveWaitCnt
+                        // cannot strip it and the O3 wait/schedule passes are fed a
+                        // spurious opaque barrier. legalizeWaitCnt no-ops when the
+                        // SWaitCntData modifier is absent or the arch is not gfx12.5.
+                        legalizeWaitCnt(asmInst, irBuilder, arch);
                     }
                     continue;
                 }

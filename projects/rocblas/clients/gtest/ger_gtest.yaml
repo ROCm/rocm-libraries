@@ -378,4 +378,20 @@ Tests:
   alpha_beta_stride: true
   stride_c: 2 # alpha stride
   pointer_mode_host: false
+
+- name: ger_stride_alpha_ILP64
+  category: pre_checkin
+  function:
+    - ger_batched
+    - ger_strided_batched
+  precision: *single_double_precisions
+  arguments:
+    - { M: 1, N: 2, lda: 1, stride_a: 2, incx: 1, incy: -1, batch_count: *c_grid_yz_require_passes }
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  alpha_beta_stride: true
+  stride_c: [ 1 ] # alpha stride
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
 ...

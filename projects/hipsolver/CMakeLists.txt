@@ -90,6 +90,9 @@ option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK"
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
 option(EXPORT_FORTRAN_BINDINGS "Install hipsolver_fortran as an exported CMake target" ON)
 
+# Feature flags
+option(HIPSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
+
 if(NOT BUILD_SHARED_LIBS)
   add_compile_definitions(HIPSOLVER_STATIC_LIB)
 endif()
@@ -212,8 +215,14 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
         endif()
 
-        # Force GENERIC target to ensure binaries work on all CPUs
-        list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
+        # Force GENERIC target to ensure binaries work on all CPUs.
+        # OpenBLAS lacks a KERNEL.generic file for POWER, so fall back
+        # to the base POWER target on ppc64le (see OpenBLAS#5987).
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
+            list(APPEND LAPACK_CMAKE_ARGS -DTARGET=POWER8)
+        else()
+            list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
+        endif()
 
         # Downgrade incompatible-pointer-types errors to warnings when using Clang
         if(CMAKE_C_COMPILER_ID MATCHES "Clang")
