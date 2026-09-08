@@ -32,7 +32,7 @@ from ci_utils import append_step_summary, retry, set_github_output
 
 GITHUB_API = "https://api.github.com"
 DEFAULT_THEROCK_REPO = "ROCm/TheRock"
-DEFAULT_THEROCK_BRANCH = "main"
+DEFAULT_THEROCK_BRANCH = "release/bkc/therock-10.1-20260908"
 DEFAULT_STALENESS_DAYS = 14
 
 MODE_OVERRIDE = "override"
