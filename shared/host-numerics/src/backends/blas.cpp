@@ -510,15 +510,17 @@ GemmExecutionInfo runTransformingBlasGemm(const GemmInvocation& problem) {
 }
 }  // namespace
 
-void matmulIntoWithBlasBackend(Tensor a, Tensor b, Tensor output, const MatmulOptions& options) {
+void matmulIntoWithBlasBackend(const Tensor& a, const Tensor& b, Tensor output,
+                               const MatmulOptions& options, OutputSelection selection) {
     GemmOptions gemmOptions(options);
+    gemmOptions.outputSelection = std::move(selection);
     Tensor zero = output;
     (void)detail::executeBlasGemm(
-        GemmInvocation(std::move(a), std::move(b), std::move(zero), std::move(output), gemmOptions),
+        GemmInvocation(a, b, std::move(zero), std::move(output), gemmOptions),
         GemmBackend::Automatic);
 }
 
-Tensor matmulWithBlasBackend(Tensor a, Tensor b, ScalarType outputType,
+Tensor matmulWithBlasBackend(const Tensor& a, const Tensor& b, ScalarType outputType,
                              const MatmulOptions& options, std::optional<Layout> outputLayout) {
     detail::requireRank(a.shape(), 2, "matmul", "A");
     detail::requireRank(b.shape(), 2, "matmul", "B");
@@ -530,7 +532,7 @@ Tensor matmulWithBlasBackend(Tensor a, Tensor b, ScalarType outputType,
     if (layout.shape() != outputShape)
         throw std::invalid_argument("matmul output layout shape mismatch.");
     Tensor output(outputType, layout);
-    matmulIntoWithBlasBackend(std::move(a), std::move(b), output, options);
+    matmulIntoWithBlasBackend(a, b, output, options);
     return output;
 }
 

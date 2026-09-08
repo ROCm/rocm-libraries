@@ -586,6 +586,13 @@ int main() {
         integerScalar.type() == ScalarType::Int64 && integerScalar.item<int64_t>() == exactInteger,
         "Rank-zero tensor did not preserve an integer above 2^53.");
 
+    const Tensor overflowingScalar(128.0);
+    require(overflowingScalar.item<int8_t>() == -128,
+            "No-options Tensor item conversion did not use modulo overflow semantics.");
+    requireThrows<std::overflow_error>(
+        [&] { (void)overflowingScalar.item<int8_t>(ScalarConversionOptions{}); },
+        "Option-bearing Tensor item conversion did not reject integer overflow.");
+
     const std::complex<float> complexValue{1.25f, -2.5f};
     const Tensor complexScalar(complexValue);
     require(complexScalar.type() == ScalarType::ComplexFloat32 &&

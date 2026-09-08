@@ -210,7 +210,6 @@ def _matmul_options(
     compute_type_a,
     compute_type_b,
     math_mode,
-    output_selection,
     block_scale_a,
     block_scale_b,
     block_size_a,
@@ -247,11 +246,6 @@ def _matmul_options(
     options.block_size_b = block_size_b
     options.conjugate_a = conjugate_a
     options.conjugate_b = conjugate_b
-    options.output_selection = (
-        OutputSelection.all()  # noqa: F405
-        if output_selection is None
-        else output_selection
-    )
     return options
 
 
@@ -264,7 +258,6 @@ def matmul(
     compute_type_a=None,
     compute_type_b=None,
     math_mode=MathMode.Default,  # noqa: F405
-    output_selection=None,
     block_scale_a=None,
     block_scale_b=None,
     block_size_a=0,
@@ -283,7 +276,6 @@ def matmul(
         compute_type_a,
         compute_type_b,
         math_mode,
-        output_selection,
         block_scale_a,
         block_scale_b,
         block_size_a,
@@ -324,7 +316,6 @@ def matmul_into(
         compute_type_a,
         compute_type_b,
         math_mode,
-        output_selection,
         block_scale_a,
         block_scale_b,
         block_size_a,
@@ -335,7 +326,12 @@ def matmul_into(
         conjugate_a,
         conjugate_b,
     )
-    return _native._matmul_into(a, b, output, options)
+    selection = (
+        OutputSelection.all()  # noqa: F405
+        if output_selection is None
+        else output_selection
+    )
+    return _native._matmul_into(a, b, output, options, selection)
 
 
 def reference_gemm(

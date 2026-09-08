@@ -8,9 +8,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iomanip>
 #include <limits>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -921,6 +923,40 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
             });
     }
     return accumulator.finish();
+}
+
+std::string formatComparisonReport(const ComparisonReport& report) {
+    std::ostringstream output;
+    output << std::setprecision(std::numeric_limits<double>::max_digits10) << "comparison "
+           << (report.passed() ? "passed" : "failed") << ": " << report.mismatches << " of "
+           << report.compared << " compared elements mismatched";
+    for (const Mismatch& mismatch : report.reportedMismatches) {
+        output << "\n  index " << mismatch.index << " [";
+        for (size_t dimension = 0; dimension < mismatch.coordinates.size(); ++dimension) {
+            if (dimension != 0) output << ", ";
+            output << mismatch.coordinates[dimension];
+        }
+        output << "]: observed ";
+        const bool complex = mismatch.observedImaginary != 0.0 ||
+                             mismatch.expectedImaginary != 0.0 ||
+                             !std::isfinite(mismatch.observedImaginary) ||
+                             !std::isfinite(mismatch.expectedImaginary);
+        if (complex)
+            output << '(' << mismatch.observed << ", " << mismatch.observedImaginary << ')';
+        else
+            output << mismatch.observed;
+        output << ", expected ";
+        if (complex)
+            output << '(' << mismatch.expected << ", " << mismatch.expectedImaginary << ')';
+        else
+            output << mismatch.expected;
+        output << ", absolute difference " << mismatch.absoluteDifference << ", tolerance "
+               << mismatch.tolerance;
+    }
+    if (report.mismatches > report.reportedMismatches.size())
+        output << "\n  " << report.mismatches - report.reportedMismatches.size()
+               << " additional mismatches not shown";
+    return output.str();
 }
 
 std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,

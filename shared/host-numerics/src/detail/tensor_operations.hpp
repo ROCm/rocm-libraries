@@ -6,6 +6,7 @@
 #include <complex>
 #include <cstddef>
 #include <roc/host_numerics/tensor_operations.hpp>
+#include <span>
 #include <stdexcept>
 #include <utility>
 
@@ -18,20 +19,33 @@ enum class BinaryOperation {
 };
 
 struct BinaryInvocation {
-    Tensor left;
-    Tensor right;
+    const Tensor& left;
+    const Tensor& right;
     Tensor output;
     ScalarType computeType;
     OutputSelection selection;
 };
 
 struct ActivationInvocation {
-    Tensor input;
+    const Tensor& input;
     Tensor output;
     ActivationFunction function;
     ScalarType computeType;
     OutputSelection selection;
 };
+
+template <typename Function>
+void forEachSelectedCoordinate(const Shape& shape, const OutputSelection& selection,
+                               Function&& function) {
+    if (selection.selectsAll()) {
+        forEachIndex(shape,
+                     [&](std::span<const size_t> coordinates, size_t) { function(coordinates); });
+        return;
+    }
+
+    for (const size_t logicalIndex : selection.indices(shape.elementCount()))
+        function(shape.coordinates(logicalIndex, selection.indexOrder()));
+}
 
 inline Shape binaryOutputShape(const Tensor& left, const Tensor& right) {
     return broadcastShapes(left.shape(), right.shape());
@@ -66,17 +80,15 @@ void binaryTyped(const BinaryInvocation& invocation, BinaryOperation operation) 
     const RuntimeQuantizer<Accumulator> quantize(
         QuantizeResult ? std::optional<ScalarType>(invocation.computeType) : std::nullopt);
 
-    for (const size_t logicalIndex :
-         invocation.selection.indices(invocation.output.shape().elementCount())) {
-        const auto coordinates =
-            invocation.output.shape().coordinates(logicalIndex, invocation.selection.indexOrder());
-        const Accumulator leftValue = leftReader(coordinates);
-        const Accumulator rightValue = rightReader(coordinates);
-        const Accumulator value = operation == BinaryOperation::Add
-                                      ? wrappingAdd(leftValue, rightValue)
-                                      : wrappingMultiply(leftValue, rightValue);
-        output.store(coordinates, quantize(value));
-    }
+    forEachSelectedCoordinate(
+        invocation.output.shape(), invocation.selection, [&](std::span<const size_t> coordinates) {
+            const Accumulator leftValue = leftReader(coordinates);
+            const Accumulator rightValue = rightReader(coordinates);
+            const Accumulator value = operation == BinaryOperation::Add
+                                          ? wrappingAdd(leftValue, rightValue)
+                                          : wrappingMultiply(leftValue, rightValue);
+            output.store(coordinates, quantize(value));
+        });
 }
 
 inline void runBinary(const BinaryInvocation& invocation, BinaryOperation operation) {
@@ -151,14 +163,12 @@ void activationTyped(const ActivationInvocation& invocation) {
     const RuntimeActivation<Accumulator> function =
         runtimeActivation<Accumulator>(invocation.function);
 
-    for (const size_t logicalIndex :
-         invocation.selection.indices(invocation.output.shape().elementCount())) {
-        const auto coordinates =
-            invocation.output.shape().coordinates(logicalIndex, invocation.selection.indexOrder());
-        output.store(coordinates,
-                     quantize(applyActivation(function.kind, input(coordinates),
-                                              function.parameter0, function.parameter1)));
-    }
+    forEachSelectedCoordinate(
+        invocation.output.shape(), invocation.selection, [&](std::span<const size_t> coordinates) {
+            output.store(coordinates,
+                         quantize(applyActivation(function.kind, input(coordinates),
+                                                  function.parameter0, function.parameter1)));
+        });
 }
 
 inline void runActivation(const ActivationInvocation& invocation) {

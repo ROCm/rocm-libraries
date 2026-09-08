@@ -85,19 +85,16 @@ namespace hipblaslt::host_numerics
         if(alpha.item<std::complex<double>>() != std::complex<double>(0.0, 0.0)
            && inputs.a.shape()[1] != 0)
         {
-            Tensor product = matmulWithBlasBackend(
-                std::move(inputs.a), std::move(inputs.b), accumulatorType, options);
-            result = multiply(
-                std::move(product), alpha, accumulatorType, accumulatorType);
+            const Tensor product
+                = matmulWithBlasBackend(inputs.a, inputs.b, accumulatorType, options);
+            result = multiply(product, alpha, accumulatorType, accumulatorType);
         }
         if(beta.item<std::complex<double>>() != std::complex<double>(0.0, 0.0))
         {
             const Tensor cScale = multiply(beta, scaleC, accumulatorType, accumulatorType);
-            Tensor       addend = multiply(
-                std::move(inputs.c), cScale, accumulatorType, accumulatorType);
-            result = result ? add(std::move(*result), std::move(addend), accumulatorType,
-                                  accumulatorType)
-                            : std::move(addend);
+            Tensor       addend = multiply(inputs.c, cScale, accumulatorType, accumulatorType);
+            result              = result ? add(*result, addend, accumulatorType, accumulatorType)
+                                         : std::move(addend);
         }
         if(!result)
             result.emplace(accumulatorType, outputShape);
@@ -106,7 +103,6 @@ namespace hipblaslt::host_numerics
         epilogue.outputScale = outputScale;
         if(inputs.d.type() == ScalarType::Int8)
             epilogue.outputConversion = OutputConversion::SaturatingInt8;
-        referenceEpilogueInto(
-            std::move(*result), {.output = std::move(inputs.d)}, epilogue);
+        referenceEpilogueInto(*result, {.output = std::move(inputs.d)}, epilogue);
     }
 } // namespace hipblaslt::host_numerics

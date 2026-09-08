@@ -10,6 +10,7 @@
 #include <roc/host_numerics/operation_types.hpp>
 #include <roc/host_numerics/tensor.hpp>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace roc::host_numerics {
@@ -244,6 +245,10 @@ double encodedUlpDistance(double exact, double approximation, ScalarType type);
 
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options = {});
+
+/// Formats aggregate comparison evidence and any recorded mismatch samples.
+/// Callers may prepend product-specific context to the returned text.
+std::string formatComparisonReport(const ComparisonReport& report);
 
 /// Returns the first candidate pair, in absolute-major then relative-minor input order, for which
 /// all enabled criteria pass. The search sets the asymmetric absolute and relative tolerances and
