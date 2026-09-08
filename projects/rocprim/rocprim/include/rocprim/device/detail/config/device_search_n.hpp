@@ -40,13 +40,16 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
+// TARGET: {'gen': 'rdna2', 'arch': 'gfx1030', 'gpu': 'rx6900', 'rep': 'amdgcn'}
 template<class Target, class data_type>
-constexpr auto search_n_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
-    search_n_config_params>
+constexpr auto search_n_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
+        search_n_config_params>
 {
-    // Based on data_type = double
+    // CONFIG: {'data_type': 'double', 'ipt': 512, 'block_size_x': 4, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -55,7 +58,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = float
+    // CONFIG: {'data_type': 'float', 'ipt': 256, 'block_size_x': 4, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -64,7 +67,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = rocprim::half
+    // CONFIG: {'data_type': 'rocprim::half', 'ipt': 1024, 'block_size_x': 8, 'threshold': 16}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
     {
         return search_n_config_params{
@@ -72,7 +75,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             16
         };
     }
-    // Based on data_type = rocprim::int128_t
+    // CONFIG: {'data_type': 'rocprim::int128_t', 'ipt': 1024, 'block_size_x': 1, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8)))
     {
@@ -81,7 +84,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = int64_t
+    // CONFIG: {'data_type': 'int64_t', 'ipt': 512, 'block_size_x': 4, 'threshold': 16}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -90,7 +93,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             16
         };
     }
-    // Based on data_type = int
+    // CONFIG: {'data_type': 'int', 'ipt': 256, 'block_size_x': 4, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -99,7 +102,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = short
+    // CONFIG: {'data_type': 'short', 'ipt': 1024, 'block_size_x': 8, 'threshold': 16}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1)))
     {
@@ -108,7 +111,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             16
         };
     }
-    // Based on data_type = int8_t
+    // CONFIG: {'data_type': 'int8_t', 'ipt': 1024, 'block_size_x': 16, 'threshold': 16}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
     {
         return search_n_config_params{
@@ -120,13 +123,16 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
     return search_n_config_params_base<data_type>();
 }
 
+// TARGET: {'gen': 'rdna3', 'arch': 'gfx1100', 'gpu': 'rx7900', 'rep': 'amdgcn'}
 template<class Target, class data_type>
-constexpr auto search_n_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
-    search_n_config_params>
+constexpr auto search_n_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
+        search_n_config_params>
 {
-    // Based on data_type = double
+    // CONFIG: {'data_type': 'double', 'ipt': 256, 'block_size_x': 4, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -135,7 +141,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = float
+    // CONFIG: {'data_type': 'float', 'ipt': 256, 'block_size_x': 4, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -144,7 +150,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = rocprim::half
+    // CONFIG: {'data_type': 'rocprim::half', 'ipt': 1024, 'block_size_x': 16, 'threshold': 16}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
     {
         return search_n_config_params{
@@ -152,7 +158,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             16
         };
     }
-    // Based on data_type = rocprim::int128_t
+    // CONFIG: {'data_type': 'rocprim::int128_t', 'ipt': 256, 'block_size_x': 1, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8)))
     {
@@ -161,7 +167,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = int64_t
+    // CONFIG: {'data_type': 'int64_t', 'ipt': 256, 'block_size_x': 4, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -170,7 +176,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = int
+    // CONFIG: {'data_type': 'int', 'ipt': 512, 'block_size_x': 4, 'threshold': 12}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -179,7 +185,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             12
         };
     }
-    // Based on data_type = short
+    // CONFIG: {'data_type': 'short', 'ipt': 1024, 'block_size_x': 16, 'threshold': 16}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1)))
     {
@@ -188,7 +194,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             16
         };
     }
-    // Based on data_type = int8_t
+    // CONFIG: {'data_type': 'int8_t', 'ipt': 1024, 'block_size_x': 16, 'threshold': 16}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
     {
         return search_n_config_params{
@@ -200,13 +206,15 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
     return search_n_config_params_base<data_type>();
 }
 
+// TARGET: {'gen': 'gcn5', 'arch': 'gfx906', 'gpu': 'mi50', 'rep': 'amdgcn'}
 template<class Target, class data_type>
-constexpr auto search_n_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
-    search_n_config_params>
+constexpr auto search_n_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
+        search_n_config_params>
 {
-    // Based on data_type = double
+    // CONFIG: {'data_type': 'double', 'ipt': 128, 'block_size_x': 2, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -215,7 +223,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = float
+    // CONFIG: {'data_type': 'float', 'ipt': 256, 'block_size_x': 2, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -224,7 +232,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = rocprim::half
+    // CONFIG: {'data_type': 'rocprim::half', 'ipt': 256, 'block_size_x': 4, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
     {
         return search_n_config_params{
@@ -232,7 +240,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = rocprim::int128_t
+    // CONFIG: {'data_type': 'rocprim::int128_t', 'ipt': 256, 'block_size_x': 1, 'threshold': 4}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8)))
     {
@@ -241,7 +249,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             4
         };
     }
-    // Based on data_type = int64_t
+    // CONFIG: {'data_type': 'int64_t', 'ipt': 128, 'block_size_x': 2, 'threshold': 4}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -250,7 +258,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             4
         };
     }
-    // Based on data_type = int
+    // CONFIG: {'data_type': 'int', 'ipt': 256, 'block_size_x': 2, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -259,7 +267,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = short
+    // CONFIG: {'data_type': 'short', 'ipt': 256, 'block_size_x': 4, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1)))
     {
@@ -268,7 +276,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = int8_t
+    // CONFIG: {'data_type': 'int8_t', 'ipt': 256, 'block_size_x': 4, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
     {
         return search_n_config_params{
@@ -280,13 +288,15 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
     return search_n_config_params_base<data_type>();
 }
 
+// TARGET: {'gen': 'cdna1', 'arch': 'gfx908', 'gpu': 'mi100', 'rep': 'amdgcn'}
 template<class Target, class data_type>
-constexpr auto search_n_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
-    search_n_config_params>
+constexpr auto search_n_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
+        search_n_config_params>
 {
-    // Based on data_type = double
+    // CONFIG: {'data_type': 'double', 'ipt': 1024, 'block_size_x': 2, 'threshold': 4}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -295,7 +305,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             4
         };
     }
-    // Based on data_type = float
+    // CONFIG: {'data_type': 'float', 'ipt': 256, 'block_size_x': 2, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -304,7 +314,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = rocprim::half
+    // CONFIG: {'data_type': 'rocprim::half', 'ipt': 256, 'block_size_x': 4, 'threshold': 12}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
     {
         return search_n_config_params{
@@ -312,7 +322,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             12
         };
     }
-    // Based on data_type = rocprim::int128_t
+    // CONFIG: {'data_type': 'rocprim::int128_t', 'ipt': 512, 'block_size_x': 1, 'threshold': 12}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8)))
     {
@@ -321,7 +331,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             12
         };
     }
-    // Based on data_type = int64_t
+    // CONFIG: {'data_type': 'int64_t', 'ipt': 1024, 'block_size_x': 2, 'threshold': 12}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -330,7 +340,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             12
         };
     }
-    // Based on data_type = int
+    // CONFIG: {'data_type': 'int', 'ipt': 256, 'block_size_x': 2, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -339,7 +349,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = short
+    // CONFIG: {'data_type': 'short', 'ipt': 1024, 'block_size_x': 4, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1)))
     {
@@ -348,7 +358,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = int8_t
+    // CONFIG: {'data_type': 'int8_t', 'ipt': 512, 'block_size_x': 4, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
     {
         return search_n_config_params{
@@ -360,13 +370,15 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
     return search_n_config_params_base<data_type>();
 }
 
+// TARGET: {'gen': 'cdna2', 'arch': 'gfx90a', 'gpu': 'mi210', 'rep': 'amdgcn'}
 template<class Target, class data_type>
-constexpr auto search_n_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
-    search_n_config_params>
+constexpr auto search_n_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
+        search_n_config_params>
 {
-    // Based on data_type = double
+    // CONFIG: {'data_type': 'double', 'ipt': 128, 'block_size_x': 2, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -375,7 +387,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = float
+    // CONFIG: {'data_type': 'float', 'ipt': 256, 'block_size_x': 2, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -384,7 +396,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = rocprim::half
+    // CONFIG: {'data_type': 'rocprim::half', 'ipt': 128, 'block_size_x': 4, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
     {
         return search_n_config_params{
@@ -392,7 +404,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = rocprim::int128_t
+    // CONFIG: {'data_type': 'rocprim::int128_t', 'ipt': 128, 'block_size_x': 1, 'threshold': 4}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8)))
     {
@@ -401,7 +413,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             4
         };
     }
-    // Based on data_type = int64_t
+    // CONFIG: {'data_type': 'int64_t', 'ipt': 128, 'block_size_x': 2, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -410,7 +422,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = int
+    // CONFIG: {'data_type': 'int', 'ipt': 256, 'block_size_x': 2, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -419,7 +431,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = short
+    // CONFIG: {'data_type': 'short', 'ipt': 128, 'block_size_x': 4, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1)))
     {
@@ -428,7 +440,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = int8_t
+    // CONFIG: {'data_type': 'int8_t', 'ipt': 128, 'block_size_x': 4, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
     {
         return search_n_config_params{
@@ -440,13 +452,16 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
     return search_n_config_params_base<data_type>();
 }
 
+// TARGET: {'gen': 'rdna4', 'arch': 'gfx1201', 'gpu': 'rx9070', 'rep': 'amdgcn'}
 template<class Target, class data_type>
-constexpr auto search_n_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>::value,
-    search_n_config_params>
+constexpr auto search_n_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>::value,
+        search_n_config_params>
 {
-    // Based on data_type = double
+    // CONFIG: {'data_type': 'double', 'ipt': 64, 'block_size_x': 2, 'threshold': 4}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -455,7 +470,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             4
         };
     }
-    // Based on data_type = float
+    // CONFIG: {'data_type': 'float', 'ipt': 128, 'block_size_x': 4, 'threshold': 12}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -464,7 +479,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             12
         };
     }
-    // Based on data_type = rocprim::half
+    // CONFIG: {'data_type': 'rocprim::half', 'ipt': 128, 'block_size_x': 8, 'threshold': 12}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
     {
         return search_n_config_params{
@@ -472,7 +487,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             12
         };
     }
-    // Based on data_type = rocprim::int128_t
+    // CONFIG: {'data_type': 'rocprim::int128_t', 'ipt': 64, 'block_size_x': 1, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8)))
     {
@@ -481,7 +496,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = int64_t
+    // CONFIG: {'data_type': 'int64_t', 'ipt': 64, 'block_size_x': 2, 'threshold': 12}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -490,7 +505,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             12
         };
     }
-    // Based on data_type = int
+    // CONFIG: {'data_type': 'int', 'ipt': 64, 'block_size_x': 4, 'threshold': 4}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -499,7 +514,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             4
         };
     }
-    // Based on data_type = short
+    // CONFIG: {'data_type': 'short', 'ipt': 64, 'block_size_x': 8, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1)))
     {
@@ -508,7 +523,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = int8_t
+    // CONFIG: {'data_type': 'int8_t', 'ipt': 64, 'block_size_x': 16, 'threshold': 4}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
     {
         return search_n_config_params{
@@ -520,13 +535,15 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
     return search_n_config_params_base<data_type>();
 }
 
+// TARGET: {'gen': 'cdna3', 'arch': 'gfx942', 'gpu': 'mi300x', 'rep': 'amdgcn'}
 template<class Target, class data_type>
-constexpr auto search_n_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
-    search_n_config_params>
+constexpr auto search_n_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
+        search_n_config_params>
 {
-    // Based on data_type = double
+    // CONFIG: {'data_type': 'double', 'ipt': 256, 'block_size_x': 2, 'threshold': 8}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -535,7 +552,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = float
+    // CONFIG: {'data_type': 'float', 'ipt': 128, 'block_size_x': 4, 'threshold': 12}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -544,7 +561,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             12
         };
     }
-    // Based on data_type = rocprim::half
+    // CONFIG: {'data_type': 'rocprim::half', 'ipt': 256, 'block_size_x': 4, 'threshold': 16}
     if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
     {
         return search_n_config_params{
@@ -552,7 +569,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             16
         };
     }
-    // Based on data_type = rocprim::int128_t
+    // CONFIG: {'data_type': 'rocprim::int128_t', 'ipt': 128, 'block_size_x': 2, 'threshold': 12}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8)))
     {
@@ -561,7 +578,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             12
         };
     }
-    // Based on data_type = int64_t
+    // CONFIG: {'data_type': 'int64_t', 'ipt': 256, 'block_size_x': 2, 'threshold': 12}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4)))
     {
@@ -570,7 +587,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             12
         };
     }
-    // Based on data_type = int
+    // CONFIG: {'data_type': 'int', 'ipt': 128, 'block_size_x': 4, 'threshold': 16}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2)))
     {
@@ -579,7 +596,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             16
         };
     }
-    // Based on data_type = short
+    // CONFIG: {'data_type': 'short', 'ipt': 256, 'block_size_x': 4, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1)))
     {
@@ -588,7 +605,7 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
             8
         };
     }
-    // Based on data_type = int8_t
+    // CONFIG: {'data_type': 'int8_t', 'ipt': 1024, 'block_size_x': 8, 'threshold': 8}
     if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
     {
         return search_n_config_params{
@@ -600,11 +617,14 @@ constexpr auto search_n_config_picker() -> std::enable_if_t<
     return search_n_config_params_base<data_type>();
 }
 
+// TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, class data_type>
-constexpr auto search_n_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
-    search_n_config_params>
+constexpr auto search_n_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
+        search_n_config_params>
 {
     return search_n_config_picker<
         comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
