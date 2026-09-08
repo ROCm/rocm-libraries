@@ -165,12 +165,16 @@ class FmhaFwdApiTrait:
     dvpad: str
     skip: str
     sink: str
+    # Metadata-only hint (occupancy of the pagedkv kernel), see
+    # fmha_fwd_traits_::kOccupancy for rationale.
+    occupancy: int = -1
 
     @property
     def name(self) -> str:
         return (
             f"{self.hdim}-{self.dtype}-{self.mode}-{self.bm0}-{self.bn0}-{self.bk0}-{self.bn0}-{self.bk1}-{self.bk0max}-"
             + f"{self.vlayout}-{self.logits}-{self.mask}-{self.bias}-{self.lse}-{self.pagedkv}-{self.squant}-{self.spad}-{self.skpad}-{self.dpad}-{self.dvpad}-{self.skip}-{self.sink}"
+            + ("" if self.occupancy == -1 else f"-o{self.occupancy}")
         )
 
     @property
