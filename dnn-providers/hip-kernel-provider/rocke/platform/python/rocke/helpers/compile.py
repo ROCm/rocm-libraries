@@ -30,10 +30,25 @@ Use `compile_kernel(...)` from a kernel-author script when:
     of re-importing the comgr ctypes wrapper: the helper memoises the
     comgr load.
 
-Typical use:
+Existing callers choose targets before calling this module:
+
+  - ``examples/common/bake_off_direct_conv_4c.py`` forwards ``--isa`` as
+    ``isa=`` when present; otherwise it forwards ``--arch`` (default ``gfx950``).
+  - ``benchmark/gemm/fp16_rcr_sweep.py`` starts with ``--arch`` or
+    ``GemmSweepConfig.arch``, carries it through dispatch records, then passes
+    it as ``arch=`` in ``compile_variant``.
+  - ``instances/common/moe_sorting.py`` resolves ``MoeSortingLauncher.arch``
+    before compilation: an explicit value wins; otherwise ``get_device_arch()``
+    queries HIP, with ``gfx950`` as the fallback if discovery fails.
+
+With ``arch=``, ``compile_kernel`` builds the COMGR ISA name from
+``ArchTarget.isa_triple`` and the derived compiler target. With neither argument,
+it uses its own ``isa="amdgcn-amd-amdhsa--gfx950"`` default without querying HIP.
+
+Example with a fixed target:
 
     from rocke.helpers import compile_kernel
-    artifact = compile_kernel(kernel, isa="amdgcn-amd-amdhsa--gfx950")
+    artifact = compile_kernel(kernel, arch="gfx950")
     print(f"codegen total {artifact.timings['total']:.2f} ms")
     Path("out.hsaco").write_bytes(artifact.hsaco)
 """
@@ -104,7 +119,9 @@ def compile_kernel(
     Pass a target ID through `arch`, such as ``"gfx942"`` or ``"gfx1250-strict"``.
     Alternatively, pass a COMGR ISA name through `isa`, such as
     ``"amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"``. `arch` takes precedence;
-    if neither is supplied, the target is ``gfx950``. No GPU query is made.
+    if neither is supplied, the target is ``gfx950``. This function does not
+    query a GPU; callers may resolve `arch` from HIP before calling it. See the
+    module docstring for examples of CLI, configuration, and launcher inputs.
 
     The target helpers remove profile suffixes such as ``-strict`` from the
     compiler target and retain features such as ``:sramecc+:xnack-``. The base

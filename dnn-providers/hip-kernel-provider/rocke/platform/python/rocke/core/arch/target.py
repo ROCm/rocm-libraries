@@ -1097,10 +1097,14 @@ def known_arches() -> Tuple[str, ...]:
 
 
 def target_id_from_isa(isa: str) -> str:
-    """Extract the target ID from a caller-supplied COMGR ISA name.
+    """Extract the target ID from a COMGR ISA name.
 
-    ``compile_kernel(..., isa=...)`` accepts names such as
-    ``amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-``. This returns
+    ``compile_kernel(..., isa=...)`` passes its ``isa`` argument here. That
+    value may come from an example's ``--isa`` option, a fixed string in a
+    script, or the compile helper's ``gfx950`` default. See the input paths
+    documented in :mod:`rocke.helpers.compile`.
+
+    For ``amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-``, this returns
     ``gfx942:sramecc+:xnack-``, keeping any profile or feature suffix.
     It also accepts a target ID without the ISA prefix.
 
