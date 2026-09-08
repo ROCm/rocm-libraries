@@ -15,8 +15,8 @@
 // pin that relationship between dynamicPartialsSlots, tiles%grid divisibility,
 // and whether a partials workspace is reserved.
 
-#include <gtest/gtest.h>
 #include <cstdlib>
+#include <gtest/gtest.h>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -80,7 +80,7 @@ namespace
         solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
         solution.sizeMapping.depthU                = 64;
         solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
-        solution.sizeMapping.workGroupSize     = TensileLite::dim3(256, 1, 1);
+        solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
         solution.sizeMapping.CUOccupancy           = 1;
         solution.sizeMapping.workspaceSizePerElemC = 4;
     }
@@ -424,7 +424,7 @@ TEST(StreamKLaunchSummaryTest, DpOnlySourceDistinguishesParamVsRuntime)
     ContractionSolution paramSol;
     initStreamKSolution(paramSol, 4);
     paramSol.sizeMapping.streamKForceDPOnly = 1;
-    auto paramProblem = makeGemmProblem(4096, 4224, 64);
+    auto paramProblem                       = makeGemmProblem(4096, 4224, 64);
     paramProblem.setWorkspaceSize(std::numeric_limits<size_t>::max());
     auto pd = paramSol.computeStreamKDecisions(paramProblem, env.device);
 
@@ -537,7 +537,7 @@ TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveButDivisible_NoWorkspace)
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
     device.skTiles       = 256; // override: number of split stream-k tiles
-    device.skSplit       = 4;   // override: k-split factor per tile
+    device.skSplit       = 4; // override: k-split factor per tile
 
     auto d = solution.computeStreamKDecisions(problem, device);
 

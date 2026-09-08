@@ -1053,8 +1053,7 @@ namespace
     size_t clampedGrid(StreamK5AnalyticalEnv& env, ContractionProblemGemm& problem)
     {
         auto tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
-        EXPECT_NE(tiles % StreamKFlagElements, 0u)
-            << "grid must leave partial tiles to fix up";
+        EXPECT_NE(tiles % StreamKFlagElements, 0u) << "grid must leave partial tiles to fix up";
         return env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree);
     }
 } // namespace
@@ -1125,8 +1124,8 @@ TEST(SKLaunchGridLimitsTest, CapsGridWhenTilesReach2Pow24)
 {
     ContractionSolution solution;
     initBenchStreamK5Solution(solution, TensileLite::dim3(32, 96, 1), 32);
-    const size_t tpg = threadsPerWorkGroup(solution);
-    const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1)/ tpg;
+    const size_t tpg               = threadsPerWorkGroup(solution);
+    const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1) / tpg;
 
     auto   problem       = makeGemmProblem(524288, 98304, 128);
     AMDGPU device        = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
@@ -1150,10 +1149,10 @@ TEST(SKLaunchGridLimitsTest, CapsGridWithAnalyticalOrigamiPath)
 
     ContractionSolution solution;
     initBenchStreamK5Solution(solution, TensileLite::dim3(32, 96, 1), 32);
-    const size_t tpg = threadsPerWorkGroup(solution);
+    const size_t tpg               = threadsPerWorkGroup(solution);
     const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1) / tpg;
-    auto problem = makeGemmProblem(524288, 98304, 128);
-    auto tiles   = problem.getNumTiles(solution.sizeMapping, 1);
+    auto         problem           = makeGemmProblem(524288, 98304, 128);
+    auto         tiles             = problem.getNumTiles(solution.sizeMapping, 1);
     ASSERT_EQ(tiles, maxTilesBeforeCap);
 
     size_t grid = solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree);
@@ -1167,7 +1166,7 @@ TEST(SKLaunchGridLimitsTest, StillUsesDpFallbackBelowTileThreshold)
     ContractionSolution solution;
     solution.sizeMapping.workGroupSize = TensileLite::dim3(128, 1, 1);
     initBenchStreamK5Solution(solution, TensileLite::dim3(16, 16, 1), 128);
-    const size_t tpg = threadsPerWorkGroup(solution);
+    const size_t tpg               = threadsPerWorkGroup(solution);
     const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1) / tpg;
 
     auto   problem       = makeGemmProblem(65536, 65552, 128);
