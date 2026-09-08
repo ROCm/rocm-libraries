@@ -4,28 +4,29 @@
 # TensileLite
 
 TensileLite is hipBLASLt's Python generator, logic validator, and tuning
-workflow. Released Python wheels are part of a matched ROCm SDK. The intended
-final runtime contract has two installation models:
+workflow. Released Python wheels validate against the selected ROCm
+installation. The runtime selects the first applicable installation model:
 
-- **Python SDK packages:** the active `rocm-sdk-core.__version__` is the full
-  ROCm publication identity. Core tool trampolines from that Python
-  environment run the compiler and toolchain commands. The final client model
-  uses a `rocm-sdk-libraries` trampoline for its library-owned native payload.
-  Until that payload ships, a client request reports that it is unavailable.
+- **TheRock CI:** the command-scoped `THEROCK_PACKAGE_VERSION` is the full
+  ROCm publication identity, and the graph-prepared `PATH` supplies compiler
+  and toolchain commands.
+- **Python SDK packages:** the active `rocm_sdk_core.__version__` is the full
+  ROCm publication identity. Interpreter script directories supply compiler
+  and toolchain commands.
 - **Conventional prefix:** an explicitly selected prefix from `ROCM_PATH`,
   `/opt/rocm`, or a ROCm tool discovered on `PATH` supplies root-relative
-  tools and the native client. Its `.info/version` is authoritative only for
-  the base `A.B.C` compatibility line, so it cannot distinguish nightly, RC,
-  or CI publications on that line.
+  tools. Its `.info/version` is authoritative only for the base `A.B.C`
+  compatibility line, so it cannot distinguish nightly, RC, or CI
+  publications on that line.
 
-The two models do not borrow paths from each other. `rocisa` is a
-separately prepared Python dependency; TensileLite requires it to be importable
-but does not prescribe its ABI or native-artifact layout.
+The models do not borrow paths from each other. `rocisa` is a separately
+prepared Python dependency; TensileLite requires it to be importable but does
+not prescribe its ABI or native-artifact layout.
 
-At present, the Python-SDK path and strict wheel/ROCm version comparison are
-implemented but deliberately gated off until TheRock forwards the required
-package identity and SDK payload. Production uses conventional-prefix discovery
-and bypasses the version comparison during that transition.
+Import validates the wheel's ROCm tag against the selected installation: full
+publication identity for TheRock CI and Python SDK packages, and the base
+compatibility version for a conventional prefix. Python SDK support is active
+whenever `rocm_sdk_core` is installed; it is not gated by a separate switch.
 
 ## Supported interface
 
@@ -70,17 +71,14 @@ python -m pip install --index-url <rocm-wheel-index> \
 python -m pip install --index-url <rocm-wheel-index> tensilelite
 ```
 
-When the strict validation gate is enabled, import fails when the wheel and ROCm
-release differ or when rocisa cannot be imported. The client is resolved and
-validated only when a
-benchmark/validation workflow requests its path. A configured client binding
-always wins for a conventional-prefix installation. The Python SDK model
-currently reports that the client is unavailable because `rocm-sdk-libraries`
-does not yet ship it; its final state uses that package's exact
-`tensilelite-client` console script from the active Python environment. The
-conventional-prefix model uses
-`$ROCM_PATH/libexec/hipblaslt/tensilelite/tensilelite-client` (with `.exe` on
-Windows). Neither model performs a broad client search on `PATH`.
+Import fails when the wheel and selected ROCm release differ. The client is
+resolved and validated only when a benchmark or validation workflow requests
+its path. A configured client binding always wins; otherwise the lookup is
+limited to the selected installation's executable paths: the graph-prepared
+`PATH` for TheRock CI, interpreter script directories for Python SDK packages,
+and `<prefix>/bin` plus `<prefix>/lib/llvm/bin` for a conventional prefix. If
+no compatible `tensilelite-client` is available there, the requesting workflow
+reports an error rather than searching broadly on `PATH`.
 
 Optional runtime capabilities remain available as extras:
 
