@@ -163,6 +163,31 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->split_k = 4;
         *arch = "gfx950";
         return 0;
+    case 15:
+        /* gfx1250 wave32 WMMA 16x16x32 K-outer. The transpose read lowers to
+         * ds_load_tr16_b128 (8 per lane), so a 16-element fragment is two
+         * reads. dtype_d=fp32 because WMMA wgrad supports only the 'default'
+         * epilogue, which rejects 16-bit dW. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = "fp32";
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        spec->lds_k_outer = true;
+        *arch = "gfx1250";
+        return 0;
     default:
         return -1;
     }

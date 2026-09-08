@@ -1,12 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Grouped convolution dispatcher (forward, backward-weight).
+"""Grouped convolution dispatcher (forward, backward-weight, backward-data).
 
-Covers ``implicit_gemm_conv`` (forward NHWC × KYXC → NHWK) and
-``implicit_gemm_conv_wgrad`` (dY × X → dW weight gradient), sharing a single
-``ConvGroupedRequest`` so callers can dispatch both directions from the same
-shape description.
+Covers ``implicit_gemm_conv`` (forward NHWC × KYXC → NHWK),
+``implicit_gemm_conv_wgrad`` (dY × X → dW weight gradient) and
+``implicit_gemm_conv_dgrad`` (dY × W → dX input gradient), sharing a single
+``ConvGroupedRequest`` so callers can dispatch all three directions from the
+same shape description.
+
+Coverage is not uniform across the three. Forward and wgrad each have gfx942,
+gfx950 and gfx1250 candidates; dgrad has gfx950 only, and pins split_k=1.
 
 SCOPE -- what this dispatcher decides
 -------------------------------------
@@ -151,6 +155,10 @@ from rocke.instances.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     is_valid_wgrad_spec as _wgrad_is_valid_spec,
 )
+from rocke.instances.common.conv_implicit_gemm_dgrad import (
+    DgradConvSpec,
+    is_valid_dgrad_spec as _dgrad_is_valid_spec,
+)
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
@@ -168,6 +176,7 @@ from rocke.dispatch.core import (
 
 _FAMILY_FWD = "conv_implicit_gemm"
 _FAMILY_WGRAD = "conv_implicit_gemm_wgrad"
+_FAMILY_DGRAD = "conv_implicit_gemm_dgrad"
 
 CONV_GROUPED_ABI_VERSION = "hipkg-conv-grouped/v1"
 
@@ -321,8 +330,10 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     errors: list[str] = []
     if req.op != "conv_grouped":
         errors.append(f"unsupported op {req.op!r}")
-    if req.direction not in ("fwd", "wgrad"):
-        errors.append(f"direction must be 'fwd' or 'wgrad', got {req.direction!r}")
+    if req.direction not in ("fwd", "wgrad", "dgrad"):
+        errors.append(
+            f"direction must be 'fwd', 'wgrad' or 'dgrad', got {req.direction!r}"
+        )
     for field_name in ("N", "C", "K", "Hi", "Wi", "Y", "X"):
         if int(getattr(req, field_name)) <= 0:
             errors.append(f"{field_name} must be positive")
@@ -380,12 +391,24 @@ def _vec_size_c(req: ConvGroupedRequest) -> int:
 
     Forward pass (D=NHWK, last dim K):  uses ImplicitGemmConvSpec, returns _vec(K).
     Wgrad       (D=KYXC, last dim C):   uses WgradConvSpec,          returns _vec(C).
+    Dgrad       (D=NHWC, last dim C):   uses DgradConvSpec,          returns _vec(C).
+
+    Each direction has its own ``default_vector_sizes``; they are not
+    interchangeable. Dgrad's takes the *per-group* runs ``(cpg, kpg)`` rather
+    than ``(C, K)``, so falling through to the forward formula here would size
+    the store vector off the wrong extent on a grouped problem.
     """
     if req.vec_size_c is not None:
         return req.vec_size_c
     if req.direction == "wgrad":
         _va, _vb, vc = WgradConvSpec.default_vector_sizes(
             req.C, req.K, req.dtype.lower(), split_k=1
+        )
+        return vc
+    if req.direction == "dgrad":
+        p = _problem(req)
+        _va, _vb, vc = DgradConvSpec.default_vector_sizes(
+            p.cpg, p.kpg, req.dtype.lower()
         )
         return vc
     _va, _vb, vc = ImplicitGemmConvSpec.default_vector_sizes(
@@ -442,7 +465,7 @@ def _is_gfx1250(req: ConvGroupedRequest) -> bool:
 class ConvGroupedSpec:
     """Selected spec for a grouped conv candidate (fwd or wgrad)."""
 
-    direction: str  # "fwd" | "wgrad"
+    direction: str  # "fwd" | "wgrad" | "dgrad"
     tile_m: int
     tile_n: int
     tile_k: int
@@ -470,7 +493,7 @@ class ConvGroupedSpec:
             self.pipeline,
             self.epilogue,
         ]
-        if self.direction == "wgrad" and self.split_k != 1:
+        if self.direction in ("wgrad", "dgrad") and self.split_k != 1:
             parts.append(f"spk{self.split_k}")
         return kernel_name_join(self.name, *parts)
 
@@ -553,6 +576,39 @@ class ConvGroupedSpec:
             split_k=resolved_split_k,
         )
 
+    def to_dgrad_spec(self, problem: "ConvProblem") -> "DgradConvSpec":
+        """Build a DgradConvSpec from this dispatcher spec and a ConvProblem.
+
+        No split-K auto-resolution counterpart to :meth:`to_wgrad_spec`: dgrad's
+        reduction is ``Y*X*K``, which is not the lopsided axis wgrad's ``N*Ho*Wo``
+        is, so the CK formula that rescues wgrad's grid does not apply and the
+        candidate pins a concrete degree instead.
+        """
+        assert self.direction == "dgrad", "to_dgrad_spec is only valid for dgrad specs"
+        target = ArchTarget.from_gfx(self.arch)
+        return DgradConvSpec(
+            problem=problem,
+            name=self.name,
+            lds_k_outer=self.lds_k_outer,
+            data=ConvDataSpec(
+                dtype_a=self.dtype,
+                dtype_b=self.dtype,
+                dtype_d=self.dtype,
+            ),
+            tile_m=self.tile_m,
+            tile_n=self.tile_n,
+            tile_k=self.tile_k,
+            warp_m=self.warp_m,
+            warp_n=self.warp_n,
+            warp_tile_m=self.warp_tile_mn,
+            warp_tile_n=self.warp_tile_mn,
+            warp_tile_k=self.warp_tile_k,
+            wave_size=target.wave_size,
+            pipeline=self.pipeline,
+            epilogue=self.epilogue,
+            split_k=self.split_k,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Grid helpers
@@ -599,6 +655,25 @@ def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, 
     # split_k, decoded in-kernel as group = z // split_k, slice = z % split_k.
     # For G==1 this reduces to (gx, gy, split_k); for split_k==1 to (gx, gy, groups).
     return (gx, gy, p.groups * split_k)
+
+
+def _dgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, int]:
+    """``(flat_tiles, groups, split_k)`` for the unified tilde-decomposed kernel.
+
+    Unlike fwd/wgrad the M-tile count is not a closed form over the problem
+    dims: stride > 1 splits the convolution into ``y_tilde * x_tilde``
+    independent sub-GEMMs of differing sizes, and the kernel binary-searches a
+    packed record buffer to find its own. The flat tile count is therefore the
+    cumulative ``block_end`` of the last sub-GEMM, which the instance already
+    computes -- derive it there rather than re-deriving the decomposition here.
+    The sub-GEMM geometry is channel-independent, so the count is per-group and
+    the group rides ``blockIdx.y``.
+    """
+    assert isinstance(req, ConvGroupedRequest)
+    p = _problem(req)
+    sub_gemms = spec.to_dgrad_spec(p).compute_sub_gemms()
+    flat_tiles = sub_gemms[-1].block_end
+    return (flat_tiles, max(int(p.groups), 1), max(int(spec.split_k), 1))
 
 
 def _block(spec: ConvGroupedSpec) -> Tuple[int, int, int]:
@@ -1179,6 +1254,143 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
     return candidate
 
 
+def _dgrad_lds_k_outer(req: "ConvGroupedRequest", warp_tile_mn: int) -> bool:
+    """Whether the gfx950 dgrad candidate should use the K-outer LDS layout.
+
+    Delegates to the instance predicate for the same reason the wgrad helper
+    does -- a second copy of the gate is how the two drift apart.
+
+    Note the asymmetry with :func:`_wgrad_lds_k_outer`: dgrad flips only the B
+    tile, so the predicate takes only the B-side dtype and warp tile, and it
+    additionally keys on ``cpg``. The saving is proportional to the B load
+    width, which collapses to 1 on an odd channel run -- there ``axis_b`` is
+    already ``"col"``, there is no transpose-on-store to remove, and K-outer
+    would only add the read-side cost.
+    """
+    p = _problem(req)
+    return DgradConvSpec.default_lds_k_outer(
+        arch=req.arch,
+        dtype_b=req.dtype.lower(),
+        warp_tile_n=warp_tile_mn,
+        cpg=p.C // max(int(p.groups), 1),
+        wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+        pipeline=_PIPELINE,
+    )
+
+
+def _make_gfx950_dgrad_candidate() -> KernelCandidate:
+    """Backward-data conv for gfx950: 64x64x64, 2x2, 32x32x16 MFMA.
+
+    Pins ``epilogue="default"`` and ``split_k=1``. dgrad already dispatches its
+    epilogue internally on ``needs_atomic`` (stride > 1 gives more than one
+    sub-GEMM, which forces the atomic store regardless of split-K), so the
+    epilogue knob does not carry the same meaning it does for wgrad. Split-K is
+    left at 1 rather than auto-resolved: the CK formula wgrad uses keys on its
+    lopsided ``N*Ho*Wo`` reduction, and dgrad's ``Y*X*K`` is not that shape.
+
+    No gfx942 or gfx1250 counterpart yet. gfx942 lacks the 32x32x16 atom, and
+    the gfx1250 wave32 path is exercised through the sweep driver but has no
+    dispatch-level dual-engine test of its own.
+    """
+    name = "implicit_gemm_conv_dgrad"
+    spec_id = "igemm_conv_dgrad_64x64"
+    algorithm = "implicit_gemm_dgrad"
+
+    def _tile(req: ConvGroupedRequest):
+        return (
+            _GFX950_TILE_M,
+            _GFX950_TILE_N,
+            _GFX950_TILE_K,
+            _GFX950_WARP_M,
+            _GFX950_WARP_N,
+            _GFX950_WARP_TILE_MN,
+            _GFX950_WARP_TILE_K,
+        )
+
+    def _build_instance_spec(req: ConvGroupedRequest) -> DgradConvSpec:
+        tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        return DgradConvSpec(
+            problem=_problem(req),
+            name=name,
+            lds_k_outer=_dgrad_lds_k_outer(req, wtmn),
+            data=_data_spec(req),
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            warp_m=wm,
+            warp_n=wn,
+            warp_tile_m=wtmn,
+            warp_tile_n=wtmn,
+            warp_tile_k=wtk,
+            wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+            pipeline=_PIPELINE,
+            epilogue=_epilogue_for(req),
+            split_k=1,
+        )
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, ConvGroupedRequest)
+        if not _is_gfx950(req):
+            return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
+        if req.direction != "dgrad":
+            return False, f"candidate handles 'dgrad', got direction={req.direction!r}"
+        ok, why = _selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        ok, why = _dgrad_is_valid_spec(_build_instance_spec(req), arch=req.arch)
+        if not ok:
+            return False, why
+        return True, "ok"
+
+    def select(req: OperatorRequest) -> ConvGroupedSpec:
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, ConvGroupedRequest)
+        tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        return ConvGroupedSpec(
+            direction="dgrad",
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            warp_m=wm,
+            warp_n=wn,
+            warp_tile_mn=wtmn,
+            warp_tile_k=wtk,
+            pipeline=_PIPELINE,
+            epilogue=_epilogue_for(req),
+            lds_k_outer=_dgrad_lds_k_outer(req, wtmn),
+            dtype=req.dtype.lower(),
+            arch=req.arch,
+            split_k=1,
+            name=name,
+        )
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY_DGRAD,
+        algorithm=algorithm,
+        spec_id=spec_id,
+        abi_version=CONV_GROUPED_ABI_VERSION,
+        priority=10,
+        capability=Capability(
+            arches=("gfx950",),
+            dtypes=("fp16", "bf16"),
+            layouts=("NHWC",),
+        ),
+        _supports=support,
+        select_spec=select,
+        signature=lambda _spec: (),
+        grid=_dgrad_grid,
+        block=_block,
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+    )
+    return candidate
+
+
 def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
     """Backward-weight conv for gfx1250: 32x32x32, 2x2, 16x16x32 WMMA (wave32).
 
@@ -1315,6 +1527,11 @@ _CONV_DIM_VOCABULARY = (
     "Do",
 )
 
+CONV_DGRAD_REGISTRY = CandidateRegistry(
+    _FAMILY_DGRAD, dim_vocabulary=_CONV_DIM_VOCABULARY
+)
+CONV_DGRAD_REGISTRY.register(_make_gfx950_dgrad_candidate())
+
 CONV_FWD_REGISTRY = CandidateRegistry(_FAMILY_FWD, dim_vocabulary=_CONV_DIM_VOCABULARY)
 CONV_FWD_REGISTRY.register(_make_gfx942_fwd_candidate())
 CONV_FWD_REGISTRY.register(_make_gfx950_fwd_candidate())
@@ -1331,6 +1548,8 @@ CONV_WGRAD_REGISTRY.register(_make_gfx1250_wgrad_candidate())
 def _registry_for(req: ConvGroupedRequest) -> CandidateRegistry:
     if req.direction == "wgrad":
         return CONV_WGRAD_REGISTRY
+    if req.direction == "dgrad":
+        return CONV_DGRAD_REGISTRY
     return CONV_FWD_REGISTRY
 
 
@@ -1365,6 +1584,8 @@ def _kernel_id(
 def conv_grouped_candidates(direction: str = "fwd") -> Tuple[KernelCandidate, ...]:
     if direction == "wgrad":
         return CONV_WGRAD_REGISTRY.candidates()
+    if direction == "dgrad":
+        return CONV_DGRAD_REGISTRY.candidates()
     return CONV_FWD_REGISTRY.candidates()
 
 

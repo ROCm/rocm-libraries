@@ -1177,13 +1177,12 @@ def main() -> int:
                     is_valid_wgrad_spec=is_valid_wgrad_spec,
                 )
             elif direction == "dgrad":
-                rc = _run_dgrad_sweep(
+                rc, rocke_results = _run_dgrad_sweep(
                     **_common,
                     DgradConvSpec=DgradConvSpec,
                     build_implicit_gemm_conv_dgrad=build_implicit_gemm_conv_dgrad,
                     is_valid_dgrad_spec=is_valid_dgrad_spec,
                 )
-                rocke_results = None
             else:
                 rc, rocke_results = _run_sweep(
                     **_common,
@@ -1493,6 +1492,7 @@ def _build_dgrad_one(args_tuple):
             warp_tile_n=warp_tile_mn,
             cpg=problem.cpg,
             wave_size=target.wave_size,
+            pipeline=pipeline,
         ),
         name="rocke_bench_igemm_dgrad",
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
@@ -2716,7 +2716,7 @@ def _run_dgrad_sweep(
 
     if not results:
         print("No valid dgrad configurations found.", file=sys.stderr)
-        return 1
+        return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
     top_n = min(args.top, len(results))
@@ -2740,7 +2740,7 @@ def _run_dgrad_sweep(
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS -- {best.kernel_name}")
-    return 0
+    return 0, results
 
 
 if __name__ == "__main__":

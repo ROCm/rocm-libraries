@@ -1001,7 +1001,11 @@ register-PV + transposed-PV reads.
 - Try XOR swizzle on two-dimensional layouts
   (`helpers/layouts.py::LdsLayout(swizzle="xor")`).
 - Try cyclic-shift swizzle when CK uses it.
-- Try padding strides (`lds_k_pad` defaults `+8` sync, `0` async).
+- Don't sweep padding strides: `lds_k_pad` is deduced (`+8` on the sync
+  path when `tile_k ≥ 16`, `0` on the async path), and the pad is
+  derived for a row step of 1, so it only fixes the *read* path. A
+  write-side scatter needs a layout flip instead (`lds_k_outer`,
+  §12.1.F).
 - Use transposed LDS loads where supported
   (`helpers/layouts.py::TransposeLdsReader`, `b.ds_read_tr16_b64`,
   `b.ds_read_tr_b8`).
@@ -1845,8 +1849,10 @@ matches → zero re-pack. See §17.4 for the quantitative reduction.
 | Knob | Spec | Values | Effect |
 |---|---|---|---|
 | `pipeline` | GEMM `TraitSpec` | `"mem"` / `"compv3"` / `"compv4"` | `mem` = single-buffer; `compv4` = double-buffered async DMA + MFMA overlap. Compv3 / compv4 trade LDS for latency hiding |
+| `pipeline` | conv_implicit_gemm, conv_implicit_gemm_wgrad | `"mem"` / `"compv3"` / `"compv4"` / `"wavelet"` / `"basic"` | The GEMM names above plus `"basic"` = CK `pipeline_basic`: a single LDS buffer, with the global read of tile `k+1` issued before the `sync` + MFMA of tile `k` and the matching LDS write deferred past the second `sync`, so VMEM latency overlaps MFMA compute and tile `k+1` waits in VGPRs rather than in a second LDS tile. Statically unrolls the K loop — bounded by `_MAX_UNROLLED_K_ITERS` on wgrad and by the parallel `_MAX_BASIC_K_ITERS` in `conv_implicit_gemm.py` on forward conv — is mutually exclusive with `async_dma`, and needs a compile-time trip count, so on wgrad it rejects `split_k=0` |
 | `scheduler` | GEMM `TraitSpec` | `"intrawave"` / `"interwave"` | Where the scheduler injects waits. Intrawave keeps producers and consumers in one wave; interwave splits them |
-| `async_dma` | conv_implicit_gemm | False / True | Enable direct global → LDS DMA (`raw_ptr_buffer_load_lds`). Pairs with `pipeline="compv4"` |
+| `async_dma` | conv_implicit_gemm, conv_implicit_gemm_wgrad, conv_implicit_gemm_dgrad | False / True | Enable direct global → LDS DMA (`raw_ptr_buffer_load_lds`). It **pins the schedule**: forward conv and wgrad both build `SchedulePolicy.for_pipeline("async_dma")` (interwave, `s_setprio 1`) and ignore `spec.pipeline` on that leg, which is why the sweep pins the pipeline to `"mem"` there instead of compiling one body under five kernel names. Incompatible with `pipeline="basic"` (all conv families) and with `pipeline="wavelet"` (forward conv, dgrad). A **swept axis**, not a run-level flag — unlike `lds_k_outer` it is not deducible from `(arch, spec)`: it removes the register staging of the tile, but it also forces the LDS pad to 0 (the intrinsic writes a packed lane-contiguous tile) and coarsens the load-width ladder to the chunk widths the intrinsic accepts, and both terms are functions of tile width and channel run, which are themselves sweep axes. On wgrad it *requires* `lds_k_outer=True`; on dgrad it is *rejected* under `lds_k_outer` (the tilde builder has no direct global→LDS path). Python-unrolls the K loop, so it is bounded by `_MAX_UNROLLED_K_ITERS` |
+| `_MAX_UNROLLED_K_ITERS` | `instances/common/conv_implicit_gemm_wgrad.py` module constant (mirrored as `ROCKE_MAX_UNROLLED_K_ITERS` in the C engine) | 128 | Cap on `ceil((wg_K_padded / split_k) / tile_k)` for **both** statically-unrolled wgrad loops — `pipeline="basic"` **and** `async_dma`. A build-practicality bound, not a hardware one: over the cap `is_valid_wgrad_spec` rejects the spec, so raise `split_k` or `tile_k` rather than raising the constant. It previously guarded `basic` only, leaving async uncapped — a deep reduction at a low split-K degree then unrolled five figures of load+MFMA bodies into one kernel and exhausted host memory during the IR build instead of failing validation. Forward conv keeps its own parallel `_MAX_BASIC_K_ITERS = 128` in `conv_implicit_gemm.py`, which still guards `pipeline="basic"` only |
 | `unroll_k` | conv_implicit_gemm | False | Python-time unroll of the K loop. Bigger code, fewer waits |
 | `use_early_v_schedule` | Attention 2D | False | Issue current-V async copy before QK so V overlaps QK + softmax (§8.1, §17.4). Use only on no-SW prefill |
 | `prefetch distance` (implicit) | `pipeline` choice | — | More stages ⇒ better latency hiding but more LDS |
@@ -1883,14 +1889,75 @@ stay direct (§9.3, §17.4 register-PV regression analogue).
 
 | Knob | Spec | Default | Effect |
 |---|---|---|---|
-| `lds_k_outer` | conv_implicit_gemm_wgrad | False | Store the A/B LDS tile K-outer (`LDS[k][mn]`) and feed the MFMA with `ds_read_b64_tr_b16` transpose reads, instead of transposing on *store*. The M-outer tile turns each `load_vec`-wide global load into `load_vec` narrow `ds_write_b16` plus their address math, and the resulting register pressure stops the backend keeping the global loads in flight — so every load's latency is exposed. Wgrad only (both operands are contiguous along the GEMM's free axis, strided along its reduction axis). gfx950 + 16-bit A/B + `warp_tile_m/n ∈ (16, 32)` + wave64. **Not a knob:** selected automatically by `WgradConvSpec.default_lds_k_outer(...)`, which both dispatch and the sweep driver call. It is a strict instruction-count win wherever the transpose read exists, so there is nothing to sweep — but it does move the tile/atom/warp optimum, so sweep geometry against a K-outer baseline. |
-| `lds_k_pad` | conv_implicit_gemm | None | K-pad to break bank conflicts (`+8` sync default; `0` async default) |
+| `lds_k_outer` | conv_implicit_gemm_wgrad, conv_implicit_gemm_dgrad | False | Store the LDS tile K-outer (`LDS[k][mn]`) and feed the MFMA with `ds_read_tr16_b64` transpose reads instead of transposing on *store*. The M-outer tile turns each `load_vec`-wide global load into `load_vec` narrow `ds_write_b16` plus their address math (`CoalescedTileLoader._store_tile` in `"row"` mode), and those writes are bank-degenerate by construction: adjacent lanes step the tile by `load_vec` **rows**, so the inter-lane dword delta is `load_vec × (block_k + k_pad) / 2` — for the 8-wide 16-bit vector this path targets, that is an exact multiple of the 32-dword bank period at every swept `tile_k` (16 / 32 / 64) and either pad (0 or 8). `lds_k_pad` cannot fix it: that pad is derived for a row step of 1, i.e. for the read path. K-outer collapses each chunk to **one** wide `smem_store_vN` (`b128` for a 16-bit 8-wide vector) and drops `load_vec − 1` address adds plus `load_vec` `vec_extract`s per chunk. Read side pays, **on wave64**, `n / 4` `ds_read_tr16_b64` for a per-lane fragment length `n`, where the M-outer path issued a single `smem_load_vN` (`b128` at `n = 8`, `b64` at `n = 4`): **+1** read per fragment on the `n = 8` atoms (`32x32x16`, MFMA `16x16x32`), exactly **zero** on the `n = 4` atoms (`16x16x16`, `32x32x8`). **On wave32** the transpose read is `ds_load_tr16_b128`, which returns **8** elements per lane, so the loop is `n / 8` (`ConvKOuterFragmentReader.fragment`, `helpers/layouts.py`) — and for the one wave32 atom, the gfx1250 WMMA `16x16x32` at `n = 16`, that is 2 reads against the 2 8-wide chunks `_emit_frag_smem_load` already issued M-outer, i.e. **zero** extra. The builder guard keys on the same width: `b_per_lane` must be a multiple of 8 on wave32, 4 on wave64. Global `buffer_load`s are unchanged — `choose_vec` tests `tile_rows` in `"row"` mode and `tile_cols` in `"col"` mode, and the flip transposes the tile as well, so both calls test the same free-axis extent against the same `tile_rows × tile_cols` product; only the LDS store instruction changes. **Wgrad flips both operands** (A and B are both contiguous along the GEMM free axis and strided along the reduction axis, so both paid the scatter). **Dgrad flips the B tile only**: A (`dY`, NHWK) already has a stride-1 reduction axis (`k_out` innermost), so its loader is already `vector_axis="col"` with one wide `smem_store_vN` and its M-outer fragment read is already conflict-free via `lds_k_pad` — flipping A would put the global vector along `m = (n, hi, wi)` (stride K in NHWK) and destroy coalescing for zero write-side gain. Only B (`W`, KYXC) has the GEMM free axis `c` stride-1, forcing `axis_b="row"` and the per-element `ds_write_b16` scatter. Gate: two regimes, `_LDS_K_OUTER_ARCH_WAVE = {gfx950: 64, gfx1250: 32}`, with the arch pinned to its wave size. gfx950 wave64 admits `warp_tile ∈ (16, 32)`; gfx1250 wave32 admits only the `16x16x32` atom. Plus 16-bit A/B (wgrad) or 16-bit B (dgrad). **Not a knob:** deduced by `WgradConvSpec.default_lds_k_outer(arch, dtype_a, dtype_b, warp_tile_m, warp_tile_n, wave_size)`, which both library dispatch (`library/dispatch/grouped_convolution.py`) and the sweep driver call, and by `DgradConvSpec.default_lds_k_outer(arch, dtype_b, warp_tile_n, cpg, wave_size, pipeline)`, which the sweep driver and library dispatch (`_dgrad_lds_k_outer`, same file) both call. The dgrad predicate also keys on `pipeline`: it returns False under `pipeline="wavelet"`, because the wavelet loader has no K-outer path — `validate()` rejects that pair outright, so the predicate keeps the combination off the sweep rather than emitting an invalid spec. The spec field itself still defaults False, so existing goldens are unmoved. The dgrad predicate is deliberately **asymmetric** (B-side dtype / warp tile only, never the A-side counterparts, because only B flips) and additionally keys on `cpg`: the saving is proportional to the B load width, which collapses to 1 on an odd channel run — there `axis_b` is already `"col"`, there is no scatter to remove, and K-outer would be a pure regression. So there is nothing to sweep — but it does move the tile/atom/warp optimum, so sweep geometry against a K-outer baseline. Rejected rather than silently ignored on the K-outer path: an explicit `lds_k_pad` (wgrad), and an explicit `lds_layout` or `async_dma=True` (dgrad). Wgrad runs the async implication the other way — `async_dma=True` *requires* `lds_k_outer=True`, because the direct global→LDS load needs a stride-1 reduction axis that wgrad only has once the tile is stored K-outer. |
+| `lds_k_pad` | conv_implicit_gemm, conv_implicit_gemm_wgrad, conv_implicit_gemm_dgrad | None | K-pad that breaks bank conflicts on the **read** path of an M-outer tile. `None` means deduced by `effective_lds_layout()`: `+8` on the sync path when `tile_k ≥ 16` (`0` below that), and `0` on the async path, where `raw_ptr_buffer_load_lds` writes a packed lane-contiguous tile. Derived for a row step of 1, so it does nothing for the M-outer write scatter — that needs a layout flip (`lds_k_outer`), not a bigger pad. **Not a sweep axis:** the value is deduced, and on a K-outer tile the row stride is not this pad at all but the builder constant `_KOUTER_PAD`, which pads the *free* axis rather than K — `8`, or `0` on the wgrad async path whose direct load deposits packed bytes and cannot skip a pad. Wgrad therefore rejects an explicit `lds_k_pad` under `lds_k_outer`; dgrad keeps honouring it, because dgrad's A tile is genuinely still M-outer and only B flips. `_KOUTER_PAD = 8` comes from the same kind of argument on that other axis: it takes a 64-wide 16-bit tile row to 36 dwords (`36 % 32 == 4`), which spreads across banks the four row-groups that the `((l % 16) // 4)` term of the transpose-read lane formula walks — the only lane term that walks rows, and one that contributes zero bank spread whenever `(stride_elems × 2 / 4) % 32 == 0` — while keeping rows 16-byte aligned for the `b128` store side. |
 | `lds_layout` | conv_implicit_gemm | None | Explicit `LdsLayout` (helpers/layouts.py) — padding, packed-async, transpose-reader |
 | `lds_k_group_pad` | `AttentionDenseSpec` (dense prefill, gfx950 + gfx942) | 8 | Per-K-row-group LDS pad (bytes); must be a multiple of 8 (`smem_load_vN` stamps align 16 unconditionally). Sweepable via `--lds-k-group-pad` on the dense prefill benchmark. See `library/builders/gfx950/attention/prefill/README.md §Tuning` for the full sweep methodology and decision record. |
 | `LdsLayout` swizzle | `helpers/layouts.py` | — | XOR swizzle (zero LDS waste, higher ALU cost) vs padding swizzle (small LDS waste, lower ALU). Architecture-specific rule §6.4a |
 | `TransposeLdsReader` | `helpers/layouts.py` | — | Use `ds_read_tr16_b{64,128}` for transposed BF16/F16 loads |
 | `pad_m` / `pad_n` / `pad_k` | GEMM `TraitSpec` | False | Pad operands to tile boundaries (avoids tail scalar path) |
 | `Q_lds`, `K_lds`, `V_lds`, `P_lds` sizing | Attention 2D (implicit via shape) | — | The §17.4 case showed 16 KiB allocated for `P_lds` was the structural cost; `use_register_pv` removes it |
+
+Caveat: the transpose fragment length is **per-atom, not a constant**. The
+per-lane operand length `n` is 8 for `32x32x16` and `16x16x32`, and 4 for
+`16x16x16` and `32x32x8`; the builders carry it into `_tr_frag` rather
+than assuming a width. Hardcoding 8 makes the `16x16x16` atom read rows
+8..27 of a 16-row tile — past the end — and return garbage. This is a
+recorded trap, not a hypothetical; both builders now reject a fragment
+length that is not a multiple of the width the transpose read returns per
+lane, which is regime-dependent: 4 on wave64 (`ds_read_tr16_b64`) and 8 on
+the gfx1250 wave32 regime (`ds_load_tr16_b128`), whose sole admitted atom
+`16x16x32` carries `n = 16`. Checking 4 on wave32 would wrongly admit
+`n = 4` or `12`, where the `n // 8` read loop is empty or truncates and
+`_tr_frag` builds the fragment from an empty `parts` list.
+
+**gfx1250 (wave32 WMMA).** Supported, as a second regime rather than a port of
+the first. gfx1250 has `ds_load_tr16_b128`, a wave32 transpose-LDS read
+overloaded on result element type (`.v8bf16` / `.v8f16`); the IR op is shared
+with gfx950 and `core/isa/backend.py` selects the opcode, so no new primitive
+was needed. What differs is the lane mapping, and it is *simpler*: 32 lanes
+over a 16-wide atom edge give two lane groups that split K rather than the free
+axis, so lane `l` owns column `l % 16` and K-half `l // 16`, and a fragment is a
+straight run of `n` K values at one column starting at `(l // 16) * n`. The read
+returns 8 per lane, so the 16-element gfx1250 fragment is two reads. gfx950's
+`((l % 16) // 4)` and `(l % 4) * 4` terms exist only because 64 lanes over that
+edge create groups *within* the free axis. `_tr_frag` branches on `wave_size`;
+`_LDS_K_OUTER_ARCH_WAVE` pins each arch to its wave size so a mismatched spec is
+rejected rather than emitting a formula the hardware does not implement. The
+wave32 regime admits one atom, `16x16x32`.
+
+Note the interaction with `Gfx1250Backend.blocks_ds_load_tr16`: that guard marks
+ordinary LDS loads volatile because the AMDGPU backend otherwise substitutes
+`ds_load_tr16_b128` for a `<8 x half>` load feeding a WMMA, and that
+substitution assumes a column-major tile while the M-outer path is row-major.
+K-outer is the layout the substitution assumes, and the transpose read is
+emitted as an explicit intrinsic call rather than left to the pass, so the guard
+is unaffected and still protects the M-outer loads beside it.
+
+**Verified on gfx1250 hardware.** The numeric A/B is green: the K-outer path is
+bitwise identical to the M-outer default for dgrad, and matches the fp32
+reference for wgrad.
+
+Getting there required a fix, and the trap generalises. `ds_load_tr16_b128`
+transposes an 8x8 element block *within each group of 8 lanes*: the 8 lanes each
+read 8 contiguous elements, and lane `j` of the group receives element `j` from
+all 8 runs. The address a lane supplies is therefore **not** the element it ends
+up holding. To land the documented WMMA B layout (lane `l` holds column
+`l % 16`, K-half `l // 16`), the group addresses the 8-column block and each
+lane supplies a different K row of it:
+
+```
+col  = mn_base + ((l % 16) // 8) * 8
+row0 = k_base  + (l // 16) * n + (l % 8)     # read r at row0 + 8*r
+```
+
+The original form addressed it as if the instruction returned a straight run of
+K at the lane's own column. That was byte-identical across both engines and
+still read a transposed operand -- byte-identity proves the two engines agree,
+never that the formula is right. A per-lane hardware probe of the intrinsic
+(fill LDS with `k*16+col`, read back, decode) settles the distribution in one
+run and is worth writing before trusting any transpose-read lane map.
+Per-arch facts belong in the arch references — see §21.
 
 #### 12.1.G Register / occupancy
 

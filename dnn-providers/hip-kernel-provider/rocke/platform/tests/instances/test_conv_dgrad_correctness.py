@@ -514,6 +514,138 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
     gfx1250 16x16x32 WMMA path builds and vectorises the dY loads.
     """
 
+    def _lower_gfx1250_kouter(self, dtype: str) -> str:
+        """Lower a K-outer (transpose-read) gfx1250 dgrad kernel, CPU-only."""
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            build_implicit_gemm_conv_dgrad,
+            is_valid_dgrad_spec,
+        )
+
+        p = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=1)
+        spec = DgradConvSpec(
+            problem=p,
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            wave_size=32,
+            pipeline="mem",
+            epilogue="default",
+            lds_k_outer=True,
+        )
+        ok, why = is_valid_dgrad_spec(spec, "gfx1250")
+        self.assertTrue(ok, f"gfx1250 K-outer dgrad spec unexpectedly invalid: {why}")
+        kernel = build_implicit_gemm_conv_dgrad(spec, arch="gfx1250")
+        return _lower_kernel_to_llvm_python(kernel, arch="gfx1250")
+
+    def test_gfx1250_kouter_rejects_wavelet_pipeline(self):
+        """wavelet + lds_k_outer must be rejected, not silently miscompiled.
+
+        build_wavelet_loaders pins the B tile to (block_n, block_k) and takes
+        the unswapped descriptor, so it writes the tile M-outer while the
+        compute phase reads it through _tr_frag. The allocation is K-outer, so
+        the row stride is wrong for every element and the store runs past
+        B_smem whenever tile_n > tile_k. Confirmed numerically wrong on
+        gfx1250 before the gate went in, and the K-outer A/B pins
+        pipeline="mem", so nothing else covers this pair.
+        """
+        import dataclasses
+
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        p = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=1)
+        base = DgradConvSpec(
+            problem=p,
+            data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            warp_m=1,
+            warp_n=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            wave_size=32,
+            pipeline="mem",
+            epilogue="cshuffle",
+            lds_k_outer=True,
+        )
+        # mem + K-outer is the supported pair and must stay valid.
+        ok, why = is_valid_dgrad_spec(base, "gfx1250")
+        self.assertTrue(ok, f"mem + lds_k_outer should be valid: {why}")
+
+        wavelet = dataclasses.replace(base, pipeline="wavelet")
+        ok, why = is_valid_dgrad_spec(wavelet, "gfx1250")
+        self.assertFalse(ok, "wavelet + lds_k_outer must be rejected")
+        self.assertIn("wavelet", why)
+        with self.assertRaises(ValueError):
+            wavelet.validate()
+
+        # And the selection policy must never hand out the broken pair.
+        common = dict(
+            arch="gfx1250", dtype_b="bf16", warp_tile_n=16, cpg=64, wave_size=32
+        )
+        self.assertTrue(DgradConvSpec.default_lds_k_outer(pipeline="mem", **common))
+        self.assertFalse(
+            DgradConvSpec.default_lds_k_outer(pipeline="wavelet", **common),
+            "default_lds_k_outer must fall back to M-outer under wavelet",
+        )
+
+    def test_gfx1250_kouter_emits_ds_load_tr16_b128(self):
+        """The K-outer B fetch must lower to ds_load_tr16_b128 of <8 x T>.
+
+        Guards the wave32 transpose-read on GPU-less CI. The 16x16x32 atom has
+        b_frag_len == 16 and the intrinsic returns 8 per lane, so the fragment is
+        exactly **two** reads -- a count of 1 would mean half the K range is
+        never fetched, and 4 would mean someone assumed the 4-element
+        ds_read_tr16_b64 shape.
+        """
+        for dtype, vec in (("bf16", "<8 x bfloat>"), ("fp16", "<8 x half>")):
+            with self.subTest(dtype=dtype):
+                ll = self._lower_gfx1250_kouter(dtype)
+                suffix = "v8bf16" if dtype == "bf16" else "v8f16"
+                intrinsic = f"llvm.amdgcn.ds.load.tr16.b128.{suffix}"
+                self.assertIn(
+                    intrinsic,
+                    ll,
+                    f"expected the gfx1250 wide transpose-LDS read for {dtype}",
+                )
+                calls = re.findall(rf"call\s+[^\n]*@{re.escape(intrinsic)}\(", ll)
+                self.assertEqual(
+                    len(calls),
+                    2,
+                    f"expected 2 {intrinsic} calls (b_frag_len 16 / 8 per read), "
+                    f"got {len(calls)}",
+                )
+                # Operand shape: the transpose read must be typed <8 x T> and
+                # take an LDS (addrspace 3) pointer, not a generic one.
+                self.assertRegex(
+                    ll,
+                    rf"call\s+{re.escape(vec)}\s+@{re.escape(intrinsic)}"
+                    rf"\(ptr addrspace\(3\)",
+                    f"expected {vec} from an addrspace(3) pointer for {dtype}",
+                )
+                # The K-outer path must not fall back to the wave64 b64 form.
+                self.assertNotIn("llvm.amdgcn.ds.read.tr16.b64", ll)
+
     def _lower_gfx1250(self, groups: int) -> str:
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
         from rocke.instances.common._conv_implicit_gemm_common import (
@@ -651,7 +783,24 @@ def _dgrad_run_inprocess(spec, dtype, seed=0):
     return out
 
 
-@unittest.skipUnless(ARCH == "gfx950" and _HAS_TORCH, "K-outer dgrad is gfx950 + torch")
+# The K-outer B tile runs in two lane-mapping regimes, and the A/B has to cover
+# both: gfx950 is wave64 MFMA reading through ``ds_read_b64_tr_b16`` (4 elements
+# per lane), gfx1250 is wave32 WMMA reading through ``ds_load_tr16_b128`` (8 per
+# lane). ``_tr_frag`` in conv_implicit_gemm_dgrad.py branches on wave_size, so a
+# green run on one arch says nothing about the other.
+_KOUTER_WAVE = {"gfx950": 64, "gfx1250": 32}
+
+# gfx1250 exposes exactly one usable atom here -- 16x16x32 -- so the gfx950
+# tilings below have no one-to-one counterpart. Remap the cases that have an
+# equivalent and skip the rest explicitly; silently running a *different* shape
+# would turn "this atom is untested on wave32" into a false green.
+_KOUTER_WAVE32_ATOM = {(32, 64): (16, 32)}  # (warp_tile_mn, tile_k) gfx950 -> wave32
+
+
+@unittest.skipUnless(
+    ARCH in _KOUTER_WAVE and _HAS_TORCH,
+    f"K-outer dgrad needs {'/'.join(_KOUTER_WAVE)} + torch",
+)
 class TestConvDgradLdsKOuter(unittest.TestCase):
     """The K-outer B tile must be a pure re-layout of the M-outer default."""
 
@@ -673,9 +822,20 @@ class TestConvDgradLdsKOuter(unittest.TestCase):
             f"./MIOpenDriver {kw} -n 2 -c 64 -H {Hi} -W {Hi} -k {K} -y 3 -x 3 "
             f"-p 1 -q 1 -u {stride} -v {stride} -l 1 -j 1 -m conv -g 1 -F 2 -t 1"
         )
+        wave = _KOUTER_WAVE[ARCH]
+        if wave == 32:
+            remapped = _KOUTER_WAVE32_ATOM.get((warp_tile_mn, tile_k))
+            if remapped is None:
+                self.skipTest(
+                    f"no wave32 counterpart for the {warp_tile_mn}x{warp_tile_mn} "
+                    f"k_max={tile_k} atom; {ARCH} has only 16x16x32"
+                )
+            warp_tile_mn, tile_k = remapped
+        family = "wmma" if wave == 32 else "mma"
+
         tgt = ArchTarget.from_gfx(ARCH)
         atom = tgt.mma.select_largest_k(
-            family="mma",
+            family=family,
             a_dtype=dtype,
             b_dtype=dtype,
             c_dtype="fp32",
@@ -684,7 +844,7 @@ class TestConvDgradLdsKOuter(unittest.TestCase):
             k_max=tile_k,
         )
         if atom is None:
-            self.skipTest(f"no MFMA atom for {warp_tile_mn} k_max={tile_k}")
+            self.skipTest(f"no {family} atom for {warp_tile_mn} k_max={tile_k}")
         out = []
         for kouter in (False, True):
             spec = DgradConvSpec(
@@ -699,7 +859,7 @@ class TestConvDgradLdsKOuter(unittest.TestCase):
                 warp_tile_m=warp_tile_mn,
                 warp_tile_n=warp_tile_mn,
                 warp_tile_k=atom.k,
-                wave_size=64,
+                wave_size=wave,
                 pipeline="mem",
                 epilogue=epilogue,
                 split_k=split_k,

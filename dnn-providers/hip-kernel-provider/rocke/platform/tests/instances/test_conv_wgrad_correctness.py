@@ -23,10 +23,16 @@ Coverage:
   - Dtypes: fp16, bf16
 
 The vector-load path is enabled for every sync MMA family (MFMA and WMMA); only
-the async-DMA path is excluded. The GPU numeric sweep here is MFMA-only
-(gfx942/gfx950) because that is the hardware available for verification; the WMMA
-path is covered by ``TestConvWgradVectorLoad`` (CPU IR-emission guard) and awaits
-gfx1250 hardware for a numeric sign-off. Requires a ROCm GPU and torch. Run:
+the async-DMA path is excluded. The sweep runs on MFMA (gfx942/gfx950) and, for
+the K-outer transpose-read tests, on gfx1250 wave32 WMMA -- the lane mapping is
+per-wave-size, so one arch being green says nothing about the other.
+
+WMMA wgrad accepts only ``epilogue='default'``, so the K-outer sweeps ask for the
+one their arch supports. A sweep requesting the wrong epilogue skips every
+subTest -- and a test whose subTests all skip still reports *passed*, so
+``_assert_ran`` makes an all-skipped K-outer sweep a hard failure instead.
+
+Requires a ROCm GPU and torch. Run:
     PYTHONPATH=rocke/platform/python <torch-python> -m pytest \\
         rocke/platform/tests/instances/test_conv_wgrad_correctness.py
 """
@@ -47,15 +53,30 @@ _HAS_TORCH = importlib.util.find_spec("torch") is not None
 GPU_ARCH = get_device_arch(0)
 _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")  # wave64 / MFMA targets
 
+# Arches with a K-outer transpose-read regime. The lane mapping is per-wave-size
+# (gfx950 wave64 ds_read_b64_tr_b16, gfx1250 wave32 ds_load_tr16_b128), so a
+# green run on one says nothing about the other -- both must be exercised.
+# Configs with no counterpart on the running arch are rejected by
+# is_valid_wgrad_spec and skip through _check's existing reason path.
+_KOUTER_ARCHES = ("gfx950", "gfx1250")
+
+# WMMA wgrad accepts only the 'default' epilogue (is_valid_wgrad_spec), so the
+# K-outer sweeps below have to ask for the one their arch supports. Requesting
+# 'cshuffle' on gfx1250 makes every subTest skip -- and a test whose subTests all
+# skip still reports *passed*, which is exactly the false green these tests exist
+# to prevent. _assert_ran() below is the backstop.
+_KOUTER_EPILOGUE = "cshuffle" if _IS_MFMA else "default"
+
 
 def _skip_reason() -> str:
     if not GPU_ARCH:
         return "no ROCm GPU detected"
     if not _HAS_TORCH:
         return "torch not importable"
-    if not _IS_MFMA:
+    if not _IS_MFMA and GPU_ARCH not in _KOUTER_ARCHES:
         return (
-            f"wgrad vector-load path is MFMA-only; got {GPU_ARCH} (need gfx942/gfx950)"
+            f"wgrad numeric sweep needs MFMA (gfx942/gfx950) or a K-outer WMMA "
+            f"arch ({'/'.join(_KOUTER_ARCHES)}); got {GPU_ARCH}"
         )
     return ""
 
@@ -455,6 +476,21 @@ class TestConvWgradCorrectness(unittest.TestCase):
             f"FAIL {shape.id} {dtype} {pipeline}/{epilogue} spk{split_k} "
             f"{'kouter ' if lds_k_outer else ''}on {GPU_ARCH}: {reason}",
         )
+        return True
+
+    def _assert_ran(self, ran: int, what: str) -> None:
+        """A sweep whose every subTest skipped still reports *passed*.
+
+        That is the false green this suite exists to catch, so make an
+        all-skipped K-outer sweep a hard failure instead of a silent pass.
+        """
+        self.assertGreater(
+            ran,
+            0,
+            f"{what}: every config skipped on {GPU_ARCH}, so the K-outer "
+            f"transpose-read path was never executed -- this is a false green, "
+            f"not a pass. Check the epilogue/atom/split_k the sweep requests.",
+        )
 
     def _sweep_pipeline(self, pipeline: str) -> None:
         for dtype in _DTYPES:
@@ -474,12 +510,23 @@ class TestConvWgradCorrectness(unittest.TestCase):
         This is the test that has to exist -- the last change to this LDS path
         (async_dma) shipped silently wrong because nothing exercised it.
         """
-        if not _IS_MFMA:
-            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+        if GPU_ARCH not in _KOUTER_ARCHES:
+            self.skipTest(
+                f"lds_k_outer needs {'/'.join(_KOUTER_ARCHES)}; got {GPU_ARCH}"
+            )
+        ran = 0
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
-                    self._check(shape, dtype, "mem", "cshuffle", lds_k_outer=True)
+                    self._check(
+                        shape,
+                        dtype,
+                        "mem",
+                        _KOUTER_EPILOGUE,
+                        lds_k_outer=True,
+                    )
+                    ran += 1
+        self._assert_ran(ran, "lds_k_outer vs default")
 
     def test_lds_k_outer_atom_16x16x16(self):
         """K-outer with the 4-element-per-lane atom.
@@ -490,9 +537,17 @@ class TestConvWgradCorrectness(unittest.TestCase):
         file pins ``_WARP_TILE_MN = 32``, so nothing exercised the n=4 stride.
         With the stride hardcoded at 8 this config read past the end of a
         16-row K-outer tile and produced NaN.
+
+        MFMA-only on purpose. This test pins the 16x16x16 atom, which exists
+        only in the MFMA table -- gfx1250's WMMA fp16/bf16 atom is 16x16x32, so
+        ``select_largest_k`` returns None there and every subTest would skip.
+        A class whose subTests all skip still reports ``passed``, so widening
+        the gate to _KOUTER_ARCHES would buy a false green rather than wave32
+        coverage. gfx1250's atom is already covered by
+        ``test_lds_k_outer_matches_default``.
         """
         if not _IS_MFMA:
-            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+            self.skipTest(f"the 16x16x16 atom is MFMA-only; got {GPU_ARCH}")
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -500,20 +555,33 @@ class TestConvWgradCorrectness(unittest.TestCase):
                         shape,
                         dtype,
                         "mem",
-                        "cshuffle",
+                        _KOUTER_EPILOGUE,
                         lds_k_outer=True,
                         warp_tile_mn=16,
                         tile_k=16,
                     )
 
     def test_lds_k_outer_split_k(self):
-        """K-outer under split-K atomics (the shipping configuration)."""
+        """K-outer under split-K atomics (the shipping configuration).
+
+        MFMA-only on purpose. On gfx1250 ``_KOUTER_EPILOGUE`` is ``default``
+        (WMMA rejects cshuffle), and the atomic guard rejects 16-bit dtype_d
+        with the default epilogue at split_k > 1 -- so this bf16 + split_k=8
+        request is invalid on wave32 and every subTest would skip. Widening the
+        gate would report ``passed`` while executing nothing. Add a supported
+        wave32 atomic configuration before extending this test.
+        """
         if not _IS_MFMA:
-            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+            self.skipTest(f"wgrad split-K atomics are MFMA-only; got {GPU_ARCH}")
         for shape in _SHAPES:
             with self.subTest(shape=shape.id):
                 self._check(
-                    shape, "bf16", "mem", "cshuffle", split_k=8, lds_k_outer=True
+                    shape,
+                    "bf16",
+                    "mem",
+                    _KOUTER_EPILOGUE,
+                    split_k=8,
+                    lds_k_outer=True,
                 )
 
     def test_lds_k_outer_async_dma(self):

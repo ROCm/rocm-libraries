@@ -67,7 +67,7 @@ from ...core.ir import (
 from ...helpers.atoms import MfmaAtom, mfma_atom
 from ...helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from ...helpers.geometry import WarpGrid
-from ...helpers.layouts import LdsLayout
+from ...helpers.layouts import ConvKOuterFragmentReader, LdsLayout
 from ...helpers.loads import AsyncTileLoader, CoalescedTileLoader
 from ...helpers.mfma_gemm_inner import decode_mfma_lanes
 from ...helpers.pipeline import SoftwarePipeline
@@ -451,8 +451,14 @@ def make_dgrad_dx_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescr
 # ---------------------------------------------------------------------
 
 
-# The K-outer B tile is fed by ds_read_tr16_b64, a CDNA4 transpose read.
-_LDS_K_OUTER_ARCH = "gfx950"
+# The K-outer B tile is fed by an LDS transpose read (ds_read_tr16_b64 on
+# gfx950 wave64, ds_load_tr16_b128 on gfx1250 wave32).
+# Architectures whose LDS transpose read can feed a K-outer tile, and the wave
+# size each requires. gfx950 wave64 MFMA uses ds_read_b64_tr_b16 (4 per lane);
+# gfx1250 wave32 WMMA uses ds_load_tr16_b128 (8 per lane). The IR op is shared;
+# core/isa/backend.py picks the opcode.
+_LDS_K_OUTER_ARCH_WAVE = {"gfx950": 64, "gfx1250": 32}
+_LDS_K_OUTER_ARCH = "gfx950"  # the wave64 regime
 
 # Row stride pad, in elements, for the K-outer B tile. The row stride must not
 # be a multiple of the 32-dword LDS bank period or the transpose read
@@ -606,6 +612,7 @@ class DgradConvSpec:
         warp_tile_n: int,
         cpg: int,
         wave_size: int = 64,
+        pipeline: str = "mem",
     ) -> bool:
         """Whether the K-outer B tile is the better layout for this spec.
 
@@ -624,11 +631,24 @@ class DgradConvSpec:
         The ``lds_k_outer`` field itself still defaults to False; this is the
         selection policy, not the default.
         """
-        if arch != _LDS_K_OUTER_ARCH or wave_size != 64:
+        if arch not in _LDS_K_OUTER_ARCH_WAVE:
+            return False
+        if wave_size != _LDS_K_OUTER_ARCH_WAVE[arch]:
+            return False
+        if pipeline == "wavelet":
+            # The wavelet loader does not implement the K-outer tile (see the
+            # validate() gate). Selecting M-outer here keeps the combination
+            # off the sweep entirely -- it costs the transpose-on-store this
+            # optimisation removes, but it is correct, whereas the pair is not.
             return False
         if dtype_b not in ("bf16", "fp16"):
             return False
-        if warp_tile_n not in (16, 32):
+        if wave_size == 32:
+            # gfx1250 WMMA 16x16x32 is the only wave32 atom with a derived
+            # lane mapping.
+            if warp_tile_n != 16:
+                return False
+        elif warp_tile_n not in (16, 32):
             return False
         # 16-bit free-axis width > 1 requires an even channel run.
         return cpg % 2 == 0
@@ -766,10 +786,18 @@ class DgradConvSpec:
                     "transpose-read lane mapping is derived per 16-lane group "
                     f"over the atom edge; got warp_tile_n={self.warp_tile_n}"
                 )
-            if self.wave_size != 64:
+            if self.wave_size not in (64, 32):
                 raise ValueError(
-                    "lds_k_outer requires wave_size=64 (ds_read_tr16_b64 is a "
-                    f"wave64 instruction); got {self.wave_size}"
+                    "lds_k_outer requires wave_size 64 (ds_read_tr16_b64) or 32 "
+                    f"(ds_load_tr16_b128); got {self.wave_size}"
+                )
+            if self.wave_size == 32 and (
+                self.warp_tile_n != 16 or self.warp_tile_k != 32
+            ):
+                # One atom in the wave32 regime: gfx1250 WMMA 16x16x32.
+                raise ValueError(
+                    "lds_k_outer on wave32 supports only the 16x16x32 atom (got "
+                    f"{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k})"
                 )
             if self.lds_layout is not None:
                 # Reject rather than ignore: under K-outer the B shape is
@@ -785,6 +813,23 @@ class DgradConvSpec:
                 raise ValueError(
                     "lds_k_outer is not supported with async_dma on dgrad: the "
                     "tilde builder has no direct global->LDS path"
+                )
+            if self.pipeline == "wavelet":
+                # Same shape of problem as async_dma above: the alternate load
+                # path does not implement K-outer. build_wavelet_loaders pins
+                # the B tile to (block_n, block_k) and takes the unswapped
+                # descriptor, so it writes the tile M-outer while the compute
+                # phase reads it through _tr_frag. The allocation is K-outer
+                # -- (block_k, block_n + _KOUTER_PAD) -- so this is not merely
+                # a transposed operand: the row stride is wrong for every
+                # element and, whenever block_n > block_k (the usual case), the
+                # store runs off the end of B_smem into a neighbouring LDS
+                # allocation. Verified numerically wrong on gfx1250.
+                raise ValueError(
+                    "lds_k_outer is not supported with pipeline='wavelet' on "
+                    "dgrad: the wavelet loader writes the B tile M-outer into a "
+                    "K-outer allocation (wrong row stride, and out of bounds "
+                    "when tile_n > tile_k)"
                 )
         layout = self.effective_lds_layout()
         if self.async_dma:
@@ -901,19 +946,31 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         # This gate has NO counterpart in validate() and that split is the whole
         # point: without it an older target builds cleanly and emits
         # ds_read_tr16_b64, surfacing as an assembler failure far from the cause.
-        if arch != _LDS_K_OUTER_ARCH:
+        if arch not in _LDS_K_OUTER_ARCH_WAVE:
             return False, (
-                f"lds_k_outer requires {_LDS_K_OUTER_ARCH} (ds_read_tr16_b64 is a "
-                f"CDNA4 transpose read); got {arch}"
+                f"lds_k_outer requires one of {sorted(_LDS_K_OUTER_ARCH_WAVE)} "
+                f"(the LDS transpose read); got {arch}"
             )
-        if family == "wmma":
-            return False, "lds_k_outer is an MFMA-family path; got wmma"
+        if spec.wave_size != _LDS_K_OUTER_ARCH_WAVE[arch]:
+            # The lane mapping is derived per wave size, so the arch and the
+            # wave must agree or the formula addresses a layout the hardware
+            # does not implement.
+            return False, (
+                f"lds_k_outer on {arch} requires wave_size="
+                f"{_LDS_K_OUTER_ARCH_WAVE[arch]}; got {spec.wave_size}"
+            )
         # Soft mirrors of the validate() gates, so sweep drivers get a reason
         # string instead of swallowing a builder ValueError into a silent skip.
         if spec.lds_layout is not None:
             return False, "lds_k_outer does not honour an explicit lds_layout"
         if spec.async_dma:
             return False, "lds_k_outer is not supported with async_dma on dgrad"
+        if spec.pipeline == "wavelet":
+            return False, (
+                "lds_k_outer is not supported with pipeline='wavelet' on dgrad "
+                "(the wavelet loader writes the B tile M-outer into a K-outer "
+                "allocation)"
+            )
 
     _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
     _lds_layout = spec.effective_lds_layout()
@@ -1544,48 +1601,51 @@ def _build_tilde_dgrad(
     else:
         _b_desc_fn = w_descriptor
 
-    # The fragment length is per-atom, not a constant: 8 for 32x32x16 and
-    # 16x16x32, 4 for 16x16x16 and 32x32x8. Hardcoding 8 would make a
-    # 4-element atom read past the end of the K-outer tile and return garbage.
-    if spec.lds_k_outer and b_per_lane % 4 != 0:
+    # The fragment length is per-atom, not a constant: on wave64 it is 8 for
+    # 32x32x16 and the MFMA 16x16x32, 4 for 16x16x16 and 32x32x8; on wave32 the
+    # WMMA 16x16x32 carries 16. Hardcoding a stride would read past the end of
+    # the K-outer tile and return garbage.
+    #
+    # The required multiple is the width the transpose read returns per lane,
+    # which differs by regime: ds_read_tr16_b64 returns 4, ds_load_tr16_b128
+    # returns 8. Checking 4 on wave32 would admit a fragment length of 4 or 12,
+    # where the ``n // 8`` read loop is empty (or truncates) and the fragment is
+    # built from an empty ``parts`` list -- an IndexError at build time rather
+    # than a wrong answer, but the guard should state the real invariant.
+    _tr_lanes = 8 if spec.wave_size == 32 else 4
+    _tr_insn = "ds_load_tr16_b128" if spec.wave_size == 32 else "ds_read_tr16_b64"
+    if spec.lds_k_outer and b_per_lane % _tr_lanes != 0:
         raise ValueError(
-            f"lds_k_outer needs a B fragment length that is a multiple of 4 "
-            f"(ds_read_tr16_b64 returns 4 elements per lane); got "
-            f"b_per_lane={b_per_lane} for atom "
+            f"lds_k_outer needs a B fragment length that is a multiple of "
+            f"{_tr_lanes} ({_tr_insn} returns {_tr_lanes} elements per lane on "
+            f"wave{spec.wave_size}); got b_per_lane={b_per_lane} for atom "
             f"{spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k}"
         )
 
     # Materialised only on the K-outer path: emitting these unconditionally
     # would add IR ops to every existing config and move every dgrad golden.
     if spec.lds_k_outer:
-        _tr_lane_mod4 = b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4))
-        _tr_grp16 = b.div(b.mod(lane, b.const_i32(16)), b.const_i32(4))
+        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size).bind(b, lane)
 
     def _tr_frag(smem: Value, mn_base: Value, k_base: Value, mn_atom: int, n: int):
-        """One MFMA operand fragment from a K-outer tile via transpose reads."""
-        c_mn = b.const_i32(mn_atom)
-        col = b.add(
+        """One MMA operand fragment from a K-outer tile via transpose reads.
+
+        Thin binding of :class:`ConvKOuterFragmentReader`, which owns the lane
+        mapping for both wave regimes and is shared with the other backward
+        instance. The mapping is the part that is easy to get subtly wrong --
+        two engines agreeing on the same wrong formula still reads a transposed
+        operand -- so it lives in one place, mirroring ``rocke_conv_tr_frag`` in
+        the C++ engine.
+        """
+        return _tr_reader.fragment(
+            b,
+            smem,
             mn_base,
-            b.add(
-                b.mul(b.div(b.mod(lane, c_mn), b.const_i32(16)), b.const_i32(16)),
-                _tr_lane_mod4,
-            ),
+            k_base,
+            mn_atom=mn_atom,
+            n=n,
+            dtype=_smem_dtype if _smem_dtype is not None else F16,
         )
-        row0 = b.add(k_base, b.add(b.mul(b.div(lane, c_mn), b.const_i32(n)), _tr_grp16))
-        # ``_smem_dtype`` is None for fp16 (the legacy "default is F16"
-        # convention used by _emit_smem_load); ds_read_tr16_b64 needs a concrete
-        # element type, so resolve it here.
-        tr_dtype = _smem_dtype if _smem_dtype is not None else F16
-        parts = [
-            b.ds_read_tr16_b64(
-                smem, b.add(row0, b.const_i32(4 * r)), col, dtype=tr_dtype
-            )
-            for r in range(n // 4)
-        ]
-        out = parts[0]
-        for pt in parts[1:]:
-            out = b.vec_concat(out, pt)
-        return out
 
     def emit_load_phase(k_off: Value, A_dst: Value, B_dst: Value) -> None:
         k_off_capture[0] = k_off
@@ -1631,6 +1691,18 @@ def _build_tilde_dgrad(
                 b_cols = []
                 for ni in range(mfmas_n):
                     atom_row = b.add(warp_n_off, b.const_i32(ni * spec.warp_tile_n))
+                    if spec.lds_k_outer:
+                        # B only: dgrad's A tile is genuinely still M-outer.
+                        b_cols.append(
+                            _tr_frag(
+                                B_src,
+                                atom_row,
+                                k_tile_base,
+                                spec.warp_tile_n,
+                                b_per_lane,
+                            )
+                        )
+                        continue
                     b_cols.append(
                         _emit_frag_smem_load(
                             b,
