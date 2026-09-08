@@ -174,33 +174,88 @@ K-contiguously, unchanged (no new LDS layout, no consumer-read change).
 Enabled for the **sync CDNA-MFMA** path (`op.family == "mma"`): the width is
 `vec_a | K` (A) and `vec_b | C` (B, so a vector never crosses a `(y,x)` filter
 boundary), falling back to the scalar `vector_axis="col"` path (byte-identical)
-when a width > 1 is not admissible. The async-DMA and WMMA paths are follow-ons
-(see below). The optional `K0-M-K1` LDS layout below is an *additional*
-bank-conflict/wider-`ds_read` optimization, independent of this vectorised load.
+when a width > 1 is not admissible. The WMMA path is a follow-on. This
+vectorised load is what makes the *store* side the remaining cost, which the
+K-outer tile below removes.
+
+### K-outer LDS tile + transpose-read operand fetch (`lds_k_outer`)
+
+The free-axis vector load above leaves a transpose *on store*: the loader reads
+`load_vec` contiguous elements along the free axis, then scatters them into
+`[row+i, col]` of the row-major `(M/N, K)` tile — one narrow `ds_write_b16` per
+element plus its address math (`CoalescedTileLoader._store_tile` in `"row"`
+mode). Those writes are bank-degenerate by construction: adjacent lanes step the
+tile by `load_vec` **rows**, so the inter-lane dword delta is
+`load_vec × (block_k + lds_k_pad) / 2`, an exact multiple of the 32-dword bank
+period at every swept `tile_k` (16 / 32 / 64) and either pad (0 or 8).
+`lds_k_pad` cannot fix this — that pad is derived for a row step of 1, i.e. for
+the *read* path.
+
+`lds_k_outer=True` stores the tile K-outer (`LDS[k][mn]`, row stride
+`block_mn + _KOUTER_PAD` with `_KOUTER_PAD = 8`, or `0` under `async_dma`) and
+recovers the MFMA operand layout with transpose reads instead:
+
+| Side | M-outer | K-outer |
+|------|---------|---------|
+| Store | `load_vec` × `ds_write_b16` + address math per chunk | one wide `smem_store_vN` (`b128` for a 16-bit 8-wide vector); drops `load_vec − 1` address adds and `load_vec` `vec_extract`s per chunk |
+| Read | one `smem_load_vN` per fragment | `n / 4` × `ds_read_b64_tr_b16` (wave64) or `n / 8` × `ds_load_tr16_b128` (wave32), for per-lane fragment length `n` |
+
+Net read-side delta is **+1** instruction per fragment on the `n = 8` atoms
+(`32x32x16`, `16x16x32`) and exactly **zero** on the `n = 4` atoms (`16x16x16`,
+`32x32x8`). Global `buffer_load`s are unchanged: `choose_vec` tests `tile_rows`
+in `"row"` mode and `tile_cols` in `"col"` mode, and the flip transposes the tile
+too, so both calls test the same free-axis extent — only the LDS store
+instruction changes.
+
+**Wgrad flips both operands.** A (`dY`, NHWK) and B (`X`, NHWC) are both
+contiguous along the GEMM free axis and strided along the reduction axis, so both
+paid the scatter. (Dgrad flips B only — see its README.)
+
+**Gating.** Two regimes, `_LDS_K_OUTER_ARCH_WAVE = {"gfx950": 64,
+"gfx1250": 32}`, each arch pinned to its wave size so a mismatched spec is
+rejected rather than emitting a lane formula the hardware does not implement.
+gfx950 wave64 admits `warp_tile ∈ (16, 32)` and `ds_read_b64_tr_b16` (4 elements
+per lane); gfx1250 wave32 admits only the `16x16x32` atom and
+`ds_load_tr16_b128` (8 per lane, so its 16-element fragment is two reads). Plus
+16-bit A/B.
+
+**Not a knob.** The spec field still defaults `False` (existing goldens are
+unmoved); the value is deduced by `WgradConvSpec.default_lds_k_outer(arch,
+dtype_a, dtype_b, warp_tile_m, warp_tile_n, wave_size)`, which both library
+dispatch (`library/dispatch/grouped_convolution.py`) and the sweep driver call.
+
+### Async DMA on the K-outer tile
+
+`async_dma=True` no longer depends on `unroll_k`. `SchedulePolicy.for_pipeline`
+is selected as `"async_dma" if spec.async_dma else spec.pipeline`, so the async
+leg pins its own schedule (interwave, `s_setprio 1`) and ignores `spec.pipeline`
+rather than being gated by it; it double-buffers on its own
+(`_double = spec.async_dma or spec.unroll_k`). This is why the sweep driver pins
+the pipeline to `"mem"` on that leg instead of compiling one body under several
+kernel names.
+
+The old blocker — `raw_ptr_buffer_load_lds` writes a packed lane-contiguous tile
+incompatible with a non-zero `lds_k_pad` — was resolved by *accepting* the packed
+layout: the K-outer tile **is** that layout. Hence `async_dma` now **requires**
+`lds_k_outer=True` on wgrad (`validate()` and `is_valid_wgrad_spec`), and forces
+the K-outer row pad to 0. It remains incompatible with `pipeline="basic"`.
+
+Both loops that Python-unroll the K iteration — `pipeline="basic"` and
+`async_dma` — are bounded by `_MAX_UNROLLED_K_ITERS` (128). Over the cap the spec
+is rejected; raise `split_k` or `tile_k` rather than the constant.
 
 ## Next steps
 
-### Async DMA for all pipelines
-
-`async_dma=True` works today but is gated to the software-pipelined (`unroll_k`)
-path. The `mem` and `compv4` pipelines fall back to synchronous
-`CoalescedTileLoader` because `raw_ptr_buffer_load_lds` writes a packed
-lane-contiguous tile that is incompatible with non-zero `lds_k_pad`. To extend
-async DMA to all pipelines the load path needs to either:
-
-- Accept the packed layout and downstream adjust SMEM read indexing to match, or
-- Introduce a padding-aware async path that inserts the `lds_k_pad` columns
-  during the DMA itself.
-
 ### K0-M-K1 LDS layout
 
-The current LDS layout stores tiles in `(M, K)` row-major order with a small
-`lds_k_pad` column pad to break bank conflicts. A `K0-M-K1` layout (also called
-the transposed or interleaved LDS layout, after the CK naming convention)
-reorders the tile as `(K0, M, K1)` where `K = K0 × K1`. This means each MFMA
-atom's K slice is contiguous in LDS, which eliminates the bank-conflict
-cross-section that the current padding only partially mitigates and enables
-wider ds_read instructions. Adding this layout requires:
+Superseded for the bank-conflict case by `lds_k_outer` above, which reaches the
+same goal (conflict-free LDS traffic, wide stores) with a 2-D `LDS[k][mn]` tile
+and a transpose read rather than a new 3-D layout. A true `K0-M-K1` layout —
+`(K0, M, K1)` with `K = K0 × K1`, after the CK naming convention — would still be
+needed to make each atom's K slice contiguous for consumers that cannot use a
+transpose-read intrinsic (no `ds_read_b64_tr_b16` / `ds_load_tr16_b128` on the
+target, or non-16-bit operands, both of which `lds_k_outer` rejects today).
+Adding it requires:
 
 1. A new `LdsLayout` variant that encodes the `(K0, M, K1)` stride formula.
 2. Updated `CoalescedTileLoader` / `AsyncTileLoader` store-index calculations
