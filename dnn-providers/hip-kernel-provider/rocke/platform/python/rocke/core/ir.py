@@ -1836,12 +1836,12 @@ class IRBuilder:
         is_int_acc = (
             dst_dtype == "i32" if dst_dtype is not None else _mma_dst_is_int(op_id)
         )
-        c_elem = I32 if is_int_acc else F32
+        dst_elem = I32 if is_int_acc else F32
         hint = _MMA_RESULT_HINT.get(op_id, "acc")
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(c_elem, dst_frag_len)],
+            [VectorType(dst_elem, dst_frag_len)],
             attrs={"op_id": op_id},
             result_name_hint=hint,
         ).result

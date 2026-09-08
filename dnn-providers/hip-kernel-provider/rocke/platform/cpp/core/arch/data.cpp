@@ -179,7 +179,7 @@ const char* rocke_normalize_dtype(const char* name, char* scratch, size_t scratc
             return;                                \
     } while(0)
 
-/* MFMA 16x16 src2/dst row-column map. */
+/* MFMA 16x16 src2/dst: slot i -> (m_blk * 4 + i, lane % 16). */
 static void _mfma_row_col_16x16(rocke_ir_builder_t* b,
                                 rocke_value_t* lane,
                                 int slot,
