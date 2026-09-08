@@ -110,7 +110,8 @@ def buildAssemblyCodeObjectFiles(
             coFileMap[destination].append(objectFile)
 
       for coFileRaw, objFiles in coFileMap.items():
-        linker(objFiles, str(coFileRaw))
+        # Canonicalize both the default-list and explicit-set linker input paths.
+        linker(sorted(objFiles), str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
           bundler.compress(str(coFileRaw), str(coFile), gfx)

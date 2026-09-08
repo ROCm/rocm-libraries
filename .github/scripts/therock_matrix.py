@@ -96,7 +96,10 @@ project_map = {
     # Windows support is experimental and off by default in TheRock, and
     # TheRock's rpp test job is Linux-only, so this row is restricted to Linux.
     "rpp": {
-        "cmake_options": ["-DTHEROCK_ENABLE_RPP=ON"],
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_RPP=ON",
+            "-DTHEROCK_DIST_AMDGPU_FAMILIES=gfx94X-dcgpu;gfx950-dcgpu;gfx125X-dcgpu",
+        ],
         "projects_to_test": ["rpp"],
         "platforms": ["linux"],
     },

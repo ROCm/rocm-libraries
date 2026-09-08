@@ -30,6 +30,14 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+/*
+ * ===========================================================================
+ *    laset is not currently included in the public API.
+ *    It is used in he2hb, hb2st, and the unmtr_hb2st tester.
+ *    It has broad utility, so may move to the public API later.
+ * ===========================================================================
+ */
+
 template <typename T>
 rocblas_status rocsolver_laset_impl(rocblas_handle handle,
                                     const rocblas_fill uplo,
