@@ -132,26 +132,38 @@ def _torch_rocm_version() -> Optional[tuple]:
     return (int(nums[0]), int(nums[1]))
 
 
+_ROCM_RELEASE_DIR_RE = re.compile(r"^rocm-(\d+)\.(\d+)")
+
+
 def _rocm_version_from_libdir(libdir: str) -> Optional[tuple]:
-    """``(major, minor)`` parsed from a ``<rocm>/lib`` path, or None.
+    """``(major, minor)`` ROCm **release** version for a ``<rocm>/lib`` path.
 
-    Tries the path as given, then its resolved target. A packaged install is
-    normally reached through an *unversioned* symlink -- ``ROCM_PATH=/opt/rocm``
-    pointing at ``/opt/rocm-7.2.3`` is the distro default -- and
-    :func:`_rocm_root_libdirs` deliberately returns the original string so
-    candidate paths stay readable in errors. Parsing only that string finds no
-    digits in ``rocm`` and reports the version as unknown, which silently
-    disables :func:`_torch_comgr_is_stale` on exactly the common layout it
-    exists to handle.
+    Matches only a ``rocm-X.Y[.Z]`` directory component, and scans the whole
+    path rather than just the parent of ``lib``. Two layouts make that
+    necessary, and each breaks a simpler rule:
 
-    Resolving is the fallback rather than the primary so an explicitly
-    versioned path keeps its own version even when it is itself a link into a
-    differently-named tree.
+    - The distro default reaches a packaged install through an *unversioned*
+      symlink (``ROCM_PATH=/opt/rocm`` -> ``/opt/rocm-7.2.3``), and
+      :func:`_rocm_root_libdirs` deliberately returns the original string so
+      candidate paths stay readable in errors. So the resolved target has to be
+      considered too, else the version reads as unknown and
+      :func:`_torch_comgr_is_stale` silently disables itself.
+    - A packaged ROCm keeps its runtime under a versioned *component* subdir,
+      ``/opt/rocm-7.2.0/core-7.13/lib``. ``core-7.13`` is a component version,
+      not a release: taking the parent of ``lib`` would yield ``(7, 13)`` and
+      compare it against ``torch.version.hip``, which reports the release. A
+      torch on ROCm 7.10 would then look *older* than a 7.2 install, because
+      ``(7, 10) < (7, 13)`` -- and comgr would be demoted backwards.
+
+    Returns None when no release component is present; unknown must stay
+    unknown, since :func:`_torch_comgr_is_stale` keeps the historical
+    resolution order rather than guessing.
     """
     for candidate in (libdir, os.path.realpath(libdir)):
-        nums = re.findall(r"\d+", os.path.basename(os.path.dirname(candidate)))
-        if len(nums) >= 2:
-            return (int(nums[0]), int(nums[1]))
+        for part in candidate.split(os.sep):
+            m = _ROCM_RELEASE_DIR_RE.match(part)
+            if m:
+                return (int(m.group(1)), int(m.group(2)))
     return None
 
 

@@ -6499,8 +6499,12 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
 
         self.assertEqual(_rocm_version_from_libdir("/opt/rocm-7.2.3/lib"), (7, 2))
+        # core-7.13 is a *component* version living under release 7.2.0. The
+        # result is compared against torch.version.hip, which reports the
+        # release, so the component number must not win: reading (7, 13) here
+        # would make a torch on ROCm 7.10 look older than a 7.2 install.
         self.assertEqual(
-            _rocm_version_from_libdir("/opt/rocm-7.2.0/core-7.13/lib"), (7, 13)
+            _rocm_version_from_libdir("/opt/rocm-7.2.0/core-7.13/lib"), (7, 2)
         )
 
     def test_rocm_version_resolves_unversioned_symlink(self):
@@ -6543,6 +6547,27 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             libdir = os.path.join(tmp, "rocm", "lib")
             os.makedirs(libdir)
             self.assertIsNone(_rocm_version_from_libdir(libdir))
+
+    def test_component_version_never_outranks_the_release(self):
+        import sys
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # torch on ROCm 7.10 beside a packaged release 7.2.0 whose runtime
+        # lives in core-7.13. torch is NEWER, so nothing may be demoted --
+        # comparing against the component version would invert that.
+        torch_stub = types.ModuleType("torch")
+        torch_stub.version = types.SimpleNamespace(hip="7.10.0-abc123")
+
+        with mock.patch.dict(sys.modules, {"torch": torch_stub}):
+            with mock.patch.object(
+                rc, "_rocm_root_libdirs", return_value=["/opt/rocm-7.2.0/core-7.13/lib"]
+            ):
+                self.assertEqual(rc._torch_rocm_version(), (7, 10))
+                self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
+                self.assertFalse(rc._torch_comgr_is_stale())
 
     def test_stale_comgr_demotion_fires_through_a_symlinked_root(self):
         import sys

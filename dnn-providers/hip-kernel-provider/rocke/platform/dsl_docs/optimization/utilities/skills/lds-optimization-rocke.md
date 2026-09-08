@@ -447,10 +447,12 @@ store side needs — so it satisfies both constraints at once.
 
 **Async exception (wgrad)**: the direct global→LDS path deposits lane-contiguous
 *packed* bytes and cannot skip a row pad, so `async_dma` forces the K-outer row
-pad to **0**. The transpose read is insensitive to the row stride, so dropping
-the pad costs nothing on the read side — but it gives back exactly the bank
-property K-outer was introduced to obtain, which is why `async_dma` is a swept
-axis rather than a deduced one. The dependency also runs the other way: wgrad
+pad to **0**. That is *not* free on the read side: by the Step 4 derivation a pad
+of 0 puts the row stride back at a whole multiple of the bank period, so the
+transpose read gives up exactly the bank spread K-outer was introduced to obtain
+(the "degenerate" row of the worked example). `async_dma` therefore trades
+read-side bank spread for the write-side and prefetch win of the direct path,
+which is why it is a swept axis rather than a deduced one. The dependency also runs the other way: wgrad
 `async_dma` *requires* `lds_k_outer=True`, because the direct load needs a
 stride-1 reduction axis and wgrad only has one once the tile is stored K-outer.
 On dgrad the pad is an unconditional 8, since `async_dma` is rejected outright on
@@ -466,13 +468,17 @@ WgradConvSpec.default_lds_k_outer(
     arch, dtype_a, dtype_b, warp_tile_m, warp_tile_n, wave_size)
 
 DgradConvSpec.default_lds_k_outer(
-    arch, dtype_b, warp_tile_n, cpg, wave_size)
+    arch, dtype_b, warp_tile_n, cpg, wave_size, pipeline)
 ```
 
 The dgrad predicate is deliberately **asymmetric** — `dtype_b` / `warp_tile_n`
 only, never the A-side counterparts — because only B flips. It additionally
-carries `cpg` (see "When Not to Use It" below). The `lds_k_outer` spec field
-itself still defaults to `False`, so existing goldens are unmoved.
+carries `cpg` (see "When Not to Use It" below) and `pipeline`: the wavelet
+loader does not implement the K-outer tile, so `pipeline="wavelet"` returns
+`False` and keeps that combination off the sweep entirely (`validate()` rejects
+the pair outright). The wgrad predicate takes no `pipeline` argument. The
+`lds_k_outer` spec field itself still defaults to `False`, so existing goldens
+are unmoved.
 
 An explicit `lds_layout` or `async_dma` on the dgrad K-outer path is **rejected**
 rather than silently ignored, as is an explicit `lds_k_pad` on the wgrad K-outer

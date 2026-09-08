@@ -308,6 +308,13 @@ typedef struct rocke_conv_build_ctx
     /* Atom edge + fragment length used by the K-outer transpose-read feed. */
     rocke_value_t* tr_lane_mod4;
     rocke_value_t* tr_grp16;
+    /* Element type handed to the transpose read, mirroring Python's
+     * _smem_dtype. Must not be left NULL: rocke_b_ds_read_tr16_b128 defaults a
+     * NULL dtype to f16, and on gfx1250 that opcode is element-typed, so a bf16
+     * kernel would select .v8f16 and feed half fragments to a bf16 WMMA. The
+     * wave64 ds_read_b64_tr_b16 is type-agnostic, which is why gfx950 parity
+     * never caught it. */
+    const rocke_type_t* tr_dtype;
     rocke_async_tile_loader_t a_loader; /* async A loader (valid iff async)*/
     rocke_async_tile_loader_t b_loader; /* async B loader                  */
     bool have_async_loaders; /* true => a_loader/b_loader valid */
@@ -395,6 +402,10 @@ rocke_value_t* rocke_conv_emit_smem_load(
  * constants directly rather than a build ctx, so both the shared compute phase
  * (wgrad, A and B) and dgrad's own operand fetch (B only) can call it without
  * duplicating the lane mapping. See conv_implicit_gemm_conv_compute_phase.cpp. */
+/* Operand dtype string -> element type for the K-outer transpose read.
+ * Mirrors Python's _smem_dtype fallback to F16; never returns NULL. */
+const rocke_type_t* rocke_conv_tr_elem_dtype(const char* a_dtype);
+
 rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
                                   rocke_value_t* lane,
                                   rocke_value_t* tr_lane_mod4,
