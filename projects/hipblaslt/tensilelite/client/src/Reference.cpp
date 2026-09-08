@@ -1959,10 +1959,11 @@ namespace TensileLite
 
         // Compute the PartialRMS partial-reduction buffer for PartialRMSAxis=0:
         // partialBuf[token, tFree0] = sum over free0 tile t of (A*B)[m, token]^2. When
-        // quant is enabled a second half holds per-tile amax/fp8Max entries.
+        // quant is enabled a second half holds per-tile amax/fp8Max entries. The full
+        // buffer is always computed (not sparse-sampled) because per-row validation needs
+        // every element of each row.
         inline void computePartialRMSBuf(ContractionProblemGemm const& problem,
-                                         ContractionInputs const&      inputs,
-                                         size_t                        elementsToValidate)
+                                         ContractionInputs const&      inputs)
         {
             if(!problem.usePartialRMS() || inputs.partialBuf == nullptr)
                 return;
@@ -1984,9 +1985,6 @@ namespace TensileLite
 
             TensorDescriptor const& pbTensor
                 = problem.tensors()[ContractionProblemGemm::TENSOR::PARTIALBUF];
-            size_t pbValidStride = 1;
-            if(elementsToValidate > 0 && elementsToValidate < pbTensor.totalLogicalElements())
-                pbValidStride = NextPrime(pbTensor.totalAllocatedElements() / elementsToValidate);
 
             float* pb = static_cast<float*>(inputs.partialBuf);
             std::fill(pb, pb + pbTensor.totalAllocatedElements(), 0.0f);
@@ -1997,7 +1995,7 @@ namespace TensileLite
 
             omp_set_num_threads(MAX_OMP_THREADS);
 #pragma omp parallel for schedule(dynamic)
-            for(size_t pbNum = 0; pbNum < pbTensor.totalLogicalElements(); pbNum += pbValidStride)
+            for(size_t pbNum = 0; pbNum < pbTensor.totalLogicalElements(); ++pbNum)
             {
                 std::vector<int64_t> pbCoord(pbTensor.dimensions());
                 CoordNumbered(pbNum,
@@ -2867,14 +2865,14 @@ namespace TensileLite
                     dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
                 }
             }
+            } // end #pragma omp parallel
 
             if constexpr(notCmplxAmaxD)
             {
-                computePartialRMSBuf(problem, inputs, elementsToValidate);
+                computePartialRMSBuf(problem, inputs);
                 computeTileQuant<Inputs, Accumulator>(problem, inputs);
                 computeMXFP8Quant<Inputs, Accumulator>(problem, inputs);
             }
-            } // end #pragma omp parallel
 
             if(problem.outputAmaxD())
             {

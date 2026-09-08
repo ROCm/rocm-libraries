@@ -543,7 +543,13 @@ namespace TensileLite
 
                                     int mt0      = m_partialRMSMT0Override > 0 ? m_partialRMSMT0Override : 16;
                                     int mt1      = m_partialRMSMT1Override > 0 ? m_partialRMSMT1Override : 16;
-                                    size_t mPadded  = ((mTokens  + static_cast<size_t>(mt1) - 1) / static_cast<size_t>(mt1)) * static_cast<size_t>(mt1);
+                                    // A benchmark group may mix solutions with different MT1, each
+                                    // writing ceil(M_tokens/MT1)*MT1 padded token rows into the shared
+                                    // partialBuf. Size the row count for the worst case by assuming a
+                                    // maximum macro tile of 512, which upper-bounds any real MT1's
+                                    // padding (ceil(M/MT1)*MT1 < M + MT1 <= M + 512).
+                                    size_t maxMacroTile = 512;
+                                    size_t mPadded  = ((mTokens + maxMacroTile - 1) / maxMacroTile) * maxMacroTile + maxMacroTile;
                                     size_t nTilesN  = (nHidden   + static_cast<size_t>(mt0) - 1) / static_cast<size_t>(mt0);
 
                                     rv.back().setPartialRMSMT0(mt0);
