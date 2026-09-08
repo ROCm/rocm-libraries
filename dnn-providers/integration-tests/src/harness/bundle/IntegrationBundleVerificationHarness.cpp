@@ -583,14 +583,9 @@ VerificationOutcome
                                   hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
         // allclose unless this engine's TOML names the tensor. Nothing else selects a
         // validator — see ALMIOPEN-2561.
-        const auto validatorOverride
-            = TestConfig::get().findValidatorOverride(currentTestName(), label);
-        if(validatorOverride && validatorOverride->kind == ValidatorOverrideKind::RMS)
+        if(const auto rmsThreshold = findTomlRmsThreshold(currentTestName(), label))
         {
-            HIPDNN_PLUGIN_LOG_INFO("Validator override applied for "
-                                   << currentTestName() << " tensor " << label
-                                   << ": rms, threshold=" << validatorOverride->rmsThreshold);
-            return ComparisonTolerance::rms(validatorOverride->rmsThreshold);
+            return ComparisonTolerance::rms(*rmsThreshold);
         }
 
         ComparisonTolerance tolerance;

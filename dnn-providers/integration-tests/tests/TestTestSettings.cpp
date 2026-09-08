@@ -465,6 +465,25 @@ rms_threshold = 0.0
     EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
+// An allclose entry carrying a threshold means the file no longer says what its
+// author meant — 'validator' was edited and 'rms_threshold' left behind, or the
+// reverse. Either way, the file is wrong about which check runs.
+TEST(TestSettingsValidatorOverrides, ThrowsOnAllcloseWithRmsThreshold)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE"]
+validator = "allclose"
+rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
 // ---------------------------------------------------------------------------
 // [[test_skips]] parsing
 // ---------------------------------------------------------------------------

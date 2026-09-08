@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,9 @@ namespace
 
 constexpr int64_t K_UID_A = 5; // named "y_out"
 constexpr int64_t K_UID_B = 4; // unnamed
+// Not wired to a node: it exists so a test can ask what an integer output does when a
+// 'tensors' glob is wide enough to select RMS for it.
+constexpr int64_t K_UID_INT = 6; // named "counts", INT32
 
 // The batchnorm graph the other bundle tests use, with uid 5 given a name so both
 // label paths are reachable: uid 5 reports its name, uid 4 falls back to its uid.
@@ -49,7 +53,9 @@ const std::string K_GRAPH
       R"({"name": "", "uid": 4, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
       R"("data_type": "float", "virtual": false}, )"
       R"({"name": "y_out", "uid": 5, "strides": [60, 20, 5, 1], "dims": [2, 3, 4, 5], )"
-      R"("data_type": "float", "virtual": false}], "io_data_type": "float", )"
+      R"("data_type": "float", "virtual": false}, )"
+      R"({"name": "counts", "uid": 6, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+      R"("data_type": "int32", "virtual": false}], "io_data_type": "float", )"
       R"("compute_data_type": "float", "intermediate_data_type": "float", "name": ""})";
 // Built the same way the bundle loader builds one, so these tests walk a real
 // flatbuffer graph rather than a hand-rolled attribute map.
@@ -83,6 +89,16 @@ std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     view.getHostValue({0, 1, 0, 0}) = v1;
     view.getHostValue({0, 2, 0, 0}) = v2;
     tensor->markHostModified();
+    return tensor;
+}
+
+// An integer tensor, filled with one value. Integer outputs exist in this suite, and
+// the RMS validator has no implementation for them.
+std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+    intTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs, int32_t value)
+{
+    auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
+    tensor->fillTensorWithValue(static_cast<float>(value));
     return tensor;
 }
 
@@ -365,6 +381,74 @@ TEST(TestOutputComparison, ValidatorKindIsChosenPerTensor)
         << "the lookup must be given the label a TOML glob would match on";
     ASSERT_EQ(mismatches.size(), 1u) << "uid 4 passes under RMS; uid 5 fails under allclose";
     EXPECT_EQ(mismatches[0].uid, K_UID_A);
+}
+
+// ---------------------------------------------------------------------------
+// Both harnesses resolve a tensor's label through the same helper: it is what a TOML
+// 'tensors' glob matches on and what the report prints, and a raw tensor name is
+// neither when the graph left the tensor unnamed.
+// ---------------------------------------------------------------------------
+
+TEST(TestOutputComparison, LabelFromANameKeepsTheName)
+{
+    EXPECT_EQ(tensorLabel(7, "LayernormBackward_0::DSCALE"), "LayernormBackward_0::DSCALE");
+}
+
+TEST(TestOutputComparison, LabelFromAnEmptyNameFallsBackToTheUid)
+{
+    EXPECT_EQ(tensorLabel(7, ""), "uid=7");
+}
+
+// ---------------------------------------------------------------------------
+// RMS is defined for float, half, bfloat16 and double only. A 'tensors' glob one
+// wildcard too wide can still select it for an integer output, and the TOML parser
+// cannot catch that: a tensor's dtype is not known until its graph is read. It has to
+// come back as a comparison failure naming the tensor, not an exception out of the
+// test body.
+// ---------------------------------------------------------------------------
+
+TEST(TestOutputComparison, RmsOnAnUnsupportedDataTypeIsReportedNotThrown)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_INT);
+
+    auto expected = intTensor(attrs, 7);
+    auto actual = intTensor(attrs, 7);
+
+    std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
+    ASSERT_NO_THROW(mismatch = compareTensor(K_UID_INT,
+                                             attrs,
+                                             *expected,
+                                             *actual,
+                                             ComparisonTolerance::rms(K_RMS_THRESHOLD),
+                                             "Bundle: b"));
+
+    // Equal tensors, so this is not a numerical verdict: it reports that the override
+    // could not be honoured at all.
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_EQ(mismatch->label, "counts");
+    EXPECT_NE(mismatch->report.find("counts"), std::string::npos);
+    EXPECT_NE(mismatch->report.find("INT32"), std::string::npos);
+    EXPECT_NE(mismatch->report.find("validator_overrides"), std::string::npos)
+        << "the operator has to be told which config section over-matched";
+}
+
+// The guard is scoped to RMS: integer outputs still compare normally under the default.
+TEST(TestOutputComparison, AllcloseStillGradesIntegerOutputs)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_INT);
+
+    auto expected = intTensor(attrs, 7);
+    auto matching = intTensor(attrs, 7);
+    auto drifted = intTensor(attrs, 9);
+
+    EXPECT_FALSE(compareTensor(K_UID_INT, attrs, *expected, *matching, exact(), "b").has_value());
+    EXPECT_TRUE(compareTensor(K_UID_INT, attrs, *expected, *drifted, exact(), "b").has_value());
 }
 
 // NOLINTEND(readability-identifier-naming)

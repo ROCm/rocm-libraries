@@ -14,6 +14,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -110,7 +111,43 @@ std::vector<TensorMismatch>
                    const std::string& contextLine);
 
 /// The tensor's name, or "uid=N" when the graph did not give it one.
+///
+/// Every harness resolves a tensor's label through this. The label is both what a
+/// TOML `tensors` glob is matched against and what the failure report prints, so the
+/// two must not be allowed to disagree about what a tensor is called.
+std::string tensorLabel(int64_t uid, const std::string& name);
+
 std::string tensorLabel(int64_t uid,
                         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs);
+
+/// The validator one tolerance selects, or the reason it could not be built.
+struct ValidatorSelection
+{
+    std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator;
+    std::string error; ///< non-empty exactly when `validator` is null
+};
+
+/// Builds the validator `tolerance` selects for one output tensor.
+///
+/// RMS is implemented for FLOAT/HALF/BFLOAT16/DOUBLE only, so a `tensors` glob one
+/// wildcard too wide can select it for an integer output. The TOML parser cannot catch
+/// that — a tensor's data type is not known until its graph is read — so it surfaces
+/// here as a named failure that says which glob over-matched, rather than as an
+/// exception unwinding out of the test body.
+ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                                 const std::string& label,
+                                 const ComparisonTolerance& tolerance);
+
+/// The failure report for one tensor: header plus per-element drift profile.
+///
+/// Shared by both harnesses so a tensor graded by RMS reports the threshold that
+/// decided it on either path, instead of an atol/rtol pair that did not.
+std::string formatMismatchReport(int64_t uid,
+                                 const std::string& label,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                                 hipdnn_data_sdk::utilities::ITensor& expected,
+                                 hipdnn_data_sdk::utilities::ITensor& actual,
+                                 const ComparisonTolerance& tolerance,
+                                 const std::string& contextLine);
 
 } // namespace hipdnn_integration_tests::bundle
