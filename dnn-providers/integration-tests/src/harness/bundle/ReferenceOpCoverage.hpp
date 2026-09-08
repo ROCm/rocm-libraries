@@ -62,7 +62,9 @@ bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, s
 /// Only the CPU reference is gated, and only for Sdpa: it is scalar, so it is
 /// restricted to the `quick` tier and to shapes under a working-set cap. Excluded
 /// bundles stay covered by the GPU lane, so this trades CPU cross-checking of the
-/// larger shapes for a golden-data run that finishes.
+/// larger shapes for a golden-data run that finishes. That trade only holds while
+/// the GPU lane actually runs, which is the caller's job to establish -- see
+/// registerReferenceValidationTests()'s `gpuLaneWillRun`.
 ///
 /// `bundleId` is "<suiteName>.<testName>"; its leading path tier is what the tier
 /// cap reads.

@@ -17,6 +17,7 @@
 
 #include <argparse.hpp>
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 
 #include <filesystem>
 #include <iostream>
@@ -127,17 +128,26 @@ int main(int argc, char** argv) noexcept
         opts.configPath = std::move(configPath);
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
+        // The CPU lane's cost exclusion is justified by the GPU lane covering the
+        // bundles it drops, so it has to know whether that lane really runs.
+        // --reference already answers half of it; the other half is the device,
+        // because the GPU harness SKIP_IF_NO_DEVICES()s in SetUp() and a registered
+        // suite that skips covers nothing.
+        int deviceCount = 0;
+        const auto deviceStatus = hipGetDeviceCount(&deviceCount);
+        const bool gpuLaneWillRun = runGpu && deviceStatus == hipSuccess && deviceCount > 0;
+
         size_t cpuRegistered = 0;
         size_t gpuRegistered = 0;
         if(runCpu)
         {
             cpuRegistered = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
-                hipdnn_integration_tests::ReferenceExecutorType::CPU);
+                hipdnn_integration_tests::ReferenceExecutorType::CPU, gpuLaneWillRun);
         }
         if(runGpu)
         {
             gpuRegistered = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
-                hipdnn_integration_tests::ReferenceExecutorType::GPU);
+                hipdnn_integration_tests::ReferenceExecutorType::GPU, gpuLaneWillRun);
         }
 
         // Per-reference, not just per-run. A lane that registered nothing while its

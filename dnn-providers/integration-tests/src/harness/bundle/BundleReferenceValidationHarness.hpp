@@ -57,9 +57,14 @@ public:
     /// `bundleId` is "<suiteName>.<testName>", the registered GTest name minus the
     /// reference suffix. It is what knownReferenceGaps() is keyed on, so it must
     /// match the name printed for a failing test.
+    ///
+    /// Required rather than defaulted: an omitted id looks up as the empty string,
+    /// finds no gap entry, and silently puts the bundle on the ordinary path. That
+    /// is the safe direction, but it is still behaviour changing on an argument a
+    /// caller forgot. Callers with no id say so by passing "".
     void setBundle(std::shared_ptr<IntegrationTestBundle> bundle,
                    std::filesystem::path path,
-                   std::string bundleId = {})
+                   std::string bundleId)
     {
         _bundle = std::move(bundle);
         _bundlePath = std::move(path);

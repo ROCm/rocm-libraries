@@ -132,21 +132,14 @@ int64_t elementCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttribute
     return elements;
 }
 
-} // namespace
-
-bool referenceShapeIsAffordable(ReferenceExecutorType type,
-                                std::string_view bundleId,
-                                const void* graphBuffer,
-                                size_t size)
+// Both caps apply to Sdpa only, so a graph with no Sdpa node is affordable by
+// construction. Batchnorm and the other CPU-covered ops are cheap at every
+// checked-in shape, and gating them would trade real coverage for no measurable
+// time.
+bool isSdpaShapeAffordableOnCpuRunner(std::string_view bundleId,
+                                      const void* graphBuffer,
+                                      size_t size)
 {
-    // Only the CPU reference is gated. The GPU reference runs the same shapes in
-    // milliseconds, and it is the one that keeps the excluded bundles covered --
-    // which is what makes this a cost decision rather than a coverage loss.
-    if(type != ReferenceExecutorType::CPU)
-    {
-        return true;
-    }
-
     try
     {
         auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
@@ -161,9 +154,6 @@ bool referenceShapeIsAffordable(ReferenceExecutorType type,
                 continue;
             }
 
-            // Both caps apply to Sdpa only. Batchnorm and the other CPU-covered ops
-            // are cheap at every checked-in shape, and gating them would trade real
-            // coverage for no measurable time.
             if(bundleId.substr(0, K_CPU_TIER_PREFIX.size()) != K_CPU_TIER_PREFIX)
             {
                 return false;
@@ -197,6 +187,24 @@ bool referenceShapeIsAffordable(ReferenceExecutorType type,
     }
 
     return true;
+}
+
+} // namespace
+
+bool referenceShapeIsAffordable(ReferenceExecutorType type,
+                                std::string_view bundleId,
+                                const void* graphBuffer,
+                                size_t size)
+{
+    // Only the CPU reference is gated. The GPU reference runs the same shapes in
+    // milliseconds, and it is the one that keeps the excluded bundles covered --
+    // which is what makes this a cost decision rather than a coverage loss.
+    if(type != ReferenceExecutorType::CPU)
+    {
+        return true;
+    }
+
+    return isSdpaShapeAffordableOnCpuRunner(bundleId, graphBuffer, size);
 }
 
 std::vector<std::string>

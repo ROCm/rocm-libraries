@@ -45,12 +45,17 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
-# Bump when generator logic changes in a way that affects output data.
-# (e.g., different reference backend, precision handling, tensor layout)
+# Bump when generator logic changes in a way that affects emitted output: the
+# tensors (different reference backend, precision handling, tensor layout) or
+# the .meta.json schema, since consumers key off both.
 # 1.0.0 — Initial forward generator (Q, K, V, O tensors)
 # 1.0.1 — Added optional LSE output tensor (uid=4) via --stats flag
 # 1.1.0 — Added causal/window masking, FP8 inputs, and GROUP (variable-seq-len) mode
-GENERATOR_VERSION = "1.1.0"
+# 1.2.0 — Emit format_version, required by RFC 0011 §4.1. Tensor output is
+#         byte-identical to 1.1.0. The 35 checked-in bundles 1.1.0 produced carry
+#         the key backfilled by hand and keep recording 1.1.0 provenance; see the
+#         `notes` field in their .meta.json.
+GENERATOR_VERSION = "1.2.0"
 
 DTYPE_MAP = {
     "bf16": {"torch": torch.bfloat16, "json": "bfloat16", "bytes": 2},
@@ -358,7 +363,14 @@ def build_graph_json(
 
 
 def _get_generator_sha256():
-    """SHA-256 of this script's contents — git-independent version marker."""
+    """SHA-256 of this script's contents — git-independent version marker.
+
+    It names the exact script bytes that emitted a bundle, so any edit here --
+    logic, metadata schema, even a comment -- makes the value recorded in already
+    checked-in .meta.json files stale. That is the intended behaviour: those files
+    record the generator that produced *their* tensors, so they are never rewritten
+    to match a later revision of this script.
+    """
     script_path = os.path.abspath(__file__)
     with open(script_path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()

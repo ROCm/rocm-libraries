@@ -226,8 +226,15 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles,
 //
 // Returns the number of bundles registered so the caller can tell "this reference
 // verified nothing" apart from "this whole run had nothing to verify".
+//
+// `gpuLaneWillRun` says whether a GPU reference lane will actually execute in this
+// process -- selected by --reference *and* backed by a device. The CPU lane's cost
+// exclusion is only a cost trade while some other lane still validates the excluded
+// bundle, so without that lane the exclusion is switched off rather than left to
+// drop bundles nobody checks.
 inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& bundles,
-                                               ReferenceExecutorType referenceType)
+                                               ReferenceExecutorType referenceType,
+                                               bool gpuLaneWillRun)
 {
     const char* label = BundleReferenceValidationHarness::referenceLabel(referenceType);
 
@@ -265,11 +272,18 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
         const std::string bundleId = bundle.suiteName + "." + bundle.testName;
 
         // Deliberate cost exclusion, counted and printed rather than silent. Unlike
-        // an op-set miss this bundle IS validated -- by the other reference lane.
-        if(!referenceShapeIsAffordable(referenceType,
-                                       bundleId,
-                                       bundle.bundle->graphBuffer.data(),
-                                       bundle.bundle->graphBuffer.size()))
+        // an op-set miss this bundle IS validated -- by the GPU reference lane,
+        // which is why the exclusion only applies when that lane is really going to
+        // run. On a device-less runner the GPU harness SKIP_IF_NO_DEVICES()s in
+        // SetUp(), and --reference cpu removes the lane outright; excluding here in
+        // either case would leave the bundle validated by nobody and reported as
+        // neither a failure nor a skip. It would also zero `tooCostly` out of the
+        // guard below, disarming the check that is supposed to notice exactly that.
+        if(gpuLaneWillRun
+           && !referenceShapeIsAffordable(referenceType,
+                                          bundleId,
+                                          bundle.bundle->graphBuffer.data(),
+                                          bundle.bundle->graphBuffer.size()))
         {
             tooCostly++;
             continue;
@@ -312,7 +326,14 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
     {
         std::cerr << "\n       " << tooCostly
                   << " excluded as too costly for this reference (see "
-                     "referenceShapeIsAffordable); the other reference lane covers them";
+                     "referenceShapeIsAffordable); the GpuRef lane runs this session and "
+                     "covers them";
+    }
+    else if(referenceType == ReferenceExecutorType::CPU && !gpuLaneWillRun)
+    {
+        std::cerr << "\n       cost exclusion disabled: no GpuRef lane runs this session "
+                     "(--reference, or no device), so the expensive shapes it would cover "
+                     "are registered here instead of going unvalidated";
     }
     if(knownGaps > 0)
     {
@@ -506,7 +527,13 @@ inline void registerBundleTests()
 /// entry point for hipdnn_golden_data_tests, which loads no plugin and creates no
 /// handle -- see the binary's main() for why that separation is structural rather
 /// than a flag.
-inline size_t registerGoldenDataValidationTests(ReferenceExecutorType referenceType)
+///
+/// `gpuLaneWillRun` is the caller's answer to "will a GPU reference lane actually
+/// execute this session" -- selected by --reference and backed by a device. It
+/// gates the CPU lane's cost exclusion, which is only sound while that lane exists
+/// to cover the excluded bundles.
+inline size_t registerGoldenDataValidationTests(ReferenceExecutorType referenceType,
+                                                bool gpuLaneWillRun)
 {
     auto bundles = detail::discoverAndLoadBundles(/*countClaimCoverage=*/false);
     if(!bundles.has_value())
@@ -514,7 +541,7 @@ inline size_t registerGoldenDataValidationTests(ReferenceExecutorType referenceT
         return 0;
     }
 
-    return detail::registerReferenceValidationTests(*bundles, referenceType);
+    return detail::registerReferenceValidationTests(*bundles, referenceType, gpuLaneWillRun);
 }
 
 } // namespace hipdnn_integration_tests::bundle

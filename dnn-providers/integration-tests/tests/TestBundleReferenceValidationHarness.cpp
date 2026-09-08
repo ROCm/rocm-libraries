@@ -88,12 +88,15 @@ protected:
         }
     }
 
-    // Gives a harness a bundle that has golden data. The harness itself is built by
-    // each case: ::testing::Test is non-copyable, so it cannot be handed back.
+    // Gives a harness a bundle that has golden data, under no bundle id: these
+    // cases exercise the ordinary path, not the known-gap one. The harness itself
+    // is built by each case: ::testing::Test is non-copyable, so it cannot be
+    // handed back.
     void setGoldenBundle(BundleReferenceValidationHarness& harness)
     {
         harness.setBundle(fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true),
-                          _tempDir / "Bundle");
+                          _tempDir / "Bundle",
+                          /*bundleId=*/"");
     }
 
     // Same, but under a bundle id that knownReferenceGaps() recognises. Taken from
@@ -130,7 +133,7 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
     auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/false);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::CPU, /*requiresDevice=*/false, executors());
-    harness.setBundle(bundle, _tempDir / "Bundle");
+    harness.setBundle(bundle, _tempDir / "Bundle", /*bundleId=*/"");
 
     ::testing::TestPartResultArray results;
     driveSetUp(harness, &results);
@@ -150,7 +153,7 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
 
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::CPU, /*requiresDevice=*/false, executors());
-    harness.setBundle(bundle, "no-tensor-data-bundle");
+    harness.setBundle(bundle, "no-tensor-data-bundle", /*bundleId=*/"");
 
     ::testing::TestPartResultArray results;
     driveSetUp(harness, &results);
@@ -184,7 +187,7 @@ TEST_F(TestBundleReferenceValidationHarness,
     auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/true, executors());
-    harness.setBundle(bundle, _tempDir / "Bundle");
+    harness.setBundle(bundle, _tempDir / "Bundle", /*bundleId=*/"");
 
     // Driven through TestBody() directly rather than SetUp()+TestBody(): SetUp()'s
     // SKIP_IF_NO_DEVICES() gate is keyed off the registration flag alone and would
@@ -222,7 +225,7 @@ TEST_F(TestBundleReferenceValidationHarness,
     auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/true, executors());
-    harness.setBundle(bundle, _tempDir / "Bundle");
+    harness.setBundle(bundle, _tempDir / "Bundle", /*bundleId=*/"");
 
     // Not driven through SetUp(): same seam as above. The guard at the top of this
     // test already confirmed a device is present for this process.

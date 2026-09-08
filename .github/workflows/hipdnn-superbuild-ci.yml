@@ -160,6 +160,15 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($sitePackages)) { throw "empty rocm_kpack python dir" }
           echo "KPACK_PYTHON_DIR=$sitePackages" >> $env:GITHUB_ENV
 
+      # DVC the way the other Windows lane installs it (therock-ci-windows.yml),
+      # pinned to the same release. The action drops in the self-contained DVC
+      # installer, so no Python interpreter on this persistent self-hosted runner is
+      # mutated, and the lane does not silently move to a new DVC major. The Linux
+      # job takes DVC from its runner image instead, matching the Linux lanes there.
+      - uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
+        with:
+          version: '3.62.0'
+
       # hipdnn_golden_data_tests validates our checked-in golden .bin blobs against
       # our own CPU/GPU references. The blobs are DVC-managed, so without this step
       # the binary registers zero tests and the lane passes having verified nothing.
@@ -170,11 +179,21 @@ jobs:
       # This MUST run before configure: integration-tests/CMakeLists.txt stages the
       # bundle tree into the build directory with a configure-time file(COPY), so
       # blobs that arrive later never reach <exe>/../lib/integration-test-bundles.
+      # That placement makes an S3 outage fail the whole lane, build included.
+      # Taken deliberately: the alternative is a green build whose golden-data
+      # suite verified nothing, which is the failure this step exists to close.
       - name: Fetch golden data
         run: |
           set -euo pipefail
-          python -m pip install --disable-pip-version-check "dvc[s3]"
-          python -m dvc pull --recursive dnn-providers/integration-tests/integration-test-bundles
+          dvc pull --recursive dnn-providers/integration-tests/integration-test-bundles
+          # Exiting 0 does not prove a blob landed: absent pointers, or a remote
+          # that resolves to nothing, pull nothing and still succeed. Every bundle
+          # then loads without golden data, which the harness counts as a
+          # legitimately empty lane -- green, having verified nothing. Count what
+          # the pull was supposed to produce.
+          count=$(find dnn-providers/integration-tests/integration-test-bundles -name '*.bin' | wc -l)
+          test "$count" -gt 0 || { echo "dvc pull produced no golden blobs" >&2; exit 1; }
+          echo "Fetched $count golden tensor blob(s)"
 
       - name: Configure superbuild
         run: |
@@ -394,21 +413,22 @@ jobs:
           test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
           echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
 
-      # hipdnn_golden_data_tests validates our checked-in golden .bin blobs against
-      # our own CPU/GPU references. The blobs are DVC-managed, so without this step
-      # the binary registers zero tests and the lane passes having verified nothing.
-      # Anonymous S3 reads are enabled on both remotes (.dvc/config), so no
-      # credentials are needed, and each golden-data pointer carries its own
-      # `remote:` key, so a bare pull resolves them all.
+      # Golden-data fetch for hipdnn_golden_data_tests. See the Windows lane above
+      # for why this exists and why it MUST precede configure.
       #
-      # This MUST run before configure: integration-tests/CMakeLists.txt stages the
-      # bundle tree into the build directory with a configure-time file(COPY), so
-      # blobs that arrive later never reach <exe>/../lib/integration-test-bundles.
+      # DVC comes from the runner image rather than an install step, matching the
+      # other Linux lanes in this repo (therock-ci-linux.yml, component-ci-miopen.yml).
+      # LOGNAME is set for the same reason they set it: DVC needs a resolvable user
+      # on these runners (see ROCm/rocm-libraries#1617).
       - name: Fetch golden data
         run: |
           set -euo pipefail
-          python -m pip install --disable-pip-version-check "dvc[s3]"
-          python -m dvc pull --recursive dnn-providers/integration-tests/integration-test-bundles
+          command -v dvc >/dev/null || { echo "dvc is not on this runner" >&2; exit 1; }
+          LOGNAME=github-runner dvc pull --recursive dnn-providers/integration-tests/integration-test-bundles
+          # A pull can exit 0 having fetched nothing; count what it should produce.
+          count=$(find dnn-providers/integration-tests/integration-test-bundles -name '*.bin' | wc -l)
+          test "$count" -gt 0 || { echo "dvc pull produced no golden blobs" >&2; exit 1; }
+          echo "Fetched $count golden tensor blob(s)"
 
       - name: Configure superbuild
         run: |
