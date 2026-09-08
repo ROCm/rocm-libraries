@@ -10,6 +10,7 @@
 #include "ck_tile/core/algorithm/coordinate_transform.hpp"
 #include "ck_tile/core/container/container_helper.hpp"
 #include "ck_tile/core/numeric/math.hpp"
+#include "ck_tile/core/tensor/tensor_coordinate.hpp"
 #include "ck_tile/core/tensor/tensor_descriptor.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
