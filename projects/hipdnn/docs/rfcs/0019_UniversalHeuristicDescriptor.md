@@ -722,23 +722,22 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    UHD is checked against the same published set as the engine's UMDs and UDDs, so one publisher serves
    all three consumers.
 
-   **This check is available only for the declarative arm.** RFC 0020 scopes it to
-   `graph_match.nodes`, whose published set is laid out at compile from the op-schema registry. Two
-   cases fall outside it:
+   **This check requires the declarative arm.** It reads the published set the `graph_match.nodes`
+   pattern lays out at compile from the op-schema registry. Two cases fall outside it, both as
+   [RFC 0020](0020_UniversalEngineDescriptor.md) specifies:
    - **The `native` arm** ([RFC 0020 §4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative)).
-     A registered symbol produces the bindings at match time, so there is no compile-time set to check a
-     signature against. A UHD on a native-arm engine therefore carries an **unverified** feature
-     contract: an unresolvable token surfaces at first evaluation, and takes the
-     [Section 5](#5-selection-flow) step 7 path (model disabled, error logged, `static_order`) rather
-     than being rejected at load. Checks 2–4 still apply in full.
+     The tokens are whatever the registered function returns on a live graph, so the published set is
+     unknown at load and this validation cannot run — for a UHD exactly as for a UMD or UDD. A stale
+     reference fails at match time rather than being an error at load; for a UHD that is the
+     [Section 5](#5-selection-flow) step 7 path (model not used, error logged, `static_order`). Checks
+     2–4 still apply in full. RFC 0020 records this as a limitation of the hatch, which is why the
+     declarative arm is the format's steady state.
    - **No `graph_match` at all.** The engine publishes an empty table, so a `features_signature` may
      reference only `$kernel.*` and `$device.*`. A model needing problem features requires the engine to
      declare a pattern.
 
-   This matters for sequencing: the first descriptor-backed engines use the native arm, so the strongest
-   load-time guarantee arrives with the declarative pattern rather than with the first shipped model.
-   **OPEN:** whether a native-arm engine should be able to *declare* its published tokens for checking
-   without also declaring a full pattern — see [Open Question 19](#operational).
+   This bears on sequencing: the engines shipping first use the native arm, so the load-time guarantee
+   arrives with the declarative pattern rather than with the first shipped model.
 2. **Signature → KMD → knobs.** Two assertions over the same set. Let `F` be the `$kernel.*` fields
    reachable from the `features_signature`, including those nested inside computed (expression) entries:
    - `F ⊆ KMD.fields` — a feature can never read a variant field the kernels don't carry.
@@ -2115,17 +2114,6 @@ dependency-gated and land only when a concrete need appears.
     Recommendation: strict equality for v1 (it is the property that makes the knob list meaningful),
     knob removal as a major UED version bump, and revisit (a) if a real consumer is broken by churn.
     *(Impacts [Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes), [Section 6.3](#63-contract-enforcement), [Section 8.1](#81-descriptor-versions-and-uhd-coupling).)*
-
-19. **Checking a native-arm engine's feature contract.** The signature-to-published-symbols check
-    ([Section 6.3](#63-contract-enforcement)) is scoped to `graph_match.nodes`, so an engine using the
-    `native` arm carries an unverified feature contract until first evaluation. Options: (a) accept it,
-    on the grounds that the native arm is itself an escape hatch and its author owns the risk;
-    (b) let a native-arm UED optionally **declare** the tokens its matcher publishes, purely so
-    consumers can be checked, without requiring a full declarative pattern; (c) require a declarative
-    pattern before a UHD may carry a `features_signature`. Recommendation: (b) — it restores the
-    load-time check at the cost of one optional list, and (c) would block the first descriptor-backed
-    engines from shipping a model at all. Owned with [RFC 0020](0020_UniversalEngineDescriptor.md).
-    *(Impacts [Section 6.3](#63-contract-enforcement).)*
 
 ---
 
