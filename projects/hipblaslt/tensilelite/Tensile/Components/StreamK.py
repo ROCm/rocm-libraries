@@ -2896,7 +2896,11 @@ class StreamKOff(StreamK):
         module = Module("StreamK Off calculateLoopNumIter")
 
         quotient = loopCounterName
-        dividend = "SizesSum+%u" % loopIdx #sumSize = self.sumSize(kernel, loopIdx)
+        # SizesSum holds the whole reduction W*k_local; one shard round covers k_local.
+        if kernel["ProblemType"]["FusedA2AMode"] == 1:
+            dividend = "A2AKLocal"
+        else:
+            dividend = "SizesSum+%u" % loopIdx #sumSize = self.sumSize(kernel, loopIdx)
         divisor = kernel["DepthU"]
 
         module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=False))

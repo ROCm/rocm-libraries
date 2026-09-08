@@ -610,6 +610,11 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['FusedGemmA2A']:
             rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
 
+        if state['ProblemType']['FusedA2AMode'] == 1:
+            rv += [cls('A2AWorldNonZero')]
+            rv += [cls('A2AShardDivisible', value=state['DepthU'])]
+            rv += [cls('A2AGsuCoalescedOff')]
+
         return rv
 
     @classmethod

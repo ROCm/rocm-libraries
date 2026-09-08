@@ -2904,6 +2904,106 @@ namespace TensileLite
                 }
             };
 
+            struct A2AWorldNonZero : public Predicate_CRTP<A2AWorldNonZero, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                A2AWorldNonZero() = default;
+
+                static std::string Type()
+                {
+                    return "A2AWorldNonZero";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.fusedA2AWorld() > 0;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.fusedA2AWorld(), ">", "sol", 0);
+                }
+            };
+
+            // value is the solution's DepthU; W comes from the problem at runtime.
+            struct A2AShardDivisible
+                : public Predicate_CRTP<A2AShardDivisible, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int64_t value;
+
+                A2AShardDivisible() = default;
+                A2AShardDivisible(int64_t value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "A2AShardDivisible";
+                }
+
+                bool divisible(ContractionProblemGemm const& problem) const
+                {
+                    const int64_t w = (int64_t)problem.fusedA2AWorld();
+                    if(w == 0 || value <= 0)
+                        return false;
+                    return (int64_t)problem.boundSize(0) % (w * value) == 0;
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return divisible(problem);
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", divisible(problem), "==", "sol", true);
+                }
+            };
+
+            struct A2AGsuCoalescedOff
+                : public Predicate_CRTP<A2AGsuCoalescedOff, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                A2AGsuCoalescedOff() = default;
+
+                static std::string Type()
+                {
+                    return "A2AGsuCoalescedOff";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return !problem.getParams().gsuc();
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.getParams().gsuc(), "==", "sol", false);
+                }
+            };
+
             struct F32XdlMathOpEqual
                 : public Predicate_CRTP<F32XdlMathOpEqual, ContractionProblemGemm>
             {
