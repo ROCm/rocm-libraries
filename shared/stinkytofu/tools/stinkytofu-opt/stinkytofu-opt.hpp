@@ -72,6 +72,7 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
+#include "stinkytofu/transforms/asm/TieExecMaskedWritesPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
@@ -203,6 +204,7 @@ const std::vector<PassInfo> availablePasses = {
      }},
     {"StinkyMergeBarrierPass", [](const auto&) { return createStinkyMergeBarrierPass(); }},
     {"SetMatrixReusePass", [](const auto&) { return createSetMatrixReusePass(); }},
+    {"TieExecMaskedWritesPass", [](const auto&) { return createTieExecMaskedWritesPass(); }},
     {"SwInstructionPrefetchRelStaticPass",
      [](const auto&) { return createSwInstructionPrefetchRelStaticPass(std::string{}); }},
     {"SwInstructionPrefetchRelDynamicPass",

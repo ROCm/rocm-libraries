@@ -1,0 +1,52 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --TieExecMaskedWritesPass --LiftAsmRegistersToSSAPass=classes=v --RegisterAllocationPass=allocator=greedy-compact,classes=v,apply --print-output
+#
+# A vector write under a narrow exec mask, end to end.
+#
+# The mask means the write covers only the active lanes and its destination
+# keeps what it held everywhere else, so the destination has to land on the
+# register holding the value it is updating. `v_mov_b32 v11, 0` names no source
+# to tie it to, which is what TieExecMaskedWritesPass supplies -- it appends the
+# destination as a read of the lanes the write preserves, and
+# AllocationConstraints turns that into an affinity.
+#
+# v10's value dies at the third instruction, which frees the lowest register
+# right where the masked write wants one. Without the affinity greedy-compact
+# takes the offer and emits
+#
+#     v1 = "st.v_add_f32"(v0, v0)      <- the preserved value's register, reused
+#     v0 = "st.v_mov_b32"(0)           <- masked write, somewhere else entirely
+#
+# leaving the inactive lanes of v0 holding a stale temporary instead of the
+# value the following add expects. That is the shape the bf16 GEMM segfaulted on.
+#
+# CHECK-LABEL: @exec_masked_write_tie
+# CHECK: ^entry:
+#
+# The temporary is pushed to v0 so the preserved value can keep v1.
+# CHECK-NEXT: v0 = "st.v_add_f32"(v20, v21)
+# CHECK-NEXT: v1 = "st.v_add_f32"(v22, v23)
+# CHECK-NEXT: v0 = "st.v_add_f32"(v0, v0)
+#
+# The masked write lands on v1, and carries the appended read of it. The
+# assembler does not print that operand -- emitSrcCount stops at the
+# descriptor's source count -- so the emitted instruction is still `v_mov_b32 v1, 0`.
+# CHECK-NEXT: exec_lo0 = "st.s_mov_b32"(vcc_lo0)
+# CHECK-NEXT: v1 = "st.v_mov_b32"(0, v1)
+# CHECK-NEXT: exec_lo0 = "st.s_mov_b32"(-1)
+#
+# CHECK-NEXT: v0 = "st.v_add_f32"(v1, v0)
+#
+# The untied colouring, spelled out so it cannot come back unnoticed.
+# CHECK-NOT: v0 = "st.v_mov_b32"(0)
+# CHECK-NOT: %
+
+st.func @exec_masked_write_tie() {
+^entry:
+  v10 = "st.v_add_f32"(v20, v21) { issueCycles = 1, latencyCycles = 5 }
+  v11 = "st.v_add_f32"(v22, v23) { issueCycles = 1, latencyCycles = 5 }
+  v12 = "st.v_add_f32"(v10, v10) { issueCycles = 1, latencyCycles = 5 }
+  exec_lo0 = "st.s_mov_b32"(vcc_lo0) { issueCycles = 1, latencyCycles = 2 }
+  v11 = "st.v_mov_b32"(0) { issueCycles = 1, latencyCycles = 2 }
+  exec_lo0 = "st.s_mov_b32"(-1) { issueCycles = 1, latencyCycles = 2 }
+  v13 = "st.v_add_f32"(v11, v12) { issueCycles = 1, latencyCycles = 5 }
+}

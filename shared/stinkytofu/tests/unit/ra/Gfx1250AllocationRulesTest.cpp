@@ -309,7 +309,7 @@ TEST_F(Gfx1250AllocationRulesTest, VectorAlignmentForbidsExactlyTheBasesTheAssem
     // the assembler: v[2:9] and ds_load_b96 v[2:4] assemble, v[3:10] and v[3:5]
     // are rejected with "vgpr tuples must be 64 bit aligned". The odd bases are
     // the two the bf16 kernel emitted -- v[3:10] for a WMMA destination, v[9:12]
-    // for a buffer_load_b128 (st_register_allocation.md issue 1).
+    // for a buffer_load_b128.
     for (uint32_t width : {2u, 3u, 4u, 8u, 16u}) {
         EXPECT_EQ(rules.forbidsBase(RegType::V, 2, width), nullptr) << "even, width " << width;
         for (uint32_t base : {3u, 9u}) {

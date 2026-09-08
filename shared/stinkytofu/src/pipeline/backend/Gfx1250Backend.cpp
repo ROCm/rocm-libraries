@@ -72,6 +72,7 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
+#include "stinkytofu/transforms/asm/TieExecMaskedWritesPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 #include "stinkytofu/transforms/asm/dag/SchedulingKnobHeuristics.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
@@ -143,6 +144,11 @@ void addRegisterAllocationPasses(PassManager& pm, const StinkyAsmModule& module)
 
     pm.addPass(createStinkyUnreachableBlockElimPass());
     pm.addPass(createRemoveDefUseAnalysisPass());
+
+    // Must precede the lift, which binds the operand it adds. Otherwise a write
+    // that only some lanes execute looks like a full definition of its
+    // destination, and the allocator moves it off the value those lanes keep.
+    pm.addPass(createTieExecMaskedWritesPass());
 
     LiftAsmRegistersToSSAOptions liftOptions;
     liftOptions.classes = RegClassSet::only(RegType::S);

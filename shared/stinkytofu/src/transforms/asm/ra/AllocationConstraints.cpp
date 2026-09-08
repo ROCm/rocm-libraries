@@ -4,14 +4,17 @@
 #include "stinkytofu/transforms/asm/ra/AllocationConstraints.hpp"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/AsmTargetRegisters.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
@@ -19,6 +22,7 @@
 #include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRules.hpp"
 
 namespace stinkytofu {
@@ -130,8 +134,15 @@ std::vector<std::vector<SSAValueID>> valueGroups(const StinkyInstruction& instru
 /// it should. HwInstDesc marks the field, and AsmVerifierPass already requires
 /// the register to appear on both sides; this is what makes the allocator keep
 /// it that way.
+///
+/// \p execMasked says the same thing about a different destination. Under a
+/// narrow exec mask a vector write covers only the active lanes and the rest of
+/// the destination keeps what it held, so the lanes it does not write are a read
+/// of it -- read-write by position in the stream rather than by opcode.
+/// TieExecMaskedWritesPass is what puts the matching source there, so the lookup
+/// below finds it the same way.
 void collectReadWriteTies(const StinkyInstruction& instruction, const RegClassSet& classes,
-                          std::vector<AffinitySet>& sets) {
+                          bool execMasked, std::vector<AffinitySet>& sets) {
     const HwInstDesc* desc = instruction.getHwInstDesc();
     if (desc == nullptr || desc->operandFields.empty()) return;
 
@@ -150,10 +161,15 @@ void collectReadWriteTies(const StinkyInstruction& instruction, const RegClassSe
     for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
         if (!field.isDest) continue;
         const size_t destSlot = destIdx++;
-        if (!field.isReadWrite) continue;
         if (destSlot >= destRegs.size() || destSlot >= destGroups.size()) continue;
 
         const StinkyRegister& reg = destRegs[destSlot];
+        // A scalar register holds one value per wave, so the mask does not gate
+        // it and a masked scalar write really is a total definition. Tying one
+        // would only cost a register.
+        const bool maskedVectorWrite = execMasked && reg.isRegister() && reg.reg.type == RegType::V;
+        if (!field.isReadWrite && !maskedVectorWrite) continue;
+
         for (size_t source = 0; source < srcRegs.size() && source < srcGroups.size(); ++source) {
             if (!(srcRegs[source] == reg)) continue;
             const std::vector<SSAValueID>& written = destGroups[destSlot];
@@ -170,6 +186,20 @@ void collectReadWriteTies(const StinkyInstruction& instruction, const RegClassSe
             break;
         }
     }
+}
+
+/// Wavefront size of \p function, which is what selects the EXEC register the
+/// exec-span walk looks for.
+///
+/// Falls back to 64 on a function carrying no architecture, as the unit tests
+/// build, rather than asserting. That is the conservative direction: EXEC
+/// overlaps EXEC_LO and EXEC_HI, so a wave64 probe finds every exec write a
+/// wave32 probe would and then some.
+uint32_t wavefrontSizeOf(const Function& function) {
+    const std::array<int, 3> arch = function.getGemmTileConfig().arch;
+    if (arch[0] == 0 && arch[1] == 0 && arch[2] == 0) return 64;
+    return getWaveFrontSize(static_cast<uint32_t>(arch[0]), static_cast<uint32_t>(arch[1]),
+                            static_cast<uint32_t>(arch[2]));
 }
 
 /// Where the dispatch stops writing scalars, or "everywhere" when the function
@@ -229,13 +259,22 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
     const RegClassSet& liftedClasses = function.ssaArena().liftedClasses();
     const uint32_t dispatchFilledSgprs = dispatchFilledSgprsOf(function);
 
+    const uint32_t wavefrontSize = wavefrontSizeOf(function);
+
     for (const BasicBlock& block : function) {
+        // Same spans TieExecMaskedWritesPass normalized against, read from the
+        // same predicates, so the operand it added and the tie collected here
+        // cannot disagree about which writes the mask covers.
+        const std::unordered_set<const StinkyInstruction*> execMasked =
+            execMaskedInstructions(block, wavefrontSize);
+
         for (const IRBase& ir : block) {
             const auto* instruction = dyn_cast<StinkyInstruction>(&ir);
             if (instruction == nullptr || !instruction->hasAttachedSSA()) continue;
             collectLiftedDestinations(*instruction, liftedClasses, constraints.tupleRuns_);
             collectLiftedSources(*instruction, liftedClasses, constraints.tupleRuns_);
-            collectReadWriteTies(*instruction, liftedClasses, constraints.affinitySets_);
+            collectReadWriteTies(*instruction, liftedClasses, execMasked.count(instruction) != 0,
+                                 constraints.affinitySets_);
         }
 
         for (const SSABlockArgument& arg : block.ssaArguments()) {
