@@ -330,7 +330,7 @@ int main(int argc, char** argv) noexcept
         // decidable, a build directory is just a directory. The env var is the
         // documented alternative to the flag, so it satisfies this too.
         if(opts.writeSupportClaims && !opts.goldenDataDir.has_value()
-           && std::getenv("HIPDNN_TEST_GOLDEN_DATA_DIR") == nullptr)
+           && hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR").empty())
         {
             std::cerr << "--write-support-claims requires a bundle data directory: pass "
                       << "--golden-data-dir or set HIPDNN_TEST_GOLDEN_DATA_DIR.\n"
