@@ -104,46 +104,18 @@ endif()
 
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
 
-include(CheckCXXCompilerFlag)
-
-if(BUILD_OFFLOAD_COMPRESS)
-  check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-  if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    # Some test will raise an unused-command-line-argument warning while building when they have no kernel code.
-    # NOTE(hipccl3): switched from `set(CMAKE_CXX_FLAGS ...)` to
-    # add_compile_options() to silence ROCMChecks' "set on a target where
-    # possible" warning.
-    #
-    # The COMPILE_LANGUAGE:CXX guard is REQUIRED, not cosmetic: unlike
-    # CMAKE_CXX_FLAGS, a bare add_compile_options() applies to *every*
-    # language, including ASM. rocRAND is fetched further down via
-    # cmake/Dependencies.cmake and inherits these directory options, then
-    # compiles its .S files with the plain system ASM compiler, failing with
-    # "cc: error: unrecognized command-line option '--offload-compress'".
-    # The guard restores the original CXX-only scope. Matches hipCUB's own
-    # (pre-existing) pattern, which guards with COMPILE_LANGUAGE:HIP.
-    add_compile_options(
-      $<$<COMPILE_LANGUAGE:CXX>:--offload-compress>
-      $<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-command-line-argument>
-    )
-  else()
-    message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
-  endif()
-endif()
-
 # Allow the user to optionally select offset type dispatch to fixed 32 or 64 bit types
 set(THRUST_DISPATCH_TYPE "Dynamic" CACHE STRING "Select Thrust offset type dispatch." FORCE)
 set_property(CACHE THRUST_DISPATCH_TYPE PROPERTY STRINGS "Dynamic" "Force32bit" "Force64bit")
 
-#Adding CMAKE_PREFIX_PATH
-list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm ${ROCM_PATH} )
-
-# CMake modules
+# Add project and ROCm-related CMake module paths.
 list(APPEND CMAKE_MODULE_PATH
+  # Shared within monorepo:
   ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip # FindHIP.cmake
-  ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
+  # ROCm related:
+  $ENV{ROCM_PATH}
+  $ENV{ROCM_PATH}/share
+  $ENV{ROCM_PATH}/lib/cmake
 )
 
 # Set a default build type if none was specified
@@ -154,6 +126,9 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT CODE_COVERAGE)
 endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
+
+# rocm-cmake must be included before processing 'GPU_TARGETS'.
+include(dependencies/rocm-cmake)
 
 if(USE_HIPCXX)
   enable_language(HIP)
@@ -181,7 +156,21 @@ else()
   endif()
 endif()
 
-# Get dependencies
+# HIP must be included before checking for 'OFFLOAD_COMPRESS'. This is because
+# adding '--offload-compress' to a CXX target (i.e. non -xhip), causes compiler
+# warnings that may be treated as error, and thus failing detection of certain
+# depedencies in subsequent 'find_package'-calls.
+if (NOT GRAFT_THRUST_ONTO_BINARIES)
+  include(dependencies/hip)
+endif()
+
+# TODO: this should be moved to toolchain-*.cmake, but this requires a hard
+# depedency of CMake HIP language support due to '--offload-compress' only
+# working with '-xhip'.
+include(flags/offload_compress)
+
+# Other depedencies must be included after adding in offload compress to
+# reduce the size of kernels contained in depedencies.
 include(cmake/Dependencies.cmake)
 
 # Verify that supported compilers are used
@@ -195,14 +184,24 @@ set(PRNG_SEEDS 1 CACHE STRING "Seeds of pseudo random sequences to test each inp
 # Set host and device backend system options
 set(THRUST_HOST_SYSTEM_OPTIONS CPP OMP TBB)
 set(THRUST_HOST_SYSTEM CPP CACHE STRING "The host backend to target.")
-check_option(THRUST_HOST_SYSTEM_OPTIONS THRUST_HOST_SYSTEM)
+if(NOT THRUST_HOST_SYSTEM IN_LIST THRUST_HOST_SYSTEM_OPTIONS)
+  message(
+    FATAL_ERROR
+    "Unrecognized THRUST_HOST_SYSTEM: ${THRUST_DEVICE_SYSTEM}"
+  )
+endif()
 add_compile_definitions(THRUST_HOST_SYSTEM=THRUST_HOST_SYSTEM_${THRUST_HOST_SYSTEM})
 
 # If we're not grafting existing CUDA onto binaries, we must dissallow CUDA backend.
 if (NOT GRAFT_THRUST_ONTO_BINARIES)
   set(THRUST_DEVICE_SYSTEM_OPTIONS OMP TBB CPP HIP)
   set(THRUST_DEVICE_SYSTEM HIP CACHE STRING "The host backend to target.")
-  check_option(THRUST_DEVICE_SYSTEM_OPTIONS THRUST_DEVICE_SYSTEM)
+  if(NOT THRUST_DEVICE_SYSTEM IN_LIST THRUST_DEVICE_SYSTEM_OPTIONS)
+    message(
+      FATAL_ERROR
+      "Unrecognized THRUST_DEVICE_SYSTEM: ${THRUST_DEVICE_SYSTEM}"
+    )
+  endif()
   add_compile_definitions(THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_${THRUST_DEVICE_SYSTEM})
 endif()
 
