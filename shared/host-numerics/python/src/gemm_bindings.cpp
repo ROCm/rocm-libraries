@@ -15,6 +15,8 @@
 #include <vector>
 
 #include "bindings.hpp"
+#include "detail/gemm_invocation.hpp"
+#include "detail/reference_gemm.hpp"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -29,20 +31,59 @@ void validatePythonGemmBackend(GemmBackend backend) {
 Tensor referenceGemmOwned(Tensor a, Tensor b, Tensor c, ScalarType outputType, GemmOptions options,
                           std::optional<Layout> outputLayout, GemmBackend backend) {
     validatePythonGemmBackend(backend);
-    return referenceGemm(std::move(a), std::move(b), std::move(c), outputType, options,
-                         std::move(outputLayout), backend);
+    const GemmSpecification problem(std::move(a), std::move(b), std::move(c), outputType, options);
+    detail::validateRuntimeGemmProblem(problem);
+    const Shape outputShape{problem.a.shape()[0], problem.b.shape()[1]};
+    const Layout layout =
+        outputLayout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
+    if (layout.shape() != outputShape)
+        throw std::invalid_argument("Owning reference GEMM output layout shape mismatch.");
+    Tensor destination(outputType, layout);
+    (void)detail::executeGemm(GemmInvocation(problem, destination, options.outputSelection),
+                              backend);
+    return destination;
+}
+
+Tensor matmulOwned(Tensor a, Tensor b, ScalarType outputType, MatmulOptions options,
+                   std::optional<Layout> outputLayout, GemmBackend backend) {
+    validatePythonGemmBackend(backend);
+    return matmul(std::move(a), std::move(b), outputType, options, std::move(outputLayout),
+                  backend);
+}
+
+void matmulIntoBound(Tensor a, Tensor b, Tensor output, MatmulOptions options,
+                     GemmBackend backend) {
+    validatePythonGemmBackend(backend);
+    matmulInto(std::move(a), std::move(b), std::move(output), options, backend);
 }
 
 void referenceGemmIntoBound(Tensor a, Tensor b, Tensor c, Tensor d, GemmOptions options,
                             GemmBackend backend) {
     validatePythonGemmBackend(backend);
-    referenceGemmInto(
-        std::move(a), std::move(b), std::move(c), std::move(d), options, backend);
+    (void)detail::executeGemm(
+        GemmInvocation(std::move(a), std::move(b), std::move(c), std::move(d), options), backend);
 }
 
 }  // namespace
 
 void registerGemmBindings(nb::module_& module) {
+    nb::class_<MatmulOptions>(module, "_MatmulOptions")
+        .def(nb::init<ScalarType>(), "accumulator_type"_a = ScalarType::Float32)
+        .def_rw("accumulator_type", &MatmulOptions::accumulatorType)
+        .def_rw("accumulation_rounding", &MatmulOptions::accumulationRounding)
+        .def_rw("math_mode", &MatmulOptions::mathMode)
+        .def_rw("compute_type_a", &MatmulOptions::computeTypeA)
+        .def_rw("compute_type_b", &MatmulOptions::computeTypeB)
+        .def_rw("pre_quantization_scales_a", &MatmulOptions::preQuantizationScalesA)
+        .def_rw("pre_quantization_scales_b", &MatmulOptions::preQuantizationScalesB)
+        .def_rw("block_scale_a", &MatmulOptions::blockScaleA)
+        .def_rw("block_scale_b", &MatmulOptions::blockScaleB)
+        .def_rw("block_size_a", &MatmulOptions::blockSizeA)
+        .def_rw("block_size_b", &MatmulOptions::blockSizeB)
+        .def_rw("conjugate_a", &MatmulOptions::conjugateA)
+        .def_rw("conjugate_b", &MatmulOptions::conjugateB)
+        .def_rw("output_selection", &MatmulOptions::outputSelection);
+
     nb::class_<GemmOptions>(module, "_GemmOptions")
         .def(nb::init<ScalarType>(), "accumulator_type"_a = ScalarType::Float32)
         .def_rw("accumulator_type", &GemmOptions::accumulatorType)
@@ -105,5 +146,10 @@ void registerGemmBindings(nb::module_& module) {
                "output_layout"_a = std::optional<Layout>{}, "backend"_a = GemmBackend::Automatic);
     module.def("_reference_gemm_into", &referenceGemmIntoBound, "a"_a, "b"_a, "c"_a, "d"_a,
                "options"_a = GemmOptions{}, "backend"_a = GemmBackend::Automatic);
+    module.def("_matmul", &matmulOwned, "a"_a, "b"_a, "output_type"_a = ScalarType::Float32,
+               "options"_a = MatmulOptions{}, "output_layout"_a = std::optional<Layout>{},
+               "backend"_a = GemmBackend::Automatic);
+    module.def("_matmul_into", &matmulIntoBound, "a"_a, "b"_a, "output"_a,
+               "options"_a = MatmulOptions{}, "backend"_a = GemmBackend::Automatic);
 }
 }  // namespace roc::host_numerics::python_bindings

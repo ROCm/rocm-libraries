@@ -109,9 +109,9 @@ inline void validateEpilogueValueType(ScalarType type, const char* name) {
         throw std::invalid_argument(std::string("Reference epilogue ") + name +
                                     " type is invalid.");
     const ScalarCategory category = scalarTypeInfo(type).category;
-    if (category == ScalarCategory::Complex || category == ScalarCategory::Scale)
+    if (category == ScalarCategory::Scale)
         throw std::invalid_argument(std::string("Reference epilogue ") + name +
-                                    " must use a real arithmetic scalar type.");
+                                    " must use an arithmetic scalar type.");
 }
 
 inline void validateEpilogueActivation(const EpilogueOptions& problem) {
@@ -122,28 +122,9 @@ inline void validateEpilogueActivation(const EpilogueOptions& problem) {
         default:
             throw std::invalid_argument("Reference epilogue activation application is invalid.");
     }
-    switch (problem.activation) {
-        case Activation::None:
-        case Activation::Absolute:
-        case Activation::ClippedRelu:
-        case Activation::Relu:
-        case Activation::Gelu:
-        case Activation::GeluDerivative:
-        case Activation::GeluScaling:
-        case Activation::LeakyRelu:
-        case Activation::ReluDerivative:
-        case Activation::Sigmoid:
-        case Activation::Tanh:
-        case Activation::Silu:
-        case Activation::Swish:
-        case Activation::Clamp:
-            break;
-        default:
-            throw std::invalid_argument("Reference epilogue activation is invalid.");
-    }
     if (problem.activationApplication == ActivationApplication::Gradient &&
-        (problem.activation == Activation::GeluDerivative ||
-         problem.activation == Activation::ReluDerivative))
+        (std::holds_alternative<GeluDerivativeActivation>(problem.activation) ||
+         std::holds_alternative<ReluDerivativeActivation>(problem.activation)))
         throw std::invalid_argument(
             "Gradient application does not accept an explicit derivative activation.");
 }
@@ -152,8 +133,7 @@ template <typename Accumulator>
 inline void validateEpilogueScalars(const EpilogueOptions& problem) {
     (void)runtimeScalar<Accumulator>(problem.outputScale, "output scale");
     (void)runtimeScalar<Accumulator>(problem.auxiliaryScale, "auxiliary scale");
-    (void)runtimeScalar<Accumulator>(problem.activationParameter0, "activation parameter 0");
-    (void)runtimeScalar<Accumulator>(problem.activationParameter1, "activation parameter 1");
+    (void)runtimeActivation<Accumulator>(problem.activation);
 }
 
 inline EpiloguePlan validateEpilogueInvocation(const EpilogueInvocation& problem) {
@@ -165,9 +145,22 @@ inline EpiloguePlan validateEpilogueInvocation(const EpilogueInvocation& problem
         validateEpilogueValueType(*problem.auxiliaryOutputType, "auxiliary output");
     if (problem.amaxType) validateEpilogueValueType(*problem.amaxType, "AMax output");
 
-    if (problem.computeType != ScalarType::Float32 && problem.computeType != ScalarType::Float64 &&
-        problem.computeType != ScalarType::Int32)
-        throw std::invalid_argument("Reference epilogue supports F32, F64, and I32 compute types.");
+    if (problem.computeType != ScalarType::Float16 && problem.computeType != ScalarType::BFloat16 &&
+        problem.computeType != ScalarType::Float32 && problem.computeType != ScalarType::Float64 &&
+        problem.computeType != ScalarType::Int32 &&
+        problem.computeType != ScalarType::ComplexFloat32 &&
+        problem.computeType != ScalarType::ComplexFloat64)
+        throw std::invalid_argument(
+            "Reference epilogue supports F16, BF16, F32, F64, I32, C64, and C128 compute types.");
+    const bool complexCompute = isComplexScalarType(problem.computeType);
+    if (complexCompute != isComplexScalarType(problem.input.type()) ||
+        complexCompute != isComplexScalarType(problem.outputType))
+        throw std::invalid_argument("Reference epilogue input/output complexity mismatch.");
+    if (complexCompute && (!std::holds_alternative<IdentityActivation>(problem.activation) ||
+                           problem.activationApplication != ActivationApplication::Forward))
+        throw std::invalid_argument("Complex reference epilogue does not support activation.");
+    if (complexCompute && problem.amaxType)
+        throw std::invalid_argument("Complex reference epilogue does not support AMax.");
     validateEpilogueActivation(problem);
     switch (problem.outputConversion) {
         case OutputConversion::Default:
@@ -182,24 +175,28 @@ inline EpiloguePlan validateEpilogueInvocation(const EpilogueInvocation& problem
     }
 
     if (problem.computeType == ScalarType::Int32) {
-        switch (problem.activation) {
-            case Activation::None:
-            case Activation::Absolute:
-            case Activation::ClippedRelu:
-            case Activation::Relu:
-            case Activation::LeakyRelu:
-            case Activation::ReluDerivative:
-            case Activation::Clamp:
-                break;
-            default:
-                throw std::invalid_argument(
-                    "Int32 reference epilogue does not support floating-point activation.");
-        }
+        const bool integerActivation =
+            std::holds_alternative<IdentityActivation>(problem.activation) ||
+            std::holds_alternative<AbsoluteActivation>(problem.activation) ||
+            std::holds_alternative<ClippedReluActivation>(problem.activation) ||
+            std::holds_alternative<ReluActivation>(problem.activation) ||
+            std::holds_alternative<LeakyReluActivation>(problem.activation) ||
+            std::holds_alternative<ReluDerivativeActivation>(problem.activation) ||
+            std::holds_alternative<ClampActivation>(problem.activation);
+        if (!integerActivation)
+            throw std::invalid_argument(
+                "Int32 reference epilogue does not support floating-point activation.");
         if (problem.amaxType)
             throw std::invalid_argument("Int32 reference epilogue does not support AMax.");
         validateEpilogueScalars<int32_t>(problem);
-    } else if (problem.computeType == ScalarType::Float32) {
+    } else if (problem.computeType == ScalarType::Float16 ||
+               problem.computeType == ScalarType::BFloat16 ||
+               problem.computeType == ScalarType::Float32) {
         validateEpilogueScalars<float>(problem);
+    } else if (problem.computeType == ScalarType::ComplexFloat32) {
+        validateEpilogueScalars<std::complex<float>>(problem);
+    } else if (problem.computeType == ScalarType::ComplexFloat64) {
+        validateEpilogueScalars<std::complex<double>>(problem);
     } else {
         validateEpilogueScalars<double>(problem);
     }
@@ -302,7 +299,7 @@ inline void initializeOwnedEpilogueTensor(Tensor tensor) {
                  [&](std::span<const size_t> indices, size_t) { tensor.storeFrom(indices, 0.0); });
 }
 
-template <typename Accumulator>
+template <typename Accumulator, bool QuantizeResult = false>
 void referenceEpilogueTyped(const EpilogueInvocation& problem) {
     const RuntimeMatrixReader<Accumulator> input(problem.input);
     const RuntimeMatrixOutputWriter<Accumulator> output(problem.output, problem.outputConversion);
@@ -320,37 +317,44 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
     const Accumulator outputScale = runtimeScalar<Accumulator>(problem.outputScale, "output scale");
     const Accumulator auxiliaryScale =
         runtimeScalar<Accumulator>(problem.auxiliaryScale, "auxiliary scale");
-    const Accumulator parameter0 =
-        runtimeScalar<Accumulator>(problem.activationParameter0, "activation parameter 0");
-    const Accumulator parameter1 =
-        runtimeScalar<Accumulator>(problem.activationParameter1, "activation parameter 1");
+    const RuntimeActivation<Accumulator> activation =
+        runtimeActivation<Accumulator>(problem.activation);
+    const RuntimeQuantizer<Accumulator> quantize(
+        QuantizeResult ? std::optional<ScalarType>(problem.computeType) : std::nullopt);
     Accumulator maximum = Accumulator(0);
     if (problem.amax && problem.accumulateAmax) maximum = problem.amax->loadAs<Accumulator>({0});
 
     const size_t rows = problem.output.shape()[0];
     const size_t columns = problem.output.shape()[1];
     auto computeOutput = [&](size_t row, size_t column) {
-        Accumulator value = input(row, column);
-        if (bias) value = wrappingAdd(value, (*bias)(row, column));
+        Accumulator value = quantize(input(row, column));
+        if (bias) value = quantize(wrappingAdd(value, (*bias)(row, column)));
 
         if (auxiliaryOutput)
-            auxiliaryOutput->store(row, column, wrappingMultiply(value, auxiliaryScale));
+            auxiliaryOutput->store(row, column, quantize(wrappingMultiply(value, auxiliaryScale)));
 
-        if (problem.activationApplication == ActivationApplication::Gradient) {
-            const Accumulator factor = activationGradientFactor(
-                problem.activation, (*auxiliaryInput)(row, column), parameter0, parameter1);
-            value = wrappingMultiply(value, factor);
-        } else {
-            value = applyActivation(problem.activation, value, parameter0, parameter1);
+        if constexpr (!IsComplex<Accumulator>::value) {
+            if (problem.activationApplication == ActivationApplication::Gradient) {
+                const Accumulator factor =
+                    activationGradientFactor(activation.kind, (*auxiliaryInput)(row, column),
+                                             activation.parameter0, activation.parameter1);
+                value = quantize(wrappingMultiply(value, factor));
+            } else {
+                value = quantize(applyActivation(activation.kind, value, activation.parameter0,
+                                                 activation.parameter1));
+            }
         }
 
-        if (problem.amax) maximum = std::max(maximum, static_cast<Accumulator>(std::abs(value)));
+        if constexpr (!IsComplex<Accumulator>::value) {
+            if (problem.amax)
+                maximum = std::max(maximum, static_cast<Accumulator>(std::abs(value)));
+        }
 
-        value = wrappingMultiply(value, outputScale);
+        value = quantize(wrappingMultiply(value, outputScale));
         if (rawOutput) rawOutput->store(row, column, value);
         if (gateResidual) {
             const Accumulator gate = (*gateResidual)(row, column);
-            value = wrappingAdd(wrappingMultiply(gate, value), gate);
+            value = quantize(wrappingAdd(quantize(wrappingMultiply(gate, value)), gate));
         }
         output.store(row, column, value);
     };

@@ -30,6 +30,10 @@ if(TARGET OpenMP::OpenMP_CXX)
 endif()
 add_test(NAME host-numerics-tests COMMAND host-numerics-tests)
 
+add_executable(host-numerics-tutorial ../examples/tutorial.cpp)
+target_link_libraries(host-numerics-tutorial PRIVATE roc::host-numerics)
+add_test(NAME host-numerics-tutorial COMMAND host-numerics-tutorial)
+
 add_executable(host-numerics-generation-recipe-tests generation_recipe_test.cpp)
 target_link_libraries(
     host-numerics-generation-recipe-tests

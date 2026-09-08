@@ -32,6 +32,11 @@ target_link_libraries(
     PRIVATE
         roc::host-numerics
 )
+target_include_directories(
+    host-numerics-python
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+)
 set_target_properties(
     host-numerics-python
     PROPERTIES

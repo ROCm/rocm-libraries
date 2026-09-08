@@ -22,6 +22,44 @@ namespace hipblaslt::host_numerics
                 Layout::contiguousLastDimensionFastest(Shape{}),
                 std::span<const std::byte>(static_cast<const std::byte*>(pointer), storageBytes));
         }
+
+        ActivationFunction activationFunction(Activation activation,
+                                              double     parameter0,
+                                              double     parameter1)
+        {
+            switch(activation)
+            {
+            case Activation::None:
+                return IdentityActivation{};
+            case Activation::Absolute:
+                return AbsoluteActivation{};
+            case Activation::ClippedRelu:
+                return ClippedReluActivation{parameter0, parameter1};
+            case Activation::Relu:
+                return ReluActivation{};
+            case Activation::Gelu:
+                return GeluActivation{};
+            case Activation::GeluDerivative:
+                return GeluDerivativeActivation{};
+            case Activation::GeluScaling:
+                return GeluScalingActivation{parameter0};
+            case Activation::LeakyRelu:
+                return LeakyReluActivation{parameter0};
+            case Activation::ReluDerivative:
+                return ReluDerivativeActivation{};
+            case Activation::Sigmoid:
+                return SigmoidActivation{};
+            case Activation::Tanh:
+                return TanhActivation{parameter0, parameter1};
+            case Activation::Silu:
+                return SiluActivation{};
+            case Activation::Swish:
+                return SwishActivation{parameter0};
+            case Activation::Clamp:
+                return ClampActivation{parameter0, parameter1};
+            }
+            throw std::invalid_argument("Unsupported hipBLASLt epilogue activation.");
+        }
     } // namespace
 
     void referenceEpilogue(const EpilogueArguments& arguments)
@@ -82,10 +120,10 @@ namespace hipblaslt::host_numerics
             options.auxiliaryScale = scalarValue(arguments.auxiliaryScale, computeType);
         if(outputType == ScalarType::Int8)
             options.outputConversion = OutputConversion::SaturatingInt8;
-        options.activation            = arguments.activation;
+        options.activation            = activationFunction(arguments.activation,
+                                                           arguments.activationParameter0,
+                                                           arguments.activationParameter1);
         options.activationApplication = arguments.activationApplication;
-        options.activationParameter0  = arguments.activationParameter0;
-        options.activationParameter1  = arguments.activationParameter1;
         roc::host_numerics::referenceEpilogueInto(input, outputs, options);
         copyTensorEncodedBackingStorageToBuffer(
             arguments.output, storageBytesForLayout(outputType, matrixLayout), outputs.output);

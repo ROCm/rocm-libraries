@@ -8,6 +8,7 @@
 
 #include <roc/host_numerics/backends/blas.hpp>
 #include <roc/host_numerics/gemm.hpp>
+#include <roc/host_numerics/tensor_operations.hpp>
 
 namespace rocRoller::HostNumerics
 {
@@ -121,7 +122,7 @@ namespace rocRoller::HostNumerics
             throw std::invalid_argument(
                 "rocRoller host GEMM C shape does not match the output shape.");
 
-        GemmOptions options(ScalarType::Float32);
+        MatmulOptions options(ScalarType::Float32);
         if(scaleA)
             options.blockScaleA = normalizeBlockScale(
                 std::move(*scaleA), a.shape()[0], a.shape()[1], scaleBlockSize, "A");
@@ -133,15 +134,30 @@ namespace rocRoller::HostNumerics
         if(options.blockScaleB)
             options.blockSizeB = scaleBlockSize;
 
-        options.alpha = alpha;
-        options.beta  = beta;
-
         const size_t rows = a.shape()[0];
         if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
             throw std::overflow_error("rocRoller host GEMM output stride exceeds ptrdiff_t.");
         const Layout outputLayout(Shape{rows, b.shape()[1]}, {1, static_cast<ptrdiff_t>(rows)});
-        return referenceGemmWithBlasBackend(
-            std::move(a), std::move(b), std::move(c), ScalarType::Float32, options, outputLayout);
+        std::optional<Tensor> result;
+        if(alpha != 0.0f && a.shape()[1] != 0)
+        {
+            Tensor product
+                = matmulWithBlasBackend(std::move(a), std::move(b), ScalarType::Float32, options);
+            result = multiply(std::move(product), alpha);
+        }
+        if(beta != 0.0f)
+        {
+            Tensor addend = multiply(std::move(c), beta);
+            if(result)
+                return add(std::move(*result),
+                           std::move(addend),
+                           ScalarType::Float32,
+                           ScalarType::Float32,
+                           outputLayout);
+            return addend.copyConvertedTo(ScalarType::Float32, outputLayout);
+        }
+        return result ? result->copyConvertedTo(ScalarType::Float32, outputLayout)
+                      : Tensor(ScalarType::Float32, outputLayout);
     }
 
     roc::host_numerics::Tensor

@@ -517,6 +517,62 @@ Accumulator runtimeScalar(const Tensor& value, const char* name) {
     throw std::invalid_argument("Invalid runtime scalar type.");
 }
 
+template <typename Accumulator>
+struct RuntimeActivation {
+    Activation kind = Activation::None;
+    Accumulator parameter0 = Accumulator(0);
+    Accumulator parameter1 = Accumulator(0);
+};
+
+template <typename Accumulator>
+RuntimeActivation<Accumulator> runtimeActivation(const ActivationFunction& activation) {
+    return std::visit(
+        []<typename Function>(const Function& function) -> RuntimeActivation<Accumulator> {
+            if constexpr (std::is_same_v<Function, IdentityActivation>)
+                return {};
+            else if constexpr (std::is_same_v<Function, AbsoluteActivation>)
+                return {.kind = Activation::Absolute};
+            else if constexpr (std::is_same_v<Function, ClippedReluActivation>)
+                return {.kind = Activation::ClippedRelu,
+                        .parameter0 = checkedRuntimeScalar<Accumulator>(function.lower, "lower"),
+                        .parameter1 = checkedRuntimeScalar<Accumulator>(function.upper, "upper")};
+            else if constexpr (std::is_same_v<Function, ReluActivation>)
+                return {.kind = Activation::Relu};
+            else if constexpr (std::is_same_v<Function, GeluActivation>)
+                return {.kind = Activation::Gelu};
+            else if constexpr (std::is_same_v<Function, GeluDerivativeActivation>)
+                return {.kind = Activation::GeluDerivative};
+            else if constexpr (std::is_same_v<Function, GeluScalingActivation>)
+                return {.kind = Activation::GeluScaling,
+                        .parameter0 = checkedRuntimeScalar<Accumulator>(function.scale, "scale")};
+            else if constexpr (std::is_same_v<Function, LeakyReluActivation>)
+                return {.kind = Activation::LeakyRelu,
+                        .parameter0 = checkedRuntimeScalar<Accumulator>(function.negativeSlope,
+                                                                        "negative slope")};
+            else if constexpr (std::is_same_v<Function, ReluDerivativeActivation>)
+                return {.kind = Activation::ReluDerivative};
+            else if constexpr (std::is_same_v<Function, SigmoidActivation>)
+                return {.kind = Activation::Sigmoid};
+            else if constexpr (std::is_same_v<Function, TanhActivation>)
+                return {.kind = Activation::Tanh,
+                        .parameter0 =
+                            checkedRuntimeScalar<Accumulator>(function.inputScale, "input scale"),
+                        .parameter1 = checkedRuntimeScalar<Accumulator>(function.outputScale,
+                                                                        "output scale")};
+            else if constexpr (std::is_same_v<Function, SiluActivation>)
+                return {.kind = Activation::Silu};
+            else if constexpr (std::is_same_v<Function, SwishActivation>)
+                return {.kind = Activation::Swish,
+                        .parameter0 = checkedRuntimeScalar<Accumulator>(function.beta, "beta")};
+            else
+                return {
+                    .kind = Activation::Clamp,
+                    .parameter0 = checkedRuntimeScalar<Accumulator>(function.minimum, "minimum"),
+                    .parameter1 = checkedRuntimeScalar<Accumulator>(function.maximum, "maximum")};
+        },
+        activation);
+}
+
 inline void requireRank(const Shape& shape, size_t rank, std::string_view operation,
                         const char* name) {
     if (shape.rank() != rank)

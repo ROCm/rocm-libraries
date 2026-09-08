@@ -27,18 +27,12 @@ enum class AccumulationRounding {
     AfterProductAndSum,  // Quantizes every product and accumulated sum.
 };
 
-// Operand transforms, arithmetic, epilogue, and output-selection policy for one GEMM.
-struct GemmOptions {
-    explicit GemmOptions(ScalarType accumulator = ScalarType::Float32)
-        : accumulatorType(accumulator),
-          alpha(Tensor::scalar(accumulator, 1)),
-          beta(Tensor::scalar(accumulator, 0)),
-          scaleC(Tensor::scalar(accumulator, 1)),
-          outputScale(Tensor::scalar(accumulator, 1)),
-          activationParameter0(Tensor::scalar(accumulator, 0)),
-          activationParameter1(Tensor::scalar(accumulator, 0)) {}
+// Numerical and execution policy intrinsic to one matrix multiplication.
+struct MatmulOptions {
+    explicit MatmulOptions(ScalarType accumulator = ScalarType::Float32)
+        : accumulatorType(accumulator) {}
 
-    ScalarType accumulatorType;  // Dot-product and epilogue arithmetic type.
+    ScalarType accumulatorType;  // Dot-product arithmetic type.
     AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
     MathMode mathMode = MathMode::Default;  // Operand transform after compute-type quantization.
 
@@ -53,32 +47,15 @@ struct GemmOptions {
     bool conjugateA = false;
     bool conjugateB = false;
 
-    Tensor alpha;                      // Rank-zero tensor multiplying the accumulated A*B term.
-    Tensor beta;                       // Rank-zero tensor multiplying C.
-    Tensor scaleC;                     // Rank-zero tensor multiplying C before beta.
-    std::optional<Tensor> bias;        // Broadcast addend after alpha*A*B + beta*scaleC*C.
-    std::optional<Tensor> scaleAlpha;  // Broadcast factor applied to alpha.
-    std::optional<Tensor> scaleA;      // Broadcast factor applied to alpha.
-    std::optional<Tensor> scaleB;      // Broadcast factor applied to alpha.
-    Tensor outputScale;                // Rank-zero tensor applied after activation.
-    OutputConversion outputConversion = OutputConversion::Default;  // Final D encoding.
-    Activation activation = Activation::None;                       // Applied before outputScale.
-    Tensor activationParameter0;  // First activation-specific rank-zero tensor.
-    Tensor activationParameter1;  // Second activation-specific rank-zero tensor.
-
-    OutputSelection outputSelection = OutputSelection::all();  // Logical D coordinates to write.
+    OutputSelection outputSelection = OutputSelection::all();
 };
 
-// Writes selected coordinates into caller-owned D and reports the concrete
-// backend used. Exact same-layout C/D aliasing is supported.
-void referenceGemmInto(Tensor a, Tensor b, Tensor c, Tensor d,
-                       const GemmOptions& options = GemmOptions{},
-                       GemmBackend backend = GemmBackend::Automatic);
-
-// Allocates and zero-initializes D, then executes the owning GEMM. Unselected
-// logical coordinates remain zero.
-Tensor referenceGemm(Tensor a, Tensor b, Tensor c, ScalarType outputType,
-                     const GemmOptions& options = GemmOptions{},
-                     std::optional<Layout> outputLayout = std::nullopt,
-                     GemmBackend backend = GemmBackend::Automatic);
+// NumPy-style matrix multiplication. The owning form allocates output; the
+// `Into` form writes selected coordinates of caller-owned output.
+void matmulInto(Tensor a, Tensor b, Tensor output, const MatmulOptions& options = MatmulOptions{},
+                GemmBackend backend = GemmBackend::Automatic);
+Tensor matmul(Tensor a, Tensor b, ScalarType outputType,
+              const MatmulOptions& options = MatmulOptions{},
+              std::optional<Layout> outputLayout = std::nullopt,
+              GemmBackend backend = GemmBackend::Automatic);
 }  // namespace roc::host_numerics

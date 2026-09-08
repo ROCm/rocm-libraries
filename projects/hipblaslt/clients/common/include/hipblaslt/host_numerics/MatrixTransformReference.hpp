@@ -12,7 +12,7 @@
 #include <optional>
 #include <ostream>
 #include <roc/host_numerics/comparison.hpp>
-#include <roc/host_numerics/linear_combination.hpp>
+#include <roc/host_numerics/tensor_operations.hpp>
 #include <stdexcept>
 #include <utility>
 
@@ -22,8 +22,9 @@ namespace hipblaslt::host_numerics
     using ::roc::host_numerics::ComparisonOptions;
     using ::roc::host_numerics::ComparisonReport;
     using ::roc::host_numerics::Layout;
-    using ::roc::host_numerics::linearCombinationInto;
-    using ::roc::host_numerics::LinearCombinationOptions;
+    using ::roc::host_numerics::addInto;
+    using ::roc::host_numerics::multiply;
+    using ::roc::host_numerics::multiplyInto;
     using ::roc::host_numerics::ScalarType;
     using ::roc::host_numerics::scalarTypeInfo;
     using ::roc::host_numerics::Shape;
@@ -140,11 +141,31 @@ namespace hipblaslt::host_numerics
         if(arguments.b)
             b = copyTensorFromEncodedStorage(arguments.b, arguments.bStorageBytes, type, bLayout);
 
-        Tensor       expected(ScalarType::Float32, outputLayout);
-        LinearCombinationOptions options(ScalarType::Float32);
-        options.alpha = arguments.alpha;
-        options.beta  = arguments.beta;
-        linearCombinationInto(std::move(a), std::move(b), expected, options);
+        Tensor expected(ScalarType::Float32, outputLayout);
+        if(a && b)
+        {
+            Tensor scaledA = multiply(*a,
+                                      Tensor::scalar(ScalarType::Float32, arguments.alpha),
+                                      ScalarType::Float32,
+                                      ScalarType::Float32);
+            Tensor scaledB = multiply(*b,
+                                      Tensor::scalar(ScalarType::Float32, arguments.beta),
+                                      ScalarType::Float32,
+                                      ScalarType::Float32);
+            addInto(std::move(scaledA), std::move(scaledB), expected, ScalarType::Float32);
+        }
+        else if(a)
+            multiplyInto(*a,
+                         Tensor::scalar(ScalarType::Float32, arguments.alpha),
+                         expected,
+                         ScalarType::Float32);
+        else if(b)
+            multiplyInto(*b,
+                         Tensor::scalar(ScalarType::Float32, arguments.beta),
+                         expected,
+                         ScalarType::Float32);
+        else
+            throw std::invalid_argument("MatrixTransform reference requires A or B.");
 
         Tensor observed
             = copyTensorFromEncodedStorage(
