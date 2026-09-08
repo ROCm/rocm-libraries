@@ -311,21 +311,6 @@ namespace rocsparse
                                                                            y,
                                                                            idx_base,
                                                                            workspace)));
-                // RETURN_IF_ROCSPARSE_ERROR(
-                //     (gemvi_kernel_dispatch<gemvi_part1_blocksize, 32, gemvi_part1_unroll>(
-                //         handle,
-                //         m,
-                //         n,
-                //         alpha_device_host,
-                //         A,
-                //         lda,
-                //         nnz,
-                //         x_val,
-                //         x_ind,
-                //         beta_device_host,
-                //         y,
-                //         idx_base,
-                //         workspace)));
             }
             else
             {
@@ -342,21 +327,6 @@ namespace rocsparse
                                                                            y,
                                                                            idx_base,
                                                                            workspace)));
-                // RETURN_IF_ROCSPARSE_ERROR(
-                //     (gemvi_kernel_dispatch<gemvi_part1_blocksize, 64, gemvi_part1_unroll>(
-                //         handle,
-                //         m,
-                //         n,
-                //         alpha_device_host,
-                //         A,
-                //         lda,
-                //         nnz,
-                //         x_val,
-                //         x_ind,
-                //         beta_device_host,
-                //         y,
-                //         idx_base,
-                //         workspace)));
             }
         }
         else

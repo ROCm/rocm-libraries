@@ -57,20 +57,9 @@ namespace rocsparse
         // etc.
         const I row = hipBlockIdx_x * WFSIZE + lid;
 
-        // The sparse vector is partitioned over the NWF wavefronts of the block
-        // and the hipGridDim_y split-k blocks, so wavefront (hipBlockIdx_y, wid)
-        // owns the nnz indices worker, worker + nworkers, worker + 2 * nworkers,
-        // ... This single strided loop covers [0, nnz) for any split-k count,
-        // and UNROLL independent accumulators keep that many loads and FMA
-        // chains in flight instead of one dependent chain.
         const I nworkers = (BLOCKSIZE / WFSIZE) * hipGridDim_y; // ncol
         const I worker   = (BLOCKSIZE / WFSIZE) * hipBlockIdx_y + wid; // col
 
-        // Entries left over once the unrolled body can no longer run in full.
-        // This must be computed in the signed index type I: letting the unsigned
-        // UNROLL into the loop condition below converts nnz - i to unsigned, so
-        // a wavefront whose last full step overshoots nnz reads a huge positive
-        // value instead of a negative one and walks off the end of x_ind.
         const I tail = static_cast<I>(UNROLL - 1) * nworkers;
 
         // Sub-row sum accumulators
@@ -119,9 +108,6 @@ namespace rocsparse
             total += sum[u];
         }
 
-        // A single wavefront block holds the whole sub-row sum of its rows in
-        // registers already, so there is nothing to reduce across wavefronts:
-        // skip the LDS staging and its barriers entirely.
         if constexpr(BLOCKSIZE == WFSIZE)
         {
             if(hipGridDim_y == 1)
@@ -147,9 +133,6 @@ namespace rocsparse
             return;
         }
 
-        // Having the sub-row sums spread over multiple wavefronts (actually
-        // each wavefront contains 64 sub-row sums), we need to use LDS for
-        // the row sum reduction.
         __shared__ T sdata[BLOCKSIZE];
 
         // Write sub-row sum into LDS
@@ -158,10 +141,7 @@ namespace rocsparse
         // and wait for all threads to finish writing
         __syncthreads();
 
-        // Accumulate the per-wavefront sub-row sums (one per wid) via a binary
-        // tree reduction in LDS. The wavefront count is a compile-time power of
-        // two, so the loop is fully unrolled and supports any block size (not
-        // just the fixed 1024-thread block).
+        // Accumulate the per-wavefront sub-row sums (one per wid)
         for(uint32_t s = (BLOCKSIZE / WFSIZE) / 2; s > 0; s >>= 1)
         {
             if(wid < s)
@@ -211,18 +191,9 @@ namespace rocsparse
 
         // Number of split-k partial sums per output row produced by part1
         // (equal to the y-dimension of the part1 launch grid).
-        const uint32_t     nblocks_part1 = static_cast<uint32_t>(grid_y);
+        const uint32_t     nblocks_part1 = grid_y;
         constexpr uint32_t NWF           = BLOCKSIZE / WFSIZE;
 
-        // part1 stores its partials as
-        //   workspace[WFSIZE * nblocks_part1 * blockIdx_x + WFSIZE * by + lid]
-        // for split-k block by in [0, nblocks_part1) and row lane lid in [0, WFSIZE).
-        // Each wavefront accumulates the partials whose split-k index by is
-        // congruent to wid modulo NWF, i.e. by == NWF * i + wid. nblocks_part1
-        // need not be a multiple of NWF: wavefronts with no matching by simply
-        // contribute zero. This keeps WFSIZE running sums live per wavefront
-        // (one per output row lane) in registers instead of staging the whole
-        // region in LDS.
         T sum = static_cast<T>(0);
         for(uint32_t by = static_cast<uint32_t>(wid); by < nblocks_part1; by += NWF)
         {
