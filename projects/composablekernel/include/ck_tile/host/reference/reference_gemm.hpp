@@ -1095,7 +1095,7 @@ void reference_gemm_gpu(ADataType* a_ptr,
                         index_t stride_b,
                         index_t stride_c)
 {
-    int64_t totalElements  = M * N;
+    int64_t totalElements  = static_cast<int64_t>(M) * N;
     int numThreadsPerBlock = 256; // Common choice for threads per block
     int64_t numBlocks      = (totalElements + numThreadsPerBlock - 1) / numThreadsPerBlock;
 
