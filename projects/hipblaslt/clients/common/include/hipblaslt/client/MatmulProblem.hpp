@@ -13,6 +13,8 @@
 
 namespace hipblaslt::client
 {
+    // The scalar types derived once from the command-line/API-facing Arguments
+    // object and shared by every normalized grouped-GEMM case.
     struct MatmulDataTypes
     {
         hipDataType computeScalar;
@@ -24,12 +26,14 @@ namespace hipblaslt::client
         hipDataType auxiliary;
     };
 
+    // One matrix's checked API type, logical batched layout, and allocation
+    // extent. A, B, C, and D need separate layouts: transpose, leading
+    // dimension, batch stride, and C/D storage can all differ independently.
     struct MatmulMatrix
     {
-        hipDataType                      apiType;
-        roc::host_numerics::ScalarType hostType;
-        roc::host_numerics::Layout     layout;
-        size_t                           allocationElements;
+        hipDataType                apiType;
+        roc::host_numerics::Layout layout;
+        size_t                     allocationElements;
 
         int64_t rows() const
         {
@@ -52,6 +56,10 @@ namespace hipblaslt::client
         }
     };
 
+    // A checked, per-GEMM snapshot of the parallel-array fields in Arguments.
+    // This is the product boundary shared by HIP descriptor construction,
+    // allocation, initialization, and host reference validation; it prevents
+    // each downstream phase from independently reinterpreting raw CLI data.
     struct MatmulProblem
     {
         int64_t m;
