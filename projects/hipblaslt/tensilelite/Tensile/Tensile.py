@@ -42,9 +42,9 @@ from Tensile import __version__
 from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
-from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, architectureMap, \
-                                         baseArchName, detectGlobalCurrentISA, \
-                                         gfxToIsa, isaToGfx
+from Tensile.Common.Architectures import architectureMap, baseArchName, \
+                                         detectGlobalCurrentISA, gfxToIsa, \
+                                         isaToGfx, steppingArchOf
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters, validateRuntimeLanguage
@@ -724,7 +724,7 @@ def Tensile(userArgs):
                 raise ValueError(f"Unrecognized Architecture in config: '{arch}'")
             if isa in isaList:
                 archNames.append(arch)
-            elif baseArchName(arch) in ARCH_COMPILER_TARGET:
+            elif steppingArchOf(arch):
                 raise ValueError(
                     f"Architecture '{arch}' in config requests a stepping of ISA "
                     f"{tuple(isa)}, which this build does not cover ({isaList}); "
@@ -739,8 +739,10 @@ def Tensile(userArgs):
     applyArchCapOverrides(isaInfoMap, archNames)
     assignGlobalParameters(config.get("GlobalParameters", {}), isaInfoMap)
 
-    # gfx1250 v0/v1 share ISA (12,5,0); pass the concrete stepping name so StinkyTofu picks the right cost table.
-    globalParameters["StinkyTofuArchName"] = "gfx1250v0" if any(baseArchName(a) == "gfx1250v0" for a in archNames) else ""
+    # A stepping shares its ISA with the base arch, so the ISA-derived name would
+    # send StinkyTofu to the wrong cost table; pass the concrete name instead.
+    stepping = next((baseArchName(a) for a in archNames if steppingArchOf(a)), "")
+    globalParameters["StinkyTofuArchName"] = stepping
 
     overrideParameters = argUpdatedGlobalParameters(args)
 

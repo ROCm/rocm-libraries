@@ -2860,30 +2860,19 @@ namespace
                 // path. Only use the subdir if a Tensile mapping file is actually present
                 // there; otherwise the directory may have been created by ExtOp/Transform
                 // installs without a corresponding Tensile library (multi-arch non-TheRock
-                // builds). The subdir is revisioned (library/gfx1250v0/ for a v0 part, no
-                // fallback) while the mapping filenames keep the base `processor` token.
+                // builds). Both the subdir and the mapping filenames carry `processor`,
+                // the name the runtime reports for this device -- which is the compiler
+                // target the kernels in it were built for, including a silicon-revision
+                // variant such as gfx1250-strict.
                 {
-                    auto processor_path     = path / rocblaslt_internal_get_library_arch_name();
+                    auto processor_path     = path / processor;
                     auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
                     auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
                     if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
                        || std::filesystem::exists(mapping_yaml))
                     {
-                        // Grab the chosen subdir name before the move. It differs
-                        // from the base `processor` only for a silicon revision
-                        // (e.g. gfx1250v0); log that -- the only runtime signal a
-                        // non-v1 revision was loaded.
-                        const auto libArch = processor_path.filename().string();
-                        path               = std::move(processor_path);
-                        if(libArch != processor
-                           && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
-                        {
-                            std::ostringstream msg;
-                            msg << "Loading ASIC-revision GEMM subtree: " << libArch
-                                << " (compiler target " << processor << ")" << std::endl;
-                            log_info(__func__, msg.str());
-                        }
+                        path = std::move(processor_path);
                     }
                 }
 

@@ -68,10 +68,9 @@ architectureMap = {
     "gfx1200": "gfx1200",
     "gfx1201": "gfx1201",
     "gfx1250": "gfx1250",
-    # gfx1250 v0 silicon; its capability deltas are in ARCH_CAP_OVERRIDES. It
-    # shares gfx1250's ISA, so `all` -- built from SUPPORTED_ISA -- cannot name
-    # it and it has to be asked for explicitly.
-    "gfx1250v0": "gfx1250v0",
+    # Spelled as clang and ROCr both spell it. Shares gfx1250's ISA, so `all` --
+    # built from SUPPORTED_ISA -- cannot name it; ask for it by name.
+    "gfx1250-strict": "gfx1250-strict",
 }
 
 gfxVariantMap = {
@@ -82,32 +81,23 @@ gfxVariantMap = {
     "gfx950": ["gfx950:xnack+", "gfx950:xnack-"],
 }
 
-# The single declaration point for gfx1250 v0's capability deltas. Both ASIC
-# revisions share ISA (12,5,0) and assemble at `-mcpu=gfx1250`, so the probe
-# can't tell them apart; one build is one revision, so the deltas are declared
-# here and layered onto the probed table. Keys are grouped by capability nature
-# (instruction-shaped vs architectural), matching the dict each consumer reads.
+# Where a stepping's capabilities differ from what probing reports. Capabilities
+# are probed by ISA version, and gfx1250-strict shares gfx1250's, so the probe
+# returns gfx1250's answers for both; these deltas are layered on top.
+# Sub-keys match the dict each consumer reads.
 ARCH_CAP_OVERRIDES = {
-    "gfx1250v0": {
-        # Instruction-shaped: v0 lacks the fp4 32x16 WMMA opcode.
+    "gfx1250-strict": {
         "asmCaps": {
-            "HasWMMA_f4_32x16": False,
+            "HasWMMA_f4_32x16": False,  # no fp4 32x16 WMMA opcode
         },
-        # Architectural: v0 has no TDM-multicast. NOTE: v0 still requires the
-        # XNACK-replay xcnt drain + SMEM dst/base overlap fix (RequiresXCntForVolatileVMEM),
-        # so it is intentionally NOT overridden here and inherits the probed default (True).
         "archCaps": {
             "HasTDMMulticast": False,
+            # RequiresXCntForVolatileVMEM is deliberately absent: gfx1250-strict
+            # still needs the XNACK-replay xcnt drain, so it inherits the probed True.
         },
     },
 }
 
-# Compiler target for names that are not themselves valid targets. The compiler
-# does not model steppings, so gfx1250v0 has to reach `-mcpu` / `--offload-arch`
-# as gfx1250; otherwise clang fails with `unsupported HIP gpu architecture`.
-ARCH_COMPILER_TARGET = {
-    "gfx1250v0": "gfx1250",
-}
 
 SUPPORTED_ISA = [
     IsaVersion(8, 0, 3),
@@ -200,23 +190,6 @@ def isaToGfx(arch: IsaVersion) -> str:
 SUPPORTED_GFX = [isaToGfx(isa) for isa in SUPPORTED_ISA]
 
 
-def gfxToCompilerTarget(name: str) -> str:
-    """The target to compile an architecture name with.
-
-    The two differ only where a name carries something the compiler does not
-    model, currently gfx1250's stepping. Anything else is returned unchanged,
-    which keeps qualifiers like ``:xnack+`` that deriving the target from the
-    ISA version would drop.
-
-    Args:
-        name: A requested gfx architecture name (e.g. 'gfx1250v0').
-
-    Returns:
-        The target for ``-mcpu`` / ``--offload-arch`` (e.g. 'gfx1250').
-    """
-    return ARCH_COMPILER_TARGET.get(name, name)
-
-
 def expandAllArchitectures(archs: List[str]) -> List[str]:
     """Replaces the ``all`` keyword with the architectures it covers.
 
@@ -247,6 +220,29 @@ def expandAllArchitectures(archs: List[str]) -> List[str]:
 def baseArchName(spec: str) -> str:
     """The bare architecture name in a spec, without predicates or qualifiers."""
     return spec.split("[")[0].split(":")[0].strip()
+
+
+def steppingArchOf(spec: str) -> Optional[str]:
+    """The architecture a stepping name belongs to.
+
+    A name is a stepping exactly when it does not survive a round trip through
+    its ISA: ``gfx942`` comes back as itself, ``gfx1250-strict`` comes back as
+    ``gfx1250``. Deriving it means a new stepping needs no registration here.
+
+    Args:
+        spec: A requested architecture spec, qualified or not.
+
+    Returns:
+        The ISA-derived name (``gfx1250-strict`` -> ``gfx1250``), or None if the
+            spec names an architecture rather than a stepping of one.
+    """
+    base = baseArchName(spec)
+    isa = gfxToIsa(base)
+    if isa is None:
+        return None
+    derived = isaToGfx(isa)
+    return derived if derived != base else None
+
 
 
 def gfxToIsa(name: str) -> Optional[IsaVersion]:

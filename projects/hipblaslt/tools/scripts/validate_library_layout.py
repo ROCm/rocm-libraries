@@ -34,13 +34,6 @@ PER_ARCH_REQUIRED = {
     "gfx950": ("rr_custom_kernels_gfx950.co",),
 }
 
-# Silicon-revision subtree -> the arch it is a revision of. gfx1250's revisions
-# share one compiler target, so only the GEMM library splits into
-# library/gfx1250/ and library/gfx1250v0/; every other artifact stays on gfx1250.
-REVISION_SUBTREES = {
-    "gfx1250v0": "gfx1250",
-}
-
 FORBIDDEN_FLAT_ROOT_BASENAMES = (
     "TensileLibrary.dat",
     "TensileLibrary.dat.zlib",
@@ -59,6 +52,18 @@ _GFX_PREFIX_RE = re.compile(r"^gfx[a-z0-9]+(?:[\-:][\-+a-z0-9]+)*$")
 
 def _arch_dir_name_is_base(name: str) -> bool:
     return bool(re.fullmatch(r"gfx[a-z0-9]+", name))
+
+
+def _stepping_base(name: str) -> Optional[str]:
+    """The architecture a stepping subtree belongs to, or None if it is not one.
+
+    Subtree names are otherwise bare -- target features never reach them -- so a
+    hyphen is the stepping, as in library/gfx1250-strict/. A stepping shares its
+    architecture's ISA and Tensile names files from the ISA, so the files inside
+    such a subtree carry the architecture's token, not the subtree's.
+    """
+    base, sep, _ = name.partition("-")
+    return base if sep and _arch_dir_name_is_base(base) else None
 
 
 def _filename_arch_matches_dir(filename: str, base_arch: str) -> bool:
@@ -131,18 +136,19 @@ def validate(install_root: Path) -> List[str]:
         return violations
 
     for d in base_arch_dirs:
+        # A stepping subtree is the one legitimate non-bare name.
+        if _stepping_base(d.name):
+            continue
         if not _arch_dir_name_is_base(d.name):
             violations.append(
                 f"library subdir name carries target features (must be bare base arch): {d}"
             )
 
     for arch_dir in base_arch_dirs:
-        # A revision subtree is validated against the architecture it is a
-        # revision of, because that is the name every file inside it carries:
-        # the runtime selects the directory by ASIC revision and then forms the
-        # filename from the compiler target, which is the same for both.
-        revision_of = REVISION_SUBTREES.get(arch_dir.name)
-        base = revision_of or arch_dir.name
+        # A stepping subtree is validated against its architecture, because that
+        # is the name every file inside it carries.
+        stepping_of = _stepping_base(arch_dir.name)
+        base = stepping_of or arch_dir.name
         if not _arch_dir_name_is_base(base):
             continue
 
@@ -157,10 +163,10 @@ def validate(install_root: Path) -> List[str]:
                 )
 
         # ExtOp and Transform are resolved at runtime from gcnArchName, which is
-        # the architecture name on either revision, so they live in the base
-        # subtree only and a revision subtree that carried copies would be
+        # the architecture name on either stepping, so they live in the
+        # architecture's subtree only; copies under a stepping subtree would be
         # dead files nothing opens.
-        if not revision_of:
+        if not stepping_of:
             for template in REQUIRED_PER_BASE_FILES:
                 if not _has_required_file(entries, template, base):
                     violations.append(f"missing required file in {arch_dir}: {template.format(arch=base)}")
@@ -188,12 +194,12 @@ def validate(install_root: Path) -> List[str]:
             if fname == "metadata.yaml":
                 continue
             if not _filename_arch_matches_dir(fname, base):
-                if revision_of:
+                if stepping_of:
                     violations.append(
                         f"filename in the {arch_dir.name} subtree is not named for the "
-                        f"compiler target {base}: {arch_dir / fname} (the revision "
-                        f"belongs in the directory only; the runtime forms filenames "
-                        f"from the target, so this one is never opened)"
+                        f"architecture {base}: {arch_dir / fname} (the stepping belongs "
+                        f"in the directory only; the runtime forms filenames from the "
+                        f"architecture, so this one is never opened)"
                     )
                 else:
                     violations.append(

@@ -54,7 +54,7 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, gfxToCompilerTarget
+from Tensile.Common.Architectures import baseArchName, gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf, architectureMap
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
@@ -116,7 +116,7 @@ def _baseArchs(archs: Collection[str]) -> List[str]:
 
 def computeOutputArchNames(requestedArchs: Collection[str]) -> Dict[str, str]:
     """Map each requested arch's ISA-derived base name -> the subtree its library
-    ships under. A stepping (gfx1250v0) collapses to its base key (gfx1250) but
+    ships under. A stepping (gfx1250-strict) collapses to its base key (gfx1250) but
     ships under its own subtree; ordinary archs map to themselves (identity), so
     their output stays byte-identical. Raises if two requested names share an ISA;
     archs with no ISA are skipped.
@@ -904,15 +904,15 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         # file is dropped there without a word and the build reports success having
         # written nothing for it. Honoring the name instead would be no better: the
         # runtime resolves libraries by the architecture the driver reports, so
-        # library/gfx1250v0/ is a directory nothing ever looks in. Tuned logic
+        # library/gfx1250-strict/ would hold logic no lookup ever reaches. Tuned logic
         # records the architecture; the stepping is a build-time capability
         # distinction, selected by --architecture.
-        if architectureName in ARCH_COMPILER_TARGET:
+        if steppingArchOf(architectureName):
             raise ValueError(
                 f"Library logic '{scheduleName}' declares ArchitectureName "
                 f"'{architectureName}', which names a silicon stepping rather than an "
                 f"architecture. Record it as "
-                f"'{ARCH_COMPILER_TARGET[architectureName]}' and select the stepping "
+                f"'{steppingArchOf(architectureName)}' and select the stepping "
                 f"at build time with --architecture={architectureName}."
             )
 
@@ -1042,8 +1042,12 @@ def run():
 
     assignGlobalParameters(arguments, isaInfoMap)
 
-    # gfx1250 v0/v1 share ISA (12,5,0); pass the concrete stepping name so StinkyTofu picks the right cost table.
-    globalParameters["StinkyTofuArchName"] = "gfx1250v0" if any(baseArchName(a) == "gfx1250v0" for a in archs) else ""
+    # StinkyTofu selects its cost table by name, and two steppings share one ISA,
+    # so the ISA-derived name would land on the base arch's table. Hand it the
+    # requested name instead. One build is one stepping, so at most one name here
+    # is a stepping; "" means this build asked for none.
+    steppings = [baseArchName(a) for a in archs if steppingArchOf(a)]
+    globalParameters["StinkyTofuArchName"] = steppings[0] if steppings else ""
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
@@ -1074,17 +1078,17 @@ def run():
     else:
         printExit(f"Unrecognized LogicFormat: {arguments['LogicFormat']}")
 
-    # A revision shares its arch's ISA and compiler target, so its logic
+    # A revision shares its arch's ISA, so its logic
     # declares the arch's name and ScheduleName is the only field separating the
     # revisions. Filter both directions -- a revision build must not fall back to
-    # the arch's logic, and an arch build must not ship a revision's. Driven by
-    # the revision table (covers the next revision automatically) and scoped to
+    # the arch's logic, and an arch build must not ship a revision's. Derived,
+    # not tabulated (covers the next revision automatically) and scoped to
     # revisioned archs so other archs' logic is untouched.
-    revisionedArchs = set(ARCH_COMPILER_TARGET.values())
+    revisionedArchs = {a for a in map(steppingArchOf, architectureMap) if a}
     requestedRevision = {
-        ARCH_COMPILER_TARGET[a]: a
+        steppingArchOf(a): a
         for a in map(baseArchName, archs)
-        if a in ARCH_COMPILER_TARGET
+        if steppingArchOf(a)
     }
     revisionedLogic = {}
     droppedByRevision = {}
@@ -1095,7 +1099,7 @@ def run():
         logicArch = load_logic_gfx_arch(p)
         if logicArch in revisionedArchs:
             scheduleName = load_logic_schedule_name(p)
-            fileRevision = scheduleName if scheduleName in ARCH_COMPILER_TARGET else None
+            fileRevision = scheduleName if steppingArchOf(scheduleName) else None
             if fileRevision != requestedRevision.get(logicArch):
                 droppedByRevision[logicArch] = droppedByRevision.get(logicArch, 0) + 1
                 return False
@@ -1136,26 +1140,25 @@ def run():
         if arch:
             selectedByArch[arch] = selectedByArch.get(arch, 0) + 1
     for logicArch in sorted(set(requestedRevision) | set(selectedByArch)):
-        revisionName = requestedRevision.get(logicArch)
-        # Name it as the build's flags do ("v0"/"v1"), so one grep finds
-        # this line and the invoke and CMake ones.
-        revision = revisionName.removeprefix(logicArch) if revisionName else "v1"
+        # Name it the way the build's flags do, so one grep finds this line and
+        # the invoke and CMake ones.
+        target = requestedRevision.get(logicArch, logicArch)
         selected = selectedByArch.get(logicArch, 0)
         dropped = droppedByRevision.get(logicArch, 0)
         print1(
-            f"# {logicArch} ASIC revision: {revision}"
+            f"# {logicArch} tuning: {target}"
             f" ({selected} selected, {dropped} dropped as another revision's)"
         )
         # A revision replaces the arch's tuning rather than adding to it, so an
         # uncovered problem type has no solution and fails at runtime with no
-        # useful message. A v1 build dropping revision logic is correct,
+        # useful message. A base-arch build dropping revision logic is correct,
         # so warn only a revision build whose coverage is partial or empty.
         if logicArch in requestedRevision and (not selected or dropped):
             printWarning(
-                f"{revision} tuning replaces {logicArch}'s rather than adding to"
+                f"{target} tuning replaces {logicArch}'s rather than adding to"
                 f" it ({selected} selected, {dropped} dropped); problem types with"
-                f" no {revision} logic have no solution and fail at runtime. Build"
-                f" {logicArch} without a revision for v1."
+                f" no {target} logic have no solution and fail at runtime. Build"
+                f" {logicArch} itself for the base architecture."
             )
 
     for logicFile in logicFiles:
@@ -1184,10 +1187,7 @@ def run():
         kernels,
         kernelHelperObjs,
         kernelWriterAssembly,
-        # Compiler targets, not the requested names: these drive --offload-arch for
-        # the HIP helper kernels and the library layout, and both must agree with
-        # the ISA-derived names used for the per-architecture writes below.
-        [gfxToCompilerTarget(a) for a in archs],
+        archs,
         arguments["DisableAsmComments"],
         compress=arguments["UseCompression"],
         removeTemporaries=not arguments["KeepBuildTmp"],

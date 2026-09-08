@@ -79,37 +79,35 @@ def test_multiple_stale_dats_each_flagged(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# ASIC-revision subtrees. gfx1250 ships as two silicon revisions that share one
-# ISA and one compiler target, so the v1 tree is library/gfx1250/ and the
-# pre-production one is library/gfx1250v0/. Only the DIRECTORY carries the
-# stepping: every file inside either subtree is named for the compiler target,
-# gfx1250. The runtime picks the directory from asicRevision and then forms the
-# filename from the target, and it resolves ExtOp/Transform from gcnArchName --
-# gfx1250 on both parts -- so those never appear in the revision subtree.
+# Stepping subtrees. gfx1250 ships as two steppings sharing one ISA, so they get
+# library/gfx1250/ and library/gfx1250-strict/. Only the DIRECTORY carries the
+# stepping: Tensile names files from the ISA, so every file inside either subtree
+# is named gfx1250. ExtOp and Transform resolve from gcnArchName, which is the
+# architecture on both parts, so they never appear in the stepping subtree.
 # --------------------------------------------------------------------------- #
-def _make_v0_dir(root: Path) -> Path:
-    v0_dir = root / "lib" / "hipblaslt" / "library" / "gfx1250v0"
-    v0_dir.mkdir(parents=True)
-    (v0_dir / "TensileLibrary_lazy_gfx1250.dat.zlib").write_bytes(b"x")
-    (v0_dir / "TensileLiteLibrary_lazy_gfx1250_Mapping.dat").write_bytes(b"x")
-    (v0_dir / "TensileLibrary_lazy_gfx1250.co").write_bytes(b"x")
-    (v0_dir / "Kernels.so-000-gfx1250.hsaco").write_bytes(b"x")
-    return v0_dir
+def _make_stepping_dir(root: Path) -> Path:
+    stepping_dir = root / "lib" / "hipblaslt" / "library" / "gfx1250-strict"
+    stepping_dir.mkdir(parents=True)
+    (stepping_dir / "TensileLibrary_lazy_gfx1250.dat.zlib").write_bytes(b"x")
+    (stepping_dir / "TensileLiteLibrary_lazy_gfx1250_Mapping.dat").write_bytes(b"x")
+    (stepping_dir / "TensileLibrary_lazy_gfx1250.co").write_bytes(b"x")
+    (stepping_dir / "Kernels.so-000-gfx1250.hsaco").write_bytes(b"x")
+    return stepping_dir
 
 
-def test_a_complete_v0_subtree_is_accepted(tmp_path):
-    """The layout an --asic-revision-less build actually produces: the base
-    tree with everything, plus a revision tree holding only Tensile artifacts,
-    all named for the compiler target."""
+def test_a_complete_stepping_subtree_is_accepted(tmp_path):
+    """What a build actually produces: the architecture's tree with everything,
+    plus a stepping tree holding only Tensile artifacts, all named for the
+    architecture."""
     _make_arch_dir(tmp_path, "gfx1250")
-    _make_v0_dir(tmp_path)
+    _make_stepping_dir(tmp_path)
 
     assert validate_library_layout.validate(tmp_path) == []
 
 
-def test_an_unrelated_arch_is_not_treated_as_a_revision_subtree(tmp_path):
-    """The revision table drives this, not a name pattern: an ordinary arch dir
-    still owes its ExtOp and Transform files."""
+def test_an_unrelated_arch_is_not_treated_as_a_stepping_subtree(tmp_path):
+    """A bare name is never a stepping, so an ordinary arch dir still owes its
+    ExtOp and Transform files."""
     arch_dir = tmp_path / "lib" / "hipblaslt" / "library" / "gfx942"
     arch_dir.mkdir(parents=True)
     (arch_dir / "TensileLibrary_gfx942.dat.zlib").write_bytes(b"x")

@@ -60,8 +60,8 @@ def applyArchCapOverrides(isaInfoMap: Dict[IsaVersion, IsaInfo], archNames: List
     _rejectConflictingArchNames(archNames)
     for name in archNames:
         # Keyed on the bare name: --gpu-targets forwards a requested spec verbatim,
-        # predicates and all, and a lookup that missed gfx1250v0[cu=64] would build
-        # v0 with the shipping stepping's capabilities without saying so.
+        # predicates and all, and a lookup that missed gfx1250-strict[cu=64] would
+        # silently build it with gfx1250's capabilities.
         overrides = ARCH_CAP_OVERRIDES.get(baseArchName(name))
         if not overrides:
             continue

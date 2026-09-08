@@ -32,7 +32,7 @@ class _MappingLoadError(Exception):
 
 def _scanSubtrees(libDir: Path):
     """Every gfx* subtree, with the arch tokens its masters and Mappings carry.
-    Keyed on the directory, not the token: library/gfx1250/ and library/gfx1250v0/
+    Keyed on the directory, not the token: library/gfx1250/ and library/gfx1250-strict/
     each hold a complete set of files all named for gfx1250 (shared compiler
     target), so merging by token would check one subtree twice and the other not
     at all.

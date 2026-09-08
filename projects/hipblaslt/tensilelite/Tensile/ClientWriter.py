@@ -42,7 +42,7 @@ from . import ROOT_PATH
 from . import LibraryIO
 from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
-from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx
+from Tensile.Common.Architectures import baseArchName, gfxToIsa, isaToGfx, steppingArchOf
 from Tensile.Common.GlobalParameters import globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
 from .TensileCreateLibrary import copyStaticFiles, libraryDir
@@ -95,14 +95,14 @@ def buildTargetGfx(isaInfoMap, archNames=None) -> str:
   The rebuild is a fresh process whose only statement of what to build is
   ``--architecture=``, so it must carry any distinction the ISA cannot express --
   currently gfx1250's stepping, where deriving the name from the ISA would rebuild
-  v0's client library with the shipping stepping's capabilities.
+  the stepping's client library with the base architecture's capabilities.
 
   Only names that need an alias to reach the compiler are consulted, and they are
   looked up by ISA rather than by position: a requested qualifier such as
   ``gfx942:xnack+`` names an architecture the ISA already describes, and forwarding
   it would build the client library for one xnack setting instead of an
   xnack-agnostic one. Qualifiers are compared and returned stripped, so that
-  ``gfx1250v0[cu=64]`` still rebuilds for v0 while the predicate -- which the
+  ``gfx1250-strict[cu=64]`` still rebuilds for the stepping while the predicate -- which the
   rebuild resolves for itself -- is left behind. Entry paths that never learn a
   name (config ISA, auto-detect) fall back to the ISA-derived name. Only the first
   ISA is rebuilt, as before.
@@ -119,7 +119,7 @@ def buildTargetGfx(isaInfoMap, archNames=None) -> str:
   requested = {
       gfxToIsa(name): baseArchName(name)
       for name in archNames or []
-      if baseArchName(name) in ARCH_COMPILER_TARGET
+      if steppingArchOf(name)
   }
   return requested.get(isa, isaToGfx(isa))
 

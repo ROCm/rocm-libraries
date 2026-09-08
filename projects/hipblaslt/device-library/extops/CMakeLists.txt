@@ -3,7 +3,10 @@
 
 set(ops_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite")
 set(output_dir "${CMAKE_CURRENT_BINARY_DIR}")
-string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${GPU_TARGETS}")
+# Keeps a "-strict" suffix while still dropping ":xnack+" (re-added below by
+# tensilelite_offload_target). Truncating it would collapse gfx1250-strict onto
+# gfx1250, leaving gfx1250-strict with code objects it cannot load.
+string(REGEX MATCHALL "gfx[a-z0-9]+(-[a-z0-9]+)*" archs "${GPU_TARGETS}")
 list(REMOVE_DUPLICATES archs)
 message(STATUS "Architectures to process: ${archs}")
 
@@ -17,7 +20,7 @@ foreach(arch IN LISTS archs)
         set(extop_xnack_args --xnack)
     endif()
     set(WAVEFRONT "-mwavefrontsize64")
-    if(arch MATCHES "^gfx1[12][0-9][0-9]$")
+    if(arch MATCHES "^gfx1[12][0-9][0-9](-[a-z0-9]+)*$")
         set(WAVEFRONT "-mno-wavefrontsize64")
     endif()
     add_library(extop-obj-${arch} OBJECT)
