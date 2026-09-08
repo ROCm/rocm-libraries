@@ -47,7 +47,7 @@ satisfied. Each group becomes one independent sub-GEMM.
 | Pipeline | Description |
 |----------|-------------|
 | `mem` | Single-buffer LDS, synchronous loads, no scheduler hints. Default. |
-| `wavelet` | Load/math wave specialization for **gfx1250/WMMA only**. Extra `num_load_waves` waves handle all DRAM→LDS transfers while the `warp_m × warp_n` math waves run WMMA exclusively. Requires gfx1250's separate VMEM and WMMA issue slots to achieve true hardware concurrency. Incompatible with `async_dma=True` and `split_k > 1`. Single-buffer LDS shared by both roles; synchronization via a `barrier_0 / barrier_A / barrier_B` protocol. |
+| `wavelet` | Load/math wave specialization for **gfx1250/WMMA only**. Extra `num_load_waves` waves handle all DRAM→LDS transfers while the `warp_m × warp_n` math waves run WMMA exclusively. Requires gfx1250's separate VMEM and WMMA issue slots to achieve true hardware concurrency. Incompatible with `async_dma=True`, `split_k > 1` and `lds_k_outer=True`. Single-buffer LDS shared by both roles; synchronization via a `barrier_0 / barrier_A / barrier_B` protocol. |
 
 The MFMA/CDNA pipelines (`compv3`, `compv4`) are not supported for dgrad; `is_valid_spec` rejects them.
 
@@ -140,6 +140,11 @@ of `W` in `KYXC` layout. Vector loads therefore go along the free (row) axis and
 the loader transposes the tile into row-major LDS layout on store — exactly the
 same mechanism used by wgrad for its B operand (`X`, `NHWC`).
 
+That transpose-on-store is what `lds_k_outer` removes; see
+[LDS Tile Layout](#lds-tile-layout-lds_k_outer) below. Under `lds_k_outer=True`
+this tile is stored K-outer and the scatter disappears, but the width selection
+below is unchanged.
+
 Constraint: `C % load_vec_b == 0`. The loader uses `vector_axis="row"`.
 
 Width selection (Python / C++):
@@ -155,6 +160,52 @@ Width selection (Python / C++):
 
 The epilogue writes `dX` whose last dim is also `C`. Store vector width follows
 `C % store_vec == 0`, derived from `default_vector_sizes` (third element).
+
+## LDS Tile Layout (`lds_k_outer`)
+
+`lds_k_outer=True` stores the **B tile only** K-outer (`LDS[k][n]`, row stride
+`block_n + _KOUTER_PAD` with `_KOUTER_PAD = 8`) and recovers the MFMA/WMMA
+operand layout with transpose reads, instead of transposing on store.
+
+**Why B only.** This is a deliberate asymmetry with wgrad, which flips both
+operands:
+
+- **B (`W`, KYXC)** has the GEMM free axis `c` stride-1, forcing
+  `vector_axis="row"` and a per-element `ds_write_b16` scatter whose inter-lane
+  dword delta is a multiple of the 32-dword bank period. This is the cost worth
+  removing.
+- **A (`dY`, NHWK)** already has a stride-1 reduction axis (`k_out` innermost),
+  so its loader is already `vector_axis="col"` with one wide `smem_store_vN`, and
+  its M-outer fragment read is already conflict-free via `lds_k_pad`. Flipping A
+  would put the global vector along `m = (n, hi, wi)` — stride `K` in NHWK — and
+  destroy coalescing for zero write-side gain.
+
+**Instruction effect on the B side.** The store collapses to one wide
+`smem_store_vN` (`b128` for a 16-bit 8-wide vector), dropping `load_vec − 1`
+address adds and `load_vec` `vec_extract`s per chunk. The read pays `n / 4`
+`ds_read_b64_tr_b16` (wave64) or `n / 8` `ds_load_tr16_b128` (wave32) for a
+per-lane fragment length `n`, where the M-outer path issued a single
+`smem_load_vN`: **+1** read per fragment on the `n = 8` atoms (`32x32x16`,
+`16x16x32`), exactly **zero** on the `n = 4` atoms (`16x16x16`, `32x32x8`).
+Global `buffer_load`s are unchanged.
+
+**Gating.** Two regimes, `_LDS_K_OUTER_ARCH_WAVE = {"gfx950": 64,
+"gfx1250": 32}`, each arch pinned to its wave size so a mismatched spec is
+rejected rather than emitting a lane formula the hardware does not implement.
+gfx950 wave64 admits `warp_tile_n ∈ (16, 32)`; gfx1250 wave32 admits only the
+`16x16x32` atom (whose 16-element fragment is two `ds_load_tr16_b128` reads).
+Plus 16-bit B. Rejected with `async_dma=True` (the tilde builder has no direct
+global→LDS path) and with `pipeline="wavelet"` (`build_wavelet_loaders` pins the
+B tile to `(block_n, block_k)` and takes the unswapped descriptor, so it would
+write M-outer into a K-outer allocation).
+
+**Not a knob.** The spec field defaults `False`; the value is deduced by
+`DgradConvSpec.default_lds_k_outer(arch, dtype_b, warp_tile_n, cpg, wave_size,
+pipeline)`, whose only caller today is the sweep driver. The predicate is
+asymmetric with wgrad's — B-side dtype and warp tile only, never the A-side
+counterparts — and additionally keys on `cpg`: the saving is proportional to the
+B load width, which collapses to 1 on an odd channel run, where `axis_b` is
+already `"col"` and there is no scatter to remove.
 
 ## Key Files
 
@@ -181,3 +232,5 @@ The epilogue writes `dX` whose last dim is also `C`. Store vector width follows
 | Output | `dW` (KYXC) | `dX` (NHWC) |
 | Tilde decomposition | Not needed | Required for stride > 1 |
 | Output accumulation | Atomic only when split_k > 1 | Atomic when num_sub_gemms > 1 OR split_k > 1 |
+| `lds_k_outer` scope | Flips **both** A and B | Flips **B only** (A already has a stride-1 reduction axis) |
+| `lds_k_outer` + `async_dma` | Required together | Mutually exclusive |
