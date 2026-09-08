@@ -87,48 +87,13 @@ def _import_rocisa():
 # stinkytofu Python binding ``_stinkytofu.so``). Anything else (or unset)
 # keeps the original nanobind bindings in ``_rocisa``.
 #
-# When ``ROCISA_BACKEND`` is unset, gfx1250 platforms automatically default
-# to the stinkytofu backend. Set ``ROCISA_BACKEND=rocisa`` to explicitly
-# force the native path on gfx1250.
-
-def _detect_default_backend() -> str:
-    """Return ``"stinkytofu"`` if gfx1250 hardware is detected AND the build
-    targets include gfx1250, else ``""``."""
-    # If --architecture is on the command line and none of the targets are
-    # gfx1250, there is no point loading the stinkytofu adapter regardless
-    # of the physical GPU.  This covers every entry point (bin/*, __main__,
-    # -m invocations) without per-script patches.
-    for i, arg in enumerate(sys.argv):
-        arch_val = None
-        if arg == "--architecture" and i + 1 < len(sys.argv):
-            arch_val = sys.argv[i + 1]
-        elif arg.startswith("--architecture="):
-            arch_val = arg.split("=", 1)[1]
-        if arch_val is not None:
-            archs = arch_val.replace(";", "_").split("_")
-            if any("gfx1250" in a for a in archs):
-                return "stinkytofu"
-            return ""
-
-    import subprocess as _sp
-    rocmpath = os.environ.get(
-        "TENSILE_ROCM_PATH", os.environ.get("ROCM_PATH", "/opt/rocm")
-    )
-    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
-    if not os.path.exists(enumerator):
-        return ""
-    try:
-        output = _sp.check_output(
-            [enumerator, "-t", "GPU"], timeout=5, stderr=_sp.DEVNULL
-        )
-        if "gfx1250" in output.decode():
-            return "stinkytofu"
-    except Exception:
-        pass
-    return ""
+# The default is ALWAYS the native rocisa backend -- there is no hardware
+# auto-detection. Even on gfx1250 the stinkytofu backend is selected only when
+# it is *explicitly* requested via ``ROCISA_BACKEND=stinkytofu``.
 
 _BACKEND_RAW = os.environ.get("ROCISA_BACKEND", "").strip().lower()
-_BACKEND = _BACKEND_RAW if _BACKEND_RAW else _detect_default_backend()
+# No hardware auto-detection: unset (or anything != "stinkytofu") -> native rocisa.
+_BACKEND = _BACKEND_RAW
 
 _ADAPTER_PKG = "rocisa_stinkytofu_adaptor"
 
@@ -192,15 +157,6 @@ def _load_stinkytofu_adapter() -> "tuple[bool, str]":
     # ``rocisa_stinkytofu_adaptor.*`` submodule under ``rocisa.*`` in
     # ``sys.modules``.
     sys.modules["rocisa"] = _adapter
-    _adapter._BACKEND = "stinkytofu"
-
-    # Force-load lazy submodules so ``import rocisa.code`` etc. find the
-    # adapter's modules (not duplicates created via __path__ lookup).
-    # Safe here because _load_stinkytofu_adapter only runs when the
-    # stinkytofu backend is actually wanted; native workers never call it.
-    for _lazy in getattr(_adapter, "_LAZY_SUBMODULES", ()):
-        getattr(_adapter, _lazy, None)
-
     _prefix = f"{_ADAPTER_PKG}."
     for _name, _obj in vars(_adapter).items():
         if isinstance(_obj, types.ModuleType) and _obj.__name__.startswith(_prefix):
@@ -300,32 +256,34 @@ def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn,
                      auto_detected=False) -> bool:
     """Decide whether to use the stinkytofu adapter (True) or native rocisa (False).
 
-    Warns only when the user *explicitly* set ``ROCISA_BACKEND=stinkytofu``
-    but the backend cannot be loaded.  Auto-detected failures (gfx1250 machine
-    where stinkytofu is simply not built) fall back silently — the fallback to
-    native rocisa is correct and expected in that case.
+    Emits a warning *only* when the stinkytofu backend was explicitly requested
+    (or auto-detected) but we have to fall back to native — so an unnoticed
+    silent fallback becomes visible, with a cause-specific reason attached.
+    ``available_fn`` and ``load_fn`` share the same ``(ok, reason)`` contract;
+    the reason is surfaced verbatim so each distinct failure mode produces its
+    own warning. Requesting anything else (or unset) selects native without
+    touching the probes and without warning.
     """
     if requested != "stinkytofu":
         return False
+    _origin = "auto-detected for gfx1250" if auto_detected else "ROCISA_BACKEND=stinkytofu"
     available, avail_reason = available_fn()
     if not available:
-        if not auto_detected:
-            warn(avail_reason, stacklevel=2)
+        warn(avail_reason, stacklevel=2)
         return False
     ok, reason = load_fn()
     if not ok:
-        if not auto_detected:
-            warn(
-                f"stinkytofu backend (ROCISA_BACKEND=stinkytofu) requested "
-                f"but the adapter failed to load ({reason}){_FALLBACK}",
-                stacklevel=2,
-            )
+        warn(
+            f"stinkytofu backend ({_origin}) requested but the adapter failed "
+            f"to load ({reason}){_FALLBACK}",
+            stacklevel=2,
+        )
         return False
     return True
 
 
 if _resolve_backend(_BACKEND, _stinkytofu_available, _load_stinkytofu_adapter,
-                    auto_detected=(not _BACKEND_RAW)):
+                    auto_detected=False):
     # stinkytofu adapter active; wiring done inside _load_stinkytofu_adapter.
     pass
 else:
