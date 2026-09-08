@@ -80,7 +80,7 @@ private:
 /// evaluating the main signature. Also computes signature hashes for contract validation.
 ///
 /// A signature entry naming a string-valued field (`$kernel.dtype`) yields that value's
-/// number from the fixed table in CategoricalEncoding.hpp (RFC 0019 §6.5), so a
+/// number from the UHD's own `categorical_encoding` (RFC 0019 §6.5), so a
 /// categorical field can be a feature at all. A string with no encoding still throws.
 class FeatureExtractor
 {
@@ -342,6 +342,7 @@ inline FeatureExtractor::FeatureExtractor(
     const std::vector<std::string>& signature,
     const std::vector<std::pair<std::string, std::string>>& derived,
     const std::map<std::string, std::map<std::string, int32_t>>& categoricalEncoding)
+    : _evaluator(categoricalEncoding)
 {
     // Parse and analyze derived values (RFC 0019 §6.4)
     _parsedDerived.reserve(derived.size());

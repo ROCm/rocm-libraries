@@ -69,15 +69,18 @@ inline std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType>
     // how "hipDNN cannot express this" should read. Deferring to the shared table also means a
     // dtype added to the schema is nameable here without anyone remembering to add it twice.
     //
-    // Keyed by the runtime's spellings only -- the ones `to_string(DataType)` produces and the
-    // ones the `dtype` category of plugin_sdk .../ingestor/uhd/CategoricalEncoding.hpp encodes.
+    // Keyed by the runtime's spellings only -- the ones `to_string(DataType)` produces, which are
+    // therefore the ones a corpus recorded from real runs holds, and the ones a UHD's generated
+    // `categorical_encoding` (RFC 0019 §6.5) ends up carrying a code for.
     // The numpy spellings (`float32`, `float16`, `float64`) were deliberately dropped: a
     // declaration using them resolved here to a perfectly good graph and then wrote `float32`
-    // into the corpus's `q.dtype` column, where the encoder throws on it as an unknown value.
-    // That turned a one-word typo in an .opmeta.json into a corpus that only fails at training
-    // time, long after the run that produced it. CategoricalEncoding.hpp rejects `float16` for
-    // this exact reason -- it is the plausible near-miss -- so accepting it here would have
-    // contradicted the runtime it feeds.
+    // into the corpus's `q.dtype` column, so the encoding generated from that corpus holds
+    // `float32` -- while the runtime binds `fp32`, a spelling that corpus never held, which has
+    // no code and is refused at scoring. That turned a one-word typo in an .opmeta.json into a
+    // corpus that only fails once a model fitted on it is scored, long after the run that
+    // produced it. `float16` is refused here for this exact reason -- it is the plausible
+    // near-miss for the `fp16` the runtime emits -- so accepting it here would have contradicted
+    // the runtime it feeds.
     static const std::map<std::string, std::string> s_aliases{
         {"fp32", "float"},
         {"fp64", "double"},

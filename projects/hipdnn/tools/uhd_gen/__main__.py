@@ -53,7 +53,11 @@ import pandas as pd
 
 from .benchmark_log import main as benchmark_log_main
 from .evaluate import add_evaluate_arguments, run_evaluate
-from .features import build_features_signature, compute_features_hash
+from .features import (
+    build_features_signature,
+    compute_features_hash,
+    derive_categorical_encoding,
+)
 from .lgbm_to_flatbuffer import convert
 from .promote import add_promote_arguments, run_promote
 from .train_uhd import evaluate_regret, find_constant_feature_columns, train_model
@@ -433,6 +437,18 @@ def _run_train(args: argparse.Namespace) -> int:
     if args.group_by:
         logger.info("GroupKFold columns: %s", args.group_by)
 
+    # Derived from the frame that is about to be fitted, and from the feature list that
+    # survived the constant-column decision above -- the same list the signature is
+    # built from. The very same dict is handed to train_model, folded into
+    # features_hash and written into the descriptor: one map, one model, one hash. A
+    # second map computed independently for the descriptor is a model whose thresholds
+    # mean something the runtime will never reproduce.
+    try:
+        categorical_encoding = derive_categorical_encoding(df, features)
+    except ValueError as error:
+        logger.error("%s", error)
+        return 1
+
     # An unencodable categorical value is an input error like a missing column, and is
     # reported like one. Letting build_feature_matrix's ValueError escape would print a
     # traceback through LightGBM's call stack, burying the column/row/value it names --
@@ -445,6 +461,7 @@ def _run_train(args: argparse.Namespace) -> int:
             args.group_by,
             num_boost_round=args.num_boost_round,
             early_stopping_rounds=args.early_stopping,
+            categorical_encoding=categorical_encoding,
         )
     except ValueError as error:
         logger.error("%s", error)
@@ -485,7 +502,7 @@ def _run_train(args: argparse.Namespace) -> int:
     logger.info("Saved LightGBM model to %s", lgbm_path)
 
     features_signature = build_features_signature(features)
-    features_hash = compute_features_hash(features_signature)
+    features_hash = compute_features_hash(features_signature, categorical_encoding)
     fb_path = output_dir / "model.bin"
     convert(
         lgbm_path,
@@ -531,6 +548,12 @@ def _run_train(args: argparse.Namespace) -> int:
         # together.
         "tree_data": {"artifact": fb_path.name},
     }
+    if categorical_encoding:
+        # Only when there is one. A signature reading no string field ships the
+        # descriptor it always shipped, and compute_features_hash leaves its hash
+        # alone to match -- an empty map is not a contract change and must not read
+        # as one. Placed beside the signature it encodes (RFC 0019 §4/§6.5).
+        descriptor["categorical_encoding"] = categorical_encoding
     descriptor_path = output_dir / f"{stem}.uhd.json"
     with open(descriptor_path, "w", encoding="utf-8") as handle:
         json.dump(descriptor, handle, indent=2)
@@ -548,6 +571,11 @@ def _run_train(args: argparse.Namespace) -> int:
         "keep_constant_features": bool(args.keep_constant_features),
         "features_signature": features_signature,
         "features_hash": features_hash,
+        # Recorded unconditionally, unlike in the descriptor: the manifest is the
+        # provenance record, and "this corpus had no categorical column" is a fact
+        # about the training run worth being able to read without inferring it from
+        # an absent key.
+        "categorical_encoding": categorical_encoding,
         "target": args.target,
         "objective": args.objective,
         "score_units": args.score_units or args.target,

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -17,7 +18,6 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/CategoricalEncoding.hpp>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -100,6 +100,23 @@ private:
 class JsonLogicEvaluator
 {
 public:
+    /// @param categoricalEncoding RFC 0019 §6.5's string-to-code map, as the descriptor
+    ///        that owns this model declares it.
+    ///
+    /// Keyed by the whole `$`-reference (`"$kernel.dtype"`), not by the trailing field
+    /// name. Two columns may share that name while holding different vocabularies --
+    /// `$kernel.dtype` carries the KMD's `"BF16"` where `$q.attention_dense.dtype`
+    /// carries the runtime's `"bf16"` -- and a per-field key silently merges them into
+    /// one category whose codes then depend on which side was seen first.
+    ///
+    /// Empty is normal and means the signature reads no string field: every entry then
+    /// resolves numerically and the map is never consulted.
+    explicit JsonLogicEvaluator(
+        std::map<std::string, std::map<std::string, int32_t>> categoricalEncoding = {})
+        : _categoricalEncoding(std::move(categoricalEncoding))
+    {
+    }
+
     using Value = std::variant<double, bool, std::string>;
 
     /// Parse a JsonLogic expression from JSON string.
@@ -109,9 +126,9 @@ public:
     /// Evaluate an expression against a variable context.
     ///
     /// When `expr` is a bare `$namespace.field` reference whose binding is a string,
-    /// the field's category is resolved through CategoricalEncoding.hpp (RFC 0019 §6.5)
-    /// so `dtype`, `layout` and their kin can be features at all. Every other numeric
-    /// context still refuses a string.
+    /// the reference's code is resolved through the UHD's own `categorical_encoding`
+    /// (RFC 0019 §6.5) so `dtype`, `layout` and their kin can be features at all. Every
+    /// other numeric context still refuses a string.
     ///
     /// @returns The result as a double (for feature extraction).
     /// @throws JsonLogicError on evaluation failure, on a string that is not an encoded
@@ -147,6 +164,10 @@ private:
     /// @throws JsonLogicError when comparing a string against a number.
     static bool valuesEqual(const Value& a, const Value& b);
     static bool toBool(const Value& v);
+
+    /// RFC 0019 §6.5's map, owned by the descriptor rather than by the process. See the
+    /// constructor for why it is keyed by the whole reference.
+    std::map<std::string, std::map<std::string, int32_t>> _categoricalEncoding;
 };
 
 
@@ -275,9 +296,14 @@ inline double JsonLogicEvaluator::evaluateDouble(const nlohmann::json& expr,
     const Value value = evaluate(expr, ctx);
 
     // RFC 0019 §6.5: a features_signature entry naming a string-valued field is the one
-    // numeric context where a string is not a type error. It is a category, and
-    // CategoricalEncoding.hpp says which number it is -- globally, so `dtype="fp16"`
-    // is the same feature value whichever engine asked (§11.3).
+    // numeric context where a string is not a type error. It is a category, and the
+    // descriptor that ships the model says which number it is.
+    //
+    // Per descriptor, not per process. A global table has to hold every value every
+    // engine might ever bind, which makes adding a kernel an edit to a shared frozen
+    // list, and makes two engines that spell the same type differently collide in one
+    // category. The model's own map is generated from the corpus it was fitted on, so
+    // it is exactly the vocabulary that model was trained to read and nothing else.
     //
     // Deliberately here and not in toDouble. toDouble is *every* operator's numeric
     // context, so encoding there would also make {"+": ["$kernel.dtype", 1]} succeed --
@@ -285,25 +311,26 @@ inline double JsonLogicEvaluator::evaluateDouble(const nlohmann::json& expr,
     // signature entry itself is a place a category legitimately becomes a number.
     if(const auto* text = std::get_if<std::string>(&value); text != nullptr && expr.is_string())
     {
-        const std::string_view category
-            = categoryOfReference(expr.get_ref<const nlohmann::json::string_t&>());
-        if(const auto code = encodeCategorical(category, *text); code.has_value())
+        const auto& reference = expr.get_ref<const nlohmann::json::string_t&>();
+        if(const auto field = _categoricalEncoding.find(reference);
+           field != _categoricalEncoding.end())
         {
-            return *code;
+            if(const auto code = field->second.find(*text); code != field->second.end())
+            {
+                return static_cast<double>(code->second);
+            }
+
+            // The descriptor declares this reference categorical, so the value is one
+            // its corpus never held -- a catalog that moved past what the model was
+            // trained on. Scoring it would put an unseen kernel on the same axis as seen
+            // ones; refusing makes the gap visible at the entry that has the problem.
+            throw JsonLogicError("Categorical value \"" + *text + "\" has no code for '" + reference
+                                 + "' in this UHD's categorical_encoding. The model was trained on a "
+                                   "corpus that never held it; retrain, or narrow the catalog.");
         }
-        if(isKnownCategory(category))
-        {
-            // Distinct from toDouble's blanket type error on purpose. The category is
-            // one we encode, so this is a value the fixed table has never been told
-            // about -- a catalog that moved past what any model was trained on. Scoring
-            // it would put an unseen kernel on the same axis as seen ones; refusing
-            // makes the gap visible at the signature entry that has the problem.
-            throw JsonLogicError("Categorical value \"" + *text + "\" has no code in category '"
-                                 + std::string(category)
-                                 + "'. Append it to CATEGORICAL_ENCODING_TABLE in "
-                                   "CategoricalEncoding.hpp and mirror it in "
-                                   "tools/uhd_gen/features.py; existing codes must not move.");
-        }
+
+        // No entry at all: the descriptor does not treat this reference as categorical,
+        // so a string here is the ordinary type error toDouble reports.
     }
 
     return toDouble(value);

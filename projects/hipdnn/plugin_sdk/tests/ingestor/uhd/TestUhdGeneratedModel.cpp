@@ -103,6 +103,34 @@ Catalog catalogAgainstPriority(int64_t seqlen)
     return catalog;
 }
 
+/// The committed `dtype_selector` pair, whose signature reads a STRING field.
+///
+/// A second fixture rather than a richer first one: `tile_selector` is numeric
+/// throughout, and it has to stay that way to keep proving that a signature with
+/// no categorical field hashes exactly as it did before the field existed.
+HeuristicDescriptor dtypeDescriptor()
+{
+    const auto dir = fixtureDir() / "dtype_selector";
+    const auto path = dir / "dtype_selector.uhd.json";
+    std::ifstream stream(path);
+    auto descriptor = detail::parseHeuristicDescriptor(nlohmann::json::parse(stream), path);
+    descriptor.treeRoot = dir;
+    return descriptor;
+}
+
+/// The same two tiles, with the dtype the model actually splits on bound.
+Catalog catalogForDtype(const std::string& dtype)
+{
+    Catalog catalog = catalogAgainstPriority(1024);
+    for(auto& entry : catalog.entries)
+    {
+        entry.metadata["dtype"] = dtype;
+    }
+    return catalog;
+}
+
+const std::vector<std::string> DTYPE_KNOBS = {"dtype", "tile_m"};
+
 /// The knobs an engine shipping this model would declare.
 ///
 /// RFC 0019 §6.3 check 2 requires the engine's exposed knobs to be exactly the model's
@@ -185,6 +213,65 @@ TEST(TestIngestorUhdGeneratedModel, TheCommittedDescriptorNamesTheCommittedArtif
     EXPECT_EQ(document.at("tree_data").at("artifact"), "model.bin");
 
     EXPECT_TRUE(std::filesystem::exists(fixtureDir() / "model.bin"));
+}
+
+// ---- A signature that reads a string (RFC 0019 §6.5) ---------------------------
+
+TEST(TestIngestorUhdGeneratedModel, TheToolsCategoricalEncodingSurvivesTheCrossing)
+{
+    // The contract with the widest blast radius and, until this test, no coverage:
+    // Python folds `categorical_encoding` into features_hash and C++ recomputes it from
+    // the same file. Disagree by one byte -- key spelling, code, or map ordering -- and
+    // the load is refused. A green load IS the agreement; nothing else has to assert it.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const auto descriptor = dtypeDescriptor();
+    ASSERT_FALSE(descriptor.categoricalEncoding.empty())
+        << "the tool must ship the map it trained with";
+
+    const auto heuristic = makeKernelHeuristic(descriptor, {}, DTYPE_KNOBS);
+
+    ASSERT_NE(heuristic, nullptr) << "hash disagreement refuses the load: "
+                                  << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(recorder.getRecordedLogCount(), 0U) << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestIngestorUhdGeneratedModel, TheDescriptorCarriesTheCorpusSpellingUnfolded)
+{
+    // The corpus holds the rocKE KMD's `"BF16"`. The frozen table this replaced folded
+    // ASCII case, so it would have recorded `bf16` and quietly accepted either; a
+    // generated map records what the corpus held and nothing else.
+    const auto descriptor = dtypeDescriptor();
+    const auto field = descriptor.categoricalEncoding.find("$kernel.dtype");
+
+    ASSERT_NE(field, descriptor.categoricalEncoding.end())
+        << "keyed by the whole reference, not the trailing field name";
+    EXPECT_EQ(field->second.count("BF16"), 1U) << "the corpus spelling, verbatim";
+    EXPECT_EQ(field->second.count("bf16"), 0U) << "case is not folded any more";
+}
+
+TEST(TestIngestorUhdGeneratedModel, TheModelRanksOnTheStringItWasTrainedOn)
+{
+    // End to end: a category reaches the model as a number and changes the answer.
+    // The two catalogs differ ONLY in dtype -- same tiles, same priorities, same
+    // seqlen -- so a model that never saw the string cannot produce this flip, and a
+    // model reading it through the wrong codes produces the flip backwards.
+    const auto heuristic = makeKernelHeuristic(dtypeDescriptor(), {}, DTYPE_KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    auto properties = testing::testDeviceProperties();
+    properties.gcnArchName = "gfx942";
+    const MatchContext context{graph, 0, properties};
+
+    const auto wide = heuristic->rank(catalogForDtype("BF16"), context);
+    const auto narrow = heuristic->rank(catalogForDtype("FP16"), context);
+
+    ASSERT_EQ(wide.size(), 2U);
+    ASSERT_EQ(narrow.size(), 2U);
+    EXPECT_EQ(wide.front().kernelId, testId(0x02)) << "BF16 was trained to want tile 128";
+    EXPECT_EQ(narrow.front().kernelId, testId(0x01)) << "FP16 was trained to want tile 64";
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

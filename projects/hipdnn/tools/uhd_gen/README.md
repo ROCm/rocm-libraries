@@ -459,9 +459,20 @@ FlatBuffer this tool writes, and it goes through generated bindings.
   "features_hash": "sha256:...",
   "objective": "max",
   "score": {"units": "tflops", "calibrated": false, "transform": "log1p"},
+  "categorical_encoding": {"$kernel.dtype": {"bf16": 0, "fp16": 1}},
   "tree_data": {"artifact": "model.bin"}
 }
 ```
+
+`categorical_encoding` maps each string-valued feature to the codes the model was
+fitted with. It is derived from the training corpus, keyed by the full `$reference`
+from `features_signature` (never the trailing field name — `kernel.dtype` and
+`q.attention_dense.dtype` are two vocabularies, not one), and holds the values exactly
+as the corpus spells them; codes run from 0 in sorted order. It is written only when
+the corpus has a string column, and it is folded into `features_hash`, so changing the
+map is a contract change even though the signature text is unchanged. The same dict is
+recorded in `train_manifest.json` (as `{}` when there is none) and is the one
+`evaluate` scores through, so evaluation encodes exactly as the fit did.
 
 ## Training Details
 
