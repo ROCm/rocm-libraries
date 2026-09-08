@@ -375,7 +375,7 @@ def find_chip_id_arch_lock_violations(files: Sequence[Path]) -> List[str]:
     from-source build re-checking the whole architecture registry on every
     invocation would add no additional safety over running it once in CI's
     unit-test job."""
-    from Tensile.Common.Architectures import supportsChipIdPredicate
+    from tensilelite.Common.Architectures import supportsChipIdPredicate
 
     violations: List[str] = []
     seen_archs = set()
