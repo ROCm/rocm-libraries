@@ -15,17 +15,19 @@ freshly-regenerated goldens.
 
 This script is the backstop that CANNOT be bypassed with ``git commit
 --no-verify``, because it runs in CI against the PR's actual diff. It compares
-the `.ambr` files changed between a PR's merge-base and its head; if more than a
-small threshold changed, it fails unless the same diff also adds or updates an
+the `.ambr` files changed between a PR's merge-base and its head; if more than
+``DEFAULT_THRESHOLD`` (3) changed, it fails unless the same diff also adds or updates an
 Architecture Decision Record (ADR, under ``characterization/adr/``) carrying an
 explicit ``Bulk-Snapshot-Update: yes`` line -- a conscious, reviewed opt-in for a
 genuine mass update (e.g. a change to the snapshot format itself), documented the
 same way as any other characterization decision (see ``adr/README.md``).
 
-Usage (run from the TensileLite root, ``projects/hipblaslt/tensilelite``, same
-convention as ``coverage_ratchet.py``)::
+Usage (from the rocm-libraries repo root; pass ``--characterization-dir`` so
+pathspecs match the monorepo layout, not the flat TensileLite test fixtures)::
 
-    python Tensile/Tests/unit/characterization/tools/check_snapshot_diff.py \\
+    python3 projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/tools/check_snapshot_diff.py \\
+        --repo-root . \\
+        --characterization-dir projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization \\
         --base <base-sha-or-ref> --head <head-sha-or-ref>
 
 Exit codes: ``0`` OK (within threshold, or a valid override was found), ``1`` a
@@ -62,8 +64,8 @@ REMEDIATION = (
     "This looks like a blanket snapshot regeneration rather than a scoped,\n"
     "reviewed change. Either:\n"
     "  (a) split this into smaller PRs, each scoped to the behavior it actually\n"
-    "      changes (see 'Surgical, never blanket' in the characterization\n"
-    "      README's snapshot discipline section), or\n"
+    "      changes (see 'The cardinal rule: never blanket-regenerate.' in the\n"
+    "      characterization README's snapshot discipline section), or\n"
     "  (b) if this bulk update is genuinely reviewed and intentional (e.g. a\n"
     "      change to the snapshot format itself), add or update an ADR under\n"
     "      characterization/adr/ (see adr/README.md for the template) with the\n"
