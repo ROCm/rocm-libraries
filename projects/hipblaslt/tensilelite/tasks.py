@@ -287,7 +287,6 @@ def build_client(
             cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_TSAN=ON")
         if enable_sdma:
             cmake_cmd.append("-DTENSILELITE_ENABLE_SDMA=ON")
-        cmake_cmd.append("-DHIPBLASLT_BUNDLE_PYTHON_DEPS=OFF")
 
         c.run(shlex.join(cmake_cmd))
 
@@ -495,6 +494,7 @@ def build_coverage(
         f"-DCMAKE_CXX_COMPILER={cmake_cxx}",
         "-DTENSILELITE_ENABLE_COVERAGE=ON",
         "-DROCISA_ENABLE_COVERAGE=ON",
+        "-DROCISA_BUILD_PYTHON=ON",
         "-DTENSILELITE_BUILD_TESTING=ON",
         "-DHIPBLASLT_ENABLE_YAML=OFF",  # Use msgpack, LLVM headers may not be available
     ]
