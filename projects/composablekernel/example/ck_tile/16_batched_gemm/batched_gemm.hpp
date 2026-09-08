@@ -11,6 +11,46 @@
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 #include "ck_tile/utility/json_dump.hpp"
 
+template <typename GemmConfig,
+          ck_tile::index_t VectorSizeA_,
+          ck_tile::index_t VectorSizeB_,
+          ck_tile::index_t VectorSizeC_>
+struct GemmConfigFixedVectorSize : public GemmConfig
+{
+    static_assert(GemmConfig::K_Warp_Tile % VectorSizeA_ == 0 &&
+                 GemmConfig::K_Warp_Tile % VectorSizeB_ == 0,
+                 "A/B vector width must divide K_Warp_Tile");
+
+    static constexpr bool kPadM = true;
+    static constexpr bool kPadN = true;
+    static constexpr bool kPadK = true;
+
+    static constexpr bool FixedVectorSize         = true;
+    static constexpr ck_tile::index_t VectorSizeA = VectorSizeA_;
+    static constexpr ck_tile::index_t VectorSizeB = VectorSizeB_;
+    static constexpr ck_tile::index_t VectorSizeC = VectorSizeC_;
+};
+
+struct GemmConfigNoFixedVectorSize
+{
+    static constexpr bool kPadM                   = false;
+    static constexpr bool kPadN                   = false;
+    static constexpr bool kPadK                   = false;
+    static constexpr bool FixedVectorSize         = false;
+    static constexpr ck_tile::index_t VectorSizeA = 1;
+    static constexpr ck_tile::index_t VectorSizeB = 1;
+    static constexpr ck_tile::index_t VectorSizeC = 1;
+};
+
+template <typename T>
+using has_fixed_vector_size_t = decltype(T::FixedVectorSize);
+
+template <typename GemmConfig>
+using GemmConfigVectorSizeDefaults =
+    std::conditional_t<ck_tile::is_detected<has_fixed_vector_size_t, GemmConfig>::value,
+                       GemmConfig,
+                       GemmConfigNoFixedVectorSize>;
+
 struct GemmConfigMemory
 {
     // Memory friendly for Interwave scheduler

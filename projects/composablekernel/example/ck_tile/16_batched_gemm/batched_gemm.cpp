@@ -45,9 +45,10 @@ float batched_gemm(const ck_tile::BatchedGemmHostArgs& args, const ck_tile::stre
 #endif
     constexpr bool DoubleSmemBuffer = GemmConfig::DoubleSmemBuffer;
 
-    constexpr bool kPadM = false;
-    constexpr bool kPadN = false;
-    constexpr bool kPadK = false;
+    using VectorSizeDefaults = GemmConfigVectorSizeDefaults<GemmConfig>;
+    constexpr bool kPadM     = VectorSizeDefaults::kPadM;
+    constexpr bool kPadN     = VectorSizeDefaults::kPadN;
+    constexpr bool kPadK     = VectorSizeDefaults::kPadK;
 
     constexpr bool TransposeC = false;
 
@@ -77,7 +78,14 @@ float batched_gemm(const ck_tile::BatchedGemmHostArgs& args, const ck_tile::stre
                                                                        AccDataType,
                                                                        GemmShape,
                                                                        GemmUniversalTraits,
-                                                                       scheduler>;
+                                                                       scheduler,
+                                                                       ck_tile::element_wise::PassThrough,
+                                                                       ck_tile::element_wise::PassThrough,
+                                                                       ADataType,
+                                                                       BDataType,
+                                                                       VectorSizeDefaults::FixedVectorSize,
+                                                                       VectorSizeDefaults::VectorSizeA,
+                                                                       VectorSizeDefaults::VectorSizeB>;
 
     using GemmPipeline = typename PipelineTypeTraits<GemmConfig::Pipeline>::template GemmPipeline<
         UniversalGemmProblem>;
@@ -98,7 +106,10 @@ float batched_gemm(const ck_tile::BatchedGemmHostArgs& args, const ck_tile::stre
                                          M_Warp_Tile,
                                          N_Warp_Tile,
                                          K_Warp_Tile,
-                                         UniversalGemmProblem::TransposeC>>;
+                                         UniversalGemmProblem::TransposeC,
+                                         1, /*kNumWaveGroups_*/
+                                         VectorSizeDefaults::FixedVectorSize,
+                                         VectorSizeDefaults::VectorSizeC>>;
 
     using Kernel = ck_tile::BatchedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
     auto kargs   = Kernel::MakeKernelArgs(args);
