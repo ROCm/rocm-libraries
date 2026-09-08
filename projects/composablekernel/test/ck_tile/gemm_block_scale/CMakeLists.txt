@@ -254,15 +254,10 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     target_compile_options(test_tile_gemm_quant_rowcol PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
     # RowColQuant large-tensor tests (64-bit global load/store path).
-    # The source guards its body with #if defined(CK_USE_GFX1250), which is only defined
-    # when gfx1250 is a target (see top-level CMakeLists.txt). Gate registration on the
-    # same condition so non-gfx1250 targets don't build a zero-test executable.
-    if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
-        add_gtest_executable(test_tile_gemm_quant_rowcol_large_tensor
-            test_gemm_quant_rowcol_large_tensor.cpp
-        )
-        target_compile_options(test_tile_gemm_quant_rowcol_large_tensor PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
-    endif()
+    add_gtest_executable(test_tile_gemm_quant_rowcol_large_tensor
+        test_gemm_quant_rowcol_large_tensor.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_rowcol_large_tensor PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
     # TensorQuant tests
     add_gtest_executable(test_tile_gemm_quant_tensor 
