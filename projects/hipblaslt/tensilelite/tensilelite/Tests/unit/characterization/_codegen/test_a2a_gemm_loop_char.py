@@ -3,8 +3,9 @@
 """A2A-GEMM (FusedA2AMode=1, GatheredB) outer shard-loop codegen characterization.
 
 The index structure is the stock GEMM one: K is a single summation index
-holding k_local. The shard loop wraps the unroll loop; its trip count is a
-runtime scalar, not a problem dimension.
+holding the whole W*k_local reduction. The shard loop wraps the unroll loop,
+which covers K/W per round; the shard count is a runtime scalar, not a problem
+dimension.
 """
 
 import pytest
@@ -102,6 +103,49 @@ class TestA2AGemmSolutionProblemType:
         assert self._contraction_problem_type().fusedA2AMode == 0
 
 
+class TestA2AGemmPredicates:
+    """The runtime shard guards ride on the solution's compound predicate list.
+
+    Each guard occupies four sites: the Python emitter here, the C++ struct, the
+    Pair<> registration and the MappingTraits. The last arm checks the two C++
+    registrations by name.
+    """
+
+    _GUARDS = ("A2AWorldNonZero", "A2AShardDivisible", "A2AGsuCoalescedOff")
+    _CPP_PREDICATES = "include/Tensile/Serialization/ContractionPredicates.hpp"
+
+    def _predicates(self, mode=None):
+        from config_harness import derive_states
+
+        from Tensile.Contractions import ProblemPredicate, ProblemType
+
+        state = derive_states(_CONFIG, arch="gfx950", limit_solutions=1)[0]
+        if mode is not None:
+            state["ProblemType"]["FusedA2AMode"] = mode
+        pt = ProblemType.FromOriginalState(state["ProblemType"])
+        return {p.tag: p.value for p in ProblemPredicate.CompoundPredicates(state, pt)}
+
+    def test_mode_one_emits_every_guard(self):
+        assert set(self._GUARDS) <= set(self._predicates())
+
+    def test_shard_divisible_carries_depth_u(self):
+        assert self._predicates()["A2AShardDivisible"] == 64
+
+    def test_mode_zero_emits_none_of_them(self):
+        assert not set(self._GUARDS) & set(self._predicates(mode=0))
+
+    def test_cpp_registers_every_guard(self):
+        import pathlib
+
+        hdr = pathlib.Path(self._CPP_PREDICATES)
+        if not hdr.is_file():
+            pytest.skip("run from the tensilelite root to reach the C++ headers")
+        src = hdr.read_text()
+        for tag in self._GUARDS:
+            assert "Pair<Predicates::Contraction::%s>" % tag in src
+            assert "MappingTraits<Predicates::Contraction::%s," % tag in src
+
+
 class TestA2AGemmShardLoop:
     """The shard loop wraps the unroll loop and closes before the store."""
 
@@ -192,10 +236,27 @@ class TestA2AGemmPerRoundState:
             "the DirectToLds m0 update is hoisted out of the shard loop"
         )
 
-    def test_inner_trip_count_is_recomputed(self, config):
-        assert "s[sgprLoopCounterL], s[sgprSizesSum" in self._body(config), (
-            "the unroll trip count is hoisted out of the shard loop"
+    def test_inner_trip_count_is_recomputed_from_k_local(self, config):
+        assert "s[sgprLoopCounterL], s[sgprA2AKLocal]" in self._body(config), (
+            "the unroll trip count is hoisted out of the shard loop, or divides "
+            "the whole W*k_local reduction instead of one shard"
         )
+
+    def test_shard_offsets_step_per_tensor_layout(self, config):
+        lines = self._transition(config).splitlines()
+        a = next(l for l in lines if "elements per A shard" in l)
+        b = next(l for l in lines if "elements per B shard" in l)
+        assert "sgprA2AKLocal" in a, "A steps a whole tensor instead of k_local along K"
+        assert "sgprSizeJ" in b and "sgprStrideB1J" in b, (
+            "B steps something other than one [nToken, k_local] segment"
+        )
+
+    def test_k_local_divide_sits_outside_the_shard_loop(self, config):
+        from config_harness import emit_kernels_from_config
+
+        src = emit_kernels_from_config(config, limit=1, arch="gfx950")[0][1]
+        assert "k_local = K / W" in src
+        assert "k_local = K / W" not in self._body(config)
 
     def test_no_load_loop_is_inside_the_body(self, config):
         assert "NoLoadLoop" in self._body(config), (

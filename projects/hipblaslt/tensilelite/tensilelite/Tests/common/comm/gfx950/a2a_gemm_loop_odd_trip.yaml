@@ -3,7 +3,8 @@
 # A2A-GEMM outer shard-loop (FusedA2AMode=1, GatheredB) config for gfx950 with
 # an odd unroll trip count K/DepthU.
 #
-# The index structure is the stock GEMM one; K holds k_local. The shard count
+# The index structure is the stock GEMM one; K holds the whole W*k_local
+# reduction and one shard round covers K/W. The shard count
 # is a runtime scalar and is not a ProblemSizes entry.
 
 GlobalParameters:
@@ -54,7 +55,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [3072, 2048, 1, 1088]
+          - Exact: [3072, 2048, 1, 4352]   # W=4, k_local=1088
 
 LibraryLogic:
   ScheduleName: "a2a_gemm_loop_odd_trip_gfx950"

@@ -667,6 +667,11 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SizeLessThan', index=kIdx,
                        value=kTiles * state['DepthU'] + 1)]
 
+        if state['ProblemType']['FusedA2AMode'] == 1:
+            rv += [cls('A2AWorldNonZero')]
+            rv += [cls('A2AShardDivisible', value=state['DepthU'])]
+            rv += [cls('A2AGsuCoalescedOff')]
+
         return rv
 
     @classmethod

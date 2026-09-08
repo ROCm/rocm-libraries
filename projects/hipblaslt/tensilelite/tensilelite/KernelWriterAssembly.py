@@ -8004,7 +8004,11 @@ class KernelWriterAssembly(KernelWriter):
       module = Module("Ordinary calculateLoopNumIter")
 
       quotient = loopCounterName
-      dividend = "SizesSum+%u" % loopIdx #sumSize = self.sumSize(kernel, loopIdx)
+      # SizesSum holds the whole reduction W*k_local; one shard round covers k_local.
+      if kernel.get("ProblemType", {}).get("FusedA2AMode", 0) == 1:
+        dividend = "A2AKLocal"
+      else:
+        dividend = "SizesSum+%u" % loopIdx #sumSize = self.sumSize(kernel, loopIdx)
       divisor = kernel["DepthU"]
 
       module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=False))
@@ -8328,6 +8332,15 @@ class KernelWriterAssembly(KernelWriter):
                                           sgprOffset=hex(offset), dword=1))
     module.add(SWaitCnt(kmcnt=0, comment="wait FusedW for the shard trip count"))
     module.add(SMovB32(dst=sgpr("A2AShardIdx"), src=0, comment="start at shard 0"))
+    tmpVgpr = self.vgprPool.checkOut(2, tag="openA2AShardLoop_divide")
+    with self.allocTmpSgpr(1, tag="openA2AShardLoop_tmpSgprInfo") as tmpSgprInfo:
+      module.add(scalarUInt32DivideAndRemainder(
+          qReg="A2AKLocal", dReg="SizesSum+%u" % self.states.unrollIdx,
+          divReg="A2AShardCounter", rReg=tmpSgprInfo.idx,
+          tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=2),
+          wavewidth=kernel["WavefrontSize"], doRemainder=False,
+          comment="k_local = K / W"))
+    self.vgprPool.checkIn(tmpVgpr)
     module.add(self.a2aShardLoopLabel())
     return module
 
@@ -8357,9 +8370,20 @@ class KernelWriterAssembly(KernelWriter):
                                      tP["bpeGR"]))
       with self.allocTmpSgpr(4, alignment=2, tag="a2aShardOffset") as tmpSgprInfo:
         s = tmpSgprInfo.idx
-        module.add(SMulI32(dst=sgpr(s), src0=self.sizeRef(tP["tileIdx"]),
-                           src1=self.strideRef(tc, tP["tileIdx"]),
-                           comment="elements per %s shard" % tc))
+        # A is one contiguous [nFeature, W*k_local] and steps k_local along K;
+        # B is W separate [nToken, k_local] segments and jumps a whole segment.
+        if tP["isA"]:
+          unrollStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
+          if self.isConstUnitStride(unrollStride):
+            module.add(SMovB32(dst=sgpr(s), src=sgpr("A2AKLocal"),
+                               comment="elements per %s shard" % tc))
+          else:
+            module.add(SMulI32(dst=sgpr(s), src0=sgpr("A2AKLocal"), src1=unrollStride,
+                               comment="elements per %s shard" % tc))
+        else:
+          module.add(SMulI32(dst=sgpr(s), src0=self.sizeRef(tP["tileIdx"]),
+                             src1=self.strideRef(tc, tP["tileIdx"]),
+                             comment="elements per %s shard" % tc))
         module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(s + 2), sgpr(s + 3), sgpr(s),
                                                        sgpr("A2AShardIdx"),
                                                        comment="shard offset in elements"))
