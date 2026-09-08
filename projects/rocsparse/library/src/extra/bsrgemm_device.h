@@ -163,14 +163,11 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename I, typename T>
     ROCSPARSE_DEVICE_ILF void bsrgemm_copy_scale_device(I size, T beta, const T* in, T* out)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(idx >= size)
+        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < size;
+            idx += static_cast<I>(hipGridDim_x) * BLOCKSIZE)
         {
-            return;
+            out[idx] = beta * in[idx];
         }
-
-        out[idx] = beta * in[idx];
     }
 
     // Hash operation to insert pair into hash table
