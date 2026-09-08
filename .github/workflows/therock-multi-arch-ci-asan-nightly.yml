@@ -32,6 +32,7 @@ jobs:
     with:
       build_variant: "asan"
       linux_amdgpu_families: "gfx94X,gfx950,gfx125X"
+      stage_reuse_mode: off
       repository: ROCm/TheRock
       ref: release/bkc/therock-10.1-20260908
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'

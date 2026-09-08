@@ -162,9 +162,8 @@ jobs:
       build_pytorch: ${{ inputs.build_pytorch || false }}
       build_jax: ${{ inputs.build_jax || false }}
       build_native_linux: ${{ inputs.build_native_linux || false }}
-      # Enable automatic stage reuse - TheRock finds commit-compatible baselines
-      # and determines which stages to rebuild based on changed files
-      stage_reuse_mode: reuse-stage
+      # Disable automatic stage reuse for the pinned BKC branch.
+      stage_reuse_mode: off
       repository: ROCm/TheRock
       ref: release/bkc/therock-10.1-20260908
       # Pass external repo info for stage-impact analysis

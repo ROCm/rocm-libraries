@@ -41,6 +41,7 @@ jobs:
       windows_test_labels: ''
       prebuilt_stages: ''
       baseline_run_id: ''
+      stage_reuse_mode: off
       repository: ROCm/TheRock
       ref: release/bkc/therock-10.1-20260908
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
