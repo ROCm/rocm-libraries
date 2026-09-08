@@ -7201,9 +7201,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # doShadowInit performs initialization in the 'shadow' of the global mem prefetch
     # TODO re-enable..
-    if not kernel["ForceDisableShadowInit"] and not kernel["UseSubtileImpl"]:
+    if not kernel["ForceDisableShadowInit"] and not kernel["UseSubtileImpl"] \
+       and kernel["ProblemType"]["FusedA2AMode"] != 1:
       if kernel["PrefetchGlobalRead"]:
-        if self.states.actualSummationLoops == 1 and kernel["ProblemType"]["FusedA2AMode"] != 1:
+        if self.states.actualSummationLoops == 1:
           self.states.doShadowInit = 2 # 2 is both store setup and initC
         else:
           # can't do shadow initC inside an outer loop since this resets the ValuC counters
