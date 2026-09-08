@@ -1019,6 +1019,235 @@
     tailLoopOptB: false
     tailLoopOptMXSA: false
     tailLoopOptMXSB: false
+  - ActivationFuncCall: false
+    AssertSummationElementMultiple: 32
+    DepthU: 256
+    DirectToLds: 1
+    EnableMatrixInstruction: true
+    GlobalSplitU: 0
+    GlobalSplitUAlgorithm: MultipleBuffer
+    InnerUnroll: 1
+    ISA:
+    - 9
+    - 5
+    - 0
+    KernelLanguage: Assembly
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstK: 128
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MFMA_BF16_1K: false
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
+    MIInputPerThread: 32
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 6
+    - 8
+    NonTemporalD: 4
+    OptNoLoadLoop: 1
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 1
+    ScheduleIterAlg: 3
+    SolutionIndex: 2
+    StaggerU: 0
+    StoreSwapAddr: false
+    StreamK: 3
+    TransposeLDS: 1
+    UseSubtileImpl: true
+    Valid: true
+    WavefrontSize: 64
+    WorkGroup:
+    - 32
+    - 8
+    - 1
+    WorkGroupMapping: 16
+    WorkGroupMappingXCC: 2
+  - ActivationFuncCall: false
+    AssertSummationElementMultiple: 32
+    DepthU: 256
+    DirectToLds: 1
+    EnableMatrixInstruction: true
+    GlobalSplitU: 0
+    GlobalSplitUAlgorithm: MultipleBuffer
+    InnerUnroll: 1
+    ISA:
+    - 9
+    - 5
+    - 0
+    KernelLanguage: Assembly
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstK: 128
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MFMA_BF16_1K: false
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
+    MIInputPerThread: 32
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 8
+    - 10
+    NonTemporalD: 4
+    OptNoLoadLoop: 1
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 1
+    ScheduleIterAlg: 3
+    SolutionIndex: 3
+    StaggerU: 0
+    StoreSwapAddr: true
+    StreamK: 3
+    TransposeLDS: 1
+    UseSubtileImpl: true
+    Valid: true
+    WavefrontSize: 64
+    WorkGroup:
+    - 32
+    - 8
+    - 1
+    WorkGroupMapping: 16
+    WorkGroupMappingXCC: 2
+  - ActivationFuncCall: false
+    AssertSummationElementMultiple: 32
+    DepthU: 256
+    DirectToLds: 1
+    EnableMatrixInstruction: true
+    GlobalSplitU: 0
+    GlobalSplitUAlgorithm: MultipleBuffer
+    InnerUnroll: 1
+    ISA:
+    - 9
+    - 5
+    - 0
+    KernelLanguage: Assembly
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstK: 128
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MFMA_BF16_1K: false
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
+    MIInputPerThread: 32
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 10
+    - 8
+    NonTemporalD: 4
+    OptNoLoadLoop: 1
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 1
+    ScheduleIterAlg: 3
+    SolutionIndex: 4
+    StaggerU: 0
+    StoreSwapAddr: true
+    StreamK: 3
+    TransposeLDS: 1
+    UseSubtileImpl: true
+    Valid: true
+    WavefrontSize: 64
+    WorkGroup:
+    - 32
+    - 8
+    - 1
+    WorkGroupMapping: 16
+    WorkGroupMappingXCC: 2
+  - ActivationFuncCall: false
+    AssertSummationElementMultiple: 32
+    DepthU: 256
+    DirectToLds: 1
+    EnableMatrixInstruction: true
+    GlobalSplitU: 0
+    GlobalSplitUAlgorithm: MultipleBuffer
+    InnerUnroll: 1
+    ISA:
+    - 9
+    - 5
+    - 0
+    KernelLanguage: Assembly
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstK: 128
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MFMA_BF16_1K: false
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
+    MIInputPerThread: 32
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
+    MIWaveGroup:
+    - 1
+    - 4
+    MIWaveTile:
+    - 14
+    - 4
+    OptNoLoadLoop: 1
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 1
+    ScheduleIterAlg: 3
+    SolutionIndex: 5
+    StaggerU: 32
+    StaggerUStride: 256
+    StoreSwapAddr: false
+    StreamK: 3
+    TransposeLDS: 1
+    UseSgprForGRO: 0
+    UseSubtileImpl: true
+    Valid: true
+    WavefrontSize: 64
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
 - null
 - null
 - null
