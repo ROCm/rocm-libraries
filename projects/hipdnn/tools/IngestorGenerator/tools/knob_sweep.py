@@ -108,7 +108,9 @@ def _promote(spec, arch_spec_cls, overrides: dict):
     return arch_spec_cls(**{**shared, **overrides})
 
 
-def _arm(resolutions, profile: dict, overrides: dict, arch_spec_cls=None) -> dict:
+def _arm(
+    resolutions, profile: dict, overrides: dict, arch_spec_cls=None
+) -> tuple[dict, list[tuple[int, str]]]:
     """One arm: the parity set with `overrides` forced onto every served spec.
 
     Built by MUTATING the dispatcher's own resolution rather than by authoring a
@@ -124,9 +126,17 @@ def _arm(resolutions, profile: dict, overrides: dict, arch_spec_cls=None) -> dic
     to the named knob. The confound is silent -- every arm still generates, gates and
     measures -- which is precisely why the arms are diffed against the baseline in
     the test suite rather than trusted.
+
+    Returns `(config, unbuildable)`, where `unbuildable` lists
+    `(shape_index, reason)` for every served shape whose spec REFUSES this arm's
+    value -- a real property of the set, not a tool error. The caller must report
+    that count: an arm covering a subset of the corpus is measurable, but a bare
+    ratio against parity over a different shape population is not a comparison.
+
     """
     mutated = []
-    for resolution in resolutions:
+    unbuildable: list[tuple[int, str]] = []
+    for index, resolution in enumerate(resolutions):
         if resolution.spec is None:
             mutated.append(resolution)
             continue
@@ -139,15 +149,34 @@ def _arm(resolutions, profile: dict, overrides: dict, arch_spec_cls=None) -> dic
                 f"are exactly the ones the dispatcher leaves alone, so a sweep needs "
                 f"the builder's own spec class to reach them."
             )
-        if arch_spec_cls is not None:
-            clone.spec = _promote(resolution.spec, arch_spec_cls, overrides)
-        else:
-            # The spec is a FROZEN dataclass, so replace() rather than setattr. Worth
-            # keeping frozen: an arm built by mutating a shared object in place is how
-            # one arm's override leaks into the next one's baseline.
-            clone.spec = dataclasses.replace(resolution.spec, **overrides)
+        # A KNOB VALUE CAN BE ILLEGAL FOR SOME SHAPES AND LEGAL FOR OTHERS, and that
+        # is a property of the SET, not an error in the tool. `wide_lds_dma` requires
+        # `block_n=64`, so a `block_n=128` arm cannot express any shape the dispatcher
+        # resolved wide-DMA for -- 53 of 84 on the gfx950 shipping corpus. Letting the
+        # spec constructor's ValueError escape aborts the whole isolation pass on the
+        # first such shape and reports nothing about the 31 that ARE expressible;
+        # worse, the same class of illegal combination previously reached a DEVICE as
+        # 180 unbuildable descriptors because no host gate constructed the spec.
+        #
+        # So construct it here, drop what cannot be built, and RETURN the count so the
+        # caller can say which shapes the arm actually covers. A silently narrowed arm
+        # is the failure this avoids: it would measure a subset while reading as a
+        # full comparison against parity.
+        try:
+            if arch_spec_cls is not None:
+                clone.spec = _promote(resolution.spec, arch_spec_cls, overrides)
+            else:
+                # The spec is a FROZEN dataclass, so replace() rather than setattr.
+                # Worth keeping frozen: an arm built by mutating a shared object in
+                # place is how one arm's override leaks into the next one's baseline.
+                clone.spec = dataclasses.replace(resolution.spec, **overrides)
+        except ParityError:
+            raise
+        except Exception as exc:
+            unbuildable.append((index, f"{type(exc).__name__}: {exc}"))
+            continue
         mutated.append(clone)
-    return build_config(mutated, profile)
+    return build_config(mutated, profile), unbuildable
 
 
 def _write(config: dict, path: Path) -> int:
@@ -246,15 +275,23 @@ def main(argv=None) -> int:
         if not candidates:
             print("\nFAIL: no candidate knobs to isolate.", file=sys.stderr)
             return 1
-        baseline = _arm(resolutions, profile, {}, arch_spec_cls)
+        baseline, base_unbuildable = _arm(resolutions, profile, {}, arch_spec_cls)
+        assert not base_unbuildable, (
+            "the PARITY baseline itself has unbuildable shapes, which is impossible "
+            "by construction -- the dispatcher resolved these specs, so they build. "
+            f"Got: {base_unbuildable[:3]}"
+        )
         count = _write(baseline, out / "arm_parity.yaml")
+        served_total = count
         print(f"\n  arm_parity.yaml               {count:5d} kernels  (the baseline)")
         base_specs = [
             k["kernel_source"]["spec"] for k in baseline["packs"][0]["kernels"]
         ]
         for knob in candidates:
             for value in knob.values:
-                arm = _arm(resolutions, profile, {knob.name: value}, arch_spec_cls)
+                arm, unbuildable = _arm(
+                    resolutions, profile, {knob.name: value}, arch_spec_cls
+                )
                 name = f"arm_{knob.name}_{value}.yaml"
                 count = _write(arm, out / name)
                 # An arm whose value is what the dispatcher already resolves is the
@@ -264,15 +301,31 @@ def main(argv=None) -> int:
                 arm_specs = [
                     k["kernel_source"]["spec"] for k in arm["packs"][0]["kernels"]
                 ]
-                identical = all(
+                identical = arm_specs and all(
                     b.get(knob.name) == a.get(knob.name)
                     for b, a in zip(base_specs, arm_specs)
                 )
                 note = "  == parity, measures nothing" if identical else ""
                 print(f"  {name:<30}{count:5d} kernels{note}")
+                # A NARROWED ARM IS NOT A FULL COMPARISON, and it must never read as
+                # one. Report the fraction and the distinct reasons so the arm's
+                # coverage is a number the reader checks rather than assumes.
+                if unbuildable:
+                    reasons: dict[str, int] = {}
+                    for _, why in unbuildable:
+                        reasons[why] = reasons.get(why, 0) + 1
+                    print(
+                        f"  {'':30}{'':5} NARROWED: covers {count} of "
+                        f"{served_total} served shapes; "
+                        f"{len(unbuildable)} cannot express this value"
+                    )
+                    for why, n in sorted(reasons.items(), key=lambda kv: -kv[1]):
+                        print(f"  {'':30}{'':5}   {n:4d} x {why}")
         print(
             "\n  Two arms per knob, everything else at parity, so an effect is "
             "attributable\n  to that knob alone. Measure these before pairing anything."
+            "\n  A NARROWED arm is measurable but is NOT a comparison over the whole"
+            "\n  set -- report its fraction, never a bare ratio against parity."
         )
         return 0
 
@@ -294,11 +347,14 @@ def main(argv=None) -> int:
         for combo in combos:
             overrides = dict(zip(names, combo))
             label = "_".join(f"{k}{v}" for k, v in overrides.items())
-            count = _write(
-                _arm(resolutions, profile, overrides, arch_spec_cls),
-                out / f"pair_{label}.yaml",
+            arm, unbuildable = _arm(resolutions, profile, overrides, arch_spec_cls)
+            count = _write(arm, out / f"pair_{label}.yaml")
+            note = (
+                f"  NARROWED: {len(unbuildable)} shapes cannot express this combination"
+                if unbuildable
+                else ""
             )
-            print(f"  pair_{label:<26}{count:5d} kernels")
+            print(f"  pair_{label:<26}{count:5d} kernels{note}")
         return 0
 
     parser.error("choose --plan, --isolate or --pairwise")
