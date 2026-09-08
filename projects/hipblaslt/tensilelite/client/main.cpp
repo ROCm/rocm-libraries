@@ -82,6 +82,15 @@ namespace TensileLite
 {
     namespace Client
     {
+        // Single-GPU A2A-GEMM shard-loop bring-up entry point. Defined in
+        // A2APrefillClient.cpp. Dispatched per problem when the a2a-prefill
+        // option is set; returns a process exit code.
+        int runA2APrefill(po::variables_map const&                                       args,
+                          std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
+                          std::shared_ptr<Hardware>                                      hardware,
+                          hip::SolutionAdapter&                                          adapter,
+                          ContractionProblem*                                            problem);
+
         __global__ void flush_icache()
         {
             asm __volatile__("s_icache_inv \n\t"
@@ -290,6 +299,8 @@ namespace TensileLite
                 ("world-filter",             po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: run only the problems whose world is listed; empty runs all.")
                 ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
                 ("fused-a2a-drain-send",     po::value<int>()->default_value(1), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
+                ("a2a-prefill",              po::value<bool>()->default_value(false), "Run the single-GPU A2A-GEMM shard-loop bring-up arm: the host lays the W gathered shards out in B (ldb = K/W), launches the FusedA2AMode=1 kernel, and compares every output element against a shard-aware CPU reference. Skips the generic single-GPU path below.")
+                ("a2a-prefill-worlds",       po::value<std::vector<int>>()->default_value(std::vector<int>()), "World sizes to sweep in the a2a-prefill arm, one value per occurrence. Defaults to 1 and 4. Each must divide K.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
@@ -1084,6 +1095,19 @@ int main(int argc, const char* argv[])
                 reporters->report(ResultKey::ProblemIndex, problemIdx);
                 reporters->report(ResultKey::ProblemProgress,
                                   concatenate(problemIdx, "/", lastProblemIdx));
+
+                // Self-contained allocate+prefill+launch+compare on one device;
+                // skips the single-GPU path below.
+                if(args["a2a-prefill"].as<bool>())
+                {
+                    int rc = runA2APrefill(args, library, hardware, *device0->adapter, problem);
+                    if(rc != 0)
+                    {
+                        flushTimingBuffer();
+                        return rc;
+                    }
+                    continue;
+                }
 
                 {
                     ScopedTimer timer("pre_problem");
