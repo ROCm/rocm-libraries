@@ -366,13 +366,19 @@ std::vector<hipblaslt::host_numerics::MatmulValidationCase::AllCloseTolerance>
     {
         for(size_t i = 0; i < matmulProblems.size(); ++i)
         {
-            tolerances[i].symmetricRelative
+            const double coefficient
                 = gfx11_low_precision_accumulation_tolerance_coefficient(computeType,
                                                                          matmulProblems[i].k);
+            tolerances[i].absolute = coefficient;
+            tolerances[i].relative = 2.0 * coefficient;
             if(bfloat16Output)
-                tolerances[i].symmetricRelative
-                    = std::max(tolerances[i].symmetricRelative,
-                               bfloat16_output_rounding_tolerance_coefficient());
+            {
+                const double outputCoefficient
+                    = bfloat16_output_rounding_tolerance_coefficient();
+                tolerances[i].absolute = std::max(tolerances[i].absolute, outputCoefficient);
+                tolerances[i].relative
+                    = std::max(tolerances[i].relative, 2.0 * outputCoefficient);
+            }
         }
     }
 

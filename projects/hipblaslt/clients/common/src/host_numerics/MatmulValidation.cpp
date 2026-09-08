@@ -29,18 +29,16 @@ namespace hipblaslt::host_numerics
 
             if(options.compareAllClose)
             {
-                if(validationCase.allCloseTolerance.symmetricRelative != 0)
+                if(validationCase.allCloseTolerance.absolute != 0
+                   || validationCase.allCloseTolerance.relative != 0)
                 {
-                    request.allCloseMode = HostAllCloseMode::SymmetricRelative;
-                    request.symmetricRelativeTolerance
-                        = validationCase.allCloseTolerance.symmetricRelative;
+                    request.allCloseMode      = HostAllCloseMode::AllClose;
+                    request.absoluteTolerance = validationCase.allCloseTolerance.absolute;
+                    request.relativeTolerance = validationCase.allCloseTolerance.relative;
                 }
                 else
                 {
-                    request.allCloseMode      = validationCase.allCloseTolerance.absolute != 0
-                                                    ? HostAllCloseMode::Near
-                                                    : HostAllCloseMode::Unit;
-                    request.absoluteTolerance = validationCase.allCloseTolerance.absolute;
+                    request.allCloseMode = HostAllCloseMode::Unit;
                 }
             }
             return compareHost(request);

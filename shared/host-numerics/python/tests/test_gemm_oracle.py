@@ -295,7 +295,7 @@ class GemmOracleTests(unittest.TestCase):
         output_layout = hv.Layout(hv.Shape([2, 2]), [7, 2], 1)
 
         output = hv.Tensor(hv.ScalarType.Int32, output_layout)
-        backend = hv.reference_gemm_into(
+        result = hv.reference_gemm_into(
             hv.from_numpy(left),
             hv.from_numpy(right),
             hv.from_numpy(initial),
@@ -320,7 +320,7 @@ class GemmOracleTests(unittest.TestCase):
         np.testing.assert_array_equal(
             np.frombuffer(output.storage, dtype=np.int32), expected_storage
         )
-        self.assertEqual(backend, hv.GemmBackend.Blocked)
+        self.assertIsNone(result)
 
     def test_unequal_mx_blocks_and_k_tail_use_per_k_scale_oracle(self):
         left = np.asarray(
@@ -371,7 +371,7 @@ class GemmOracleTests(unittest.TestCase):
         operand_a = hv.from_numpy(left, hv.ScalarType.Float4E2M1)
         operand_b = hv.from_numpy(right, hv.ScalarType.Float4E2M1)
         output = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3]))
-        backend = hv.reference_gemm_into(
+        result = hv.reference_gemm_into(
             operand_a,
             operand_b,
             hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3])),
@@ -390,7 +390,7 @@ class GemmOracleTests(unittest.TestCase):
         expected = np.zeros_like(expected_complete)
         expected.reshape(-1)[selected] = expected_complete.reshape(-1)[selected]
         np.testing.assert_array_equal(hv.to_numpy(output), expected)
-        self.assertEqual(backend, hv.GemmBackend.Blocked)
+        self.assertIsNone(result)
 
     def test_mxfp4_scale_is_applied_after_the_complete_segment(self):
         reductions = 16
@@ -404,7 +404,7 @@ class GemmOracleTests(unittest.TestCase):
         )
         output = hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1]))
 
-        backend = hv.reference_gemm_into(
+        result = hv.reference_gemm_into(
             hv.from_numpy(left, hv.ScalarType.Float4E2M1),
             hv.from_numpy(right, hv.ScalarType.Float4E2M1),
             hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1])),
@@ -419,7 +419,7 @@ class GemmOracleTests(unittest.TestCase):
         np.testing.assert_array_equal(
             hv.to_numpy(output), np.zeros((1, 1), dtype=np.float32)
         )
-        self.assertEqual(backend, hv.GemmBackend.Blocked)
+        self.assertIsNone(result)
 
     def test_one_sided_block_scales_are_independent(self):
         left = np.ones((2, 4), dtype=np.float32)
@@ -507,7 +507,7 @@ class GemmOracleTests(unittest.TestCase):
             offset=1,
         )
         output = hv.Tensor(hv.ScalarType.ComplexFloat32, output_layout)
-        backend = hv.reference_gemm_into(
+        result = hv.reference_gemm_into(
             operand_a,
             operand_b,
             initial_tensor,
@@ -534,7 +534,7 @@ class GemmOracleTests(unittest.TestCase):
             np.frombuffer(output.storage, dtype=np.complex64),
             expected_storage,
         )
-        self.assertEqual(backend, hv.GemmBackend.Blocked)
+        self.assertIsNone(result)
 
 
 class GemmFinalizationOracleTests(unittest.TestCase):

@@ -13,9 +13,9 @@ namespace roc::host_numerics {
 // is applied while writing the caller-owned output tensor. Automatic tries
 // BLAS first when its cost policy prefers BLAS, then delegates to the built-in
 // Blocked implementation.
-GemmBackend referenceGemmIntoWithBlasBackend(Tensor a, Tensor b, Tensor c, Tensor d,
-                                             const GemmOptions& options = GemmOptions{},
-                                             GemmBackend backend = GemmBackend::Automatic);
+void referenceGemmIntoWithBlasBackend(Tensor a, Tensor b, Tensor c, Tensor d,
+                                      const GemmOptions& options = GemmOptions{},
+                                      GemmBackend backend = GemmBackend::Automatic);
 
 Tensor referenceGemmWithBlasBackend(Tensor a, Tensor b, Tensor c, ScalarType outputType,
                                     const GemmOptions& options = GemmOptions{},
