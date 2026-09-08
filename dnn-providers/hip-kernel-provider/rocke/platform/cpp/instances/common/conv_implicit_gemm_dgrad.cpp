@@ -2122,6 +2122,9 @@ static rocke_kernel_def_t*
      * instruction stream (immediately after the schedule prologue). */
     rocke_value_t* tr_lane_mod4 = NULL;
     rocke_value_t* tr_grp16 = NULL;
+    /* Element type for the transpose read -- see rocke_conv_tr_elem_dtype.
+     * Type selection only, emits no IR, so it is computed unconditionally. */
+    const rocke_type_t* tr_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
     if(spec->lds_k_outer && spec->wave_size == 64)
     {
         /* Python: b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4)) -- evaluated
@@ -2173,6 +2176,27 @@ static rocke_kernel_def_t*
             {
                 rocke_value_t* atom_row
                     = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
+                if(spec->lds_k_outer)
+                {
+                    /* B only: dgrad's A tile is genuinely still M-outer. This
+                     * branch existed in the MFMA phase but not here, so a
+                     * wave32 K-outer dgrad silently fell back to ordinary
+                     * M-outer smem loads in the C engine while Python emitted
+                     * the transpose read -- there was no gfx1250 dgrad parity
+                     * config to catch the divergence. */
+                    b_wma_cols[ni] = rocke_conv_tr_frag(b,
+                                                        lane,
+                                                        tr_lane_mod4,
+                                                        tr_grp16,
+                                                        B_src,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        spec->warp_tile_n,
+                                                        b_per_lane,
+                                                        spec->wave_size,
+                                                        tr_dtype);
+                    continue;
+                }
                 b_wma_cols[ni] = rocke_conv_emit_frag_smem_load(
                     b, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, b_per_lane);
             }
@@ -2504,7 +2528,7 @@ static rocke_kernel_def_t*
                                                         spec->warp_tile_n,
                                                         b_per_lane,
                                                         spec->wave_size,
-                                                        NULL);
+                                                        tr_dtype);
                         continue;
                     }
                     rocke_value_t* b_row = rocke_b_add(

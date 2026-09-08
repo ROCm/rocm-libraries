@@ -1795,8 +1795,14 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             b_sh[0] = ctx->block_k;
             b_sh[1] = ctx->block_n + kpad;
         }
-        ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_sh, 2, "A_smem");
-        ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_sh, 2, "B_smem");
+        /* Element type must follow the operand dtype, exactly as Python does with
+         * ir_dtype_a / ir_dtype_b. Hardcoding f16 typed the LDS pool and every
+         * tile store `half` for a bf16 kernel, diverging from Python -- invisible
+         * until now because no wgrad parity config used bf16 A/B operands. */
+        const rocke_type_t* ir_dtype_a = rocke_conv_tr_elem_dtype(spec->dtype_a);
+        const rocke_type_t* ir_dtype_b = rocke_conv_tr_elem_dtype(spec->dtype_b);
+        ctx->A_smem = rocke_b_smem_alloc(b, ir_dtype_a, a_sh, 2, "A_smem");
+        ctx->B_smem = rocke_b_smem_alloc(b, ir_dtype_b, b_sh, 2, "B_smem");
         /* Only async_dma and unroll_k reach a K-loop that alternates buffers:
          * async_dma takes the SoftwarePipeline branch and unroll_k hand-rolls a
          * ping-pong.  "compv4" alone shares the plain single-buffer loop with
@@ -1806,8 +1812,8 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->double_buffer = spec->async_dma || spec->unroll_k;
         if(ctx->double_buffer)
         {
-            ctx->A_smem2 = rocke_b_smem_alloc(b, rocke_f16(), a_sh, 2, "A_smem2");
-            ctx->B_smem2 = rocke_b_smem_alloc(b, rocke_f16(), b_sh, 2, "B_smem2");
+            ctx->A_smem2 = rocke_b_smem_alloc(b, ir_dtype_a, a_sh, 2, "A_smem2");
+            ctx->B_smem2 = rocke_b_smem_alloc(b, ir_dtype_b, b_sh, 2, "B_smem2");
         }
         else
         {
@@ -2150,6 +2156,14 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     /* Emit schedule prologue AFTER buffer resources -- mirrors Python ordering:
      *   make_buffer_resource(dY/X/dW) then schedule.emit_prologue(b). */
     rocke_schedule_policy_emit_prologue(&ctx.schedule, b);
+
+    /* Element type for the transpose read. Mirrors Python's
+     *   _smem_dtype = BF16 if a_dtype == bf16 else F32 if fp32 else None
+     *   tr_dtype    = _smem_dtype if not None else F16
+     * Type selection only -- emits no IR, so it is unconditional. Leaving this
+     * NULL lets rocke_b_ds_read_tr16_b128 default to f16, which on gfx1250
+     * (where the opcode is element-typed) would emit .v8f16 for a bf16 kernel. */
+    ctx.tr_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
 
     /* K-outer transpose-read lane constants. Python emits these immediately
      * after schedule.emit_prologue() and before the k-loop (the intervening

@@ -537,11 +537,17 @@ class TestConvWgradCorrectness(unittest.TestCase):
         file pins ``_WARP_TILE_MN = 32``, so nothing exercised the n=4 stride.
         With the stride hardcoded at 8 this config read past the end of a
         16-row K-outer tile and produced NaN.
+
+        MFMA-only on purpose. This test pins the 16x16x16 atom, which exists
+        only in the MFMA table -- gfx1250's WMMA fp16/bf16 atom is 16x16x32, so
+        ``select_largest_k`` returns None there and every subTest would skip.
+        A class whose subTests all skip still reports ``passed``, so widening
+        the gate to _KOUTER_ARCHES would buy a false green rather than wave32
+        coverage. gfx1250's atom is already covered by
+        ``test_lds_k_outer_matches_default``.
         """
-        if GPU_ARCH not in _KOUTER_ARCHES:
-            self.skipTest(
-                f"lds_k_outer needs {'/'.join(_KOUTER_ARCHES)}; got {GPU_ARCH}"
-            )
+        if not _IS_MFMA:
+            self.skipTest(f"the 16x16x16 atom is MFMA-only; got {GPU_ARCH}")
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -556,11 +562,17 @@ class TestConvWgradCorrectness(unittest.TestCase):
                     )
 
     def test_lds_k_outer_split_k(self):
-        """K-outer under split-K atomics (the shipping configuration)."""
-        if GPU_ARCH not in _KOUTER_ARCHES:
-            self.skipTest(
-                f"lds_k_outer needs {'/'.join(_KOUTER_ARCHES)}; got {GPU_ARCH}"
-            )
+        """K-outer under split-K atomics (the shipping configuration).
+
+        MFMA-only on purpose. On gfx1250 ``_KOUTER_EPILOGUE`` is ``default``
+        (WMMA rejects cshuffle), and the atomic guard rejects 16-bit dtype_d
+        with the default epilogue at split_k > 1 -- so this bf16 + split_k=8
+        request is invalid on wave32 and every subTest would skip. Widening the
+        gate would report ``passed`` while executing nothing. Add a supported
+        wave32 atomic configuration before extending this test.
+        """
+        if not _IS_MFMA:
+            self.skipTest(f"wgrad split-K atomics are MFMA-only; got {GPU_ARCH}")
         for shape in _SHAPES:
             with self.subTest(shape=shape.id):
                 self._check(

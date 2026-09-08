@@ -17,6 +17,7 @@
  */
 
 #include <stddef.h>
+#include <string.h> /* strcmp -- operand dtype string -> transpose-read elem type */
 
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* rocke_lane_decode_t, rocke_decode_mfma_lanes */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
@@ -71,6 +72,24 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
  * 16x16x16 atom read k rows 8..27 of a 16-row tile -- past the end of the
  * K-outer tile. The emitted IR is unchanged for the two 8-element atoms.
  * Mirrors _tr_frag() in conv_implicit_gemm_wgrad.py. */
+/* Element type for the K-outer transpose read, from the operand dtype string.
+ * Mirrors Python's
+ *   _smem_dtype = BF16 if a_dtype == "bf16" else F32 if a_dtype == "fp32" else None
+ *   tr_dtype    = _smem_dtype if _smem_dtype is not None else F16
+ * Never returns NULL: rocke_b_ds_read_tr16_b128 defaults a NULL dtype to f16,
+ * and the gfx1250 opcode is element-typed, so a bf16 kernel would silently
+ * select .v8f16 and feed half fragments to a bf16 WMMA. The wave64
+ * ds_read_b64_tr_b16 is type-agnostic, which is why gfx950 parity never caught
+ * a NULL here. */
+const rocke_type_t* rocke_conv_tr_elem_dtype(const char* a_dtype)
+{
+    if(a_dtype != NULL && strcmp(a_dtype, "bf16") == 0)
+        return rocke_bf16();
+    if(a_dtype != NULL && strcmp(a_dtype, "fp32") == 0)
+        return rocke_f32();
+    return rocke_f16();
+}
+
 rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
                                   rocke_value_t* lane,
                                   rocke_value_t* tr_lane_mod4,
@@ -243,7 +262,7 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
                                                 spec->warp_tile_m,
                                                 ctx->a_per_lane,
                                                 spec->wave_size,
-                                                NULL);
+                                                ctx->tr_dtype);
                 continue;
             }
             a_rows[mi] = rocke_conv_emit_frag_smem_load(
@@ -266,7 +285,7 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
                                                 spec->warp_tile_n,
                                                 ctx->b_per_lane,
                                                 spec->wave_size,
-                                                NULL);
+                                                ctx->tr_dtype);
                 continue;
             }
             b_cols[ni] = rocke_conv_emit_frag_smem_load(
@@ -366,7 +385,7 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                                                 spec->warp_tile_m,
                                                 ctx->a_per_lane,
                                                 spec->wave_size,
-                                                NULL);
+                                                ctx->tr_dtype);
                 continue;
             }
             /* a_row = warp_m_off + (mi*warp_tile_m + m_in_atom) */
@@ -409,7 +428,7 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                                                 spec->warp_tile_n,
                                                 ctx->b_per_lane,
                                                 spec->wave_size,
-                                                NULL);
+                                                ctx->tr_dtype);
                 continue;
             }
             /* b_row = warp_n_off + (ni*warp_tile_n + n_in_atom) */

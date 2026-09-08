@@ -334,7 +334,7 @@ The two directions carry the constant differently. dgrad fixes it at 8 as a modu
 
 ### Fragment Length Is Per-Atom
 
-`n` in `_tr_frag` is the per-lane operand length — `op.a_frag_len` for the A fragment, `op.b_frag_len` for B — not a constant: 8 for `32x32x16` and `16x16x32`, 4 for `16x16x16` and `32x32x8`. It sets the k-stride between lane groups (`k = (l // MN)*n .. +n-1`). Hardcoding it at 8 made the `16x16x16` atom read k rows 8..27 of a 16-row tile — past the end — returning garbage. dgrad additionally rejects `b_per_lane % 4 != 0` outright, since `ds_read_tr16_b64` returns 4 elements per lane.
+`n` in `_tr_frag` is the per-lane operand length — `op.a_frag_len` for the A fragment, `op.b_frag_len` for B — not a constant: on wave64 it is 8 for `32x32x16` and the MFMA `16x16x32`, 4 for `16x16x16` and `32x32x8`; on wave32 the WMMA `16x16x32` carries 16. It sets the k-stride between lane groups (`k = (l // MN)*n .. +n-1`). Hardcoding it at 8 made the `16x16x16` atom read k rows 8..27 of a 16-row tile — past the end — returning garbage. Both directions reject a fragment length that is not a multiple of the width the transpose read returns per lane — 4 for `ds_read_tr16_b64` (wave64), 8 for `ds_load_tr16_b128` (wave32) — since a non-multiple builds the fragment from an empty or truncated `parts` list. dgrad checks its single flipped operand (`b_per_lane`); wgrad flips both and checks `a_per_lane` and `b_per_lane`.
 
 ### Which Operands Flip
 
@@ -351,11 +351,13 @@ WgradConvSpec.default_lds_k_outer(
 ) -> bool
 
 DgradConvSpec.default_lds_k_outer(
-    *, arch, dtype_b, warp_tile_n, cpg, wave_size=64
+    *, arch, dtype_b, warp_tile_n, cpg, wave_size=64, pipeline="mem"
 ) -> bool
 ```
 
-The wgrad predicate is the single selection point for both `library/dispatch/grouped_convolution.py` and the sweep driver `benchmark/benchmark_implicit_gemm_conv.py`, rather than each keeping its own copy. The dgrad predicate is called from the sweep driver; dgrad has no `library/dispatch` consumer today.
+The dgrad deducer additionally takes `pipeline` and returns `False` for `pipeline == "wavelet"`: the wavelet loader does not implement the K-outer tile (the `validate()` gate rejects the pair), so the predicate keeps that combination off the sweep. A caller that omits the keyword gets the `"mem"` default and so never sees the exclusion — wavelet callers must pass their own pipeline.
+
+Both predicates are the single selection point for `library/dispatch/grouped_convolution.py` and the sweep driver `benchmark/benchmark_implicit_gemm_conv.py`, rather than each keeping its own copy: dispatch reaches wgrad's through `_wgrad_lds_k_outer` and dgrad's through `_dgrad_lds_k_outer`.
 
 The dgrad predicate is deliberately **asymmetric** — it keys on `dtype_b` / `warp_tile_n` only, never their A-side counterparts, because only B flips; copying wgrad's symmetric predicate would over-reject dgrad specs whose A side differs. It additionally carries `cpg`: the saving is proportional to the B load width, which collapses to 1 on an odd channel run. There `axis_b` is already `"col"`, there is no scatter to remove, and K-outer would be a small pure regression.
 
@@ -367,24 +369,26 @@ The transpose read exists in two regimes -- `ds_read_tr16_b64` on gfx950 (wave64
 
 ```text
 wgrad (WgradConvSpec.validate + is_valid_wgrad_spec):
-  arch == "gfx950"
+  arch in _LDS_K_OUTER_ARCH_WAVE  # {"gfx950": 64, "gfx1250": 32}
+  wave_size == _LDS_K_OUTER_ARCH_WAVE[arch]
   dtype_a and dtype_b in (bf16, fp16)
-  warp_tile_m and warp_tile_n in (16, 32)
-  wave_size == 64
+  wave64: warp_tile_m and warp_tile_n in (16, 32)
+  wave32: warp_tile (m, n, k) == (16, 16, 32)   # the only WMMA atom
   lds_k_pad is None            # rejected, not ignored
   async_dma implies lds_k_outer
 
 dgrad (DgradConvSpec.validate + is_valid_dgrad_spec):
-  arch == "gfx950"
-  family != "wmma"
+  arch in _LDS_K_OUTER_ARCH_WAVE  # {"gfx950": 64, "gfx1250": 32}
+  wave_size == _LDS_K_OUTER_ARCH_WAVE[arch]
   dtype_b in (bf16, fp16)      # A keeps the ordinary _emit_smem_load
-  warp_tile_n in (16, 32)
-  wave_size == 64
+  wave64: warp_tile_n in (16, 32)
+  wave32: (warp_tile_n, warp_tile_k) == (16, 32)  # the only WMMA atom
   lds_layout is None           # rejected, not ignored
   async_dma is False
+  pipeline != "wavelet"        # rejected, not ignored
 ```
 
-The deducers mirror the arch/dtype/atom/wave half of each gate; the dgrad deducer adds `cpg % 2 == 0`, and neither deducer tests `family` (the `gfx950` term already implies it). The arch check lives only in `is_valid_*_spec` — `validate()` has no arch to check against — which is the whole point of the split: without it an older target builds cleanly and emits an instruction the assembler rejects far from the cause.
+The deducers mirror the arch/dtype/atom/wave half of each gate; the dgrad deducer adds `cpg % 2 == 0`, and neither deducer tests `family` (the arch/wave pair already implies it — `gfx950` is wave64 MFMA, `gfx1250` wave32 WMMA). The arch check lives only in `is_valid_*_spec` — `validate()` has no arch to check against — which is the whole point of the split: without it an older target builds cleanly and emits an instruction the assembler rejects far from the cause.
 
 On the dgrad path the two rejections have different reasons. `lds_layout` is rejected because the B shape is computed straight from `(block_k, block_n + _KOUTER_PAD)` and never consults the layout object, so honouring an explicit one would be a silent lie. `async_dma` is rejected because the tilde builder has no direct global→LDS path at all.
 
