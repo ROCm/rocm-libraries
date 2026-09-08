@@ -3569,6 +3569,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     lastuIdx = False
     pflr     = self.states.numItersPLR
     localWriteEndIter = kernel["LoopIters"] - self.states.numItersPLR - 1
+    dsWriteBA = False
     if isNGLL and UnrollLoopSwapGlobalReadOrder == 1 and NLLindex == 0 and NLLnum == 2:
       dsWriteBA = True
 
