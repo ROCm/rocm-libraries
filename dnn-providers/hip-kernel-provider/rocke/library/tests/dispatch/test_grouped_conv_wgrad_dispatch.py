@@ -233,6 +233,34 @@ class TestGroupedDgradDispatch(unittest.TestCase):
             self.assertFalse(ok, direction)
             self.assertIn("dgrad", why)
 
+    def test_epilogue_follows_store_vector_width(self):
+        # dX's last dim is C, so a wide store vector needs cshuffle's LDS
+        # staging; the direct-store 'default' path writes scalars. Pinning
+        # 'default' unconditionally is silently valid -- vector_size_c is left
+        # unset, so the validator rule never fires -- and costs store bandwidth
+        # on every non-grouped shape. Derive it instead.
+        _cand, wide = self._select(_dgrad(C=128, K=128, Hi=32, Wi=32))
+        self.assertEqual(wide.epilogue, "cshuffle")
+
+        # cpg = 3: no legal width > 1, so the scalar direct store is correct.
+        _cand, narrow = self._select(_dgrad(C=48, G=16))
+        self.assertEqual(narrow.epilogue, "default")
+
+    def test_vec_size_c_uses_the_dgrad_formula(self):
+        # Each direction has its own default_vector_sizes and they are not
+        # interchangeable: dgrad's takes the per-group runs (cpg, kpg), so a
+        # fallthrough to the forward formula sizes off the wrong extent once
+        # groups > 1.
+        from dispatch.grouped_convolution import _vec_size_c
+        from rocke.instances.common.conv_implicit_gemm_dgrad import DgradConvSpec
+
+        req = _dgrad(C=48, G=16)
+        p = _problem(req)
+        _va, _vb, expected = DgradConvSpec.default_vector_sizes(
+            p.cpg, p.kpg, req.dtype.lower()
+        )
+        self.assertEqual(_vec_size_c(req), expected)
+
     def test_spec_round_trips_to_instance_spec(self):
         req = _dgrad()
         _cand, spec = self._select(req)

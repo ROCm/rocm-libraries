@@ -391,12 +391,24 @@ def _vec_size_c(req: ConvGroupedRequest) -> int:
 
     Forward pass (D=NHWK, last dim K):  uses ImplicitGemmConvSpec, returns _vec(K).
     Wgrad       (D=KYXC, last dim C):   uses WgradConvSpec,          returns _vec(C).
+    Dgrad       (D=NHWC, last dim C):   uses DgradConvSpec,          returns _vec(C).
+
+    Each direction has its own ``default_vector_sizes``; they are not
+    interchangeable. Dgrad's takes the *per-group* runs ``(cpg, kpg)`` rather
+    than ``(C, K)``, so falling through to the forward formula here would size
+    the store vector off the wrong extent on a grouped problem.
     """
     if req.vec_size_c is not None:
         return req.vec_size_c
     if req.direction == "wgrad":
         _va, _vb, vc = WgradConvSpec.default_vector_sizes(
             req.C, req.K, req.dtype.lower(), split_k=1
+        )
+        return vc
+    if req.direction == "dgrad":
+        p = _problem(req)
+        _va, _vb, vc = DgradConvSpec.default_vector_sizes(
+            p.cpg, p.kpg, req.dtype.lower()
         )
         return vc
     _va, _vb, vc = ImplicitGemmConvSpec.default_vector_sizes(
@@ -1312,7 +1324,7 @@ def _make_gfx950_dgrad_candidate() -> KernelCandidate:
             warp_tile_k=wtk,
             wave_size=ArchTarget.from_gfx(req.arch).wave_size,
             pipeline=_PIPELINE,
-            epilogue="default",
+            epilogue=_epilogue_for(req),
             split_k=1,
         )
 
@@ -1349,7 +1361,7 @@ def _make_gfx950_dgrad_candidate() -> KernelCandidate:
             warp_tile_mn=wtmn,
             warp_tile_k=wtk,
             pipeline=_PIPELINE,
-            epilogue="default",
+            epilogue=_epilogue_for(req),
             lds_k_outer=_dgrad_lds_k_outer(req, wtmn),
             dtype=req.dtype.lower(),
             arch=req.arch,
