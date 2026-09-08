@@ -2661,6 +2661,31 @@ namespace
         return inputs;
     }
 
+    // True when `filename` is a code object built for exactly `processor`. The
+    // architecture is the trailing token of the stem, and matching it whole
+    // matters where several architectures share one directory -- which
+    // HIPBLASLT_TENSILE_LIBPATH permits: a bare gfx1250 would otherwise claim
+    // gfx1250-strict's objects, which share its ISA but carry an ELF machine
+    // code it cannot load.
+    bool codeObjectTargets(const std::filesystem::path& filename, const std::string& processor)
+    {
+        if(filename.extension().string() != ".co")
+            return false;
+
+        const std::string stem = filename.stem().string();
+        if(stem.size() < processor.size()
+           || stem.compare(stem.size() - processor.size(), processor.size(), processor) != 0)
+            return false;
+
+        if(stem.size() == processor.size())
+            return true;
+
+        // Both separators the producers use: TensileLibrary_..._gfx942 and
+        // extop_gfx942 underscore it, Kernels.so-000-gfx942 hyphenates it.
+        const char preceding = stem[stem.size() - processor.size() - 1];
+        return preceding == '_' || preceding == '-';
+    }
+
     TensileLite::LazyLoadingInit getLazyLoadingArch(int deviceID)
     {
         hipDeviceProp_t deviceProperties;
@@ -2752,6 +2777,13 @@ namespace
         else if(deviceString.find("gfx1201") != std::string::npos)
         {
             return TensileLite::LazyLoadingInit::gfx1201;
+        }
+        // Must precede gfx1250, whose substring test this name also satisfies.
+        // The caller de-duplicates devices by this value, so sharing gfx1250's
+        // would drop the second stepping on a machine holding both.
+        else if(deviceString.find("gfx1250-strict") != std::string::npos)
+        {
+            return TensileLite::LazyLoadingInit::gfx1250_strict;
         }
         else if(deviceString.find("gfx1250") != std::string::npos)
         {
@@ -2916,30 +2948,19 @@ namespace
                 // path. Only use the subdir if a Tensile mapping file is actually present
                 // there; otherwise the directory may have been created by ExtOp/Transform
                 // installs without a corresponding Tensile library (multi-arch non-TheRock
-                // builds). The subdir is revisioned (library/gfx1250v0/ for a v0 part, no
-                // fallback) while the mapping filenames keep the base `processor` token.
+                // builds). Both the subdir and the mapping filenames carry `processor`,
+                // the name the runtime reports for this device -- which is the compiler
+                // target the kernels in it were built for, including a silicon-revision
+                // variant such as gfx1250-strict.
                 {
-                    auto processor_path     = path / rocblaslt_internal_get_library_arch_name();
+                    auto processor_path     = path / processor;
                     auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
                     auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
                     if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
                        || std::filesystem::exists(mapping_yaml))
                     {
-                        // Grab the chosen subdir name before the move. It differs
-                        // from the base `processor` only for a silicon revision
-                        // (e.g. gfx1250v0); log that -- the only runtime signal a
-                        // non-v1 revision was loaded.
-                        const auto libArch = processor_path.filename().string();
-                        path               = std::move(processor_path);
-                        if(libArch != processor
-                           && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
-                        {
-                            std::ostringstream msg;
-                            msg << "Loading ASIC-revision GEMM subtree: " << libArch
-                                << " (compiler target " << processor << ")" << std::endl;
-                            log_info(__func__, msg.str());
-                        }
+                        path = std::move(processor_path);
                     }
                 }
 
@@ -2951,16 +2972,15 @@ namespace
                 }
             }
 
-            // only load modules for the current architecture (contains the processor
-            // string and ends in "co").
+            // only load modules for the current architecture (named for the processor
+            // and ending in "co").
             if(!lazyLoad)
             {
                 bool no_match = true;
                 for(const auto& entry : std::filesystem::directory_iterator(path))
                 {
                     auto filename = entry.path().filename();
-                    if(filename.string().find(processor) != std::string::npos
-                       && filename.extension().string() == ".co")
+                    if(codeObjectTargets(filename, processor))
                     {
                         static_cast<void>(adapter.loadCodeObjectFile(entry.path().string()));
                         no_match = false;

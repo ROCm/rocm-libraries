@@ -18,7 +18,7 @@ pipeline is already CPU-reachable. Only a few rows actually need a device:
 | `TensileCreateLibrary` | No | A cross-compiler — host `amdclang++` for the target ISA; no device. |
 | **Client perf-run** (`ClientWriter.runClient`) | **Yes** | Launches the compiled client on a device to collect GEMM perf. ← stubbed |
 | **System probes** (`amd-smi`, `rocm_agent_enumerator`, clock-frequency) | **Yes** | Shell out to detect/describe the device. ← skipped |
-| **ISA detection** (`detectGlobalCurrentISA` → `_detectGlobalCurrentISA`) | **Yes** | Runs `amdgpu-arch` / `rocm_agent_enumerator`; raises GPU-less. ← spoofed |
+| **Arch detection** (`detectGlobalCurrentArch` → `_detectGlobalCurrentArch`) | **Yes** | Runs `amdgpu-arch`, then `rocminfo`, then the enumerator; raises GPU-less. ← spoofed |
 
 So the switch only has to cover the last three rows. Everything above them runs
 CPU-only with no mock.
@@ -29,19 +29,22 @@ The flag is `--cpu-only` and **requires `--gpu-targets`** (you must name the
 target arch to spoof). It is plumbed through an internal global, not the
 documented `--global-parameters` surface.
 
-- **CLI flag** — `Tensile/Tensile.py` (`--cpu-only`, `dest="cpuOnly"`). It is
-  stashed into internal plumbing: `globalParameters["CpuOnly"]` and the target
-  arch into `globalParameters["CpuOnlyArch"]`.
+- **CLI flag** — `Tensile/Tensile.py` (`--cpu-only`, `dest="cpuOnly"`). It sets
+  `globalParameters["CpuOnly"]`. It does *not* set `CpuOnlyArch`; that keeps its
+  default, and the primary path never reaches detection anyway because
+  `--gpu-targets` supplies the architecture directly.
 - **Plumbing keys** — `Tensile/Common/GlobalParameters.py` defines
   `globalParameters["CpuOnly"]` (default `False`) and
   `globalParameters["CpuOnlyArch"]` (default `"gfx942"`); both reset via
   `restoreDefaultGlobalParameters()`. The flag is intentionally **not** exposed
   on the `--global-parameters` surface.
-- **ISA spoof** — `Tensile/Common/Architectures.py::_detectGlobalCurrentISA`:
-  when `CpuOnly` is set it returns a spoofed `IsaVersion` derived from
-  `gfxToIsa(CpuOnlyArch)` instead of shelling out to `amdgpu-arch` /
-  `rocm_agent_enumerator`, so `detectGlobalCurrentISA` no longer raises on a
-  GPU-less host and `Tensile.Tensile()` runs CPU-only.
+- **Arch spoof** — `Tensile/Common/Architectures.py::_detectGlobalCurrentArch`:
+  when `CpuOnly` is set it returns `CpuOnlyArch` as a *name* before any probe
+  runs, so neither `amdgpu-arch`/`rocminfo` nor the enumerator is shelled out
+  to, and neither `detectGlobalCurrentArch` nor `detectGlobalCurrentISA` (which
+  derives its answer from it) raises on a GPU-less host. The spoof returns a
+  name rather than an ISA because gfx1250's two steppings share (12,5,0), so an
+  ISA could no longer say which was asked for.
 - **Device-launch stub** — `Tensile/ClientWriter.py::runClient`: when `CpuOnly`
   is set it writes the client config / run-script as usual but skips the
   device-bound client launch and returns returncode `0`.
