@@ -57,7 +57,7 @@ import shutil
 from dataclasses import dataclass
 
 import pytest
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 from rocisa.code import Module
 
