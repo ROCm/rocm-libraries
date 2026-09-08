@@ -1470,6 +1470,9 @@ typedef enum
     /** @brief Trigger: release the stall so the queued work runs (HIPDNN_TYPE_BOOLEAN, write-only) */
     HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT = 60406,
 
+    /** @brief True when a stall watchdog timeout, not the caller, released the stall; the elapsed time is then invalid (HIPDNN_TYPE_BOOLEAN, read-only) */
+    HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT = 60407,
+
     /** @} */
 
 } hipdnnBackendAttributeName_t;

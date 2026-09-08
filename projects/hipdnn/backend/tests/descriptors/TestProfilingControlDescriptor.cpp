@@ -159,6 +159,9 @@ protected:
     {
         SKIP_IF_NO_DEVICES();
         TestProfilingControlDescriptor::SetUp();
+        // One case deliberately trips the watchdog, which disables stalling for the
+        // whole process. Clear it per test so results cannot depend on test order.
+        hipdnn_data_sdk::utilities::StallGate::resetDisabledProcessWideForTesting();
         ASSERT_EQ(hipStreamCreate(&_testStream), hipSuccess);
         _mockHandle = std::make_unique<NiceMock<MockHandle>>();
         ON_CALL(*_mockHandle, getStream()).WillByDefault(Return(_testStream));
@@ -390,6 +393,77 @@ TEST_F(TestGpuProfilingControlDescriptor, StallGateExcludesHostSubmissionDelay)
     // The bounds are loose on both sides so scheduling jitter cannot flip the result.
     EXPECT_GE(unstalledMs, 15.0f) << "unstalled timing did not absorb the host delay";
     EXPECT_LT(stalledMs, 5.0f) << "stalled timing still includes the host delay";
+}
+
+// The deadlock the watchdog exists for, reproduced exactly: work inside the timed
+// region blocks the host on the stalled stream, and only the host can release. Without
+// the watchdog this test hangs forever. With it, the write that ends the stall is also
+// what the blocked host is waiting on, so hipStreamSynchronize returns.
+TEST_F(TestGpuProfilingControlDescriptor, WatchdogBreaksSelfInflictedDeadlock)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    constexpr auto TIMEOUT = std::chrono::milliseconds(300);
+    hipdnn_data_sdk::utilities::StallGate gate(TIMEOUT);
+    ASSERT_TRUE(gate.isUsable());
+    ASSERT_TRUE(gate.arm(_testStream));
+
+    const auto begin = std::chrono::steady_clock::now();
+    // Never returns unless something else releases the gate.
+    EXPECT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+    const auto waited = std::chrono::steady_clock::now() - begin;
+
+    EXPECT_TRUE(gate.timedOut()) << "watchdog released but did not report it";
+    EXPECT_GE(waited, TIMEOUT) << "watchdog fired before its deadline";
+
+    // Sticky: the cause is a property of the measured code, so stalling stays off and a
+    // later arm must decline rather than deadlock again.
+    EXPECT_TRUE(hipdnn_data_sdk::utilities::StallGate::isDisabledProcessWide());
+    EXPECT_FALSE(gate.arm(_testStream));
+}
+
+// The host released in time, so the watchdog must stay out of the way: no timeout
+// reported, and stalling still enabled for everything after.
+TEST_F(TestGpuProfilingControlDescriptor, WatchdogDoesNotFireOnNormalRelease)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    hipdnn_data_sdk::utilities::StallGate gate(std::chrono::milliseconds(5000));
+    ASSERT_TRUE(gate.isUsable());
+    ASSERT_TRUE(gate.arm(_testStream));
+    gate.release();
+    ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+
+    EXPECT_FALSE(gate.timedOut());
+    EXPECT_FALSE(hipdnn_data_sdk::utilities::StallGate::isDisabledProcessWide());
+}
+
+// A watchdog release must be visible through the public descriptor, so an external
+// caller can discard the sample instead of averaging a timeout into its results.
+TEST_F(TestGpuProfilingControlDescriptor, TimedOutAttributeIsFalseForAHealthyMeasurement)
+{
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(armStall(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(releaseStall(desc));
+    ASSERT_NO_THROW(desc->finalize());
+
+    bool timedOut = true;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &elementCount,
+                                       &timedOut));
+    EXPECT_FALSE(timedOut);
 }
 
 // An armed gate holds the stop event unsignalled, so a caller that arms and then hits an

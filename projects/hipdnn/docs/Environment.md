@@ -661,6 +661,37 @@ this sequence internally, so their reported times exclude host submission.
   the first timed iteration. The stall removes the submission gap inside a measurement; it does not
   drain work that was queued before it.
 
+### Do not synchronize inside the measured region
+
+While the stall is armed, the stream is frozen and only the host can release it. Code between
+`STALL_ARM` and `STALL_RELEASE` must therefore not block the host on that stream. These calls
+deadlock if the executed plan makes them on the stalled stream:
+
+- `hipStreamSynchronize` on the stalled stream, or `hipDeviceSynchronize`
+- `hipEventSynchronize` on an event recorded on the stalled stream
+- a blocking `hipMemcpy` on the stalled stream
+- `hipMalloc` or `hipFree`, which synchronize the device implicitly
+
+Synchronizing a different stream that has no dependency on the stalled one is safe. Allocate
+workspace before arming, not inside the timed region.
+
+A watchdog bounds this rather than letting it hang. If the host has not released within the
+timeout, the watchdog writes the release itself, the stream drains, the blocked call returns, and
+execution continues. The measurement from that region is invalid, because it contains the timeout:
+
+```c
+bool stallTimedOut = false;
+hipdnnBackendGetAttribute(profiling, HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
+                          HIPDNN_TYPE_BOOLEAN, 1, NULL, &stallTimedOut);
+/* Discard the sample when this is true; do not average it. */
+```
+
+A timeout also logs a warning and disables stalling for the rest of the process, because the cause
+is a property of the code being measured and re-arming would only produce another timeout. Later
+measurements then run unstalled and include host submission overhead. `Graph::autotune()` handles
+this itself: it discards the timed-out sample and re-measures the plan unstalled, so an engine is
+never rejected merely because the timer could not measure it.
+
 ## Error Handling
 
 hipDNN provides functions for retrieving error information:

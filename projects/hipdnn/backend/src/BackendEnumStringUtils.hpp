@@ -1007,6 +1007,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_PROFILING_STALL_ARM_EXT";
     case HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT:
         return "HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT";
+    case HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT:
+        return "HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT";
 
     default:
         return "HIPDNN_ATTR_UNKNOWN";

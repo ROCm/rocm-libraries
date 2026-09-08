@@ -245,6 +245,15 @@ private:
                 return std::nullopt;
             }
 
+            // A watchdog release means this plan blocked the host on its own stream, so
+            // the span contains the timeout rather than a measurement. Drop the sample:
+            // averaging it would swamp every good one. The first timeout also disables
+            // stalling process-wide, so later samples measure unstalled and succeed.
+            if((*gate)->timedOut())
+            {
+                return std::nullopt;
+            }
+
             float elapsedMs = 0.0F;
             if(hipEventElapsedTime(&elapsedMs, start, stop) != hipSuccess)
             {

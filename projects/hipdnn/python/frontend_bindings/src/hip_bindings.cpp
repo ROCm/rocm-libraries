@@ -188,8 +188,10 @@ public:
 
     HipStallGate(const HipStallGate&) = delete;
     HipStallGate& operator=(const HipStallGate&) = delete;
-    HipStallGate(HipStallGate&&) noexcept = default;
-    HipStallGate& operator=(HipStallGate&&) noexcept = default;
+    // Pinned, like the core gate: it owns a mutex and a watchdog thread. nanobind
+    // constructs in place, so nothing needs to move one.
+    HipStallGate(HipStallGate&&) = delete;
+    HipStallGate& operator=(HipStallGate&&) = delete;
 
     // Reset the signal, then enqueue a wait packet that blocks all later work on the
     // stream until the host releases the gate.
