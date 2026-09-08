@@ -1099,12 +1099,14 @@ def known_arches() -> Tuple[str, ...]:
 def target_id_from_isa(isa: str) -> str:
     """Return the exact target ID carried by an AMDGPU ISA string.
 
-    The target ID is the portion after the HSA triple's ``--`` separator. It may
-    contain a target profile such as ``gfx1250-strict`` and feature suffixes such
-    as ``:sramecc+:xnack-``; those are intentionally preserved.
+    The target ID starts at the final ``gfx`` component and continues to the end.
+    This handles LLVM triples with either empty or populated OS/environment
+    components. Profiles such as ``gfx1250-strict`` and feature suffixes such as
+    ``:sramecc+:xnack-`` are preserved.
     """
 
-    return isa.rsplit("--", 1)[-1] if "--" in isa else isa
+    start = isa.rfind("gfx")
+    return isa[start:] if start >= 0 else isa
 
 
 def base_arch_from_target_id(target_id: str) -> str:
