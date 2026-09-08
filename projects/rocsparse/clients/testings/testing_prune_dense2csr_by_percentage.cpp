@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -331,4 +331,136 @@ INSTANTIATE(float);
 INSTANTIATE(double);
 // INSTANTIATE(rocsparse_float_complex);
 // INSTANTIATE(rocsparse_double_complex);
-void testing_prune_dense2csr_by_percentage_extra(const Arguments& arg) {}
+
+void testing_prune_dense2csr_by_percentage_extra_682(const Arguments& arg)
+{
+    const int64_t              M    = arg.M;
+    const int64_t              N    = arg.N;
+    const rocsparse_index_base base = arg.baseA;
+
+    const float percentage = arg.get_percentage<float>();
+
+    // Number of entries of A that survive the pruning.
+    static constexpr rocsparse_int nnz_expected = 64;
+
+    static constexpr float below_threshold = 1.0f;
+    static constexpr float above_threshold = 2.0f;
+
+    // Create rocsparse handle
+    rocsparse_local_handle handle(arg);
+
+    // Create matrix descriptor
+    rocsparse_local_mat_descr descr;
+
+    // Create matrix info
+    rocsparse_local_mat_info info;
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descr, base));
+
+    float* d_A = nullptr;
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&d_A, sizeof(float) * M * N));
+
+    // Transfer A one column at a time so that the host footprint does not depend on M * N.
+    host_vector<float> h_column(M);
+
+    for(int64_t i = 0; i < M; ++i)
+    {
+        h_column[i] = below_threshold;
+    }
+
+    for(int64_t j = 0; j < N - 1; ++j)
+    {
+        CHECK_HIP_ERROR(hipMemcpy(d_A + j * M, h_column, sizeof(float) * M, hipMemcpyHostToDevice));
+    }
+
+    // The surviving entries are the first nnz_expected rows of the last column.
+    for(rocsparse_int i = 0; i < nnz_expected; ++i)
+    {
+        h_column[i] = above_threshold;
+    }
+
+    CHECK_HIP_ERROR(
+        hipMemcpy(d_A + (N - 1) * M, h_column, sizeof(float) * M, hipMemcpyHostToDevice));
+
+    device_vector<rocsparse_int> d_csr_row_ptr(M + 1);
+
+    size_t buffer_size = 0;
+    CHECK_ROCSPARSE_ERROR(rocsparse_prune_dense2csr_by_percentage_buffer_size<float>(handle,
+                                                                                     M,
+                                                                                     N,
+                                                                                     d_A,
+                                                                                     M,
+                                                                                     percentage,
+                                                                                     descr,
+                                                                                     nullptr,
+                                                                                     d_csr_row_ptr,
+                                                                                     nullptr,
+                                                                                     info,
+                                                                                     &buffer_size));
+
+    float* d_temp_buffer = nullptr;
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&d_temp_buffer, buffer_size));
+
+    host_vector<rocsparse_int> h_nnz_total(1);
+    CHECK_ROCSPARSE_ERROR(rocsparse_prune_dense2csr_nnz_by_percentage<float>(
+        handle, M, N, d_A, M, percentage, descr, d_csr_row_ptr, h_nnz_total, info, d_temp_buffer));
+
+    unit_check_scalar<rocsparse_int>(nnz_expected, h_nnz_total[0]);
+
+    device_vector<rocsparse_int> d_csr_col_ind(nnz_expected);
+    device_vector<float>         d_csr_val(nnz_expected);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_prune_dense2csr_by_percentage<float>(handle,
+                                                                         M,
+                                                                         N,
+                                                                         d_A,
+                                                                         M,
+                                                                         percentage,
+                                                                         descr,
+                                                                         d_csr_val,
+                                                                         d_csr_row_ptr,
+                                                                         d_csr_col_ind,
+                                                                         info,
+                                                                         d_temp_buffer));
+
+    host_vector<rocsparse_int> h_csr_row_ptr(M + 1);
+    host_vector<rocsparse_int> h_csr_col_ind(nnz_expected);
+    host_vector<float>         h_csr_val(nnz_expected);
+
+    CHECK_HIP_ERROR(hipMemcpy(
+        h_csr_row_ptr, d_csr_row_ptr, sizeof(rocsparse_int) * (M + 1), hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(hipMemcpy(
+        h_csr_col_ind, d_csr_col_ind, sizeof(rocsparse_int) * nnz_expected, hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(
+        hipMemcpy(h_csr_val, d_csr_val, sizeof(float) * nnz_expected, hipMemcpyDeviceToHost));
+
+    host_vector<rocsparse_int> h_csr_row_ptr_gold(M + 1);
+    host_vector<rocsparse_int> h_csr_col_ind_gold(nnz_expected);
+    host_vector<float>         h_csr_val_gold(nnz_expected);
+
+    for(int64_t i = 0; i < M + 1; ++i)
+    {
+        h_csr_row_ptr_gold[i] = static_cast<rocsparse_int>(base)
+                                + static_cast<rocsparse_int>((i < nnz_expected) ? i : nnz_expected);
+    }
+
+    for(rocsparse_int i = 0; i < nnz_expected; ++i)
+    {
+        h_csr_col_ind_gold[i]
+            = static_cast<rocsparse_int>(N - 1) + static_cast<rocsparse_int>(base);
+        h_csr_val_gold[i] = above_threshold;
+    }
+
+    h_csr_row_ptr_gold.unit_check(h_csr_row_ptr);
+    h_csr_col_ind_gold.unit_check(h_csr_col_ind);
+    h_csr_val_gold.unit_check(h_csr_val);
+
+    CHECK_HIP_ERROR(rocsparse_hipFree(d_temp_buffer));
+    CHECK_HIP_ERROR(rocsparse_hipFree(d_A));
+}
+
+void testing_prune_dense2csr_by_percentage_extra(const Arguments& arg)
+{
+    testing_prune_dense2csr_by_percentage_extra_682(arg);
+}

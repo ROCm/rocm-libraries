@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -32,19 +32,13 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void abs_kernel(int64_t nnz_A, const T* csr_val_A, T* output)
     {
-        const int64_t gid_x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-        const int64_t gid_y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+        const int64_t NUM_THREADS = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
 
-        const int64_t grid_dim_x = hipGridDim_x * hipBlockDim_x;
+        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
-        // Map a 2D HIP grid to a 1D index
-        const int64_t gid = grid_dim_x * gid_y + gid_x;
-
-        if(gid >= nnz_A)
+        for(int64_t idx = gid; idx < nnz_A; idx += NUM_THREADS)
         {
-            return;
+            output[idx] = rocsparse::abs(csr_val_A[idx]);
         }
-
-        output[gid] = rocsparse::abs(csr_val_A[gid]);
     }
 }
