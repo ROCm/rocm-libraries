@@ -29,7 +29,7 @@
 
 **ROCm/HIP**: This package requires a ROCm install. The native Origami library (`liborigami` and its CMake package) is first-class in ROCm, so a ROCm install provides it. See the [ROCm Quick Start Guide](https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html) for installation instructions.
 
-By default the Python extension links the installed shared `liborigami` (`find_package(origami)`) rather than building it from source. The build therefore needs a prefix that CMake can discover (via `CMAKE_PREFIX_PATH`) containing:
+By default the Python extension links the installed shared `liborigami` (`find_package(origami)`) rather than building it from source. The supplied presets use the coherent ROCm toolchain and SDK installed under `/opt/rocm`, which must contain:
 
 ```text
 lib/cmake/origami/origami-config.cmake
@@ -37,7 +37,46 @@ lib/liborigami.so
 include/origami/...
 ```
 
-A generic "ROCm is installed" is not sufficient if that prefix is not on `CMAKE_PREFIX_PATH`. To build the native library from this source tree instead, pass `-DORIGAMI_BUILD_FROM_SOURCE=ON` (via `CMAKE_ARGS`). That is a development path, not a self-contained one: the wheel never bundles `liborigami`, so the extension still resolves `liborigami.so.1` through the loader at import time and you must install the library you built and put it on the loader path yourself.
+To build the native library from this source tree instead, pass `-DORIGAMI_BUILD_FROM_SOURCE=ON` (via `CMAKE_ARGS`). That is a development path, not a self-contained one: the wheel never bundles `liborigami`, so the extension still resolves `liborigami.so.1` through the loader at import time and you must install the library you built and put it on the loader path yourself.
+
+#### Toolchain, package prefix, and sysroot
+
+The supplied presets select `cmake/toolchains/rocm-clang.cmake`. On Linux, that
+file intentionally describes one coherent toolchain and SDK installation under
+`/opt/rocm`, including the AMD Clang binaries and the system package prefix.
+
+These CMake concepts serve different purposes:
+
+- [`CMAKE_TOOLCHAIN_FILE`](https://cmake.org/cmake/help/latest/variable/CMAKE_TOOLCHAIN_FILE.html)
+  selects the compiler and other build tools. To use a different compiler
+  installation, select or provide a different toolchain file.
+- [`CMAKE_PREFIX_PATH`](https://cmake.org/cmake/help/latest/variable/CMAKE_PREFIX_PATH.html)
+  adds package-search prefixes for `find_package()` and the other `find_*()`
+  commands. It is not a way to relocate a toolchain. Pointing it at a different
+  ROCm SDK while using the supplied `/opt/rocm` toolchain can mix incompatible
+  compiler, runtime, and library artifacts.
+- [`CMAKE_SYSROOT`](https://cmake.org/cmake/help/latest/variable/CMAKE_SYSROOT.html)
+  identifies a complete target root filesystem for cross-compilation. CMake
+  passes it to supported compilers as `--sysroot` and uses it to prefix
+  `find_*()` searches. A cross-compiling toolchain should set this standard
+  variable rather than introducing a project-specific SDK-root variable.
+
+An ordinary `/opt/rocm` installation is an SDK and compiler prefix, not a
+complete sysroot. Setting `CMAKE_SYSROOT=/opt/rocm` hides the host system headers,
+C runtime, and startup objects from the compiler. A cross-compilation invocation
+instead points `CMAKE_SYSROOT` at a target filesystem that contains those
+components. A cross-compiling toolchain normally defines the sysroot together
+with its matching compiler and search policy:
+
+```cmake
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSROOT "/path/to/target-rootfs")
+set(CMAKE_C_COMPILER "/path/to/cross-compiler")
+set(CMAKE_CXX_COMPILER "/path/to/cross-compiler++")
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+```
 
 ### Install
 
@@ -55,8 +94,7 @@ wheel:
 cd shared/origami
 python -m pip install build
 
-CMAKE_PREFIX_PATH=/path/to/rocm \
-  python -m build --wheel --outdir dist
+python -m build --wheel --outdir dist
 ```
 
 Install the built artifact:

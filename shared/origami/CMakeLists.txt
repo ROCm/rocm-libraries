@@ -19,12 +19,25 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
 endif()
 
 if(ORIGAMI_BUILD_FROM_SOURCE)
+    if(ORIGAMI_ENABLE_PYTHON)
+        set(ORIGAMI_BUILD_SHARED_LIBS ON CACHE BOOL "Build shared libraries." FORCE)
+    endif()
+
     # Set cpack license file here to avoid rocm-cmake warning
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
     include(dependencies)
+    rocm_setup_version(VERSION ${PROJECT_VERSION})
     add_subdirectory(origami-cpp)
 else()
     find_package(origami REQUIRED)
+
+    get_target_property(_origami_library_type roc::origami TYPE)
+    if(_origami_library_type STREQUAL "STATIC_LIBRARY")
+        message(
+            FATAL_ERROR
+                "The installed roc::origami target is static. Install a shared liborigami or configure with ORIGAMI_BUILD_FROM_SOURCE=ON."
+        )
+    endif()
 endif()
 
 if(ORIGAMI_ENABLE_PYTHON)
