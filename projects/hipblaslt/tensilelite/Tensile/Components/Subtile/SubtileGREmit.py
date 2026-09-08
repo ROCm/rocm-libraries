@@ -16,6 +16,7 @@
 # LR emit lives in a separate file (SubtileLREmit.py).
 ################################################################################
 
+import contextlib
 import math
 from functools import singledispatch
 
@@ -28,7 +29,7 @@ from rocisa.instruction import (
     SNop, SOrB32, SSubI32, SXorB32,
     SCBranchSCC1, SCmpEQU32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
-    VAddU32, VAndB32, VCmpXEqU32,
+    VAddU32, VAndB32, VCmpLtI32, VCmpXEqU32, VCndMaskB32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32, VOrB32,
     TensorLoadToLds,
     VMulLOU32, VReadfirstlaneB32, VSubU32, VXorB32,
@@ -996,6 +997,33 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   return module
 
 
+def _tluPadFreeExtent(kernel, tileInfo):
+  """Real free-dim element extent when the GR strip is padded, else None.
+
+  _subtileStackForTile rounds an operand onto a taller stack when the padding
+  ratio is inside the cap, so a 12-MMA-tile operand rides a 16-tile strip.  The
+  extra tiles are fetched and written to LDS but never read, and the SRD limit
+  cannot exclude them: it is one linear bound over the K window, so a pad offset
+  only exceeds it on the final K row.  Returning the real extent lets the caller
+  send the pad lanes out of range instead.
+
+  Only the single-strip case pads (_subtileTLU1StackReason rejects a partial tail
+  across several strips), and only when this tensor's wave group is 1 does the
+  strip coincide with the macro tile, so m_chunk is the absolute free-dim
+  position.  Both conditions are required for the comparison to be right.
+  """
+  tc = tileInfo.tc
+  wgIdx = 0 if tc == 'A' else 1
+  if int(kernel["MIWaveGroup"][wgIdx]) != 1:
+    return None
+  freeElems = int(kernel["MacroTile0" if tc == 'A' else "MacroTile1"])
+  mtTiles = freeElems // int(tileInfo.mmaTileShape[0])
+  stack = int(tileInfo.subtileShape[0])
+  if stack <= 0 or mtTiles % stack == 0:
+    return None
+  return freeElems
+
+
 def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
                                       strideK, cs):
   """GR per-lane offsets for the column-scatter TLU layout (8x1 fp4 and up).
@@ -1057,31 +1085,63 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
   # col_group * N (load-independent K-column base).
   module.add(VLShiftLeftB32(dst=vgpr(cg), shiftHex=hex(N.bit_length() - 1), src=vgpr(cg),
              comment="%s: col_group * %u (= K-column at load 0)" % (tc, N)))
-  # m_chunk * elemsPerChunk (free-dim element start, load-independent).
-  module.add(VLShiftLeftB32(dst=vgpr(mc), shiftHex=hex(elemsPerChunk.bit_length() - 1),
-             src=vgpr(mc), comment="%s: m_chunk * %u (free-dim start)" % (tc, elemsPerChunk)))
+  # A padded strip carries lanes whose free-dim chunk starts past the operand's
+  # real tiles.  Compare while mc is still a chunk index: the bound is then small
+  # enough to be an inline constant, where the element extent (192, 224) is not.
+  # m_chunk is load-independent, so one compare covers every load; the select has
+  # to come last though, after the per-wave offset is folded in, because the steps
+  # between would mangle an out-of-range value back into a valid address.
+  padFreeElems = _tluPadFreeExtent(kernel, tileInfo)
+  laneSGPRCount = writer.states.laneSGPRCount
+  with contextlib.ExitStack() as padStack:
+    padMaskSgpr = None
+    oobVgpr = None
+    if padFreeElems is not None:
+      padChunks = -(-padFreeElems // elemsPerChunk)
+      oobVgpr = writer.vgprPool.checkOut(1, tag="_graColScatter_oob")
+      module.add(VMovB32(dst=vgpr(oobVgpr), src="BufferOOB",
+                 comment="%s: offset that the buffer bound rejects" % tc))
+      padMaskSgpr = padStack.enter_context(
+          writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount,
+                              tag="_graColScatter_padMask")).idx
+      module.add(VCmpLtI32(dst=sgpr(padMaskSgpr, laneSGPRCount), src0=vgpr(mc),
+                 src1=padChunks,
+                 comment="%s: m_chunk < %u, i.e. lane inside the real %u elements?"
+                         % (tc, padChunks, padFreeElems)))
 
-  waveAxisOffVgpr = _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo)
-  colK = writer.vgprPool.checkOut(1, tag="_graColScatter_colK")
-  for i in range(tileInfo.numGRPerSubtile):
-    out = tile.sharedVgprGROffset[i]
-    # K-column for load i = col_group*N + i.
-    module.add(VAddU32(dst=vgpr(colK), src0=hex(i), src1=vgpr(cg),
-               comment="%s: K-column = col_group*%u + %u" % (tc, N, i)))
-    # colK * strideK (elements).
-    module.add(VMulLOU32(dst=vgpr(colK), src0=strideK, src1=vgpr(colK),
-               comment="%s: K-column * strideK" % tc))
-    # + m_chunk*elemsPerChunk (free dim is unit stride).
-    module.add(VAddU32(dst=vgpr(colK), src0=vgpr(colK), src1=vgpr(mc),
-               comment="%s: + free-dim start" % tc))
-    # * bpe (sub-byte safe).
-    module.add(VLShiftLeftB32(dst=vgpr(colK), shiftHex=hex(bpeBits.bit_length() - 1),
-               src=vgpr(colK), comment="%s: * bpe" % tc))
-    module.add(VLShiftRightB32(dst=vgpr(out), shiftHex=hex(3), src=vgpr(colK),
-               comment="%s: to bytes" % tc))
-    if waveAxisOffVgpr is not None:
-      module.add(VAddU32(dst=vgpr(out), src0=vgpr(out), src1=vgpr(waveAxisOffVgpr),
-                 comment="%s: + per-wave free-dim (M/N) global offset" % tc))
+    # m_chunk * elemsPerChunk (free-dim element start, load-independent).
+    module.add(VLShiftLeftB32(dst=vgpr(mc), shiftHex=hex(elemsPerChunk.bit_length() - 1),
+               src=vgpr(mc), comment="%s: m_chunk * %u (free-dim start)" % (tc, elemsPerChunk)))
+
+    waveAxisOffVgpr = _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo)
+    colK = writer.vgprPool.checkOut(1, tag="_graColScatter_colK")
+    for i in range(tileInfo.numGRPerSubtile):
+      out = tile.sharedVgprGROffset[i]
+      # K-column for load i = col_group*N + i.
+      module.add(VAddU32(dst=vgpr(colK), src0=hex(i), src1=vgpr(cg),
+                 comment="%s: K-column = col_group*%u + %u" % (tc, N, i)))
+      # colK * strideK (elements).
+      module.add(VMulLOU32(dst=vgpr(colK), src0=strideK, src1=vgpr(colK),
+                 comment="%s: K-column * strideK" % tc))
+      # + m_chunk*elemsPerChunk (free dim is unit stride).
+      module.add(VAddU32(dst=vgpr(colK), src0=vgpr(colK), src1=vgpr(mc),
+                 comment="%s: + free-dim start" % tc))
+      # * bpe (sub-byte safe).
+      module.add(VLShiftLeftB32(dst=vgpr(colK), shiftHex=hex(bpeBits.bit_length() - 1),
+                 src=vgpr(colK), comment="%s: * bpe" % tc))
+      module.add(VLShiftRightB32(dst=vgpr(out), shiftHex=hex(3), src=vgpr(colK),
+                 comment="%s: to bytes" % tc))
+      if waveAxisOffVgpr is not None:
+        module.add(VAddU32(dst=vgpr(out), src0=vgpr(out), src1=vgpr(waveAxisOffVgpr),
+                   comment="%s: + per-wave free-dim (M/N) global offset" % tc))
+      if padMaskSgpr is not None:
+        module.add(VCndMaskB32(dst=vgpr(out), src0=vgpr(oobVgpr), src1=vgpr(out),
+                   src2=sgpr(padMaskSgpr, laneSGPRCount),
+                   comment="%s: pad lane -> BufferOOB, dropping its global read" % tc))
+
+    if oobVgpr is not None:
+      writer.vgprPool.checkIn(oobVgpr)
+
   if waveAxisOffVgpr is not None:
     writer.vgprPool.checkIn(waveAxisOffVgpr)
   writer.vgprPool.checkIn(colK)
