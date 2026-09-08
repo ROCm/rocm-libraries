@@ -609,7 +609,7 @@ defaultBenchmarkCommonParameters = [
     # PreloopGRClusterSize: cluster size for fused preloop GR interleaving.
     # -1 (default) = off. N > 0 = groups of N loads separated by initC MFMA filler.
     # Only active when UseSubtileImpl=True and PGR=2 (single-DU path).
-    {"PreloopGRClusterSize": [-1]},
+    {"PreloopGRClusterSize": [6]},
     # 1 (default) = hoist MT1 GRs before WaitGR so both prefetch batches are
     # in-flight simultaneously (GR reorder, Exp 3). 0 = classic order: all MT0
     # GRs, then initC, then WaitGR, then MT1 GRs. Only affects UseSubtileImpl

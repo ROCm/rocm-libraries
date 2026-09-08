@@ -3697,6 +3697,13 @@ class LogicalScheduler:
                     gl2_preloop_ops.append(GL2PrefetchIncOp())
                     gl2_preloop_ops.append(GL2PrefetchOp())
             maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
+            # PreloopGRReorder gates the Exp-3 GR reorder (hoist MT1 GRs before
+            # WaitGR with a partial vmcnt(N_gr1)) INDEPENDENTLY of PGRCS MT0
+            # clustering. When off, emit MT1 after the NLL skip and drain fully
+            # (vmcnt(0)) at the barrier; the [MT0 GRs][gr_inc][initC] region is
+            # unchanged so _interleave_preloop_filler still clusters MT0. Default
+            # on (matches GlobalParameters PreloopGRReorder=[1]).
+            do_reorder = bool(self._kernel.get("PreloopGRReorder", 1)) if self._kernel else True
             if maxUnroll > 1:
                 preloop_ops = []
                 for uid in range(maxUnroll):
@@ -3709,42 +3716,73 @@ class LogicalScheduler:
                     mt1_grs_only.extend(uid_grs)
                     mt1_ops.extend(uid_grs)
                     mt1_ops.extend(self._make_depops_uid(GRIncOp, uid))
-                # GR reorder (Experiment 3): MT1 GRs issued before WaitGR so both
-                # MT0 and MT1 prefetch batches are in-flight simultaneously.
-                # vmcnt is set to N_gr1 (not 0) so GR0 is drained while GR1 remains
-                # in-flight past the barrier, to be drained by the mainloop's own
-                # per-subIterK WaitGROp before ds_reads(MT1).
-                emitted = self._to_emitted([
-                    *preloop_ops,
-                    initC_op,
-                    *mt1_ops,                              # ← moved before WaitGR
-                    WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs_only)),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
+                if do_reorder:
+                    # GR reorder (Experiment 3): MT1 GRs issued before WaitGR so both
+                    # MT0 and MT1 prefetch batches are in-flight simultaneously.
+                    # vmcnt is set to N_gr1 (not 0) so GR0 is drained while GR1 remains
+                    # in-flight past the barrier, to be drained by the mainloop's own
+                    # per-subIterK WaitGROp before ds_reads(MT1).
+                    emitted = self._to_emitted([
+                        *preloop_ops,
+                        initC_op,
+                        *mt1_ops,                              # ← moved before WaitGR
+                        WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs_only)),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
+                else:
+                    # Reorder off: MT1 after the NLL skip, full vmcnt(0) drain.
+                    emitted = self._to_emitted([
+                        *preloop_ops,
+                        initC_op,
+                        WaitGROp(wait_gr_counts=WaitGRCounts()),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *mt1_ops,
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
             else:
                 mt1_grs = self._make_preloop_mt1_grs()
-                # Emit the clean, unclustered GR-reorder op list. When
-                # PreloopGRClusterSize > 0 (single-DU only), the post-populate pass
-                # _interleave_preloop_filler (called from emitMainAndExitLoops)
-                # rewrites this into clusters with distributed filler at the
-                # INSTRUCTION level, where it can respect per-tensor SRD windows and
-                # the initC seed→MFMA ordering that op-level clustering could not.
-                emitted = self._to_emitted([
-                    *self._make_gr_all_tensors(0, all_tiles),
-                    *self._make_depops_all_tensors(GRIncOp),
-                    initC_op,
-                    *mt1_grs,                              # ← moved before WaitGR
-                    WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs)),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
+                if do_reorder:
+                    # Emit the clean, unclustered GR-reorder op list. When
+                    # PreloopGRClusterSize > 0 (single-DU only), the post-populate pass
+                    # _interleave_preloop_filler (called from emitMainAndExitLoops)
+                    # rewrites this into clusters with distributed filler at the
+                    # INSTRUCTION level, where it can respect per-tensor SRD windows and
+                    # the initC seed→MFMA ordering that op-level clustering could not.
+                    emitted = self._to_emitted([
+                        *self._make_gr_all_tensors(0, all_tiles),
+                        *self._make_depops_all_tensors(GRIncOp),
+                        initC_op,
+                        *mt1_grs,                              # ← moved before WaitGR
+                        WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs)),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
+                else:
+                    # Reorder off: MT1 after the NLL skip, full vmcnt(0) drain at the
+                    # barrier. PGRCS MT0 clustering still applies — the region up to
+                    # initC is unchanged, so _interleave_preloop_filler still rewrites it.
+                    emitted = self._to_emitted([
+                        *self._make_gr_all_tensors(0, all_tiles),
+                        *self._make_depops_all_tensors(GRIncOp),
+                        initC_op,
+                        WaitGROp(wait_gr_counts=WaitGRCounts()),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *mt1_grs,
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
 
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
