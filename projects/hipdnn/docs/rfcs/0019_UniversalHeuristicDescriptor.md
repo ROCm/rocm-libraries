@@ -1,7 +1,7 @@
 # RFC 0019: Universal Heuristic Descriptor (UHD): Data-Driven Kernel Selection
 
 - Contributors: Jason Campbell, Chris Erb
-- Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs).
+- Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs).
 - Siblings:
   - [RFC 0020 Universal Engine Descriptor](0020_UniversalEngineDescriptor.md) — owns engine identity, the UED's `nodes` pattern, and the **symbol table matching it publishes**. That table is the binding this RFC's `features_signature` reads, and the set every UHD is validated against ([Section 6.1](#61-feature-sources), [Section 6.3](#63-contract-enforcement)).
   - [RFC 0018 Universal Match Descriptor](0018_UniversalMatchDescriptor.md) — the UMD's criteria, applicability evaluated over that same table. A sibling consumer of the binding, not its owner.
@@ -105,7 +105,7 @@ constraints; load/eval performance; the model-generation pipeline.
 
 **Out of scope (this RFC):** the engine-selection outer loop itself ([RFC 0007](0007_EngineSelectionHeuristicsFramework.md)
 owns it); autotuning / exhaustive search (device-access tuning is [RFC 0013](0013_Autotune.md)); the
-matcher and launch machinery ([RFC 0017 §5–6](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)).
+matcher and launch machinery ([RFC 0017 §5–6](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria)).
 
 ---
 
@@ -397,7 +397,7 @@ Other adapters keep the same header and swap the body:
 
 **On `static_order.order`.** The entries are *ordering criteria* (`priority`, then `id`), not a literal
 list of UKD ids — the same deterministic arbitration
-[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) defines. An explicit id list is a
+[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) defines. An explicit id list is a
 reasonable future extension for pinning a known-good order; if one is supplied, ids present in the list
 rank first in the given order and **any catalog entry not named falls through to the default criteria**,
 so a stale list degrades gracefully rather than hiding kernels.
@@ -507,7 +507,7 @@ unset until the JIT path is real. What is *not* settled, and is deferred to
 ## 5. Selection Flow
 
 The generic engine first builds the **catalog**: the set of the engine's kernels that pass every matcher
-for this graph ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)), each carrying
+for this graph ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria)), each carrying
 its build `metadata`. The catalog is engine-scoped — the union across every KDP that joins the engine —
 and the engine owns the UHD that ranks it, so the candidates and their selector arrive together.
 
@@ -523,7 +523,7 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
 4. **Choose by objective.** `max` (or `min`) over the scores; the winner is the selected kernel.
 5. **Tie-break deterministically.** On equal scores (or when the UHD declines), fall through to explicit
    UKD `priority`, then stable `id` — the same deterministic arbitration
-   [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) defines. Declaration order
+   [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) defines. Declaration order
    is never used.
 6. **A UHD is optional.** An engine that names no heuristic is valid; it is the starting state
    ([Section 13.1](#131-two-stage-workflow)). The catalog is returned in deterministic
@@ -931,7 +931,7 @@ of [Section 6.1](#61-feature-sources)).
 ## 7. Model Adapters
 
 The question "LightGBM, CSV, or a separate library?" is really about how model content reaches the
-scorer, and it maps onto [RFC 0017 §8](0017_UniversalKernelDescriptor.md#8-adapters-and-extensibility)'s
+scorer, and it maps onto [RFC 0017 §9](0017_UniversalKernelDescriptor.md#9-adapters-and-extensibility)'s
 adapter model. A UHD names an `adapter`; the adapter turns content into a scorer. Adding a new ranker
 is one more adapter value. Adapters come in the same two delivery classes as kernel-source adapters.
 
@@ -993,7 +993,7 @@ lowers author friction but requires a bespoke parser to harden. **OPEN:** See
 For a model the in-tree walker does not cover, the engine ships its own compiled scorer `.so`, `dlopen`'d
 through a small C ABI (`score(const double* feats, ...) -> double`). Treelite generates such a `.so` from
 a tree model. Any model family is supported, under the author-native-code trust class of
-[RFC 0017 §10](0017_UniversalKernelDescriptor.md#10-packaging-and-delivery).
+[RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery).
 
 The constraint is on linkage, not compilation. Compiling a model *into* the provider makes it
 non-portable to third-party provider builds; a model may still be compiled (a Treelite `.so`) provided it
@@ -1285,7 +1285,7 @@ components should be **wall-clocked separately** — descriptor load and model p
 (shared prefix vs. per-candidate tail), and scoring — so a regression is attributable and so the cost of
 different adapters can be compared directly when choosing between heuristic options. The exact budget is
 not fixed here; the requirement is that the numbers exist and are tracked, per
-[RFC 0017 §12.1](0017_UniversalKernelDescriptor.md#121-testing-and-performance).
+[RFC 0017 §14.1](0017_UniversalKernelDescriptor.md#141-testing-and-performance).
 
 ---
 
@@ -1469,7 +1469,7 @@ This is a dedicated follow-up co-owned with [RFC 0007](0007_EngineSelectionHeuri
 ## 12. Observability
 
 Because selection is data-driven, it must be inspectable — consistent with
-[RFC 0017 §9](0017_UniversalKernelDescriptor.md#9-observability-and-diagnostics) and
+[RFC 0017 §10](0017_UniversalKernelDescriptor.md#10-observability-and-diagnostics) and
 [RFC 0007 §12](0007_EngineSelectionHeuristicsFramework.md#12-logging). The UHD path surfaces:
 
 - **Selection trace:** Candidates, scores, the ranked order, winner, and whether the model or a fallback
@@ -1875,7 +1875,7 @@ pack (all knobs) → benchmark → heuristic → prune knobs → regenerate pack
 ## 15. Phased Delivery
 
 Each phase is independently shippable and validated against the SDPA path and the reference tooling,
-using the parity and overhead checks of [RFC 0017 §12.1](0017_UniversalKernelDescriptor.md#121-testing-and-performance).
+using the parity and overhead checks of [RFC 0017 §14.1](0017_UniversalKernelDescriptor.md#141-testing-and-performance).
 
 The ordering establishes the ranking seam before the data-driven machinery. Phases 1–3 stand up the UHD
 path — schema, wiring, ranking, load and cache, engine integration — using ranking mechanisms that need no
@@ -1921,7 +1921,7 @@ dependency-gated and land only when a concrete need appears.
 | **Miscalibrated cross-engine scores** | Absolute score misleads engine selection | Train calibratable TFLOPS from start; fall back to rank-ordering at policy level if calibration unreliable |
 | **Selection CPU overhead** | Per-candidate scoring on the plan-build path costs more than it saves | Wall-clock load / extract / score separately against the `native` baseline; shared-prefix split; single-candidate short-circuit ([§9.4](#94-latency-target)) |
 | **Cache key incompleteness** | Result cache returns wrong kernel | Fingerprint must include problem + candidate set + device |
-| **Drop-in trust** | Model artifact is author-controlled input | Bounded loader/evaluator; inherit [RFC 0017 §10](0017_UniversalKernelDescriptor.md#10-packaging-and-delivery) trust rules |
+| **Drop-in trust** | Model artifact is author-controlled input | Bounded loader/evaluator; inherit [RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery) trust rules |
 
 ---
 
@@ -2199,7 +2199,7 @@ dependency-gated and land only when a concrete need appears.
 
 - **Scorer / adapter:** The thing that turns a UHD's model content into a per-candidate score; reached
   through an adapter in build-and-runtime (default) or build-only delivery classes, mirroring
-  [RFC 0017 §8](0017_UniversalKernelDescriptor.md#8-adapters-and-extensibility).
+  [RFC 0017 §9](0017_UniversalKernelDescriptor.md#9-adapters-and-extensibility).
 
 - **The tooling:** The heuristic-generation pipeline this RFC builds on — a sweep step that produces a
   training dataset (problem × kernel × measured TFLOPS), a training step that fits a LightGBM regressor on
