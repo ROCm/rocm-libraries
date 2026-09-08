@@ -90,10 +90,6 @@ public:
         const detail::DataSourceAdapter<DataT> source(data);
         return _root->eval(source);
     }
-    Value evaluate(const DataT& data) const
-    {
-        return (*this)(data);
-    }
 
     explicit operator bool() const
     {
