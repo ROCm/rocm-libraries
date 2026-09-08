@@ -131,7 +131,7 @@ TEST(TestIngestorDescriptors, KernelDescriptorOriginDirectoryDefaultsToEmpty)
 
 // HeuristicDescriptor: UhdAdapter as data; dispatch is tested in TestKernelHeuristic.cpp.
 
-TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToNativeKind)
+TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
 {
     const HeuristicDescriptor descriptor{};
 

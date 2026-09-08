@@ -223,5 +223,17 @@
     "neighbourhood": 0.6,
     "exploration": 0.2
   },
-  "// archetypes": "A reduction's cost is set by how much it reads and how far it must reduce, so the meaningful axis is the aspect ratio: a short-wide softmax row, a vocabulary-sized logit reduction, and a whole-tensor reduction to one scalar are different kernels."
+  "// archetypes": "A reduction's cost is set by how much it reads and how far it must reduce, so the meaningful axis is the aspect ratio: a short-wide softmax row, a vocabulary-sized logit reduction, and a whole-tensor reduction to one scalar are different kernels.",
+  "// elements": "The full input, and one output per row. Element count across every tensor the operation touches, inputs and outputs. Dtype-free on purpose: bytes is elements times the dtype width, and the width table belongs to the tool rather than repeated as a nested dtype lookup in seven declarations. gbs = bytes / measured time, which is the metric that ranks a memory-bound kernel where tflops cannot.",
+  "elements": {
+    "+": [
+      {
+        "*": [
+          "$q.rows",
+          "$q.cols"
+        ]
+      },
+      "$q.rows"
+    ]
+  }
 }

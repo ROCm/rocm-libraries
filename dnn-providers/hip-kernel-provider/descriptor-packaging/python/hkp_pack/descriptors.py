@@ -360,12 +360,12 @@ def _validate_ued(desc):
 # DescriptorLoader.hpp matchScopeFromString / heuristicKindFromString /
 # metadataTypeFromString.
 _MATCH_SCOPES = ("graph", "kernel")
-_UHD_ADAPTERS = ("static_order", "native", "tree_data", "table")
+_UHD_ADAPTERS = ("static_order", "native", "tree_data", "table", "custom_library")
 
 # The adapters whose body names a file the packed tree has to carry. `static_order`
 # scores from the descriptor's own fields and `native` names a symbol the provider
 # registered in-process; neither has anything on disk.
-_ARTIFACT_ADAPTERS = ("tree_data", "table")
+_ARTIFACT_ADAPTERS = ("tree_data", "table", "custom_library")
 _METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
 
 
@@ -396,19 +396,30 @@ def _validate_udd(desc):
 
 
 def _validate_uhd(desc, source_root):
-    """UHD: adapter is a closed enum, and an adapter that reads a model has to
-    name one. Mirrors parseHeuristicDescriptor.
+    """UHD: adapter is a closed enum, and the adapter-scoped body it selects has
+    to carry what that adapter cannot work without. Mirrors
+    parseHeuristicDescriptor.
 
-    A missing model artifact is a hard error. The runtime drops an engine whose
-    artifact is absent rather than shipping one that silently stops using its
-    model, so a UHD packed without its artifact costs the whole engine. Catching
-    it here reports it against the source tree, where the fix is.
+    The UHD is the whole descriptor now, not a stub naming a FlatBuffer, so the
+    fields checked here are the ones the runtime reads -- a body naming no
+    artifact drops the model at load and the engine ranks by declared order,
+    silently.
+
+    Takes `source_root` because it does not only validate: an artifact-bearing
+    adapter registers its file as a sidecar here, which is what carries the model
+    into the packed tree. Validating without registering ships a descriptor whose
+    artifact was checked and then left behind.
     """
     where = f"UHD {desc.path.name}"
     _require(desc.doc, ["name", "adapter"], where)
     _require_enum(desc.doc, "adapter", _UHD_ADAPTERS, where)
 
     adapter = desc.doc["adapter"]
+    if adapter == "native":
+        body = desc.doc.get("native")
+        if not isinstance(body, dict) or not body.get("symbol"):
+            raise HkpPackError(f"{where} adapter 'native' requires 'native.symbol'")
+        return
     if adapter not in _ARTIFACT_ADAPTERS:
         return
 

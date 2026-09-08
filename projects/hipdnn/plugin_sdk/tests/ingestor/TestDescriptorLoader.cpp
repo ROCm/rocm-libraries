@@ -351,14 +351,9 @@ TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
     EXPECT_EQ(set.schema.fields.size(), 2u);
     ASSERT_TRUE(set.heuristic.has_value());
     EXPECT_EQ(set.heuristic->nativeSymbol, SCORE_SYMBOL);
-    // A MODEL payload is a path relative to the .uhd.json that declared it, so the
+    // A model artifact is a path relative to the .uhd.json that declared it, so the
     // descriptor has to carry that directory -- nothing downstream can recover it.
     EXPECT_EQ(set.heuristic->baseDir, dir.path());
-    // And the tree it was found under, which is the boundary that path may not cross.
-    // Resolution and containment are different questions: baseDir answers the first,
-    // treeRoot the second, and a nested descriptor legitimately climbs out of its own
-    // folder while nothing may climb out of the tree.
-    EXPECT_EQ(set.heuristic->treeRoot, dir.path());
     EXPECT_EQ(set.matchers.size(), 2u);
     EXPECT_EQ(set.dispatches.size(), 1u);
     ASSERT_EQ(set.packs.size(), 1u);
@@ -1512,13 +1507,12 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseHeuristicIsMissing)
 namespace
 {
 
-/// Turns the set's UHD into a MODEL one naming @p payload, and writes the tree.
+/// Turns the set's UHD into a tree_data one naming @p artifact, and writes the tree.
 ///
 /// Returns the directory, so a case can create or withhold the artifact afterwards.
-/// Every case below differs only in whether that file exists and where it resolves.
 std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
                                              const std::string& engineName,
-                                             const std::string& payload)
+                                             const std::string& artifact)
 {
     auto documents = makeSetDocuments('1', engineName);
     auto& heuristic = documentOfType(documents, ".uhd.json");
@@ -1527,23 +1521,25 @@ std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
     heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")"});
     heuristic["features_hash"] = "sha256:unchecked";
     heuristic["objective"] = "max";
-    heuristic["tree_data"] = {{"artifact", payload}};
+    heuristic["tree_data"] = {{"artifact", artifact}};
     writeDocuments(root, documents);
     return root;
 }
 
+/// Contents are irrelevant: the loader checks that the path resolves to a file, and the
+/// artifact is only parsed later, by the adapter, in a test that builds a real one.
 void writeArtifact(const std::filesystem::path& path)
 {
     std::filesystem::create_directories(path.parent_path());
-    std::ofstream(path, std::ios::binary) << "\0\0\0\0HUHD";
+    std::ofstream(path, std::ios::binary) << "not a real model";
 }
 
 } // namespace
 
-/// A MODEL UHD whose artifact shipped loads with the engine intact.
+/// A model-backed UHD whose artifact shipped loads with the engine intact.
 ///
-/// The baseline the two failure cases below are read against: without it, "the engine
-/// survived" proves nothing, because an engine that never had a model survives too.
+/// The baseline the failure cases are read against: without it, "the engine survived"
+/// proves nothing, because an engine that never had a model survives too.
 TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
 {
     const ScopedSymbols symbols;
@@ -1575,8 +1571,8 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     auto& heuristic = documentOfType(documents, ".uhd.json");
     heuristic["adapter"] = "tree_data";
     heuristic.erase("native");
-    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")",
-                                                             R"("$derived.tiles_m")"});
+    heuristic["features_signature"]
+        = nlohmann::json::array({R"("$kernel.tile_m")", R"("$derived.tiles_m")"});
     heuristic["features_hash"] = "sha256:unchecked";
     // max with a calibrated score: the pair a cross-engine consumer may act on, and the
     // one combination where `calibrated` is not its default, so the boolean parse is real.
@@ -1584,7 +1580,8 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     heuristic["derived"] = nlohmann::json::array(
         {{{"name", "tiles_m"}, {"expression", R"({"ceil_div": ["$q.M", "$kernel.tile_m"]})"}}});
     heuristic["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
-    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    heuristic["categorical_encoding"] = {{"$kernel.dtype", {{"fp16", 0}, {"bf16", 1}}}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}, {"hash", "sha256:model"}};
     writeDocuments(dir.path(), documents);
     writeArtifact(dir.path() / "model.bin");
 
@@ -1604,6 +1601,9 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     EXPECT_EQ(parsed.score.units, "tflops");
     EXPECT_TRUE(parsed.score.calibrated);
     EXPECT_EQ(parsed.score.transform, "log1p");
+    EXPECT_EQ(parsed.modelHash, "sha256:model");
+    ASSERT_EQ(parsed.categoricalEncoding.count("$kernel.dtype"), 1u);
+    EXPECT_EQ(parsed.categoricalEncoding.at("$kernel.dtype").at("bf16"), 1);
 }
 
 /// A cost-target UHD is ordinary: `min` on an uncalibrated score parses and is kept.
@@ -1696,37 +1696,27 @@ TEST(TestDescriptorLoader, RejectsAMalformedDerivedEntry)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "derived"));
 }
 
-/// A missing artifact drops the engine and says why.
-///
-/// RFC 0019 §5 permits degrading to declared order instead, and this used to. Dropping
-/// is the deliberate choice: an engine that quietly ranks by priority is
-/// indistinguishable from one that never had a model, so the packaging bug that lost the
-/// file resurfaces months later as an unattributable performance regression. A dropped
-/// engine fails where the fault is.
-///
-/// The diagnostic is asserted for its content, not its wording -- it is the only thing
-/// telling an operator which file to go looking for.
-TEST(TestDescriptorLoader, DropsAnEngineWhoseModelArtifactIsAbsentAndReportsIt)
+/// A missing artifact degrades rather than dropping: RFC 0019 §5 keeps the engine
+/// selecting, by declared order, and the warning is what says why.
+TEST(TestDescriptorLoader, WarnsWhenAModelArtifactIsAbsentAndKeepsTheEngine)
 {
     const ScopedSymbols symbols;
     auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_absent"));
     writeModelHeuristicSet(dir.path(), "test:model_absent", "never_packaged.bin");
 
-    EXPECT_TRUE(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).empty());
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "never_packaged.bin"));
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "which is absent"));
+    EXPECT_EQ(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "never_packaged.bin"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "which is absent"));
 }
 
-/// A payload resolving outside the descriptor tree drops the engine.
-///
-/// The one MODEL failure that is not a deployment accident. The artifact is
-/// author-controlled input (RFC 0019 §16, "Drop-in trust"), so a payload climbing out of
-/// the tree is an attempt to make the loader open a file the tree does not own --
-/// degrading around it would mean honouring the rest of a descriptor that just tried it.
 TEST(TestDescriptorLoader, DropsAnEngineWhoseModelArtifactEscapesTheTree)
 {
+    // Containment drops where absence only warns. The artifact is author-controlled
+    // input (RFC 0019 §16, "Drop-in trust"), so a path climbing out of the tree is an
+    // attempt to make the loader open a file the tree does not own -- not the
+    // deployment accident the case above degrades around.
     const ScopedSymbols symbols;
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
@@ -1743,15 +1733,11 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseModelArtifactEscapesTheTree)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "outside the descriptor tree"));
 }
 
-/// A nested descriptor may climb out of its own folder, but not out of the tree.
-///
-/// The case that makes the boundary treeRoot rather than baseDir. Production ships one
-/// arch shard per directory with shared content at the shard root, so `../shared/x` is
-/// the normal way two packs reference one artifact. Anchoring containment on the
-/// descriptor's own folder would reject every nested descriptor -- the defect
-/// IngestorKernelCode.hpp already had to fix for kernel `library` paths.
 TEST(TestDescriptorLoader, AcceptsAModelArtifactAboveTheDescriptorButInsideTheTree)
 {
+    // The boundary is the tree, not the descriptor's own folder: one archive ships per
+    // arch shard at the shard root, so a nested descriptor legitimately climbs out of
+    // its folder to reach a shared artifact.
     const ScopedSymbols symbols;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_nested"));
     writeModelHeuristicSet(dir.path() / "pack", "test:model_nested", "../shared/model.bin");
