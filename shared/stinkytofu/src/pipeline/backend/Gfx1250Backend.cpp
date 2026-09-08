@@ -160,12 +160,18 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
                 passFeatureConfig.dagFeatures.dsReadThrottleLatency =
                     moduleOptions.DsReadThrottleLatency;
+                passFeatureConfig.dagFeatures.dsReadThrottleTransitionFactor =
+                    moduleOptions.DsReadThrottleTransitionFactor;
+                passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
+                    moduleOptions.DsReadThrottleTransitionEntries;
                 passFeatureConfig.dagFeatures.tensorLoadWmmaSpace =
                     moduleOptions.TensorLoadWmmaSpace;
                 passFeatureConfig.dagFeatures.globalReadQueueDepth =
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =
                     moduleOptions.GlobalReadDrainLatency;
+                // Same option as InsertClusterBarrierPass below (see cluster-barrier.md).
+                passFeatureConfig.dagFeatures.clusterBarrier = moduleOptions.ClusterBarrier;
                 if (moduleOptions.DsReadPerWmma >= 0)
                     passFeatureConfig.dagFeatures.dsReadPerWmma = moduleOptions.DsReadPerWmma;
                 if (moduleOptions.DsReadOrder >= 0)

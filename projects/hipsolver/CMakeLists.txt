@@ -90,6 +90,9 @@ option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK"
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
 option(EXPORT_FORTRAN_BINDINGS "Install hipsolver_fortran as an exported CMake target" ON)
 
+# Feature flags
+option(HIPSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
+
 if(NOT BUILD_SHARED_LIBS)
   add_compile_definitions(HIPSOLVER_STATIC_LIB)
 endif()

@@ -43,6 +43,7 @@ import importlib
 import shutil
 
 import pytest
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
@@ -73,8 +74,12 @@ def _init_rocisa():
     return ri
 
 
-# Module-level init: done once at import time so all tests share it.
-_RI = _init_rocisa()
+@pytest.fixture(scope="module", autouse=True)
+def _rocisa_gfx942():
+    """Provide the required caps without leaking gfx942 during collection."""
+    with preserve_rocisa_kernel_state():
+        _init_rocisa()
+        yield
 
 
 # ---------------------------------------------------------------------------

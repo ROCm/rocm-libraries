@@ -112,6 +112,21 @@ bool SupportClaims::isClaimed(const std::string& engine,
     return archIt->second.count(platform) != 0;
 }
 
+std::set<std::string> SupportClaims::claimedEngineNames(const std::string& arch,
+                                                        const std::string& platform) const
+{
+    std::set<std::string> names;
+    for(const auto& [engine, archMap] : claims)
+    {
+        const auto archIt = archMap.find(arch);
+        if(archIt != archMap.end() && archIt->second.count(platform) != 0)
+        {
+            names.insert(engine);
+        }
+    }
+    return names;
+}
+
 bool SweepSupportClaims::isClaimed(const std::string& caseId,
                                    const std::string& engine,
                                    const std::string& arch,
@@ -139,6 +154,29 @@ bool SweepSupportClaims::isClaimed(const std::string& caseId,
     }
 
     return false;
+}
+
+std::set<std::string> SweepSupportClaims::claimedEngineNames(const std::string& caseId,
+                                                             const std::string& arch,
+                                                             const std::string& platform) const
+{
+    std::set<std::string> names;
+    for(const auto& [engine, groups] : claims)
+    {
+        for(const auto& group : groups)
+        {
+            if(std::find(group.cases.begin(), group.cases.end(), caseId) == group.cases.end())
+            {
+                continue;
+            }
+            const auto archIt = group.support.find(arch);
+            if(archIt != group.support.end() && archIt->second.count(platform) != 0)
+            {
+                names.insert(engine);
+            }
+        }
+    }
+    return names;
 }
 
 SupportClaims parseSupportClaimsJson(const nlohmann::json& json, std::string_view source)
@@ -257,14 +295,11 @@ std::filesystem::path supportJsonPath(const std::filesystem::path& bundleJsonPat
     return bundleJsonPath.parent_path() / (bundleJsonPath.stem().string() + ".support.json");
 }
 
-std::optional<SupportClaims> loadSupportClaims(const std::filesystem::path& bundleJsonPath)
+namespace
 {
-    const auto path = supportJsonPath(bundleJsonPath);
-    if(!std::filesystem::exists(path))
-    {
-        return std::nullopt;
-    }
 
+nlohmann::json readJsonFile(const std::filesystem::path& path)
+{
     std::ifstream file(path);
     if(!file)
     {
@@ -276,8 +311,29 @@ std::optional<SupportClaims> loadSupportClaims(const std::filesystem::path& bund
     {
         throw std::runtime_error("support.json is not parseable JSON: " + path.string());
     }
+    return json;
+}
 
-    return parseSupportClaimsJson(json, path.string());
+} // namespace
+
+SupportClaims loadSupportClaimsFromPath(const std::filesystem::path& sidecarPath)
+{
+    return parseSupportClaimsJson(readJsonFile(sidecarPath), sidecarPath.string());
+}
+
+SweepSupportClaims loadSweepSupportClaimsFromPath(const std::filesystem::path& sidecarPath)
+{
+    return parseSweepSupportClaimsJson(readJsonFile(sidecarPath), sidecarPath.string());
+}
+
+std::optional<SupportClaims> loadSupportClaims(const std::filesystem::path& bundleJsonPath)
+{
+    const auto path = supportJsonPath(bundleJsonPath);
+    if(!std::filesystem::exists(path))
+    {
+        return std::nullopt;
+    }
+    return loadSupportClaimsFromPath(path);
 }
 
 std::optional<SweepSupportClaims> loadSweepSupportClaims(const std::filesystem::path& sweepDir)
@@ -287,20 +343,7 @@ std::optional<SweepSupportClaims> loadSweepSupportClaims(const std::filesystem::
     {
         return std::nullopt;
     }
-
-    std::ifstream file(path);
-    if(!file)
-    {
-        throw std::runtime_error("Could not open support claims file: " + path.string());
-    }
-
-    auto json = nlohmann::json::parse(file, nullptr, /*allow_exceptions=*/false);
-    if(json.is_discarded())
-    {
-        throw std::runtime_error("support.json is not parseable JSON: " + path.string());
-    }
-
-    return parseSweepSupportClaimsJson(json, path.string());
+    return loadSweepSupportClaimsFromPath(path);
 }
 
 } // namespace hipdnn_integration_tests::bundle
