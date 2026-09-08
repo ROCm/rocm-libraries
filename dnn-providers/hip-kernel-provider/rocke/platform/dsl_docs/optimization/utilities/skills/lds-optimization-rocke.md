@@ -424,23 +424,33 @@ freebie.
 **This is the reusable part.** The K-outer row stride must not be a multiple of
 the 32-dword bank period or the *transpose read* degenerates instead.
 
-Lane `l` reads 8 bytes at:
+Lane `l` reads 8 bytes at (wave64, `ds_read_tr16_b64`):
 ```
 (k_base + ((l%16)//4)) * stride + mn_base + ((l%MN)//16)*16 + (l%4)*4
 ```
 
-The only term that walks **rows** is `((l%16)//4)`. It contributes zero bank
-spread whenever:
+and 16 bytes at (wave32, `ds_load_tr16_b128`):
+```
+(k_base + (l%8)) * stride + mn_base + ((l%16)//8)*8
+```
+
+The term that walks **rows** is `((l%16)//4)` on wave64 — four row-groups — and
+`(l%8)` on wave32 — eight. The regime changes how many groups there are, not the
+condition: either contributes zero bank spread whenever:
 ```
 (stride_elems * 2 / 4) % 32 == 0
 ```
 
-Worked example, 64-wide tile, 16-bit elements:
+Worked example, 64-wide tile, 16-bit elements (wave64's four row-groups):
 
 | `stride_elems` | dwords | `% 32` | Row-group banks | Verdict |
 |----------------|--------|--------|-----------------|---------|
 | 64 (no pad) | 32 | 0 | 0, 0, 0, 0 | degenerate |
 | 64 + 8 = 72 | 36 | 4 | 0, 4, 8, 12 | spread |
+
+Wave32 has eight row-groups rather than four, so the same two strides give
+`0, 0, ..., 0` and `0, 4, 8, ..., 28` — same verdicts, wider spread. The pad
+derivation is regime-independent.
 
 A pad of **8** elements also keeps each row 16-byte aligned, which the `b128`
 store side needs — so it satisfies both constraints at once.
@@ -463,12 +473,14 @@ the K-outer path.
 There is no `--lds-k-outer` flag and no env override. The layout is deduced from
 the spec, and dispatch and the sweep driver call the same predicate:
 
+Both are keyword-only:
+
 ```python
 WgradConvSpec.default_lds_k_outer(
-    arch, dtype_a, dtype_b, warp_tile_m, warp_tile_n, wave_size)
+    *, arch, dtype_a, dtype_b, warp_tile_m, warp_tile_n, wave_size=64)
 
 DgradConvSpec.default_lds_k_outer(
-    arch, dtype_b, warp_tile_n, cpg, wave_size, pipeline)
+    *, arch, dtype_b, warp_tile_n, cpg, wave_size=64, pipeline="mem")
 ```
 
 The dgrad predicate is deliberately **asymmetric** — `dtype_b` / `warp_tile_n`

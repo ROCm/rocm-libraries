@@ -220,9 +220,10 @@ per lane); gfx1250 wave32 admits only the `16x16x32` atom and
 16-bit A/B.
 
 **Not a knob.** The spec field still defaults `False` (existing goldens are
-unmoved); the value is deduced by `WgradConvSpec.default_lds_k_outer(arch,
-dtype_a, dtype_b, warp_tile_m, warp_tile_n, wave_size)`, which both library
-dispatch (`library/dispatch/grouped_convolution.py`) and the sweep driver call.
+unmoved); the value is deduced by the keyword-only
+`WgradConvSpec.default_lds_k_outer(*, arch, dtype_a, dtype_b, warp_tile_m,
+warp_tile_n, wave_size=64)`, which both library dispatch
+(`library/dispatch/grouped_convolution.py`) and the sweep driver call.
 
 ### Async DMA on the K-outer tile
 
