@@ -316,6 +316,12 @@ Tensor scalarFromPython(nb::handle value) {
     }
     return Tensor(nb::cast<std::complex<double>>(value));
 }
+
+Tensor tensorOperand(nb::handle value, ScalarType scalarType) {
+    if (nb::isinstance<Tensor>(value)) return nb::cast<Tensor>(value);
+    const Tensor scalar = scalarFromPython(value);
+    return Tensor::scalar(scalarType, scalar.item<std::complex<double>>());
+}
 }  // namespace roc::host_numerics::python_bindings
 
 NB_MODULE(_roc_host_numerics, module) {
@@ -507,7 +513,31 @@ NB_MODULE(_roc_host_numerics, module) {
         .def("expand_dims", &Tensor::expandDims, "axis"_a)
         .def("clone", [](const Tensor& tensor) { return tensor.deepCopy(); })
         .def("to", static_cast<Tensor (Tensor::*)(ScalarType) const>(&Tensor::copyConvertedTo),
-             "type"_a);
+             "type"_a)
+        .def(
+            "__add__",
+            [](const Tensor& tensor, nb::handle value) {
+                return tensor + python_bindings::tensorOperand(value, tensor.type());
+            },
+            nb::is_operator())
+        .def(
+            "__radd__",
+            [](const Tensor& tensor, nb::handle value) {
+                return python_bindings::tensorOperand(value, tensor.type()) + tensor;
+            },
+            nb::is_operator())
+        .def(
+            "__mul__",
+            [](const Tensor& tensor, nb::handle value) {
+                return tensor * python_bindings::tensorOperand(value, tensor.type());
+            },
+            nb::is_operator())
+        .def(
+            "__rmul__",
+            [](const Tensor& tensor, nb::handle value) {
+                return python_bindings::tensorOperand(value, tensor.type()) * tensor;
+            },
+            nb::is_operator());
 
     python_bindings::registerGemmBindings(module);
 

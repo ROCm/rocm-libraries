@@ -64,6 +64,15 @@ if(HOST_NUMERICS_BUILD_TESTING)
         PROPERTIES
             ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}"
     )
+    add_test(
+        NAME host-numerics-python-tutorial
+        COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../examples/tutorial.py"
+    )
+    set_tests_properties(
+        host-numerics-python-tutorial
+        PROPERTIES
+            ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}"
+    )
 endif()
 
 set(

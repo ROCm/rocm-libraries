@@ -18,30 +18,29 @@ using namespace nb::literals;
 
 namespace roc::host_numerics::python_bindings {
 namespace {
-Tensor tensorOperand(nb::handle value, ScalarType scalarType) {
-    if (nb::isinstance<Tensor>(value)) return nb::cast<Tensor>(value);
-    Tensor scalar = scalarFromPython(value);
-    return Tensor::scalar(scalarType, scalar.item<std::complex<double>>());
+Tensor addOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
+                std::optional<ScalarType> computeType) {
+    if (!outputType && !computeType) return add(left, tensorOperand(right, left.type()));
+    const ScalarType resolvedCompute = computeType.value_or(outputType.value_or(left.type()));
+    const ScalarType resolvedOutput = outputType.value_or(resolvedCompute);
+    return add(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute);
 }
 
-Tensor addOwned(Tensor left, nb::object right, ScalarType outputType, ScalarType computeType) {
-    Tensor rightTensor = tensorOperand(right, left.type());
-    return add(std::move(left), std::move(rightTensor), outputType, computeType);
+void addIntoBound(const Tensor& left, nb::object right, Tensor output, ScalarType computeType) {
+    addInto(left, tensorOperand(right, computeType), std::move(output), computeType);
 }
 
-void addIntoBound(Tensor left, nb::object right, Tensor output, ScalarType computeType) {
-    Tensor rightTensor = tensorOperand(right, left.type());
-    addInto(std::move(left), std::move(rightTensor), std::move(output), computeType);
+Tensor multiplyOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
+                     std::optional<ScalarType> computeType) {
+    if (!outputType && !computeType) return multiply(left, tensorOperand(right, left.type()));
+    const ScalarType resolvedCompute = computeType.value_or(outputType.value_or(left.type()));
+    const ScalarType resolvedOutput = outputType.value_or(resolvedCompute);
+    return multiply(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute);
 }
 
-Tensor multiplyOwned(Tensor left, nb::object right, ScalarType outputType, ScalarType computeType) {
-    Tensor rightTensor = tensorOperand(right, left.type());
-    return multiply(std::move(left), std::move(rightTensor), outputType, computeType);
-}
-
-void multiplyIntoBound(Tensor left, nb::object right, Tensor output, ScalarType computeType) {
-    Tensor rightTensor = tensorOperand(right, left.type());
-    multiplyInto(std::move(left), std::move(rightTensor), std::move(output), computeType);
+void multiplyIntoBound(const Tensor& left, nb::object right, Tensor output,
+                       ScalarType computeType) {
+    multiplyInto(left, tensorOperand(right, computeType), std::move(output), computeType);
 }
 
 ActivationFunction activationFunction(Activation activation, double parameter0, double parameter1) {
@@ -227,32 +226,33 @@ void registerOperationBindings(nb::module_& module) {
             },
             nb::rv_policy::reference_internal);
 
-    module.def("add", &addOwned, "left"_a, "right"_a, "output_type"_a = ScalarType::Float32,
-               "compute_type"_a = ScalarType::Float32);
+    module.def("add", &addOwned, "left"_a, "right"_a, "output_type"_a = std::optional<ScalarType>{},
+               "compute_type"_a = std::optional<ScalarType>{});
     module.def("add_into", &addIntoBound, "left"_a, "right"_a, "output"_a,
                "compute_type"_a = ScalarType::Float32);
     module.def("multiply", &multiplyOwned, "left"_a, "right"_a,
-               "output_type"_a = ScalarType::Float32, "compute_type"_a = ScalarType::Float32);
+               "output_type"_a = std::optional<ScalarType>{},
+               "compute_type"_a = std::optional<ScalarType>{});
     module.def("multiply_into", &multiplyIntoBound, "left"_a, "right"_a, "output"_a,
                "compute_type"_a = ScalarType::Float32);
-    module.def("absolute", [](Tensor input) { return absolute(std::move(input)); }, "input"_a);
-    module.def("relu", [](Tensor input) { return relu(std::move(input)); }, "input"_a);
-    module.def("gelu", [](Tensor input) { return gelu(std::move(input)); }, "input"_a);
-    module.def("sigmoid", [](Tensor input) { return sigmoid(std::move(input)); }, "input"_a);
+    module.def("absolute", [](const Tensor& input) { return absolute(input); }, "input"_a);
+    module.def("relu", [](const Tensor& input) { return relu(input); }, "input"_a);
+    module.def("gelu", [](const Tensor& input) { return gelu(input); }, "input"_a);
+    module.def("sigmoid", [](const Tensor& input) { return sigmoid(input); }, "input"_a);
     module.def(
         "tanh",
-        [](Tensor input, double inputScale, double outputScale) {
-            return tanh(std::move(input), inputScale, outputScale);
+        [](const Tensor& input, double inputScale, double outputScale) {
+            return tanh(input, inputScale, outputScale);
         },
         "input"_a, "input_scale"_a = 1.0, "output_scale"_a = 1.0);
-    module.def("silu", [](Tensor input) { return silu(std::move(input)); }, "input"_a);
+    module.def("silu", [](const Tensor& input) { return silu(input); }, "input"_a);
     module.def(
-        "swish", [](Tensor input, double beta) { return swish(std::move(input), beta); }, "input"_a,
+        "swish", [](const Tensor& input, double beta) { return swish(input, beta); }, "input"_a,
         "beta"_a = 1.0);
     module.def(
         "clip",
-        [](Tensor input, double minimum, double maximum) {
-            return clip(std::move(input), minimum, maximum);
+        [](const Tensor& input, double minimum, double maximum) {
+            return clip(input, minimum, maximum);
         },
         "input"_a, "minimum"_a, "maximum"_a);
 

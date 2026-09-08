@@ -52,9 +52,9 @@ Tensor matmulOwned(Tensor a, Tensor b, ScalarType outputType, MatmulOptions opti
 }
 
 void matmulIntoBound(Tensor a, Tensor b, Tensor output, MatmulOptions options,
-                     GemmBackend backend) {
+                     OutputSelection selection, GemmBackend backend) {
     validatePythonGemmBackend(backend);
-    matmulInto(std::move(a), std::move(b), std::move(output), options, backend);
+    matmulInto(a, b, std::move(output), options, std::move(selection), backend);
 }
 
 void referenceGemmIntoBound(Tensor a, Tensor b, Tensor c, Tensor d, GemmOptions options,
@@ -81,8 +81,7 @@ void registerGemmBindings(nb::module_& module) {
         .def_rw("block_size_a", &MatmulOptions::blockSizeA)
         .def_rw("block_size_b", &MatmulOptions::blockSizeB)
         .def_rw("conjugate_a", &MatmulOptions::conjugateA)
-        .def_rw("conjugate_b", &MatmulOptions::conjugateB)
-        .def_rw("output_selection", &MatmulOptions::outputSelection);
+        .def_rw("conjugate_b", &MatmulOptions::conjugateB);
 
     nb::class_<GemmOptions>(module, "_GemmOptions")
         .def(nb::init<ScalarType>(), "accumulator_type"_a = ScalarType::Float32)
@@ -150,6 +149,7 @@ void registerGemmBindings(nb::module_& module) {
                "options"_a = MatmulOptions{}, "output_layout"_a = std::optional<Layout>{},
                "backend"_a = GemmBackend::Automatic);
     module.def("_matmul_into", &matmulIntoBound, "a"_a, "b"_a, "output"_a,
-               "options"_a = MatmulOptions{}, "backend"_a = GemmBackend::Automatic);
+               "options"_a = MatmulOptions{}, "output_selection"_a = OutputSelection::all(),
+               "backend"_a = GemmBackend::Automatic);
 }
 }  // namespace roc::host_numerics::python_bindings

@@ -519,7 +519,15 @@ class Tensor {
     }
 
     template <typename Target>
-    Target item(const ScalarConversionOptions& options = {}) const {
+    Target item() const {
+        if (shape().rank() != 0)
+            throw std::invalid_argument("Tensor item requires a rank-zero tensor.");
+        return detail::decodeScalar<Target>(type(), rawEncodedBackingStorage(),
+                                            layout().elementOffset(std::span<const size_t>{}));
+    }
+
+    template <typename Target>
+    Target item(const ScalarConversionOptions& options) const {
         if (shape().rank() != 0)
             throw std::invalid_argument("Tensor item requires a rank-zero tensor.");
         return detail::decodeScalar<Target>(type(), rawEncodedBackingStorage(),

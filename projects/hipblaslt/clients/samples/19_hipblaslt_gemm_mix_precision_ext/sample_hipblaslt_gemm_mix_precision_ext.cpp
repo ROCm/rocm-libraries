@@ -86,12 +86,10 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
                                                 batchStrideC,
                                                 Layout(Shape{size_t(runner.m), size_t(runner.n)},
                                                        {1, static_cast<ptrdiff_t>(runner.m)}));
-        Tensor product = matmul(std::move(a), std::move(bTensor), ScalarType::Float32);
-        Tensor scaledProduct
-            = multiply(std::move(product), runner.alpha * scaleA);
-        Tensor scaledC = multiply(std::move(c), runner.beta);
-        addInto(std::move(scaledProduct), std::move(scaledC), referenceTensor,
-                ScalarType::Float32);
+        const Tensor product  = matmul(a, bTensor, ScalarType::Float32);
+        const Tensor combined = product * (runner.alpha * scaleA)
+                                + c.copyConvertedTo(ScalarType::Float32) * runner.beta;
+        referenceTensor.copyLogicalElementsFrom(combined);
         copyTensorEncodedBackingStorageToBuffer(
             reference.data() + batchStrideD * b, batchStrideD, referenceTensor);
     }

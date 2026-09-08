@@ -35,7 +35,6 @@
 #include <hipblaslt/host_numerics/GroupedGemmDataInitialization.hpp>
 #include <hipblaslt/host_numerics/Types.hpp>
 #include <hipblaslt_arguments.hpp>
-#include <hipblaslt/host_numerics/hipblaslt_vector.hpp>
 #include <iostream>
 #include <limits>
 #include <roc/host_numerics/validation.hpp>
@@ -922,10 +921,10 @@ int test_hipblaslt(hipDataType                 in_datatype,
                         c_ptr + i3 * stride_c[i],
                         cElements,
                         Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]}));
-                    Tensor product = matmul(std::move(a), std::move(b), ScalarType::Float32);
-                    Tensor combined
-                        = add(multiply(std::move(product), static_cast<float>(alpha[i])),
-                              multiply(std::move(c), static_cast<float>(beta[i])));
+                    const Tensor product = matmul(a, b, ScalarType::Float32);
+                    const Tensor combined
+                        = product * static_cast<float>(alpha[i])
+                          + c.copyConvertedTo(ScalarType::Float32) * static_cast<float>(beta[i]);
 
                     EpilogueOptions options;
                     options.activation = toHostNumericsActivation(actType[i]);
@@ -935,11 +934,12 @@ int test_hipblaslt(hipDataType                 in_datatype,
                                   Layout::contiguousLastDimensionFastest(Shape{size_t(m[i])}),
                                   std::span<const float>(bias_ptr, size_t(m[i])))
                                   .expandDims(1);
-                    referenceEpilogueInto(
-                        std::move(combined), {.output = referenceOutput}, options);
+                    referenceEpilogueInto(combined, {.output = referenceOutput}, options);
                     copyTensorEncodedBackingStorageToBuffer(
                         d_ptr + i3 * stride_d[i], dElements, referenceOutput);
 
+                    // Use the greatest representable double below 0.001 so a
+                    // difference that rounds to exactly 0.001 is rejected.
                     const double tolerance = std::nextafter(0.001, 0.0);
                     ComparisonOptions comparisonOptions{.absoluteTolerance = tolerance,
                                                         .relativeTolerance = 2.0 * tolerance,

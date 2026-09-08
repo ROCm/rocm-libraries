@@ -141,19 +141,14 @@ namespace rocRoller::HostNumerics
         std::optional<Tensor> result;
         if(alpha != 0.0f && a.shape()[1] != 0)
         {
-            Tensor product
-                = matmulWithBlasBackend(std::move(a), std::move(b), ScalarType::Float32, options);
-            result = multiply(std::move(product), alpha);
+            const Tensor product = matmulWithBlasBackend(a, b, ScalarType::Float32, options);
+            result               = product * alpha;
         }
         if(beta != 0.0f)
         {
-            Tensor addend = multiply(std::move(c), beta);
+            Tensor addend = c * beta;
             if(result)
-                return add(std::move(*result),
-                           std::move(addend),
-                           ScalarType::Float32,
-                           ScalarType::Float32,
-                           outputLayout);
+                return add(*result, addend, ScalarType::Float32, ScalarType::Float32, outputLayout);
             return addend.copyConvertedTo(ScalarType::Float32, outputLayout);
         }
         return result ? result->copyConvertedTo(ScalarType::Float32, outputLayout)

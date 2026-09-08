@@ -112,10 +112,16 @@ it is the equivalent of sampling from a finite list, like NumPy's
 mapping, or coordinate-based sign pattern without introducing mutable global
 generator state.
 
-## C++ tutorial
+## Tutorials
 
-The complete, compiled version of this walkthrough is
-[`examples/tutorial.cpp`](examples/tutorial.cpp).
+The complete C++ and Python walkthroughs are
+[`examples/tutorial.cpp`](examples/tutorial.cpp) and
+[`examples/tutorial.py`](examples/tutorial.py). They progress from basic
+tensors through deterministic generation, broadcast arithmetic,
+ordinary/integer/complex matrix multiplication, MXFP4 generation, higher-level
+operations, zero extents, and comparison diagnostics.
+
+### C++
 
 Create tensors from native values, multiply them, and compose the result with
 ordinary broadcast operations:
@@ -135,12 +141,12 @@ Tensor b = Tensor::copyNativeValues<float>(Shape{3, 2}, bValues);
 Tensor product = matmul(a, b, ScalarType::Float32);
 Tensor bias = Tensor::copyNativeValues<float>(
     Shape{2}, std::array<float, 2>{-100.0f, 1.0f});
-Tensor result = relu(add(multiply(product, 0.5f), bias));
+Tensor result = relu(product * 0.5f + bias);
 ```
 
 The last dimension of `bias` broadcasts over the columns. Native `0.5f` is
-treated like a NumPy scalar. A rank-zero tensor can be supplied instead when
-its encoded type matters.
+converted to the other operand's element type. A rank-zero tensor can be
+supplied instead when its encoded type matters.
 
 Generation is similarly tensor-first:
 
@@ -154,6 +160,21 @@ Tensor random = generate(ScalarType::Float32, Shape{2, 2}, recipe);
 Products needing a particular destination layout or a sparse validation
 selection use the corresponding `...Into` operation. The ordinary forms own
 and return their outputs.
+
+### Python
+
+The same basic expression uses Python operators and ordinary scalars:
+
+```python
+import numpy as np
+import roc_host_numerics as hn
+
+a = hn.from_numpy(np.asarray([[1, 2, 3], [4, 5, 6]], dtype=np.float32))
+b = hn.from_numpy(np.asarray([[7, 8], [9, 10], [11, 12]], dtype=np.float32))
+bias = hn.from_numpy(np.asarray([-100, 1], dtype=np.float32))
+
+result = hn.relu(hn.matmul(a, b) * 0.5 + bias)
+```
 
 ## Reference operations
 
@@ -223,29 +244,10 @@ of the tensor and reference-operation layers.
 
 ## Python use
 
-The `roc_host_numerics` module exposes the same scalar types, tensors,
-generation recipes, reference operations, and comparison results. NumPy
-conversion functions copy values so ownership is unambiguous:
-
-```python
-import numpy as np
-import roc_host_numerics as hv
-
-a_np = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
-b_np = np.asarray([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
-a = hv.from_numpy(a_np)
-b = hv.from_numpy(b_np)
-product = hv.matmul(
-    a, b,
-    output_type=hv.ScalarType.Float32,
-    accumulator_type=hv.ScalarType.Float32,
-)
-result = hv.relu(hv.add(hv.multiply(product, 0.5), 1.0))
-result_np = hv.to_numpy(result)
-```
-
-Python operations take tensors and ordinary keyword arguments directly; there
-is no public request, operand, scalar, or result wrapper to construct.
+The `roc_host_numerics` module mirrors the tensor, generation, operation, and
+comparison APIs shown in the Python tutorial above. Python operations accept
+tensors and ordinary numeric operands directly; there is no public request,
+operand, scalar, or result wrapper to construct.
 
 `from_numpy` creates an owning tensor and `to_numpy` returns an owning decoded
 array. Packed and custom encodings remain packed in `Tensor.storage`; their

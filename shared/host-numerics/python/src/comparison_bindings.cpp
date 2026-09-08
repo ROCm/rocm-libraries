@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
 #include <optional>
@@ -86,7 +87,8 @@ void registerComparisonBindings(nb::module_& module) {
         .def_ro("ulp_passed", &ComparisonReport::ulpPassed)
         .def_ro("reported_mismatches", &ComparisonReport::reportedMismatches)
         .def_ro("reported_comparisons", &ComparisonReport::reportedComparisons)
-        .def_prop_ro("passed", &ComparisonReport::passed);
+        .def_prop_ro("passed", &ComparisonReport::passed)
+        .def("__str__", &formatComparisonReport);
 
     nb::class_<ComparisonTolerance>(module, "ComparisonTolerance")
         .def_ro("absolute", &ComparisonTolerance::absolute)

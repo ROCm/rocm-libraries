@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <complex>
 #include <cstddef>
@@ -82,7 +81,7 @@ enum class BFloat16Rounding : uint8_t {
 
 struct ScalarConversionOptions {
     // Option-bearing conversions reject overflow by default. No-options
-    // Scalar/Tensor APIs use the documented deterministic implicit policy.
+    // Tensor and conversion APIs use the documented deterministic implicit policy.
     IntegerRounding integerRounding = IntegerRounding::TowardZero;
     IntegerOverflow integerOverflow = IntegerOverflow::Reject;
     BFloat16Rounding bfloat16Rounding = BFloat16Rounding::NearestEven;
