@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.2.0
+
+### Optimized
+* Improve `rocsparse_Xgemvi` performance significantly especially when `n` > `m`.
+
 ## (Unreleased) rocSPARSE 5.1.0
 
 ### Added

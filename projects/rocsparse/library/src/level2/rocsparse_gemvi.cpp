@@ -101,6 +101,7 @@ namespace rocsparse
                != hipSuccess
            || blocks_per_cu < 1)
         {
+            // LCOV_EXCL_START
             // Fall back to the device's resident thread capacity.
             blocks_per_cu = 1;
             if(prop.maxThreadsPerMultiProcessor > 0)
@@ -108,6 +109,7 @@ namespace rocsparse
                 blocks_per_cu = rocsparse::max(
                     prop.maxThreadsPerMultiProcessor / static_cast<int>(BLOCKSIZE), 1);
             }
+            // LCOV_EXCL_STOP
         }
 
         return rocsparse::max(prop.multiProcessorCount * blocks_per_cu, 1);
