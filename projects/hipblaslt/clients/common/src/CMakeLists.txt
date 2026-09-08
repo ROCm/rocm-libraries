@@ -17,7 +17,6 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/argument_model.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_parse_data.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_arguments.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_init_device.cpp"
 )
 
 if(amd_smi_FOUND)

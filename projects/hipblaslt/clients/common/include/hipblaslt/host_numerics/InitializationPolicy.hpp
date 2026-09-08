@@ -8,7 +8,13 @@
 
 namespace hipblaslt::host_numerics
 {
-    inline constexpr uint64_t defaultInitializationSeed    = 69'069;
+    // Preserve the historical hipBLASLt client PRNG seed so existing test
+    // inputs remain reproducible while callers explicitly derive operand and
+    // problem streams from it.
+    inline constexpr uint64_t defaultInitializationSeed = 69'069;
+
+    // Preserve the former norm_dist_one_special device-generator seed. It is
+    // intentionally independent from ordinary matrix generation.
     inline constexpr uint64_t oneSpecialInitializationSeed = 12'345;
 
     namespace initialization
