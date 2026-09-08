@@ -53,6 +53,7 @@ import pandas as pd
 
 from .benchmark_log import main as benchmark_log_main
 from .evaluate import add_evaluate_arguments, run_evaluate
+from .knobs import add_knob_arguments, run_knobs
 from .features import (
     build_features_signature,
     compute_features_hash,
@@ -145,6 +146,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_promote_arguments(promote)
 
+    knobs = subparsers.add_parser(
+        "knobs",
+        help="measure what each knob is worth, and how few AOT variants suffice",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_knob_arguments(knobs)
+
     # export-benchmarks parses its own argv tail, so it is split off before the
     # main parser sees flags it does not declare.
     if argv is None:
@@ -157,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_promote(args)
     if args.command == "evaluate":
         return run_evaluate(args)
+    if args.command == "knobs":
+        return run_knobs(args)
     return _run_train(args)
 
 
