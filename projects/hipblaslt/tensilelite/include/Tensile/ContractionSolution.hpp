@@ -54,18 +54,20 @@
 
 namespace TensileLite
 {
-    // Elements in one GSU (MBSK) reduction region. Usage there is
-    // synchronizerSizePerWG * numTiles * batch, which runs into the tens of
-    // thousands, so this keeps the size it has always had and a solution whose
-    // usage exceeds it is not selected (SynchronizerSizeCheck, both in
-    // ContractionSolution and in the predicate of the same name).
+    // Elements in one slot of the GSU (MBSK) reduction buffer. Usage there is
+    // synchronizerSizePerWG * numTiles * batch, tens of thousands on the shapes
+    // MBSK is selected for. A grouped GEMM is handed the slot at its problem
+    // index and bounded by it; a non-grouped GEMM is handed the base and bounded
+    // by the whole buffer (this * SynchronizerGroupedSlots). A solution over its
+    // bound is not selected (SynchronizerSizeCheck, both in ContractionSolution
+    // and in the predicate of the same name).
     //
     // Must stay in sync with _rocblaslt_handle::c_syncGsuSlotElements.
     constexpr uint32_t GsuSynchronizerElements = 409600;
 
-    // Problems a grouped GEMM can be given private regions for. A wider group
-    // cannot be isolated per problem, so no solution that uses these flags may
-    // be selected for it.
+    // Slots in the GSU buffer, and so the problems a grouped GEMM can be given
+    // private regions for. A wider group cannot be isolated per problem, so no
+    // solution that uses these flags may be selected for it.
     //
     // Must stay in sync with _rocblaslt_handle::c_syncGsuSlots.
     constexpr uint32_t SynchronizerGroupedSlots = 16;
@@ -840,6 +842,12 @@ namespace TensileLite
 
         virtual void relaseDeviceUserArgs(void* dUA, void* dUAHost);
 
+        /**
+         * resolvedGlobalAccumulation is the mode the kernel will actually run in.
+         * AdaptiveGemmGSUA lets getAccumulation() pick it per launch, so it can
+         * differ from sizeMapping.globalAccumulation; the argument layout has to
+         * follow the resolved mode, not the compiled-in one.
+         */
         template <bool T_Debug, bool insertKernelArgs, typename KA>
         void singleCallArgs(Problem const&           problem,
                             ContractionInputs const& inputs,
@@ -848,7 +856,8 @@ namespace TensileLite
                             dim3 const&              problemNumGroupTiles,
                             dim3 const&              numWorkGroups,
                             KA&                      args,
-                            StreamKSettings const&   sk) const;
+                            StreamKSettings const&   sk,
+                            size_t                   resolvedGlobalAccumulation) const;
 
         // Common kernel related arguments (e.g. gemm_count, arg type, MT, GSU...)
         template <bool T_Debug, bool Legacy, typename KA>
@@ -907,6 +916,7 @@ namespace TensileLite
                                       KA&                      args,
                                       StreamKSettings const&   sk,
                                       uint32_t                 autoGsuVal,
+                                      size_t                   resolvedGlobalAccumulation,
                                       uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
 
         template <typename KA>
@@ -922,7 +932,8 @@ namespace TensileLite
         KernelInvocation generateOutputConversionCall(Problem const&           problem,
                                                       ContractionInputs const& inputs,
                                                       StreamKSettings const&   sk,
-                                                      uint32_t                 autoGsuVal) const;
+                                                      uint32_t                 autoGsuVal,
+                                                      size_t resolvedGlobalAccumulation) const;
 
         template <bool T_Debug, typename KA>
         KernelInvocation
