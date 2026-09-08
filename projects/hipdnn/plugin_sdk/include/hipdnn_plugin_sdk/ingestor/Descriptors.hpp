@@ -134,6 +134,7 @@ enum class UhdAdapter
     NATIVE, ///< A scorer compiled into the engine, resolved by symbol.
     TREE_DATA, ///< GBDT tree table shipped as a data artifact. The default (§7.2).
     TABLE, ///< Bucketed lookup table shipped as a data artifact.
+    CUSTOM_LIBRARY, ///< An author-supplied `.so`, dlopened and called by symbol (§7.2).
 };
 
 /// Units and calibration of a UHD's score, for cross-engine comparison (RFC 0019 §11.3).
@@ -167,9 +168,15 @@ struct HeuristicDescriptor
     UhdAdapter adapter = UhdAdapter::STATIC_ORDER;
 
     /// Ordered model inputs, each a JsonLogic expression over `$device.*`, `$kernel.*`,
-    /// `$q.*` and `$derived.*`. Order is part of the contract: it is the order the model
-    /// was trained on. Empty for static_order, which consumes no features.
+    /// `$q.*` and `$derived.*`, or a bare reference such as `$kernel.block_size`. Order
+    /// is part of the contract: it is the order the model was trained on. Empty for
+    /// static_order, which consumes no features.
     std::vector<std::string> featuresSignature;
+    /// Guards @ref featuresSignature against the model that was trained on it. The
+    /// extractor recomputes it and refuses to load on a mismatch (RFC 0019 §6.3).
+    std::string featuresHash;
+    /// Evaluated before the signature, forming the `$derived.*` namespace.
+    std::vector<UhdDerivedValue> derived;
 
     /// RFC 0019 §6.5's string-to-code map, generated with the model from the corpus it
     /// was fitted on, and folded into @ref featuresHash -- §6.5 is explicit that the
@@ -183,11 +190,6 @@ struct HeuristicDescriptor
     ///
     /// Empty when the signature reads no string field, which is most of them.
     std::map<std::string, std::map<std::string, int32_t>> categoricalEncoding;
-    /// Guards @ref featuresSignature against the model that was trained on it. The
-    /// extractor recomputes it and refuses to load on a mismatch (RFC 0019 §6.3).
-    std::string featuresHash;
-    /// Evaluated before the signature, forming the `$derived.*` namespace.
-    std::vector<UhdDerivedValue> derived;
 
     /// "max" or "min". A model trained on a cost rather than a rate ranks ascending, and
     /// getting this wrong silently inverts every ranking it produces.
@@ -196,8 +198,13 @@ struct HeuristicDescriptor
 
     /// NATIVE: the symbol the engine registered its scorer under.
     std::string nativeSymbol;
-    /// TREE_DATA / TABLE: the artifact path, relative to @ref baseDir.
+    /// TREE_DATA / TABLE / CUSTOM_LIBRARY: the artifact path, relative to @ref baseDir.
     std::string modelArtifactPath;
+    /// Checksum of the artifact, for integrity validation. Empty when the author
+    /// declared none.
+    std::string modelHash;
+    /// CUSTOM_LIBRARY: the scorer function's symbol name inside the `.so`.
+    std::string customLibrarySymbol;
     /// STATIC_ORDER: ordering criteria, e.g. {"priority", "id"}.
     std::vector<std::string> staticOrderFields;
 

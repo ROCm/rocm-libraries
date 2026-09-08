@@ -273,14 +273,16 @@ public:
         config.uhdId = toString(descriptor.id);
         config.name = descriptor.name;
         config.featuresSignature = descriptor.featuresSignature;
-        config.categoricalEncoding = descriptor.categoricalEncoding;
         config.featuresHash = descriptor.featuresHash;
+        config.categoricalEncoding = descriptor.categoricalEncoding;
         config.objective = descriptor.objective;
         config.scoreUnits = descriptor.score.units;
         config.scoreCalibrated = descriptor.score.calibrated;
         config.scoreTransform = descriptor.score.transform;
         config.staticOrderFields = descriptor.staticOrderFields;
         config.nativeSymbol = descriptor.nativeSymbol;
+        config.customLibrarySymbol = descriptor.customLibrarySymbol;
+        config.modelHash = descriptor.modelHash;
 
         for(const auto& entry : descriptor.derived)
         {
@@ -289,22 +291,13 @@ public:
 
         switch(descriptor.adapter)
         {
-        case UhdAdapter::STATIC_ORDER:
-            config.adapterType = "static_order";
-            break;
-        case UhdAdapter::NATIVE:
-            config.adapterType = "native";
-            break;
-        case UhdAdapter::TREE_DATA:
-            config.adapterType = "tree_data";
-            break;
-        case UhdAdapter::TABLE:
-            config.adapterType = "table";
-            break;
+        case UhdAdapter::STATIC_ORDER: config.adapterType = "static_order"; break;
+        case UhdAdapter::NATIVE: config.adapterType = "native"; break;
+        case UhdAdapter::TREE_DATA: config.adapterType = "tree_data"; break;
+        case UhdAdapter::TABLE: config.adapterType = "table"; break;
+        case UhdAdapter::CUSTOM_LIBRARY: config.adapterType = "custom_library"; break;
         // -Wswitch-default. The enum is closed and every member is handled above.
-        default:
-            config.adapterType = "static_order";
-            break;
+        default: config.adapterType = "static_order"; break;
         }
 
         if(!descriptor.modelArtifactPath.empty())

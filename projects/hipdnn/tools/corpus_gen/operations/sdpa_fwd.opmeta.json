@@ -423,5 +423,90 @@
   },
   "// archetypes": "Recorded transformer configurations (RFC 0019.13 \u00a712.3). Decode and prefill are the same operation and different problems -- seqlen_q of 1 against a long cache is memory bound, and a square prefill is compute bound -- so each is anchored separately rather than left to a range over seqlen_q.",
   "// neighbourhood": "head_dim is absent on purpose: it takes one of a few values fixed by the model architecture, and an interpolated 96 or 112 is not a configuration anyone ships. seqlen_k mirrors seqlen_q at ratios >= 1, which keeps the declared seqlen_q <= seqlen_k relation satisfied by construction rather than by rejection.",
-  "// mixture": "Same shares as conv_fwd; see the note there."
+  "// mixture": "Same shares as conv_fwd; see the note there.",
+  "// flops": "Effective, not dense: the work a causal mask leaves, which is what aiter and Triton report and what RFC 0019 13.6 settles. 4*batch*heads*Sq*Sk*head_dim is the dense count -- two matmuls, QK^T and PV, at 2*Sq*Sk*D each per head. The causal term is the mask's own shape, not a flat halving: 13.6's average effective KV length per query is kv_len - q_len + (q_len+1)/2, which over Sq queries is Sq*Sk - Sq*(Sq-1)/2. A flat *0.5 agrees only when Sq == Sk and is wrong by up to 2x when Sk > Sq, which is most of a prefill or decode corpus. The max() guards the case where queries outrun keys and the first term would go negative, matching the reference's fallback to half the rectangle. is_causal reads as 1 or 0, so the non-causal arm reduces to the dense count.",
+  "flops": {
+    "*": [
+      4,
+      "$q.batch",
+      "$q.heads",
+      "$q.head_dim",
+      {
+        "max": [
+          {
+            "-": [
+              {
+                "*": [
+                  "$q.seqlen_q",
+                  "$q.seqlen_k"
+                ]
+              },
+              {
+                "/": [
+                  {
+                    "*": [
+                      "$q.is_causal",
+                      "$q.seqlen_q",
+                      {
+                        "-": [
+                          "$q.seqlen_q",
+                          1
+                        ]
+                      }
+                    ]
+                  },
+                  2
+                ]
+              }
+            ]
+          },
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.seqlen_q",
+                  "$q.seqlen_k"
+                ]
+              },
+              {
+                "-": [
+                  1,
+                  {
+                    "/": [
+                      "$q.is_causal",
+                      2
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "// elements": "Q and O are Sq-long, K and V are Sk-long, all B*H*D wide: B*H*D*(2*Sq + 2*Sk). Element count across every tensor the operation touches, inputs and outputs. Dtype-free on purpose: bytes is elements times the dtype width, and the width table belongs to the tool rather than repeated as a nested dtype lookup in seven declarations. gbs = bytes / measured time, which is the metric that ranks a memory-bound kernel where tflops cannot.",
+  "elements": {
+    "*": [
+      "$q.batch",
+      "$q.heads",
+      "$q.head_dim",
+      {
+        "+": [
+          {
+            "*": [
+              2,
+              "$q.seqlen_q"
+            ]
+          },
+          {
+            "*": [
+              2,
+              "$q.seqlen_k"
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }

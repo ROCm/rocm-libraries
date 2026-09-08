@@ -1137,7 +1137,7 @@ TEST_F(TestTreeDataAdapter, ATreeWhoseParallelArraysDisagreeIsRejected)
     //
     // The model artifact is author-controlled input loaded from disk (RFC 0019 §16,
     // "malformed drop-in pack"), so this is reachable by shipping a crafted or
-    // truncated .uhd.fb.
+    // truncated model artifact.
     GbdtModelBuilder::TreeSpec ragged;
     ragged.featureIndices = {0, 0, 0};
     ragged.thresholds = {1.0, 2.0, 3.0};
