@@ -385,9 +385,9 @@ set_target_properties( rocfft-test PROPERTIES
 )
 
 if( ROCFFT_BUILD_SCOPE )
-  set( TESTS_OUT_DIR "/../staging" )
+  set( TESTS_OUT_DIR "/clients/staging" )
 elseif( ROCFFT_CLIENTS_BUILD_SCOPE )
-  set( TESTS_OUT_DIR "/../bin" )
+  set( TESTS_OUT_DIR "/bin" )
 else()
   set( TESTS_OUT_DIR "/bin" )
 endif()
