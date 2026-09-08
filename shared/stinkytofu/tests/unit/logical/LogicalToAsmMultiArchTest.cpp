@@ -51,7 +51,7 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
         case logical::VAddPKF16:
             return VAddPKF16(vgpr(0), vgpr(1), vgpr(2));
         case logical::VAdd3U32:
-            return VAdd3U32(vgpr(0), vgpr(1), vgpr(2));
+            return VAdd3U32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VSubF32:
             return VSubF32(vgpr(0), vgpr(1), vgpr(2));
         case logical::VSubI32:
@@ -634,6 +634,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SFf1B32(sgpr(0), sgpr(1));
         case logical::SBfmB32:
             return SBfmB32(sgpr(0), sgpr(1), sgpr(2));
+        case logical::SBfmB64:
+            return SBfmB64(sgpr(0), sgpr(1), sgpr(2));
         case logical::SMovkI32:
             return SMovkI32(sgpr(0), sgpr(1));
         case logical::SSExtI16toI32:
@@ -731,6 +733,10 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SAtomicInc(sgpr(0), sgpr(1), sgpr(2));
         case logical::SAtomicDec:
             return SAtomicDec(sgpr(0), sgpr(1));
+        case logical::SAtomicCmpswapX2:
+            return SAtomicCmpswapX2(sgpr(0, 4), sgpr(1), sgpr(2));
+        case logical::SAtomicUmaxX2:
+            return SAtomicUmaxX2(sgpr(0, 2), sgpr(1), sgpr(2));
         case logical::SCSelectB64:
             return SCSelectB64(sgpr(0), sgpr(1), sgpr(2));
         case logical::SCmpKEQU32:
@@ -910,19 +916,21 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::VCmpNeU32, "v_cmp_ne_u32"},
     {logical::VCmpNeU64, "v_cmp_ne_u64"},
     {logical::VCmpClassF32, "v_cmp_class_f32"},
-    // Vector CompareX
-    {logical::VCmpXClassF32, "v_cmpx_class_f32"},
-    {logical::VCmpXEqU32, "v_cmpx_eq_u32"},
-    {logical::VCmpXGeU32, "v_cmpx_ge_u32"},
-    {logical::VCmpXGtU32, "v_cmpx_gt_u32"},
-    {logical::VCmpXLeU32, "v_cmpx_le_u32"},
-    {logical::VCmpXLeI32, "v_cmpx_le_i32"},
-    {logical::VCmpXLtF32, "v_cmpx_lt_f32"},
-    {logical::VCmpXLtI32, "v_cmpx_lt_i32"},
-    {logical::VCmpXLtU32, "v_cmpx_lt_u32"},
-    {logical::VCmpXLtU64, "v_cmpx_lt_u64"},
-    {logical::VCmpXNeU16, "v_cmpx_ne_u16"},
-    {logical::VCmpXNeU32, "v_cmpx_ne_u32"},
+    // Vector CompareX: on gfx12 (RDNA, CMPXWritesSGPR=false) ToStinkyAsmPass
+    // legalizes v_cmpx_* into v_cmp_* (writes vcc) + s_mov exec, vcc, so the
+    // FIRST lowered instruction is the non-x v_cmp_* compare, not v_cmpx_*.
+    {logical::VCmpXClassF32, "v_cmp_class_f32"},
+    {logical::VCmpXEqU32, "v_cmp_eq_u32"},
+    {logical::VCmpXGeU32, "v_cmp_ge_u32"},
+    {logical::VCmpXGtU32, "v_cmp_gt_u32"},
+    {logical::VCmpXLeU32, "v_cmp_le_u32"},
+    {logical::VCmpXLeI32, "v_cmp_le_i32"},
+    {logical::VCmpXLtF32, "v_cmp_lt_f32"},
+    {logical::VCmpXLtI32, "v_cmp_lt_i32"},
+    {logical::VCmpXLtU32, "v_cmp_lt_u32"},
+    {logical::VCmpXLtU64, "v_cmp_lt_u64"},
+    {logical::VCmpXNeU16, "v_cmp_ne_u16"},
+    {logical::VCmpXNeU32, "v_cmp_ne_u32"},
     // Scalar Min/Max/Abs
     {logical::SAbsI32, "s_abs_i32"},
     {logical::SMaxI32, "s_max_i32"},
@@ -1110,12 +1118,15 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         logical::SStoreB512,
         logical::SAtomicInc,
         logical::SAtomicDec,
+        logical::SAtomicCmpswapX2,
+        logical::SAtomicUmaxX2,
         logical::SCSelectB64,
         logical::SCmpKEQU32,
         logical::SCmpKGeU32,
         logical::SCmpKGtU32,
         logical::SCmpKLGU32,
         logical::SFlbitI32B32,
+        logical::SBfmB64,
         logical::VPermlane16SwapB32,
         logical::VPermlane32SwapB32,
         logical::BufferLoadB16,

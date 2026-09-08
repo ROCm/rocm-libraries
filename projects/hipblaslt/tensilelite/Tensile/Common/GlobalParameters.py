@@ -212,6 +212,10 @@ globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # host for non-SK5 solutions. Default keeps behavior unchanged for
 # existing tests.
 globalParameters["StreamKHybridMode"] = [0]
+# Runtime batch ABI used by the Tensile client: 0=strided, 1=pointer array.
+# This is intentionally independent of ProblemType.StridedBatched so universal
+# strided kernels can exercise their ArgType==3 general-batched path.
+globalParameters["BatchMode"] = 0
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -440,6 +444,10 @@ defaultInternalSupportParams = {
     # but WGM is not.
     "SupportCustomWGM": True,
     "SupportCustomStaggerU": True,
+    # Kernel distributes Stream-K extra iters within each tile when
+    # skGrid % skTiles == 0. Default False so older/custom kernels do not
+    # claim the capability; newly generated StreamK 3 / SK5 set it True.
+    "SupportStreamKPerTileExtraIters": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,
@@ -461,7 +469,7 @@ defaultBenchmarkCommonParameters = [
     {"LdsBlockSizePerPadMetadata": [-1]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
-    {"MaxOccupancy": [40]},
+    {"MaxOccupancy": [64]},
     {"MaxLDS": [-1]},
     {"VectorWidthA": [-1]},
     {"VectorWidthB": [-1]},
