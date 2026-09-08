@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-include_guard(GLOBAL)
+include_guard(DIRECTORY)
 
 include(${CMAKE_CURRENT_LIST_DIR}/rocm-cmake.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/utils.cmake)
@@ -32,30 +32,11 @@ override_variable(CMAKE_CXX_FLAGS ${filtered_cmake_cxx_flags})
 if(WIN32)
   find_package(GTest 1.11.0 REQUIRED)
 else()
-  find_package(GTest QUIET)
+  find_package(GTest)
 endif()
 
-# Google Test has created a mess with legacy FindGTest.cmake and newer
-# GTestConfig.cmake
-#
-# FindGTest.cmake defines:
-#   GTest::GTest, GTest::Main, GTEST_FOUND
-#
-# GTestConfig.cmake defines:
-#   GTest::gtest, GTest::gtest_main, GTest::gmock, GTest::gmock_main
-#
-# Finding GTest in MODULE mode, one cannot invoke find_package in CONFIG mode,
-# because targets will be duplicately defined.
-#
-# The following snippet first tries to find Google Test binary either in
-# MODULE or CONFIG modes.If neither succeeds it goes on to import Google Test
-# into this build either from a system source package (apt install googletest
-# on Ubuntu 18.04 only) or GitHub and defines the MODULE mode targets.
-# Otherwise if MODULE or CONFIG succeeded, then it prints the result to the
-# console via a non-QUIET find_package call and if CONFIG succeeded, creates
-# ALIAS targets with the MODULE IMPORTED names.
 if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
-
+  # GTest not found, resort to downloading it ourselves.
   override_variable(BUILD_SHARED_LIBS OFF)
 
   set(BUILD_GTEST ON)
@@ -73,14 +54,18 @@ if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
       GIT_REPOSITORY https://github.com/google/googletest.git
       GIT_TAG release-1.11.0
     )
-    FetchContent_MakeAvailable(googletest)
-    add_library(GTest::GTest ALIAS gtest)
-    add_library(GTest::Main  ALIAS gtest_main)
   endif()
+  FetchContent_MakeAvailable(googletest)
+
+  add_library(GTest::GTest ALIAS gtest)
+  add_library(GTest::Main ALIAS gtest_main)
 
   restore_variable(BUILD_SHARED_LIBS)
 else()
-  find_package(GTest REQUIRED)
+  # 'find_package(GTest)' can return different targets depending on the CMake
+  # version. See the following documentation pages:
+  # * https://cmake.org/cmake/help/v3.19/module/FindGTest.html
+  # * https://cmake.org/cmake/help/v3.20/module/FindGTest.html
   if(TARGET GTest::gtest_main AND NOT TARGET GTest::Main)
     add_library(GTest::GTest ALIAS GTest::gtest)
     add_library(GTest::Main  ALIAS GTest::gtest_main)
