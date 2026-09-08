@@ -174,9 +174,13 @@ set_tests_properties(dispatcher_test_gemm_utils PROPERTIES
 # when no GPU / hipcc / static lib is present, so they cost nothing on a
 # CPU-only runner and only run on a GPU runner. mx arch-gates to gfx950.
 #
-# These three are still unittest.TestCase-based and skip internally, so
-# `unittest discover` is the right driver. multi_d has been converted to the
-# script-style-77 convention and is registered separately below.
+# These three are unittest.TestCase-based and skip themselves in setUp, so they
+# are driven through run_unittest_77.py rather than `python -m unittest
+# discover` directly. discover exits 0 when every test skipped, which made ctest
+# report Passed for a run that asserted nothing -- a CPU-only runner showed the
+# same green tick as a real GPU run. The driver keeps the discovery semantics and
+# only maps an all-skipped run onto 77, which SKIP_RETURN_CODE turns into
+# "Skipped". multi_d is script-style-77 in its own right and is registered below.
 # =============================================================================
 foreach(_gpu_test
         test_grouped_gemm_gpu_correctness
@@ -184,12 +188,13 @@ foreach(_gpu_test
         test_mx_gemm_gpu_correctness)
     add_test(
         NAME dispatcher_${_gpu_test}
-        COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p ${_gpu_test}.py -v
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_unittest_77.py ${_gpu_test}.py
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     set_tests_properties(dispatcher_${_gpu_test} PROPERTIES
         LABELS "dispatcher;python;bridge;gpu"
         TIMEOUT 600
+        SKIP_RETURN_CODE 77
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
     )
 endforeach()
@@ -220,13 +225,20 @@ set_tests_properties(dispatcher_test_multi_d_gpu_correctness PROPERTIES
 # nowhere -- it was reachable only from the Jenkins dispatcher lane, so a local
 # `ctest` never exercised it and neither did any pre-merge gate.
 #
-# --budget 4 rather than the Jenkins lane's 16: each sampled config is its own
-# hipcc build, and this is a correctness canary here, not the sweep. It already
-# returns 77 when no GPU is present and --arch is not given (:281), so
-# SKIP_RETURN_CODE keeps a CPU-only runner honest instead of green.
+# --budget 16, one per (dtype x layout) stratum: the sampler splits the budget
+# evenly across the 16 strata the standard variant enumerates, so anything below
+# 16 leaves whole strata unsampled on any given run. At --budget 4 the run was
+# not a small slice of the space but a slice of a quarter of it, and no single
+# run ever compiled an fp8 or bf8 config. Each sampled config is its own hipcc
+# build, hence the 1800s timeout.
+#
+# The runner returns 77 when no GPU is present and --arch is not given, so
+# SKIP_RETURN_CODE keeps a CPU-only runner honest instead of green. That skip
+# path and the sampler's stratum coverage are both pinned by
+# test_search_space_sampling.py, which needs no GPU.
 add_test(
     NAME dispatcher_test_gemm_search_space
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_search_space.py --budget 4
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_search_space.py --budget 16
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -234,6 +246,26 @@ set_tests_properties(dispatcher_test_gemm_search_space PROPERTIES
     LABELS "dispatcher;python;gemm;gpu"
     TIMEOUT 1800
     SKIP_RETURN_CODE 77
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Unit tests for the search-space runner's sampler and skip path. Pure CPU, no
+# hipcc and no built kernels, so unlike the sweep above these run on every
+# machine and gate every build.
+#
+# Registered separately because neither behaviour is observable from the sweep's
+# own result: a sampler that draws from only a quarter of the strata still
+# passes every config it does run, and a broken skip path shows up as a green
+# GPU lane, not a red one. Both regressed silently once already.
+add_test(
+    NAME dispatcher_test_search_space_sampling
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_search_space_sampling.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_search_space_sampling PROPERTIES
+    LABELS "dispatcher;python;gemm;validation"
+    TIMEOUT 60
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 

@@ -121,18 +121,29 @@ def _daily_seed() -> int:
 def _sample(strata: dict, budget: int, seed: int) -> list:
     """Stratified budget-limited sample: equal share per non-empty stratum.
 
-    Strata are visited in sorted order so the sample is reproducible from the
-    seed alone. Each gets floor(budget/n), with the first ``budget % n`` strata
-    taking one extra; a stratum smaller than its share releases the difference
-    to a final top-up draw, so the full budget is used whenever the space allows.
+    Each stratum gets floor(budget/n), with ``budget % n`` strata taking one
+    extra; a stratum smaller than its share releases the difference to a final
+    top-up draw, so the full budget is used whenever the space allows.
+
+    The strata are enumerated in sorted order and then *shuffled* before the
+    remainder is handed out, rather than being visited in sorted order. Sorted
+    order alone made the remainder deterministic in a way the seed could not
+    move: when ``budget < n`` every stratum's share is 0, the whole budget is
+    remainder, and it all lands on the lexicographically-first strata. At the
+    real 16 strata (bf16|bf8|fp16|fp8 x ccr|crr|rcr|rrr), --budget 4 therefore
+    picked bf16/{ccr,crr,rcr,rrr} for every seed, so the ctest registration was
+    permanently bf16-only and the daily seed bought nothing. Seeding the shuffle
+    from the same rng keeps the result reproducible from the seed alone.
     """
     nonempty = {k: v for k, v in strata.items() if v}
     if not nonempty or budget <= 0:
         return []
     rng = random.Random(seed)
     per, remainder = divmod(budget, len(nonempty))
+    strata_order = sorted(nonempty.items())
+    rng.shuffle(strata_order)
     selected, leftover = [], []
-    for i, (_, configs) in enumerate(sorted(nonempty.items())):
+    for i, (_, configs) in enumerate(strata_order):
         # Clamp to the stratum size: budget < n makes `per` 0, and a stratum
         # smaller than its share would otherwise ask random.sample for more
         # items than exist.
@@ -284,7 +295,13 @@ def _verify(variant: str, cfg, runner, result, ops: _Operands) -> float:
 
 
 def run(args) -> int:
-    arch = args.arch or detect_gpu_arch()
+    # fallback="" so a failed detection is falsy and the skip below can fire.
+    # detect_gpu_arch defaults to fallback="gfx942" (ctypes_utils.py), which
+    # never returns empty -- with the default, a CPU-only runner walked straight
+    # into hipcc instead of reporting skipped, which is the exact false signal
+    # the exit-77 convention exists to remove. Matches the aquant/abquant/bquant
+    # GPU tests, which all spell this out the same way.
+    arch = args.arch or detect_gpu_arch(fallback="") or None
     if not arch:
         print("SKIP: no GPU detected and --arch not given")
         return _SKIP

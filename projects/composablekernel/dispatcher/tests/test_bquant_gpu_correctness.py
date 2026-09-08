@@ -357,7 +357,7 @@ def _make_bf16_inputs(M, N, K, gK, gN, seed=42):
 _N_SWEEP = (128, 256, 512)
 
 
-def test_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+def case_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     # K=768 = 3*TileK(256): use num_loop=3 (TailNumber::Odd) for better coverage.
     # num_loop=2 works but exercises only the no-hot-loop/Even tail path; 3 gives
     # the no-hot-loop/Odd tail path and exercises the BQ scale prefetch more robustly.
@@ -374,8 +374,8 @@ def test_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     return PASS, f"C4/fp8: PASS for N in {_N_SWEEP}"
 
 
-def test_c4_bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
-    # K=768 = 3*TileK(256): use num_loop=3 for the same reason as test_c4_fp8.
+def case_c4_bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+    # K=768 = 3*TileK(256): use num_loop=3 for the same reason as case_c4_fp8.
     M, K, gK, gN = 16, 768, 128, 1
     cfg = default_bf8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     for N in _N_SWEEP:
@@ -389,7 +389,7 @@ def test_c4_bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     return PASS, f"C4/bf8: PASS for N in {_N_SWEEP}"
 
 
-def test_h3_mx_bf16bf16(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+def case_h3_mx_bf16bf16(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     if gfx_arch not in MX_SUPPORTED_ARCHS:
         return SKIP, (f"H3/mx_bf16bf16: not supported on {gfx_arch} "
                       f"(requires {'/'.join(MX_SUPPORTED_ARCHS)})")
@@ -408,7 +408,7 @@ def test_h3_mx_bf16bf16(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     return PASS, f"H3/mx_bf16bf16: PASS for N in {_N_SWEEP}"
 
 
-def test_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+def case_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     if gfx_arch not in MX_SUPPORTED_ARCHS:
         return SKIP, (f"H3/mx_bf16bf8: not supported on {gfx_arch} "
                       f"(requires {'/'.join(MX_SUPPORTED_ARCHS)})")
@@ -430,7 +430,7 @@ def test_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     return PASS, f"H3/mx_bf16bf8: PASS for N in {_N_SWEEP}"
 
 
-def test_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+def case_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     if gfx_arch not in MX_SUPPORTED_ARCHS:
         return SKIP, (f"H3/mx_bf16fp4: not supported on {gfx_arch} "
                       f"(requires {'/'.join(MX_SUPPORTED_ARCHS)})")
@@ -459,7 +459,7 @@ def test_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     return PASS, f"H3/mx_bf16fp4: PASS for N in {_N_SWEEP}"
 
 
-def test_c_i4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+def case_c_i4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     """Round-6: fp8i4 / bf8i4 must be exact once BQ is encoded to the kernel's
     QDataType (fp8/bf8, 1 byte).  The round-5 float32 BQ produced NaN.  Swept over
     N to also exercise the per-N-tile de-permute.  B is pk_int4 (2 per byte)."""
@@ -515,12 +515,12 @@ def test_c_i4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 TESTS = [
-    ("C4/fp8",          test_c4_fp8),
-    ("C4/bf8",          test_c4_bf8),
-    ("C/i4",            test_c_i4),
-    ("H3/mx_bf16bf16",  test_h3_mx_bf16bf16),
-    ("H3/mx_bf16bf8",   test_h3_mx_bf16bf8),
-    ("H3/mx_bf16fp4",   test_h3_mx_bf16fp4),
+    ("C4/fp8",          case_c4_fp8),
+    ("C4/bf8",          case_c4_bf8),
+    ("C/i4",            case_c_i4),
+    ("H3/mx_bf16bf16",  case_h3_mx_bf16bf16),
+    ("H3/mx_bf16bf8",   case_h3_mx_bf16bf8),
+    ("H3/mx_bf16fp4",   case_h3_mx_bf16fp4),
 ]
 
 

@@ -312,7 +312,7 @@ def _run_one(label: str, config, M: int, N: int, K: int, dtype: str,
 # must be exact multiples of TileM, TileN and TileK. Shapes below are the
 # smallest multi-tile sizes that satisfy that for each pipeline.
 
-def test_fp8_compv3(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
+def case_fp8_compv3(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
     # compv3 tiles are 128x128x128; M=N=256 spans a 2x2 tile grid.
     # bquant_group_n=1 gives one B scale per column, the finest granularity.
     M, N, K, gK, bN = 256, 256, 512, 128, 1
@@ -322,7 +322,7 @@ def test_fp8_compv3(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
                     gfx_arch=gfx_arch, seed=42)
 
 
-def test_bf8_compv3(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
+def case_bf8_compv3(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
     M, N, K, gK, bN = 256, 256, 512, 128, 1
     cfg = default_bf8_compv3_config(quant_group_k=gK, bquant_group_n=bN,
                                     gfx_arch=gfx_arch)
@@ -330,7 +330,7 @@ def test_bf8_compv3(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
                     gfx_arch=gfx_arch, seed=43)
 
 
-def test_fp8_eightwaves(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
+def case_fp8_eightwaves(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
     if gfx_arch not in EIGHTWAVES_SUPPORTED_ARCHS:
         return SKIP, (f"fp8/eightwaves: not yet enabled on {gfx_arch} "
                       f"(see EIGHTWAVES_SUPPORTED_ARCHS)")
@@ -349,9 +349,9 @@ def test_fp8_eightwaves(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
 # ---------------------------------------------------------------------------
 
 TESTS = [
-    ("fp8/compv3",     test_fp8_compv3),
-    ("bf8/compv3",     test_bf8_compv3),
-    ("fp8/eightwaves", test_fp8_eightwaves),
+    ("fp8/compv3",     case_fp8_compv3),
+    ("bf8/compv3",     case_bf8_compv3),
+    ("fp8/eightwaves", case_fp8_eightwaves),
 ]
 
 

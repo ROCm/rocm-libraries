@@ -231,7 +231,7 @@ def _run_one(label: str, config, M: int, N: int, K: int,
 # Individual test cases
 # ---------------------------------------------------------------------------
 
-def test_fp8(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
+def case_fp8(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
     # K=768 = 3*TileK(256): num_loop=3 gives the no-hot-loop/TailNumber::Odd path,
     # which exercises the AQ scale prefetch more thoroughly than an even tail.
     M, N, K, gM, gK = 16, 64, 768, 1, 128
@@ -241,7 +241,7 @@ def test_fp8(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
                     out_dir, gfx_arch=gfx_arch)
 
 
-def test_bf8(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
+def case_bf8(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
     M, N, K, gM, gK = 16, 64, 768, 1, 128
     cfg = default_bf8_config(quant_group_k=gK, quant_group_m=gM, gfx_arch=gfx_arch)
     A_raw, A_dec, B_raw, B_dec, AQ = _make_inputs(M, N, K, gM, gK, "bf8", gfx_arch,
@@ -250,7 +250,7 @@ def test_bf8(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
                     out_dir, gfx_arch=gfx_arch)
 
 
-def test_fp8_tiled(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
+def case_fp8_tiled(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
     # M=64, N=256 spans 4x4 output tiles (tile_m=16, tile_n=64). The single-tile
     # cases above cannot distinguish a correct tile index from a constant one.
     M, N, K, gM, gK = 64, 256, 768, 1, 128
@@ -266,9 +266,9 @@ def test_fp8_tiled(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
 # ---------------------------------------------------------------------------
 
 TESTS = [
-    ("fp8",       test_fp8),
-    ("bf8",       test_bf8),
-    ("fp8/tiled", test_fp8_tiled),
+    ("fp8",       case_fp8),
+    ("bf8",       case_bf8),
+    ("fp8/tiled", case_fp8_tiled),
 ]
 
 
