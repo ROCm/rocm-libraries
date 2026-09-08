@@ -351,7 +351,7 @@ def config_cmd():
         if not nvcc_candidate:
             fatal("nvcc not found. Install the CUDA toolkit or pass "
                   "--cudapath=/path/to/cuda to specify its location.")
-        cmake_options.append(f"-DCUDA_TOOLKIT_ROOT_DIR={cuda_path}")
+        cmake_options.append(f"-DCUDAToolkit_ROOT={cuda_path}")
         cmake_options.append(f"-DCMAKE_CUDA_COMPILER={nvcc_candidate}")
 
     if args.cmake_dargs:
