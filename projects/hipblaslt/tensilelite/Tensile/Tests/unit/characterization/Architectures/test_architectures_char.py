@@ -10,6 +10,7 @@ detection helper (subprocess monkeypatched)."""
 import pytest
 
 import Tensile.Common.Architectures as A
+from Tensile.Common.Types import IsaVersion
 
 pytestmark = pytest.mark.unit
 
@@ -56,41 +57,44 @@ def test_cli_archs_to_isa_all():
     assert A.cliArchsToIsa("all") == A.SUPPORTED_ISA
 
 
-def test_detect_global_current_isa_success(monkeypatch, snapshot):
-    # Monkeypatch the subprocess `run` to return canned gfx output + rc 0.
-    class _Proc:
-        returncode = 0
-        stdout = b"gfx942\ngfx90a\n"
+def _shellOutReturning(monkeypatch, stdout, returncode=0):
+    """Wire the enumerator shell-out to canned output.
 
+    amdgpu-arch and rocminfo back it up, so they are silenced too -- left alone
+    they answer from the real device once the canned output is empty.
+    """
+
+    class _Proc:
+        pass
+
+    _Proc.returncode = returncode
+    _Proc.stdout = stdout
+    monkeypatch.setattr(A, "detect_gpu_archs", lambda: [])
     monkeypatch.setattr(A, "run", lambda *a, **k: _Proc())
+
+
+def test_detect_global_current_isa_success(monkeypatch, snapshot):
+    _shellOutReturning(monkeypatch, b"gfx942\ngfx90a\n")
     rv = A._detectGlobalCurrentISA("amdgpu-arch", 0)
     assert tuple(rv) == snapshot
 
 
 def test_detect_global_current_isa_failure(monkeypatch):
-    class _Proc:
-        returncode = 3
-        stdout = b""
-
-    monkeypatch.setattr(A, "run", lambda *a, **k: _Proc())
-    assert A._detectGlobalCurrentISA("amdgpu-arch", 0) == 3
+    # Not the tool's exit code any more, just "this is not an ISA". Detection
+    # has several sources now, so there is no single returncode to hand back,
+    # and no caller ever read the number: both public wrappers only check the
+    # type before raising.
+    _shellOutReturning(monkeypatch, b"", returncode=3)
+    assert not isinstance(A._detectGlobalCurrentISA("amdgpu-arch", 0), IsaVersion)
 
 
 def test_detect_global_current_isa_public_success(monkeypatch, snapshot):
-    class _Proc:
-        returncode = 0
-        stdout = b"gfx942\n"
-
-    monkeypatch.setattr(A, "run", lambda *a, **k: _Proc())
+    _shellOutReturning(monkeypatch, b"gfx942\n")
     assert tuple(A.detectGlobalCurrentISA(0, "amdgpu-arch")) == snapshot
 
 
 def test_detect_global_current_isa_public_failure(monkeypatch):
-    class _Proc:
-        returncode = 5
-        stdout = b""
-
-    monkeypatch.setattr(A, "run", lambda *a, **k: _Proc())
+    _shellOutReturning(monkeypatch, b"", returncode=5)
     with pytest.raises(Exception):
         A.detectGlobalCurrentISA(0, "amdgpu-arch")
 

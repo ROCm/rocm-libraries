@@ -36,26 +36,31 @@ from Tensile.KernelWriterAssembly import KernelWriterAssembly
 # ── GPU detection ───────────────────────────────────────────────────────────────
 
 def _detect_gpu() -> str | None:
-    """Return the first detected GPU arch string, or None."""
+    """The architecture of the device these tests will actually use, or None.
+
+    Asked of HIP, which is what the tests then drive. rocm_agent_enumerator
+    reports what the machine contains rather than what this process can open, so
+    on a host whose /dev/kfd is render-group-only it clears the skip gate and
+    the test dies in hipInit; it also truncates a stepping, calling a
+    gfx1250-strict device gfx1250.
+    """
     override = os.environ.get("TENSILE_GPU_TARGET")
     if override:
         return override
-    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
-    enumerator = os.path.join(rocm_path, "bin", "rocm_agent_enumerator")
-    if os.path.exists(enumerator):
-        try:
-            out = subprocess.check_output(
-                [enumerator, "-t", "GPU"], stderr=subprocess.DEVNULL
-            )
-            archs = [
-                line.strip()
-                for line in out.decode().splitlines()
-                if line.strip() and "gfx000" not in line
-            ]
-            return archs[0] if archs else None
-        except subprocess.CalledProcessError:
-            pass
-    return None
+    if not HIP_AVAILABLE:
+        return None
+    try:
+        if int(_hip_check(_hip.hipGetDeviceCount())) == 0:
+            return None
+        props = _hip.hipDeviceProp_t()
+        _hip_check(_hip.hipGetDeviceProperties(props, 0))
+    except RuntimeError:
+        return None
+    name = props.gcnArchName
+    if isinstance(name, bytes):
+        name = name.decode()
+    # gcnArchName carries target features; the cases name a bare architecture.
+    return name.split(":")[0] or None
 
 
 GFX_TARGET: str | None = _detect_gpu()
