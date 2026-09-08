@@ -87,13 +87,48 @@ def _import_rocisa():
 # stinkytofu Python binding ``_stinkytofu.so``). Anything else (or unset)
 # keeps the original nanobind bindings in ``_rocisa``.
 #
-# The default is ALWAYS the native rocisa backend -- there is no hardware
-# auto-detection. Even on gfx1250 the stinkytofu backend is selected only when
-# it is *explicitly* requested via ``ROCISA_BACKEND=stinkytofu``.
+# When ``ROCISA_BACKEND`` is unset, gfx1250 platforms automatically default
+# to the stinkytofu backend. Set ``ROCISA_BACKEND=rocisa`` to explicitly
+# force the native path on gfx1250.
+
+def _detect_default_backend() -> str:
+    """Return ``"stinkytofu"`` if gfx1250 hardware is detected AND the build
+    targets include gfx1250, else ``""``."""
+    # If --architecture is on the command line and none of the targets are
+    # gfx1250, there is no point loading the stinkytofu adapter regardless
+    # of the physical GPU.  This covers every entry point (bin/*, __main__,
+    # -m invocations) without per-script patches.
+    for i, arg in enumerate(sys.argv):
+        arch_val = None
+        if arg == "--architecture" and i + 1 < len(sys.argv):
+            arch_val = sys.argv[i + 1]
+        elif arg.startswith("--architecture="):
+            arch_val = arg.split("=", 1)[1]
+        if arch_val is not None:
+            archs = arch_val.replace(";", "_").split("_")
+            if any("gfx1250" in a for a in archs):
+                return "stinkytofu"
+            return ""
+
+    import subprocess as _sp
+    rocmpath = os.environ.get(
+        "TENSILE_ROCM_PATH", os.environ.get("ROCM_PATH", "/opt/rocm")
+    )
+    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
+    if not os.path.exists(enumerator):
+        return ""
+    try:
+        output = _sp.check_output(
+            [enumerator, "-t", "GPU"], timeout=5, stderr=_sp.DEVNULL
+        )
+        if "gfx1250" in output.decode():
+            return "stinkytofu"
+    except Exception:
+        pass
+    return ""
 
 _BACKEND_RAW = os.environ.get("ROCISA_BACKEND", "").strip().lower()
-# No hardware auto-detection: unset (or anything != "stinkytofu") -> native rocisa.
-_BACKEND = _BACKEND_RAW
+_BACKEND = _BACKEND_RAW if _BACKEND_RAW else _detect_default_backend()
 
 _ADAPTER_PKG = "rocisa_stinkytofu_adaptor"
 
@@ -104,50 +139,11 @@ def _load_stinkytofu_adapter() -> "tuple[bool, str]":
     Returns ``(True, "")`` iff we successfully rewired sys.modules; on any
     failure returns ``(False, <reason>)`` so the caller can surface why the
     stinkytofu backend could not be loaded (instead of falling back silently).
+
+    The adapter is a regular importable package. CMake stages it next to
+    ``rocisa/`` and ``stinkytofu/`` on the same PYTHONPATH root (see
+    rocisa/CMakeLists.txt); do not walk the filesystem looking for ``projects/``.
     """
-
-    # Locate ``<repo_root>/projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor``
-    # by walking up from this file until we find an ancestor whose basename
-    # is ``projects``; the adapter then lives at
-    # ``<that_parent>/projects/hipblaslt/tensilelite/<_ADAPTER_PKG>/``.
-    #
-    # The adapter is a sibling of ``tensilelite/rocisa/`` on purpose — it is
-    # a *consumer* of the stinkytofu Python binding (a tensilelite-internal
-    # alternative backend), not a piece of ``shared/stinkytofu/`` itself.
-    # Sibling-of-rocisa keeps ``ROCISA_BACKEND=stinkytofu`` purely a
-    # tensilelite concern.
-    #
-    # Works for both the source tree (``<repo>/projects/hipblaslt/
-    # tensilelite/rocisa/rocisa/__init__.py``) and CMake-staged copies
-    # under ``<repo>/projects/hipblaslt/tensilelite/<build_dir>/tensilelite/
-    # rocisa/rocisa/__init__.py`` because in either case walking up from
-    # ``__file__`` eventually hits the ``projects`` directory.
-    repo_root = None
-    cur = os.path.dirname(os.path.abspath(__file__))
-    adapter_rel = os.path.join("projects", "hipblaslt", "tensilelite", _ADAPTER_PKG)
-    while True:
-        parent = os.path.dirname(cur)
-        if parent == cur:  # reached filesystem root
-            break
-        if os.path.basename(cur) == "projects":
-            candidate = parent
-            if os.path.isdir(os.path.join(candidate, adapter_rel)):
-                repo_root = candidate
-                break
-        cur = parent
-    if repo_root is None:
-        return False, (
-            f"adapter package not found: no ancestor 'projects' dir containing "
-            f"{adapter_rel}"
-        )
-    adapter_parent = os.path.join(repo_root, adapter_rel)
-
-    if not os.path.isdir(os.path.join(adapter_parent, _ADAPTER_PKG)):
-        return False, f"adapter package directory missing under {adapter_parent}"
-
-    if adapter_parent not in sys.path:
-        sys.path.insert(0, adapter_parent)
-
     try:
         import rocisa_stinkytofu_adaptor as _adapter  # noqa: F401
     except Exception as exc:
@@ -157,6 +153,15 @@ def _load_stinkytofu_adapter() -> "tuple[bool, str]":
     # ``rocisa_stinkytofu_adaptor.*`` submodule under ``rocisa.*`` in
     # ``sys.modules``.
     sys.modules["rocisa"] = _adapter
+    _adapter._BACKEND = "stinkytofu"
+
+    # Force-load lazy submodules so ``import rocisa.code`` etc. find the
+    # adapter's modules (not duplicates created via __path__ lookup).
+    # Safe here because _load_stinkytofu_adapter only runs when the
+    # stinkytofu backend is actually wanted; native workers never call it.
+    for _lazy in getattr(_adapter, "_LAZY_SUBMODULES", ()):
+        getattr(_adapter, _lazy, None)
+
     _prefix = f"{_ADAPTER_PKG}."
     for _name, _obj in vars(_adapter).items():
         if isinstance(_obj, types.ModuleType) and _obj.__name__.startswith(_prefix):
@@ -256,34 +261,34 @@ def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn,
                      auto_detected=False) -> bool:
     """Decide whether to use the stinkytofu adapter (True) or native rocisa (False).
 
-    Emits a warning *only* when the stinkytofu backend was explicitly requested
-    (or auto-detected) but we have to fall back to native — so an unnoticed
-    silent fallback becomes visible, with a cause-specific reason attached.
-    ``available_fn`` and ``load_fn`` share the same ``(ok, reason)`` contract;
-    the reason is surfaced verbatim so each distinct failure mode produces its
-    own warning. Requesting anything else (or unset) selects native without
-    touching the probes and without warning.
+    Warns only when the user *explicitly* set ``ROCISA_BACKEND=stinkytofu``
+    but the binding itself cannot be imported. Auto-detected failures (gfx1250
+    machine where stinkytofu is simply not built) fall back silently — the
+    fallback to native rocisa is correct and expected in that case.
+
+    Once ``available_fn`` has succeeded, ``_stinkytofu.so`` is already loaded.
+    Falling back to ``_rocisa.so`` in the same process is fatal (nanobind
+    duplicate-type abort), so a subsequent adapter load failure raises
+    rather than returning False.
     """
     if requested != "stinkytofu":
         return False
-    _origin = "auto-detected for gfx1250" if auto_detected else "ROCISA_BACKEND=stinkytofu"
     available, avail_reason = available_fn()
     if not available:
-        warn(avail_reason, stacklevel=2)
+        if not auto_detected:
+            warn(avail_reason, stacklevel=2)
         return False
     ok, reason = load_fn()
     if not ok:
-        warn(
-            f"stinkytofu backend ({_origin}) requested but the adapter failed "
-            f"to load ({reason}){_FALLBACK}",
-            stacklevel=2,
+        raise ImportError(
+            f"stinkytofu binding is loaded but the adapter failed to load "
+            f"({reason}). Cannot fall back to native rocisa in the same process."
         )
-        return False
     return True
 
 
 if _resolve_backend(_BACKEND, _stinkytofu_available, _load_stinkytofu_adapter,
-                    auto_detected=False):
+                    auto_detected=(not _BACKEND_RAW)):
     # stinkytofu adapter active; wiring done inside _load_stinkytofu_adapter.
     pass
 else:

@@ -20,28 +20,54 @@ from .base import IsaInfo, KernelInfo, OutputOptions
 # Make submodules importable as attributes (``rocisa.code`` etc.). The
 # rocisa dispatcher in ``tensilelite/rocisa/rocisa/__init__.py`` is what
 # ultimately installs them under the ``rocisa.*`` name in ``sys.modules``.
-from . import asmpass as asmpass
+#
+# Heavy submodules (code, asmpass, functions, container, instruction, …) are
+# loaded lazily via ``__getattr__`` so that *importing this package* does not
+# pull in ``_stinkytofu.so``.  This matters when a multiprocessing worker
+# unpickles an adapter-typed object (e.g. ``base.IsaInfo``) while native
+# ``_rocisa.so`` is already loaded: eager import would trigger a fatal
+# nanobind duplicate-type abort.
 from . import base as base
-from . import code as code
-from . import container as container
-from . import enum as enum
-from . import functions as functions
-from . import instruction as instruction
-from . import label as label
-from . import macro as macro
-from . import register as register
-from .stinky_interop import toStinkyTofuModule
+
+_LAZY_SUBMODULES = frozenset({
+    "asmpass", "code", "container", "enum", "functions",
+    "instruction", "label", "macro", "register",
+})
+
+def __getattr__(name: str):
+    if name in _LAZY_SUBMODULES:
+        import importlib, sys as _sys
+        mod = importlib.import_module(f".{name}", __name__)
+        globals()[name] = mod
+        # Wire under ``rocisa.*`` so ``from rocisa.code import Module``
+        # finds the same object (the adapter is installed as ``rocisa``).
+        _sys.modules.setdefault(f"rocisa.{name}", mod)
+        return mod
+    if name in ("toStinkyTofuModule", "StinkyAsmModule", "CloneSpec"):
+        _ensure_stinky_types()
+        val = globals()[name]
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 _P = "rocisa"
 
-try:
-    import stinkytofu as _stinkytofu  # type: ignore[import-not-found]
+# Lazy-loaded on first access (avoids pulling in _stinkytofu.so at import time).
+_stinky_types_loaded = False
 
-    StinkyAsmModule = _stinkytofu.StinkyAsmModule
-    CloneSpec = _stinkytofu.CloneSpec
-except ImportError:
-    StinkyAsmModule = make_dummy_class(f"{_P}.StinkyAsmModule")
-    CloneSpec = make_dummy_class(f"{_P}.CloneSpec")
+def _ensure_stinky_types():
+    global _stinky_types_loaded
+    if _stinky_types_loaded:
+        return
+    _stinky_types_loaded = True
+    from .stinky_interop import toStinkyTofuModule as _tsm
+    globals()["toStinkyTofuModule"] = _tsm
+    try:
+        import stinkytofu as _st
+        globals()["StinkyAsmModule"] = _st.StinkyAsmModule
+        globals()["CloneSpec"] = _st.CloneSpec
+    except ImportError:
+        globals()["StinkyAsmModule"] = make_dummy_class(f"{_P}.StinkyAsmModule")
+        globals()["CloneSpec"] = make_dummy_class(f"{_P}.CloneSpec")
 
 
 # ---------------------------------------------------------------------------
