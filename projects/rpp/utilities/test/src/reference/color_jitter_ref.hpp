@@ -32,6 +32,7 @@ SOFTWARE.
 
 #include "framework/config_param.hpp"
 #include "framework/intensity.hpp"
+#include "framework/math.hpp"
 #include "framework/tensor_setup.hpp"
 
 namespace rpptest {
@@ -112,7 +113,7 @@ constexpr double kRot[9] = {0.168,  0.330,  -0.497,  //
 
 // Row-major 3x3: L + sch*(I - L) + ssh*kRot. Row c of the result produces output channel c.
 inline void hue_saturation_matrix(double hueDeg, double satFactor, double m[9]) {
-    const double rad = hueDeg * M_PI / 180.0;
+    const double rad = hueDeg * kPi / 180.0;
     const double sch = satFactor * std::cos(rad);
     const double ssh = satFactor * std::sin(rad);
     const double luma[9] = {kWr, kWg, kWb, kWr, kWg, kWb, kWr, kWg, kWb};

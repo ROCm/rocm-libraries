@@ -31,6 +31,7 @@ SOFTWARE.
 
 #include "framework/config_param.hpp"
 #include "framework/geometric.hpp"
+#include "framework/math.hpp"
 #include "framework/tensor_setup.hpp"
 
 namespace rpptest {
@@ -79,7 +80,7 @@ void rotate_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const R
                                // integer division by 2 is on purpose
                                const double cx = static_cast<double>(b.w / 2);
                                const double cy = static_cast<double>(b.h / 2);
-                               const double theta = static_cast<double>(angleDeg[n]) * M_PI / 180.0;
+                               const double theta = static_cast<double>(angleDeg[n]) * kPi / 180.0;
                                const double ct = std::cos(theta), st = std::sin(theta);
                                const double dx = ox - cx, dy = oy - cy;
                                sx = cx + dx * ct - dy * st;

@@ -35,6 +35,7 @@ SOFTWARE.
 
 #include "framework/config_param.hpp"
 #include "framework/intensity.hpp"
+#include "framework/math.hpp"
 #include "framework/tensor_setup.hpp"
 #include "reference/color_ycbcr.hpp"
 
@@ -145,7 +146,7 @@ inline const std::array<double, 64>& cos_table() {
     static const std::array<double, 64> t = [] {
         std::array<double, 64> c{};
         for (int x = 0; x < 8; ++x)
-            for (int u = 0; u < 8; ++u) c[x * 8 + u] = std::cos((2.0 * x + 1.0) * u * M_PI / 16.0);
+            for (int u = 0; u < 8; ++u) c[x * 8 + u] = std::cos((2.0 * x + 1.0) * u * kPi / 16.0);
         return c;
     }();
     return t;
