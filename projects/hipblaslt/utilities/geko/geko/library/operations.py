@@ -6,9 +6,9 @@ from __future__ import annotations
 """
 Library operations module.
 
-This module provides tools to manage and manipulate TensileLite solution libraries including
+This module provides tools to manage and manipulate TensileLiteLite solution libraries including
 loading, merging, and creating optimized GEMM solution libraries. It handles YAML
-manipulation, solution library operations, and integration with the TensileLite framework.
+manipulation, solution library operations, and integration with TensileLite.
 
 The operations module enables the final step of the optimization workflow by merging
 individual optimized solutions into hipBLASLt libraries.
@@ -23,9 +23,9 @@ Functions:
     extract_solutions(df, match_table_path) -> LibraryCollection
         Build library from DataFrame with GEMMs and solution indices.
     merge(hipblaslt_path, orig_dir, inc_dir, output_dir) -> None
-        Merge incremental library into original using TensileMergeLibrary.
+        Merge incremental library into original using ``tensilelite.merge_library``.
     create(hipblaslt_path, input_dir, output_dir) -> None
-        Create a TensileLite library from YAML library logic files using TensileCreateLibrary.
+        Create a TensileLiteLite library from YAML library logic files.
     from_dataframe(df, lib_dir) -> LibraryCollection
         Create filtered libraries from a DataFrame of selected solutions.
     prune_library(hipblaslt_path, base_lib) -> Library
@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import List, Tuple, Sequence
 from threading import Lock
 
-from geko.utils import run_silent_command, parse_devices
+from geko.utils import parse_devices
 from geko.concurrency import parallel_for
 from geko.concurrency.runner import Runner, Worker
 from geko.library import Library, LibraryCollection
@@ -118,7 +118,7 @@ def load_collection(lib_dir: str | Path) -> LibraryCollection:
 
 
 def _library_supports_epilogues(lib: Library) -> bool:
-    """Return False for f64 and complex libraries; epilogues are not supported."""
+    """Return False for f64 and complex libraries; TensileLite epilogues are not supported."""
     _NO_EPILOGUE_TYPES = ("f64_r", "f32_c", "f64_c")
     data_type = lib.problem.get("DataType")
     return INDEX_TYPE_MAP.get(data_type) not in _NO_EPILOGUE_TYPES
@@ -140,7 +140,7 @@ def merge_solutions(
         epilogues (bool, optional): Whether to add epilogue support to merged libraries.
             Defaults to True. DGEMM (f64) libraries are always skipped.
         pattern (str, optional): Search pattern for libraries in the given input dir.
-            Defaults to Tensile format.
+            Defaults to TensileLite format.
         trim_size (bool, optional): Whether to use [M, N, B, K] format or to keep leading dimensions.
             Defaults to True.
 
@@ -183,7 +183,7 @@ def merge_solutions(
 
         if libs[lib.name].default_solution != lib.default_solution:
             raise NotImplementedError(f"Default solution mismatch for library '{lib.name}'. "
-                                      f"Use TensileMergeLibrary instead.")
+                                      f"Use tensilelite.merge_library instead.")
 
         base_sols = libs[lib.name].solutions
         base_sizes = libs[lib.name].sizes
@@ -270,7 +270,7 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
         else:
             if libs[lib.name].default_solution != lib.default_solution:
                 raise NotImplementedError(f"Default solution mismatch for library '{lib.name}'. "
-                                          f"Use TensileMergeLibrary instead.")
+                                          f"Use tensilelite.merge_library instead.")
             new_sols = libs[lib.name].solutions
             new_sizes = libs[lib.name].sizes
 
@@ -299,7 +299,7 @@ def merge(
     eff: bool = False,
     force: bool = True,
 ) -> None:
-    """Merge incremental library into original using TensileMergeLibrary.
+    """Merge incremental library into original using ``tensilelite.merge_library``.
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
@@ -318,16 +318,14 @@ def merge(
     if not hipblaslt_path.is_dir():
         raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
 
-    logger.info(f"Calling TensileMergeLibrary on '{inc_dir}'")
-    cmd = [str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileMergeLibrary")]
-    if not eff:
-        cmd += ["--no_eff"]
-    cmd += ["--force_merge", str(force), orig_dir, inc_dir, output_dir]
-    run_silent_command(cmd)
+    logger.info(f"Merging TensileLite library '{inc_dir}'")
+    from tensilelite.merge_library import avoidRegressions
+
+    avoidRegressions(orig_dir, inc_dir, output_dir, force, not eff)
 
 
 def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str | Path, version: str = "5") -> None:
-    """Create a TensileLite library from YAML library logic files using TensileCreateLibrary.
+    """Create a TensileLite library from YAML library logic files.
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
@@ -350,30 +348,32 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
 
     arch = load_library(lib_paths[0]).arch
 
-    logger.info(f"Calling TensileCreateLibrary on '{library_dir}'")
-    run_silent_command(
+    logger.info(f"Creating TensileLite library from '{library_dir}'")
+    from tensilelite.tensilelite_create_library import run as create_library
+
+    create_library(
         [
-            str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileCreateLibrary"),
             "--code-object-version",
             version,
             "--library-format",
             "msgpack",
             "--architecture",
             arch,
-            library_dir.resolve(),
-            output_dir,
+            str(library_dir.resolve()),
+            str(output_dir),
             "HIP",
         ]
     )
 
 def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path: ( str | Path) | None = None) -> None:
-    """Normalize a TensileLite library using TensileNormalizeLibrary.
+    """Normalize a TensileLite library using its merge-library helpers.
 
     Args:
         library_path (str | Path): Path to the input library.
         output_path (str | Path): Path to the output normalized library.
-        hipblaslt_path (str | Path, optional): Path to hipBLASLt installation. 
-            If set, will append the path to sys.path to find tensilelite.
+        hipblaslt_path (str | Path, optional): Path to a hipBLASLt installation
+            retained for caller validation; TensileLite is always imported from
+            the active Python environment.
 
     Raises:
         FileNotFoundError: If library path does not exist.
@@ -386,15 +386,15 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
         hipblaslt_path = Path(hipblaslt_path)
         if not hipblaslt_path.is_dir():
             raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
-        import sys
-        sys.path.append(str(hipblaslt_path / "tensilelite"))
-
     try:
         from tensilelite import LibraryIO
         from tensilelite.CustomYamlLoader import load_yaml_stream
         from tensilelite.merge_library import convertToDict, normalizeDictLibraryLayout
     except ImportError as e:
-        raise ImportError(f"Failed to import tensilelite. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
+        raise ImportError(
+            "Failed to import TensileLite from the active Python environment. Install it before running GEKO. "
+            f"Error: {e}."
+        ) from e
     
     data = load_yaml_stream(library_path, SafeLoader)
     if not isinstance(data, list):
