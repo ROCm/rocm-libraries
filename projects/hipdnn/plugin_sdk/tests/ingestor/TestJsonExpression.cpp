@@ -726,7 +726,7 @@ TEST(TestJsonExpression, IntegersCompareExactlyAboveTwoToThe53)
     EXPECT_EQ(evalWide(json({{">=", json::array({"$bytes", big + 1})}})), V(false));
     EXPECT_EQ(evalWide(json({{"==", json::array({"$bytes", big})}})), V(true));
 
-    const double roundedBig = static_cast<double>(big);
+    const auto roundedBig = static_cast<double>(big);
     EXPECT_NE(V(big + 1), V(roundedBig));
     EXPECT_EQ(V::compare(V(big + 1), V(roundedBig)), V::Ordering::GREATER);
     EXPECT_EQ(V::compare(V(roundedBig), V(big + 1)), V::Ordering::LESS);

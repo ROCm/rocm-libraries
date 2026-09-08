@@ -183,8 +183,8 @@ inline bool rankPinLiteral(const nlohmann::json& j, std::int64_t& value)
         // range check plus the integrality check make the conversion below
         // lossless.
         const double raw = j.get<double>();
-        constexpr double maxExactInteger = 9007199254740992.0; // 2^53
-        if(!std::isfinite(raw) || raw < -maxExactInteger || raw > maxExactInteger)
+        constexpr double MAX_EXACT_INTEGER = 9007199254740992.0; // 2^53
+        if(!std::isfinite(raw) || raw < -MAX_EXACT_INTEGER || raw > MAX_EXACT_INTEGER)
         {
             return false;
         }

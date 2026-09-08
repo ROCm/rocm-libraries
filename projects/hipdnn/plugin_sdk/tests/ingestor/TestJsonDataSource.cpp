@@ -60,13 +60,13 @@ TEST(TestJsonDataSource, GetRejectsLeadingDotPaths)
 
 TEST(TestJsonDataSource, GetDeclinesUnsignedIntegersOutsideInt64Range)
 {
-    constexpr auto maxInt64 = std::numeric_limits<std::int64_t>::max();
-    const auto maxUnsigned = static_cast<std::uint64_t>(maxInt64);
+    constexpr auto MAX_INT64 = std::numeric_limits<std::int64_t>::max();
+    const auto maxUnsigned = static_cast<std::uint64_t>(MAX_INT64);
     const jexpr::JsonDataSource src{json{{"max", maxUnsigned},
                                          {"tooLarge", maxUnsigned + 1U},
                                          {"arr", json::array({maxUnsigned + 1U})}}};
 
-    EXPECT_EQ(src.getData("max"), V(maxInt64));
+    EXPECT_EQ(src.getData("max"), V(MAX_INT64));
     EXPECT_EQ(src.getData("tooLarge"), V());
     EXPECT_EQ(src.getData("arr[0]"), V());
 }

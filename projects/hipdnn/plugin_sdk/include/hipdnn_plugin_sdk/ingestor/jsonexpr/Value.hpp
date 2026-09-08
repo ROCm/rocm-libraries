@@ -365,7 +365,7 @@ private:
             return Ordering::LESS;
         }
 
-        const std::int64_t whole = static_cast<std::int64_t>(d);
+        const auto whole = static_cast<std::int64_t>(d);
         if(i < whole)
         {
             return Ordering::LESS;
@@ -375,7 +375,7 @@ private:
             return Ordering::GREATER;
         }
 
-        const double wholeAsDouble = static_cast<double>(whole);
+        const auto wholeAsDouble = static_cast<double>(whole);
         if(wholeAsDouble < d)
         {
             return Ordering::LESS;
