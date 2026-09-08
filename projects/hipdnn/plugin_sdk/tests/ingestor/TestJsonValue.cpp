@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <clocale>
 #include <cmath>
 #include <cstdint>
@@ -319,17 +320,17 @@ TEST(TestJsonValue, CompareIsAntisymmetric)
 {
     // Every ladder branch must reverse cleanly, including the two that route
     // through reverse() rather than comparing directly.
-    const V samples[] = {V(1),
-                         V(2),
-                         V(1.5),
-                         V(MAX_INT64),
-                         V(1e300),
-                         V("a"),
-                         V("b"),
-                         V(true),
-                         V(),
-                         V(std::nan("")),
-                         V(V::Array{V(1)})};
+    const std::array samples = {V(1),
+                                V(2),
+                                V(1.5),
+                                V(MAX_INT64),
+                                V(1e300),
+                                V("a"),
+                                V("b"),
+                                V(true),
+                                V(),
+                                V(std::nan("")),
+                                V(V::Array{V(1)})};
     for(const V& a : samples)
     {
         for(const V& b : samples)
