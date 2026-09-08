@@ -78,6 +78,7 @@ set(UNIT_ASM_TEST_FILES
     unit/ra/GreedyAllocatorTest.cpp
     unit/ra/AllocationRulesTest.cpp
     unit/ra/AllocationRulesRegistryTest.cpp
+    unit/ra/ExecMaskedWriteTieTest.cpp
     unit/ra/Gfx1250AllocationRulesTest.cpp
     unit/ra/RegisterAllocationPassTest.cpp
     unit/ra/RegisterBudgetTest.cpp

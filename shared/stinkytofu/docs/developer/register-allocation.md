@@ -1122,7 +1122,7 @@ This is a *different* requirement from the scalar one, which is why it is a sepa
 
 Ungated, for the same reason as its scalar sibling: it is a property of the instruction encoding. It also wants no Audit stage — the producer's own VGPR tuples assemble today.
 
-The row was added after enabling VGPR lifting, and its absence is worth remembering as a category of bug rather than a one-off. `Gfx1250Backend` lifted SGPRs alone for as long as this table had only scalar rows, so every allocated multi-DWORD range was covered by the one rule that existed. Widening the lift scope to `RegType::V` moved allocation into a class the table said nothing about, and because the verifier reads the same table as the allocator, both agreed there was nothing to check and a `v[3:10]` WMMA destination reached the assembler. See `st_register_allocation.md` issue 1. `tests/filecheck/allocation_rule_vector_alignment.stir` pins the fixed colouring.
+The row was added after enabling VGPR lifting, and its absence is worth remembering as a category of bug rather than a one-off. `Gfx1250Backend` lifted SGPRs alone for as long as this table had only scalar rows, so every allocated multi-DWORD range was covered by the one rule that existed. Widening the lift scope to `RegType::V` moved allocation into a class the table said nothing about, and because the verifier reads the same table as the allocator, both agreed there was nothing to check and a `v[3:10]` WMMA destination reached the assembler. See `st_register_allocation.md`, "Multi-DWORD VGPR ranges were placed at odd bases". `tests/filecheck/allocation_rule_vector_alignment.stir` pins the fixed colouring.
 
 ### 14.6. Diagnostics
 
