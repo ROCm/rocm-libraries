@@ -20,6 +20,7 @@
 #include "hip/thread"
 
 #include "hip/__support/misuse.h"
+#include <cstdint>
 #include <cstdlib>
 #include <hip/atomic>
 // For cuda::std::__cccl_thread_sleep_for / cuda::std::__libcpp_thread_sleep_for(__ns)
@@ -773,6 +774,39 @@ __host__ __device__ void wthread::detach() {
     return (cuCount / 2) * getRequestedVcoresPerWgp();
 }
 
+// Ceiling on total scheduler vcores based on measured occupancy of threading_main, or
+// UINT64_MAX if occupancy could not be measured or safety-divided down to something usable
+// (in which case the caller should treat the device as unconstrained by this check).
+//
+// threading_main is persistent: a vcore that cannot be made resident never runs, and the
+// resident ones never exit while work might arrive. Over-subscribe the grid and it wedges.
+// hipOccupancyMaxActiveBlocksPerMultiprocessor is theoretical and over-predicts what a
+// persistent kernel sustains, by an amount that varies by architecture, so the margin is
+// scaled: RDNA sustains ~3/4 of it (gfx1100 reports 44 blocks/WGP, wedges at 36); CDNA far
+// less - gfx942 reports 16 but wedges intermittently at 8, likely because multi-XCD parts
+// cannot pack the grid evenly and one oversubscribed XCD is enough. Hence the wider margin
+// there.
+[[gnu::const]] static __host__ uint64_t getOccupancyBasedMaxVcores(int device) {
+    const int occupancySafetyDivisor = (getCusPerMultiprocessor(device) == 2U) ? 2 : 4;
+
+    int maxBlocksPerMp = 0;
+    __LIBHIPTHREADS_HIP_CHECK__(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &maxBlocksPerMp, internal::threading_main, static_cast<int>(wthread::max_width()), 0));
+    if (maxBlocksPerMp <= 0) {
+        return UINT64_MAX;
+    }
+
+    const uint64_t blocksPerMp = static_cast<uint64_t>(maxBlocksPerMp) / occupancySafetyDivisor;
+    if (blocksPerMp == 0) {
+        return UINT64_MAX;
+    }
+
+    int multiprocessorCount = 0;
+    __LIBHIPTHREADS_HIP_CHECK__(
+        hipDeviceGetAttribute(&multiprocessorCount, hipDeviceAttributeMultiprocessorCount, device));
+    return blocksPerMp * static_cast<uint64_t>(multiprocessorCount);
+}
+
 // Deliberately not [[gnu::const]]: the result depends on which device is current when the call is
 // made, so the compiler must not treat calls either side of a hipSetDevice as interchangeable.
 __host__ unsigned int wthread::hardware_concurrency() noexcept {
@@ -792,41 +826,15 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
             }
         }
 
-        int multiprocessorCount = 0;
-        __LIBHIPTHREADS_HIP_CHECK__(
-            hipDeviceGetAttribute(&multiprocessorCount, hipDeviceAttributeMultiprocessorCount, device));
-
-        // threading_main is persistent: a vcore that cannot be made resident never runs, and the
-        // resident ones never exit while work might arrive. Over-subscribe the grid and it wedges.
-        //
         // multiprocessorCount counts WGPs on RDNA (2 CUs each) but CUs on CDNA, so one setting
         // means two densities - which is why the default hung on Instinct but not Navi.
         // getTotalRequestedVcores normalises to CUs so the configured value means the same thing
-        // on both.
-        const uint64_t totalRequestedVcores = getTotalRequestedVcores(device);
-        const uint32_t cusPerMultiprocessor = getCusPerMultiprocessor(device);
-
-        // Even at the right density the device may not hold that many blocks, so cap against
-        // measured occupancy (reported per multiprocessor, same unit, so unit-consistent). That
-        // figure is theoretical: it ignores the capacity co-resident work needs, and how much it
-        // over-predicts varies by architecture. RDNA sustains ~3/4 of it (gfx1100 reports 44
-        // blocks/WGP, wedges at 36); CDNA far less - gfx942 reports 16 but wedges intermittently
-        // at 8, likely because multi-XCD parts cannot pack the grid evenly and one oversubscribed
-        // XCD is enough. Hence the wider margin there.
-        const int occupancySafetyDivisor = (cusPerMultiprocessor == 2U) ? 2 : 4;
-        int maxBlocksPerMp = 0;
-        __LIBHIPTHREADS_HIP_CHECK__(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-            &maxBlocksPerMp, internal::threading_main, static_cast<int>(wthread::max_width()), 0));
-
-        // Widen before multiplying so a large multiprocessor count times a large override cannot wrap.
-        uint64_t total = totalRequestedVcores;
-        if (maxBlocksPerMp > 0) {
-            const uint64_t occupancyBasedMaxVcores =
-                (static_cast<uint64_t>(maxBlocksPerMp) / occupancySafetyDivisor)
-                * static_cast<uint64_t>(multiprocessorCount);
-            if (occupancyBasedMaxVcores > 0 && occupancyBasedMaxVcores < total) {
-                total = occupancyBasedMaxVcores;
-            }
+        // on both. Even at the right density the device may not hold that many blocks, so
+        // getOccupancyBasedMaxVcores caps against measured occupancy.
+        uint64_t total = getTotalRequestedVcores(device);
+        const uint64_t occupancyBasedMaxVcores = getOccupancyBasedMaxVcores(device);
+        if (occupancyBasedMaxVcores < total) {
+            total = occupancyBasedMaxVcores;
         }
         if (total > static_cast<uint64_t>(MAX_VCORES)) {
             total = static_cast<uint64_t>(MAX_VCORES);
