@@ -96,7 +96,7 @@ def test_assign_global_parameters_locateexe_oserror_nonfatal(isolate_globals, is
 def test_assign_global_parameters_min_version_compatible(isolate_globals, isa_info_map, monkeypatch):
     # A *present, compatible* MinimumRequiredVersion -> the 644->651 false arm.
     _stub_hipcc(monkeypatch)
-    from tensilelite import __version__
+    from tensilelite import GENERATOR_VERSION as __version__
     GP.assignGlobalParameters({"MinimumRequiredVersion": __version__}, isa_info_map)
     assert "ROCmPath" in GP.globalParameters
 
