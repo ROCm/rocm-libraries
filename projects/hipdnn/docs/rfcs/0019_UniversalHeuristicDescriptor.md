@@ -162,7 +162,7 @@ In JSON form:
 }
 ```
 
-**An engine names up to three role-scoped UHDs, each mapped by architecture** ([RFC 0020 §4.4](0020_UniversalEngineDescriptor.md)):
+**An engine names up to three role-scoped UHDs, each mapped by architecture** ([RFC 0020 §4.6](0020_UniversalEngineDescriptor.md)):
 
 | UED field | Role | When it runs | This RFC |
 |---|---|---|---|
@@ -721,6 +721,24 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    unresolvable reference is a load error at build and at drop-in load, with both descriptors named. The
    UHD is checked against the same published set as the engine's UMDs and UDDs, so one publisher serves
    all three consumers.
+
+   **This check is available only for the declarative arm.** RFC 0020 scopes it to
+   `graph_match.nodes`, whose published set is laid out at compile from the op-schema registry. Two
+   cases fall outside it:
+   - **The `native` arm** ([RFC 0020 §4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative)).
+     A registered symbol produces the bindings at match time, so there is no compile-time set to check a
+     signature against. A UHD on a native-arm engine therefore carries an **unverified** feature
+     contract: an unresolvable token surfaces at first evaluation, and takes the
+     [Section 5](#5-selection-flow) step 7 path (model disabled, error logged, `static_order`) rather
+     than being rejected at load. Checks 2–4 still apply in full.
+   - **No `graph_match` at all.** The engine publishes an empty table, so a `features_signature` may
+     reference only `$kernel.*` and `$device.*`. A model needing problem features requires the engine to
+     declare a pattern.
+
+   This matters for sequencing: the first descriptor-backed engines use the native arm, so the strongest
+   load-time guarantee arrives with the declarative pattern rather than with the first shipped model.
+   **OPEN:** whether a native-arm engine should be able to *declare* its published tokens for checking
+   without also declaring a full pattern — see [Open Question 19](#operational).
 2. **Signature → KMD → knobs.** Two assertions over the same set. Let `F` be the `$kernel.*` fields
    reachable from the `features_signature`, including those nested inside computed (expression) entries:
    - `F ⊆ KMD.fields` — a feature can never read a variant field the kernels don't carry.
@@ -960,6 +978,10 @@ dependency audit.
 
 ### 7.1 First: `native`
 
+> **Two unrelated uses of "native."** This is the UHD's `native` *adapter* — a compiled **scorer**.
+> RFC 0020 § 4.5 defines a `graph_match` `native` *arm* — a compiled **matcher**. Different layers,
+> different registries, and an engine may use either independently of the other.
+
 The scorer is a function compiled into the engine and named in the UHD by symbol, resolved through the
 same symbol-registration mechanism the ingestor uses for matchers and dispatch handlers. The UHD still
 carries `objective` and `score`, so a native scorer participates in ranking and cross-engine comparison
@@ -1045,8 +1067,8 @@ others change what a trained model reads:
 | Descriptor | Why a change can invalidate the model |
 |---|---|
 | **KMD** | Defines the `$kernel.*` fields. Removing or reinterpreting one breaks the feature space directly. |
-| **UED** | Its `knobs` **are** the model's `$kernel.*` feature axes ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)), so a knob-set change and a model change are the same event. Engine identity and op scope changes land here too. |
-| **UMD** | Determines the catalog and binds the `$graph.*` tokens the features read. A matcher change can alter which kernels are candidates, or change what a bound token *means* — both invisible to a feature-name check. |
+| **UED** | Two ways. Its `knobs` **are** the model's `$kernel.*` feature axes ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)), so a knob-set change and a model change are the same event. It also owns `graph_match`, which **publishes the symbol table** the features read ([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)) — so a pattern change can alter what a bound token *means*. Engine identity and op scope changes land here too. |
+| **UMD** | Narrows the catalog. A pack's criteria decide which kernels survive for a graph, so a matcher change alters the candidate set the model was trained to rank — invisible to a feature-name check. The UMD *reads* the binding; it does not produce it ([RFC 0018 §2](0018_UniversalMatchDescriptor.md#2-the-symbol-table-criteria-read)). |
 
 The UHD records all three, as the versions it was generated against
 ([Section 4.1](#41-field-reference)):
@@ -1970,8 +1992,8 @@ dependency-gated and land only when a concrete need appears.
 
 ### Structural
 
-5. **Independently-authored packs joining one engine.** The catalog is engine-scoped and one UHD ranks
-   the union across packs ([Section 5](#5-selection-flow)), so overlapping packs do *not* produce
+5. **Independently-authored packs joining one engine.** The catalog is engine-scoped and one
+   `sort_kernel_catalog` UHD ranks the union across packs ([Section 5](#5-selection-flow)), so overlapping packs do *not* produce
    incomparable scores — but they do produce a catalog the model may never have seen. A UHD trained on
    pack A's kernels is asked to rank A ∪ B when B is dropped in later, and nothing in the load-time
    contract check catches it: the `features_signature` still resolves, because B's kernels fill the same
@@ -2094,6 +2116,17 @@ dependency-gated and land only when a concrete need appears.
     knob removal as a major UED version bump, and revisit (a) if a real consumer is broken by churn.
     *(Impacts [Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes), [Section 6.3](#63-contract-enforcement), [Section 8.1](#81-descriptor-versions-and-uhd-coupling).)*
 
+19. **Checking a native-arm engine's feature contract.** The signature-to-published-symbols check
+    ([Section 6.3](#63-contract-enforcement)) is scoped to `graph_match.nodes`, so an engine using the
+    `native` arm carries an unverified feature contract until first evaluation. Options: (a) accept it,
+    on the grounds that the native arm is itself an escape hatch and its author owns the risk;
+    (b) let a native-arm UED optionally **declare** the tokens its matcher publishes, purely so
+    consumers can be checked, without requiring a full declarative pattern; (c) require a declarative
+    pattern before a UHD may carry a `features_signature`. Recommendation: (b) — it restores the
+    load-time check at the cost of one optional list, and (c) would block the first descriptor-backed
+    engines from shipping a model at all. Owned with [RFC 0020](0020_UniversalEngineDescriptor.md).
+    *(Impacts [Section 6.3](#63-contract-enforcement).)*
+
 ---
 
 ## 18. Glossary
@@ -2120,9 +2153,12 @@ dependency-gated and land only when a concrete need appears.
   the UHD ranks on and the `features_signature` references
   ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
 
-- **UED (Universal Engine Descriptor):** The UED names one UHD and one KMD. They are coupled — the KMD
-  is the feature space the UHD ranks over — so the engine owns both; a *breaking* KMD change requires
-  retraining the UHD, while additive changes and dispatch-only fields do not
+- **UED (Universal Engine Descriptor):** The UED names one KMD and, optionally, its role-scoped
+  arch-keyed UHDs ([Section 3.1](#31-descriptor-relationships)). It also owns `graph_match`, which
+  publishes the symbol table the features read
+  ([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)). KMD
+  and UHD are coupled — the KMD is the feature space the ranker ranks over — so the engine owns both; a
+  *breaking* KMD change requires retraining, while additive changes and dispatch-only fields do not
   ([Section 3.3](#33-coupling-rules)).
 
 - **`global.` knobs:** hipDNN's reserved knob namespace ([RFC 0004](0004_EngineConfigKnobs.md)), which a
