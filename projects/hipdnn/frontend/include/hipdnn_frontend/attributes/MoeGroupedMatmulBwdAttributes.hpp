@@ -124,5 +124,20 @@ public:
         return setOutput(OutputNames::DWEIGHT, value);
     }
     // NOLINTEND(readability-identifier-naming)
+
+    // No extra fields beyond tensors: defer entirely to the base class's
+    // tensor/metadata comparison.
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool logicallyEqualsImpl([[maybe_unused]] const MoeGroupedMatmulBwdAttributes& other) const
+    {
+        return true;
+    }
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool strictEqualsImpl([[maybe_unused]] const MoeGroupedMatmulBwdAttributes& other) const
+    {
+        return true;
+    }
 };
+typedef MoeGroupedMatmulBwdAttributes
+    Moe_grouped_matmul_bwd_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

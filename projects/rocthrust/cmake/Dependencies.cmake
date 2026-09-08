@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 # ###########################
@@ -254,7 +254,7 @@ if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
       prim
       SOURCE_DIR    ${ROCPRIM_PATH}
       INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
-      CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
+      CMAKE_ARGS    -DBUILD_TEST=OFF -DBUILD_BENCHMARK=OFF -DBUILD_EXAMPLE=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
       LOG_CONFIGURE TRUE
       LOG_BUILD     TRUE
       LOG_INSTALL   TRUE
@@ -266,6 +266,14 @@ if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
     if(NOT TARGET roc::rocprim_hip)
       add_library(roc::rocprim_hip ALIAS rocprim_hip)
     endif()
+  endif()
+endif()
+
+# Search for libhipcxx if requested (default: ON)
+if(${ROCTHRUST_USE_LIBHIPCXX})
+  find_package(libhipcxx)
+  if (NOT TARGET libhipcxx::libhipcxx)
+    message(STATUS "libhipcxx installation not found. Using deprecated rocThrust fallback implementation.  Please switch to using libhipcxx.")
   endif()
 endif()
 
@@ -377,57 +385,6 @@ endif()
 
 # Benchmark dependencies
 if(BUILD_BENCHMARK)
-  set(BENCHMARK_VERSION 1.9.5)
-  if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
-    # Google Benchmark (https://github.com/google/benchmark.git)
-    find_package(benchmark ${BENCHMARK_VERSION} QUIET)
-  else()
-    message(STATUS "Force installing Google Benchmark.")
-  endif()
-
-  if(NOT benchmark_FOUND)
-    message(STATUS "Google Benchmark not found or force download Google Benchmark on. Downloading and building Google Benchmark.")
-    if(CMAKE_CONFIGURATION_TYPES)
-      message(FATAL_ERROR "DownloadProject.cmake doesn't support multi-configuration generators.")
-    endif()
-    set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/googlebenchmark CACHE PATH "")
-    if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
-      if(WIN32)
-        get_filename_component(CXX_DIRNAME ${CMAKE_CXX_COMPILER} DIRECTORY)
-        set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=${CXX_DIRNAME}/clang++.exe")
-      else()
-        set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
-      endif()
-    endif()
-
-    message(STATUS "Google Benchmark not found. Fetching...")
-    option(BENCHMARK_ENABLE_TESTING "Enable testing of the benchmark library." OFF)
-    option(BENCHMARK_ENABLE_INSTALL "Enable installation of benchmark." OFF)
-    FetchContent_Declare(
-      googlebench
-      GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        v${BENCHMARK_VERSION}
-    )
-    set(HAVE_STD_REGEX ON)
-    set(RUN_HAVE_STD_REGEX 1)
-    set(_ROCTHRUST_DISABLE_ROCM_CHECKS TRUE)
-    FetchContent_MakeAvailable(googlebench)
-    set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
-	# Clang on Windows throws the following warnings with Googlebenchmark v1.9.5 (along with Werror):
-    # googlebench-src/src/string_util.cc:158:34: error: format string is not a string literal [-Werror,-Wformat-nonliteral]
-	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)
-	  if(TARGET benchmark)
-	    target_compile_options(benchmark PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)
-	  endif()
-	  if(TARGET benchmark_main)
-	    target_compile_options(benchmark_main PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)
-	  endif()
-      if(NOT TARGET benchmark::benchmark)
-        add_library(benchmark::benchmark ALIAS benchmark)
-      endif()
-	endif()
-  endif()
-
   # rocRAND (https://github.com/ROCm/rocm-libraries)
   fetch_dep(ROCRAND_FETCH_METHOD rocrand ROCRAND_PATH MIN_ROCRAND_PACKAGE_VERSION ROCM_DEP_RELEASE_BRANCH)
 
@@ -444,21 +401,23 @@ if(BUILD_BENCHMARK)
       set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
     endif()
 
-    # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON leaks into
-    # rocrand and causes its benchmarks to build. Suppress that here.
+    # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON and BUILD_TEST=ON leaks into
+    # rocrand and causes its benchmarks and unit tests to build. Suppress that here.
     set(BUILD_BENCHMARK OFF)
+    set(BUILD_TEST OFF)
     
     FetchContent_Declare(
       rocrand
       SOURCE_DIR    ${ROCRAND_PATH}
       INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand
-      CMAKE_ARGS    -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
+      CMAKE_ARGS    -DBUILD_BENCHMARK=OFF -DBUILD_TEST=OFF -DBUILD_EXAMPLE=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
       LOG_CONFIGURE TRUE
       LOG_BUILD     TRUE
       LOG_INSTALL   TRUE
     )
     FetchContent_MakeAvailable(rocrand)
     set(BUILD_BENCHMARK ON)
+    set(BUILD_TEST ON)
     if(NOT TARGET roc::rocrand)
       add_library(roc::rocrand ALIAS rocrand)
     endif()

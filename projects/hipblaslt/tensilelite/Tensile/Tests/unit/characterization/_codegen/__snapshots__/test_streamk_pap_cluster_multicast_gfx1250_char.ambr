@@ -2,11 +2,11 @@
 # name: test_streamk_pap_cluster_multicast_gfx1250_golden[cs2_ck2]
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg4Lo4AeQN5N68uL5_sGeg4t12mOnnP5NHLihkuwk6qvI=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg0CIAzVFktOyVqpmhbvk_UmXhYB7pFqKH6ckZtp1I5gw=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgyd34NPKnNai9vTiZi-HzKQjFV3csokJ60uxcGBQeJLU=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArguDPz62UMKRWK1lkCKBcB04rNzLDjs8HbbDEZDlwk0iw=',
       'err': 0,
     }),
   ])
@@ -14,11 +14,11 @@
 # name: test_streamk_pap_cluster_multicast_gfx1250_golden[cs4_ck1]
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg2a0OwCiPvM4cNZhbw9Pj4gAWoSIeA6jnzB-4EzIYF-0=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg36ODDEJ4nUnQDqcAIdv6QaSiuxHwvc2Dn1zodqt7yj4=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgKGN9poypgaQiocXZb0n0Diwto9knjq3965ce67ZSS44=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArghhdcl75P3DGmLZl03AXFO-khJ0ujiYJiABjDqJNJLQg=',
       'err': 0,
     }),
   ])

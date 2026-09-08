@@ -1,0 +1,32 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --WaitAwareScheduleRepairPass --print-output
+#
+# Anchor discovery must agree with the segment boundaries used by the rewrite.
+# An asm directive is not a StinkyTofu instruction, so it is invisible to the
+# wait/WMMA adjacency scan but still splits a segment. A wait group separated
+# from a WMMA by a directive therefore must not be anchored to it, otherwise the
+# rewrite would re-emit the wait on the far side of the boundary.
+#
+# CHECK-LABEL: @wait_aware_schedule_repair_directive_anchor
+# CHECK: ds_load_b128
+# The first wait stays on its own side of the directive.
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 56
+# CHECK-NEXT: asm_directive
+# CHECK-SAME: symA
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4
+# The second wait is a normal in-segment anchor and still shortens its window.
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 55
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NEXT: s_mov_b32
+
+st.func @wait_aware_schedule_repair_directive_anchor() {
+^entry:
+  v[926:929] = "st.ds_load_b128"(v538, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 128, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_wait_dscnt"(56) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 56, dscnt = -1, kmcnt = -1 } }
+  "st.asm_directive"(".set", "symA")
+  v[22:29] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[540:555], v[798:813], v[22:29], v0, v10) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  s6 = "st.s_mov_b32"(-137216) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_wait_dscnt"(55) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 55, dscnt = -1, kmcnt = -1 } }
+  v[30:37] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[556:571], v[798:813], v[30:37], v1, v10) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+}

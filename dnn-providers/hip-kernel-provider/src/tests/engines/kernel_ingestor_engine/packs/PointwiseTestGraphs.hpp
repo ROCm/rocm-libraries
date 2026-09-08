@@ -120,11 +120,10 @@ constexpr std::string_view OPERATION_FIELD = "operation";
 /// A pack's native functions, reached by the symbol name its descriptors carry.
 /// Resolving (not calling directly) surfaces a descriptor naming a symbol nothing
 /// implements.
-inline hipdnn_plugin_sdk::ingestor::GraphMatcherFn graphMatcher(const PackSymbols& pack)
+inline hipdnn_plugin_sdk::ingestor::GraphMatchFn graphMatcher(const PackSymbols& pack)
 {
     registerNativeIngestorSymbols();
-    return hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry::resolve(
-        std::string(pack.graphMatcher));
+    return hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(std::string(pack.graphMatcher));
 }
 
 inline hipdnn_plugin_sdk::ingestor::KernelMatcherFn kernelMatcher(const PackSymbols& pack)
@@ -149,37 +148,43 @@ inline const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>&
     return *handler;
 }
 
-inline bool matchesGraph(const PackSymbols& pack,
-                         const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                         hipdnn_plugin_sdk::ingestor::BoundTokens& bound)
+/// Runs the engine's graph match: the sole producer of bound tokens. nullopt means the
+/// engine does not serve this graph.
+inline std::optional<hipdnn_plugin_sdk::ingestor::BoundTokens>
+    matchesGraph(const PackSymbols& pack, const hipdnn_plugin_sdk::ingestor::MatchContext& context)
 {
-    return graphMatcher(pack)(context, bound);
+    return graphMatcher(pack)(context);
 }
 
-/// Runs the graph-scoped matcher that admits only @p pack's operation -- separate from
-/// matchesGraph() because the split is the contract: the shared matcher says "this
-/// engine could serve this graph", this one says "this pack is the one".
+/// Runs the graph-scoped criterion that admits only @p pack's operation.
+///
+/// Separate from matchesGraph() because the split is the contract: the engine's graph
+/// match says "this engine could serve this graph", this one says "this pack is the one".
+/// A pack passes only if both do. A criterion reads the tokens the match bound and
+/// never writes.
 inline bool matchesOperation(const PackSymbols& pack,
                              const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                             hipdnn_plugin_sdk::ingestor::BoundTokens& bound)
+                             const hipdnn_plugin_sdk::ingestor::BoundTokens& bound)
 {
     registerNativeIngestorSymbols();
-    return hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry::resolve(
+    return hipdnn_plugin_sdk::ingestor::GraphCriterionRegistry::resolve(
         std::string(pack.operationMatcher))(context, bound);
 }
 
 inline bool matchesKernel(const PackSymbols& pack,
                           const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
+                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                          const hipdnn_plugin_sdk::ingestor::BoundTokens& bound = {})
 {
-    return kernelMatcher(pack)(context, kernel);
+    return kernelMatcher(pack)(context, bound, kernel);
 }
 
 inline double scoreKernel(const PackSymbols& pack,
+                          const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                           const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
-                          const hipdnn_plugin_sdk::ingestor::MatchContext& context)
+                          const hipdnn_plugin_sdk::ingestor::BoundTokens& bound = {})
 {
-    return scorer(pack)(kernel, context);
+    return scorer(pack)(context, bound, kernel);
 }
 
 /// Tensor uids the builders below use, in argument order.
@@ -418,12 +423,18 @@ inline flatbuffers::FlatBufferBuilder
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-    const auto resolvedWDims = wDims.value_or(std::vector<int64_t>{1, xDims[1], 2, 2});
-    const auto resolvedYDims
-        = yDims.value_or(std::vector<int64_t>{xDims[0],
-                                              resolvedWDims[0],
-                                              xDims[2] - resolvedWDims[2] + 1,
-                                              xDims[3] - resolvedWDims[3] + 1});
+    // std::optional::value_or evaluates its argument unconditionally, so deriving the
+    // defaults with value_or indexes xDims even when the caller supplied w/y dims. The
+    // rank-3 refusal case passes a 3-element xDims, making xDims[3] an out-of-bounds
+    // read. Derive a default only when one is needed.
+    const auto resolvedWDims
+        = wDims.has_value() ? *wDims : std::vector<int64_t>{1, xDims.at(1), 2, 2};
+    const auto resolvedYDims = yDims.has_value()
+                                   ? *yDims
+                                   : std::vector<int64_t>{xDims.at(0),
+                                                          resolvedWDims.at(0),
+                                                          xDims.at(2) - resolvedWDims.at(2) + 1,
+                                                          xDims.at(3) - resolvedWDims.at(3) + 1};
     const auto resolvedWDataType = wDataType.value_or(dataType);
 
     const auto xStrides = xStridesOverride.value_or(packedRowMajorStrides(xDims));

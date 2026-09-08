@@ -3,11 +3,11 @@
 
 #include <memory>
 
+#include "MiopenApi.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "HipdnnMiopenSettings.hpp"
@@ -47,6 +47,104 @@ TEST(TestConvFwdParams, InitializesAllTensorsFromValidGraph)
     EXPECT_NO_THROW(params.w());
     EXPECT_NO_THROW(params.y());
     EXPECT_NO_THROW(params.conv());
+}
+
+TEST(TestConvFwdParams, PadsOneDimensionalGraphToTwoDimensions)
+{
+    // NCL tensors with one spatial dimension. MIOpen has no 1D convolution, so
+    // the provider pads the tensors to 4D and the convolution to 2 spatial dims.
+    const std::vector<int64_t> xDims = {1, 4, 8};
+    const std::vector<int64_t> xStrides = {32, 8, 1};
+    const std::vector<int64_t> wDims = {4, 4, 3};
+    const std::vector<int64_t> wStrides = {12, 3, 1};
+    const std::vector<int64_t> yDims = {1, 4, 6};
+    const std::vector<int64_t> yStrides = {24, 6, 1};
+    const std::vector<int64_t> convPrePadding = {0};
+    const std::vector<int64_t> convPostPadding = {0};
+    const std::vector<int64_t> convStrides = {1};
+    const std::vector<int64_t> convDilation = {1};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                       xStrides,
+                                                                       wDims,
+                                                                       wStrides,
+                                                                       yDims,
+                                                                       yStrides,
+                                                                       convPrePadding,
+                                                                       convPostPadding,
+                                                                       convStrides,
+                                                                       convDilation);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    const ConvFwdParams params(*attrs, graph.getTensorMap());
+
+    EXPECT_EQ(params.spatialDimCount(), 1);
+
+    for(const auto* tensor : {&params.x(), &params.w(), &params.y()})
+    {
+        int dimCount = 0;
+        EXPECT_EQ(miopenGetTensorDescriptorSize(tensor->tensorDescriptor(), &dimCount),
+                  miopenStatusSuccess);
+        EXPECT_EQ(dimCount, 4);
+    }
+
+    int convSpatialDimCount = 0;
+    EXPECT_EQ(miopenGetConvolutionSpatialDim(params.conv().convDescriptor(), &convSpatialDimCount),
+              miopenStatusSuccess);
+    EXPECT_EQ(convSpatialDimCount, 2);
+}
+
+TEST(TestConvFwdParams, PadsOneDimensionalChannelsLastGraphWithChannelStride)
+{
+    // NLC tensors: the padded trailing dimension must take the channel count as
+    // its stride, not 1, or MIOpen reads the tensor as channels-first.
+    constexpr int64_t CHANNEL_COUNT = 4;
+    const std::vector<int64_t> xDims = {1, CHANNEL_COUNT, 8};
+    const std::vector<int64_t> xStrides = {32, 1, CHANNEL_COUNT};
+    const std::vector<int64_t> wDims = {4, CHANNEL_COUNT, 3};
+    const std::vector<int64_t> wStrides = {12, 1, CHANNEL_COUNT};
+    const std::vector<int64_t> yDims = {1, CHANNEL_COUNT, 6};
+    const std::vector<int64_t> yStrides = {24, 1, CHANNEL_COUNT};
+    const std::vector<int64_t> convPrePadding = {0};
+    const std::vector<int64_t> convPostPadding = {0};
+    const std::vector<int64_t> convStrides = {1};
+    const std::vector<int64_t> convDilation = {1};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                       xStrides,
+                                                                       wDims,
+                                                                       wStrides,
+                                                                       yDims,
+                                                                       yStrides,
+                                                                       convPrePadding,
+                                                                       convPostPadding,
+                                                                       convStrides,
+                                                                       convDilation);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    const ConvFwdParams params(*attrs, graph.getTensorMap());
+
+    for(const auto* tensor : {&params.x(), &params.w(), &params.y()})
+    {
+        std::vector<int> dims(4);
+        std::vector<int> strides(4);
+        miopenDataType_t dataType{};
+        EXPECT_EQ(miopenGetTensorDescriptor(
+                      tensor->tensorDescriptor(), &dataType, dims.data(), strides.data()),
+                  miopenStatusSuccess);
+        EXPECT_EQ(dims[3], 1);
+        EXPECT_EQ(strides[3], CHANNEL_COUNT);
+    }
 }
 
 TEST(TestConvFwdParams, ThrowsOnAssymetricPadding)

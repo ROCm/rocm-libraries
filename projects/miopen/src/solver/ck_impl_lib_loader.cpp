@@ -59,6 +59,11 @@ miopen::fs::path GetOwningModuleDirectory()
                           reinterpret_cast<LPCWSTR>(miopenCreate),
                           &hmod) != 0)
     {
+        // Windows paths top out at 32767 wide characters even with long-path support, so the
+        // buffer never needs to grow past that. Capping it keeps a misbehaving
+        // GetModuleFileNameW (one that keeps reporting "buffer too small") from looping until
+        // the allocation fails, at the cost of giving up on a path that cannot exist.
+        constexpr size_t max_module_path = 32768;
         std::wstring module_path(MAX_PATH, L'\0');
         while(true)
         {
@@ -71,7 +76,15 @@ miopen::fs::path GetOwningModuleDirectory()
                 module_path.resize(len);
                 return miopen::weakly_canonical(miopen::fs::path{module_path}).parent_path();
             }
-            module_path.resize(module_path.size() * 2);
+            if(module_path.size() >= max_module_path)
+            {
+                MIOPEN_LOG_W("Module path exceeds " << max_module_path << " characters");
+                break;
+            }
+            // Not std::min: this TU pulls in windows.h without NOMINMAX, so its min() macro
+            // breaks the std:: call.
+            const auto grown = module_path.size() * 2;
+            module_path.resize(grown < max_module_path ? grown : max_module_path);
         }
     }
 #else
