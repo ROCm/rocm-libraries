@@ -496,8 +496,12 @@ class WgradConvSpec:
                     f"position; the packed dW inner dim is cpg=C/groups); "
                     f"got cpg={self.problem.cpg} (C={self.problem.C}, groups={self.problem.groups})"
                 )
-        # two_stage writes to f32 workspace (not atomic dW), so the cshuffle
-        # requirement only applies to atomic split-K paths (not two_stage).
+        # The cshuffle requirement is an atomic-epilogue constraint only. Neither
+        # split_k == 1 (direct store) nor two_stage (f32 workspace store, which
+        # force_deterministic is promoted to above) emits packed atomics, so the
+        # default epilogue is fine for both. Gating on _needs_atomic rather than
+        # on dtype alone keeps the non-atomic 16-bit output path reachable -- it
+        # is the only one WMMA wgrad can use, since WMMA rejects cshuffle.
         _needs_atomic = (self.split_k == 0 or self.split_k > 1) and not self.two_stage
         if (
             _needs_atomic
@@ -790,11 +794,21 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"position; the packed dW inner dim is cpg=C/groups); "
             f"got cpg={spec.problem.cpg}"
         )
-    # two_stage writes to f32 workspace (not atomic dW), so the cshuffle
-    # requirement only applies to atomic split-K paths (not two_stage).
-    _atomic_not_two_stage = _is_atomic and not spec.two_stage
+    # Atomic-epilogue constraint only: the packed atomic store emits zero-fill
+    # pairs at the scattered MFMA layout, so it needs cshuffle's contiguous
+    # pairs. Two cases are not on it. At split_k == 1 the epilogue is a direct
+    # store, and under two_stage it is an f32 workspace store; neither emits
+    # packed atomics, so 'default' is fine. split_k == 1 + 'default' is also the
+    # only combination WMMA wgrad can use, since WMMA rejects cshuffle outright.
+    #
+    # Unlike validate(), this predicate is public and is called by dispatch and
+    # the benchmarks on specs that have NOT been through the builder's
+    # force_deterministic -> two_stage promotion, so fold that in here. Mirrors
+    # effective_two_stage_v in the C++ is_valid_wgrad_spec.
+    _effective_two_stage = spec.two_stage or (spec.force_deterministic and sk > 1)
     if (
-        _atomic_not_two_stage
+        _is_atomic
+        and not _effective_two_stage
         and spec.data.dtype_d in ("bf16", "fp16")
         and spec.epilogue == "default"
     ):
@@ -1136,6 +1150,24 @@ def build_implicit_gemm_conv_wgrad(
     atom = spec.atom if op.family == "mma" else None
     a_per_lane = op.a_frag_len
     b_per_lane = op.b_frag_len
+    # wgrad flips BOTH operands under K-outer, so both fragment lengths have to
+    # divide the width the transpose read returns per lane: ds_read_tr16_b64
+    # returns 4 (wave64), ds_load_tr16_b128 returns 8 (wave32). A length that
+    # does not divide it builds the fragment from an empty/truncated `parts`
+    # list in _tr_frag. dgrad carries the same guard for its single flipped
+    # operand.
+    if spec.lds_k_outer:
+        _tr_lanes = 8 if spec.wave_size == 32 else 4
+        _tr_insn = "ds_load_tr16_b128" if spec.wave_size == 32 else "ds_read_tr16_b64"
+        for _side, _n in (("A", a_per_lane), ("B", b_per_lane)):
+            if _n % _tr_lanes != 0:
+                raise ValueError(
+                    f"lds_k_outer needs a {_side} fragment length that is a "
+                    f"multiple of {_tr_lanes} ({_tr_insn} returns {_tr_lanes} "
+                    f"elements per lane on wave{spec.wave_size}); got "
+                    f"{_side.lower()}_per_lane={_n} for atom "
+                    f"{spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k}"
+                )
     _smem_dtype: Optional[Type] = (
         BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
     )

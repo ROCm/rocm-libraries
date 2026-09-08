@@ -27,15 +27,10 @@ the async-DMA path is excluded. The sweep runs on MFMA (gfx942/gfx950) and, for
 the K-outer transpose-read tests, on gfx1250 wave32 WMMA -- the lane mapping is
 per-wave-size, so one arch being green says nothing about the other.
 
-Two gfx1250 gotchas the sweep works around, both of which previously made these
-tests report *passed* while executing nothing:
-  - WMMA wgrad accepts only ``epilogue='default'``, so a sweep asking for
-    'cshuffle' skips every subTest -- and an all-skipped test still passes.
-    ``_assert_ran`` now makes that a hard failure.
-  - 'default' then collides with the rule that a 16-bit dW requires 'cshuffle',
-    leaving no valid gfx1250 wgrad spec with fp16/bf16 output at all. The
-    K-outer sweep accumulates into fp32 dW instead (``_KOUTER_DTYPE_D``); the
-    A/B is unaffected since both arms share the output dtype.
+WMMA wgrad accepts only ``epilogue='default'``, so the K-outer sweeps ask for the
+one their arch supports. A sweep requesting the wrong epilogue skips every
+subTest -- and a test whose subTests all skip still reports *passed*, so
+``_assert_ran`` makes an all-skipped K-outer sweep a hard failure instead.
 
 Requires a ROCm GPU and torch. Run:
     PYTHONPATH=rocke/platform/python <torch-python> -m pytest \\
@@ -71,13 +66,6 @@ _KOUTER_ARCHES = ("gfx950", "gfx1250")
 # skip still reports *passed*, which is exactly the false green these tests exist
 # to prevent. _assert_ran() below is the backstop.
 _KOUTER_EPILOGUE = "cshuffle" if _IS_MFMA else "default"
-
-# ...but WMMA's mandatory 'default' epilogue then collides with the rule that a
-# 16-bit dW requires 'cshuffle' (conv_implicit_gemm_wgrad.py), leaving *no* valid
-# gfx1250 wgrad spec with fp16/bf16 output. An fp32 dW satisfies both, so that is
-# what the wave32 K-outer sweep accumulates into; the A/B is unaffected because
-# both arms use the same output dtype.
-_KOUTER_DTYPE_D = None if _IS_MFMA else "fp32"
 
 
 def _skip_reason() -> str:
@@ -216,7 +204,6 @@ def _make_spec(
     async_dma: bool = False,
     warp_tile_mn: "int | None" = None,
     tile_k: "int | None" = None,
-    dtype_d: "str | None" = None,
 ):
     """Build a (spec, problem, warp_tile_k) triple, or (None, None, reason).
 
@@ -297,9 +284,7 @@ def _make_spec(
                 else ""
             )
         ),
-        data=ConvDataSpec(
-            dtype_a=dtype, dtype_b=dtype, dtype_d=dtype if dtype_d is None else dtype_d
-        ),
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
@@ -329,7 +314,6 @@ def _run_one(
     async_dma: bool = False,
     warp_tile_mn: "int | None" = None,
     tile_k: "int | None" = None,
-    dtype_d: "str | None" = None,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
 
@@ -357,7 +341,6 @@ def _run_one(
         async_dma,
         warp_tile_mn=warp_tile_mn,
         tile_k=tile_k,
-        dtype_d=dtype_d,
     )
     if spec is None:
         return True, f"skip (no atom): {_wtk}"
@@ -376,9 +359,7 @@ def _run_one(
     except Exception as e:  # noqa: BLE001
         return False, f"compile failed: {e}"
 
-    _DT = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
-    _torch_dtype = _DT[dtype]
-    _torch_dtype_d = _DT[dtype if dtype_d is None else dtype_d]
+    _torch_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
     torch.manual_seed(0)
     p = problem
     X_f32 = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0)
@@ -387,7 +368,7 @@ def _run_one(
     dY_t = dY_f32.to(_torch_dtype)
     # dW is the (grouped) weight gradient: packed KYXC with the per-group channel
     # count cpg = C // groups (== C for groups=1).
-    dW_t = torch.empty(p.K, p.Y, p.X, p.C // p.groups, dtype=_torch_dtype_d)
+    dW_t = torch.empty(p.K, p.Y, p.X, p.C // p.groups, dtype=_torch_dtype)
 
     # float32 reference (KYXC layout), on the CPU (see _wgrad_reference_cpu).
     ref = _wgrad_reference_cpu(X_f32, dY_f32, p)
@@ -475,7 +456,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
         async_dma=False,
         warp_tile_mn=None,
         tile_k=None,
-        dtype_d=None,
     ) -> None:
         passed, reason = _run_one(
             GPU_ARCH,
@@ -488,7 +468,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
             async_dma,
             warp_tile_mn=warp_tile_mn,
             tile_k=tile_k,
-            dtype_d=dtype_d,
         )
         if reason.startswith("skip"):
             self.skipTest(reason)
@@ -545,7 +524,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
                         "mem",
                         _KOUTER_EPILOGUE,
                         lds_k_outer=True,
-                        dtype_d=_KOUTER_DTYPE_D,
                     )
                     ran += 1
         self._assert_ran(ran, "lds_k_outer vs default")
@@ -575,7 +553,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
                         lds_k_outer=True,
                         warp_tile_mn=16,
                         tile_k=16,
-                        dtype_d=_KOUTER_DTYPE_D,
                     )
 
     def test_lds_k_outer_split_k(self):
@@ -593,7 +570,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
                     _KOUTER_EPILOGUE,
                     split_k=8,
                     lds_k_outer=True,
-                    dtype_d=_KOUTER_DTYPE_D,
                 )
 
     def test_lds_k_outer_async_dma(self):

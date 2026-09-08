@@ -374,10 +374,15 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         }
     }
 
-    /* For bf16/fp16 output with split_k atomics the default epilogue emits
-     * zero-fill packed atomics at the scattered MFMA layout; cshuffle is
-     * required.  This does NOT apply to split_k==1 (direct store, no atomics)
-     * or two_stage=true (workspace-store epilogue, also no atomics).
+    /* For bf16/fp16 output the *packed atomic* store emits zero-fill pairs at
+     * the scattered MFMA layout, so it needs cshuffle's contiguous pairs.  This
+     * is an atomic-epilogue constraint only, and there are two ways to not be
+     * on it: at split_k == 1 the epilogue is a direct store, and under
+     * two_stage (or force_deterministic with split_k > 1) it is a
+     * workspace store.  Neither emits packed atomics, so the default epilogue
+     * is fine for both.  Guarding on sk rather than on dtype alone keeps the
+     * non-atomic 16-bit output path reachable -- it is the only one WMMA wgrad
+     * can use, since WMMA rejects cshuffle.
      * Matches Python is_valid_wgrad_spec / validate(): _needs_atomic guard. */
     if(sk > 1 || sk == 0)
     {
