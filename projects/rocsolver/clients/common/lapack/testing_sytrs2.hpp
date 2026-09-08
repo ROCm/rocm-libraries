@@ -228,6 +228,8 @@ void sytrs2_initData(const rocblas_handle handle,
 
 #ifdef NDEBUG
 #else
+            bool constexpr show_num_of_1x1_pivots = false;
+            if constexpr(show_num_of_1x1_pivots)
             {
                 auto ipiv = hIpiv_cpu[b];
                 int num_1x1 = 0;
