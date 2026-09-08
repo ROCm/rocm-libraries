@@ -138,7 +138,6 @@ namespace rpp {
 RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan* plan,
                           rocfft_plan_description* desc);
 }  // namespace rpp
-using rpp::get_rocfft_plan;
 #endif
 
 RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,

@@ -20,7 +20,6 @@ find_library(ROCFFT_LIBRARY
     PATHS
         ${ROCM_PATH}/lib
         /opt/rocm/lib
-        /opt/rocm-*/lib
         ${ROCM_PATH}/lib/rocm_sysdeps/lib
         /usr/local/lib
         /usr/lib

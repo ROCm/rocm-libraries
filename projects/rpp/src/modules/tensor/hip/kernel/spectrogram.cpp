@@ -285,10 +285,19 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     Rpp32s numBins = (nfft / 2 + 1);
 
 #ifdef RPP_USE_ROCFFT
-    // rocFFT-based implementation path
-    {
-        // Find the maximum windows required across all inputs in batch
-        Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
+    // Check if rocFFT path fits in scratch memory, otherwise fall back to manual DFT
+    Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
+    if (!nfft) nfft = windowLength;
+    Rpp32u windowOutputStride = maxNumWindows * nfft;
+    Rpp32u fftOutputStride = maxNumWindows * numBins;
+    size_t windowOutputFloats = static_cast<size_t>(dstDescPtr->n) * windowOutputStride;
+    size_t alignedOffset = (windowOutputFloats + 1) & ~1;
+    uint rocfftScratchSize = static_cast<uint>(windowLength) + static_cast<uint>(alignedOffset) +
+                             static_cast<uint>(dstDescPtr->n) * fftOutputStride * 2;
+    bool useRocFFT = (rocfftScratchSize <= SPECTROGRAM_MAX_SCRATCH_MEMORY);
+
+    if (useRocFFT) {
+        // rocFFT-based implementation path
 
         // Generate hanning window
         Rpp32f* windowFn;
@@ -312,8 +321,6 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                 get_num_windows(srcLengthTensor[i], windowLength, windowStep, centerWindows);
 
         Rpp32s windowCenterOffset = (centerWindows) ? (windowLength / 2) : 0;
-        if (!nfft) nfft = windowLength;
-        Rpp32u windowOutputStride = maxNumWindows * nfft;
 
         // Allocate window output buffer (after d_windowFn)
         Rpp32f* windowOutput = d_windowFn + windowLength;
@@ -337,22 +344,14 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                            reflectPadding);
         HIP_CHECK_LAUNCH_RETURN();
 
-        // Allocate complex output buffer for rocFFT (after windowOutput)
-        Rpp32u fftOutputStride = maxNumWindows * numBins;
-        const uint scratchMemorySize = static_cast<uint>(windowLength) +
-                                       static_cast<uint>(dstDescPtr->n) * windowOutputStride +
-                                       static_cast<uint>(dstDescPtr->n) * fftOutputStride * 2;
-        if (scratchMemorySize > SPECTROGRAM_MAX_SCRATCH_MEMORY)
-            return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
-
-        float2* fftOutput =
-            reinterpret_cast<float2*>(windowOutput + dstDescPtr->n * windowOutputStride);
+        // Allocate complex output buffer for rocFFT (after windowOutput, with 8-byte alignment for float2)
+        float2* fftOutput = reinterpret_cast<float2*>(windowOutput + alignedOffset);
 
         // Get or create cached rocFFT plan for this (nfft, totalWindows) combination
         int totalWindows = maxNumWindows * dstDescPtr->n;
         rocfft_plan plan = nullptr;
         rocfft_plan_description desc = nullptr;
-        RppStatus status = get_rocfft_plan(handle, nfft, totalWindows, &plan, &desc);
+        RppStatus status = rpp::get_rocfft_plan(handle, nfft, totalWindows, &plan, &desc);
         if (status != RPP_SUCCESS) return status;
 
         // Get work buffer size
@@ -411,13 +410,14 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
 
         RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         return RPP_SUCCESS;
-    }
-#else
-    // Manual DFT fallback implementation (existing code)
+    } else
+#endif
+    {
+        // Manual DFT fallback implementation (used when rocFFT is not available or exceeds scratch budget)
 
-    // find the maximum windows required across all inputs in batch and stride required for window
-    // output
-    Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
+        // find the maximum windows required across all inputs in batch and stride required for window
+        // output
+        Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
     uint scratchMemorySize = nfft * ((maxNumWindows * dstDescPtr->n) + (numBins * 2));
 
     // check if scratch memory size required for spectrogram is within the limits
@@ -497,5 +497,5 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
 
     return RPP_SUCCESS;
-#endif  // RPP_USE_ROCFFT
+    }
 }
