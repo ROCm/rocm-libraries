@@ -23,6 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+// ALMIOPEN-1779: temp CI trigger for miopen-dbsync; revert before merge.
 #include <miopen/activ.hpp>
 #include <miopen/logger.hpp>
 
