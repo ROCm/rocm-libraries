@@ -6,3 +6,9 @@
 ## while surviving in the plugin .so, with no error either way.
 /// @see packs/{{ config.native_class_name }}Native.cpp
 void {{ config.register_symbols_fn }}(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+{% if config.is_packaged %}
+## Packaged dialect only: the table row emitted for this engine names this symbol as its
+## resetModuleCache. Define it OUTSIDE the pack's anonymous namespace, or the row will
+## not link.
+void reset{{ config.engine.pascal_name }}ModuleCache();
+{%- endif %}

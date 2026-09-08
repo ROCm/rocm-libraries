@@ -202,7 +202,7 @@ The ROCm SDK is published as Python wheels on a nightly index. Installing into a
 
 2. Install the SDK, selecting your GPU architecture with the `device-<arch>` extra (replace `gfx942`):
    ```bash
-   pip install --index-url https://nightly.repo.amd.com/rocm/whl-next/ "rocm[libraries,devel,device-gfx942]"
+   pip install --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ "rocm[libraries,devel,device-gfx942]"
    ```
    The `libraries` and `devel` extras provide the ROCm libraries, headers, CMake configuration, and compiler needed to build hipDNN; `device-<arch>` provides the device code for your GPU. This installs the latest nightly; see [RELEASES.md](https://github.com/ROCm/TheRock/blob/main/RELEASES.md) to pin a specific version or for other extras.
 
@@ -221,7 +221,7 @@ Run the `python -m rocm_sdk` commands with the same Python you installed the whe
 
 ### Tarballs
 
-Tarballs are published as nightly builds (dated versions, like the wheels) at `https://nightly.repo.amd.com/rocm/core/tarball/`. Filenames follow `therock-dist-<platform>-<group>-<version>.tar.gz`, where:
+Tarballs are published as nightly builds (dated versions, like the wheels) at `https://rocm.nightlies.amd.com/tarball-multi-arch/`. Filenames follow `therock-dist-<platform>-<group>-<version>.tar.gz`, where:
 
 - `<platform>` is `linux` or `windows`.
 - `<group>` is either `multiarch` (all supported architectures) or a specific GPU family (for example `gfx110X-all`). If in doubt or just getting started, `multiarch` is the recommended safe choice.
@@ -412,15 +412,6 @@ Related variables, both read by comgr itself rather than by hipDNN:
 Disabling the cache is a diagnostic, not a fix: it makes every build pay full compilation
 cost. Relocating it is what you want. Note that a cache on local disk is also per-machine and
 per-container, so a fresh CI runner or a rebuilt container always starts cold.
-
-To see where packing time is actually going, set `HKP_PACK_TIMING=1` when building. The packer
-then reports its per-phase split — the parallel kernel compilation, the serial descriptor
-walk, and archive assembly — as `hkp_pack[timing]` lines, instead of leaving the whole pack as
-one opaque build step:
-
-```
-hkp_pack[timing] gfx942 TOTAL=41.33s prewarm=40.45s walk=0.47s assemble=0.41s other=0.00s serial=2%
-```
 
 Kernel compilation normally dominates, which is why the cache matters so much and why
 `HKP_PACK_JOBS` (worker count, defaulting to `min(32, ncpu)`) is the other lever worth
@@ -782,7 +773,7 @@ gfx1103
 
 Install the ROCm SDK from the nightly wheel index, selecting your architecture with the `device-<arch>` extra (replace `gfx1103` with the architecture reported above), then expand the development tree:
 ```cmd
-pip install --index-url https://nightly.repo.amd.com/rocm/whl-next/ "rocm[libraries,devel,device-gfx1103]"
+pip install --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ "rocm[libraries,devel,device-gfx1103]"
 python -m rocm_sdk init
 ```
 The `libraries` and `devel` extras provide the ROCm libraries, headers, CMake configuration, and compiler needed to build hipDNN; `device-<arch>` provides the device code for your GPU. Re-run `python -m rocm_sdk init` if you later add or change a `device-*` wheel. To pin a specific dated build instead of the latest nightly, see [Python wheels](#python-wheels-recommended) under Obtaining ROCm.

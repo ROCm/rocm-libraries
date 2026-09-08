@@ -668,7 +668,17 @@ def _expand_one_arm(
             # binary the spec builds. The two arms are genuinely different catalog
             # entries over the same kernel, and the config has to be able to say so.
             value = arm_metadata[field_name]
-        elif field_name in spec:
+        # NOT `field_name in spec`. A spec key present with value None means the
+        # kernel's own policy decides it at build time -- the SAME tri-state as
+        # omitting the key, differing only in how the spec was produced (a
+        # hand-authored spec omits it; `dispatch_parity.build_config` dumps the
+        # builder's dataclass, so every unset policy knob arrives present-and-None).
+        # A membership test takes None as if it were a real pinned value, skips the
+        # `resolved` branch below, and writes None into metadata -- which then fails
+        # its own kmd_fields type check ("metadata 'use_exp2_fast' = None does not
+        # match its declared kmd_fields type 'int'"), or would silently become the
+        # catalog key for a binary built from the policy's actual answer.
+        elif spec.get(field_name) is not None:
             value = spec[field_name]
         elif field_name in resolved:
             # Absent from the spec but known: either the kernel's own policy decided

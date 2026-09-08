@@ -465,14 +465,30 @@ def _build_group(group: list, template: str, ordinals, tags: list, knob_fields: 
         }
         shape["knobs"] = knob_sets[signature][0]
         # What the kernel's own policy resolved to for the fields this shape's arms
-        # leave absent from the spec. Without it the loader substitutes the KMD
+        # do not PIN in the spec. Without it the loader substitutes the KMD
         # default as the catalog key while the binary was built from the policy's
         # answer, and the descriptor then names one kernel and advertises another.
+        #
+        # "Does not pin" has TWO spellings and they mean the same thing. A spec may
+        # OMIT the key, or carry it explicitly as None -- both say "the kernel's own
+        # policy decides this at build time". Which one you get is an artefact of
+        # how the spec was produced, not a difference in meaning: a hand-authored
+        # spec omits the key, while `dispatch_parity.build_config` dumps the
+        # builder's dataclass wholesale (`dataclasses.fields(resolution.spec)`), so
+        # every declared-but-unset policy knob arrives present-and-None.
+        #
+        # Testing only for absence silently dropped the whole `resolved` block for
+        # the dataclass-dumped case: gfx942's `use_exp2_fast` is None in all 64
+        # specs while its metadata is a real 0/1 per shape, so factorising hoisted
+        # None into spec_defaults, emitted no `resolved`, and re-expansion produced
+        # `metadata 'use_exp2_fast' = None does not match its declared kmd_fields
+        # type 'int'`. That is the exact tri-state this module's header promises to
+        # "preserve by construction", lost on the round-trip that exists to catch it.
         resolved = {
             field: value
             for entry in block
             for field, value in entry["metadata"].items()
-            if field not in entry["spec"] and field not in per_arm_metadata
+            if entry["spec"].get(field) is None and field not in per_arm_metadata
         }
         if resolved:
             shape["resolved"] = resolved
@@ -485,7 +501,14 @@ def _build_group(group: list, template: str, ordinals, tags: list, knob_fields: 
         "metadata": list(group[0]["metadata"]),
         "spec_order": spec_order,
     }
-    policy = sorted(f for f in knob_fields if any(f not in e["spec"] for e in group))
+    # Same two spellings as `resolved` above -- omitted, or present-and-None. These
+    # two predicates MUST agree: `policy_knobs` is what makes the loader demand a
+    # `resolved` entry (config_loader.py raises when a declared policy knob has no
+    # resolved value), so a knob listed by one test and not the other either asks
+    # for a value nothing supplies, or supplies one nothing requires.
+    policy = sorted(
+        f for f in knob_fields if any(e["spec"].get(f) is None for e in group)
+    )
     if policy:
         out["policy_knobs"] = policy
     if spec_defaults:

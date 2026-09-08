@@ -519,6 +519,73 @@ class IngestorGenerator:
 
         return written
 
+    #: Emitted files that are splice INSTRUCTIONS, not shipped source. They are
+    #: pasted into existing files by hand and never exist as files in the tree,
+    #: so they are excluded from the located/missing accounting.
+    _NON_SHIPPED_PREFIXES = ("fragments/",)
+
+    @classmethod
+    def locate_emitted(
+        cls, root: Path, written: list[str]
+    ) -> tuple[dict[str, Path], list[str], dict[str, list[Path]]]:
+        """``({relative path: real path}, [not found], {relative path: [ambiguous]})``
+        for the shippable files in ``written``, searched by BASENAME under ``root``.
+
+        Not ``root / rel``. This tool emits a flat ``packs/`` + ``tests/``
+        layout, but the provider splits it: packs land in the engine directory
+        and the test stubs under ``src/tests/engines/.../packs/`` -- which this
+        generator's own ``cmake_test_sources`` fragment instructs. Resolving
+        ``rel`` against one directory therefore found the packs and silently
+        missed every test stub, reproducing precisely the ``packs/``-only blind
+        spot this scan exists to close.
+
+        Two matches for one basename is an ERROR, not a pick. Keeping the first
+        ``rglob`` hit made the answer depend on filesystem order: a stale copy or
+        a build tree under ``root`` could bind instead of the real file, and a
+        filled decoy would report the gate green while the real file still
+        carried its markers. Basenames are not unique here -- 1809 collide
+        repo-wide, and ``build/`` already duplicates shipped descriptor names --
+        so uniqueness is luck, not a property. "Found something, assumed it was
+        the right thing" is the shape this gate exists to reject.
+        """
+        shippable = [
+            rel for rel in written if not rel.startswith(cls._NON_SHIPPED_PREFIXES)
+        ]
+        wanted = {Path(rel).name: rel for rel in shippable}
+        hits: dict[str, list[Path]] = {}
+        for path in sorted(root.rglob("*")):
+            rel = wanted.get(path.name)
+            if rel is not None and path.is_file():
+                hits.setdefault(rel, []).append(path)
+        found = {rel: paths[0] for rel, paths in hits.items() if len(paths) == 1}
+        ambiguous = {rel: paths for rel, paths in hits.items() if len(paths) > 1}
+        missing = [rel for rel in shippable if rel not in hits]
+        return found, missing, ambiguous
+
+    @classmethod
+    def unfilled_placeholders(cls, root: Path, written: list[str]) -> dict[str, int]:
+        """``{relative path: placeholder count}`` for every located file that
+        still carries an unfilled stub marker, worst first.
+
+        Lives here because this object is the only one that knows the full
+        emitted set. The runbook used to carry a hand-written
+        ``grep -c "FILL THIS OUT" .../packs/*Native.cpp``, which missed the
+        generated ``tests/Test<Name>Matchers.cpp`` entirely -- a transcribed
+        glob drifts the moment the emitted set changes, and that one already
+        had. Ask the generator instead; it cannot fall behind itself.
+        """
+        located, _missing, _ambiguous = cls.locate_emitted(root, written)
+        counts: dict[str, int] = {}
+        for rel, path in located.items():
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            n = text.count(PLACEHOLDER_MARKER)
+            if n:
+                counts[rel] = n
+        return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
+
     def _render_template(
         self, template_name: str, config: IngestorConfig, **extra
     ) -> str:
@@ -531,6 +598,11 @@ class IngestorGenerator:
                 f"'{config.engine.name}': {e}"
             ) from e
 
+
+#: The marker every unfilled stub body carries. Templates emit it; the reader
+#: replaces it. One spelling, defined once, so a scan cannot look for a string
+#: the templates stopped writing.
+PLACEHOLDER_MARKER = "FILL THIS OUT"
 
 FRAGMENT_TEMPLATES: tuple[tuple[str, str], ...] = (
     ("fragments/cmake_descriptor_files.j2", "cmake_descriptor_files.txt"),

@@ -34,12 +34,56 @@ _PROFILE = (
     / "gfx942_attention_dense.profile.yaml"
 )
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-_VALIDATOR = _REPO_ROOT / "build-noasm" / "bin" / "hipdnn_validate_descriptors"
-_PACKED = _REPO_ROOT / "build-noasm/lib/hipdnn_plugins/engines/arch_content"
+
+
+_EXPECT_ENGINE = "hipkernel:Gfx942AttentionDense"
+
+
+def _find_build_artifacts() -> tuple[Path | None, Path | None]:
+    """(validator, packed tree) from a build that actually contains the engine
+    these tests assert on.
+
+    Discovered, not hardcoded: this was pinned to `build-noasm/`, one author's
+    directory name, so it skipped on every checkout that calls its build
+    anything else -- reporting "needs a build" while sitting next to one.
+
+    The engine check is the other half. A build can be present and valid and
+    still predate this engine (the packed tree here ships ConvFwd, Pointwise and
+    the examples), in which case the assertions below fail on a stale artifact
+    rather than on a defect. Skip covers "no build for this engine"; it must
+    never cover "the gate is broken".
+    """
+    for candidate in sorted(_REPO_ROOT.glob("build*")):
+        validator = candidate / "bin" / "hipdnn_validate_descriptors"
+        packed = candidate / "lib/hipdnn_plugins/engines/arch_content"
+        if not (validator.is_file() and packed.is_dir()):
+            continue
+        try:
+            probe = subprocess.run(
+                [str(validator), str(packed), "--json"],
+                capture_output=True,
+                text=True,
+                # Per CANDIDATE, and this runs at import time, so N build dirs
+                # cost N x this before collection finishes. The real validator
+                # answers in ~0.12s; 15s is ~100x headroom for a loaded box and
+                # still bounds a hung probe to something a human will wait out.
+                timeout=15,
+            )
+            engines = json.loads(probe.stdout).get("engines", [])
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+        if _EXPECT_ENGINE in engines:
+            return validator, packed
+    return None, None
+
+
+_VALIDATOR, _PACKED = _find_build_artifacts()
 
 _needs_build = pytest.mark.skipif(
-    not (_VALIDATOR.exists() and _PACKED.exists()),
-    reason="needs a build configured with HIPDNN_ENABLE_KERNEL_INGESTOR=ON",
+    _VALIDATOR is None or not _PROFILE.is_file(),
+    reason=f"needs a build*/ whose packed tree contains {_EXPECT_ENGINE} "
+    f"AND {_PROFILE.name} (configure with HIPDNN_ENABLE_KERNEL_INGESTOR=ON on a "
+    "branch that ships both)",
 )
 
 
@@ -129,7 +173,7 @@ class TestAgainstTheRealBuild:
             "--validator",
             str(_VALIDATOR),
             "--expect-engine",
-            "hipkernel:Gfx942AttentionDense",
+            _EXPECT_ENGINE,
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "1. STATIC   PASS" in result.stdout

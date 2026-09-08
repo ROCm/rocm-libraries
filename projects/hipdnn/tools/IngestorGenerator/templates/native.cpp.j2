@@ -177,6 +177,24 @@ const {{ config.dispatch_handler_class }}& {{ config.engine.camel_name }}Dispatc
 
 } // namespace
 
+{% if config.is_packaged %}
+// Packaged/kpack dialect. The IngestorPacks.cpp row this engine splices names
+// reset{{ config.engine.pascal_name }}ModuleCache as its resetModuleCache, and the
+// .hpp fragment declares it -- so it MUST be defined here, OUTSIDE the anonymous
+// namespace above, or the splice does not link.
+//
+// TODO - FILL THIS OUT: give this pack a process-lifetime KpackModuleCache and clear
+// it here. See packs/PointwiseNative.cpp for the shipped shape: an accessor returning
+// a function-local static cache, exposed (not hidden in the loader) so a test can
+// observe that two dispatches over the same archive loaded one module, plus this
+// reset that clears it. A reset that does nothing silently defeats the ownership
+// contract the table row is asserting.
+void reset{{ config.engine.pascal_name }}ModuleCache()
+{
+    // TODO - FILL THIS OUT
+}
+
+{% endif %}
 void {{ config.register_symbols_fn }}(SymbolScope<Handle>& scope)
 {
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &{{ config.engine.camel_name }}GraphMatches);

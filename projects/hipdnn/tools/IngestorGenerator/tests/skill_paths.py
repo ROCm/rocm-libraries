@@ -154,6 +154,15 @@ _EXTERNAL_DECL_RE = re.compile(
     r"^<!--\s*skill-paths:\s*external-repo\s+(\S+)\s*-->\s*$", re.MULTILINE
 )
 
+#: The same declaration, scoped to one line instead of a page.
+#:
+#: A page that is mostly about THIS tree may still cite a handful of paths in
+#: another one -- workloads.md names three in a single blockquote that says so in
+#: prose. Exempting the whole page to accommodate them is the broad exemption the
+#: note above rejects: every real path on the page would stop being checked. This
+#: exempts exactly the line it appears on, and is as greppable as the page form.
+_EXTERNAL_LINE_RE = re.compile(r"<!--\s*skill-paths:\s*external-path\s*-->")
+
 
 def declares_external_repo(text: str) -> str | None:
     """The repository a page explicitly declares itself to be about, if any.
@@ -185,6 +194,9 @@ def extract_candidates(
     placeholders: list[ExtractedPath] = []
     external = declares_external_repo(text)
     for lineno, line in enumerate(text.splitlines(), start=1):
+        # Counted as placeholders, not dropped, so the count assertion still sees
+        # them and an exempt line is never silently invisible.
+        line_external = _EXTERNAL_LINE_RE.search(line) is not None
         for m in _TICK_RE.finditer(line):
             raw = m.group(1)
             if "/" not in raw:
@@ -197,7 +209,7 @@ def extract_candidates(
             normalized = _strip_ellipsis_prefix(raw)
             if not _looks_like_repo_path(normalized):
                 continue
-            if external is not None:
+            if external is not None or line_external:
                 placeholders.append(ExtractedPath(filename, lineno, raw, normalized))
                 continue
             candidates.append(ExtractedPath(filename, lineno, raw, normalized))

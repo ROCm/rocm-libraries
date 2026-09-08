@@ -204,7 +204,7 @@ const char* severityName(hipdnnSeverity_t severity)
 /// Every native symbol name one DescriptorSet references, across all five hook kinds:
 /// `engine.graphMatchNativeSymbol`, every `matchers[].matchSymbol` (dispatched by
 /// `matcher.scope` onto the graph- or kernel-scoped registry), every
-/// `dispatches[].dispatchSymbol`, and `heuristic->payload` when the heuristic is
+/// `dispatches[].dispatchSymbol`, and `heuristic->nativeSymbol` when the heuristic is
 /// native. Harvested from pass 1's (unresolved-symbol) sets, before any stub is
 /// registered.
 struct HarvestedSymbols

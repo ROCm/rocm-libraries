@@ -1,5 +1,3 @@
-<!-- skill-paths: external-repo ROCm/dnn-benchmarking -->
-
 # Real workloads — deciding what to compile, and proving it runs
 
 **You are sent here from RUNBOOK step 2a (which shapes exist), step 3 (which to ship) and
@@ -10,8 +8,9 @@ The tool is **`ROCm/dnn-benchmarking`** — a separate repository, not part of t
 It is the project's inventory of what callers actually run, and it is the only source
 here that answers *"will anyone use this kernel?"*
 
-> Prefer its own docs over this page: `README.md` for the CLI and setup,
-> `docs/troubleshooting.md`, and each workload's `MANIFEST.md` for provenance. This file
+> Prefer that repository's own docs over this page — all three paths below are **in the
+> dnn-benchmarking checkout, not this tree**: `README.md` for the CLI and setup,
+> `docs/troubleshooting.md`, and each workload's `MANIFEST.md` for provenance. This file <!-- skill-paths: external-path -->
 > covers only what an ingestor integration needs and the traps that cost real time.
 
 ---
@@ -144,6 +143,18 @@ python3 setup_env.py --workspace .workspace --torch-mode rocm --gpu-arch <arch> 
 source .workspace/.venv/bin/activate
 ```
 
+- **That submodule clone is the flaky step, and every 8e run pays it.** It is a large
+  monorepo; a fresh full clone degrades badly under load and can hang long enough to burn
+  a whole device allocation. Make it cheap and bounded: a blobless clone
+  (`--filter=blob:none`), a sparse checkout of only the paths you need, and a persistent
+  local reference clone to borrow objects from — all wrapped in `timeout` so a hang fails
+  fast instead of eating the allocation. This turns minutes-to-never into seconds.
+- **If you sparse-checkout the submodule, add `.dvc` explicitly.** A cone-mode checkout
+  drops the repository-root `.dvc/` directory while keeping the `*.dvc` pointer files
+  scattered through `Workloads/`. The outer repo then adopts orphaned pointers naming a
+  DVC remote nothing defines, and `dvc pull` fails with a remote-does-not-exist error that
+  reads like a credentials problem. `git sparse-checkout add .dvc` fixes it.
+
 - The `--torch-index-url` is TheRock's nightly channel, and it is in that repo's own
   Dockerfile. **PyTorch must match the container's ROCm.** A mismatch fails at
   `import hipdnn_frontend` *after* `import torch` with an undefined HSA symbol — a
@@ -154,6 +165,62 @@ source .workspace/.venv/bin/activate
 - If you must reuse an existing install, set `ROCM_PATH` to it and pass
   `--plugin-path $ROCM_PATH/lib/hipdnn_plugins/engines` — otherwise your engine is simply
   absent and every graph reports "no engines applicable".
+
+**`setup_env.py` builds with the ingestor OFF, and the symptom is identical to the one
+above.** `HIPDNN_ENABLE_KERNEL_INGESTOR` defaults to **OFF** in both hipDNN and the
+provider (`git grep -n 'option(HIPDNN_ENABLE_KERNEL_INGESTOR'`), so a stock
+`setup_env.py` build produces a plugin that is **present but empty** — and every graph
+reports "no engines applicable", exactly like the missing-`--plugin-path` case. Two
+different faults, one message; that is what makes this expensive to spot.
+
+Tell them apart before changing anything — the plugin file's existence is the
+discriminator, so ask that question first:
+
+| Plugin `.so` | Your engine listed | Fault |
+|---|---|---|
+| absent | — | wrong `--plugin-path` (bullet above) |
+| present, no `arch_content/` | — | pointed at the wrong plugin **directory** — see below |
+| present, with `arch_content/` | no | built with the ingestor OFF |
+
+`hipdnn_list_engines` against the built tree answers the second column; an empty list
+from a plugin that exists is the signature.
+
+**A third fault prints the same message: the torch wheel ships more than one plugin
+directory.** One carries the provider's installed descriptors and one does not, so a
+`find ... | head -1` can select a real plugin directory with no descriptor tree under it.
+**Select on the presence of `arch_content/<arch>`, never on the directory's name** — the
+names are wheel-layout detail and will change; the `arch_content` tree is what the loader
+actually needs.
+
+The fix is to get `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (plus whatever production-pack
+flags your engine needs) into the provider build that `setup_env.py` drives, via its
+repeatable `--cmake-arg`.
+
+**As of writing that flag is UNMERGED** (ROCm/dnn-benchmarking#43, open), so unless your
+submodule already carries it, expect the escalation path below rather than this command:
+
+```bash
+python3 setup_env.py --workspace .workspace --torch-mode rocm --gpu-arch <arch> \
+  --torch-index-url https://rocm.nightlies.amd.com/whl-multi-arch/ -y \
+  --cmake-arg HIPDNN_ENABLE_KERNEL_INGESTOR=ON
+```
+
+`NAME=VALUE`; `-DNAME=VALUE` also works. Extras are appended after the tool's own
+defaults, so a repeat overrides a default.
+
+For a **`packaged`/rocKE** engine the ingestor flag alone is not enough, and the
+packaging flags are a conjunction, not a list — `HkpPackaging.cmake` hard-fails the
+configure if you enable a producer without the wheels, or set a source root with no
+producer. Read the guard before choosing, rather than copying flags from here:
+
+```bash
+git grep -n 'FATAL_ERROR' -- '*HkpPackaging.cmake'
+```
+
+**If `setup_env.py --help` does not list `--cmake-arg`, your submodule predates it** —
+that flag arrived in ROCm/dnn-benchmarking#43. Update the submodule, or say so and
+escalate. Do **not** benchmark without it: a green run against an ingestor-less build
+measures the incumbent, and reads as though your engine lost.
 
 ### What to run
 

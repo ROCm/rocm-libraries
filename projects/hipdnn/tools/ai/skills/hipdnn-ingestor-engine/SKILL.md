@@ -13,7 +13,7 @@ skill, two flows — not one skill per descriptor type — because descriptors c
 each other by UUID and the UMD-vs-`graph_match` decision is a property of the whole
 engine, not of any single file.
 
-This skill is seven files, each with exactly one job. **If you are here to do an
+Every file below has exactly one job. **If you are here to do an
 integration, read this page's completion contract and then drive from `RUNBOOK.md`** —
 everything else is reference material it sends you to at a named step, and each of those
 files tells you what you owe before you return.
@@ -35,6 +35,58 @@ not a description of yours — run the command, never reuse the example's answer
 fields, layout, ABI and baked constants all differ per kernel, and assuming otherwise
 produces silently wrong numbers.
 
+**This skill is source-agnostic too, and that rule has teeth.** Trees get refactored;
+files move, split and get renamed. So this page and its siblings name **what to look
+for and the pattern that finds it** — never a fixed path or a line number. A path
+written down here is a coordinate, and a coordinate is stale the moment someone
+refactors. Two things are safe to state outright, and they are the only two:
+
+- **Contract names** — a CMake option, a schema table, a registration function, a
+  CLI flag. Renaming one of those is a reviewed, breaking change, so a name that
+  breaks *should* break your run loudly.
+- **A search that finds the thing** — an anchor directory plus a glob, or a `git
+  ls-files` / `git log` query. That survives every move that preserves meaning.
+
+**When discovery finds nothing, STOP. Do not guess, and do not proceed on a
+near-match.** A path that used to exist is not evidence of where it went, and an
+integration built against the wrong source fails much later, in a way that reads as
+a kernel bug. Zero hits is a legitimate outcome and it is *information*: it means the
+tree moved out from under this skill.
+
+Escalate to the user. Say, explicitly:
+
+1. **What you were looking for** — in terms of its job, not its filename ("the rocKE
+   builder that defines the spec for this kernel").
+2. **The exact command you ran** and that it returned nothing.
+3. **Where you looked** and what you ruled out.
+4. **That the skill's own expectation appears to be out of date**, and recommend the
+   skill text be updated once they point you at the real location — otherwise the
+   next run hits the identical wall.
+
+Then ask where it lives, and wait. Blocking on a question costs minutes; guessing
+costs a debugging session at stage 8, or a wrong integration nobody catches.
+
+**A symptom is not a cause. Confirm the mechanism in source before you name one, and
+especially before you escalate.** The same discipline as the rule above, pointed at
+diagnosis instead of discovery. Two different faults routinely print the same message in
+this stack — "no engines applicable" is *either* a wrong plugin path *or* a build with
+the ingestor OFF; a FAILED validation row is *either* a numeric mismatch *or* a row where
+no comparison ran at all. Find the line that emits the message and check that its
+preconditions actually hold.
+
+Two tells that a "failure" is not the failure you think:
+
+- **Numbers that do not fit the dtype.** An fp32-shaped tolerance on a bf16 or fp16 graph
+  means the dtype-aware path was never taken — so nothing was compared.
+- **A failure with no magnitude.** If the tool prints a difference whenever it has one and
+  none appears, none was computed. An empty field is not a zero.
+
+The same trap applies to the tools you diagnose WITH. This shell's `grep` has no BRE `\|`
+alternation, so `grep "a\|b"` matches nothing and reports success. **An empty result is
+not evidence until the pattern has matched something you know is there** — use `grep -E`
+and give it a positive control. Two "defects" reported against this skill were that
+mistake, not defects.
+
 ## Completion contract — read this before starting
 
 **A generated, validated descriptor bundle is NOT a finished integration.** It is roughly
@@ -42,6 +94,15 @@ a third of one. An engine whose descriptors validate perfectly and whose matcher
 `nullopt` serves exactly zero graphs, and every mechanical check stays green while it does
 so. That is the failure mode this skill exists to prevent, and reporting a validated
 bundle as "done" reproduces it.
+
+**If you were handed a PARTIAL run — "take this from stage 7 to stage 10", "just do the
+device run and the report" — the stage numbers in that prompt are a pointer to this
+table, never a redefinition of it.** A kickoff that says "stage 8: bundles and an
+on-device run" has silently dropped 8e, which is part of the stage-8 gate, and a run that
+skips it and reports "stage 8 complete" overstates what was proven. This has happened:
+8e was skipped on a stage-scoped kickoff and the miss was only caught when a human asked
+why the variant set was so small. **Re-read this table and the runbook's own step list
+before accepting any prompt's account of what a stage contains.**
 
 The ten stages, in order. A run is **incomplete** until stage 9:
 
@@ -62,9 +123,18 @@ The ten stages, in order. A run is **incomplete** until stage 9:
 `RUNBOOK.md`'s sequence table carries the per-step `Produces` / `Gate` / `Typical time`
 contract. Three stages have a mechanical done-check and they are the ones runs die on:
 stage 2 is done when **both** `graph_contract.md` and `mining.md` exist, and stage 5 when
-`grep -c "FILL THIS OUT"` on the pack returns 0. Research that produced no file is not a
+`generate.py --check-placeholders` exits 0. Research that produced no file is not a
 completed stage — it is a stall, and the cure is to write down what you have, mark the
 uncertain rows, and move.
+
+**Scan for site-specific content immediately before every push, over the CURRENT file
+set.** These branches are public. Scheduler payloads, run scripts and logs accumulate
+hostnames, cluster and partition names, account names, shared image paths and other
+people's home directories — and they are written at stage 8, long after the early stages
+you may have scanned. A scan scoped to an earlier diff reports clean about files it never
+saw, which is exactly how a leak has shipped: the scan ran, passed, and the offending
+files were created afterwards. Re-scan the full set each time, and give the pattern a
+positive control before you believe a zero (see the `grep -E` note above).
 
 **Check at stage 1 that stage 8 is reachable.** The shared reference executors are dense
 and stride-based and decline paged KV, varlen, ragged tensors and block-sparse — see
@@ -169,8 +239,8 @@ steps in `extend.md`.
 ## Validator availability — check this before promising validation
 
 `hipdnn_validate_descriptors` is built and installed **only** when the consuming build
-was configured with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`
-(`projects/hipdnn/CMakeLists.txt:65`), and that option's default is **OFF**. A build
+was configured with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (find where the option is
+declared with `git grep -n 'option(HIPDNN_ENABLE_KERNEL_INGESTOR'`), and its default is **OFF**. A build
 directory configured the ordinary way will not contain the binary at all. Absence is
 the **common** case, not an edge case — both flows must detect it explicitly (search the
 active build directory's `bin/`, and any install prefix, for `hipdnn_validate_descriptors`)
@@ -292,10 +362,11 @@ more variants.
 
 ### And two known gaps in the surrounding tooling, not in yours
 
-- **The packer is single-threaded.** Its cost scales with the shape you compile, not just
-  the count, so a variant-count budget that looks like a design limit is partly a tooling
-  artifact. Time one pack and check whether it saturates the machine before you shrink a
-  set to fit it.
+- **Packing cost scales with the shape you compile, not just the variant count**, so a
+  variant-count budget that looks like a design limit is partly a tooling artifact. Time
+  one pack and check whether it saturates the machine before you shrink a set to fit it.
+  (`hkp_pack` parallelises its prewarm across `HKP_PACK_JOBS` workers; `HKP_PACK_JOBS=1`
+  forces serial, which is the knob to reach for when a pack's failure output interleaves.)
 - **Descriptors land in the packager's tree, not the engine tree**, because `hkp_pack`
   rejects the engine tree's dialect. RUNBOOK step 4 has the detail. This is a known
   deviation, not your layout mistake — but say so in your report rather than leaving the
@@ -304,23 +375,23 @@ more variants.
 ## Reference materials this skill relies on
 
 - Descriptor-format authority, in precedence order: the loader itself
-  (`projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`
-  — `FILE_TYPES` and the `parse*` functions are what actually accepts or rejects a
+  (`git ls-files '*ingestor/DescriptorLoader.hpp'` — `FILE_TYPES` and the `parse*`
+  functions are what actually accepts or rejects a
   file), the struct definitions beside it (`Descriptors.hpp`), and the native hook
   signatures (`NativeRegistry.hpp`). The design intent is in
   `projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md` and
   `0020_UniversalEngineDescriptor.md`, but where an RFC and the loader disagree, **the
   loader wins** — the RFCs are design documents, not specifications of the code.
-- Worked examples to copy: the shipped descriptor sets under
-  `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/`
-  (`conv_fwd/` is the smallest complete engine; `pointwise/` is the multi-pack shape),
+- Worked examples to copy: the shipped descriptor sets in the engine's `descriptors/`
+  directory — `git ls-files '*kernel_ingestor_engine/descriptors/*'` (at time of writing
+  `conv_fwd/` is the smallest complete engine and `pointwise/` the multi-pack shape),
   with their native halves in the sibling `packs/` directory. **Read them as shape
   references, not as your destination:** they are `direct_load` (`kind: embedded_source`),
   and `hkp_pack` rejects that kind, so a `packaged` integration cannot currently be
   authored in that tree. RUNBOOK step 4 has the detail; your descriptors go to the
   packager's `PRODUCTION_SOURCE_ROOT` until it is fixed.
 - The generator's CLI: `generate.py --config <yaml> --output-dir <dir> [--dry-run] [--force]`,
-  under `projects/hipdnn/tools/IngestorGenerator/`.
+  in the `IngestorGenerator` tool directory (`git ls-files '*IngestorGenerator/generate.py'`).
 - The validator's CLI and `--json` shape:
   `hipdnn_validate_descriptors <root>... [--native-source <cpp>]... [--expect-engine <name>]... [--json]`,
-  built from `projects/hipdnn/tools/IngestorGenerator/ValidateDescriptors.cpp`.
+  built from the `ValidateDescriptors.cpp` beside that generator.

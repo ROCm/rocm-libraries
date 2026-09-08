@@ -102,12 +102,14 @@ grep -nE "b\.(block|thread)_id_[xyz]" $M
 sed -n '1,25p' $M
 ```
 
-Introspect first, to get the field inventory mechanically:
+Introspect first, to get the field inventory mechanically. Use a builder name from the
+`^def build_` enumeration above — there is no naming convention, so `<builder>` below is
+a name you read out of the module, never one you construct:
 
 ```
 python3 -c "
 from codegen.sources import introspect
-i = introspect('kernels/<arch>/<mod>.py', 'build_<op>')
+i = introspect('kernels/<arch>/<mod>.py', '<builder>')
 print(i.signature_error or 'OK'); print(i.spec_class)
 print('required:', [f.name for f in i.required_fields])
 print('arches:', i.supported_arches)
@@ -407,10 +409,10 @@ the mapping you are held to. Read the kernel's own key-set or formula and the re
 side by side, and equate them term by term rather than assuming the "obvious" direction.
 
 *(The gfx950 dense kernel's sliding-window field is the sharp instance — it isn't even
-named in the schema, only derived. The kernel keeps a key iff `ktok > q - W`
-(`attention_dense.py:832,843`); the reference drops iff `skv < sq - L`
-(`GpuRefSdpaFwd.cpp:141-147`); so `W = L + 1`. The reference's own comment states the
-asymmetry — "+1 on the right bound, none on the left bound" — so guessing either
+named in the schema, only derived. The kernel keeps a key iff `ktok > q - W` (the `win_lo`
+window bound in the gfx950 dense builder); the reference drops iff `skv < sq - L` (the `leftBound`
+branch of `GpuRefSdpaFwd.cpp`'s `score` lambda); so `W = L + 1`. The reference's own
+comment states the asymmetry — "+1 on the right bound, none on the left bound" — so guessing either
 direction is a silent one-key error on every masked graph. Alignment is the same shape of
 problem: the reference shifts by `offset = topLeft ? 0 : (Skv - Sq)`; a kernel masking on
 raw absolute token indices implements one alignment convention only, and the other is
@@ -540,6 +542,31 @@ Determine which by reading the `b.param` declarations line by line and noting wh
 each sits inside an `if`. Then mirror exactly that in `launch()`, and cite the Python
 lines in a comment — nothing checks this correspondence.
 
+### Every pointer needs a named source. Synthesis is an applicability rule.
+
+Getting the ABI *aligned* is not the same as getting it *right*. For each pointer
+parameter, write down which of these it is — the table is the deliverable, one row per
+pointer, and a pointer with no row is an unfinished audit:
+
+| Source | Meaning |
+|---|---|
+| a graph tensor | the UID whose device buffer you pass |
+| a value the graph supplies | scalar or metadata, named |
+| **synthesised in `launch()`** | you are computing it — see below |
+
+**A synthesised pointer is a claim about the inputs, and the claim belongs in
+`graph_match`.** A shipped integration filled `query_start_len_ptr` and `seq_lens_ptr`
+by computing offsets from tensor dimensions — correct only when every sequence in the
+batch has the same length, and silently wrong otherwise. Nothing failed: the kernel
+launched, the graph ran, the numbers were wrong for non-uniform batches only, and no
+gate covers arithmetic nobody declared.
+
+So: if you synthesise a pointer, state the assumption that makes the synthesis valid,
+and **enforce that assumption in `graph_match`** — decline the graphs it does not hold
+for. An assumption you cannot enforce is a decline, not a default. The enumeration is
+mechanical: the parameter list you just read line by line *is* the checklist, so do this
+while you have it open rather than at step 6 when the ABI is a memory.
+
 ---
 
 ## `supports_*` is necessary, not sufficient
@@ -581,7 +608,7 @@ the one that has actually shipped bugs.
 
 ### Worked example: the `batch == 1` defect
 
-`attention_dense.py:360-361` reads:
+The gfx950 dense kernel's builder module — the one your `MODULE` points at — reads:
 
 ```python
 if self.batch != 1:
