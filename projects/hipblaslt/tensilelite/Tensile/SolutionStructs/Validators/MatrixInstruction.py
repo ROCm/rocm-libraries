@@ -306,10 +306,16 @@ def validateMIParameters(
         assert miEnabled == False, elineno()
         return True
 
-    assert solution["MatrixInstM"] == mi4[0]
-    assert solution["MatrixInstN"] == mi4[1]
-    assert solution["MatrixInstK"] == mi4[2]
-    assert solution["MatrixInstB"] == mi4[3]
+    # With SourceSwap the MatrixInstruction's M/N are transposed relative to
+    # MatrixInstM/MatrixInstN (e.g. F4 32x16 WMMA), so assert the swapped order.
+    if solution.get("SourceSwap", False):
+        assert solution["MatrixInstM"] == mi4[1], elineno()
+        assert solution["MatrixInstN"] == mi4[0], elineno()
+    else:
+        assert solution["MatrixInstM"] == mi4[0], elineno()
+        assert solution["MatrixInstN"] == mi4[1], elineno()
+    assert solution["MatrixInstK"] == mi4[2], elineno()
+    assert solution["MatrixInstB"] == mi4[3], elineno()
 
     assert mi4 in validMatrixInstructions, f"{elineno()} : invalid MI4: {str(mi4)} for type {miDataType.toChar()}"
 
