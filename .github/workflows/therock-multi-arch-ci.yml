@@ -199,6 +199,8 @@ jobs:
           "ref": "${{ github.sha }}",
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
+      # Pass changed projects for sparse checkout optimization
+      changed_projects: ${{ needs.configure.outputs.changed_projects }}
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
