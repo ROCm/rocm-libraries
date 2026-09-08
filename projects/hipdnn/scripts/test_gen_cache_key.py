@@ -196,13 +196,15 @@ class TestUidCanonicalization(unittest.TestCase):
         with self.assertRaises(SystemExit):
             Emitter(broken, f"{NS}.Root")
 
-    def test_more_than_one_domain_is_rejected(self):
-        # Ordinals are positions in one vector; two candidates have no defined answer.
+    def test_more_than_one_domain_annotation_is_rejected(self):
+        # The second annotation is on a non-domain-shaped vector, so this reaches
+        # the duplicate-annotation check rather than the candidate ambiguity check.
         broken = uid_schema([field("x_tensor_uid", "Long", 0, uid=True)])
+        broken["objects"].append(table(f"{NS}.Decoy", [field("value", "Int", 0)]))
         broken["objects"][2]["fields"].append(
-            field("more_tensors", "Vector", 2, index=0, element="Obj", uid_domain=True)
+            field("more_domains", "Vector", 2, index=3, element="Obj", uid_domain=True)
         )
-        with self.assertRaises(SystemExit):
+        with self.assertRaisesRegex(SystemExit, "declared on 2 fields"):
             Emitter(broken, f"{NS}.Root")
 
     def test_a_second_domain_shaped_candidate_is_rejected(self):
@@ -313,6 +315,20 @@ class TestPortableByteOperations(unittest.TestCase):
         ]
         self.assertIn("aValue.has_value() != bValue.has_value()", body)
         self.assertIn("std::memcmp(&*aValue, &*bValue", body)
+
+    def test_a_float_vector_compares_elements_by_object_representation(self):
+        root = table(
+            f"{NS}.Root",
+            [field("values", "Vector", 0, element="Float")],
+        )
+        body = function_bodies(Emitter(schema([root]), f"{NS}.Root").emit())[
+            ("equal", "Root")
+        ]
+        self.assertIn("std::memcmp(&aValue, &bValue, sizeof(aValue))", body)
+        self.assertNotIn(
+            "aItems->Get(index) != bItems->Get(index)",
+            body,
+        )
 
 
 class TestUnhandledBaseType(unittest.TestCase):

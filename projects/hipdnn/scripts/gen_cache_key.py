@@ -869,6 +869,14 @@ class Emitter:
                 )
                 self.w("            {")
                 self.w("                return false;")
+            elif element in ("Float", "Double"):
+                self.w("            const auto aValue = aItems->Get(index);")
+                self.w("            const auto bValue = bItems->Get(index);")
+                self.w(
+                    "            if(std::memcmp(&aValue, &bValue, sizeof(aValue)) != 0)"
+                )
+                self.w("            {")
+                self.w("                return false;")
                 self.w("            }")
             else:
                 if uid:
