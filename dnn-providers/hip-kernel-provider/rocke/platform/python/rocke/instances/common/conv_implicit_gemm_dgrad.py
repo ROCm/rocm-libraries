@@ -55,6 +55,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from ...core.ir import (
     BF16,
+    F16,
     F32,
     I32,
     IRBuilder,
@@ -450,6 +451,20 @@ def make_dgrad_dx_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescr
 # ---------------------------------------------------------------------
 
 
+# The K-outer B tile is fed by ds_read_tr16_b64, a CDNA4 transpose read.
+_LDS_K_OUTER_ARCH = "gfx950"
+
+# Row stride pad, in elements, for the K-outer B tile. The row stride must not
+# be a multiple of the 32-dword LDS bank period or the transpose read
+# degenerates: the only lane term that walks rows is ((l%16)//4), which
+# contributes zero bank spread whenever (stride_elems * 2 / 4) % 32 == 0. A pad
+# of 8 makes a 64-wide tile 36 dwords (36 % 32 == 4), spreading the four
+# row-groups across banks, and keeps each row 16-byte aligned for the b128
+# store side. Shared by the builder and is_valid_dgrad_spec so the charged and
+# the allocated shape cannot drift. Mirrors ROCKE_DGRAD_KOUTER_PAD.
+_KOUTER_PAD = 8
+
+
 @dataclass(frozen=True)
 class DgradConvSpec:
     """One concrete implicit-GEMM backward-data convolution configuration.
@@ -489,6 +504,25 @@ class DgradConvSpec:
     async_dma: bool = False
     unroll_k: bool = False
     lds_k_pad: Optional[int] = None
+
+    # Store the B (W, KYXC) LDS tile K-outer as T[k][n] and transpose during the
+    # MFMA operand fetch with ds_read_tr16_b64.
+    #
+    # Unlike wgrad this is a B-ONLY layout. dgrad's A (dY, NHWK) already has a
+    # stride-1 reduction axis -- k_out is innermost in k_dg -- so its loader is
+    # already vector_axis="col" with a single wide smem_store_vN, and its
+    # M-outer fragment read is already conflict-free via lds_k_pad. Flipping A
+    # would put the global vector along m=(n,hi,wi), stride K in NHWK, which
+    # destroys coalescing for zero write-side gain.
+    #
+    # B is the sole scatter: c (KYXC's stride-1 axis) is the GEMM free axis, so
+    # axis_b="row" makes _store_tile emit one ds_write_b16 per element, and
+    # adjacent lanes step whole padded rows -- a bank-degenerate write the
+    # lds_k_pad tuning cannot fix, because that pad is derived for a row step of
+    # 1 on the read path.
+    #
+    # Default False so every existing dgrad golden stays byte-identical.
+    lds_k_outer: bool = False
 
     vector_size_a: Optional[int] = None
     vector_size_b: Optional[int] = None
@@ -564,6 +598,41 @@ class DgradConvSpec:
 
         return _vec(K), _vec(C), _vec(C)
 
+    @staticmethod
+    def default_lds_k_outer(
+        *,
+        arch: str,
+        dtype_b: str,
+        warp_tile_n: int,
+        cpg: int,
+        wave_size: int = 64,
+    ) -> bool:
+        """Whether the K-outer B tile is the better layout for this spec.
+
+        Note two deliberate divergences from the wgrad predicate.
+
+        The gate is ASYMMETRIC: it keys on ``dtype_b``/``warp_tile_n`` only,
+        never their A-side counterparts, because only the B tile flips. Copying
+        wgrad's symmetric predicate would over-reject dgrad specs whose A side
+        differs.
+
+        It also carries ``cpg``. The saving is proportional to the B load width,
+        and that width collapses to 1 when the stride-1 channel run is odd -- at
+        which point ``axis_b`` is already "col" and there is no scatter to
+        remove, so K-outer would be a small pure regression rather than a win.
+
+        The ``lds_k_outer`` field itself still defaults to False; this is the
+        selection policy, not the default.
+        """
+        if arch != _LDS_K_OUTER_ARCH or wave_size != 64:
+            return False
+        if dtype_b not in ("bf16", "fp16"):
+            return False
+        if warp_tile_n not in (16, 32):
+            return False
+        # 16-bit free-axis width > 1 requires an even channel run.
+        return cpg % 2 == 0
+
     # ---- dgrad GEMM dimensions ----
 
     @property
@@ -632,6 +701,11 @@ class DgradConvSpec:
             self.acc_epilogue.tag(),
             flags={
                 "async": self.async_dma,
+                # Mandatory, not cosmetic: the compile cache keys on
+                # kernel.name, so an M-outer and a K-outer spec differing only
+                # in LDS layout would collide on one symbol and an A/B sweep
+                # would silently measure one kernel twice.
+                "kouter": self.lds_k_outer,
                 f"spk{self.split_k}": self.split_k > 1,
                 "spkauto": self.split_k == -1,
             },
@@ -678,6 +752,40 @@ class DgradConvSpec:
                 "DgradConvSpec: 3-D convolution is not yet supported for the dgrad "
                 "direction (Phase 1 is 2-D only)"
             )
+        if self.lds_k_outer:
+            # ds_read_tr16_b64 is a 16-bit transpose read, so only the B side
+            # constrains the dtype -- A keeps the ordinary _emit_smem_load.
+            if self.data.dtype_b not in ("bf16", "fp16"):
+                raise ValueError(
+                    "lds_k_outer requires a 16-bit B dtype (ds_read_tr16_b64 is "
+                    f"a 16-bit transpose read); got dtype_b={self.data.dtype_b!r}"
+                )
+            if self.warp_tile_n not in (16, 32):
+                raise ValueError(
+                    "lds_k_outer requires warp_tile_n in (16, 32) -- the "
+                    "transpose-read lane mapping is derived per 16-lane group "
+                    f"over the atom edge; got warp_tile_n={self.warp_tile_n}"
+                )
+            if self.wave_size != 64:
+                raise ValueError(
+                    "lds_k_outer requires wave_size=64 (ds_read_tr16_b64 is a "
+                    f"wave64 instruction); got {self.wave_size}"
+                )
+            if self.lds_layout is not None:
+                # Reject rather than ignore: under K-outer the B shape is
+                # computed straight from (block_k, block_n + _KOUTER_PAD) and
+                # never consults the layout object, so honouring an explicit
+                # one would be a silent lie.
+                raise ValueError(
+                    "lds_k_outer does not honour an explicit lds_layout: the "
+                    "K-outer B row stride is fixed by the transpose-read bank "
+                    "argument (_KOUTER_PAD). Leave lds_layout=None."
+                )
+            if self.async_dma:
+                raise ValueError(
+                    "lds_k_outer is not supported with async_dma on dgrad: the "
+                    "tilde builder has no direct global->LDS path"
+                )
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -789,10 +897,35 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     ):
         return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
 
+    if spec.lds_k_outer:
+        # This gate has NO counterpart in validate() and that split is the whole
+        # point: without it an older target builds cleanly and emits
+        # ds_read_tr16_b64, surfacing as an assembler failure far from the cause.
+        if arch != _LDS_K_OUTER_ARCH:
+            return False, (
+                f"lds_k_outer requires {_LDS_K_OUTER_ARCH} (ds_read_tr16_b64 is a "
+                f"CDNA4 transpose read); got {arch}"
+            )
+        if family == "wmma":
+            return False, "lds_k_outer is an MFMA-family path; got wmma"
+        # Soft mirrors of the validate() gates, so sweep drivers get a reason
+        # string instead of swallowing a builder ValueError into a silent skip.
+        if spec.lds_layout is not None:
+            return False, "lds_k_outer does not honour an explicit lds_layout"
+        if spec.async_dma:
+            return False, "lds_k_outer is not supported with async_dma on dgrad"
+
     _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
     _lds_layout = spec.effective_lds_layout()
+    # A is genuinely still M-outer; only B flips, so only B's charge branches.
+    # Both sides read _KOUTER_PAD from the module constant so the charged shape
+    # and the allocated shape cannot drift.
     _a_shape = _lds_layout.storage_shape(spec.tile_m)
-    _b_shape = _lds_layout.storage_shape(spec.tile_n)
+    _b_shape = (
+        (spec.tile_k, spec.tile_n + _KOUTER_PAD)
+        if spec.lds_k_outer
+        else _lds_layout.storage_shape(spec.tile_n)
+    )
     _ab_bytes = (
         _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes
@@ -1180,9 +1313,13 @@ def _build_tilde_dgrad(
     A_smem = b.smem_alloc(
         ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem"
     )
-    B_smem = b.smem_alloc(
-        ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem"
-    )
+    if spec.lds_k_outer:
+        # K-outer: rows are K, columns are the free axis N. See _KOUTER_PAD for
+        # why the stride must not be a multiple of the 32-dword bank period.
+        b_shape = (block_k, block_n + _KOUTER_PAD)
+    else:
+        b_shape = lds_layout.storage_shape(block_n)
+    B_smem = b.smem_alloc(ir_dtype_b, b_shape, name_hint="B_smem")
 
     mfmas_m = spec.mfmas_per_warp_m
     mfmas_n = spec.mfmas_per_warp_n
@@ -1226,7 +1363,28 @@ def _build_tilde_dgrad(
         max_vec=_def_vec_b,
         vector_axis="row",
     )
-    if spec.vector_size_b is not None:
+    if spec.lds_k_outer:
+        # Recompute in col mode over the swapped tile. This is provably
+        # value-preserving: choose_vec tests tile_rows in "row" mode and
+        # tile_cols in "col" mode, so both calls test the same extent (block_n)
+        # against the same product (block_n * block_k). load_vec_b is therefore
+        # invariant under the swap -- the emitted global buffer_loads are
+        # unchanged and ONLY the LDS store instruction changes, from
+        # load_vec_b scalar ds_write_b16 to one wide smem_store_vN.
+        _max_vb = (
+            _def_vec_b
+            if spec.vector_size_b is None
+            else min(_def_vec_b, spec.vector_size_b)
+        )
+        load_vec_b = CoalescedTileLoader.choose_vec(
+            tile_rows=block_k,
+            tile_cols=block_n,
+            block_size=threads,
+            max_vec=_max_vb,
+            vector_axis="col",
+        )
+        axis_b = "col"
+    elif spec.vector_size_b is not None:
         load_vec_b = spec.vector_size_b
         axis_b = "row" if load_vec_b > 1 else "col"
     elif _vb > 1:
@@ -1345,9 +1503,14 @@ def _build_tilde_dgrad(
         load_vec=load_vec_a,
         elem_dtype=ir_dtype_a,
     )
+    # Flipping the tile makes the free axis the column axis, so _store_tile
+    # takes its existing wide-store branch. No change to loads.py is required.
+    _b_tile_rows, _b_tile_cols = (
+        (block_k, block_n) if spec.lds_k_outer else (block_n, block_k)
+    )
     b_sync_loader = CoalescedTileLoader(
-        tile_rows=block_n,
-        tile_cols=block_k,
+        tile_rows=_b_tile_rows,
+        tile_cols=_b_tile_cols,
         block_size=threads,
         load_vec=load_vec_b,
         elem_dtype=ir_dtype_b,
@@ -1373,13 +1536,68 @@ def _build_tilde_dgrad(
     schedule = SchedulePolicy.for_pipeline(spec.pipeline)
     schedule.emit_prologue(b)
 
+    if spec.lds_k_outer:
+
+        def _b_desc_fn(b_: IRBuilder, row: Value, col: Value):
+            return w_descriptor(b_, col, row)
+
+    else:
+        _b_desc_fn = w_descriptor
+
+    # The fragment length is per-atom, not a constant: 8 for 32x32x16 and
+    # 16x16x32, 4 for 16x16x16 and 32x32x8. Hardcoding 8 would make a
+    # 4-element atom read past the end of the K-outer tile and return garbage.
+    if spec.lds_k_outer and b_per_lane % 4 != 0:
+        raise ValueError(
+            f"lds_k_outer needs a B fragment length that is a multiple of 4 "
+            f"(ds_read_tr16_b64 returns 4 elements per lane); got "
+            f"b_per_lane={b_per_lane} for atom "
+            f"{spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k}"
+        )
+
+    # Materialised only on the K-outer path: emitting these unconditionally
+    # would add IR ops to every existing config and move every dgrad golden.
+    if spec.lds_k_outer:
+        _tr_lane_mod4 = b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4))
+        _tr_grp16 = b.div(b.mod(lane, b.const_i32(16)), b.const_i32(4))
+
+    def _tr_frag(smem: Value, mn_base: Value, k_base: Value, mn_atom: int, n: int):
+        """One MFMA operand fragment from a K-outer tile via transpose reads."""
+        c_mn = b.const_i32(mn_atom)
+        col = b.add(
+            mn_base,
+            b.add(
+                b.mul(b.div(b.mod(lane, c_mn), b.const_i32(16)), b.const_i32(16)),
+                _tr_lane_mod4,
+            ),
+        )
+        row0 = b.add(k_base, b.add(b.mul(b.div(lane, c_mn), b.const_i32(n)), _tr_grp16))
+        # ``_smem_dtype`` is None for fp16 (the legacy "default is F16"
+        # convention used by _emit_smem_load); ds_read_tr16_b64 needs a concrete
+        # element type, so resolve it here.
+        tr_dtype = _smem_dtype if _smem_dtype is not None else F16
+        parts = [
+            b.ds_read_tr16_b64(
+                smem, b.add(row0, b.const_i32(4 * r)), col, dtype=tr_dtype
+            )
+            for r in range(n // 4)
+        ]
+        out = parts[0]
+        for pt in parts[1:]:
+            out = b.vec_concat(out, pt)
+        return out
+
     def emit_load_phase(k_off: Value, A_dst: Value, B_dst: Value) -> None:
         k_off_capture[0] = k_off
         a_sync_loader.load(
             b, tid=tid, smem_dst=A_dst, descriptor=dy_descriptor, rsrc=dy_rsrc
         )
+        # The K-outer tile is indexed (k, free) while w_descriptor takes
+        # (free, k). w_descriptor itself is untouched, so the global addressing
+        # and its OOB select stay byte-identical -- this is a swap, not a
+        # redesign.
         b_sync_loader.load(
-            b, tid=tid, smem_dst=B_dst, descriptor=w_descriptor, rsrc=w_rsrc
+            b, tid=tid, smem_dst=B_dst, descriptor=_b_desc_fn, rsrc=w_rsrc
         )
 
     def emit_mfma_phase(
@@ -1459,6 +1677,17 @@ def _build_tilde_dgrad(
                 )
             b_cols = []
             for ni in range(mfmas_n):
+                if spec.lds_k_outer:
+                    b_cols.append(
+                        _tr_frag(
+                            B_src,
+                            b.add(warp_n_off, b.const_i32(ni * spec.warp_tile_n)),
+                            b.const_i32(kk * spec.warp_tile_k),
+                            spec.warp_tile_n,
+                            b_per_lane,
+                        )
+                    )
+                    continue
                 b_row = b.add(
                     warp_n_off,
                     b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom),

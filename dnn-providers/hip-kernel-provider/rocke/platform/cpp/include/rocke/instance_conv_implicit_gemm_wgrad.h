@@ -47,6 +47,16 @@
 #define ROCKE_INSTANCE_CONV_IMPLICIT_GEMM_WGRAD_H
 
 #include <stdbool.h>
+
+/* Column pad (in elements) for the K-outer wgrad LDS tile. Keeps the row stride
+ * off a multiple of the LDS bank period while staying 16-byte aligned for the
+ * wide store. Mirrors _KOUTER_PAD in conv_implicit_gemm_wgrad.py. */
+#define ROCKE_WGRAD_KOUTER_PAD 8
+
+/* The K-outer LDS tile is fed by ds_read_tr16_b64, a CDNA4 transpose read.
+ * Emitting it for an older target produces IR the assembler will reject.
+ * Mirrors _LDS_K_OUTER_ARCH in conv_implicit_gemm_wgrad.py. */
+#define ROCKE_WGRAD_LDS_K_OUTER_ARCH "gfx950"
 #include <stddef.h>
 
 #include "rocke/helper_rocke.instances.common.conv_implicit_gemm.h" /* rocke_conv_problem_t */
@@ -114,6 +124,11 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
     const char* epilogue; /* default "default" */
     bool async_dma; /* default false */
     bool unroll_k; /* default false */
+    /* Store the A/B tiles K-outer (LDS[k][m] / LDS[k][n]) and feed the MFMA with
+     * gfx950 ds_read_b64_tr_b16 transpose reads instead of transposing on store.
+     * Mirrors WgradConvSpec.lds_k_outer. Default false: strictly additive, so
+     * every existing config emits byte-identical IR. */
+    bool lds_k_outer; /* default false */
 
     bool has_lds_k_pad; /* false => Python None */
     int lds_k_pad;
@@ -167,6 +182,11 @@ int rocke_wgrad_conv_spec_wg_N(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
 /* spec.wg_K: output spatial positions (N * Ho * Wo [* Do]). */
 int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
+
+/* Max K iterations the Python-unrolled loops (pipeline="basic" and async_dma)
+ * may unroll to. Build-practicality bound (code size / compile time), not a
+ * hardware limit. Mirrors _MAX_UNROLLED_K_ITERS in conv_implicit_gemm_wgrad.py. */
+#define ROCKE_MAX_UNROLLED_K_ITERS 128
 
 /* spec.wg_K_padded(): wg_K rounded up to tile_k * split_k. */
 int rocke_wgrad_conv_spec_wg_K_padded(const rocke_implicit_gemm_conv_wgrad_spec_t* s);

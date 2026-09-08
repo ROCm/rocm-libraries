@@ -244,30 +244,57 @@ namespace TensileLite
                                 * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
                                    * value[2] * value[4] * value[3] * problem.d().sizes()[2];
 
-                    // This guards the GSU (MBSK) region, which is sized per
-                    // problem and unchanged from before.
-                    bool ret = synchronizerUsage <= GsuSynchronizerElements;
-                    // A group wider than the block cannot be given a private
-                    // region per problem, so it must not run a solution that
-                    // uses these flags at all.
-                    if(problem.groupedGemm())
-                        ret = ret && (problem.groupedGemmCount() <= SynchronizerGroupedSlots);
-                    return ret;
+                    // Guards the GSU (MBSK) region. A non-grouped GEMM is handed
+                    // the base of the buffer and may use every slot; a grouped
+                    // GEMM is handed the slot at its problem index, so one slot
+                    // bounds it and the group has to fit in the slots that exist.
+                    if(!problem.groupedGemm())
+                        return synchronizerUsage
+                               <= GsuSynchronizerElements * SynchronizerGroupedSlots;
+
+                    return synchronizerUsage <= GsuSynchronizerElements
+                           && problem.groupedGemmCount() <= SynchronizerGroupedSlots;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    return debugEvalCmp(
-                        problem,
-                        stream,
-                        "prob",
-                        (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
-                         * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
-                            * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2],
-                        ">=",
-                        "limit",
-                        GsuSynchronizerElements);
+                    // Mirrors operator(): an unsplit GSU never reaches the
+                    // flags, and printing a usage row for it would read as a
+                    // failure next to a passing verdict.
+                    int16_t gsu = problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[5];
+                    if(gsu == -1 || gsu == 1)
+                        return debugEvalCmp(problem, stream, "gsu", gsu, "in", "unsplit", "{-1,1}");
+
+                    uint32_t synchronizerUsage
+                        = (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
+                           * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
+                          * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2];
+
+                    // Report both halves of the grouped condition: a group wider
+                    // than the slots is rejected however small its usage, so a
+                    // usage row alone would read as a pass next to the verdict.
+                    if(problem.groupedGemm())
+                        return debugEvalCmp(problem,
+                                            stream,
+                                            "prob",
+                                            synchronizerUsage,
+                                            "<=",
+                                            "limit",
+                                            GsuSynchronizerElements,
+                                            "gemms",
+                                            problem.groupedGemmCount(),
+                                            "<=",
+                                            "slots",
+                                            SynchronizerGroupedSlots);
+
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        synchronizerUsage,
+                                        "<=",
+                                        "limit",
+                                        GsuSynchronizerElements * SynchronizerGroupedSlots);
                 }
             };
 

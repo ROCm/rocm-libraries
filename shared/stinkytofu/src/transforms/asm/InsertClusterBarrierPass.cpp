@@ -32,9 +32,11 @@
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/AsmSetSymbolMap.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/support/OptimizationRemark.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPassTestSupport.hpp"
 
@@ -83,6 +85,9 @@ std::string makeRandomHash() {
     return out;
 }
 
+/// An SGPR identified only by its `.set` symbol. The index is a placeholder
+/// that names a real register, so `resolveSymbolicOperands` at the end of `run`
+/// replaces it before any consumer keys on it.
 StinkyRegister makeSymbolicSgpr(const std::string& symbolicName) {
     StinkyRegister reg(RegType::S, /*regIdx=*/0u, /*regNum=*/1u);
     reg.setSymbolicName(symbolicName);
@@ -283,6 +288,9 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
            "Cluster-barrier opcodes are not supported on this architecture");
 
     StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, anchor);
+    // Implicit-operand legalisation has already run, so declare the SCC write
+    // that the branch below depends on.
+    cmpInst->addDestReg(StinkyRegister::getSCCRegister());
     cmpInst->addSrcReg(makeSymbolicSgpr(kWaveIdxSymbol));
     cmpInst->addSrcReg(StinkyRegister(0));
     cmpInst->addModifier<CommentData>(CommentData{"Check for waveID 0"});
@@ -325,6 +333,9 @@ void insertRule1ClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuild
     assert(cmpDesc && brDesc && "LoopCounterL gate opcodes are not supported on this architecture");
 
     StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, anchor);
+    // Implicit-operand legalisation has already run, so declare the SCC write
+    // that the branch below depends on.
+    cmpInst->addDestReg(StinkyRegister::getSCCRegister());
     cmpInst->addSrcReg(makeSymbolicSgpr(kLoopCounterLSymbol));
     cmpInst->addSrcReg(StinkyRegister(0));
     cmpInst->addModifier<CommentData>(CommentData{"gate: only signal when LoopCounterL != 0"});
@@ -1471,6 +1482,21 @@ class InsertClusterBarrierPassImpl : public Pass {
                 insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(tailTL),
                                                "cluster barrier wait", irBuilder, archId);
             }
+        }
+
+        // The gates above carry placeholder indices (see makeSymbolicSgpr).
+        // Resolve them here: downstream, a register is its index alone.
+        std::vector<SymbolicOperandFix> fixes;
+        const size_t corrected = resolveSymbolicOperands(func, fixes);
+        if (corrected != 0) {
+            std::string message = "@" + func.getName() + ": resolved " + std::to_string(corrected) +
+                                  " symbolic operand(s):";
+            for (const SymbolicOperandFix& fix : fixes) {
+                message += " " + fix.symbol + " " + std::to_string(fix.fromIdx) + "->" +
+                           std::to_string(fix.toIdx);
+            }
+            emitRemark(passCtx, {OptimizationRemark::Kind::Analysis, getName(),
+                                 "ResolvedSymbolicOperands", message});
         }
 
         return PreservedAnalyses::none();

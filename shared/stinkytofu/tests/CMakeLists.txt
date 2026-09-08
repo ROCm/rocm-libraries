@@ -46,6 +46,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/WaitCntInsertionTest.cpp
     unit/asm/DAGSchedulerPassTest.cpp
     unit/asm/CDNA5ReadyQueueTest.cpp
+    unit/asm/InFlightQueueTest.cpp
     unit/asm/ExecMaskGroupingTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/StinkyUnreachableBlockElimPassTest.cpp
@@ -144,6 +145,7 @@ set(UNIT_COMMON_TEST_FILES
     unit/ErrorHandlingTest.cpp
     unit/FunctionDestructionTest.cpp
     unit/IntrusiveListTest.cpp
+    unit/ir/AsmSetSymbolMap_test.cpp
     unit/ir/IntrinsicExpansionPassTest.cpp
     unit/ir/RegisterWidthValidationTest.cpp
     unit/ir/SymbolicRegNameTest.cpp
