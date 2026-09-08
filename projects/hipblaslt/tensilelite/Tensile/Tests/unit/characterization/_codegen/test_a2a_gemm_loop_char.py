@@ -82,6 +82,26 @@ class TestA2AGemmKernarg:
         assert "FusedW" in self._src()
 
 
+class TestA2AGemmSolutionProblemType:
+    """The mode reaches the serialized solution, where the host kernarg gate reads it."""
+
+    def _contraction_problem_type(self, **overrides):
+        from Tensile.Contractions import ProblemType
+
+        return ProblemType.FromOriginalState(_tn_problem_type(**overrides))
+
+    def test_state_keys_carry_the_mode(self):
+        from Tensile.Contractions import ProblemType
+
+        assert "fusedA2AMode" in ProblemType.StateKeys
+
+    def test_mode_round_trips(self):
+        assert self._contraction_problem_type(FusedA2AMode=1).fusedA2AMode == 1
+
+    def test_stock_gemm_leaves_the_mode_at_zero(self):
+        assert self._contraction_problem_type().fusedA2AMode == 0
+
+
 class TestA2AGemmShardLoop:
     """The shard loop wraps the unroll loop and closes before the store."""
 

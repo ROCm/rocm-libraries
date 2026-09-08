@@ -2124,7 +2124,7 @@ namespace TensileLite
         }
 
         // The fused GEMM+A2A segment follows batchOffsets in the kernel signature.
-        if(problem.fusedGemmA2A())
+        if(problem.fusedGemmA2A() || problemType.fusedA2AMode == 1)
             appendFusedSegment(rv.args,
                                inputs.fusedA2APeers,
                                inputs.fusedA2ACounter,
