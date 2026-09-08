@@ -54,7 +54,7 @@ namespace
 /// a skip when it should be a failure.
 std::filesystem::path fixtureDir()
 {
-    return std::filesystem::path(HIPDNN_UHD_GENERATED_FIXTURE_DIR);
+    return {HIPDNN_UHD_GENERATED_FIXTURE_DIR};
 }
 
 /// The committed `tile_selector.uhd.json`, through the loader's own parser.

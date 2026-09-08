@@ -1535,7 +1535,12 @@ std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
 void writeArtifact(const std::filesystem::path& path)
 {
     std::filesystem::create_directories(path.parent_path());
-    std::ofstream(path, std::ios::binary) << "\0\0\0\0HUHD";
+    // Constructed with an explicit length. A string literal ends at its first NUL, so
+    // `<< "\0\0\0\0HUHD"` wrote *nothing* -- the artifact this helper claims to create was a
+    // zero-byte file, and every test reading it was asserting against an empty artifact rather
+    // than the four-byte prefix and identifier a real one carries.
+    const std::string header("\0\0\0\0HUHD", 8);
+    std::ofstream(path, std::ios::binary) << header;
 }
 
 } // namespace

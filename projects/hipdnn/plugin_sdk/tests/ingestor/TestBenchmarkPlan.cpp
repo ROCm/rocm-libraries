@@ -859,6 +859,7 @@ TEST(TestIngestorBenchmarkPlan, EveryTimedCandidateIsLoggedAsAParsableRecord)
     }
 
     std::vector<std::string> kernels;
+    kernels.reserve(records.size());
     for(const auto& record : records)
     {
         kernels.push_back(record["kernel"].get<std::string>());
