@@ -34,6 +34,25 @@
 #include "host_vector.hpp"
 #include "type_utils.h"
 
+// Detect AddressSanitizer (GCC defines __SANITIZE_ADDRESS__; Clang exposes it via __has_feature).
+#if defined(__SANITIZE_ADDRESS__)
+#define HIPBLAS_ASAN_ACTIVE 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define HIPBLAS_ASAN_ACTIVE 1
+#endif
+#endif
+
+// Parallelize host buffer initialization with OpenMP, except under AddressSanitizer.
+// Under ASAN the libomp worker-team fork/join deadlocks in these init regions (threads
+// wedge in pthread_cond_wait at the OpenMP barrier), hanging the test process. These
+// loops only fill small host buffers, so serial init under ASAN costs negligible time.
+#if defined(_OPENMP) && !defined(HIPBLAS_ASAN_ACTIVE)
+#define HIPBLAS_INIT_OMP_PARALLEL_FOR _Pragma("omp parallel for")
+#else
+#define HIPBLAS_INIT_OMP_PARALLEL_FOR
+#endif
+
 //!
 //! @brief enum to check for NaN initialization of the Input vector/matrix
 //!
@@ -108,9 +127,7 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
 
         if(matrix_type == hipblas_general_matrix)
         {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+            HIPBLAS_INIT_OMP_PARALLEL_FOR
             for(size_t i = 0; i < M; ++i)
                 for(size_t j = 0; j < N; ++j)
                 {
@@ -120,9 +137,7 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
         }
         else if(matrix_type == hipblas_triangular_matrix)
         {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+            HIPBLAS_INIT_OMP_PARALLEL_FOR
             for(size_t i = 0; i < M; ++i)
                 for(size_t j = 0; j < N; ++j)
                 {
@@ -146,9 +161,7 @@ void hipblas_init_vector_alternating_sign(T rand_gen(), T* x, int64_t N, int64_t
     if(incx < 0)
         x -= (N - 1) * incx;
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+    HIPBLAS_INIT_OMP_PARALLEL_FOR
     for(int64_t j = 0; j < N; ++j)
     {
         auto value  = rand_gen();
@@ -169,18 +182,14 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
         int64_t lda = hA.lda();
         if(matrix_type == hipblas_general_matrix)
         {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+            HIPBLAS_INIT_OMP_PARALLEL_FOR
             for(size_t j = 0; j < N; ++j)
                 for(size_t i = 0; i < M; ++i)
                     A[i + j * lda] = rand_gen();
         }
         else if(matrix_type == hipblas_hermitian_matrix)
         {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+            HIPBLAS_INIT_OMP_PARALLEL_FOR
             for(size_t i = 0; i < N; ++i)
                 for(size_t j = 0; j <= i; ++j)
                 {
@@ -206,9 +215,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
         }
         else if(matrix_type == hipblas_symmetric_matrix)
         {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+            HIPBLAS_INIT_OMP_PARALLEL_FOR
             for(size_t i = 0; i < N; ++i)
                 for(size_t j = 0; j <= i; ++j)
                 {
@@ -234,9 +241,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
         }
         else if(matrix_type == hipblas_triangular_matrix)
         {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+            HIPBLAS_INIT_OMP_PARALLEL_FOR
             for(size_t j = 0; j < N; ++j)
                 for(size_t i = 0; i < M; ++i)
                 {
@@ -252,9 +257,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
             //This matrix should have a lower condition number. An alternative is to calculate the Cholesky factor of an SPD matrix with random values and make it diagonal dominant.
             //This approach is not used because it is slow.
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+            HIPBLAS_INIT_OMP_PARALLEL_FOR
             for(size_t j = 0; j < N; ++j)
                 for(size_t i = 0; i < M; ++i)
                 {
@@ -268,9 +271,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 
             if(uplo == 'U') // hipblas_fill_upper
             {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+                HIPBLAS_INIT_OMP_PARALLEL_FOR
                 for(size_t i = 0; i < N; i++)
                 {
                     R abs_sum_off_diagonal_row = R(
@@ -294,9 +295,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
             }
             else // hipblas_fill_lower
             {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+                HIPBLAS_INIT_OMP_PARALLEL_FOR
                 for(size_t j = 0; j < N; j++)
                 {
                     R abs_sum_off_diagonal_row = R(
@@ -336,9 +335,7 @@ void hipblas_init_vector(T rand_gen(), T* x, int64_t N, int64_t incx)
     if(incx < 0)
         x -= (N - 1) * incx;
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+    HIPBLAS_INIT_OMP_PARALLEL_FOR
     for(int64_t j = 0; j < N; ++j)
         x[j * incx] = rand_gen();
 }
@@ -358,18 +355,14 @@ void hipblas_init_matrix_trig(hipblas_matrix_type matrix_type,
 
         if(matrix_type == hipblas_general_matrix)
         {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+            HIPBLAS_INIT_OMP_PARALLEL_FOR
             for(size_t i = 0; i < M; ++i)
                 for(size_t j = 0; j < N; ++j)
                     A[i + j * lda] = T(seedReset ? cos(i + j * M) : sin(i + j * M));
         }
         else if(matrix_type == hipblas_hermitian_matrix)
         {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+            HIPBLAS_INIT_OMP_PARALLEL_FOR
             for(size_t i = 0; i < N; ++i)
                 for(size_t j = 0; j <= i; ++j)
                 {
@@ -396,9 +389,7 @@ void hipblas_init_matrix_trig(hipblas_matrix_type matrix_type,
         }
         else if(matrix_type == hipblas_symmetric_matrix)
         {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+            HIPBLAS_INIT_OMP_PARALLEL_FOR
             for(size_t i = 0; i < N; ++i)
                 for(size_t j = 0; j <= i; ++j)
                 {
@@ -424,9 +415,7 @@ void hipblas_init_matrix_trig(hipblas_matrix_type matrix_type,
         }
         else if(matrix_type == hipblas_triangular_matrix)
         {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+            HIPBLAS_INIT_OMP_PARALLEL_FOR
             for(size_t i = 0; i < M; ++i)
                 for(size_t j = 0; j < N; ++j)
                 {
@@ -454,9 +443,7 @@ void hipblas_init_vector_trig(T* x, int64_t N, int64_t incx, bool seedReset = fa
     if(incx < 0)
         x -= (N - 1) * incx;
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+    HIPBLAS_INIT_OMP_PARALLEL_FOR
     for(int64_t j = 0; j < N; ++j)
         x[j * incx] = T(seedReset ? cos(j) : sin(j));
 }
@@ -471,9 +458,7 @@ void hipblas_init_vector_zero(U& hx)
     int64_t incx   = hx.inc();
     int64_t stride = hx.stride();
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+    HIPBLAS_INIT_OMP_PARALLEL_FOR
     for(size_t batch_index = 0; batch_index < hx.batch_count(); batch_index++)
     {
         auto* x = hx[batch_index];
@@ -529,9 +514,7 @@ inline void regular_to_banded(bool upper, const T& h_A, T& h_AB, int64_t k)
     size_t  ldab = h_AB.lda();
     int64_t n    = h_AB.n();
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+    HIPBLAS_INIT_OMP_PARALLEL_FOR
     for(int64_t batch_index = 0; batch_index < h_A.batch_count(); ++batch_index)
     {
         auto* A  = h_A[batch_index];
@@ -594,9 +577,7 @@ inline void banded_matrix_setup(bool upper, T& h_A, int64_t k)
 {
     int64_t n = h_A.n();
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+    HIPBLAS_INIT_OMP_PARALLEL_FOR
     for(int64_t batch_index = 0; batch_index < h_A.batch_count(); ++batch_index)
     {
         auto* A = h_A[batch_index];
@@ -655,9 +636,7 @@ void make_unit_diagonal(hipblasFillMode_t uplo, T& h_A)
     int64_t N   = h_A.n();
     size_t  lda = h_A.lda();
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+    HIPBLAS_INIT_OMP_PARALLEL_FOR
     for(int64_t batch_index = 0; batch_index < h_A.batch_count(); ++batch_index)
     {
         auto* A = h_A[batch_index];
@@ -711,9 +690,7 @@ inline void regular_to_packed(bool upper, const T* A, T* AP, int64_t n)
 template <typename U>
 inline void regular_to_packed(bool upper, U& h_A, U& h_AP, int64_t n)
 {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+    HIPBLAS_INIT_OMP_PARALLEL_FOR
     for(int64_t batch_index = 0; batch_index < h_A.batch_count(); ++batch_index)
     {
         auto*  AP    = h_AP[batch_index];
