@@ -2588,6 +2588,11 @@ public:
             std::cerr << "Error: Can't call run() before calling set_items()\n";
             exit(EXIT_FAILURE);
         }
+        if(m_has_run)
+        {
+            std::cerr << "Error: Can't call run() twice\n";
+            exit(EXIT_FAILURE);
+        }
         m_has_run = true;
 
         std::string name            = m_meta.serialize_name();
