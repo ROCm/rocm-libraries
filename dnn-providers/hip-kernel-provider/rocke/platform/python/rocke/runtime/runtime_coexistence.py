@@ -132,12 +132,41 @@ def _torch_rocm_version() -> Optional[tuple]:
     return (int(nums[0]), int(nums[1]))
 
 
-def _newest_rocm_root_version() -> Optional[tuple]:
-    """``(major, minor)`` of the newest discovered ROCm install, or None."""
-    for libdir in _rocm_root_libdirs():
-        nums = re.findall(r"\d+", os.path.basename(os.path.dirname(libdir)))
+def _rocm_version_from_libdir(libdir: str) -> Optional[tuple]:
+    """``(major, minor)`` parsed from a ``<rocm>/lib`` path, or None.
+
+    Tries the path as given, then its resolved target. A packaged install is
+    normally reached through an *unversioned* symlink -- ``ROCM_PATH=/opt/rocm``
+    pointing at ``/opt/rocm-7.2.3`` is the distro default -- and
+    :func:`_rocm_root_libdirs` deliberately returns the original string so
+    candidate paths stay readable in errors. Parsing only that string finds no
+    digits in ``rocm`` and reports the version as unknown, which silently
+    disables :func:`_torch_comgr_is_stale` on exactly the common layout it
+    exists to handle.
+
+    Resolving is the fallback rather than the primary so an explicitly
+    versioned path keeps its own version even when it is itself a link into a
+    differently-named tree.
+    """
+    for candidate in (libdir, os.path.realpath(libdir)):
+        nums = re.findall(r"\d+", os.path.basename(os.path.dirname(candidate)))
         if len(nums) >= 2:
             return (int(nums[0]), int(nums[1]))
+    return None
+
+
+def _newest_rocm_root_version() -> Optional[tuple]:
+    """``(major, minor)`` of the ROCm install that would be loaded, or None.
+
+    First parseable entry in *resolution* order, not the numeric maximum across
+    all installs: the point of comparison is the lib this process would
+    actually load, and an operator's ``ROCM_PATH`` wins that race even when a
+    newer tree exists beside it.
+    """
+    for libdir in _rocm_root_libdirs():
+        version = _rocm_version_from_libdir(libdir)
+        if version is not None:
+            return version
     return None
 
 
