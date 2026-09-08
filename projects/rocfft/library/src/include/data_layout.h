@@ -449,6 +449,9 @@ private:
 
     data_layout_t() = default;
 
+    // Storing length and batch axes in two vectors is an internal representation
+    // detail (hidden behind semantic accessors). It's preferred over a single flat
+    // vector plus a batch_rank counter because the split *is* the rank bookkeeping.
     std::vector<axis_t> len_axes;
     std::vector<axis_t> batch_axes;
     // If the current object captures the data layout for a sub-dimensional data set
