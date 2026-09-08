@@ -235,7 +235,8 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
         return EV_VGPR_CSMACC_WRITE;
     }
     if (isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst)) return EV_VGPR_LDS_READ;
-    if (isFLATLoad(inst) || isFLATStore(inst) || isFLATAtomic(inst)) return EV_VGPR_FLAT_READ;
+    if (isFLATLoad(inst) || isFLATStore(inst) || isFLATAtomic(inst) || isFLATPrefetch(inst))
+        return EV_VGPR_FLAT_READ;
     // TEX path. Stinkytofu does not yet flag scratch / image / sample / BVH
     // instructions; on archs that emit them they belong in this same bucket.
     if (isVmemTex(inst)) return EV_VGPR_VMEM_READ;
