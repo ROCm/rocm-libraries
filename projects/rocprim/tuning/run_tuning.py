@@ -77,6 +77,7 @@ def get_available_algorithms() -> List[str]:
         "device_select_predicate",
         "device_select_unique",
         "device_reduce",
+        "device_segmented_reduce",
         # Add new algorithms here
     ]
 
