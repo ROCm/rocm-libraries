@@ -787,19 +787,20 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
         }
 
         // Even at the right density the device may not hold that many blocks, so cap against
-        // measured occupancy (reported per multiprocessor in the same unit, so unit-consistent).
-        // That figure is theoretical and over-predicts what a persistent kernel sustains: gfx1100
-        // reports 44 blocks/WGP but wedges at 36. The gap is capacity needed by work that must
-        // co-reside - blit kernels behind the async memcpys, detachWorkNode, and the CU held back
-        // by cuMask. Halve it for margin; this only ever lowers the value.
-        constexpr int OCCUPANCY_SAFETY_DIVISOR = 2;
+        // measured occupancy (reported per multiprocessor, same unit, so unit-consistent). That
+        // figure is theoretical: it ignores the capacity co-resident work needs, and how much it
+        // over-predicts varies by architecture. RDNA sustains ~3/4 of it (gfx1100 reports 44
+        // blocks/WGP, wedges at 36); CDNA far less - gfx942 reports 16 but wedges intermittently
+        // at 8, likely because multi-XCD parts cannot pack the grid evenly and one oversubscribed
+        // XCD is enough. Hence the wider margin there.
+        const int occupancySafetyDivisor = (deviceWarpSize == 32) ? 2 : 4;
         int maxBlocksPerMp = 0;
         __LIBHIPTHREADS_HIP_CHECK__(hipOccupancyMaxActiveBlocksPerMultiprocessor(
             &maxBlocksPerMp, internal::threading_main, static_cast<int>(wthread::max_width()), 0));
 
         uint32_t occupancyCeiling = 0;
         if (maxBlocksPerMp > 0) {
-            occupancyCeiling = static_cast<uint32_t>(maxBlocksPerMp) / OCCUPANCY_SAFETY_DIVISOR;
+            occupancyCeiling = static_cast<uint32_t>(maxBlocksPerMp) / occupancySafetyDivisor;
             if (occupancyCeiling > 0 && occupancyCeiling < vcoresPerMp) {
                 vcoresPerMp = occupancyCeiling;
             }
