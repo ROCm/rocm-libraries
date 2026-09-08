@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-// What gfx1250 requires of a register allocation. Two rules; see
+// What gfx1250 requires of a register allocation. Three rules; see
 // docs/developer/register-allocation.md §14.
 
 #include <array>
@@ -103,7 +103,20 @@ AllocationRules buildGfx1250Rules(const AsmCapsConfig& caps) {
         return regClass == RegType::S && base % scalarTupleAlign(width) != 0;
     };
 
-    return AllocationRules({smemSelfOverlap, scalarAlignment});
+    /// A different requirement from the scalar one, not just a different class:
+    /// a vector tuple needs 64-bit alignment at every width where a scalar tuple
+    /// needs its own, so `v[2:5]` is legal and `s[2:5]` is not. Hence a separate
+    /// row, which also gets it named in the shadow report. The assembler rejects
+    /// an odd base with "vgpr tuples must be 64 bit aligned".
+    AllocationRule vectorAlignment;
+    vectorAlignment.name = "VectorTupleAlignment";
+    vectorAlignment.description = "a multi-DWORD vector tuple must start on an even index";
+    vectorAlignment.status = RuleStatus::Active;
+    vectorAlignment.forbidsBase = [](RegType regClass, uint32_t base, uint32_t width) {
+        return regClass == RegType::V && width > 1 && base % 2 != 0;
+    };
+
+    return AllocationRules({smemSelfOverlap, scalarAlignment, vectorAlignment});
 }
 
 struct Gfx1250RulesRegistrar {
