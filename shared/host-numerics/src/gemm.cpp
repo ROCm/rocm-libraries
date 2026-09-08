@@ -12,16 +12,16 @@
 #include "detail/reference_gemm.hpp"
 
 namespace roc::host_numerics {
-void matmulInto(Tensor a, Tensor b, Tensor output, const MatmulOptions& options,
-                GemmBackend backend) {
+void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
+                OutputSelection selection, GemmBackend backend) {
     GemmOptions gemmOptions(options);
+    gemmOptions.outputSelection = std::move(selection);
     Tensor zero = output;
-    (void)detail::executeGemm(
-        GemmInvocation(std::move(a), std::move(b), std::move(zero), std::move(output), gemmOptions),
-        backend);
+    (void)detail::executeGemm(GemmInvocation(a, b, std::move(zero), std::move(output), gemmOptions),
+                              backend);
 }
 
-Tensor matmul(Tensor a, Tensor b, ScalarType outputType, const MatmulOptions& options,
+Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType, const MatmulOptions& options,
               std::optional<Layout> outputLayout, GemmBackend backend) {
     detail::requireRank(a.shape(), 2, "matmul", "A");
     detail::requireRank(b.shape(), 2, "matmul", "B");
@@ -33,7 +33,7 @@ Tensor matmul(Tensor a, Tensor b, ScalarType outputType, const MatmulOptions& op
     if (layout.shape() != outputShape)
         throw std::invalid_argument("matmul output layout shape mismatch.");
     Tensor output(outputType, layout);
-    matmulInto(std::move(a), std::move(b), output, options, backend);
+    matmulInto(a, b, output, options, OutputSelection::all(), backend);
     return output;
 }
 

@@ -46,15 +46,15 @@ struct MatmulOptions {
     size_t blockSizeB = 0;
     bool conjugateA = false;
     bool conjugateB = false;
-
-    OutputSelection outputSelection = OutputSelection::all();
 };
 
 // NumPy-style matrix multiplication. The owning form allocates output; the
 // `Into` form writes selected coordinates of caller-owned output.
-void matmulInto(Tensor a, Tensor b, Tensor output, const MatmulOptions& options = MatmulOptions{},
+void matmulInto(const Tensor& a, const Tensor& b, Tensor output,
+                const MatmulOptions& options = MatmulOptions{},
+                OutputSelection selection = OutputSelection::all(),
                 GemmBackend backend = GemmBackend::Automatic);
-Tensor matmul(Tensor a, Tensor b, ScalarType outputType,
+Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType,
               const MatmulOptions& options = MatmulOptions{},
               std::optional<Layout> outputLayout = std::nullopt,
               GemmBackend backend = GemmBackend::Automatic);

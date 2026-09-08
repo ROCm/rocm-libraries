@@ -7,8 +7,9 @@
 #include "detail/reference_epilogue.hpp"
 
 namespace roc::host_numerics {
-void referenceEpilogueInto(Tensor input, EpilogueOutputs outputs, const EpilogueOptions& options) {
-    const detail::EpilogueInvocation invocation(std::move(input), std::move(outputs), options);
+void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
+                           const EpilogueOptions& options) {
+    const detail::EpilogueInvocation invocation(input, std::move(outputs), options);
     (void)detail::validateEpilogue(invocation);
     switch (options.computeType) {
         case ScalarType::Float16:
@@ -29,7 +30,7 @@ void referenceEpilogueInto(Tensor input, EpilogueOutputs outputs, const Epilogue
     }
 }
 
-EpilogueOutputs referenceEpilogue(Tensor input, const EpilogueOutputTypes& outputTypes,
+EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes,
                                   const EpilogueOptions& options) {
     Tensor output(outputTypes.output, input.shape());
     std::optional<Tensor> rawOutput;
@@ -49,7 +50,7 @@ EpilogueOutputs referenceEpilogue(Tensor input, const EpilogueOutputTypes& outpu
         .auxiliaryOutput = std::move(auxiliaryOutput),
         .amax = std::move(amax),
     };
-    referenceEpilogueInto(std::move(input), outputs, options);
+    referenceEpilogueInto(input, outputs, options);
     return outputs;
 }
 

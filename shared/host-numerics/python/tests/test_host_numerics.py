@@ -624,18 +624,30 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(hv.to_numpy(result), expected)
 
         y_only = hv.multiply(y, 3.0)
+        self.assertEqual(y_only.type, hv.ScalarType.BFloat16)
         np.testing.assert_array_equal(
             hv.to_numpy(y_only),
-            np.float32(3.0) * y_values,
+            quantize_bfloat16(np.float32(3.0) * y_values),
         )
 
         scalar_coefficient = hv.from_numpy(np.asarray(2.0, dtype=np.float32))
-        tensor_scaled = hv.multiply(x, scalar_coefficient)
+        tensor_scaled = hv.multiply(
+            x,
+            scalar_coefficient,
+            output_type=hv.ScalarType.Float32,
+            compute_type=hv.ScalarType.Float32,
+        )
         np.testing.assert_array_equal(
             hv.to_numpy(tensor_scaled), np.float32(2.0) * x_values
         )
         np.testing.assert_array_equal(
             hv.to_numpy(hv.multiply(x, x)), x_values * x_values
+        )
+
+        float_values = hv.from_numpy(np.asarray([1.0, 2.0], dtype=np.float32))
+        np.testing.assert_array_equal(
+            hv.to_numpy(2.0 * float_values + 1.0),
+            np.asarray([3.0, 5.0], dtype=np.float32),
         )
 
         padded_x = hv.Tensor.from_storage(
@@ -937,6 +949,12 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertEqual(result.mismatches, 1)
         self.assertEqual(result.reported_mismatches[0].index, 5)
+        diagnostic = str(result)
+        self.assertTrue(
+            diagnostic.startswith("comparison failed: 1 of 6 compared elements mismatched")
+        )
+        self.assertIn("index 5 [1, 2]", diagnostic)
+        self.assertIn("absolute difference", diagnostic)
 
     def test_comparison_program_matches_numpy(self):
         expected_values = np.asarray(

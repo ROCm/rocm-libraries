@@ -49,12 +49,12 @@ struct EpilogueOutputs {
     std::optional<Tensor> amax;
 };
 
-EpilogueOutputs referenceEpilogue(Tensor input, const EpilogueOutputTypes& outputTypes = {},
+EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes = {},
                                   const EpilogueOptions& options = EpilogueOptions{});
 
 // Writes selected coordinates into caller-owned destinations. The primary
 // output may exactly alias input; other overlapping input/output or
 // output/output storage is rejected.
-void referenceEpilogueInto(Tensor input, EpilogueOutputs outputs,
+void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
                            const EpilogueOptions& options = EpilogueOptions{});
 }  // namespace roc::host_numerics

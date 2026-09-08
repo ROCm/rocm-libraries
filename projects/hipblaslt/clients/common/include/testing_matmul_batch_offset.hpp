@@ -26,12 +26,13 @@
 
 #pragma once
 
+#include "device_vector.hpp"
 #include "hipblaslt_test.hpp"
 #include "host_vector.hpp"
 #include "utility.hpp"
 #include <hipblaslt/host_numerics/Types.hpp>
-#include <roc/host_numerics/validation.hpp>
 #include <limits>
+#include <roc/host_numerics/validation.hpp>
 #include <stdexcept>
 
 namespace
@@ -278,14 +279,11 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                                                 cPlan.matrixElements,
                                                 Layout(Shape{size_t(M), size_t(N)}, {1, ldc}));
         const ScalarType computeType = scalarType<Tc>();
-        Tensor product = roc::host_numerics::matmul(
-            std::move(a), std::move(b), computeType, MatmulOptions(computeType));
-        Tensor scaledProduct = multiply(
-            std::move(product), Tensor::scalar(computeType, alpha), computeType, computeType);
-        Tensor scaledC
-            = multiply(std::move(c), Tensor::scalar(computeType, beta), computeType, computeType);
-        result.copyLogicalElementsFrom(
-            add(std::move(scaledProduct), std::move(scaledC), computeType, computeType));
+        Tensor product = roc::host_numerics::matmul(a, b, computeType, MatmulOptions(computeType));
+        Tensor scaledProduct
+            = multiply(product, Tensor::scalar(computeType, alpha), computeType, computeType);
+        Tensor scaledC = multiply(c, Tensor::scalar(computeType, beta), computeType, computeType);
+        result.copyLogicalElementsFrom(add(scaledProduct, scaledC, computeType, computeType));
         copyTensorEncodedBackingStorageToBuffer(
             expectedD.data() + batch * dPlan.matrixElements, dPlan.matrixElements, result);
     }
