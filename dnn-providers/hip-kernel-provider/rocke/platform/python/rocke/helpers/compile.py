@@ -51,7 +51,9 @@ from ..core.arch import (
     ArchTarget,
     arch_from_isa,
     base_arch_from_target_id,
+    compiler_target_from_target_id,
     known_arches,
+    target_id_from_isa,
 )
 from ..core.codegen_policy import codegen_policy_for_kernel
 from ..core.ir import KernelDef
@@ -96,14 +98,14 @@ def compile_kernel(
     """Lower `kernel` to a `KernelArtifact` ready for HIP module load.
 
     `arch` is the preferred way to select the target (e.g. ``"gfx942"``,
-    ``"gfx950"``): when given, the comgr ISA triple is derived from
-    :class:`rocke.core.arch.ArchTarget`, so callers don't hand-spell the
-    triple. `arch` takes precedence over `isa`.
+    ``"gfx1250-strict"``): when given, the comgr ISA triple is derived from
+    the corresponding compiler target. `arch` takes precedence over `isa`.
 
-    `isa` is the raw comgr target triple and stays accepted for backward
-    compatibility; exact profiles and feature suffixes are preserved while the
-    corresponding base architecture drives rocKE lowering. `gfx950` is the
-    historical default every example uses.
+    `isa` stays accepted for backward compatibility. Runtime-only target
+    profiles are normalized to a compiler-supported target, target feature
+    suffixes are preserved for compiler validation, and the corresponding base
+    architecture drives rocKE lowering. `gfx950` is the historical default
+    every example uses.
 
     `capture_ir_text` controls whether the MLIR-style textual dump is
     populated. Disable for tight sweep loops where the dump is
@@ -121,12 +123,17 @@ def compile_kernel(
     for backward compatibility but is no longer consulted).
     """
     if arch is not None:
-        isa = ArchTarget.from_gfx(arch).isa_triple
-        _lower_arch = arch
+        _lower_arch = base_arch_from_target_id(arch)
+        compiler_target = compiler_target_from_target_id(arch)
+        base_isa = ArchTarget.from_gfx(_lower_arch).isa_triple
+        isa = f"{base_isa[: -len(_lower_arch)]}{compiler_target}"
     else:
         # Derive the lowering arch from the isa triple so the ISA backend
         # (datalayout/triple/waitcnt) matches the comgr target even when a
         # caller passes isa= directly.
+        target_id = target_id_from_isa(isa)
+        compiler_target = compiler_target_from_target_id(target_id)
+        isa = f"{isa[: -len(target_id)]}{compiler_target}"
         _gfx = arch_from_isa(isa)
         _lower_arch = _gfx if _gfx in known_arches() else None
 
@@ -256,8 +263,8 @@ def compile_kernel_via_hipcc(
     """Lower ``kernel`` to HIP C++, compile through ``hipcc --genco``, and
     return a :class:`KernelArtifact` whose ``hsaco`` is the hipcc output.
 
-    ``arch`` may include a compiler target profile or feature suffix. The exact
-    value is passed to ``hipcc --offload-arch`` while rocKE lowering uses its
+    ``arch`` may be a runtime target ID with a profile or feature suffix. hipcc
+    receives the corresponding compiler target while rocKE lowering uses the
     normalized base architecture.
 
     Use this **only** when the LLVM-direct pipeline (``compile_kernel``)
@@ -295,6 +302,7 @@ def compile_kernel_via_hipcc(
     ir_text = print_ir(kernel)
     t1 = time.perf_counter()
     lower_arch = base_arch_from_target_id(arch)
+    compiler_target = compiler_target_from_target_id(arch)
     hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     t2 = time.perf_counter()
     flags = ["-O3"]
@@ -308,7 +316,7 @@ def compile_kernel_via_hipcc(
         proc = subprocess.run(
             [
                 "hipcc",
-                f"--offload-arch={arch}",
+                f"--offload-arch={compiler_target}",
                 "--genco",
                 *flags,
                 str(src_path),
@@ -331,7 +339,7 @@ def compile_kernel_via_hipcc(
     timings["ir_lower_hip"] = (t2 - t1) * 1000.0
     timings["hipcc"] = (t3 - t2) * 1000.0
     timings["total"] = (t3 - t0) * 1000.0
-    isa = f"amdgcn-amd-amdhsa--{arch}"
+    isa = f"amdgcn-amd-amdhsa--{compiler_target}"
     return KernelArtifact(
         kernel=kernel,
         ir_text=ir_text,
@@ -352,8 +360,8 @@ def emit_device_llvm_ir_via_hipcc(
 ) -> str:
     """Lower ``kernel`` to HIP C++, then emit device LLVM IR via hipcc.
 
-    ``arch`` may include a compiler target profile or feature suffix. The exact
-    value is passed to ``hipcc --offload-arch`` while rocKE lowering uses its
+    ``arch`` may be a runtime target ID with a profile or feature suffix. hipcc
+    receives the corresponding compiler target while rocKE lowering uses the
     normalized base architecture.
 
     This is the **ground-truth datalayout oracle**: it asks the project's
@@ -382,6 +390,7 @@ def emit_device_llvm_ir_via_hipcc(
         FileNotFoundError: If hipcc cannot be located.
     """
     lower_arch = base_arch_from_target_id(arch)
+    compiler_target = compiler_target_from_target_id(arch)
     hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     flags = ["-O3"]
     if extra_flags:
@@ -394,7 +403,7 @@ def emit_device_llvm_ir_via_hipcc(
         proc = subprocess.run(
             [
                 "hipcc",
-                f"--offload-arch={arch}",
+                f"--offload-arch={compiler_target}",
                 "-S",
                 "-emit-llvm",
                 "--cuda-device-only",

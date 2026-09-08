@@ -1112,9 +1112,10 @@ def target_id_from_isa(isa: str) -> str:
 def base_arch_from_target_id(target_id: str) -> str:
     """Normalize an exact AMDGPU target ID to a rocKE architecture key.
 
-    Runtime/compiler profiles and feature suffixes are not separate
-    :class:`ArchTarget` rows. For example, ``gfx1250-strict`` and
-    ``gfx1250-strict:xnack-`` both use the static ``gfx1250`` hardware facts.
+    Runtime profiles and feature suffixes are not separate
+    :class:`ArchTarget` rows. For example, ``gfx1250-strict`` uses the static
+    ``gfx1250`` hardware facts, while ``gfx942:sramecc+:xnack-`` uses
+    ``gfx942``.
     """
 
     target_without_features = target_id.split(":", 1)[0]
@@ -1126,6 +1127,25 @@ def base_arch_from_target_id(target_id: str) -> str:
             return arch
     match = re.match(r"^(gfx[0-9a-z]+)", target_without_features)
     return match.group(1) if match else target_without_features
+
+
+def compiler_target_from_target_id(target_id: str) -> str:
+    """Return the compiler-form target for a runtime target ID.
+
+    Runtime profiles such as ``-strict`` identify the destination device but
+    are not processor names accepted by COMGR or hipcc. The compiler-form target
+    therefore uses the normalized base architecture. Target feature suffixes
+    remain attached for compiler validation; unsupported feature combinations
+    are rejected by the selected compiler.
+    """
+
+    target_without_features, separator, features = target_id.partition(":")
+    base_arch = base_arch_from_target_id(target_id)
+    if target_without_features.startswith(f"{base_arch}-"):
+        target_without_features = base_arch
+    if separator:
+        return f"{target_without_features}:{features}"
+    return target_without_features
 
 
 def arch_from_isa(isa: str) -> str:

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..core.arch import base_arch_from_target_id
+from ..core.arch import base_arch_from_target_id, compiler_target_from_target_id
 from .hip_module import _get_device_asic_revision, get_device_target_id
 
 
@@ -19,19 +19,24 @@ from .hip_module import _get_device_asic_revision, get_device_target_id
 class DeviceInfo:
     """Identity reported by HIP for one device.
 
-    ``target_id`` preserves the complete runtime/compiler target string,
-    including profiles and feature suffixes such as
-    ``gfx1250-strict:sramecc+:xnack-``.
+    ``target_id`` preserves the complete runtime target string, including
+    profiles such as ``gfx1250-strict`` and feature suffixes such as
+    ``gfx942:sramecc+:xnack-``.
 
     ``base_arch`` is the normalized rocKE architecture used for static
     :class:`~rocke.core.arch.ArchTarget` lookup. It intentionally omits target
     profiles and feature suffixes.
+
+    ``compiler_target`` is the compiler-form target derived from ``target_id``.
+    Runtime-only profiles are removed while feature suffixes are retained for
+    compiler validation.
 
     ``asic_revision`` is the revision value reported by HIP.
     """
 
     target_id: str | None
     base_arch: str | None
+    compiler_target: str | None
     asic_revision: int | None
 
 
@@ -46,6 +51,9 @@ def get_device_info(device: int = 0) -> DeviceInfo:
         target_id=target_id,
         base_arch=(
             base_arch_from_target_id(target_id) if target_id is not None else None
+        ),
+        compiler_target=(
+            compiler_target_from_target_id(target_id) if target_id is not None else None
         ),
         asic_revision=_get_device_asic_revision(device),
     )

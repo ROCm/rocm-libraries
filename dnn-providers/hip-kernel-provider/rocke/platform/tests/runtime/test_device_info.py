@@ -31,7 +31,7 @@ def _props(target_id: str | None) -> bytes:
         ("gfx1250", "gfx1250"),
         ("gfx11-generic", "gfx11-generic"),
         ("gfx1250-strict", "gfx1250"),
-        ("gfx1250-strict:sramecc+:xnack-", "gfx1250"),
+        ("gfx942:sramecc+:xnack-", "gfx942"),
     ],
 )
 def test_device_target_id_and_base_arch_are_separate(
@@ -114,6 +114,7 @@ def test_get_device_info_reports_identity_without_capability_policy() -> None:
     assert info == device_info.DeviceInfo(
         target_id="gfx1250-strict",
         base_arch="gfx1250",
+        compiler_target="gfx1250",
         asic_revision=0,
     )
     assert not hasattr(info, "supported")
@@ -129,6 +130,7 @@ def test_get_device_info_preserves_unknown_properties() -> None:
     assert info == device_info.DeviceInfo(
         target_id=None,
         base_arch=None,
+        compiler_target=None,
         asic_revision=None,
     )
 
