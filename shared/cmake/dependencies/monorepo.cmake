@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-include_guard(GLOBAL)
+include_guard(DIRECTORY)
 
 include(${CMAKE_CURRENT_LIST_DIR}/rocm-cmake.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/utils.cmake)
