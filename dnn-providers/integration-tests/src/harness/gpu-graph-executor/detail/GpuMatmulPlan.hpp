@@ -94,6 +94,48 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->b_tensor_uid(), BDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->c_tensor_uid(), CDataTypeEnum);
 
+        auto& aAttr = *tensorMap.at(nodeAttributes->a_tensor_uid());
+        auto& bAttr = *tensorMap.at(nodeAttributes->b_tensor_uid());
+        auto& cAttr = *tensorMap.at(nodeAttributes->c_tensor_uid());
+        const std::vector<int64_t> aDims(aAttr.dims()->begin(), aAttr.dims()->end());
+        const std::vector<int64_t> bDims(bAttr.dims()->begin(), bAttr.dims()->end());
+        const std::vector<int64_t> cDims(cAttr.dims()->begin(), cAttr.dims()->end());
+        if(aDims.size() != bDims.size() || aDims.size() != cDims.size())
+        {
+            return false;
+        }
+        if(aDims.size() < 2 || aDims.size() > 5)
+        {
+            return false;
+        }
+
+        std::vector<int64_t> aBatchDims(aDims.begin(), aDims.end() - 2);
+        std::vector<int64_t> bBatchDims(bDims.begin(), bDims.end() - 2);
+        for(size_t i = 0; i < aBatchDims.size(); ++i)
+        {
+            if(aBatchDims[i] % bBatchDims[i] != 0 && bBatchDims[i] % aBatchDims[i] != 0)
+            {
+                return false;
+            }
+        }
+
+        if(aDims[aDims.size() - 1] != bDims[bDims.size() - 2])
+        {
+            return false;
+        }
+
+        std::vector<int64_t> expectedCDims(aDims.size());
+        for(size_t i = 0; i < aBatchDims.size(); ++i)
+        {
+            expectedCDims[i] = std::max(aBatchDims[i], bBatchDims[i]);
+        }
+        expectedCDims[expectedCDims.size() - 2] = aDims[aDims.size() - 2];
+        expectedCDims[expectedCDims.size() - 1] = bDims[bDims.size() - 1];
+        if(cDims != expectedCDims)
+        {
+            return false;
+        }
+
         const std::vector<int64_t> operandUids = {nodeAttributes->a_tensor_uid(),
                                                   nodeAttributes->b_tensor_uid(),
                                                   nodeAttributes->c_tensor_uid()};
