@@ -94,6 +94,17 @@ Tests:
   incx: *incx_range_small
   api: FORTRAN
 
+- name: tpmv_HMM
+  category: HMM
+  function: tpmv
+  precision: *single_double_precisions_complex_real
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range
+  incx: *incx_range_small
+  HMM: true
+
 - name: tpmv_small
   category: quick
   function: tpmv
