@@ -2,20 +2,33 @@
 // SPDX-License-Identifier: MIT
 
 /*! \file
- * \brief Post-launch dirty-buffer check for the shared Synchronizer buffer.
- *        StreamK (work-queue / fixup Flags) and GSU MultipleBufferSingleKernel
- *        both use it and both must leave it at zero on exit.
- *        Enabled by HIPBLASLT_CHECK_SYNCHRONIZER env var (read once in handle ctor).
+ * \brief Post-launch dirty-buffer check for the handle's inter-workgroup flag
+ *        buffers. Enabled by the HIPBLASLT_CHECK_SYNCHRONIZER env var (read
+ *        once in the handle ctor).
  *
- *        Covers rocblaslt_matmul_impl only. The ext and user-argument paths
- *        share the buffer but are not scanned, so residue they leave is
+ *        There are two such buffers and both must read back all-zero once a
+ *        kernel that used them has retired:
+ *          - `Synchronizer`: the GSU MultipleBufferSingleKernel reduction flags
+ *            and the amaxD counter, one slot per problem, shared across
+ *            streams. Scanned whole.
+ *          - `StreamKFlags`: the Stream-K work-queue and fixup flags, one block
+ *            per (stream, problem). Only the block bound to this launch is
+ *            scanned. Another stream may be mid-kernel with legitimately
+ *            nonzero flags in its own block, so scanning the whole table would
+ *            report that as residue; the per-(stream, problem) block is the
+ *            only region this launch could have dirtied.
+ *        Each buffer is reported and re-zeroed on its own, and either may be
+ *        absent, in which case that half of the scan is skipped.
+ *
+ *        Covers rocblaslt_matmul_impl only. The ext and user-argument paths use
+ *        the same buffers but are not scanned, so residue they leave is
  *        reported against the next scanned matmul.
  *
- *        The scan synchronizes the stream and zeroes the handle-wide buffer.
- *        Both rely on the handle already being single-stream by contract (see
- *        hipblasLtHandle_t in hipblaslt.h), which is also what lets the
- *        Synchronizer itself be shared unpartitioned. Skipped during HIP graph
- *        capture, where both operations are illegal.
+ *        The scan synchronizes the stream, stages the readback on an unguarded
+ *        handle-wide host buffer, and zeroes whichever region it found dirty.
+ *        All three rely on the handle being single-stream by contract (see
+ *        hipblasLtHandle_t in hipblaslt.h). Skipped during HIP graph capture,
+ *        where the synchronize and the memset are illegal.
  */
 
 #pragma once
@@ -31,81 +44,119 @@
 #include <mutex>
 #include <vector>
 
-// Blocks on `stream` to read the buffer back and reports any nonzero int.
+namespace hipblaslt_check_synchronizer_detail
+{
+    inline std::ostream& sink()
+    {
+        std::ostream* os = get_logger_os();
+        return os ? *os : std::cerr;
+    }
+
+    // Reads `count` ints back from `region` and reports any nonzero one against
+    // `buffer`. No-op when that buffer is absent.
+    inline void scan_region(
+        rocblaslt_handle handle, const char* label, const char* buffer, void* region, size_t count)
+    {
+        if(!region)
+            return;
+
+        const size_t      bytes = count * sizeof(int);
+        std::vector<int>& host  = handle->check_synchronizer_host;
+
+        // Reported, not swallowed: `host` still holds the previous scan, which
+        // would otherwise read as a clean buffer.
+        if(hipError_t err = hipMemcpy(host.data(), region, bytes, hipMemcpyDeviceToHost);
+           err != hipSuccess)
+        {
+            std::lock_guard<std::mutex> lk(log_mutex);
+            sink() << "[hipBLASLt CHECK_SYNCHRONIZER] " << label << ": " << buffer
+                   << " readback failed (" << hipGetErrorString(err) << "); buffer not checked."
+                   << std::endl;
+            return;
+        }
+
+        // Every consumer writes 32-bit counters, so an int offset names the
+        // counter left set. Stream-K indexes its block by workgroup id. MBSK
+        // works from the head of the problem's Synchronizer slot, except on the
+        // user-argument path, which is offset by 1638400 bytes (int 409600).
+        size_t nonzero = 0, first = count;
+        for(size_t i = 0; i < count; ++i)
+            if(host[i] != 0)
+            {
+                if(nonzero == 0)
+                    first = i;
+                ++nonzero;
+            }
+
+        if(nonzero == 0)
+            return;
+
+        {
+            std::lock_guard<std::mutex> lk(log_mutex);
+            sink() << "[hipBLASLt CHECK_SYNCHRONIZER] " << label << ": " << buffer
+                   << " left dirty (" << nonzero << "/" << count
+                   << " ints nonzero, first at int offset " << first
+                   << ") -- the kernel did not reset its flags on exit." << std::endl;
+        }
+
+        // Restore the zero baseline, so this residue is reported once rather
+        // than by every call after it. A failure here would re-report it
+        // forever.
+        if(hipError_t merr = hipMemset(region, 0, bytes); merr != hipSuccess)
+        {
+            std::lock_guard<std::mutex> lk(log_mutex);
+            sink() << "[hipBLASLt CHECK_SYNCHRONIZER] " << label << ": could not clear " << buffer
+                   << " (" << hipGetErrorString(merr) << "); residue will be re-reported."
+                   << std::endl;
+        }
+    }
+}
+
+// Blocks on `stream` to read both flag buffers back and reports any nonzero int.
 inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
                                               hipStream_t      stream,
                                               const char*      label)
 {
-    if(!handle || !handle->check_synchronizer || !handle->Synchronizer)
+    if(!handle || !handle->check_synchronizer)
         return;
 
-    // Skip during HIP graph capture: the sync and memset below cannot be
-    // sequenced into a captured graph.
+    // Skip during HIP graph capture: the synchronize and the memsets below
+    // cannot be sequenced into a captured graph.
     hipStreamCaptureStatus cap = hipStreamCaptureStatusNone;
     if(hipStreamIsCapturing(stream, &cap) == hipSuccess && cap != hipStreamCaptureStatusNone)
         return;
 
-    constexpr size_t count = _rocblaslt_handle::c_syncGsuTotalElements;
-    constexpr size_t bytes = count * sizeof(int);
+    // The Stream-K block this launch was handed, at the problem index
+    // rocblaslt_matmul_impl binds. Null when StreamKFlags was never allocated or
+    // no block was left; the status is ignored because the caller has already
+    // acted on it and this check stays passive.
+    void* streamKFlags = nullptr;
+    static_cast<void>(handle->streamKFlagsForStream(stream, 0, &streamKFlags));
 
-    // Staged on the handle, unguarded: a handle is single-stream by contract.
-    if(handle->check_synchronizer_host.size() != count)
-        handle->check_synchronizer_host.assign(count, 0);
-    std::vector<int>& host = handle->check_synchronizer_host;
+    if(!handle->Synchronizer && !streamKFlags)
+        return;
 
-    hipError_t err = hipStreamSynchronize(stream);
-    if(err == hipSuccess)
-        err = hipMemcpy(host.data(), handle->Synchronizer, bytes, hipMemcpyDeviceToHost);
-    // Reported, not swallowed: `host` still holds the previous scan, which
-    // would otherwise read as a clean buffer.
-    if(err != hipSuccess)
+    constexpr size_t gsuCount = _rocblaslt_handle::c_syncGsuTotalElements;
+    constexpr size_t skCount  = _rocblaslt_handle::c_syncSkSlotElements;
+    // One staging buffer, sized for the larger region and reused by both.
+    // Unguarded on the handle: a handle is single-stream by contract.
+    constexpr size_t staging = gsuCount > skCount ? gsuCount : skCount;
+    if(handle->check_synchronizer_host.size() != staging)
+        handle->check_synchronizer_host.assign(staging, 0);
+
+    if(hipError_t err = hipStreamSynchronize(stream); err != hipSuccess)
     {
         std::lock_guard<std::mutex> lk(log_mutex);
-        std::ostream*               sink = get_logger_os();
-        if(!sink)
-            sink = &std::cerr;
-        *sink << "[hipBLASLt CHECK_SYNCHRONIZER] " << label << ": readback failed ("
-              << hipGetErrorString(err) << "); buffer not checked." << std::endl;
+        hipblaslt_check_synchronizer_detail::sink()
+            << "[hipBLASLt CHECK_SYNCHRONIZER] " << label << ": readback failed ("
+            << hipGetErrorString(err) << "); buffers not checked." << std::endl;
         return;
     }
 
-    // Every consumer writes 32-bit counters, so an int offset names the counter
-    // left set. StreamK and MBSK both work from the head, except MBSK on the
-    // user-argument path, which is offset by 1638400 bytes (int 409600).
-    size_t nonzero = 0, first = count;
-    for(size_t i = 0; i < count; ++i)
-        if(host[i] != 0)
-        {
-            if(nonzero == 0)
-                first = i;
-            ++nonzero;
-        }
-
-    if(nonzero == 0)
-        return;
-
-    {
-        std::lock_guard<std::mutex> lk(log_mutex);
-        std::ostream*               sink = get_logger_os();
-        if(!sink)
-            sink = &std::cerr;
-        *sink << "[hipBLASLt CHECK_SYNCHRONIZER] " << label << ": Synchronizer left dirty ("
-              << nonzero << "/" << count << " ints nonzero, first at int offset " << first
-              << ") -- the kernel did not reset the shared Synchronizer buffer on exit."
-              << std::endl;
-    }
-
-    // Restore the zero baseline, so this residue is reported once rather than
-    // by every call after it. A failure here would re-report it forever.
-    if(hipError_t merr = hipMemset(handle->Synchronizer, 0, bytes); merr != hipSuccess)
-    {
-        std::lock_guard<std::mutex> lk(log_mutex);
-        std::ostream*               sink = get_logger_os();
-        if(!sink)
-            sink = &std::cerr;
-        *sink << "[hipBLASLt CHECK_SYNCHRONIZER] " << label << ": could not clear the buffer ("
-              << hipGetErrorString(merr) << "); residue will be re-reported." << std::endl;
-    }
+    hipblaslt_check_synchronizer_detail::scan_region(
+        handle, label, "Synchronizer", handle->Synchronizer, gsuCount);
+    hipblaslt_check_synchronizer_detail::scan_region(
+        handle, label, "StreamKFlags", streamKFlags, skCount);
 }
 
 #endif // HIPBLASLT_CHECK_SYNCHRONIZER_HPP

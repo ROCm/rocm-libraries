@@ -138,8 +138,8 @@ struct _rocblaslt_handle
     // HIPBLASLT_CHECK_SYNCHRONIZER state, read once in the ctor. See
     // check_synchronizer.hpp for the checker protocol.
     bool check_synchronizer = false;
-    // Host staging for the Synchronizer readback, sized on first use and
-    // reused across every scanned call.
+    // Host staging for the flag-buffer readbacks, sized on first use for the
+    // larger of the two regions and reused across every scanned call.
     std::vector<int> check_synchronizer_host;
 
     // Kernels treat these buffers as inter-workgroup flags that they set, spin
