@@ -20,6 +20,25 @@
 #     pattern shapes are needed. "*" (comprehensive/full) also matches the
 #     full-tier bundles (integration-test-bundles/full/...).
 #
+# Layernorm backward (IntegrationGpuLayernormBackward.cpp) is the one
+# always-built graph suite here that instantiates the full Quick/Standard/
+# Comprehensive/Full tier set directly -- same convention as the gpu-ref
+# reference tests (tests/gpu-ref/TestGpuFpReferenceLayernormBwd.cpp and
+# friends) -- rather than registering everything under one "Smoke" bucket and
+# filtering by CTest pattern. "Quick/*", "Standard/*", "Comprehensive/*" below
+# pick that up generically: any other op that adopts the same instantiation
+# convention is covered with no further YAML change. Real single-process
+# totals measured on gfx1151 (dominated by fixed HIP/plugin process warm-up,
+# not test content): Quick alone ~25 s; Quick+Standard together ~38 s;
+# Quick+Standard+Comprehensive together ~173 s. Comprehensive isolates one
+# variant (optionalTensors=false) of the {32,32,14,25,59} production shape
+# (21.1M el, ~8-10 s/case -- host-side verification cost scales with element
+# count); its optionalTensors=true sibling doesn't fit the 5-minute budget
+# alongside it and is deferred to the Full tier instead. See
+# LayernormCommon.hpp's getLayernorm5DStandardTestCases() /
+# getLayernorm5DComprehensiveTestCases() / getLayernorm5DBackwardFullTestCases()
+# for the exact split.
+#
 # hipdnn_integration_tests covers ops (conv, matmul, sdpa, reduction, ...) that
 # HIP_MLOPS_ENGINE doesn't implement; the harness's generic engine-support check
 # (checkEngineSupportOrSkip / verifyGraph) skips those automatically, so the
@@ -35,23 +54,8 @@ test_categories:
     test_patterns:
       - "quick_*"
       - "Smoke/*"
-      # Layernorm backward's "4D" shape family (Smoke and Full instantiations
-      # alike) is cheap regardless of tier -- 18.0 s measured on gfx1151 for
-      # all 14 suites combined (Smoke ~12.6 s + Full ~5.5 s) -- so it is
-      # pulled into quick explicitly. "Full/*" isn't otherwise part of quick;
-      # this pattern is scoped to layernorm backward's own suite names so it
-      # can't pick up another op's Full suite.
-      - "Full/*IntegrationGpuLayernormBackward*4D*"
-    exclude:
-      - "*DISABLED*"
-      # Layernorm backward's "5D" shape family is not cheap: 276.7 s measured
-      # on gfx1151 across the 7 Smoke/*5D* suites alone (see standard/
-      # comprehensive below for where it lands instead). The blanket
-      # "Smoke/*" pattern above would otherwise pull all of it into quick;
-      # carve it back out here. Full/*5D* and Full/*LargeBatch* never enter
-      # quick's positive patterns in the first place (quick has no bare
-      # "Full/*"), so they need no exclude.
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*"
+      - "Quick/*"
+    exclude: *common_excludes
     labels:
       - "quick"
       - "pre-commit"
@@ -63,20 +67,9 @@ test_categories:
       - "quick_*"
       - "standard_*"
       - "Smoke/*"
-      - "Full/*IntegrationGpuLayernormBackward*4D*"
-    exclude:
-      - "*DISABLED*"
-      # Standard adds the 5D family back (25.0 s measured for 7 suites x 26
-      # cases minus the four indices below), keeping quick's content plus
-      # this at 43.0 s total -- comfortably under the 2-minute standard
-      # budget. The four excluded indices are the same production shape
-      # (see comprehensive's comment below) repeated per dtype fixture: ~8.2-
-      # 10.0 s each, ~251.7 s combined across all 7 5D suites, which alone
-      # would blow the standard budget, so they wait for comprehensive.
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/10"
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/12"
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/23"
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/25"
+      - "Quick/*"
+      - "Standard/*"
+    exclude: *common_excludes
     labels:
       - "standard"
       - "pr"
@@ -88,18 +81,12 @@ test_categories:
       - "*"
     # Layernorm backward is always built (HIPDNN_IT_ALWAYS_BUILT_SOURCES), so
     # unlike the other C++ graph suites it runs in CI. Full/*5D* and
-    # Full/*LargeBatch* are still excluded here -- 1364.2 s and 1240.1 s
-    # measured on gfx1151 respectively, each alone blowing the 5-minute
-    # comprehensive budget by itself (ROCm/rocm-libraries#11529 is the
-    # original full-suite timeout this was cut from). Everything else layernorm
-    # backward now runs in comprehensive: with quick+standard's 43.0 s plus the
-    # four production-shape indices standard held back (251.7 s), the total is
-    # 294.7 s -- just inside 5 minutes. Those four indices are one shape,
-    # {32,32,14,25,59} (21.1M el), repeated per dtype fixture; identified by
-    # index rather than name because the shape isn't in the test name:
-    # Combine(2 layouts, getLayernorm5DTestCases()) gives index = layout * 13 +
-    # case, and this shape is cases 10 and 12 in common/LayernormCommon.hpp.
-    # Re-derive if that list changes -- the indices shift silently.
+    # Full/*LargeBatch* are still excluded here -- each measured well over an
+    # hour on gfx1151 in the original full-suite run (ROCm/rocm-libraries#11529
+    # is the timeout this was cut from), nowhere close to fitting a 5-minute
+    # budget. Everything else in Quick/Standard/Comprehensive plus Full's
+    # cheap 4D suites runs here via the bare "*" pattern -- ~173 s measured,
+    # comfortably inside 5 minutes.
     #
     # Explicit list because YAML cannot concatenate an aliased sequence, hence
     # the repeated "*DISABLED*" instead of *common_excludes.
@@ -126,11 +113,8 @@ test_categories:
     test_patterns:
       - "quick_*"
       - "Smoke/*"
-      - "Full/*IntegrationGpuLayernormBackward*4D*"
-    exclude:
-      - "*DISABLED*"
-      # Mirrors the quick tier's carve-out above -- see quick's exclude comment.
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*"
+      - "Quick/*"
+    exclude: *common_excludes
     labels:
       - "ffm-quick"
       - "ffm-full"

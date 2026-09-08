@@ -97,6 +97,45 @@ inline std::vector<LayernormTestCase> getLayernorm5DTestCases()
     };
 }
 
+// Backward-only split of getLayernorm5DTestCases() above by measured CI cost: the
+// {32,32,14,25,59} shape (21.1M el) runs ~8-10 s a case on gfx1151 versus ~0.1-0.7 s for
+// everything else here (host-side verification cost scales with tensor element count). Its
+// optionalTensors=false case is carved out into its own Comprehensive-tier instantiation
+// (IntegrationGpuLayernormBackward.cpp) instead of being reached by a CTest index exclude. Its
+// optionalTensors=true sibling still doesn't fit comprehensive's 5-minute budget alongside it:
+// keeping just the false case across all 7 dtype fixtures (14 cases: 1 shape x 2 layouts x 7
+// fixtures) measures ~173 s combined with Quick+Standard on gfx1151; adding the true case back
+// (28 cases) would push that to ~300 s+, so it is deferred to
+// getLayernorm5DBackwardFullTestCases() below instead -- it still runs, just at the Full tier.
+// Forward's Smoke5d instantiation still uses the combined getLayernorm5DTestCases() above.
+inline std::vector<LayernormTestCase> getLayernorm5DStandardTestCases()
+{
+    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 2, 3, 2, 2}, 4, false, seed},
+        {{2, 2, 3, 2, 2}, 3, false, seed},
+        {{2, 2, 3, 2, 2}, 2, false, seed},
+        {{2, 2, 3, 2, 2}, 1, false, seed},
+        {{2, 2, 3, 2, 2}, 4, true, seed},
+        {{2, 2, 3, 2, 2}, 3, true, seed},
+        {{2, 2, 3, 2, 2}, 2, true, seed},
+        {{2, 2, 3, 2, 2}, 1, true, seed},
+        {{2, 5, 2, 2, 2}, 1, true, seed}, // larger C, normalized over C
+        {{32, 1, 32, 32, 32}, 4, false, seed}, // 32x32x32 volumetric shape
+        {{32, 1, 32, 32, 32}, 4, true, seed},
+    };
+}
+
+inline std::vector<LayernormTestCase> getLayernorm5DComprehensiveTestCases()
+{
+    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{32, 32, 14, 25, 59}, 4, false, seed},
+    };
+}
+
 // Larger, closer-to-production shapes reserved for the Full tier (imported from the MIOpen
 // layernorm suite). The heaviest batch-256/512 volumetric shapes live in a separate
 // getLayernormFwd5DLargeBatchTestCases() set below so they can be gated independently.
@@ -157,6 +196,20 @@ inline std::vector<LayernormTestCase> getLayernorm5DFullTestCases()
         {{1, 3, 8, 112, 112}, 4, true, seed},
         {{1, 3, 16, 112, 112}, 4, true, seed},
     };
+}
+
+// Backward-only: getLayernorm5DFullTestCases() above plus the optionalTensors=true case of the
+// {32,32,14,25,59} shape (21.1M el) that Comprehensive's 5-minute budget can't fit alongside its
+// optionalTensors=false sibling (see getLayernorm5DComprehensiveTestCases() above) -- it still
+// runs, just deferred to the Full tier. Kept out of getLayernorm5DFullTestCases() itself so
+// Forward's Full5d instantiation (gated behind -DBUILD_CPP_GRAPH_TESTS=ON) isn't affected by a
+// Backward tier-budget decision.
+inline std::vector<LayernormTestCase> getLayernorm5DBackwardFullTestCases()
+{
+    auto cases = getLayernorm5DFullTestCases();
+    cases.push_back(
+        {{32, 32, 14, 25, 59}, 4, true, hipdnn_test_sdk::utilities::getGlobalTestSeed()});
+    return cases;
 }
 
 // Batch-256/512 volumetric shapes. Measured at ~17-29 s per case and roughly doubling the
