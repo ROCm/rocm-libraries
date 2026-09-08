@@ -118,6 +118,8 @@ struct HWModel {
         /// Same-class reads after a read that satisfy its vm_vsrc wait; a class at 0 always waits.
         int vmVsrcLds;
         int vmVsrcTex;
+        /// Reads in the other class that satisfy the wait of an op belonging to both.
+        int vmVsrcBridge;
     };
 
     Lds lds;
