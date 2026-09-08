@@ -399,6 +399,20 @@ Tests:
   transA_transB: *complex_transA_transB_range
   alpha_beta: *complex_alpha_beta_range
   batch_count: 10
+  batch_mode: [0, 1]
+  gpu_arch: '9(42|50)|1250'
+
+# NT + size-1 complex (f32_c) cases return "NO solution found" on gfx950.
+# Those are quarantined for gfx950 in known_bugs.yaml.
+- name: matmul_batch_complex_general_batch_edge
+  category: pre_checkin
+  function:
+    - matmul: *complex_precisions
+  matrix_size: *one_matrix_size_range
+  transA_transB: *complex_transA_transB_range
+  alpha_beta: *complex_alpha_beta_range
+  batch_count: 3
+  batch_mode: [0, 1]
   gpu_arch: '9(42|50)|1250'
 
 

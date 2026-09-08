@@ -69,8 +69,17 @@ def get_available_algorithms() -> List[str]:
         "device_adjacent_find",
         "device_adjacent_difference",
         "device_adjacent_difference_inplace",
+        "device_partition_flag",
+        "device_partition_predicate",
+        "device_partition_three_way",
+        "device_partition_two_way_flag",
+        "device_partition_two_way_predicate",
+        "device_select_predicated_flag",
+        "device_select_unique_by_key",
+        "device_select_flag",
+        "device_select_predicate",
+        "device_select_unique"
     ])
-
 
 def filter_algorithms(available_algos: List[str], pattern: str) -> List[str]:
     """Filter algorithms based on regex pattern."""

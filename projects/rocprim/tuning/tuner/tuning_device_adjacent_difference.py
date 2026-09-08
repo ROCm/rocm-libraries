@@ -49,10 +49,10 @@ class Tuner(BaseTuner):
         params['ipt'] = IPT
         return params
 
-    def _get_key_type(self) -> str:
+    def _get_key_type_name(self) -> str:
         return "value_type"
 
-    def _get_value_type(self):
+    def _get_value_type_name(self):
         return ""
 
     def _get_restrictions(
