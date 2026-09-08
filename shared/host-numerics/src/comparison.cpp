@@ -20,16 +20,6 @@
 
 namespace roc::host_numerics {
 
-ComparisonOptions defaultComparisonOptions(ScalarType type,
-                                           std::optional<double> symmetricRelativeTolerance) {
-    ComparisonOptions options;
-    options.symmetricRelativeTolerance =
-        symmetricRelativeTolerance.value_or(defaultSymmetricRelativeTolerance(type));
-    options.strictTolerance = options.symmetricRelativeTolerance != 0.0;
-    options.equalNaNs = false;
-    return options;
-}
-
 ComparisonOptions nearComparisonOptions(double absoluteTolerance) {
     ComparisonOptions options;
     options.absoluteTolerance = absoluteTolerance;
@@ -213,7 +203,6 @@ class ComparisonAccumulator {
         ++m_result.compared;
         m_sawNonFinite = m_sawNonFinite || !std::isfinite(observed) || !std::isfinite(expected);
         if ((!allCloseDecision || *allCloseDecision) && observed == expected &&
-            (m_options.equalSignedZero || !oppositeZeroSigns(observed, expected)) &&
             !m_options.computeFrobenius && !m_options.computeUlp &&
             !m_options.reportMatchingElements) {
             if (m_options.computeElementwiseStatistics)
@@ -235,9 +224,7 @@ class ComparisonAccumulator {
         const long double difference = integralDifference(observed, expected);
         const long double tolerance =
             static_cast<long double>(m_options.absoluteTolerance) +
-            static_cast<long double>(m_options.relativeTolerance) * expectedMagnitude +
-            static_cast<long double>(m_options.symmetricRelativeTolerance) *
-                (observedMagnitude + expectedMagnitude + 1.0L);
+            static_cast<long double>(m_options.relativeTolerance) * expectedMagnitude;
 
         ComponentResult component;
         component.difference = static_cast<double>(difference);
@@ -246,11 +233,7 @@ class ComparisonAccumulator {
             expectedMagnitude == 0.0L
                 ? (difference == 0.0L ? 0.0 : std::numeric_limits<double>::infinity())
                 : static_cast<double>(difference / expectedMagnitude);
-        component.symmetricRelativeDifference =
-            static_cast<double>(difference / (observedMagnitude + expectedMagnitude + 1.0L));
-        component.close =
-            integralValuesEqual(observed, expected) ||
-            (m_options.strictTolerance ? difference < tolerance : difference <= tolerance);
+        component.close = integralValuesEqual(observed, expected) || difference <= tolerance;
         const ExactRealEvidence exactEvidence{
             component,
             observedMagnitude,
@@ -276,12 +259,8 @@ class ComparisonAccumulator {
         const bool complexValue = observed.complex || expected.complex;
         const bool exactReal = observed.real == expected.real;
         const bool exactImaginary = !complexValue || observed.imaginary == expected.imaginary;
-        const bool signedZeroMatches =
-            m_options.equalSignedZero ||
-            (!oppositeZeroSigns(observed.real, expected.real) &&
-             (!complexValue || !oppositeZeroSigns(observed.imaginary, expected.imaginary)));
         if ((!allCloseDecision || *allCloseDecision) && exactReal && exactImaginary &&
-            signedZeroMatches && !m_options.computeFrobenius && !m_options.computeUlp &&
+            !m_options.computeFrobenius && !m_options.computeUlp &&
             !m_options.reportMatchingElements) {
             if (m_options.computeElementwiseStatistics) {
                 if (complexValue &&
@@ -327,9 +306,6 @@ class ComparisonAccumulator {
                                               static_cast<size_t>(imaginary.matchedInfinity);
             }
             m_result.nonFiniteMismatches += nonFiniteMismatch;
-            m_result.signedZeroMismatches +=
-                magnitudeMode ? magnitude.signedZeroMismatch
-                              : real.signedZeroMismatch || imaginary.signedZeroMismatch;
         }
 
         double difference = magnitudeMode
@@ -345,15 +321,10 @@ class ComparisonAccumulator {
             if (magnitudeMode) {
                 m_result.maxRelativeDifference =
                     std::max(m_result.maxRelativeDifference, magnitude.relativeDifference);
-                m_result.maxSymmetricRelativeDifference = std::max(
-                    m_result.maxSymmetricRelativeDifference, magnitude.symmetricRelativeDifference);
             } else {
                 m_result.maxRelativeDifference =
                     std::max({m_result.maxRelativeDifference, real.relativeDifference,
                               imaginary.relativeDifference});
-                m_result.maxSymmetricRelativeDifference = std::max(
-                    {m_result.maxSymmetricRelativeDifference, real.symmetricRelativeDifference,
-                     imaginary.symmetricRelativeDifference});
             }
         }
 
@@ -461,12 +432,9 @@ class ComparisonAccumulator {
                     m_result.maxAbsoluteDifference / m_result.maximumExpectedMagnitude;
             }
         }
-        if (m_options.relativeFrobeniusTolerance) {
+        if (m_options.relativeFrobeniusTolerance)
             m_result.frobeniusPassed =
-                m_options.strictTolerance
-                    ? m_result.relativeFrobeniusError < *m_options.relativeFrobeniusTolerance
-                    : m_result.relativeFrobeniusError <= *m_options.relativeFrobeniusTolerance;
-        }
+                m_result.relativeFrobeniusError <= *m_options.relativeFrobeniusTolerance;
 
         if (m_result.ulpCompared != 0)
             m_result.averageUlp = m_result.sumUlp / static_cast<double>(m_result.ulpCompared);
@@ -847,31 +815,8 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
         return result;
     };
 
-    if (options.equalSignedZero && !options.equalNaNs && options.strictTolerance &&
-        options.absoluteTolerance == 0.0 && options.relativeTolerance == 0.0) {
-        const double tolerance = options.symmetricRelativeTolerance;
-        return run([tolerance](auto observedValue, auto expectedValue) {
-            if constexpr (std::is_integral_v<decltype(observedValue)> &&
-                          std::is_integral_v<decltype(expectedValue)>) {
-                return observedValue == expectedValue ||
-                       integralDifference(observedValue, expectedValue) <
-                           static_cast<long double>(tolerance) *
-                               (integralMagnitude(observedValue) +
-                                integralMagnitude(expectedValue) + 1.0L);
-            } else {
-                using Real = decltype(observedValue - expectedValue);
-                const Real typedTolerance = static_cast<Real>(tolerance);
-                return observedValue == expectedValue ||
-                       std::abs(observedValue - expectedValue) <
-                           typedTolerance * (std::abs(observedValue) + std::abs(expectedValue) +
-                                             static_cast<Real>(1));
-            }
-        });
-    }
-
-    if (options.equalSignedZero && !options.equalNaNs && !options.strictTolerance &&
-        options.absoluteTolerance == 0.0 && options.relativeTolerance == 0.0 &&
-        options.symmetricRelativeTolerance == 0.0)
+    if (!options.equalNaNs && options.absoluteTolerance == 0.0 &&
+        options.relativeTolerance == 0.0)
         return run(
             [](auto observedValue, auto expectedValue) { return observedValue == expectedValue; });
 
@@ -988,7 +933,6 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
         for (const double relative : relativeCandidates) {
             options.absoluteTolerance = absolute;
             options.relativeTolerance = relative;
-            options.symmetricRelativeTolerance = 0.0;
             if (compare(observed, expected, options).passed())
                 return ComparisonTolerance{absolute, relative};
         }

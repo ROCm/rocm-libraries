@@ -46,31 +46,28 @@ namespace TensileLite
 
         // Specialized solver for ungrouped GEMM problems. Automatic execution
         // selects among the component-owned implementations.
-        roc::host_numerics::GemmBackend
-            SolveGemmCPU(ContractionProblemGemm const&       problem,
-                         ContractionInputs const&            inputs,
-                         roc::host_numerics::OutputSelection outputSelection);
+        void SolveGemmCPU(ContractionProblemGemm const&       problem,
+                          ContractionInputs const&            inputs,
+                          roc::host_numerics::OutputSelection outputSelection);
 
-        roc::host_numerics::GemmBackend SolveGemmCPU(ContractionProblemGemm const& problem,
-                                                     ContractionInputs const&      inputs,
-                                                     size_t elementsToValidate);
+        void SolveGemmCPU(ContractionProblemGemm const& problem,
+                          ContractionInputs const&      inputs,
+                          size_t                        elementsToValidate);
 
         // Translates and executes one ungrouped GEMM. Unsupported descriptors or
         // backends throw std::invalid_argument before copying the current batch's
         // staged outputs to caller storage.
-        roc::host_numerics::GemmBackend
-            executeReferenceGemm(ContractionProblemGemm const&       problem,
-                                 ContractionInputs const&            inputs,
-                                 roc::host_numerics::OutputSelection outputSelection,
-                                 roc::host_numerics::GemmBackend     backend
-                                 = roc::host_numerics::GemmBackend::Automatic);
+        void executeReferenceGemm(
+            ContractionProblemGemm const&       problem,
+            ContractionInputs const&            inputs,
+            roc::host_numerics::OutputSelection outputSelection,
+            roc::host_numerics::GemmBackend backend = roc::host_numerics::GemmBackend::Automatic);
 
-        roc::host_numerics::GemmBackend
-            executeReferenceGemm(ContractionProblemGemm const&   problem,
-                                 ContractionInputs const&        inputs,
-                                 size_t                          elementsToValidate,
-                                 roc::host_numerics::GemmBackend backend
-                                 = roc::host_numerics::GemmBackend::Automatic);
+        void executeReferenceGemm(
+            ContractionProblemGemm const&   problem,
+            ContractionInputs const&        inputs,
+            size_t                          elementsToValidate,
+            roc::host_numerics::GemmBackend backend = roc::host_numerics::GemmBackend::Automatic);
 
     } // namespace Client
 } // namespace TensileLite

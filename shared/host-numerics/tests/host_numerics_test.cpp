@@ -80,17 +80,6 @@ void testRuntimeReferenceGemm() {
         Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(scaleB));
     problem.activation = Activation::Relu;
 
-    const GemmSupportInfo mixedSupport = queryGemmSupport(problem, GemmBackend::Mixed);
-    require(!mixedSupport && mixedSupport.reason == "Mixed is a reporting-only GEMM backend value.",
-            "GEMM accepted Mixed as an execution request.");
-    bool mixedExecutionRejected = false;
-    try {
-        (void)referenceGemm(problem, GemmBackend::Mixed);
-    } catch (const std::invalid_argument& error) {
-        mixedExecutionRejected = error.what() == mixedSupport.reason;
-    }
-    require(mixedExecutionRejected, "GEMM executed the reporting-only Mixed backend value.");
-
     GemmBackend backend = GemmBackend::Automatic;
     require(static_cast<bool>(queryGemmSupport(problem, backend)),
             "Runtime reference GEMM request support mismatch.");
@@ -1913,31 +1902,30 @@ void testComparisonProgram() {
 
     const std::array<double, 1> unitExpected{1.0};
     const std::array<double, 1> unitDifference{2.0};
-    ComparisonOptions strictNorm;
-    strictNorm.allClose = false;
-    strictNorm.computeElementwiseStatistics = true;
-    strictNorm.computeFrobenius = true;
-    strictNorm.relativeFrobeniusTolerance = 1.0;
-    strictNorm.strictTolerance = true;
-    require(!compare(Tensor::copyNativeStorage(std::span<const double>(unitDifference)),
-                     Tensor::copyNativeStorage(std::span<const double>(unitExpected)), strictNorm)
-                 .passed(),
-            "Strict relative Frobenius comparison accepted its tolerance boundary.");
+    ComparisonOptions normOptions;
+    normOptions.allClose = false;
+    normOptions.computeElementwiseStatistics = true;
+    normOptions.computeFrobenius = true;
+    normOptions.relativeFrobeniusTolerance = 1.0;
+    require(compare(Tensor::copyNativeStorage(std::span<const double>(unitDifference)),
+                    Tensor::copyNativeStorage(std::span<const double>(unitExpected)), normOptions)
+                .passed(),
+            "Relative Frobenius comparison rejected its inclusive tolerance boundary.");
 
     const std::array<double, 1> zeroNorm{};
-    strictNorm.zeroExpectedNormIsNaN = true;
+    normOptions.zeroExpectedNormIsNaN = true;
     const ComparisonReport zeroNormResult =
         compare(Tensor::copyNativeStorage(std::span<const double>(zeroNorm)),
-                Tensor::copyNativeStorage(std::span<const double>(zeroNorm)), strictNorm);
+                Tensor::copyNativeStorage(std::span<const double>(zeroNorm)), normOptions);
     require(std::isnan(zeroNormResult.relativeFrobeniusError) &&
                 std::isnan(zeroNormResult.relativeMaximumError) && !zeroNormResult.passed(),
             "IEEE zero-norm comparison policy did not preserve 0/0 as NaN.");
 
     const std::array<double, 1> infiniteNormValue{std::numeric_limits<double>::infinity()};
-    strictNorm.nonFiniteValuesInvalidateRelativeNorms = true;
+    normOptions.nonFiniteValuesInvalidateRelativeNorms = true;
     const ComparisonReport nonFiniteNormResult =
         compare(Tensor::copyNativeStorage(std::span<const double>(infiniteNormValue)),
-                Tensor::copyNativeStorage(std::span<const double>(infiniteNormValue)), strictNorm);
+                Tensor::copyNativeStorage(std::span<const double>(infiniteNormValue)), normOptions);
     require(std::isnan(nonFiniteNormResult.relativeFrobeniusError) &&
                 std::isnan(nonFiniteNormResult.relativeMaximumError) &&
                 !nonFiniteNormResult.passed(),
@@ -1999,7 +1987,6 @@ void testComparisonProgram() {
 
     const ComparisonOptions numpyDefaults = allCloseComparisonOptions();
     require(numpyDefaults.absoluteTolerance == 1e-8 && numpyDefaults.relativeTolerance == 1e-5 &&
-                numpyDefaults.symmetricRelativeTolerance == 0.0 && !numpyDefaults.strictTolerance &&
                 !numpyDefaults.equalNaNs &&
                 numpyDefaults.complexComparisonMode == ComplexComparisonMode::Magnitude,
             "Allclose options do not expose NumPy's finite-value defaults.");
@@ -2016,12 +2003,6 @@ void testComparisonProgram() {
                      Tensor::copyNativeStorage(std::span<const double>(lowerValue)), numpyBoundary)
                  .passed(),
             "Allclose lost NumPy's expected-reference asymmetry.");
-    numpyBoundary.strictTolerance = true;
-    require(
-        !compare(Tensor::copyNativeStorage(std::span<const double>(lowerValue)),
-                 Tensor::copyNativeStorage(std::span<const double>(referenceValue)), numpyBoundary)
-             .passed(),
-        "Strict tolerance did not preserve the legacy exclusive boundary.");
 
     const std::array<std::complex<double>, 1> componentwiseObserved{std::complex<double>(1.0, 1.0)};
     const std::array<std::complex<double>, 1> componentwiseExpected{std::complex<double>(0.0, 0.0)};
@@ -2141,15 +2122,13 @@ void testComparisonProgram() {
     const std::array<std::complex<double>, 1> signedZeroNaNExpected{
         std::complex<double>(quietNaN, -0.0)};
     ComparisonOptions signedZeroNaN = allCloseComparisonOptions(0.0, 0.0, true);
-    signedZeroNaN.equalSignedZero = false;
     signedZeroNaN.computeFrobenius = false;
     const ComparisonReport signedZeroNaNResult = compare(
         Tensor::copyNativeStorage(std::span<const std::complex<double>>(signedZeroNaNObserved)),
         Tensor::copyNativeStorage(std::span<const std::complex<double>>(signedZeroNaNExpected)),
         signedZeroNaN);
-    require(signedZeroNaNResult.passed() && signedZeroNaNResult.matchedNaNs == 1 &&
-                signedZeroNaNResult.signedZeroMismatches == 0,
-            "Logical complex NaN matching did not precede signed-zero classification.");
+    require(signedZeroNaNResult.passed() && signedZeroNaNResult.matchedNaNs == 1,
+            "Logical complex NaN matching did not preserve NumPy signed-zero behavior.");
 
     const std::array<double, 4> absoluteCandidates{1e-6, 1e-5, 1e-4, 1e-3};
     const std::array<double, 1> relativeCandidates{0.0};

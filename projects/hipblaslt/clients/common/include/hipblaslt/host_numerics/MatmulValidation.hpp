@@ -26,8 +26,8 @@ namespace hipblaslt::host_numerics
     {
         struct AllCloseTolerance
         {
-            double absolute          = 0.0;
-            double symmetricRelative = 0.0;
+            double absolute = 0.0;
+            double relative = 0.0;
         };
 
         std::vector<HostComparisonRequest> outputs;

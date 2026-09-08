@@ -973,10 +973,9 @@ namespace TensileLite::Client::HostNumerics
     GemmInvocationAdapter&
         GemmInvocationAdapter::operator=(GemmInvocationAdapter&&) noexcept = default;
 
-    roc::host_numerics::GemmBackend
-        TranslatedGemmBatch::runGemm(roc::host_numerics::GemmBackend backend) const
+    void TranslatedGemmBatch::runGemm(roc::host_numerics::GemmBackend backend) const
     {
-        return roc::host_numerics::referenceGemmInto(a, b, c, d, options, backend);
+        roc::host_numerics::referenceGemmInto(a, b, c, d, options, backend);
     }
 
     void TranslatedGemmBatch::runPostGemmOperationsAndCopyOutputs() const
@@ -1009,13 +1008,10 @@ namespace TensileLite::Client::HostNumerics
         return m_state->batchPlans.size();
     }
 
-    roc::host_numerics::GemmBackend
-        GemmInvocationAdapter::execute(roc::host_numerics::GemmBackend backend) const
+    void GemmInvocationAdapter::execute(roc::host_numerics::GemmBackend backend) const
     {
         using namespace roc::host_numerics;
 
-        GemmBackend combined   = GemmBackend::Blocked;
-        bool        hasBackend = false;
         for(size_t batch = 0; batch < batchCount(); ++batch)
         {
             auto translation = translateBatch(batch);
@@ -1028,20 +1024,9 @@ namespace TensileLite::Client::HostNumerics
 
             TranslatedGemmBatch translated
                 = std::move(std::get<TranslatedGemmBatch>(translation));
-            const GemmBackend backendUsed = translated.runGemm(backend);
+            translated.runGemm(backend);
             translated.runPostGemmOperationsAndCopyOutputs();
-
-            if(!hasBackend)
-            {
-                combined   = backendUsed;
-                hasBackend = true;
-            }
-            else if(combined != backendUsed)
-            {
-                combined = GemmBackend::Mixed;
-            }
         }
-        return combined;
     }
 
     std::variant<TranslatedGemmBatch, TranslationFailure> GemmInvocationAdapter::translateBatch(

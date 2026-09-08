@@ -944,9 +944,10 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     copyTensorEncodedBackingStorageToBuffer(
                         d_ptr + i3 * stride_d[i], dElements, referenceOutput);
 
-                    ComparisonOptions comparisonOptions{
-                        .symmetricRelativeTolerance = std::nextafter(0.001, 0.0),
-                        .maxReportedMismatches      = 10};
+                    const double tolerance = std::nextafter(0.001, 0.0);
+                    ComparisonOptions comparisonOptions{.absoluteTolerance = tolerance,
+                                                        .relativeTolerance = 2.0 * tolerance,
+                                                        .maxReportedMismatches = 10};
                     comparisonOptions.selection
                         = OutputSelection::all(IndexOrder::FirstDimensionFastest);
                     const Layout comparisonLayout(

@@ -153,12 +153,41 @@ namespace TensileLite::Client
     {
         using namespace roc::host_numerics;
 
-        const ScalarType            scalarType = toHostNumericsScalarType(type);
-        const std::optional<double> toleranceOverride
-            = scalarType == ScalarType::Float32 && threshold > 0.0
-                  ? std::optional<double>(threshold)
-                  : std::nullopt;
-        return defaultComparisonOptions(scalarType, toleranceOverride);
+        const ScalarType scalarType = toHostNumericsScalarType(type);
+        const double defaultTolerance = [&] {
+            switch(scalarType)
+            {
+            case ScalarType::Float16:
+                return 0.01;
+            case ScalarType::BFloat16:
+                return 0.1;
+            case ScalarType::Float8E4M3:
+            case ScalarType::Float8E4M3Fnuz:
+                return 0.125;
+            case ScalarType::Float8E5M2:
+            case ScalarType::Float8E5M2Fnuz:
+                return 0.25;
+            case ScalarType::Float32:
+            case ScalarType::ComplexFloat32:
+                return 0.0002;
+            case ScalarType::Float64:
+            case ScalarType::ComplexFloat64:
+                return 1e-12;
+            default:
+                return 0.0;
+            }
+        }();
+        const double tolerance
+            = scalarType == ScalarType::Float32 && threshold > 0.0 ? threshold : defaultTolerance;
+
+        ComparisonOptions options;
+        // Preserve the scale of TensileLite's historical symmetric check while
+        // expressing it through the NumPy allclose model. Near zero the old +1
+        // term was an absolute tolerance; for similar nonzero operands its two
+        // magnitude terms correspond to roughly twice that relative tolerance.
+        options.absoluteTolerance = tolerance;
+        options.relativeTolerance = 2.0 * tolerance;
+        return options;
     }
 
     inline roc::host_numerics::OutputSelection

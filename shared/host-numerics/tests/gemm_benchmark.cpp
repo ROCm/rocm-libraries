@@ -71,6 +71,21 @@ NumericProfile numericProfile(std::string_view name) {
         "or bf6mx.");
 }
 
+double comparisonTolerance(ScalarType type) {
+    switch (type) {
+        case ScalarType::Float16:
+            return 0.01;
+        case ScalarType::BFloat16:
+            return 0.1;
+        case ScalarType::Float32:
+            return 0.0002;
+        case ScalarType::Float64:
+            return 1e-12;
+        default:
+            return 0.0;
+    }
+}
+
 size_t parseSize(const char* text, const char* name) {
     char* end = nullptr;
     const unsigned long long value = std::strtoull(text, &end, 10);
@@ -319,17 +334,15 @@ int main(int argc, char** argv) {
         runScalarOracle(expectedRequest, expected);
 
         const std::vector<size_t> validationIndices = validationSelection.indices(outputElements);
-        const double tolerance = defaultSymmetricRelativeTolerance(profile.outputType);
+        const double tolerance = comparisonTolerance(profile.outputType);
+        ComparisonOptions comparisonOptions = allCloseComparisonOptions(tolerance, 2.0 * tolerance);
+        comparisonOptions.selection = validationSelection;
+        if (!compare(output, expected, comparisonOptions).passed())
+            throw std::runtime_error("Benchmark result differs from the scalar oracle.");
         double checksum = 0.0;
         for (const size_t index : validationIndices) {
             const double observed =
                 output.loadAs<double>({index / options.columns, index % options.columns});
-            const double reference =
-                expected.loadAs<double>({index / options.columns, index % options.columns});
-            const double difference = std::abs(observed - reference);
-            if (observed != reference &&
-                !(difference < tolerance * (std::abs(observed) + std::abs(reference) + 1.0)))
-                throw std::runtime_error("Benchmark result differs from the scalar oracle.");
             checksum += observed;
         }
 

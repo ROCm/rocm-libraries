@@ -52,7 +52,8 @@ int main(int argc, char** argv) {
         Tensor::copyNativeStorage<float>(layout, std::span<const float>(expected));
     const Tensor observedView =
         Tensor::copyNativeStorage<float>(layout, std::span<const float>(observed));
-    ComparisonOptions options = defaultComparisonOptions(ScalarType::Float32);
+    ComparisonOptions options = allCloseComparisonOptions(0.0002, 0.0004);
+    options.complexComparisonMode = ComplexComparisonMode::Componentwise;
     options.computeElementwiseStatistics = false;
     options.computeFrobenius = false;
     options.maxReportedMismatches = 0;
@@ -63,7 +64,7 @@ int main(int argc, char** argv) {
         bestSeconds([&] { report = compare(observedView, expectedView, options); });
     if (!report.passed() || report.compared != elements) return 1;
 
-    ComparisonOptions statisticsOptions = defaultComparisonOptions(ScalarType::Float32);
+    ComparisonOptions statisticsOptions = options;
     statisticsOptions.computeFrobenius = false;
     statisticsOptions.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
     ComparisonReport statisticsReport;
@@ -71,7 +72,7 @@ int main(int argc, char** argv) {
         [&] { statisticsReport = compare(observedView, expectedView, statisticsOptions); });
     if (!statisticsReport.passed() || statisticsReport.compared != elements) return 1;
 
-    ComparisonOptions detailedOptions = defaultComparisonOptions(ScalarType::Float32);
+    ComparisonOptions detailedOptions = options;
     detailedOptions.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
     ComparisonReport detailedReport;
     const double detailedComponentSeconds =
@@ -79,7 +80,8 @@ int main(int argc, char** argv) {
     if (!detailedReport.passed() || detailedReport.compared != elements) return 1;
 
     size_t baselineMismatches = 0;
-    const double tolerance = defaultSymmetricRelativeTolerance(ScalarType::Float32);
+    constexpr double absoluteTolerance = 0.0002;
+    constexpr double relativeTolerance = 0.0004;
     const double baselineSeconds = bestSeconds([&] {
         size_t mismatches = 0;
         for (size_t column = 0; column < columns; ++column) {
@@ -88,8 +90,8 @@ int main(int argc, char** argv) {
                 const double a = observed[index];
                 const double b = expected[index];
                 const double difference = std::abs(a - b);
-                mismatches +=
-                    !(a == b || difference < tolerance * (std::abs(a) + std::abs(b) + 1.0));
+                mismatches += !(a == b ||
+                                difference <= absoluteTolerance + relativeTolerance * std::abs(b));
             }
         }
         baselineMismatches = mismatches;

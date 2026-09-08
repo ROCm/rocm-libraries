@@ -36,10 +36,6 @@ inline bool allCloseOnlyComparison(const ComparisonOptions& options) {
            !options.maximumUlpTolerance;
 }
 
-inline bool oppositeZeroSigns(double observed, double expected) {
-    return observed == 0.0 && expected == 0.0 && std::signbit(observed) != std::signbit(expected);
-}
-
 template <typename T>
 ComparisonValue typedComparisonValue(const T& value) {
     using Value = std::remove_cvref_t<T>;
@@ -118,16 +114,13 @@ long double integralDifference(Observed observed, Expected expected) {
 
 template <typename Observed, typename Expected>
 bool valuesCloseFast(Observed observed, Expected expected, const ComparisonOptions& options) {
-    if (observed == expected)
-        return options.equalSignedZero || !oppositeZeroSigns(observed, expected);
+    if (observed == expected) return true;
     if constexpr (std::is_integral_v<Observed> && std::is_integral_v<Expected>) {
-        const long double observedMagnitude = integralMagnitude(observed);
         const long double expectedMagnitude = integralMagnitude(expected);
         const long double difference = integralDifference(observed, expected);
         const long double tolerance =
-            options.absoluteTolerance + options.relativeTolerance * expectedMagnitude +
-            options.symmetricRelativeTolerance * (observedMagnitude + expectedMagnitude + 1.0L);
-        return options.strictTolerance ? difference < tolerance : difference <= tolerance;
+            options.absoluteTolerance + options.relativeTolerance * expectedMagnitude;
+        return difference <= tolerance;
     } else {
         if (std::isnan(observed) || std::isnan(expected))
             return options.equalNaNs && std::isnan(observed) && std::isnan(expected);
@@ -135,9 +128,8 @@ bool valuesCloseFast(Observed observed, Expected expected, const ComparisonOptio
 
         const double difference = std::abs(observed - expected);
         const double tolerance =
-            options.absoluteTolerance + options.relativeTolerance * std::abs(expected) +
-            options.symmetricRelativeTolerance * (std::abs(observed) + std::abs(expected) + 1.0);
-        return options.strictTolerance ? difference < tolerance : difference <= tolerance;
+            options.absoluteTolerance + options.relativeTolerance * std::abs(expected);
+        return difference <= tolerance;
     }
 }
 
@@ -146,11 +138,9 @@ struct ComponentResult {
     bool matchedNaN = false;
     bool matchedInfinity = false;
     bool nonFiniteMismatch = false;
-    bool signedZeroMismatch = false;
     double difference = 0.0;
     double tolerance = 0.0;
     double relativeDifference = 0.0;
-    double symmetricRelativeDifference = 0.0;
 };
 
 inline ComponentResult compareComponent(double observed, double expected,
@@ -163,7 +153,6 @@ inline ComponentResult compareComponent(double observed, double expected,
         result.nonFiniteMismatch = !result.close;
         result.difference = result.close ? 0.0 : std::numeric_limits<double>::infinity();
         result.relativeDifference = result.difference;
-        result.symmetricRelativeDifference = result.difference;
         return result;
     }
 
@@ -173,28 +162,15 @@ inline ComponentResult compareComponent(double observed, double expected,
         result.nonFiniteMismatch = !result.close;
         result.difference = result.close ? 0.0 : std::numeric_limits<double>::infinity();
         result.relativeDifference = result.difference;
-        result.symmetricRelativeDifference = result.difference;
-        return result;
-    }
-
-    if (!options.equalSignedZero && oppositeZeroSigns(observed, expected)) {
-        result.signedZeroMismatch = true;
-        result.close = false;
         return result;
     }
 
     result.difference = std::abs(observed - expected);
-    result.tolerance =
-        options.absoluteTolerance + options.relativeTolerance * std::abs(expected) +
-        options.symmetricRelativeTolerance * (std::abs(observed) + std::abs(expected) + 1.0);
+    result.tolerance = options.absoluteTolerance + options.relativeTolerance * std::abs(expected);
     result.relativeDifference =
         expected == 0.0 ? (result.difference == 0.0 ? 0.0 : std::numeric_limits<double>::infinity())
                         : result.difference / std::abs(expected);
-    result.symmetricRelativeDifference =
-        result.difference / (std::abs(observed) + std::abs(expected) + 1.0);
-    result.close =
-        observed == expected || (options.strictTolerance ? result.difference < result.tolerance
-                                                         : result.difference <= result.tolerance);
+    result.close = result.difference <= result.tolerance;
     return result;
 }
 
@@ -210,15 +186,6 @@ inline ComponentResult compareComplexMagnitude(const ComparisonValue& observed,
         result.nonFiniteMismatch = !result.close;
         result.difference = result.close ? 0.0 : std::numeric_limits<double>::infinity();
         result.relativeDifference = result.difference;
-        result.symmetricRelativeDifference = result.difference;
-        return result;
-    }
-
-    const bool signedZeroMismatch =
-        !options.equalSignedZero && (oppositeZeroSigns(observed.real, expected.real) ||
-                                     oppositeZeroSigns(observed.imaginary, expected.imaginary));
-    if (signedZeroMismatch) {
-        result.signedZeroMismatch = true;
         return result;
     }
 
@@ -236,7 +203,6 @@ inline ComponentResult compareComplexMagnitude(const ComparisonValue& observed,
         result.nonFiniteMismatch = true;
         result.difference = std::numeric_limits<double>::infinity();
         result.relativeDifference = result.difference;
-        result.symmetricRelativeDifference = result.difference;
         return result;
     }
 
@@ -244,17 +210,12 @@ inline ComponentResult compareComplexMagnitude(const ComparisonValue& observed,
     const double expectedMagnitude = std::hypot(expected.real, expected.imaginary);
     result.difference =
         std::hypot(observed.real - expected.real, observed.imaginary - expected.imaginary);
-    result.tolerance =
-        options.absoluteTolerance + options.relativeTolerance * expectedMagnitude +
-        options.symmetricRelativeTolerance * (observedMagnitude + expectedMagnitude + 1.0);
+    result.tolerance = options.absoluteTolerance + options.relativeTolerance * expectedMagnitude;
     result.relativeDifference =
         expectedMagnitude == 0.0
             ? (result.difference == 0.0 ? 0.0 : std::numeric_limits<double>::infinity())
             : result.difference / expectedMagnitude;
-    result.symmetricRelativeDifference =
-        result.difference / (observedMagnitude + expectedMagnitude + 1.0);
-    result.close = options.strictTolerance ? result.difference < result.tolerance
-                                           : result.difference <= result.tolerance;
+    result.close = result.difference <= result.tolerance;
     return result;
 }
 
@@ -404,26 +365,8 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
 
 template <typename Observed, typename Expected>
 bool valuesClose(Observed observed, Expected expected, const ComparisonOptions& options) {
-    if (options.equalSignedZero && !options.equalNaNs && options.strictTolerance &&
-        options.absoluteTolerance == 0.0 && options.relativeTolerance == 0.0) {
-        if constexpr (std::is_integral_v<Observed> && std::is_integral_v<Expected>) {
-            return observed == expected ||
-                   integralDifference(observed, expected) <
-                       static_cast<long double>(options.symmetricRelativeTolerance) *
-                           (integralMagnitude(observed) + integralMagnitude(expected) + 1.0L);
-        } else {
-            using Real = decltype(observed - expected);
-            const Real typedTolerance = static_cast<Real>(options.symmetricRelativeTolerance);
-            return observed == expected ||
-                   std::abs(observed - expected) <
-                       typedTolerance *
-                           (std::abs(observed) + std::abs(expected) + static_cast<Real>(1));
-        }
-    }
-
-    if (options.equalSignedZero && !options.equalNaNs && !options.strictTolerance &&
-        options.absoluteTolerance == 0.0 && options.relativeTolerance == 0.0 &&
-        options.symmetricRelativeTolerance == 0.0)
+    if (!options.equalNaNs && options.absoluteTolerance == 0.0 &&
+        options.relativeTolerance == 0.0)
         return observed == expected;
 
     return valuesCloseFast(observed, expected, options);

@@ -956,12 +956,11 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertEqual(selected_report.compared, len(selected_indices))
         self.assertEqual(selected_report.mismatches, int(selected_mismatches))
 
-    def test_explicit_legacy_relative_norm_policy(self):
+    def test_explicit_relative_norm_policy(self):
         options = hv.ComparisonOptions()
         options.all_close = False
         options.compute_frobenius = True
         options.relative_frobenius_tolerance = 1.0
-        options.strict_tolerance = True
         options.zero_expected_norm_is_nan = True
         options.non_finite_values_invalidate_relative_norms = True
 
@@ -971,7 +970,7 @@ class TensorAndGemmTests(unittest.TestCase):
             options,
         )
         self.assertEqual(boundary.relative_frobenius_error, 1.0)
-        self.assertFalse(boundary.passed)
+        self.assertTrue(boundary.passed)
 
         zero = hv.from_numpy(np.asarray([0.0], dtype=np.float64))
         zero_result = hv.compare(zero, zero, options)
@@ -1145,7 +1144,7 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertFalse(sentinel_report.passed)
         self.assertEqual(sentinel_report.reported_mismatches[0].index, 2)
 
-    def test_default_comparison_policies_match_numpy(self):
+    def test_allclose_policies_match_numpy(self):
         real_values = np.asarray(
             [
                 -5.0,
@@ -1201,17 +1200,17 @@ class TensorAndGemmTests(unittest.TestCase):
                 )
                 observed_values = hv.to_numpy(observed, np.float64)
                 expected_values = hv.to_numpy(expected, np.float64)
-                options = hv.default_comparison_options(scalar_type)
+                options = hv.allclose_comparison_options()
                 options.compute_frobenius = False
 
                 with np.errstate(invalid="ignore"):
-                    difference = np.abs(observed_values - expected_values)
-                    tolerance = options.symmetric_relative_tolerance * (
-                        np.abs(observed_values) + np.abs(expected_values) + 1.0
+                    oracle = np.isclose(
+                        observed_values,
+                        expected_values,
+                        atol=options.absolute_tolerance,
+                        rtol=options.relative_tolerance,
+                        equal_nan=options.equal_nans,
                     )
-                oracle = observed_values == expected_values
-                finite = np.isfinite(observed_values) & np.isfinite(expected_values)
-                oracle |= finite & (difference < tolerance)
 
                 report = hv.compare(observed, expected, options)
                 self.assertEqual(
@@ -1250,26 +1249,17 @@ class TensorAndGemmTests(unittest.TestCase):
                 )
                 observed_values = hv.to_numpy(observed, np.complex128)
                 expected_values = hv.to_numpy(expected, np.complex128)
-                options = hv.default_comparison_options(scalar_type)
+                options = hv.allclose_comparison_options()
                 options.compute_frobenius = False
 
-                def component_oracle(observed_component, expected_component):
-                    with np.errstate(invalid="ignore"):
-                        difference = np.abs(observed_component - expected_component)
-                        tolerance = options.symmetric_relative_tolerance * (
-                            np.abs(observed_component)
-                            + np.abs(expected_component)
-                            + 1.0
-                        )
-                    result = observed_component == expected_component
-                    finite = np.isfinite(observed_component) & np.isfinite(
-                        expected_component
+                with np.errstate(invalid="ignore"):
+                    oracle = np.isclose(
+                        observed_values,
+                        expected_values,
+                        atol=options.absolute_tolerance,
+                        rtol=options.relative_tolerance,
+                        equal_nan=options.equal_nans,
                     )
-                    return result | (finite & (difference < tolerance))
-
-                oracle = component_oracle(
-                    observed_values.real, expected_values.real
-                ) & component_oracle(observed_values.imag, expected_values.imag)
                 report = hv.compare(observed, expected, options)
                 self.assertEqual(
                     report.mismatches,
@@ -1286,7 +1276,7 @@ class TensorAndGemmTests(unittest.TestCase):
             report = hv.compare(
                 hv.from_numpy(observed_values, scalar_type),
                 hv.from_numpy(expected_values, scalar_type),
-                hv.default_comparison_options(scalar_type),
+                hv.ComparisonOptions(),
             )
             self.assertEqual(
                 report.mismatches,
@@ -1330,34 +1320,30 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         self.assertFalse(signed_report.passed)
 
-    def test_explicit_tolerance_strict_boundary(self):
+    def test_explicit_tolerance_uses_numpy_boundary(self):
         observed = hv.from_numpy(np.asarray([1.02, 0.0], dtype=np.float32))
         expected = hv.from_numpy(np.asarray([1.0, 1.0], dtype=np.float32))
 
-        defaults = hv.default_comparison_options(hv.ScalarType.Float32)
+        defaults = hv.allclose_comparison_options()
         defaults.compute_frobenius = False
         self.assertEqual(hv.compare(observed, expected, defaults).mismatches, 2)
 
-        overridden = hv.default_comparison_options(hv.ScalarType.Float32, 0.01)
+        overridden = hv.allclose_comparison_options(0.01, 0.02)
         overridden.compute_frobenius = False
         self.assertEqual(
             hv.compare(observed, expected, overridden).mismatches,
             1,
         )
 
-        exact_boundary = hv.default_comparison_options(hv.ScalarType.Float32, 0.5)
+        exact_boundary = hv.allclose_comparison_options(0.0, 1.0)
         exact_boundary.compute_frobenius = False
         boundary_observed = hv.from_numpy(np.asarray([0.0], dtype=np.float32))
         boundary_expected = hv.from_numpy(np.asarray([1.0], dtype=np.float32))
-        self.assertFalse(
-            hv.compare(boundary_observed, boundary_expected, exact_boundary).passed
-        )
-        exact_boundary.strict_tolerance = False
         self.assertTrue(
             hv.compare(boundary_observed, boundary_expected, exact_boundary).passed
         )
 
-    def test_default_relative_policy_scales_at_large_magnitudes(self):
+    def test_relative_policy_scales_at_large_magnitudes(self):
         cases = [
             (
                 np.float32,
@@ -1376,7 +1362,8 @@ class TensorAndGemmTests(unittest.TestCase):
         ]
         for dtype, scalar_type, base, accepted_delta, rejected_delta in cases:
             with self.subTest(scalar_type=scalar_type):
-                options = hv.default_comparison_options(scalar_type)
+                tolerance = 0.0002 if scalar_type == hv.ScalarType.Float32 else 1e-12
+                options = hv.allclose_comparison_options(tolerance, 2.0 * tolerance)
                 options.compute_frobenius = False
                 accepted = hv.compare(
                     hv.from_numpy(np.asarray([base], dtype=dtype)),
@@ -1391,25 +1378,21 @@ class TensorAndGemmTests(unittest.TestCase):
                 self.assertTrue(accepted.passed)
                 self.assertFalse(rejected.passed)
 
-    def test_default_float32_policy_rejects_opposite_signs_near_zero(self):
+    def test_float32_policy_rejects_opposite_signs_near_zero(self):
         observed = hv.from_numpy(np.asarray([-0.0001, -0.0002], dtype=np.float32))
         expected = hv.from_numpy(np.asarray([0.0001, 0.0002], dtype=np.float32))
-        options = hv.default_comparison_options(hv.ScalarType.Float32)
+        options = hv.allclose_comparison_options(0.0002, 0.0004)
         options.compute_frobenius = False
         report = hv.compare(observed, expected, options)
         self.assertFalse(report.passed)
         self.assertEqual(report.mismatches, 1)
 
-    def test_signed_zero_policy_is_explicit(self):
+    def test_signed_zero_matches_numpy(self):
         observed = hv.from_numpy(np.asarray([0.0, -0.0], dtype=np.float64))
         expected = hv.from_numpy(np.asarray([-0.0, 0.0], dtype=np.float64))
         options = hv.ComparisonOptions()
         options.compute_frobenius = False
         self.assertTrue(hv.compare(observed, expected, options).passed)
-        options.equal_signed_zero = False
-        report = hv.compare(observed, expected, options)
-        self.assertFalse(report.passed)
-        self.assertEqual(report.signed_zero_mismatches, 2)
 
     def test_indexed_generation_matches_numpy(self):
         serial = hv.generate_tensor(
