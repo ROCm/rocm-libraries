@@ -12,6 +12,14 @@
 #include <string>
 #include <variant>
 
+// Max. vectorized global memory access in bytes.
+static constexpr ck_tile::index_t kMaxVectorBytes = 16;
+
+// Number of elements of type T in 1 max-width access.
+template <typename T>
+static constexpr ck_tile::index_t kMaxVectorElems =
+    static_cast<ck_tile::index_t>(kMaxVectorBytes / sizeof(T));
+
 struct GemmConfigBase
 {
     static constexpr bool kPadM = false;
@@ -52,7 +60,7 @@ struct GemmConfigBase
     static constexpr bool EnableKPadFallback = false;
 };
 
-// A,B vector sizes must be multiples of K
+// A,B vector sizes must divide K_Warp_Tile.
 template <typename GemmConfig,
           ck_tile::index_t VectorSizeA_,
           ck_tile::index_t VectorSizeB_,
@@ -232,6 +240,9 @@ struct GemmConfigComputeV3_WMMA_ClusterLaunch : public GemmConfigComputeV3_WMMA<
 {
     static constexpr ck_tile::index_t kClusterSizeM = 2;
     static constexpr ck_tile::index_t kClusterSizeN = 2;
+
+    // KPad fallback not validated on the cluster-launch path yet, disable for now.
+    static constexpr bool EnableKPadFallback = false;
 };
 
 template <typename PrecType>

@@ -6,6 +6,8 @@
 #include "ck_tile/host/tensor_shuffle_utils.hpp"
 #include "ck_tile/ops/common/utils.hpp"
 
+#include <type_traits>
+
 template <typename Layout>
 static constexpr inline auto is_row_major(Layout layout_)
 {
@@ -361,102 +363,49 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     constexpr bool k_pad_fallback_eligible = false;
 #endif
 
+    // Invoke GEMM
+    auto run_invoke = [&](auto cfg_tag) {
+        using Cfg = typename decltype(cfg_tag)::type;
+        return invoke_gemm<Cfg,
+                           Invoker,
+                           ADataTypeBuf,
+                           BDataTypeBuf,
+                           ck_tile::tuple<>,
+                           AccDataType,
+                           CDataType,
+                           ALayout,
+                           BLayout,
+                           ck_tile::tuple<>,
+                           CLayout>(a_m_k_dev_buf,
+                                    b_k_n_dev_buf,
+                                    c_m_n_dev_buf,
+                                    M,
+                                    N,
+                                    K,
+                                    stride_A,
+                                    stride_B,
+                                    stride_C,
+                                    kbatch,
+                                    n_warmup,
+                                    n_repeat,
+                                    persistent,
+                                    flush_cache,
+                                    rotating_count);
+    };
+
     float ave_time;
     if constexpr(k_pad_fallback_eligible)
     {
-        using KPadConfig =
-            GemmConfigFixedVectorSize<GemmConfig,
-                                      1,
-                                      1,
-                                      static_cast<ck_tile::index_t>(16 / sizeof(CDataType))>;
+        using KPadConfig = GemmConfigFixedVectorSize<GemmConfig, 1, 1, kMaxVectorElems<CDataType>>;
 
-        if(K % (16 / static_cast<int>(sizeof(ADataTypeBuf))) != 0)
-        {
-            // Unaligned K
-            ave_time = invoke_gemm<KPadConfig,
-                                   Invoker,
-                                   ADataTypeBuf,
-                                   BDataTypeBuf,
-                                   ck_tile::tuple<>,
-                                   AccDataType,
-                                   CDataType,
-                                   ALayout,
-                                   BLayout,
-                                   ck_tile::tuple<>,
-                                   CLayout>(a_m_k_dev_buf,
-                                            b_k_n_dev_buf,
-                                            c_m_n_dev_buf,
-                                            M,
-                                            N,
-                                            K,
-                                            stride_A,
-                                            stride_B,
-                                            stride_C,
-                                            kbatch,
-                                            n_warmup,
-                                            n_repeat,
-                                            persistent,
-                                            flush_cache,
-                                            rotating_count);
-        }
-        else
-        {
-            // Aligned K
-            ave_time = invoke_gemm<GemmConfig,
-                                   Invoker,
-                                   ADataTypeBuf,
-                                   BDataTypeBuf,
-                                   ck_tile::tuple<>,
-                                   AccDataType,
-                                   CDataType,
-                                   ALayout,
-                                   BLayout,
-                                   ck_tile::tuple<>,
-                                   CLayout>(a_m_k_dev_buf,
-                                            b_k_n_dev_buf,
-                                            c_m_n_dev_buf,
-                                            M,
-                                            N,
-                                            K,
-                                            stride_A,
-                                            stride_B,
-                                            stride_C,
-                                            kbatch,
-                                            n_warmup,
-                                            n_repeat,
-                                            persistent,
-                                            flush_cache,
-                                            rotating_count);
-        }
+        ave_time = (K % kMaxVectorElems<ADataTypeBuf> != 0)
+                       ? run_invoke(std::type_identity<KPadConfig>{})  // unaligned K
+                       : run_invoke(std::type_identity<GemmConfig>{}); // aligned K
     }
     else
     {
-        // Do not use KPad Fallback
-        ave_time = invoke_gemm<GemmConfig,
-                               Invoker,
-                               ADataTypeBuf,
-                               BDataTypeBuf,
-                               ck_tile::tuple<>,
-                               AccDataType,
-                               CDataType,
-                               ALayout,
-                               BLayout,
-                               ck_tile::tuple<>,
-                               CLayout>(a_m_k_dev_buf,
-                                        b_k_n_dev_buf,
-                                        c_m_n_dev_buf,
-                                        M,
-                                        N,
-                                        K,
-                                        stride_A,
-                                        stride_B,
-                                        stride_C,
-                                        kbatch,
-                                        n_warmup,
-                                        n_repeat,
-                                        persistent,
-                                        flush_cache,
-                                        rotating_count);
+        // Do not use KPad fallback
+        ave_time = run_invoke(std::type_identity<GemmConfig>{});
     }
 
     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
