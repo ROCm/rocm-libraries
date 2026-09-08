@@ -781,13 +781,13 @@ __host__ __device__ void wthread::detach() {
 //
 // threading_main is persistent: a vcore that cannot be made resident never runs, and the
 // resident ones never exit while work might arrive. Over-subscribe the grid and it wedges.
-// hipOccupancyMaxActiveBlocksPerMultiprocessor is theoretical and over-predicts what a
-// persistent kernel sustains, by an amount that varies by architecture, so the margin is
-// scaled: RDNA sustains ~3/4 of it (gfx1100 reports 44 blocks/WGP, wedges at 36); CDNA far
-// less - gfx942 reports 16 but wedges intermittently at 8, likely because multi-XCD parts
-// cannot pack the grid evenly and one oversubscribed XCD is enough. Hence the wider margin
-// there.
 [[gnu::const]] static __host__ uint64_t getOccupancyBasedMaxVcores(int device) {
+    // hipOccupancyMaxActiveBlocksPerMultiprocessor is theoretical and over-predicts what a
+    // persistent kernel sustains, by an amount that varies by architecture, so the margin is
+    // scaled: RDNA sustains ~3/4 of it (gfx1100 reports 44 blocks/WGP, wedges at 36); CDNA far
+    // less - gfx942 reports 16 but wedges intermittently at 8, likely because multi-XCD parts
+    // cannot pack the grid evenly and one oversubscribed XCD is enough. Hence the wider margin
+    // there.
     const int occupancySafetyDivisor = (getCusPerMultiprocessor(device) == 2U) ? 2 : 4;
 
     int maxBlocksPerMp = 0;
