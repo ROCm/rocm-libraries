@@ -67,7 +67,7 @@ from ...core.ir import (
 from ...helpers.atoms import MfmaAtom, mfma_atom
 from ...helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from ...helpers.geometry import WarpGrid
-from ...helpers.layouts import LdsLayout
+from ...helpers.layouts import ConvKOuterFragmentReader, LdsLayout
 from ...helpers.loads import AsyncTileLoader, CoalescedTileLoader
 from ...helpers.mfma_gemm_inner import decode_mfma_lanes
 from ...helpers.pipeline import SoftwarePipeline
@@ -1624,77 +1624,28 @@ def _build_tilde_dgrad(
 
     # Materialised only on the K-outer path: emitting these unconditionally
     # would add IR ops to every existing config and move every dgrad golden.
-    if spec.lds_k_outer and spec.wave_size == 64:
-        _tr_lane_mod4 = b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4))
-        _tr_grp16 = b.div(b.mod(lane, b.const_i32(16)), b.const_i32(4))
+    if spec.lds_k_outer:
+        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size).bind(b, lane)
 
     def _tr_frag(smem: Value, mn_base: Value, k_base: Value, mn_atom: int, n: int):
         """One MMA operand fragment from a K-outer tile via transpose reads.
 
-        wave32 (gfx1250 WMMA 16x16x32): the *result* layout is lane ``l`` owning
-        column ``l % 16`` and K-half ``l // 16`` -- but that is what the lane
-        must end up holding, not the address it supplies. ``ds_load_tr16_b128``
-        transposes an 8x8 element block *within each group of 8 lanes*: the 8
-        lanes of a group each read 8 contiguous elements, and lane ``j`` of the
-        group receives element ``j`` from all 8 of those runs. So to land column
-        ``l % 16`` in lane ``l``, the group must address the 8-column block
-        containing it (``((l % 16) // 8) * 8``) and lane ``l`` must supply the
-        ``l % 8``-th K row of the run, not its own column:
-
-            col  = mn_base + ((l % 16) // 8) * 8
-            row0 = k_base  + (l // 16) * n + (l % 8)
-
-        Verified on silicon -- addressing this as if the instruction returned a
-        straight run of K at the lane's own column reads a transposed operand
-        and produces numerically wrong output.
-
-        wave64 (gfx950 MFMA): four (or two) lane groups fall *within* the free
-        axis, which is what the ``((l % 16) // 4)`` and ``(l % 4) * 4`` terms
-        encode. ``ds_read_b64_tr_b16`` returns 4 per lane, so ``n / 4`` reads.
+        Thin binding of :class:`ConvKOuterFragmentReader`, which owns the lane
+        mapping for both wave regimes and is shared with the other backward
+        instance. The mapping is the part that is easy to get subtly wrong --
+        two engines agreeing on the same wrong formula still reads a transposed
+        operand -- so it lives in one place, mirroring ``rocke_conv_tr_frag`` in
+        the C++ engine.
         """
-        tr_dtype = _smem_dtype if _smem_dtype is not None else F16
-        if spec.wave_size == 32:
-            c16 = b.const_i32(16)
-            c8 = b.const_i32(8)
-            lane_mod16 = b.mod(lane, c16)
-            col_grp = b.div(lane_mod16, c8)
-            col_off = b.mul(col_grp, c8)
-            col = b.add(mn_base, col_off)
-            lane_div16 = b.div(lane, c16)
-            c_n = b.const_i32(n)
-            row_mul = b.mul(lane_div16, c_n)
-            lane_mod8 = b.mod(lane, c8)
-            row_sum = b.add(row_mul, lane_mod8)
-            row0 = b.add(k_base, row_sum)
-            parts = [
-                b.ds_read_tr16_b128(
-                    smem, b.add(row0, b.const_i32(8 * r)), col, dtype=tr_dtype
-                )
-                for r in range(n // 8)
-            ]
-            out = parts[0]
-            for pt in parts[1:]:
-                out = b.vec_concat(out, pt)
-            return out
-        c_mn = b.const_i32(mn_atom)
-        col = b.add(
+        return _tr_reader.fragment(
+            b,
+            smem,
             mn_base,
-            b.add(
-                b.mul(b.div(b.mod(lane, c_mn), b.const_i32(16)), b.const_i32(16)),
-                _tr_lane_mod4,
-            ),
+            k_base,
+            mn_atom=mn_atom,
+            n=n,
+            dtype=_smem_dtype if _smem_dtype is not None else F16,
         )
-        row0 = b.add(k_base, b.add(b.mul(b.div(lane, c_mn), b.const_i32(n)), _tr_grp16))
-        parts = [
-            b.ds_read_tr16_b64(
-                smem, b.add(row0, b.const_i32(4 * r)), col, dtype=tr_dtype
-            )
-            for r in range(n // 4)
-        ]
-        out = parts[0]
-        for pt in parts[1:]:
-            out = b.vec_concat(out, pt)
-        return out
 
     def emit_load_phase(k_off: Value, A_dst: Value, B_dst: Value) -> None:
         k_off_capture[0] = k_off
