@@ -158,10 +158,16 @@ def load_logic_gfx_arch(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML
 def archMatch(arch: str, archs: List[str]) -> bool:
     """Return True if a logic file's declared gfx `arch` belongs to `archs`.
 
-    An exact match, or a requested entry that starts with `arch` so a bare
-    header arch (e.g. "gfx942") matches a predicated request ("gfx942:xnack+").
+    An exact match, or one where only the request's target features or predicate
+    differ, so a bare "gfx942" header matches "gfx942:xnack+" and
+    "gfx942[cu=64]". Whole-name, not prefix, or "gfx1250" would also claim a
+    request for "gfx1250-strict".
+
+    Stripped inline rather than via baseArchName to keep this module free of
+    Tensile imports: TensileLogic filters with the raw CMake spec, predicates
+    and all.
     """
-    return (arch in archs) or any(a.startswith(arch) for a in archs)
+    return (arch in archs) or any(a.split("[")[0].split(":")[0] == arch for a in archs)
 
 def load_logic_schedule_name(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML_LOADER):
     try:

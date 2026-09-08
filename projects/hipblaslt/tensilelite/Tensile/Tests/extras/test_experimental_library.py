@@ -332,6 +332,9 @@ def test_detect_host_gfx_archs_normalizes_and_filters(monkeypatch):
         returncode = 0
         stdout = b"gfx950\ngfx950:xnack-\ngfx000\n"
 
+    # amdgpu-arch and rocminfo back the enumerator up; silenced so this reads the
+    # fixture rather than whatever silicon the test is running on.
+    monkeypatch.setattr(Arch, "detect_gpu_archs", lambda: [])
     monkeypatch.setattr(
         "Tensile.Toolchain.Validators.validateToolchain", lambda tool: "/fake/enum"
     )
@@ -341,6 +344,43 @@ def test_detect_host_gfx_archs_normalizes_and_filters(monkeypatch):
     assert Arch.hostHasArch("gfx950") is True
     assert Arch.hostHasArch("gfx950:xnack-") is True  # variant normalized
     assert Arch.hostHasArch("gfx1151") is False
+
+
+def test_detect_host_gfx_archs_keeps_the_stepping_the_enumerator_reported(monkeypatch):
+    """Rebuilding the name from the ISA reports gfx1250 for gfx1250-strict silicon,
+    which tells the caller to build for an architecture whose code objects this
+    host will reject -- and prints that name in the error when it refuses."""
+    pytest.importorskip("rocisa")
+    import Tensile.Common.Architectures as Arch
+
+    class _Proc:
+        returncode = 0
+        stdout = b"gfx1250-strict\n"
+
+    # Without this the real device answers, and on plain gfx1250 silicon the test
+    # fails by reporting exactly the truncation it was written to rule out.
+    monkeypatch.setattr(Arch, "detect_gpu_archs", lambda: [])
+    monkeypatch.setattr(
+        "Tensile.Toolchain.Validators.validateToolchain", lambda tool: "/fake/enum"
+    )
+    monkeypatch.setattr(Arch, "run", lambda *a, **k: _Proc())
+
+    assert Arch.detectHostGfxArchs() == ["gfx1250-strict"]
+
+
+def test_host_arch_match_tells_the_two_steppings_apart(monkeypatch):
+    """They share ISA (12,5,0), so matching on it answers True for each on the
+    other's silicon and the caller benchmarks code objects the agent rejects."""
+    pytest.importorskip("rocisa")
+    import Tensile.Common.Architectures as Arch
+
+    monkeypatch.setattr(Arch, "detectHostGfxArchs", lambda: ["gfx1250-strict"])
+    assert Arch.hostHasArch("gfx1250-strict") is True
+    assert Arch.hostHasArch("gfx1250") is False
+
+    monkeypatch.setattr(Arch, "detectHostGfxArchs", lambda: ["gfx1250"])
+    assert Arch.hostHasArch("gfx1250") is True
+    assert Arch.hostHasArch("gfx1250-strict") is False
 
 
 def test_gen_logic_rejects_arch_absent_on_host(monkeypatch, tmp_path):
