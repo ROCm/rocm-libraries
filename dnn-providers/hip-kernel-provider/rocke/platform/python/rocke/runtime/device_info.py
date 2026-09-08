@@ -18,7 +18,10 @@ class DeviceInfo:
     ``target_id`` is the string read from HIP's ``gcnArchName`` property,
     such as ``gfx1250-strict`` or ``gfx942:sramecc+:xnack-``.
 
-    ``base_arch`` is derived from ``target_id`` by
+    Only ``target_id`` and ``asic_revision`` are stored. ``base_arch`` and
+    ``compiler_target`` are read-only properties computed from ``target_id``.
+
+    ``base_arch`` is derived by
     :func:`~rocke.core.arch.base_arch_from_target_id`. rocKE uses this name
     with :meth:`~rocke.core.arch.ArchTarget.from_gfx` for catalog lookup.
 
@@ -31,28 +34,37 @@ class DeviceInfo:
     """
 
     target_id: str | None
-    base_arch: str | None
-    compiler_target: str | None
     asic_revision: int | None
+
+    @property
+    def base_arch(self) -> str | None:
+        """Base architecture, or ``None`` when ``target_id`` is unavailable."""
+        return (
+            base_arch_from_target_id(self.target_id)
+            if self.target_id is not None
+            else None
+        )
+
+    @property
+    def compiler_target(self) -> str | None:
+        """Compiler target, or ``None`` when ``target_id`` is unavailable."""
+        return (
+            compiler_target_from_target_id(self.target_id)
+            if self.target_id is not None
+            else None
+        )
 
 
 def get_device_info(device: int = 0) -> DeviceInfo:
-    """Read properties for a HIP device ordinal and derive its target names.
+    """Read target ID and ASIC revision for a HIP device ordinal.
 
     Uses :func:`get_device_target_id` and :func:`_get_device_asic_revision`.
     If the target ID is unavailable, all three target names are ``None``.
     The revision query is independent and returns ``None`` on failure.
     """
 
-    target_id = get_device_target_id(device)
     return DeviceInfo(
-        target_id=target_id,
-        base_arch=(
-            base_arch_from_target_id(target_id) if target_id is not None else None
-        ),
-        compiler_target=(
-            compiler_target_from_target_id(target_id) if target_id is not None else None
-        ),
+        target_id=get_device_target_id(device),
         asic_revision=_get_device_asic_revision(device),
     )
 

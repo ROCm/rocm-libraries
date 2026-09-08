@@ -91,11 +91,18 @@ def test_device_properties_retry_after_hip_library_becomes_available(
 
 
 @pytest.mark.parametrize(
-    ("target_id", "base_arch", "revision"),
-    [("gfx1250-strict", "gfx1250", 0), (None, None, None)],
+    ("target_id", "base_arch", "compiler_target", "revision"),
+    [
+        ("gfx1250-strict", "gfx1250", "gfx1250", 0),
+        ("gfx942:sramecc+:xnack-", "gfx942", "gfx942:sramecc+:xnack-", 1),
+        (None, None, None, None),
+    ],
 )
 def test_get_device_info(
-    target_id: str | None, base_arch: str | None, revision: int | None
+    target_id: str | None,
+    base_arch: str | None,
+    compiler_target: str | None,
+    revision: int | None,
 ) -> None:
     with (
         mock.patch.object(
@@ -109,12 +116,9 @@ def test_get_device_info(
 
     query_target.assert_called_once_with(4)
     query_revision.assert_called_once_with(4)
-    assert info == device_info.DeviceInfo(
-        target_id=target_id,
-        base_arch=base_arch,
-        compiler_target=base_arch,
-        asic_revision=revision,
-    )
+    assert info == device_info.DeviceInfo(target_id=target_id, asic_revision=revision)
+    assert info.base_arch == base_arch
+    assert info.compiler_target == compiler_target
 
 
 def test_runtime_exports_device_info_api() -> None:
