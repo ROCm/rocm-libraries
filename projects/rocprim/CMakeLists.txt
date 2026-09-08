@@ -27,6 +27,7 @@ cmake_policy(VERSION 3.18...3.25)
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
 # rocPRIM project
+# Test comment for sparse checkout validation
 project(rocprim LANGUAGES CXX)
 
 # Set CXX flags
