@@ -20,6 +20,7 @@
 #include "hip/thread"
 
 #include "hip/__support/misuse.h"
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <hip/atomic>
@@ -830,15 +831,13 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
         // means two densities - which is why the default hung on Instinct but not Navi.
         // getTotalRequestedVcores normalises to CUs so the configured value means the same thing
         // on both. Even at the right density the device may not hold that many blocks, so
-        // getOccupancyBasedMaxVcores caps against measured occupancy.
-        uint64_t total = getTotalRequestedVcores(device);
-        const uint64_t occupancyBasedMaxVcores = getOccupancyBasedMaxVcores(device);
-        if (occupancyBasedMaxVcores < total) {
-            total = occupancyBasedMaxVcores;
-        }
-        if (total > static_cast<uint64_t>(MAX_VCORES)) {
-            total = static_cast<uint64_t>(MAX_VCORES);
-        }
+        // getOccupancyBasedMaxVcores caps against measured occupancy. MAX_VCORES is the hard
+        // bound imposed by currentWorkNode's fixed size, independent of either.
+        uint64_t total = ::std::min({
+            getTotalRequestedVcores(device),
+            getOccupancyBasedMaxVcores(device),
+            static_cast<uint64_t>(MAX_VCORES),
+        });
         if (total == 0) {
             // Never report zero: callers size loops off this, and the scheduler needs a grid.
             total = 1;
