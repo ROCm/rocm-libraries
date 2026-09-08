@@ -30,16 +30,26 @@ ordinary TensileLite builds and tests do not depend on them.
 
 ## Run one investigation
 
-1. Choose one source module and a focused candidate test set.
+1. Define the slice, following
+   [references/slice-planning.md](references/slice-planning.md): record the
+   source version, target module, selected tests, container, worker limit, and
+   output directory before editing any configuration. Assemble the test set
+   with [references/covering-set.md](references/covering-set.md) and measure
+   its coverage of that exact file. Treat the threshold as a scheduling
+   heuristic, not as evidence that the tests detect each mutation. A run whose
+   selected tests do not meet the reviewed threshold is deferred, not started.
 2. Record the source and container state with `scripts/slice-preflight.sh`.
 3. Use `scripts/pyproject-mutmut.sh backup` and `set` to configure the bounded
    campaign.
-4. Run mutmut with an explicit worker limit. Inspect every result that was not
-   killed with `mutmut show <id>` before deciding whether it exposes a gap.
+4. Run mutmut with an explicit worker limit. Review every result that was not
+   killed, following [references/survivor-triage.md](references/survivor-triage.md).
+   Save the complete set of mutant IDs before grouping work, inspect each one
+   with `mutmut show <id>`, and keep exactly one review row per ID.
 5. Restore `pyproject.toml` and require `assert-clean` before survivor
    verification.
 6. For a meaningful survivor, add a focused characterization test that passes
-   on unchanged source and fails on the changed behavior. A new untracked test
+   on unchanged source and fails on the changed behavior, following
+   [references/test-authoring.md](references/test-authoring.md). A new untracked test
    file can be verified directly; when an existing tracked test must change,
    use a separate clean worktree or a deliberate local commit first.
 7. Verify that evidence with `scripts/mutmut-verify.sh`. Collection, usage,
@@ -49,9 +59,12 @@ ordinary TensileLite builds and tests do not depend on them.
 
 ## Report the outcome
 
-Record the source commit, container image, mutmut version, selected source and
-tests, complete result counts, characterization tests added, and any unresolved
-survivors or infrastructure failures. End with one explicit state:
+Follow [references/reporting.md](references/reporting.md). Build the report from
+saved mutmut output, the complete review table, verifier output, and the
+restoration result, keeping mutmut's original statuses separate from review
+decisions. Record the source commit, container image, mutmut version, selected
+source and tests, complete result counts, characterization tests added, and any
+unresolved survivors or infrastructure failures. End with one explicit state:
 
 - **Unresolved survivor:** the exact mutation has not yet been classified;
   preserve its ID and evidence without calling it a coverage gap.
