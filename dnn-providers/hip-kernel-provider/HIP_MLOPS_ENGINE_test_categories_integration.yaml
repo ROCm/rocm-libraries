@@ -27,15 +27,23 @@
 # friends) -- rather than registering everything under one "Smoke" bucket and
 # filtering by CTest pattern. "Quick/*", "Standard/*", "Comprehensive/*" below
 # pick that up generically: any other op that adopts the same instantiation
-# convention is covered with no further YAML change. Real single-process
-# totals measured on gfx1151 (dominated by fixed HIP/plugin process warm-up,
-# not test content): Quick alone ~25 s; Quick+Standard together ~38 s;
-# Quick+Standard+Comprehensive together ~173 s. Comprehensive isolates one
-# variant (optionalTensors=false) of the {32,32,14,25,59} production shape
-# (21.1M el, ~8-10 s/case -- host-side verification cost scales with element
-# count); its optionalTensors=true sibling doesn't fit the 5-minute budget
-# alongside it and is deferred to the Full tier instead. See
-# LayernormCommon.hpp's getLayernorm5DStandardTestCases() /
+# convention is covered with no further YAML change. Real numbers below are
+# layernorm backward's OWN contribution in isolation (measured via
+# --gtest_filter='Quick/*:Standard/*:Comprehensive/*' against just this
+# suite) -- NOT the comprehensive tier's total wall time, which also runs
+# every other op's own quick/standard/full-tier bundle sweeps via the same
+# bare "*" pattern (pre-existing, unrelated to this file's layernorm changes;
+# that total is what execution_settings.category_timeouts.comprehensive's
+# 7200 s allowance below is sized for). Single-process totals measured on
+# gfx1151, dominated by fixed HIP/plugin process warm-up rather than test
+# content: Quick alone ~25 s; Quick+Standard together ~38 s;
+# Quick+Standard+Comprehensive together ~173 s -- each within its 20 s / 2
+# min / 5 min budget for layernorm backward's own share of that tier.
+# Comprehensive isolates one variant (optionalTensors=false) of the
+# {32,32,14,25,59} production shape (21.1M el, ~8-10 s/case -- host-side
+# verification cost scales with element count); its optionalTensors=true
+# sibling doesn't fit that budget alongside it and is deferred to the Full
+# tier instead. See LayernormCommon.hpp's getLayernorm5DStandardTestCases() /
 # getLayernorm5DComprehensiveTestCases() / getLayernorm5DBackwardFullTestCases()
 # for the exact split.
 #
@@ -80,13 +88,18 @@ test_categories:
     test_patterns:
       - "*"
     # Layernorm backward is always built (HIPDNN_IT_ALWAYS_BUILT_SOURCES), so
-    # unlike the other C++ graph suites it runs in CI. Full/*5D* and
-    # Full/*LargeBatch* are still excluded here -- each measured well over an
-    # hour on gfx1151 in the original full-suite run (ROCm/rocm-libraries#11529
-    # is the timeout this was cut from), nowhere close to fitting a 5-minute
-    # budget. Everything else in Quick/Standard/Comprehensive plus Full's
-    # cheap 4D suites runs here via the bare "*" pattern -- ~173 s measured,
-    # comfortably inside 5 minutes.
+    # unlike the other C++ graph suites it runs in CI. All three "Full"-tagged
+    # layernorm backward instantiations (4D, 5D, LargeBatch) are excluded here
+    # -- not just the two that are actually expensive -- so the tag boundary
+    # stays crisp: "Full" means full-tier-only, never leaks into comprehensive
+    # via the bare "*" pattern below just because one Full-tagged case happens
+    # to be cheap. Comprehensive's layernorm content is exactly the union of
+    # its Quick/Standard/Comprehensive-tagged instantiations, matched by "*"
+    # with nothing more to exclude for those three. Full/*5D* and
+    # Full/*LargeBatch* each measured well over an hour on gfx1151 in the
+    # original full-suite run (ROCm/rocm-libraries#11529 is the timeout this
+    # was cut from); Full/*4D* is cheap (~5 s) but excluded anyway for the
+    # same tag-boundary reason.
     #
     # Explicit list because YAML cannot concatenate an aliased sequence, hence
     # the repeated "*DISABLED*" instead of *common_excludes.
@@ -94,6 +107,7 @@ test_categories:
       - "*DISABLED*"
       - "Full/*IntegrationGpuLayernormBackwardLargeBatch*"
       - "Full/*IntegrationGpuLayernormBackward*5D*"
+      - "Full/*IntegrationGpuLayernormBackward*4D*"
     labels:
       - "comprehensive"
       - "nightly"
