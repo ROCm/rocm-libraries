@@ -338,9 +338,15 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
         HIP_CHECK_LAUNCH_RETURN();
 
         // Allocate complex output buffer for rocFFT (after windowOutput)
+        Rpp32u fftOutputStride = maxNumWindows * numBins;
+        const uint scratchMemorySize = static_cast<uint>(windowLength) +
+                                       static_cast<uint>(dstDescPtr->n) * windowOutputStride +
+                                       static_cast<uint>(dstDescPtr->n) * fftOutputStride * 2;
+        if (scratchMemorySize > SPECTROGRAM_MAX_SCRATCH_MEMORY)
+            return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
+
         float2* fftOutput =
             reinterpret_cast<float2*>(windowOutput + dstDescPtr->n * windowOutputStride);
-        Rpp32u fftOutputStride = maxNumWindows * numBins;
 
         // Get or create cached rocFFT plan for this (nfft, totalWindows) combination
         int totalWindows = maxNumWindows * dstDescPtr->n;
@@ -354,23 +360,25 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
         if (rocfft_plan_get_work_buffer_size(plan, &workBufferSize) != rocfft_status_success)
             return RPP_ERROR;
 
-        // Allocate work buffer if needed
+        // Create execution info and set stream unconditionally (required for correct synchronization)
         void* workBuffer = nullptr;
         rocfft_execution_info execInfo = nullptr;
+        if (rocfft_execution_info_create(&execInfo) != rocfft_status_success)
+            return RPP_ERROR_NOT_ENOUGH_MEMORY;
+
+        if (rocfft_execution_info_set_stream(execInfo, handle.GetStream()) != rocfft_status_success) {
+            rocfft_execution_info_destroy(execInfo);
+            return RPP_ERROR_HIP_RUNTIME;
+        }
+
+        // Allocate work buffer if needed
         if (workBufferSize > 0) {
-            if (rocfft_execution_info_create(&execInfo) != rocfft_status_success ||
-                hipMalloc(&workBuffer, workBufferSize) != hipSuccess ||
+            if (hipMalloc(&workBuffer, workBufferSize) != hipSuccess ||
                 rocfft_execution_info_set_work_buffer(execInfo, workBuffer, workBufferSize) !=
                     rocfft_status_success) {
                 if (workBuffer) (void)hipFree(workBuffer);
-                if (execInfo) rocfft_execution_info_destroy(execInfo);
-                return RPP_ERROR_NOT_ENOUGH_MEMORY;  // rocFFT work buffer allocation failed
-            }
-            if (rocfft_execution_info_set_stream(execInfo, handle.GetStream()) !=
-                rocfft_status_success) {
-                if (workBuffer) (void)hipFree(workBuffer);
                 rocfft_execution_info_destroy(execInfo);
-                return RPP_ERROR_HIP_RUNTIME;  // rocFFT stream configuration failed
+                return RPP_ERROR_NOT_ENOUGH_MEMORY;  // rocFFT work buffer allocation failed
             }
         }
 
@@ -384,6 +392,8 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
         }
 
         // Compute magnitude from complex FFT output
+        // For NTF (vertical=false): stride.hStride = width (numBins), for NFT (vertical=true): maxNumWindows
+        Rpp32u dstHStride = vertical ? maxNumWindows : dstDescPtr->strides.hStride;
         globalThreads_x = numBins;
         hipLaunchKernelGGL(compute_magnitude_from_complex_hip_tensor,
                            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
@@ -391,7 +401,7 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                            handle.GetStream(), fftOutput, fftOutputStride, dstPtr,
-                           make_uint2(dstDescPtr->strides.nStride, maxNumWindows), numWindowsTensor,
+                           make_uint2(dstDescPtr->strides.nStride, dstHStride), numWindowsTensor,
                            make_int2(numBins, power), vertical);
         HIP_CHECK_LAUNCH_RETURN();
 

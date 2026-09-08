@@ -335,7 +335,7 @@ RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan*
     auto& cache = handle.impl->rocfft_plan_cache;
 
     // Create composite key: upper 32 bits = nfft, lower 32 bits = batchCount
-    int64_t cacheKey = (static_cast<int64_t>(nfft) << 32) | static_cast<int64_t>(batchCount);
+    int64_t cacheKey = (static_cast<int64_t>(nfft) << 32) | (static_cast<int64_t>(batchCount) & 0xFFFFFFFF);
 
     // Check if plan already exists in cache
     auto it = cache.find(cacheKey);
