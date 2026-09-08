@@ -81,7 +81,9 @@ class TensorDataMoverLoad(TensorDataMover):
         numWaves: int = kernel["NumWaves"]
         wavelen: int = kernel["WavefrontSize"]
         mt: int = kernel["MacroTile0"] if tc == "A" else kernel["MacroTile1"]
-        tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]) else 1
+        # Metadata is never split (only the A/B data tensors are); Sparse implies
+        # this function may be called with the Metadata tp (tdmGlobalOffset).
+        tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not tp["isM"]) else 1
         du: int = kernel["DepthU"]
         if "MXS" in tc:
             subTc0 = tc[3]
@@ -177,7 +179,7 @@ class TensorDataMoverLoad(TensorDataMover):
         mt: int = kernel["MacroTile0"] if tc.endswith("A") else kernel["MacroTile1"]
         du: int = kernel["DepthU"]
         tile1Size: int = du if tlu else mt
-        tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]) else 1
+        tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc)) else 1
         if tlu and ((kernel["ProblemType"]["Sparse"] == 1 and tc.endswith("A")) or (kernel["ProblemType"]["Sparse"] == 2 and tc.endswith("B"))):
             tile1Size = tile1Size // 2
         if ("MXS" in tc):
@@ -369,7 +371,7 @@ class TensorDataMoverLoad(TensorDataMover):
                             "clear iterate_enable (D# Group 1 bit 19)"))
         return mod
 
-    def resetTensorDimForTail(self, group1: int | str, sgprTail: int, tdmDescIdx: int, writer: "KernelWriterAssembly", constShifter: int=0, isMXS: bool=False, isSparseTrack: bool=False) -> Module:
+    def resetTensorDimForTail(self, group1: int | str, sgprTail: int, tdmDescIdx: int, writer: "KernelWriterAssembly", constShifter: int=0, isMXS: bool=False, isSparseTrack: bool=False, isMetadata: bool=False) -> Module:
         mod = Module()
         mod.addComment("TDM reset tensor dim for tail")
 
@@ -391,14 +393,20 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprTail)))
                 mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
                 mod.add(SOrB32(sgpr(descSgprName(tdmDescIdx+1)), sgpr(descSgprName(tdmDescIdx+1)), sgpr(tmpSgpr.idx)))
-            elif isSparseTrack:
-                # sparse A/B: tensor_dim0 must be K/2 (compressed), divide SizeL by 2
+            elif isSparseTrack or isMetadata:
+                # sparse A/B: tensor_dim0 must be K/2 (compressed), divide SizeL by 2.
+                # Metadata additionally packs 4 elements/byte (bpe=0.25), so divide by 4
+                # more (mirrors setTensorDim0's isMetadata handling).
                 mod.add(SMovB32(sgpr(tmpSgpr.idx), sgpr(sgprTail)))
                 mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(1), sgpr(tmpSgpr.idx), "sizeL /= 2 for sparse matrix"))
+                if isMetadata:
+                    mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(2), sgpr(tmpSgpr.idx), "sizeL /= 4 for metadata (bpe = 0.25)"))
                 mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
                 mod.add(SOrB32(sgpr(descSgprName(tdmDescIdx)), sgpr(descSgprName(tdmDescIdx)), sgpr(tmpSgpr.idx)))
                 mod.add(SMovB32(sgpr(tmpSgpr.idx), sgpr(sgprTail)))
                 mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(1), sgpr(tmpSgpr.idx), "sizeL /= 2 for sparse matrix"))
+                if isMetadata:
+                    mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(2), sgpr(tmpSgpr.idx), "sizeL /= 4 for metadata (bpe = 0.25)"))
                 mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
                 mod.add(SOrB32(sgpr(descSgprName(tdmDescIdx+1)), sgpr(descSgprName(tdmDescIdx+1)), sgpr(tmpSgpr.idx)))
             else:

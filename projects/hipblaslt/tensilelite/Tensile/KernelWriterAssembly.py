@@ -1001,7 +1001,7 @@ class KernelWriterAssembly(KernelWriter):
     # Single-wave (NumWaves == 1): descriptors are independent, so TDMSplit
     # uses per-tensor increment SGPRs instead of the aliased AB pair.
     if (kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] == 1
-        and kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]):
+        and kernel["TDMSplit"]):
       module.add(self.defineSgpr("tdmAGlobalSplitIncs", 1))
       module.add(self.defineSgpr("tdmALdsSplitIncs", 1))
       module.add(self.defineSgpr("tdmBGlobalSplitIncs", 1))
@@ -7565,7 +7565,7 @@ class KernelWriterAssembly(KernelWriter):
             # Undo HPLR last-body dangling +=split (matching -= lives in next body).
             # Leak only happens when >= 2 unrolled bodies executed (LC_init > 1), since
             # the first body's end-of-body +=split is undone by the next body's incCode.
-            if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"] \
+            if kernel["TDMSplit"] \
                 and kernel["PrefetchGlobalRead"] >= 2:
               SkipUndoLabel = Label("Skip_TDMSplit_Undo", "")
               module.add(SCmpLeU32(src0=sgpr("OrigLoopCounter"), src1=1,
@@ -11321,7 +11321,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if tc == "A" and kernel["enableTDMA"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-      useSplitTokens = bool(kernel["TDMSplit"]) and not kernel["ProblemType"]["Sparse"]
+      useSplitTokens = bool(kernel["TDMSplit"])
       tdmParity = self.states.ldsTensorTokenIdx
       if useSplitTokens:
         comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][0]])
@@ -11350,7 +11350,7 @@ class KernelWriterAssembly(KernelWriter):
       # module and the special-case handling in noSchedGlobalRead.
       # if kernel["enableTDMMetadata"] and tP["is_sparse"]:
       #     imod.middle.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
-      if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
+      if kernel["TDMSplit"]:
         if numWaves > 1:
           # Multi-wave: recompute the LDS split boundary and global split increment
           # transiently per use (see _tdmSplitMultiWaveInc).
@@ -11440,7 +11440,7 @@ class KernelWriterAssembly(KernelWriter):
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if numWaves == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-        useSplitTokens = bool(kernel["TDMSplit"]) and not kernel["ProblemType"]["Sparse"]
+        useSplitTokens = bool(kernel["TDMSplit"])
         tdmParity = self.states.ldsTensorTokenIdx
         if useSplitTokens:
           comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][0]])
@@ -11465,7 +11465,7 @@ class KernelWriterAssembly(KernelWriter):
         # module and the special-case handling in noSchedGlobalRead.
         # if kernel["enableTDMMetadata"] and tP["is_sparse"]:
         #     imod.middle.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
-        if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
+        if kernel["TDMSplit"]:
           ldsIncSgprName = f"tdm{tc}LdsSplitIncs"
           globalIncSgprName = f"tdm{tc}GlobalSplitIncs"
           imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), sgpr(ldsIncSgprName)))
@@ -19297,11 +19297,15 @@ class KernelWriterAssembly(KernelWriter):
 
   def tdmSplitLdsBoundary(self, kernel: Mapping, tP: Mapping) -> int:
     """LDS split boundary (bytes) for the second half of a TDMSplit tile. Assumes
-    the TDMSplit && !MXS && !Sparse precondition, i.e. dim1Divisor == 2."""
+    the TDMSplit && !MXS precondition, i.e. dim1Divisor == 2."""
     tc: str = tP['tensorChar']
     ti: int = tP["idx"]
     mt: int = kernel[f"MacroTile{ti}"]
     du: int = kernel["DepthU"]
+    # Sparse-tracked operand's LDS footprint holds the compressed (K/2) data,
+    # mirroring the du //= 2 done locally in _setTdmDescriptor{,WaveSeparated}.
+    if (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]):
+      du = du // 2
     bpe: float = tP["bpeGR"] if not tP["isM"] else 1
     dim1Divisor = 2
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
@@ -19336,7 +19340,9 @@ class KernelWriterAssembly(KernelWriter):
     """Return (strideRef, const) for the TDMSplit global split increment
     (stride * mt*bpe//2). strideRef mirrors the descriptor init: strideRef(tc, ti)
     for unrolled-major, else strideRef(tc, 3). const is a compile-time integer.
-    Assumes the TDMSplit && !MXS && !Sparse precondition (dim1Divisor == 2)."""
+    Assumes the TDMSplit && !MXS precondition (dim1Divisor == 2). The split is
+    along the mt (M/N) axis, which sparse K-compression does not affect, so no
+    Sparse-specific adjustment is needed here (contrast tdmSplitLdsBoundary)."""
     tc: str = tP["tensorChar"]
     ti: int = tP["idx"]
     unrolledMajor = not tP["tlu"]
@@ -19521,7 +19527,9 @@ class KernelWriterAssembly(KernelWriter):
     ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
-    dim1Divisor = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]) else 1
+    # Metadata is never split (only the A/B data tensors are); this function is also
+    # called for the Metadata tp (see initTDMDescriptor / tdmGlobalOffset).
+    dim1Divisor = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not tP["isM"]) else 1
     isSparseTrack: bool = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"])
     isMetadata: bool = tP["isM"]
     isMetadataML1: bool = isMetadata and kernel["ProblemType"]["Sparse"] and kernel["ProblemType"]["MetadataLayout"]
@@ -19624,7 +19632,7 @@ class KernelWriterAssembly(KernelWriter):
     else:
       mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
 
-    if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]):
+    if (kernel["TDMSplit"] and not ("MXS" in tc) and not tP["isM"]):
       splitBoundary: int = self.tdmSplitLdsBoundary(kernel, tP)
       strideRefG, globalIncConst = self.tdmSplitGlobalInc(kernel, tP)
       mod.add(SMovB32(sgpr(f"tdm{tc}LdsSplitIncs"), splitBoundary, comment=f"tdm{tc} Lds Split Incs({round(mt * du * bpe // dim1Divisor)})"))
@@ -19691,7 +19699,7 @@ class KernelWriterAssembly(KernelWriter):
     ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
-    dim1Divisor = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]) else 1
+    dim1Divisor = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not tP["isM"]) else 1
     if ("MXS" in tc):
         subTc = tc[3]
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
@@ -20298,7 +20306,7 @@ class KernelWriterAssembly(KernelWriter):
     else:
       mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
 
-    if kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]:
+    if kernel["TDMSplit"] and not ("MXS" in tc):
       mod.add(SSubU32(sgpr(f"{tdmGroup0}+2"), sgpr(f"{tdmGroup0}+2"), sgpr(f"tdm{tc}GlobalSplitIncs"), f"tdm{tc} Global Split Incs sub"))
       mod.add(SSubBU32(sgpr(f"{tdmGroup0}+3"), sgpr(f"{tdmGroup0}+3"), 0, f"tdm{tc} Global Split borrow"))
       mod.add(SSubU32(sgpr(f"{tdmGroup0}+1"), sgpr(f"{tdmGroup0}+1"), sgpr(f"tdm{tc}LdsSplitIncs"), f"tdm{tc} Lds Split Incs sub"))
@@ -20455,7 +20463,7 @@ class KernelWriterAssembly(KernelWriter):
     else:
       mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
 
-    if kernel["TDMSplit"] and not (("MXS" in tcA) or ("MXS" in tcB)) and not kernel["ProblemType"]["Sparse"]:
+    if kernel["TDMSplit"] and not (("MXS" in tcA) or ("MXS" in tcB)):
       # Recompute the split increments transiently (see _tdmSplitMultiWaveInc). The
       # parity recompute clobbers SCC and runs before the sub chain, so the borrow
       # between the +2 subtract and the +3 borrow remains intact.
@@ -20566,6 +20574,7 @@ class KernelWriterAssembly(KernelWriter):
 
     isSparseTrack: bool = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or \
                           (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"])
+    isMetadata: bool = tP["isM"]
 
     with self.allocTmpSgpr(1, tag="resetTDMDescriptorForTail_tmpSgpr") as tmpSgpr:
       mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr("SizeL"), (du - 1)))
@@ -20579,7 +20588,7 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SMulI32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), 3, "F6 tail: * 3 = bytes"))
         mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, 0, isMXS))
       else:
-        mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, sizeShifter, isMXS, isSparseTrack))
+        mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, sizeShifter, isMXS, isSparseTrack, isMetadata))
     return mod
 
   def resetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:
