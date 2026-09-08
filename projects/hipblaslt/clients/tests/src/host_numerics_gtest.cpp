@@ -504,29 +504,25 @@ TEST(HostNumericsMatrixTransformBridge, MapsLayoutsAndTransposes)
         }
     }
 
-    hipblaslt::host_numerics::MatrixTransformReferenceArguments arguments;
-    arguments.observed               = observed.data();
-    arguments.observedStorageBytes   = sizeof(observed);
-    arguments.a                      = a.data();
-    arguments.aStorageBytes          = sizeof(a);
-    arguments.b                      = b.data();
-    arguments.bStorageBytes          = sizeof(b);
-    arguments.type                   = HIP_R_32F;
-    arguments.rows                   = rows;
-    arguments.columns                = columns;
-    arguments.batchCount             = batches;
-    arguments.leadingDimensionA      = 2;
-    arguments.leadingDimensionB      = 4;
-    arguments.leadingDimensionOutput = 3;
-    arguments.batchStride            = batchStride;
-    arguments.rowMajorA              = true;
-    arguments.rowMajorB              = true;
-    arguments.rowMajorOutput         = false;
-    arguments.transposeA             = true;
-    arguments.alpha                  = 2.0;
-    arguments.beta                   = -1.0;
+    using namespace roc::host_numerics;
+    const Tensor observedTensor = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+        observed.data(),
+        observed.size(),
+        hipblaslt::host_numerics::matrixTransformLayout(
+            rows, columns, batches, 3, batchStride, false, false));
+    const Tensor aTensor = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+        a.data(),
+        a.size(),
+        hipblaslt::host_numerics::matrixTransformLayout(
+            rows, columns, batches, 2, batchStride, true, true));
+    const Tensor bTensor = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+        b.data(),
+        b.size(),
+        hipblaslt::host_numerics::matrixTransformLayout(
+            rows, columns, batches, 4, batchStride, true, false));
 
-    const auto comparison = hipblaslt::host_numerics::referenceMatrixTransform(arguments);
+    const auto comparison = hipblaslt::host_numerics::referenceMatrixTransform(
+        observedTensor, aTensor, bTensor, 2.0, -1.0);
     EXPECT_EQ(comparison.compared, rows * columns * batches);
     EXPECT_TRUE(comparison.passed());
 }
