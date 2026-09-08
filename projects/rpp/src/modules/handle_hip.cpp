@@ -191,14 +191,15 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
         this->impl->stream = HandleImpl::reference_stream(stream);
 
     this->SetAllocator(nullptr, nullptr, nullptr);
-    impl->PreInitializeBuffer();
 
 #ifdef AUDIO_SUPPORT
 #ifdef RPP_USE_ROCFFT
-    // Initialize rocFFT library once per handle
+    // Initialize rocFFT library once per handle (before PreInitializeBuffer to avoid leaks on failure)
     if (rocfft_setup() != rocfft_status_success) RPP_THROW("rocFFT library initialization failed");
 #endif
 #endif
+
+    impl->PreInitializeBuffer();
 }
 
 Handle::Handle(size_t batchSize, Rpp32u numThreads) : impl(new HandleImpl()) {
@@ -229,8 +230,8 @@ void Handle::rpp_destroy_object_gpu() {
     }
     this->impl->rocfft_plan_cache.clear();
 
-    // Cleanup rocFFT library once per handle
-    if (rocfft_cleanup() != rocfft_status_success) RPP_THROW("rocFFT library cleanup failed");
+    // Cleanup rocFFT library once per handle (best-effort, don't throw to allow destruction to proceed)
+    rocfft_cleanup();
 #endif
 #endif
 

@@ -282,16 +282,18 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                                       Rpp32f* windowFunction, Rpp32s nfft, Rpp32s power,
                                       Rpp32s windowLength, Rpp32s windowStep, rpp::Handle& handle) {
     bool vertical = (dstDescPtr->layout == RpptLayout::NFT);
+    if (!nfft) nfft = windowLength;  // Apply default before computing numBins
     Rpp32s numBins = (nfft / 2 + 1);
 
 #ifdef RPP_USE_ROCFFT
     // Check if rocFFT path fits in scratch memory, otherwise fall back to manual DFT
     Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
-    if (!nfft) nfft = windowLength;
     Rpp32u windowOutputStride = maxNumWindows * nfft;
     Rpp32u fftOutputStride = maxNumWindows * numBins;
     size_t windowOutputFloats = static_cast<size_t>(dstDescPtr->n) * windowOutputStride;
-    size_t alignedOffset = (windowOutputFloats + 1) & ~1;
+    // Align fftOutput to 8 bytes accounting for windowLength offset from d_windowFn
+    size_t alignedOffset = ((((static_cast<size_t>(windowLength) + windowOutputFloats) + 1) & ~1) -
+                            static_cast<size_t>(windowLength));
     uint rocfftScratchSize = static_cast<uint>(windowLength) + static_cast<uint>(alignedOffset) +
                              static_cast<uint>(dstDescPtr->n) * fftOutputStride * 2;
     bool useRocFFT = (rocfftScratchSize <= SPECTROGRAM_MAX_SCRATCH_MEMORY);
