@@ -10,7 +10,7 @@ subclasses in the owning kernel modules.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as _dataclass_fields
 from types import MappingProxyType
 
 from rocke.core.ir import BF16, F16
@@ -231,6 +231,12 @@ class AttentionDenseSpec:
     def _layout_name_parts(self) -> tuple[str, ...]:
         return ()
 
+    def _shape_name_parts(self) -> tuple[str, ...]:
+        """Name tokens for the baked problem shape. A subclass whose kernel takes
+        the shape as runtime params (so one kernel serves every batch/seqlen)
+        overrides this to drop sq/sk from the symbol name."""
+        return (f"sq{self.seqlen_q}", f"sk{self.seqlen_kv}")
+
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         return ("lazyrs",) if self.lazy_rescale else ()
 
@@ -251,13 +257,8 @@ class AttentionDenseSpec:
         if 128 // self.head_size > 1:
             parts.append(f"kpad{self.lds_k_group_pad}")
         parts.extend(self._layout_name_parts())
-        parts.extend(
-            [
-                f"sq{self.seqlen_q}",
-                f"sk{self.seqlen_kv}",
-                "causal" if self.causal else "full",
-            ]
-        )
+        parts.extend(self._shape_name_parts())
+        parts.append("causal" if self.causal else "full")
         if self.ragged:
             parts.append("ragged")
         if self.sliding_window > 0:
@@ -280,9 +281,24 @@ class AttentionDenseSpec:
 
 
 def attention_dense_cache_key(spec: AttentionDenseSpec, *, arch: str) -> tuple:
-    """Cache identity containing every frozen spec field and the architecture."""
+    """Cache identity containing every frozen spec field and the architecture.
+
+    gfx950 exception: when the spec's kernel takes the problem shape as runtime
+    params (``spec.runtime_shape``), one compiled kernel serves every
+    batch/seqlen, so batch/seqlen_q/seqlen_kv are excluded from the identity --
+    this is what collapses the AOT batch x seqlen instance explosion. All other
+    codegen-affecting fields remain in the key, and every non-gfx950 / non-runtime
+    spec keeps the full ``(arch, spec)`` identity unchanged."""
     if not arch:
         raise ValueError("attention dense cache identity requires an explicit arch")
+    if arch == "gfx950" and getattr(spec, "runtime_shape", False):
+        shape_fields = {"batch", "seqlen_q", "seqlen_kv"}
+        rest = tuple(
+            (f.name, getattr(spec, f.name))
+            for f in _dataclass_fields(spec)
+            if f.name not in shape_fields
+        )
+        return (arch, type(spec).__name__, rest)
     return (arch, spec)
 
 
