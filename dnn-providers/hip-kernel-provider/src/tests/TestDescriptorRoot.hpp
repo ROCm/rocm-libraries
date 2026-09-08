@@ -54,7 +54,7 @@ inline std::filesystem::path descriptorSetRoot(const char* relativeSubdir)
 ///
 /// An absent or empty root gives a caller the same answer as a root holding nothing for
 /// this device: every case skips and the binary reports success. A test main() calls this
-/// and fails the process instead, so the two are told apart.
+/// and fails the process instead, so it tells the two apart.
 inline std::string describeUnusableDescriptorRoot(const std::filesystem::path& root)
 {
     std::error_code failed;

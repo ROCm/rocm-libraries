@@ -48,7 +48,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
 
-# Gates the generic kernel ingestor (RFC 0017). The ingestor engine compiles its kernel
+# Gates the generic kernel ingestor. The ingestor engine compiles its kernel
 # through the HIP kernel engine's compiler, so it only builds alongside that engine.
 option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
@@ -187,18 +187,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # subtrees and the integration root holds three, all five wired in
     # descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
     # subtree per architecture: it rewrites an authored hip descriptor to kpack and writes
-    # the archive beside it. For an embedded_source descriptor it stamps the shard
-    # architecture and records the authored values in a provenance block. An
-    # embedded_source descriptor names a kernel compiled into a binary and JIT-compiled
-    # at load. Its subtree gets descriptors and no archive. Both roots stage into the
-    # build tree rather than being read from the source tree, so the build tree matches
-    # the install tree.
+    # the archive beside it. An embedded_source descriptor names a kernel compiled into a
+    # binary and JIT-compiled at load; for one of those the packer stamps the shard
+    # architecture and records the authored values in a provenance block, and the subtree
+    # gets descriptors and no archive. Both roots stage into the build tree rather than
+    # being read from the source tree, so the build tree matches the install tree.
     set(HIPKERNELPROVIDER_TEST_SET_UNIT "unit")
     set(HIPKERNELPROVIDER_TEST_SET_INTEGRATION "integration")
-    # Defined here, with the other path variables, and NOT beside the staging rules that
-    # write them: add_subdirectory(src) runs before those rules, so a definition further
-    # down reaches the test subdirectories empty -- which resolves to no descriptor set at
-    # all and fails every test that needs one, with nothing in the build to say why.
     set(HIPKERNELPROVIDER_UNIT_BUILD_DIR
         "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}")
     set(HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR
@@ -228,7 +223,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
 
     # The offset a test binary walks from its own directory to reach the test descriptor
-    # trees. Both trees hang off HIPDNN_PLUGIN_ROOTDIR and both binaries off
+    # trees. Both trees hang off HIPDNN_PLUGIN_ENGINE_ROOTDIR and both binaries off
     # CMAKE_INSTALL_BINDIR, under ${CMAKE_BINARY_DIR} in the build tree and under the
     # prefix in the install tree, so this one offset reaches them in either -- and a
     # binary carries no path belonging to the machine that configured it. Computed against
@@ -319,7 +314,8 @@ else()
     message(STATUS "rocKE features disabled")
 endif()
 
-# Both halves of kpack support ride the ingestor gate and nothing else.
+# The kpack reader and the descriptor packer both ride the ingestor gate. (The ASM SDPA
+# engine is a separate kpack producer on its own gate; it packs but never reads.)
 #
 # The reader is the rocm_kpack shared library ROCm ships, resolved the way this repo's
 # other providers resolve their externals: miopen-provider finds MIOpen, hipblaslt-provider

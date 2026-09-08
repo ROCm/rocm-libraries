@@ -3,8 +3,7 @@
 #
 # Build-time hip UKD -> compile -> prune -> kpack packaging for the
 # hip-kernel-provider. All functions are provider-internal and namespaced hkp_*.
-# hkp = Hip Kernel-provider Packaging; the hkp_/HKP_ prefixes mark internal
-# symbols of this kpack-packaging module.
+# hkp = Hip Kernel-provider Packaging.
 
 include_guard(GLOBAL)
 
@@ -131,14 +130,15 @@ endfunction()
 #   test_arch_content/ in the build tree, and those two trees are installed
 #   wholesale by hip-kernel-provider/CMakeLists.txt.
 #
-#   Every argument is a requirement. A source root that is not a directory, or a
-#   missing output root, is a configure error: each one makes the pack step write
-#   nothing, and a consumer cannot tell that apart from a broken layout.
+#   A source root that is not a directory, or a missing output root, is a
+#   configure error: each one makes the pack step write nothing, and a consumer
+#   cannot tell that apart from a broken layout.
 #
 #   What actually differs between roots is declared, not forked into a second
 #   function:
 #
-#   ENABLE_ROCKE says whether the rocKE producer may run.
+#   ENABLE_ROCKE selects the interpreter the tool runs under; producer
+#   selection stays per-UKD on kernel_source.kind.
 #   When ON the tool runs under ROCKE_INTERP (wheel-provisioned so
 #   `import rocke`/`kernels` resolve) and ROCKE_COMGR_LIB, if set,
 #   is forwarded to the tool environment. ROCKE_WHEEL_STAMP is the wheel
@@ -176,10 +176,8 @@ function(hkp_wire_pack_target)
     # restore, a stray clean, a disk that filled -- takes the stamp with it, and the next
     # build packs again instead of reading a stamp that outlived its descriptors.
     #
-    # One fixed name for every pack, not one per pack, so a single install() filter
-    # excludes all of them and a pack added later needs no new clause. Dot-prefixed to
-    # match the convention the packer already uses for the in-progress shard directories
-    # it does not ship.
+    # Dot-prefixed to match the convention the packer already uses for the in-progress
+    # shard directories it does not ship.
     set(_stamp "${ARG_OUT_ROOT}/${HKP_PACK_STAMP_NAME}")
 
     # The rocKE producer needs the wheel-provisioned interpreter so its UKDs
@@ -467,12 +465,10 @@ endfunction()
 #   Configure-time gate for the rocKE producer, scoped to what is knowable at
 #   configure time.
 #
-#   An earlier version imported `rocke, kernels` from the SOURCE tree under the
-#   base interpreter. That validated a different mechanism than the build uses
-#   (the build imports from wheels installed in the hkp venv), so it could pass
-#   and the build then fail. The import check now runs where it belongs -- in
-#   the provisioned venv, as the last step of hkp_rocke_wheel_python_interp --
-#   because neither the venv nor the wheels exist until the build runs.
+#   This probe does NOT check that `rocke`/`kernels` import. That check belongs
+#   in the provisioned venv (last step of hkp_rocke_wheel_python_interp):
+#   neither the venv nor the wheels exist at configure time, and the build
+#   imports from the wheels, not from the source tree.
 #
 #   Scope caveat: rocKE treats ROCKE_COMGR_LIB as a candidate, not an assertion
 #   (`runtime/comgr.py` iterates candidates and the first loadable path wins),
@@ -528,8 +524,7 @@ endfunction()
 #   every kernel for every arch on every build, even when the wheels are
 #   byte-identical. Keying on this stamp instead means a rebuild that produces
 #   identical wheels leaves the stamp's mtime untouched, and Ninja's restat
-#   (which CMake emits for add_custom_command OUTPUT edges) prunes everything
-#   downstream.
+#   prunes everything downstream.
 #
 #   Declared as BYPRODUCTS rather than OUTPUT precisely because the script may
 #   legitimately not write it; an OUTPUT that the command sometimes leaves alone
@@ -638,8 +633,7 @@ endfunction()
 #   time: the venv and the wheels are both add_custom_command outputs that do
 #   not exist until the build runs, so there is nothing to probe at configure
 #   time. Running it in the provisioned venv also means it validates exactly
-#   what the pack step will import, which the configure-time source-tree probe
-#   did not.
+#   what the pack step will import.
 # ---------------------------------------------------------------------------
 function(hkp_rocke_wheel_python_interp out_interp wheel_stamp)
     set(_venv "${CMAKE_CURRENT_BINARY_DIR}/hkp-rocke-venv")
@@ -654,13 +648,7 @@ function(hkp_rocke_wheel_python_interp out_interp wheel_stamp)
     set(_library_wheel
         "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
 
-    # rocm_kpack's runtime dependencies. The packer reaches rocm_kpack by path on
-    # sys.path rather than by pip-installing it, so nothing resolves the
-    # `msgpack>=1.0.0` / `zstandard>=0.20.0` it declares in its own
-    # pyproject.toml -- and `import rocm_kpack.kpack` fails without them. The
-    # previous venv used --system-site-packages and inherited whatever the host
-    # happened to have; making the venv hermetic removed that accident, so the
-    # dependency has to be declared here instead of relied upon.
+    # rocm_kpack's runtime dependencies -- see hkp_require_kpack_runtime.
     #
     # These come from the index, unlike the rocke wheels: they are third-party
     # packages with no local artifact to install from. The install is scoped to
@@ -820,11 +808,9 @@ assertion: an unloadable path silently falls through to the next candidate.")
 
     set(_rocke_interp "")
     set(_rocke_wheel_stamp "")
-    # ROCKE_COMGR_LIB is rocke's RUNTIME environment variable (comgr.py:66,99,
-    # core.cpp:471). Nothing in this repository ever set() or option()s it, so
-    # reading it here was reading an always-empty variable and the forwarding
-    # below was unreachable. Take the value from a cache variable of our own and
-    # forward THAT into the environment rocke reads.
+    # ROCKE_COMGR_LIB is rocke's runtime environment variable, not a CMake variable: the
+    # value comes from our own cache entry and is forwarded into the environment rocke
+    # reads.
     set(_rocke_comgr_lib "${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
     set(_enable_rocke OFF)
     if(_source_root AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE)
@@ -862,11 +848,9 @@ assertion: an unloadable path silently falls through to the next candidate.")
             "packaging dormant (tests still run against the fixtures).")
     endif()
 
-    # Test descriptors, one pack per authored set. The shared root is packed twice, once
-    # into each test root, so both test binaries see the same authored descriptors. Every
-    # NAME is the folder its SOURCE_ROOT names, because the name is also the source_label
-    # stamped into each emitted descriptor's provenance -- a reader of a staged shard
-    # traces it back by that label alone.
+    # Test descriptors, one pack per authored set. The shared root is packed into both
+    # test roots, so both test binaries see the same authored descriptors; the two need
+    # distinct NAMEs.
     set(_authored "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT}")
     set(_unit "${HIPKERNELPROVIDER_UNIT_BUILD_DIR}")
     set(_integration "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}")
@@ -935,11 +919,6 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
         return()
     endif()
 
-    # The comgr gate was read from the environment (conftest.py) but declared
-    # nowhere, so the only way to arm it was an env var nothing documented.
-    # Declaring it as a cache BOOL makes the gate discoverable and settable with
-    # -D, symmetric with every other knob here.
-    #
     # What it buys is durability, not coverage: the comgr tier passes today
     # because the toolchain happens to be present. Its fixture SKIPS when the
     # probe fails, so a ROCm wheel bump that moves or drops comgr would turn the

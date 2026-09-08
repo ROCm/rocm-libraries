@@ -91,9 +91,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR=1
     )
     # The one descriptor set this binary's cases resolve, as the offset from the binary to
-    # the staged tree. main() applies if not in the env so the binary runs standalone, and
-    # the offset holds in the install tree too, so no machine-specific path is compiled in
-    # or reaches the CTest files.
+    # the staged tree. main() applies it when the environment names no set, so the binary
+    # runs standalone, and the offset holds in the install tree too, so no machine-specific
+    # path is compiled in or reaches the CTest files.
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
     )

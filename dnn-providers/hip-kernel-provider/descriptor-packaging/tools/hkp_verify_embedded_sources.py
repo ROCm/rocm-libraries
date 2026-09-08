@@ -96,7 +96,7 @@ def path_segments(text: str) -> list[str]:
 
     A leading separator reads as an empty segment, so this drops it too. A
     relative path then yields the segments of the absolute path with the same
-    tail. Judge a path absolute before you compare two segment lists.
+    tail. Judge whether a path is absolute before comparing two segment lists.
     """
     return [part for part in text.replace("\\", "/").split("/") if part and part != "."]
 
@@ -269,8 +269,8 @@ def verify(
     """Check one target against every staged root it serves.
 
     Return the failures, the number of embedded_source descriptors checked and
-    the number of keys in the table. The two counts tell a pass that examined
-    descriptors from a pass over nothing.
+    the number of keys in the table. The two counts distinguish a pass that
+    examined descriptors from a pass over nothing.
     """
     table = read_key_manifest(manifest)
     failures = []

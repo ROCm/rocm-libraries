@@ -100,20 +100,20 @@ std::vector<std::filesystem::path> packedArchShards()
 /// A root that is not a directory fails. The probe below reads the children of one fixed
 /// level, so a tree the build lays out somewhere else answers "nothing was packed" and
 /// skips every case in this file.
-#define REQUIRE_PACKED_SHARDS(shards)                                                      \
-    std::error_code missingRoot;                                                           \
-    ASSERT_TRUE(std::filesystem::is_directory(unitKpackRoot(), missingRoot))               \
-        << "the packed set root " << unitKpackRoot()                                       \
-        << " is not a directory. The staged tree sits elsewhere, or this binary holds a "  \
-           "stale offset to it.";                                                          \
-    const auto shards = packedArchShards();                                                \
-    if((shards).empty())                                                                   \
-    {                                                                                      \
-        GTEST_SKIP() << "no packed arch shard under " << unitKpackRoot()                   \
-                     << " -- the packaging rule did not run. Configure with "              \
-                        "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON, a discoverable hipcc, and a " \
-                        "HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT.";                       \
-    }                                                                                      \
+#define REQUIRE_PACKED_SHARDS(shards)                                                     \
+    std::error_code missingRoot;                                                          \
+    ASSERT_TRUE(std::filesystem::is_directory(unitKpackRoot(), missingRoot))              \
+        << "the packed set root " << unitKpackRoot()                                      \
+        << " is not a directory. The staged tree sits elsewhere, or this binary holds a " \
+           "stale offset to it.";                                                         \
+    const auto shards = packedArchShards();                                               \
+    if((shards).empty())                                                                  \
+    {                                                                                     \
+        GTEST_SKIP() << "no packed arch shard under " << unitKpackRoot()                  \
+                     << " -- the packaging rule did not run. Configure with "             \
+                        "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON and a discoverable hipcc, "   \
+                        "then build the descriptor staging targets.";                     \
+    }                                                                                     \
     static_assert(true, "swallow the trailing semicolon")
 
 } // namespace
@@ -389,13 +389,16 @@ TEST(TestPackedDescriptorLoad, PackedKernelsCarryCompleteKpackCoordinates)
     }
 }
 
-/// Nothing reaches the staged tree still claiming a producer-side source kind.
+/// Nothing in this root reaches the staged tree still claiming a producer-side source kind.
 ///
-/// The packer's whole job on a UKD is to REPLACE the authored producer form -- `hip` with
-/// its source file, `rocke` with its builder and spec -- with the `kpack` coordinates of
-/// the code object it produced. A descriptor that arrives still naming `embedded_source`
-/// means the rewrite silently did not happen for it, and the runtime would try to compile
-/// a source file the shard does not carry.
+/// The packer's job on a `hip` or `rocke` UKD is to REPLACE the authored producer form --
+/// `hip` with its source file, `rocke` with its builder and spec -- with the `kpack`
+/// coordinates of the code object it produced. A descriptor arriving in this root still
+/// naming a producer-side kind means the rewrite silently did not happen for it, and the
+/// runtime would try to compile a source file the shard does not carry.
+///
+/// `embedded_source` is not producer-side in that sense: the packer passes it through as
+/// authored, and those descriptors are staged in a different set.
 ///
 /// This also pins the rocKE path specifically: `kind: "rocke"` is a PACKAGING vocabulary
 /// the runtime loader does not accept at all, so a rocKE descriptor that failed to be

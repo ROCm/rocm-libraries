@@ -295,11 +295,10 @@ DescriptorSet makeTwoPackSet(const std::filesystem::path& emptyDirectory)
     return set;
 }
 
-/// The GPU-less half of the drop-costs-only-itself case. The front-ranked candidate
-/// names a kpack archive that
-/// is not there; the loader reports it at archive-open, before HIP is involved, so the
-/// whole path runs on a machine with no device. The graph is still served, and the
-/// failure is named rather than swallowed.
+/// This is the GPU-less half of the drop-costs-only-itself case. The front-ranked
+/// candidate names a kpack archive that is not there; the loader reports it at
+/// archive-open, before HIP is involved, so the whole path runs on a machine with no
+/// device. The graph is still served, and the failure is named rather than swallowed.
 TEST(TestPointwiseKpackDispatch, SurvivesAKpackWhoseArchiveIsAbsent)
 {
     registerNativeIngestorSymbols();

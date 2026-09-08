@@ -6,10 +6,9 @@ each descriptor's authored subpath is preserved verbatim into the staged and
 installed trees. Producer selection is per-UKD on `kernel_source.kind`, never
 per-folder.
 
-This file replaces the multi-root suite. The invariants that survived the
-collapse are kept and re-expressed against one root: whole-set id validation,
-descriptor-relative hip source resolution, hip+rocKE coexistence in one kpack,
-and the comgr diagnostic.
+The invariants this file holds: whole-set id validation, descriptor-relative
+hip source resolution, hip+rocKE coexistence in one kpack, and the comgr
+diagnostic.
 """
 
 import hashlib
@@ -106,10 +105,10 @@ def test_rel_dir_is_root_relative_parent(tmp_path, main_fixture, empty_arch_fixt
 def test_same_filename_in_two_folders_both_survive(
     tmp_path, main_fixture, empty_arch_fixture
 ):
-    """The collision the flat tool dropped silently.
+    """Two child folders may carry the same filename; distinct rel_dirs keep
+    them apart.
 
-    Two child folders may carry the same filename; distinct rel_dirs keep them
-    apart. The in-tree ingestor corpus does exactly this with
+    The in-tree ingestor corpus does exactly this with
     kernel_dtype_matches_graph.umd.json.
     """
     root = tmp_path / "root"
@@ -285,13 +284,11 @@ def test_variant_key_is_location_independent(
 
 
 @pytest.mark.quick
-def test_flat_layout_keys_match_pre_nesting(empty_arch_fixture):
-    """A flat root keys exactly as it did before nesting existed.
+def test_flat_layout_keys_on_source_alone(empty_arch_fixture):
+    """A flat root keys on `source` alone.
 
     rel_dir is "." at the root, so hip_source_relpath is the identity on
-    `source` and the payload is the original {source, build}. This is what makes
-    the "hip single-root path preserved byte-for-byte" claim true for artifact
-    keys, not just kernel bytes.
+    `source` and the variant key is the same as it would be with no rel_dir.
     """
     from hkp_pack.hip_compile import hip_source_relpath
 
@@ -311,8 +308,7 @@ def test_mixed_hip_rocke_one_kpack_per_arch(
     tmp_path, main_fixture, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available
 ):
     # Two child folders under ONE root -> one kpack per arch holding BOTH kinds.
-    # This is the concrete demonstration that multi-root was never needed for
-    # producer selection: the dispatch is per-UKD on kernel_source.kind.
+    # Producer selection is per-UKD on kernel_source.kind.
     root = tmp_path / "root"
     _nest(root, "hip/pointwise", main_fixture)
     _nest(root, "rocKE/attention", rocke_fixture)
@@ -530,10 +526,9 @@ def test_example_tree_packs_both_producers(
 def test_example_tree_keeps_both_shared_filenames(
     tmp_path, hipcc, rocm_kpack_dir, rocke_available
 ):
-    """Standing regression test for review 2.1.
-
-    The example tree deliberately reuses `shared.umd.json` across its two child
-    folders. A flat packer drops one silently; path preservation keeps both.
+    """The example tree deliberately reuses `shared.umd.json` across its two
+    child folders. A flat packer drops one silently; path preservation keeps
+    both.
     """
     run_pipeline(
         source_root=EXAMPLE_ROOT,
@@ -714,8 +709,6 @@ def test_library_resolves_from_a_nested_descriptor(
 def test_library_resolves_for_a_flat_descriptor(
     tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
 ):
-    # The flat case must keep working: it is the shape every pre-nesting
-    # descriptor has, and the one the original implementation got right.
     root = tmp_path / "root"
     shutil.copytree(empty_arch_fixture, root)
 
@@ -1191,7 +1184,8 @@ def test_embedded_source_requires_source_file_and_entry_point(
 def test_unhandled_kind_aborts_the_walk_and_lists_the_accepted_kinds(
     tmp_path, empty_arch_fixture
 ):
-    """A kind no producer handles is an error, and the message says what is.
+    """A kind no producer handles is an error, and the message names the kinds
+    that are handled.
 
     A misspelling is the common case, so the diagnostic must let an author see
     the intended spelling next to theirs.
@@ -1585,9 +1579,8 @@ def test_a_field_the_packer_left_alone_is_not_reported_as_rewritten(
 def test_embedded_source_shards_are_reproducible(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
-    """Two runs over one source tree write the same bytes.
-
-    Provenance records nothing that varies by machine, time or invocation.
+    """Two runs over one source tree write the same bytes, because the
+    provenance block carries nothing that varies per invocation.
     """
     root = tmp_path / "root"
     _embedded_copy(root, "", empty_arch_fixture)

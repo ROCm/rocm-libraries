@@ -2,8 +2,9 @@
 # SPDX-License-Identifier:  MIT
 
 # The plugin resolves kpack descriptors, which read their kernel code from an archive on
-# disk. The unit-test binary resolves embedded_source descriptors. That binary links this
-# engine statically and embeds its own copy of the kernel sources.
+# disk, so nothing is embedded there. The unit-test binary resolves both kinds: it reads
+# kpack descriptors from a staged archive, and for embedded_source descriptors it links
+# this engine statically and embeds its own copy of the kernel sources.
 
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/IngestorPacks.cpp

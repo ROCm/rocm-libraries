@@ -60,7 +60,7 @@ int main(int argc, char** argv)
     auto recordingCallback = hipdnn_test_sdk::utilities::initializeTestLogRecordingShared();
 
     // Initialize plugin logger with test recording callback so that plugin logs
-    // logs are first routed to the log recorder for capture and use by the unit tests.
+    // are first routed to the log recorder for capture and use by the unit tests.
     hipdnn_plugin_sdk::logging::initializeCallbackLogging("hip_kernel-provider_tests",
                                                           recordingCallback);
 

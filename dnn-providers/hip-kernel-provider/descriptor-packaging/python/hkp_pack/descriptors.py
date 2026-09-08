@@ -311,9 +311,10 @@ def _validate_standalone_ukd(desc, log=print):
     """A standalone `<name>.ukd.json` carries the same fields as an inline UKD.
 
     Kind-specific checks are delegated to _validate_ukd_fields, so a standalone
-    UKD may be hip or rocke. Its optional `arch` narrows the shards it ships in
-    (empty/omitted = wildcard, applying to every referencing arch) and must be a
-    subset of each referencing KDP's arch, checked in _validate_references.
+    UKD may be of any kind that function accepts. Its optional `arch` narrows
+    the shards it ships in (empty/omitted = wildcard, applying to every
+    referencing arch) and must be a subset of each referencing KDP's arch,
+    checked in _validate_references.
     """
     doc = desc.doc
     where = f"standalone UKD {desc.path.name}"
@@ -487,7 +488,7 @@ def load_flat_input(root, log=print):
         # intermixed with the archive -- today they survive only because the
         # archive happens to be written last. Refuse the name rather than depend
         # on write order.
-        # Compared case-insensitively. On Linux `KPACK/` and `kpack/` are
+        # The comparison is case-insensitive. On Linux `KPACK/` and `kpack/` are
         # distinct directories and coexist harmlessly (verified), so a
         # case-sensitive check would be correct here -- but the packed tree also
         # gets built and consumed on Windows, where they are the SAME directory

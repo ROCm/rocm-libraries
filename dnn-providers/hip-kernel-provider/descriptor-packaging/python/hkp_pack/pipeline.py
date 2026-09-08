@@ -27,8 +27,6 @@ from .kpack_resolver import load_kpack
 # tree must not share a group -- otherwise they emit the same
 # `<arch>/kpack/<group>_<arch>.kpack` and whichever copy lands second silently overwrites
 # the other, leaving descriptors naming an archive that no longer holds their kernels.
-# That collision is the whole reason the build used to stage one root under a `production/`
-# subdirectory; naming the group per root removes the cause instead of dodging it.
 GROUP_NAME = "hip_kernel_provider"
 
 # The kernel_source kinds the packer ships as authored. No producer runs for
@@ -145,7 +143,7 @@ def _kpack_rel(arch, rel_dir=Path("."), group=GROUP_NAME):
 
     So a nested descriptor has to climb back out to the arch root before
     descending into `kpack/`. A root-relative value happens to be correct only
-    when rel_dir is "." -- which is every flat layout, and is why this was not
+    when rel_dir is "." -- true of every flat layout, which is why this was not
     caught until descriptors could nest.
 
     Climbing out of the descriptor's own directory is legal because the runtime
@@ -852,8 +850,6 @@ def run_pipeline(
             if out_arch_dir.exists():
                 shutil.rmtree(out_arch_dir)
             staging.rename(out_arch_dir)
-            # A shard with nothing to compile writes no archive, so its
-            # kpack_path stays None through the rename.
             kpack_path = (
                 None
                 if result.kpack_path is None

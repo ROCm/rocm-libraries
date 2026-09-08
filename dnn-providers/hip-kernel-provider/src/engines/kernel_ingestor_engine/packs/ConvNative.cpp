@@ -451,16 +451,16 @@ const data_objects::TensorAttributes& requireTensor(const MatchContext& context,
 
 /**
  * @brief The native dispatch behind this pack's UDD: sizes and launches the conv
- *        kernel. Splits per RFC 0017 §8.5: everything graph/kernel-derived resolves
- *        once at prepare(); execute() only resolves buffers and launches, so nothing
- *        mutates once prepared and concurrent execution is safe.
+ *        kernel. Everything graph/kernel-derived resolves once at prepare(); execute()
+ *        only resolves buffers and launches, so nothing mutates once prepared and
+ *        concurrent execution is safe.
  */
 class ConvFwdDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
 {
 public:
     /// @param kernelCompiler Must outlive this handler; both are process-lifetime.
-    /// @param kpackLoader Same must-outlive contract. Which of the two is consulted is
-    /// the selected kernel's source kind, decided in buildIngestorKernelCode.
+    /// @param kpackLoader Same must-outlive contract. Which of the two is consulted
+    /// depends on the selected kernel's source kind, decided in buildIngestorKernelCode.
     ConvFwdDispatchHandler(const compilation::IKernelCompiler& kernelCompiler,
                            const compilation::KpackKernelLoader& kpackLoader)
         : _kernelCompiler(kernelCompiler)
@@ -511,8 +511,8 @@ public:
         const auto p = h - r + 1;
         const auto q = width - s + 1;
         // int64_t: n*k*p*q can exceed 2^31 for shapes this matcher admits. A 32-bit
-        // product here previously wrapped silently, corrupting both the grid size and
-        // the kernel's own bounds guard (ConvFwd.cpp).
+        // product would wrap, corrupting both the grid size and the kernel's own bounds
+        // guard (ConvFwd.cpp).
         const int64_t total = static_cast<int64_t>(n) * k * p * q;
         const auto gridSize = static_cast<unsigned int>(
             (total + static_cast<int64_t>(blockSize) - 1) / static_cast<int64_t>(blockSize));

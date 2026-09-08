@@ -47,15 +47,11 @@ struct IngestorKernelCode
 
 /// The single place a KernelSource's `kind` decides where the code object comes from.
 ///
-/// One helper rather than a branch copied into each pack handler: ConvNative is then a
-/// two-line follow-up rather than a second copy of this logic.
-///
 /// @param compiler   Used only on the EMBEDDED_SOURCE path.
 /// @param kpackLoader Used only on the KPACK path.
-/// @param options    HIPRTC build options. Deliberately not consulted on the KPACK
-///                   path: a kpack blob's build defines were baked at pack time, so
-///                   there is nothing left for them to affect. Silently ignoring them
-///                   is the correct behaviour, not an oversight.
+/// @param options    HIPRTC build options. A kpack blob's build defines were baked at
+///                   pack time, so there is nothing left for them to affect. Ignoring
+///                   them on the KPACK path is the correct behaviour, not an oversight.
 inline IngestorKernelCode
     buildIngestorKernelCode(const compilation::IKernelCompiler& compiler,
                             const compilation::KpackKernelLoader& kpackLoader,
@@ -97,15 +93,14 @@ inline IngestorKernelCode
         // The boundary is the TREE, not the descriptor's own directory. One archive ships
         // per arch shard, at the shard root, so a descriptor authored in a child folder --
         // which is every production layout, since packing preserves the authored subpath --
-        // has to climb out of its own directory to reach it. Anchoring on originDirectory
-        // rejected exactly those, which made every production-packaged kernel unloadable
-        // while flat fixture trees stayed green.
+        // has to climb out of its own directory to reach it.
         //
         // treeRoot rather than a derived arch-shard root: it is what the loader actually
         // walked, so it needs no filesystem probing and assumes nothing about how deep a
         // shard sits under it. A kernel built in memory carries neither path and is not
-        // reachable here -- KPACK requires a file -- but an empty treeRoot would degrade
-        // to the old behaviour rather than open a hole, so fall back to origin.
+        // reachable here -- KPACK requires a file -- but an empty treeRoot narrows the
+        // boundary to the descriptor's own directory rather than opening a hole, so fall
+        // back to origin.
         const std::filesystem::path boundary
             = kernel.treeRoot.empty() ? origin
                                       : std::filesystem::weakly_canonical(kernel.treeRoot, ignored);

@@ -120,8 +120,8 @@ TEST_F(TestKpackKernelLoader, ReportsACorruptArchive)
         EXPECT_NE(what.find(descriptorLabel()), std::string::npos) << what;
         EXPECT_NE(what.find(PACKED_SYMBOL), std::string::npos) << what;
         EXPECT_NE(what.find("could not be read"), std::string::npos) << what;
-        // Distinct from the missing-archive wording: "not there" and "there but
-        // unusable" are told apart.
+        // Distinct from the missing-archive wording: the message tells "not there"
+        // apart from "there but unusable".
         EXPECT_EQ(what.find("does not exist"), std::string::npos) << what;
     }
 }

@@ -3,8 +3,10 @@
 
 # - This module is responsible for inlining the kernels into a single source file,
 # from which kernels are retrieved when running any of them from HipProgram.
-# It defines a global property that contains a list of all kernel source files
-# from any of the available engines.
+# It records each kernel's source file and key as properties on the consuming
+# target, and writes a key-to-file manifest published on that target as
+# KERNELEMBEDDING_KEY_MANIFEST. That manifest is the contract the staged
+# descriptor verification checks each descriptor's provenance against.
 #
 # Usage:
 # within the engine that contains HIP kernel kernels,
@@ -112,8 +114,8 @@ endfunction()
 #   Add one kernel header to the generated include table of <target>.
 #
 #   <key> names the header in the map GetKernelInc() reads. The map holds one entry per
-#   key. A second header under one key drops, and a lookup returns the first file's text.
-#   A repeat is fatal here instead.
+#   key, so a second header under one key never lands and a lookup returns the first
+#   file's text. A repeat is fatal here instead.
 #
 #   Reads and returns the caller's HEADER_DECLARATIONS, HEADER_DEFINITIONS,
 #   HEADER_MAP_ENTRIES, HEADER_FILENAMES, SEEN_HEADER_KEYS and SEEN_HEADER_KEY_FILES.
@@ -161,7 +163,7 @@ endfunction()
 #   caller's SEEN_KERNEL_KEYS and SEEN_KERNEL_KEY_FILES, which hold the sources
 #   alone: getKernelSrc() never reaches a header.
 #
-#   Rewrites <file> on a change alone. The verification step depends on this file,
+#   Rewrites <file> only when its content changes. The verification step depends on it,
 #   and an unconditional write reruns that step on every configure.
 function(_write_kernel_key_manifest KEY_MANIFEST_FILE)
     set(_manifest_lines "")

@@ -55,7 +55,7 @@ void resetConvFwdModuleCache();
 /// process-lifetime guarantee -- one hipModule_t per (archive, toc_key, arch) -- not a
 /// cache to be invalidated. It exists because a test that deliberately corrupts a
 /// staged archive cannot otherwise observe the failure it asserts on: a resident module
-/// serves the plan and the damaged bytes are read by nothing.
+/// serves the plan and nothing reads the damaged bytes.
 ///
 /// Clearing releases each cache's own reference only. A module still held by a live
 /// plan stays loaded until that plan drops it, so this cannot unload a module out from

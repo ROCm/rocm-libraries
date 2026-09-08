@@ -39,8 +39,7 @@ _ROCKE_UKD_SPEC = {
     "head_size": 128,
 }
 _ROCKE_SKIP_REASON = (
-    "rocke/comgr not loadable — provision to run (deferred CI wiring per "
-    "ALMIOPEN-2420)"
+    "rocke/comgr not loadable — provision the rocke platform and libamd_comgr to run"
 )
 
 

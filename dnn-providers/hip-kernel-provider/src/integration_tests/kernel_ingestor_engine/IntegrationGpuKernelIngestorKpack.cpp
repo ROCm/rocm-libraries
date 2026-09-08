@@ -244,10 +244,8 @@ std::string recoverAbandonedBackups(const std::vector<std::filesystem::path>& ar
 /// The module cache is process-lifetime by design -- one hipModule_t per
 /// (archive, toc_key, arch), deliberately outliving every Container. That is correct
 /// for the product and fatal for ...SurvivesABrokenArchive: if any earlier case has
-/// already executed the packaged kernel, a resident module serves the plan, the corrupt
-/// bytes are read by nothing, and the diagnostics this suite asserts on never fire.
-/// This suite used to depend on being FIRST in the file to avoid that, which
-/// --gtest_shuffle destroys.
+/// already executed the packaged kernel, a resident module serves the plan, nothing
+/// reads the corrupt bytes, and the diagnostics this suite asserts on never fire.
 ///
 /// Reached by dlsym rather than a direct call because this binary links only the SDKs;
 /// the provider arrives via dlopen. Same route as
@@ -388,18 +386,6 @@ protected:
 
 // ---------------------------------------------------------------------------
 // The artifact fails without taking the process with it
-//
-// Position-independent, deliberately. This suite used to rely on being FIRST in the
-// file -- gtest registers suites in definition order within a translation unit, so it
-// ran before IntegrationGpuKernelIngestorKpack below and therefore before any case had
-// executed the packaged kernel. That mattered because the module cache is
-// process-lifetime: once the kernel has run, a resident hipModule_t serves the plan and
-// the corrupt bytes on disk are read by nothing, so every diagnostic below silently
-// stops firing. --gtest_shuffle destroys that ordering, and the suite failed
-// deterministically whenever the shuffle put the executing case first.
-//
-// SetUp() now drops the resident modules explicitly, so the corrupt archive is re-read
-// whatever ran before. Nothing here depends on file position any more.
 // ---------------------------------------------------------------------------
 
 /// A truncated archive must produce a diagnosable failure, never a crash, and must leave
@@ -575,7 +561,7 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
 
     // An unreadable archive is reported at ERROR against the engine that owns it. If this
     // fails while the plan below still builds, the packaged engine was never asked -- a
-    // resident module served it, and the corrupt bytes were read by nothing. That is the
+    // resident module served it, and nothing read the corrupt bytes. That is the
     // failure mode the suite's position at the top of this file exists to prevent, so read
     // this assertion as the detector for a registration-order regression as well as for a
     // swallowed diagnostic.

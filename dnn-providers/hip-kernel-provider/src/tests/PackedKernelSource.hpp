@@ -62,8 +62,7 @@ inline void findPackedArchDirectory(hipDeviceProp_t& properties,
 ///
 /// Found by RECURSIVE search rather than a join on the arch root: the packer preserves
 /// each descriptor's authored subpath, so a descriptor sits wherever its source root put
-/// it. Searching by filename keeps callers indifferent to that depth, which is the point
-/// -- a flat join is what made this suite blind to nesting.
+/// it. Searching by filename keeps callers indifferent to that depth.
 ///
 /// Asserts rather than skips -- the per-arch directory exists by the time this is called,
 /// so anything missing inside it is a broken build. Call through ASSERT_NO_FATAL_FAILURE.
