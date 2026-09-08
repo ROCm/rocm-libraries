@@ -126,13 +126,18 @@ namespace
 {
 
 template <typename AType, typename BType, typename CType, typename ComputeType>
-void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims, float tolerance)
+void runPlanExecuteVsCpuRef(const std::vector<int64_t>& aDims,
+                            const std::vector<int64_t>& bDims,
+                            const std::vector<int64_t>& cDims,
+                            float tolerance)
 {
     constexpr int64_t A_UID = 1;
     constexpr int64_t B_UID = 2;
     constexpr int64_t C_UID = 3;
 
-    const auto strides = generateStrides(dims);
+    const auto aStrides = generateStrides(aDims);
+    const auto bStrides = generateStrides(bDims);
+    const auto cStrides = generateStrides(cDims);
 
     auto aDataType = nativeTypeToDataType<AType>();
     auto bDataType = nativeTypeToDataType<BType>();
@@ -142,12 +147,12 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims, float tolerance)
     auto graphBuilder = createMatmulGraph(A_UID,
                                           B_UID,
                                           C_UID,
-                                          dims,
-                                          strides,
-                                          dims,
-                                          strides,
-                                          dims,
-                                          strides,
+                                          aDims,
+                                          aStrides,
+                                          bDims,
+                                          bStrides,
+                                          cDims,
+                                          cStrides,
                                           aDataType,
                                           bDataType,
                                           cDataType,
@@ -161,15 +166,15 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims, float tolerance)
                            *tensorMap.at(nodeAttributes->c_tensor_uid()));
     GpuMatmulPlan<AType, BType, CType, ComputeType> gpuPlan(std::move(params));
 
-    Tensor<AType> aTensor(dims);
-    Tensor<BType> bTensor(dims);
+    Tensor<AType> aTensor(aDims, aStrides);
+    Tensor<BType> bTensor(bDims, bStrides);
 
     constexpr unsigned int SEED = 42;
     aTensor.fillWithRandomValues(static_cast<AType>(-1.0), static_cast<AType>(1.0), SEED);
     bTensor.fillWithRandomValues(static_cast<BType>(-1.0), static_cast<BType>(1.0), SEED + 1);
 
-    Tensor<CType> gpuC(dims);
-    Tensor<CType> cpuC(dims);
+    Tensor<CType> gpuC(cDims, cStrides);
+    Tensor<CType> cpuC(cDims, cStrides);
 
     std::unordered_map<int64_t, void*> gpuVariantPack;
     gpuVariantPack[A_UID] = aTensor.rawDeviceData();
@@ -205,22 +210,48 @@ TEST(TestGpuMatmulPlanFp32, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
-    runPlanExecuteVsCpuRef<float, float, float, float>({2, 4, 8, 8}, matmul::getTolerance<float>());
+    runPlanExecuteVsCpuRef<float, float, float, float>(
+        {2, 4, 8, 6}, {2, 4, 6, 9}, {2, 4, 8, 9}, matmul::getTolerance<float>());
 }
 
 TEST(TestGpuMatmulPlanFp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
-    runPlanExecuteVsCpuRef<half, half, half, float>({2, 4, 8, 8}, matmul::getTolerance<half>());
+    runPlanExecuteVsCpuRef<half, half, half, float>(
+        {2, 4, 8, 6}, {2, 4, 6, 9}, {2, 4, 8, 9}, matmul::getTolerance<half>());
 }
 
 TEST(TestGpuMatmulPlanBfp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
-    runPlanExecuteVsCpuRef<bfloat16, bfloat16, bfloat16, float>({2, 4, 8, 8},
-                                                                matmul::getTolerance<bfloat16>());
+    runPlanExecuteVsCpuRef<bfloat16, bfloat16, bfloat16, float>(
+        {2, 4, 8, 6}, {2, 4, 6, 9}, {2, 4, 8, 9}, matmul::getTolerance<bfloat16>());
+}
+
+TEST(TestGpuMatmulPlanFp32, ExecutePlanBroadcast)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<float, float, float, float>(
+        {3, 4, 8, 6}, {9, 2, 6, 9}, {9, 4, 8, 9}, matmul::getTolerance<float>());
+}
+
+TEST(TestGpuMatmulPlanFp16, ExecutePlanBroadcast)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<half, half, half, float>(
+        {3, 4, 8, 6}, {9, 2, 6, 9}, {9, 4, 8, 9}, matmul::getTolerance<half>());
+}
+
+TEST(TestGpuMatmulPlanBfp16, ExecutePlanBroadcast)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<bfloat16, bfloat16, bfloat16, float>(
+        {3, 4, 8, 6}, {9, 2, 6, 9}, {9, 4, 8, 9}, matmul::getTolerance<bfloat16>());
 }
 
 // ============================================================================
