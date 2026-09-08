@@ -187,11 +187,6 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
         return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::half_t>, ck_tile::half_t>(
             a_layout, b_layout, arg_parser);
     }
-    else if(data_type == "fp32")
-    {
-        return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::fp32_t>, ck_tile::fp32_t>(
-            a_layout, b_layout, arg_parser);
-    }
     else if(data_type == "bf16")
     {
         return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::bf16_t>, ck_tile::bf16_t>(
