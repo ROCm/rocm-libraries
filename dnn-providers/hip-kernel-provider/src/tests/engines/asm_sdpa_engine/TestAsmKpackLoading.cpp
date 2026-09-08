@@ -46,7 +46,7 @@ void verifyKernelExtraction(const std::string& archivePath,
     EXPECT_NE(data, nullptr);
     EXPECT_GT(size, 0u);
 
-    if(data)
+    if(data != nullptr)
     {
         kpack_free_kernel(data);
     }

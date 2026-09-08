@@ -42,7 +42,7 @@ public:
 
         ~KernelData()
         {
-            if(data)
+            if(data != nullptr)
             {
                 kpack_free_kernel(data);
             }
