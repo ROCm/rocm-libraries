@@ -1,12 +1,71 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+add_subdirectory(bench)
+
+# corpus_gen generates UHD training corpora, and three of its headers use the ingestor's
+# JsonLogic evaluator to read the constraint expressions in an .opmeta.json declaration. That
+# evaluator's header is empty unless HIPDNN_ENABLE_KERNEL_INGESTOR is set, and the option
+# defaults to OFF -- so building this tool unconditionally made the *default* configure fail to
+# compile. The tool is part of the feature, so it is gated with it rather than papered over with
+# a second gate inside the headers.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    add_subdirectory(corpus_gen)
+endif()
+
 add_executable(hipdnn_list_engines ListEngines.cpp)
 # hipdnn_data_sdk supplies the canonical engine-ID hex rendering (formatEngineIdHex). It is a
 # header-only INTERFACE target, and hipdnn_backend links it privately, so the tool names it here.
 target_link_libraries(hipdnn_list_engines PRIVATE hipdnn_backend hipdnn_data_sdk)
 target_compile_definitions(hipdnn_list_engines PRIVATE HIPDNN_BACKEND_COMPILATION)
 install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Register the uhd_gen converter's Python tests with CTest so CI actually runs them.
+# These pin the cross-language features_hash contract against the C++ FeatureExtractor;
+# without this registration nothing executes them and the two sides drift silently.
+# The suite self-skips (pytest.importorskip) when lightgbm/flatbuffers/numpy are
+# absent, so environments without the training dependencies report skips, not failures.
+# Registered unconditionally, matching how this project adds its other test
+# directories (cmake/Tests.cmake calls enable_testing(); there is no BUILD_TESTING gate).
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    # Probe for pytest rather than discovering its absence as a test failure:
+    # `python -m pytest` exits 1 when the module is missing, which is
+    # indistinguishable from a genuine test failure.
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import pytest"
+        RESULT_VARIABLE UHD_GEN_PYTEST_PROBE
+        OUTPUT_QUIET ERROR_QUIET)
+    if(UHD_GEN_PYTEST_PROBE EQUAL 0)
+        add_test(
+            NAME uhd_gen_tests
+            COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/tests
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+        # pytest exits 5 when it collects nothing, which is what the suite's
+        # importorskip guards produce when lightgbm/flatbuffers/numpy are absent.
+        set_tests_properties(uhd_gen_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+
+        # results_import derives RFC 0019.13 §8.3's tflops and gbs from each operation's
+        # declared flops/elements. Registered beside uhd_gen's suite and for the same reason:
+        # a wrong formula or byte width does not raise, it yields a plausible rate, and every
+        # model trained on that corpus ranks by a number wrong by a constant nobody sees.
+        # Needs no ML dependencies -- it is arithmetic over a declaration and a row.
+        add_test(
+            NAME results_import_tests
+            COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                    ${CMAKE_CURRENT_SOURCE_DIR}/results_import/tests
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+        set_tests_properties(results_import_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+    else()
+        message(WARNING
+                "uhd_gen tests NOT registered: pytest is not importable by "
+                "${Python3_EXECUTABLE}. These pin the features_hash contract between "
+                "tools/uhd_gen and the C++ FeatureExtractor; install pytest (plus "
+                "lightgbm, flatbuffers, numpy) so they run.")
+    endif()
+else()
+    message(WARNING "uhd_gen tests NOT registered: no Python3 interpreter found")
+endif()
 
 # Smoke test: run the tool against a real, loadable engine plugin and assert it prints that plugin's
 # own engine name rather than a hexadecimal fallback.

@@ -775,7 +775,10 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderWhenNotSet)
     ASSERT_NO_THROW(heur->finalize());
 
     // With no descriptor-level override and no env var, resolveHeuristicPolicyOrder
-    // returns the built-in default: Config first, then StaticOrdering.
+    // returns the built-in default: Config first so HIPDNN_HEUR_CONFIG_PATH rules win,
+    // then UHD for data-driven selection, then StaticOrdering as the last-resort
+    // fallback that always succeeds. Keep in step with the default list in
+    // EngineHeuristicDescriptor::resolveHeuristicPolicyOrder.
     int64_t count = 999;
     ASSERT_NO_THROW(heur->getAttribute(
         HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 0, &count, nullptr));
@@ -785,6 +788,8 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderWhenNotSet)
     ASSERT_NO_THROW(heur->getAttribute(
         HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 2, &count, buffer.data()));
     ASSERT_EQ(count, 2);
+    // The UHD policy used to sit between these two. It ranked kernels where the plugin ABI
+    // can only return engines, so it always reported applied=0 and never affected the chain.
     EXPECT_EQ(buffer[0], hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"));
     EXPECT_EQ(buffer[1],
               hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"));
