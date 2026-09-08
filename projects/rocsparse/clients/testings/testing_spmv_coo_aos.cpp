@@ -156,8 +156,8 @@ void testing_spmv_coo_aos_extra(const Arguments& arg)
         hipMemcpy(static_cast<T*>(dval) + probe_idx, &probe_val, sizeof(T), hipMemcpyHostToDevice));
 
     rocsparse_spmat_descr mat;
-    CHECK_ROCSPARSE_ERROR(rocsparse_create_coo_aos_descr(
-        &mat, m, n, nnz, dcoo_ind, dval, itype, base, ttype));
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_create_coo_aos_descr(&mat, m, n, nnz, dcoo_ind, dval, itype, base, ttype));
     rocsparse_local_dnvec x(n, dx, ttype);
     rocsparse_local_dnvec y(m, dy, ttype);
 
