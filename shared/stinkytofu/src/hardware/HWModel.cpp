@@ -66,6 +66,7 @@ constexpr HWModel kGfx1250Model = {
             .forms = kGfx1250WaitHideForms,
             .vmVsrcLds = 11,
             .vmVsrcTex = 11,
+            .vmVsrcBridge = 11,
         },
 };
 
