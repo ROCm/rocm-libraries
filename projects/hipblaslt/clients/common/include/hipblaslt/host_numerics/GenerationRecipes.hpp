@@ -15,10 +15,14 @@ namespace hipblaslt::host_numerics
     using roc::host_numerics::ScalarType;
     using roc::host_numerics::scalarTypeInfo;
 
+    // Compatibility values inherited from hipblaslt_init_alt_impl_big/small.
     inline constexpr double specialInitializationAValue = 65'280.0;
     inline constexpr double specialInitializationBValue = 0.0000607967376708984375;
-    inline constexpr double maximumFiniteFloat16Value   = 65'504.0;
-    inline constexpr double fp16AccumulatorProbeStep    = 4.0;
+
+    // The historical FP16 accumulator probe alternates 2 * (max_finite - 4)
+    // so the running sum exposes premature Float16 rounding without overflow.
+    inline constexpr double maximumFiniteFloat16Value = 65'504.0;
+    inline constexpr double fp16AccumulatorProbeStep  = 4.0;
 
     enum class TrigonometricComponent
     {
