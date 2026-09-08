@@ -621,7 +621,7 @@ def test_gemm_options(tmp_path):
     def run_and_load_example_yaml(cmd):
         subprocess.run(cmd, check=True)
         yaml_contents = example.read_text()
-        return yaml.load(yaml_contents, Loader=yaml.Loader)
+        return yaml.safe_load(yaml_contents)
 
     # fails
     with pytest.raises(subprocess.CalledProcessError):
@@ -852,7 +852,7 @@ def test_gemm_initialization_modes(tmp_path, cli_mode, serialized_mode):
         check=True,
     )
 
-    post = yaml.load(example_problem.read_text(), Loader=yaml.Loader)
+    post = yaml.safe_load(example_problem.read_text())
     assert post["initMode_A"] == serialized_mode
     assert post["initMode_B"] == serialized_mode
     assert post["initMode_C"] == serialized_mode
@@ -873,10 +873,10 @@ def test_gemm_config(tmp_path):
     subprocess.run(cmd, check=True)
 
     yaml_contents = yaml_path.read_text()
-    client = yaml.load(yaml_contents, Loader=yaml.Loader)
+    client = yaml.safe_load(yaml_contents)
     del client["version"]
 
-    reference = yaml.load(DP_HGEMM, Loader=yaml.Loader)
+    reference = yaml.safe_load(DP_HGEMM)
 
     assert client == reference
 
