@@ -51,13 +51,26 @@ private:
 template <typename DType>
 struct TypedMatrixTransformIO : public MatrixTransformIO
 {
-    TypedMatrixTransformIO(int64_t m, int64_t n, int64_t b, hipblaslt_initialization initMethod)
+    TypedMatrixTransformIO(const roc::host_numerics::Layout& aLayout,
+                           const roc::host_numerics::Layout& bLayout,
+                           const roc::host_numerics::Layout& outputLayout,
+                           hipblaslt_initialization          initMethod)
     {
-        auto        hipErr = hipMalloc(&this->a, m * n * b * sizeof(DType));
-        hipErr = hipMalloc(&this->b, m * n * b * sizeof(DType));
-        hipErr = hipMalloc(&this->c, m * n * b * sizeof(DType));
-        init(this->a, m * n * b, initMethod);
-        init(this->b, m * n * b, initMethod);
+        const auto   type     = hipblaslt::host_numerics::scalarType<DType>();
+        const size_t aBytes   = roc::host_numerics::storageBytesForLayout(type, aLayout);
+        const size_t bBytes   = roc::host_numerics::storageBytesForLayout(type, bLayout);
+        const size_t cBytes   = roc::host_numerics::storageBytesForLayout(type, outputLayout);
+        const auto   allocate = [](DType** pointer, size_t bytes) {
+            const hipError_t error = hipMalloc(pointer, bytes == 0 ? 1 : bytes);
+            if(error != hipSuccess)
+                throw std::runtime_error(std::string("hipMalloc failed: ")
+                                         + hipGetErrorString(error));
+        };
+        allocate(&this->a, aBytes);
+        allocate(&this->b, bBytes);
+        allocate(&this->c, cBytes);
+        init(this->a, aLayout, initMethod);
+        init(this->b, bLayout, initMethod);
     }
 
     ~TypedMatrixTransformIO() override
@@ -79,13 +92,20 @@ struct TypedMatrixTransformIO : public MatrixTransformIO
     }
 
 private:
-    void init(DType* buf, size_t len, hipblaslt_initialization initMethod)
+    void init(DType*                            buf,
+              const roc::host_numerics::Layout& layout,
+              hipblaslt_initialization          initMethod)
     {
-        std::vector<DType> ref(len);
-        hipblaslt::host_numerics::initialize(
-            ref.data(), ref.size(), initMethod);
-
-        auto err = hipMemcpy(buf, ref.data(), len * sizeof(DType), hipMemcpyHostToDevice);
+        const auto type   = hipblaslt::host_numerics::scalarType<DType>();
+        const auto recipe = hipblaslt::host_numerics::detail::vectorInitializationRecipe(
+            type, initMethod, hipblaslt::host_numerics::TrigonometricComponent::Cosine);
+        const auto       generated = roc::host_numerics::generate(type, layout, recipe);
+        const hipError_t error     = hipMemcpy(buf,
+                                           generated.rawEncodedBackingStorage().data(),
+                                           generated.rawEncodedBackingStorage().size(),
+                                           hipMemcpyHostToDevice);
+        if(error != hipSuccess)
+            throw std::runtime_error(std::string("hipMemcpy failed: ") + hipGetErrorString(error));
     }
 
 private:
@@ -95,24 +115,36 @@ private:
 };
 
 using MatrixTransformIOPtr = std::unique_ptr<MatrixTransformIO>;
-MatrixTransformIOPtr makeMatrixTransformIOPtr(
-    hipDataType datatype, int64_t m, int64_t n, int64_t b, hipblaslt_initialization init)
+MatrixTransformIOPtr makeMatrixTransformIOPtr(hipDataType                       datatype,
+                                              const roc::host_numerics::Layout& aLayout,
+                                              const roc::host_numerics::Layout& bLayout,
+                                              const roc::host_numerics::Layout& outputLayout,
+                                              hipblaslt_initialization          init)
 {
     if(datatype == HIP_R_32F)
     {
-        return std::make_unique<TypedMatrixTransformIO<hipblasLtFloat>>(m, n, b, init);
+        return std::make_unique<TypedMatrixTransformIO<hipblasLtFloat>>(
+            aLayout, bLayout, outputLayout, init);
     }
     else if(datatype == HIP_R_16F)
     {
-        return std::make_unique<TypedMatrixTransformIO<hipblasLtHalf>>(m, n, b, init);
+        return std::make_unique<TypedMatrixTransformIO<hipblasLtHalf>>(
+            aLayout, bLayout, outputLayout, init);
     }
     else if(datatype == HIP_R_16BF)
     {
-        return std::make_unique<TypedMatrixTransformIO<hipblasLtBfloat16>>(m, n, b, init);
+        return std::make_unique<TypedMatrixTransformIO<hipblasLtBfloat16>>(
+            aLayout, bLayout, outputLayout, init);
     }
     else if(datatype == HIP_R_8I)
     {
-        return std::make_unique<TypedMatrixTransformIO<int8_t>>(m, n, b, init);
+        return std::make_unique<TypedMatrixTransformIO<int8_t>>(
+            aLayout, bLayout, outputLayout, init);
+    }
+    else if(datatype == HIP_R_32I)
+    {
+        return std::make_unique<TypedMatrixTransformIO<int32_t>>(
+            aLayout, bLayout, outputLayout, init);
     }
     return nullptr;
 }
@@ -271,59 +303,31 @@ int64_t getLeadingDimSize(int64_t numRows, int64_t numCols)
     return RowMaj ? numCols : numRows;
 }
 
-void validation(hipDataType datatype,
-                void*       c,
-                void*       a,
-                void*       b,
-                float       alpha,
-                float       beta,
-                uint32_t    m,
-                uint32_t    n,
-                uint32_t    ldA,
-                uint32_t    ldB,
-                uint32_t    ldC,
-                uint32_t    batchSize,
-                uint32_t    batchStride,
-                bool        rowMajA,
-                bool        rowMajB,
-                bool        rowMajC,
-                bool        transA,
-                bool        transB)
+void validation(hipDataType                       datatype,
+                void*                             c,
+                void*                             a,
+                void*                             b,
+                float                             alpha,
+                float                             beta,
+                const roc::host_numerics::Layout& aLayout,
+                const roc::host_numerics::Layout& bLayout,
+                const roc::host_numerics::Layout& outputLayout)
 {
-    const auto   scalarType   = hipblaslt::host_numerics::scalarType(datatype);
-    const size_t elementBytes = roc::host_numerics::scalarTypeInfo(scalarType).storageBits / 8;
-    const size_t storageBytes = size_t(m) * n * batchSize * elementBytes;
-    std::vector<std::byte> hA(storageBytes);
-    std::vector<std::byte> hB(storageBytes);
-    std::vector<std::byte> hC(storageBytes);
-    auto                   hipErr = hipMemcpyDtoH(hA.data(), a, storageBytes);
-    hipErr                        = hipMemcpyDtoH(hB.data(), b, storageBytes);
-    hipErr                        = hipMemcpyDtoH(hC.data(), c, storageBytes);
-
-    hipblaslt::host_numerics::MatrixTransformReferenceArguments arguments;
-    arguments.observed               = hC.data();
-    arguments.observedStorageBytes   = storageBytes;
-    arguments.a                      = hA.data();
-    arguments.aStorageBytes          = storageBytes;
-    arguments.b                      = hB.data();
-    arguments.bStorageBytes          = storageBytes;
-    arguments.type                   = datatype;
-    arguments.rows                   = m;
-    arguments.columns                = n;
-    arguments.batchCount             = batchSize;
-    arguments.leadingDimensionA      = ldA;
-    arguments.leadingDimensionB      = ldB;
-    arguments.leadingDimensionOutput = ldC;
-    arguments.batchStride            = batchStride;
-    arguments.rowMajorA              = rowMajA;
-    arguments.rowMajorB              = rowMajB;
-    arguments.rowMajorOutput         = rowMajC;
-    arguments.transposeA             = transA;
-    arguments.transposeB             = transB;
-    arguments.alpha                  = alpha;
-    arguments.beta                   = beta;
-
-    const auto comparison = hipblaslt::host_numerics::referenceMatrixTransform(arguments);
+    using namespace roc::host_numerics;
+    const ScalarType type             = hipblaslt::host_numerics::scalarType(datatype);
+    const auto       readDeviceTensor = [&](void* pointer, const Layout& layout) {
+        std::vector<std::byte> storage(storageBytesForLayout(type, layout));
+        const hipError_t       error = hipMemcpyDtoH(storage.data(), pointer, storage.size());
+        if(error != hipSuccess)
+            throw std::runtime_error(std::string("hipMemcpyDtoH failed: ")
+                                     + hipGetErrorString(error));
+        return Tensor::takeOwnershipOfEncodedBackingStorage(type, layout, std::move(storage));
+    };
+    const Tensor observed = readDeviceTensor(c, outputLayout);
+    const Tensor inputA   = readDeviceTensor(a, aLayout);
+    const Tensor inputB   = readDeviceTensor(b, bLayout);
+    const auto   comparison
+        = hipblaslt::host_numerics::referenceMatrixTransform(observed, inputA, inputB, alpha, beta);
     if(!comparison.passed())
     {
         hipblaslt::host_numerics::reportMatrixTransformMismatches(std::cerr, comparison);
@@ -390,7 +394,15 @@ int main(int argc, char** argv)
     auto             tA     = transA ? HIPBLAS_OP_T : HIPBLAS_OP_N;
     auto             tB     = transB ? HIPBLAS_OP_T : HIPBLAS_OP_N;
 
-    auto  inputs = makeMatrixTransformIOPtr(datatype, m, n, batchSize, init);
+    const auto referenceLayoutA = hipblaslt::host_numerics::matrixTransformLayout(
+        m, n, batchSize, ldA, batchStride, rowMajA, transA);
+    const auto referenceLayoutB = hipblaslt::host_numerics::matrixTransformLayout(
+        m, n, batchSize, ldB, batchStride, rowMajB, transB);
+    const auto referenceOutputLayout = hipblaslt::host_numerics::matrixTransformLayout(
+        m, n, batchSize, ldC, batchStride, rowMajC, false);
+
+    auto inputs = makeMatrixTransformIOPtr(
+        datatype, referenceLayoutA, referenceLayoutB, referenceOutputLayout, init);
     void* dA     = inputs->getBuf(0);
     void* dB     = inputs->getBuf(1);
     void* dC     = inputs->getBuf(2);
@@ -517,18 +529,9 @@ int main(int argc, char** argv)
                    dB,
                    alpha,
                    beta,
-                   m,
-                   n,
-                   ldA,
-                   ldB,
-                   ldC,
-                   batchSize,
-                   batchStride,
-                   rowMajA,
-                   rowMajB,
-                   rowMajC,
-                   transA,
-                   transB);
+                   referenceLayoutA,
+                   referenceLayoutB,
+                   referenceOutputLayout);
     }
 
 releaseResource:
