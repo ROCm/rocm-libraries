@@ -331,7 +331,7 @@ version = 1
     EXPECT_FALSE(settings.findValidatorOverride("AnyTest", "AnyTensor").has_value());
 }
 
-TEST(TestSettingsValidatorOverrides, MatchesOnBothTestNameAndTensorLabel)
+TEST(TestSettingsValidatorOverrides, MatchesOnBothNameAndTensorGlob)
 {
     const TempTomlFile file(K_RMS_CONFIG);
     const TestSettings settings(file.path());
@@ -348,7 +348,7 @@ TEST(TestSettingsValidatorOverrides, MatchesOnBothTestNameAndTensorLabel)
 
 // The tensor glob is what keeps dx on allclose while dscale moves to RMS. Matching
 // on the test name alone would take the whole graph with it.
-TEST(TestSettingsValidatorOverrides, OtherTensorsInTheSameTestAreUnaffected)
+TEST(TestSettingsValidatorOverrides, OtherTensorsInTheSameCaseAreUnaffected)
 {
     const TempTomlFile file(K_RMS_CONFIG);
     const TestSettings settings(file.path());
@@ -360,7 +360,7 @@ TEST(TestSettingsValidatorOverrides, OtherTensorsInTheSameTestAreUnaffected)
             .has_value());
 }
 
-TEST(TestSettingsValidatorOverrides, OtherTestsWithTheSameTensorNameAreUnaffected)
+TEST(TestSettingsValidatorOverrides, OtherSuitesWithTheSameTensorAreUnaffected)
 {
     const TempTomlFile file(K_RMS_CONFIG);
     const TestSettings settings(file.path());
