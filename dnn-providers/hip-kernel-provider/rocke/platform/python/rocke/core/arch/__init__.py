@@ -14,8 +14,10 @@ from .target import (  # noqa: F401
     MmaOp,
     ResourceLimits,
     arch_from_isa,
+    base_arch_from_target_id,
     known_arches,
     normalize_dtype,
+    target_id_from_isa,
     validate_arch,
 )
 
@@ -27,7 +29,9 @@ __all__ = [
     "MmaOp",
     "ResourceLimits",
     "arch_from_isa",
+    "base_arch_from_target_id",
     "known_arches",
     "normalize_dtype",
+    "target_id_from_isa",
     "validate_arch",
 ]

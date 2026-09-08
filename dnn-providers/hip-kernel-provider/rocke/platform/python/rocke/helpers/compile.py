@@ -95,7 +95,9 @@ def compile_kernel(
     triple. `arch` takes precedence over `isa`.
 
     `isa` is the raw comgr target triple and stays accepted for backward
-    compatibility; `gfx950` is the historical default every example uses.
+    compatibility; exact profiles and feature suffixes are preserved while the
+    corresponding base architecture drives rocKE lowering. `gfx950` is the
+    historical default every example uses.
 
     `capture_ir_text` controls whether the MLIR-style textual dump is
     populated. Disable for tight sweep loops where the dump is
@@ -252,6 +254,10 @@ def compile_kernel_via_hipcc(
     """Lower ``kernel`` to HIP C++, compile through ``hipcc --genco``, and
     return a :class:`KernelArtifact` whose ``hsaco`` is the hipcc output.
 
+    ``arch`` may include a compiler target profile or feature suffix. The exact
+    value is passed to ``hipcc --offload-arch`` while rocKE lowering uses its
+    normalized base architecture.
+
     Use this **only** when the LLVM-direct pipeline (``compile_kernel``)
     is leaving performance on the table for a specific workload. The HIP
     path goes through the full clang frontend + AMDGPU backend, which
@@ -286,7 +292,10 @@ def compile_kernel_via_hipcc(
     t0 = time.perf_counter()
     ir_text = print_ir(kernel)
     t1 = time.perf_counter()
-    hip_src = lower_kernel_to_hip(kernel, arch=arch)
+    from ..core.arch import base_arch_from_target_id
+
+    lower_arch = base_arch_from_target_id(arch)
+    hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     t2 = time.perf_counter()
     flags = ["-O3"]
     if extra_flags:

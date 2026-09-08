@@ -212,27 +212,45 @@ def _device_props(device: int = 0) -> Optional[bytes]:
     return None
 
 
-def get_device_arch(device: int = 0) -> Optional[str]:
-    """Best-effort gfx string of a HIP device (e.g. ``"gfx942"``).
+def get_device_target_id(device: int = 0) -> Optional[str]:
+    """Best-effort exact target ID of a HIP device.
 
     Mirrors the ``Name`` field ``rocminfo`` prints for a GPU agent. Returns ``None``
     when it can't be determined (no GPU present, or the properties symbol is
-    unavailable). Launch paths use this to compile for the device they will actually
-    run on instead of defaulting to a fixed arch — building a gfx950 code object and
-    launching it on gfx942 yields ``hipError(209) no kernel image``.
+    unavailable). Profiles and feature suffixes are preserved, for example
+    ``gfx1250-strict`` and ``gfx942:sramecc+:xnack-``.
 
     ``gcnArchName`` carries the gfx token; the marketing ``name`` field (offset 0)
-    contains no ``gfx`` token, so the first match in the raw buffer is the architecture
-    name. The ``[0-9a-z]+`` class stops at the ``:`` feature-flag delimiter and the NUL
-    terminator, yielding e.g. ``"gfx942"`` from ``"gfx942:sramecc+:xnack-"``.
+    contains no ``gfx`` token, so the first NUL-terminated string beginning with
+    ``gfx`` in the raw buffer is the target ID.
     """
     import re
 
     raw = _device_props(device)
     if raw is None:
         return None
-    m = re.search(rb"gfx[0-9a-z]+", raw)
-    return m.group(0).decode("ascii") if m else None
+    match = re.search(rb"gfx[0-9a-z]", raw)
+    if match is None:
+        return None
+    end = raw.find(b"\0", match.start())
+    if end < 0:
+        end = len(raw)
+    target_id = raw[match.start() : end].decode("ascii", "replace")
+    return target_id or None
+
+
+def get_device_arch(device: int = 0) -> Optional[str]:
+    """Best-effort normalized rocKE architecture of a HIP device.
+
+    This compatibility query intentionally removes runtime/compiler profiles and
+    feature suffixes. Use :func:`get_device_target_id` when the exact identity is
+    required.
+    """
+
+    from ..core.arch import base_arch_from_target_id
+
+    target_id = get_device_target_id(device)
+    return base_arch_from_target_id(target_id) if target_id is not None else None
 
 
 def get_device_name(device: int = 0) -> Optional[str]:
@@ -303,8 +321,8 @@ def _get_device_asic_revision(device: int = 0) -> Optional[int]:
     """ASIC revision of a HIP device, or ``None`` when it cannot be queried.
 
     Revision ``0`` is a valid result and must remain distinguishable from a failed
-    query. This private value is used to look up named capabilities. Callers should
-    use that capability API instead of comparing revision numbers themselves.
+    query. This remains a raw runtime identity property; it does not by itself
+    promise that a particular code object or instruction is usable.
     """
 
     v = ctypes.c_int(-1)

@@ -18,6 +18,7 @@ See ``dsl_docs/architecture/multi_arch_data_layout.md``.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -1095,9 +1096,40 @@ def known_arches() -> Tuple[str, ...]:
     return tuple(sorted(_load_specs()))
 
 
+def target_id_from_isa(isa: str) -> str:
+    """Return the exact target ID carried by an AMDGPU ISA string.
+
+    The target ID is the portion after the HSA triple's ``--`` separator. It may
+    contain a target profile such as ``gfx1250-strict`` and feature suffixes such
+    as ``:sramecc+:xnack-``; those are intentionally preserved.
+    """
+
+    return isa.rsplit("--", 1)[-1] if "--" in isa else isa
+
+
+def base_arch_from_target_id(target_id: str) -> str:
+    """Normalize an exact AMDGPU target ID to a rocKE architecture key.
+
+    Runtime/compiler profiles and feature suffixes are not separate
+    :class:`ArchTarget` rows. For example, ``gfx1250-strict`` and
+    ``gfx1250-strict:xnack-`` both use the static ``gfx1250`` hardware facts.
+    """
+
+    target_without_features = target_id.split(":", 1)[0]
+    arches = known_arches()
+    if target_without_features in arches:
+        return target_without_features
+    for arch in sorted(arches, key=len, reverse=True):
+        if target_without_features.startswith(f"{arch}-"):
+            return arch
+    match = re.match(r"^(gfx[0-9a-z]+)", target_without_features)
+    return match.group(1) if match else target_without_features
+
+
 def arch_from_isa(isa: str) -> str:
-    """Extract the gfx token from an isa triple like ``amdgcn-amd-amdhsa--gfx942``."""
-    return isa.rsplit("-", 1)[-1] if "-" in isa else isa
+    """Return the normalized rocKE architecture carried by an ISA string."""
+
+    return base_arch_from_target_id(target_id_from_isa(isa))
 
 
 def validate_arch(arch: Optional[str]) -> None:
