@@ -90,8 +90,8 @@ int main(int argc, char** argv) {
                 const double a = observed[index];
                 const double b = expected[index];
                 const double difference = std::abs(a - b);
-                mismatches += !(a == b ||
-                                difference <= absoluteTolerance + relativeTolerance * std::abs(b));
+                mismatches +=
+                    !(a == b || difference <= absoluteTolerance + relativeTolerance * std::abs(b));
             }
         }
         baselineMismatches = mismatches;

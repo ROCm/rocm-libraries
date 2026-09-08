@@ -815,8 +815,7 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
         return result;
     };
 
-    if (!options.equalNaNs && options.absoluteTolerance == 0.0 &&
-        options.relativeTolerance == 0.0)
+    if (!options.equalNaNs && options.absoluteTolerance == 0.0 && options.relativeTolerance == 0.0)
         return run(
             [](auto observedValue, auto expectedValue) { return observedValue == expectedValue; });
 
