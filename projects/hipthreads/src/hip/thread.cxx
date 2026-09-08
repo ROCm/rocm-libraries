@@ -758,6 +758,21 @@ __host__ __device__ void wthread::detach() {
     return (warpSize == 32) ? 2U : 1U;
 }
 
+// Total scheduler vcores requested across the whole device, before any occupancy-based clamp.
+// "Vcores per WGP" always means "per 2 CUs" by definition, so the per-CU rate is
+// requestedVcoresPerWgp / 2 on every architecture; only converting multiprocessorCount into a
+// real CU count is architecture dependent (see getCusPerMultiprocessor). CU counts are even on
+// every architecture we've measured, so that division is exact - it doesn't special-case small
+// requests the way halving requestedVcoresPerWgp itself would need to.
+[[gnu::const]] static __host__ uint64_t getTotalRequestedVcores(int device) {
+    int multiprocessorCount = 0;
+    __LIBHIPTHREADS_HIP_CHECK__(
+        hipDeviceGetAttribute(&multiprocessorCount, hipDeviceAttributeMultiprocessorCount, device));
+    const uint64_t cuCount =
+        static_cast<uint64_t>(multiprocessorCount) * getCusPerMultiprocessor(device);
+    return (cuCount / 2) * getRequestedVcoresPerWgp();
+}
+
 // Deliberately not [[gnu::const]]: the result depends on which device is current when the call is
 // made, so the compiler must not treat calls either side of a hipSetDevice as interchangeable.
 __host__ unsigned int wthread::hardware_concurrency() noexcept {
@@ -777,8 +792,6 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
             }
         }
 
-        const uint32_t requestedVcoresPerWgp = getRequestedVcoresPerWgp();
-
         int multiprocessorCount = 0;
         __LIBHIPTHREADS_HIP_CHECK__(
             hipDeviceGetAttribute(&multiprocessorCount, hipDeviceAttributeMultiprocessorCount, device));
@@ -787,14 +800,11 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
         // resident ones never exit while work might arrive. Over-subscribe the grid and it wedges.
         //
         // multiprocessorCount counts WGPs on RDNA (2 CUs each) but CUs on CDNA, so one setting
-        // means two densities - which is why the default hung on Instinct but not Navi. Normalise
-        // to CUs, treating 2 CUs as the WGP equivalent on CDNA.
+        // means two densities - which is why the default hung on Instinct but not Navi.
+        // getTotalRequestedVcores normalises to CUs so the configured value means the same thing
+        // on both.
+        const uint64_t totalRequestedVcores = getTotalRequestedVcores(device);
         const uint32_t cusPerMultiprocessor = getCusPerMultiprocessor(device);
-        uint32_t vcoresPerMp = requestedVcoresPerWgp;
-        if (cusPerMultiprocessor == 1U) {
-            // Halve, but never to zero: an explicit request of 1 must still launch something.
-            vcoresPerMp = requestedVcoresPerWgp > 1U ? requestedVcoresPerWgp / 2U : 1U;
-        }
 
         // Even at the right density the device may not hold that many blocks, so cap against
         // measured occupancy (reported per multiprocessor, same unit, so unit-consistent). That
@@ -808,16 +818,16 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
         __LIBHIPTHREADS_HIP_CHECK__(hipOccupancyMaxActiveBlocksPerMultiprocessor(
             &maxBlocksPerMp, internal::threading_main, static_cast<int>(wthread::max_width()), 0));
 
-        uint32_t occupancyCeiling = 0;
+        // Widen before multiplying so a large multiprocessor count times a large override cannot wrap.
+        uint64_t total = totalRequestedVcores;
         if (maxBlocksPerMp > 0) {
-            occupancyCeiling = static_cast<uint32_t>(maxBlocksPerMp) / occupancySafetyDivisor;
-            if (occupancyCeiling > 0 && occupancyCeiling < vcoresPerMp) {
-                vcoresPerMp = occupancyCeiling;
+            const uint64_t occupancyBasedMaxVcores =
+                (static_cast<uint64_t>(maxBlocksPerMp) / occupancySafetyDivisor)
+                * static_cast<uint64_t>(multiprocessorCount);
+            if (occupancyBasedMaxVcores > 0 && occupancyBasedMaxVcores < total) {
+                total = occupancyBasedMaxVcores;
             }
         }
-
-        // Widen before multiplying so a large unit count times a large override cannot wrap.
-        uint64_t total = static_cast<uint64_t>(multiprocessorCount) * static_cast<uint64_t>(vcoresPerMp);
         if (total > static_cast<uint64_t>(MAX_VCORES)) {
             total = static_cast<uint64_t>(MAX_VCORES);
         }
