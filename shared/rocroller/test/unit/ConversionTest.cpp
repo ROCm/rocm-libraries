@@ -488,7 +488,7 @@ namespace rocRollerTest
         // Convert A to destination type
         auto tagCvtA = seed.has_value()
                            ? execute.addXOp(rocRoller::Operations::E_StochasticRoundingCvt(
-                                 tagLoadA, tagLoadSeed, destDataType))
+                               tagLoadA, tagLoadSeed, destDataType))
                            : execute.addXOp(rocRoller::Operations::E_Cvt(tagLoadA, destDataType));
         command->addOperation(std::move(execute));
 
