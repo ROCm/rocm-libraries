@@ -89,7 +89,7 @@ if(NOT USE_CUDA)
   endif()
 
 else( )
-  target_link_libraries( hipblas-bench PRIVATE CUDA::cublas )
+  target_link_libraries( hipblas-bench PRIVATE hip::host CUDA::cudart )
 endif( )
 
 set_target_properties( hipblas-bench PROPERTIES

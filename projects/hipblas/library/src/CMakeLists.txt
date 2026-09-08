@@ -66,7 +66,10 @@ endif()
 set(static_depends)
 
 find_package( hipblas-common REQUIRED CONFIG PATHS ${ROCM_PATH})
-target_link_libraries( hipblas PUBLIC roc::hipblas-common )
+# hip::host is required unconditionally: hipBLAS' public headers expose HIP
+# types and the hip::host target provides the HIP runtime include directories
+# needed by consumers of roc::hipblas on both AMD and CUDA backends.
+target_link_libraries( hipblas PUBLIC roc::hipblas-common hip::host )
 
 # Build hipblas from source on AMD platform
 if(NOT USE_CUDA)
@@ -83,7 +86,6 @@ if(NOT USE_CUDA)
 
   list(APPEND static_depends PACKAGE rocblas)
   target_link_libraries( hipblas PRIVATE roc::rocblas )
-  target_link_libraries( hipblas PUBLIC hip::host )
 
   # Add rocSOLVER as a dependency if BUILD_WITH_SOLVER is on
   if( BUILD_WITH_SOLVER )
@@ -114,9 +116,9 @@ if(NOT USE_CUDA)
 else( )
   target_compile_definitions( hipblas PRIVATE ${HIPBLAS_CUDA_COMPILER_DEFINES} )
 
-  # CUDA::cublas brings in cuBLAS headers and the HIP RT is not used;
-  # link directly via the modern CUDAToolkit imported target (no hipcc).
-  target_link_libraries( hipblas PRIVATE CUDA::cublas )
+  # hipBLAS' public headers expose cuBLAS and CUDA runtime declarations on this
+  # backend, so propagate their usage requirements to consumers of roc::hipblas.
+  target_link_libraries( hipblas PUBLIC CUDA::cublas CUDA::cudart )
 endif( )
 
 # External header includes included as system files
