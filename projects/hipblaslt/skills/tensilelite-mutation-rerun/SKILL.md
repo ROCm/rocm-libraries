@@ -30,7 +30,12 @@ ordinary TensileLite builds and tests do not depend on them.
 
 ## Run one investigation
 
-1. Choose one source module and a focused candidate test set.
+1. Choose one source module and a focused candidate test set. Follow
+   [references/covering-set.md](references/covering-set.md) to assemble the
+   set and measure its coverage of that exact file. Treat the threshold as a
+   scheduling heuristic, not as evidence that the tests detect each mutation.
+   A run whose selected tests do not meet the reviewed threshold is deferred,
+   not started.
 2. Record the source and container state with `scripts/slice-preflight.sh`.
 3. Use `scripts/pyproject-mutmut.sh backup` and `set` to configure the bounded
    campaign.
