@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for tensilelite.TensileCreateLibrary.ParseArguments
+# Characterization tests for tensilelite.tensilelite_create_library.parse_arguments
 #
 # ADD-ONLY: pins the argv -> arguments-dict mapping of parseArguments.
 #
@@ -15,7 +15,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-PA = importlib.import_module("tensilelite.TensileCreateLibrary.ParseArguments")
+PA = importlib.import_module("tensilelite.tensilelite_create_library.parse_arguments")
 coVersionMap = importlib.import_module("tensilelite.Common").coVersionMap
 
 BASE = ["prog", "/logic", "/out", "HSA"]
@@ -57,7 +57,14 @@ def test_defaults(monkeypatch):
 def test_quirk_input_param_ignored(monkeypatch):
     # Even with a fully-formed `input` list, sys.argv is what gets parsed.
     monkeypatch.setattr(sys, "argv", ["prog", "/real", "/realout", "HIP"])
-    a = PA.parseArguments(["prog", "/fake", "/fakeout", "OCL"])
+    a = PA.parseArguments(["/fake", "/fakeout", "HSA"])
+    assert a["RuntimeLanguage"] == "HSA"
+    assert a["LogicPath"] == "/fake"
+
+
+def test_no_argument_uses_sys_argv(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "/real", "/realout", "HIP"])
+    a = PA.parseArguments()
     assert a["RuntimeLanguage"] == "HIP"
     assert a["LogicPath"] == "/real"
 

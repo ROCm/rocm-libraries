@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-"""Characterization tests for tensilelite.TensileCreateLibrary.Run — deep coverage pass.
+"""Characterization tests for tensilelite.tensilelite_create_library.run — deep coverage pass.
 
 Target miss ranges (methodology-A):
   336-348  : writeAssembly (assembly-file writer)
@@ -56,7 +56,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # Module under test
 # ---------------------------------------------------------------------------
-M = importlib.import_module("tensilelite.TensileCreateLibrary.Run")
+M = importlib.import_module("tensilelite.tensilelite_create_library.run")
 SL = importlib.import_module("tensilelite.SolutionLibrary")
 
 _DATA_DIR = Path(__file__).parent / "data"
@@ -74,7 +74,7 @@ def _make_isa_info_map(arch: str = "gfx942"):
     clang = shutil.which("clang++") or "/opt/rocm/lib/llvm/bin/clang++"
     isa = gfxToIsa(arch)
     info_map = makeIsaInfoMap([isa], clang)
-    info_map[isa].asmCaps["SupportedISA"] = True
+    info_map[isa].asmCaps.update({"SupportedISA": True, "HasMFMA": True})
     return isa, info_map
 
 

@@ -248,7 +248,7 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def useGlobalParameters(tensile_args):
     from tensilelite import Common
-    from tensilelite import Tensile as tensilelite
+    from tensilelite import tensilelite
     import argparse
 
     class gpUpdater:

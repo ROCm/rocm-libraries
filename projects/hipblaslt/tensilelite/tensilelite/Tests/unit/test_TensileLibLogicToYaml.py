@@ -29,7 +29,7 @@ import os
 import tempfile
 import filecmp
 
-from tensilelite import TensileLibLogicToYaml
+from tensilelite import lib_logic_to_yaml as TensileLibLogicToYaml
 
 # Test data
 VALID_LIBLOGIC_FILE_CONTENT = """

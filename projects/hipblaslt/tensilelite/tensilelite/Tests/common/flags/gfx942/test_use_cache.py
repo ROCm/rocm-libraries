@@ -25,7 +25,7 @@ import pytest
 import re
 from pathlib import Path
 
-from tensilelite import Tensile as tensilelite
+from tensilelite import tensilelite
 from tensilelite.Tests.gpu_detection import has_arch
 
 # The yaml config is defined inline (rather than as a separate .yaml file) to
@@ -97,7 +97,7 @@ def test_compile_and_benchmark(tensile_args: list[str], tmp_path: Path) -> None:
     config_path = str(tmp_path / "config.yaml")
     _write_config(config_path)
     output_dir = str(tmp_path / "output")
-    tensilelite.Tensile([config_path, output_dir, *tensile_args])
+    tensilelite.tensilelite([config_path, output_dir, *tensile_args])
 
 
 @pytest.mark.skipif(not _HAS_GFX942, reason="gfx942 GPU not available")
@@ -108,10 +108,10 @@ def test_use_cache(tensile_args: list[str], tmp_path: Path) -> None:
     output_dir = str(tmp_path / "output")
 
     # First run: compile and benchmark
-    tensilelite.Tensile([config_path, output_dir, *tensile_args])
+    tensilelite.tensilelite([config_path, output_dir, *tensile_args])
 
     # Second run: use cache -- should not crash
-    tensilelite.Tensile([config_path, output_dir, "--use-cache", *tensile_args])
+    tensilelite.tensilelite([config_path, output_dir, "--use-cache", *tensile_args])
 
 
 def _find_caches_dirs(output_dir: str) -> list[Path]:
@@ -135,7 +135,7 @@ def test_use_cache_creates_cache_dir(tensile_args: list[str], tmp_path: Path) ->
     _write_config(config_path)
     output_dir = str(tmp_path / "output")
 
-    tensilelite.Tensile([config_path, output_dir, *tensile_args])
+    tensilelite.tensilelite([config_path, output_dir, *tensile_args])
 
     caches_dirs = _find_caches_dirs(output_dir)
     assert len(caches_dirs) >= 1, "Expected at least one caches/ directory"
@@ -153,12 +153,12 @@ def test_use_cache_different_params(tensile_args: list[str], tmp_path: Path) -> 
     # Run 1: DepthU=32
     config1 = str(tmp_path / "config1.yaml")
     _write_config(config1)
-    tensilelite.Tensile([config1, output_dir, *tensile_args])
+    tensilelite.tensilelite([config1, output_dir, *tensile_args])
 
     # Run 2: DepthU=64 (different params, same output dir)
     config2 = str(tmp_path / "config2.yaml")
     _write_config_with_depth_u(config2, 64)
-    tensilelite.Tensile([config2, output_dir, *tensile_args])
+    tensilelite.tensilelite([config2, output_dir, *tensile_args])
 
     # Verify: caches/ directory should have 2 entries
     caches_dirs = _find_caches_dirs(output_dir)
@@ -168,7 +168,7 @@ def test_use_cache_different_params(tensile_args: list[str], tmp_path: Path) -> 
         assert len(entries) == 2, f"Expected 2 cache entries in {caches_dir}, got {len(entries)}"
 
     # Run 3: --use-cache with original config should reuse first cache (no crash, no new entries)
-    tensilelite.Tensile([config1, output_dir, "--use-cache", *tensile_args])
+    tensilelite.tensilelite([config1, output_dir, "--use-cache", *tensile_args])
     for caches_dir in caches_dirs:
         entries = [e for e in caches_dir.iterdir() if e.is_dir()]
         assert len(entries) == 2, f"Expected still 2 cache entries after reuse, got {len(entries)}"

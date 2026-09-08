@@ -195,7 +195,7 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
     logic files (e.g. the StreamK corpus) without emitting thousands.
     """
     import rocisa
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.tensilelite_create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -260,7 +260,7 @@ def emit_helpers_from_logic(logic_path):
     MMA scheduler state) but we still key the golden on identity + return code
     for consistency with the asm suites.
     """
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.tensilelite_create_library.run import (
         generateKernelObjectsFromSolutions,
         generateKernelHelperObjects,
     )

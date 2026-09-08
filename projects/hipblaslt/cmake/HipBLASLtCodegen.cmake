@@ -83,7 +83,7 @@ function(hipblaslt_create_device_library)
 
     # Keep the resource as an explicit dependency so quarantine edits invalidate
     # the validation stamp; TensileLogic itself resolves the resource at runtime.
-    set(_known_bugs_resource "${_codegen_dir}/tensilelite/TensileLogic/known_bugs.yaml")
+    set(_known_bugs_resource "${_codegen_dir}/tensilelite/tensilelite_logic/known_bugs.yaml")
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     set(_tensile_logic_opts_list
         "${_cdl_LOGIC_PATH}"
@@ -113,7 +113,7 @@ function(hipblaslt_create_device_library)
 
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
-        ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite.TensileCreateLibrary
+        ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite.tensilelite_create_library
         ${_opts_list}
         "${_cdl_LOGIC_PATH}"
         "${_cdl_OUTPUT_DIR}"

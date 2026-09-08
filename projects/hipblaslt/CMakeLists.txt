@@ -688,7 +688,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     # ship at the tensilelite root, not under scripts/.
     install(
         FILES
-            "${_tensilelite_src}/AMaxGenerator.py"
+            "${_tensilelite_src}/tensilelite/_extops/AMaxGenerator.py"
         DESTINATION "${_tensilelite_install_dest}"
         COMPONENT tests
     )
