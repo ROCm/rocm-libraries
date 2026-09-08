@@ -164,9 +164,7 @@ class TestForceDeterministic(unittest.TestCase):
 
     def test_force_deterministic_noop_for_split_k_1(self):
         # split_k=1 is always deterministic; force_deterministic must not error.
-        r = dispatch_conv_grouped(
-            _wgrad("gfx1250", force_deterministic=True)
-        )
+        r = dispatch_conv_grouped(_wgrad("gfx1250", force_deterministic=True))
         ws = r.spec.to_wgrad_spec(_problem(r.request))
         self.assertEqual(ws.split_k, 1, "gfx1250 always uses split_k=1")
         self.assertFalse(ws.two_stage, "split_k=1 needs no two_stage")

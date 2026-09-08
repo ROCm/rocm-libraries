@@ -1182,8 +1182,6 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
     }
 }
 
-
-
 // Split-K atomic epilogue for wgrad
 // ---------------------------------------------------------------------------
 

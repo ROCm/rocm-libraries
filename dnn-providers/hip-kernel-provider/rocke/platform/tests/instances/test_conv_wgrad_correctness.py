@@ -1094,9 +1094,14 @@ def _cpu_wgrad_ref_ts(X_f32, dY_f32, p):
     return dW_nchw.permute(0, 2, 3, 1).contiguous()
 
 
-def _make_two_stage_spec(arch, N=2, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, split_k=4, groups=1):
+def _make_two_stage_spec(
+    arch, N=2, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, split_k=4, groups=1
+):
     """Build a WgradConvSpec with two_stage=True for MFMA (gfx942/gfx950)."""
-    from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
+    from rocke.instances.common._conv_implicit_gemm_common import (
+        ConvDataSpec,
+        ConvProblem,
+    )
     from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
     p = ConvProblem(N=N, Hi=Hi, Wi=Wi, C=C, K=K, Y=Y, X=X, groups=groups)
@@ -1138,9 +1143,11 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
     assert ws_nbytes > 0, "workspace must be non-empty for split_k > 1"
 
     p = spec.problem
-    _dw_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}.get(
-        spec.data.dtype_d, torch.float16
-    )
+    _dw_dtype = {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+        "fp32": torch.float32,
+    }.get(spec.data.dtype_d, torch.float16)
     dW_t = torch.zeros(p.K, p.Y, p.X, p.cpg, dtype=_dw_dtype)
 
     dY_dev = rt.alloc(dY_t.nbytes)
@@ -1240,9 +1247,16 @@ def _check_two_stage(
     # Build spec via the shared _make_spec helper (epilogue="default" for two-stage;
     # the two-stage epilogue is workspace-store and ignores the output epilogue).
     result = _make_spec(
-        arch, shape, dtype, pipeline, "default", split_k,
-        lds_k_outer=lds_k_outer, async_dma=async_dma,
-        warp_tile_mn=warp_tile_mn, tile_k=tile_k,
+        arch,
+        shape,
+        dtype,
+        pipeline,
+        "default",
+        split_k,
+        lds_k_outer=lds_k_outer,
+        async_dma=async_dma,
+        warp_tile_mn=warp_tile_mn,
+        tile_k=tile_k,
     )
     if result[0] is None:
         return False, f"spec construction failed: {result[2]}"
@@ -1251,6 +1265,7 @@ def _check_two_stage(
     # Apply grouped problem if needed (override shape.groups).
     if groups > 1 and base_spec.problem.groups != groups:
         from dataclasses import replace as _p_replace
+
         gp = _dc_replace(base_spec.problem, groups=groups)
         base_spec = _dc_replace(base_spec, problem=gp)
 
@@ -1333,9 +1348,16 @@ class TestConvWgradTwoStage(unittest.TestCase):
         seed: int = 0,
     ):
         ok, reason = _check_two_stage(
-            shape, dtype, pipeline, split_k, groups=groups,
-            lds_k_outer=lds_k_outer, async_dma=async_dma,
-            warp_tile_mn=warp_tile_mn, tile_k=tile_k, seed=seed,
+            shape,
+            dtype,
+            pipeline,
+            split_k,
+            groups=groups,
+            lds_k_outer=lds_k_outer,
+            async_dma=async_dma,
+            warp_tile_mn=warp_tile_mn,
+            tile_k=tile_k,
+            seed=seed,
         )
         if not ok:
             self.fail(
@@ -1422,14 +1444,18 @@ class TestConvWgradTwoStage(unittest.TestCase):
         """K not divisible by tile_m=64; OOB guard in Stage 1 epilogue."""
         self._check(
             _Shape("3x3_K40", N=2, Hi=8, Wi=8, C=16, K=40, Y=3, X=3, pH=1, pW=1),
-            "fp16", "mem", seed=4,
+            "fp16",
+            "mem",
+            seed=4,
         )
 
     def test_non_tile_aligned_wg_N(self):
         """Y*X*C not divisible by tile_n=32; OOB guard in Stage 1 epilogue."""
         self._check(
             _Shape("3x3_C24", N=2, Hi=8, Wi=8, C=24, K=32, Y=3, X=3, pH=1, pW=1),
-            "fp16", "mem", seed=5,
+            "fp16",
+            "mem",
+            seed=5,
         )
 
     # ------------------------------------------------------------------
@@ -1452,7 +1478,9 @@ class TestConvWgradTwoStage(unittest.TestCase):
         for dtype in _DTYPES:
             for shape in (_SHAPES[0], _SHAPES[2]):
                 with self.subTest(shape=shape.id, dtype=dtype):
-                    self._check(shape, dtype, "mem", lds_k_outer=True, warp_tile_mn=16, seed=7)
+                    self._check(
+                        shape, dtype, "mem", lds_k_outer=True, warp_tile_mn=16, seed=7
+                    )
 
     def test_lds_k_outer_split_k(self):
         """lds_k_outer + split_k=8 + two_stage on gfx950."""
@@ -1470,8 +1498,12 @@ class TestConvWgradTwoStage(unittest.TestCase):
         """G=2 grouped two-stage (Stage 2 grid z=2, block_id_z=group)."""
         for dtype in _DTYPES:
             for shape in (
-                _Shape("3x3_G2_C32K32", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1),
-                _Shape("3x3_G2_C16K16", N=2, Hi=8, Wi=8, C=16, K=16, Y=3, X=3, pH=1, pW=1),
+                _Shape(
+                    "3x3_G2_C32K32", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1
+                ),
+                _Shape(
+                    "3x3_G2_C16K16", N=2, Hi=8, Wi=8, C=16, K=16, Y=3, X=3, pH=1, pW=1
+                ),
             ):
                 with self.subTest(shape=shape.id, dtype=dtype):
                     self._check(shape, dtype, "mem", groups=2, seed=9)
@@ -1480,7 +1512,9 @@ class TestConvWgradTwoStage(unittest.TestCase):
         """G=4 grouped two-stage."""
         for dtype in _DTYPES:
             for shape in (
-                _Shape("3x3_G4_C32K64", N=2, Hi=8, Wi=8, C=32, K=64, Y=3, X=3, pH=1, pW=1),
+                _Shape(
+                    "3x3_G4_C32K64", N=2, Hi=8, Wi=8, C=32, K=64, Y=3, X=3, pH=1, pW=1
+                ),
             ):
                 with self.subTest(shape=shape.id, dtype=dtype):
                     self._check(shape, dtype, "mem", groups=4, seed=10)
@@ -1492,20 +1526,32 @@ class TestConvWgradTwoStage(unittest.TestCase):
                 with self.subTest(groups=groups, dtype=dtype):
                     shape = _Shape(
                         f"3x3_G{groups}_C{C}K{K}",
-                        N=2, Hi=8, Wi=8, C=C, K=K, Y=3, X=3, pH=1, pW=1,
+                        N=2,
+                        Hi=8,
+                        Wi=8,
+                        C=C,
+                        K=K,
+                        Y=3,
+                        X=3,
+                        pH=1,
+                        pW=1,
                     )
                     self._check(shape, dtype, "mem", groups=groups, seed=groups)
 
     def test_grouped_split_k_8(self):
         """Grouped G=2 with split_k=8 (many workspace slices per group)."""
         for dtype in _DTYPES:
-            shape = _Shape("3x3_G2_C32K32_spk8", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1)
+            shape = _Shape(
+                "3x3_G2_C32K32_spk8", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1
+            )
             with self.subTest(dtype=dtype):
                 self._check(shape, dtype, "mem", split_k=8, groups=2, seed=11)
 
     def test_grouped_auto_split_k(self):
         """Grouped G=2 with split_k=-1 auto-selected."""
-        shape = _Shape("3x3_G2_C32K32_autospk", N=2, Hi=14, Wi=14, C=32, K=32, Y=3, X=3, pH=1, pW=1)
+        shape = _Shape(
+            "3x3_G2_C32K32_autospk", N=2, Hi=14, Wi=14, C=32, K=32, Y=3, X=3, pH=1, pW=1
+        )
         self._check(shape, "fp16", "mem", split_k=-1, groups=2, seed=12)
 
     # ------------------------------------------------------------------
@@ -1518,7 +1564,18 @@ class TestConvWgradTwoStage(unittest.TestCase):
 
     def test_tile_128x64(self):
         """128x64 tile (wider M sweep). Uses arch-aware _check harness."""
-        shape = _Shape("3x3_K128_N2H14W14C64K128", N=2, Hi=14, Wi=14, C=64, K=128, Y=3, X=3, pH=1, pW=1)
+        shape = _Shape(
+            "3x3_K128_N2H14W14C64K128",
+            N=2,
+            Hi=14,
+            Wi=14,
+            C=64,
+            K=128,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+        )
         self._check(shape, "fp16", "mem", split_k=4, seed=21)
 
     def test_tile_k_32(self):

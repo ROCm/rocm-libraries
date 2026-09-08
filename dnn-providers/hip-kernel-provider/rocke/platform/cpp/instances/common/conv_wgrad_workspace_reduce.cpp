@@ -167,10 +167,8 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
     rocke_value_t* t_n = rocke_b_mod(b, tid, rocke_b_const_i32(b, tile_n));
 
     /* Per-group (m, n) coordinates */
-    rocke_value_t* c_m
-        = rocke_b_add(b, rocke_b_mul(b, blk_m, rocke_b_const_i32(b, tile_m)), t_m);
-    rocke_value_t* c_n
-        = rocke_b_add(b, rocke_b_mul(b, blk_n, rocke_b_const_i32(b, tile_n)), t_n);
+    rocke_value_t* c_m = rocke_b_add(b, rocke_b_mul(b, blk_m, rocke_b_const_i32(b, tile_m)), t_m);
+    rocke_value_t* c_n = rocke_b_add(b, rocke_b_mul(b, blk_n, rocke_b_const_i32(b, tile_n)), t_n);
 
     /* OOB guard: threads outside [0, wg_M) x [0, wg_N) do nothing */
     rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_p);
@@ -214,8 +212,7 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
              * Stage 1 writes z = grp_id*split_k + kid, so group g's slices
              * occupy contiguous indices [g*split_k, g*split_k+split_k). */
             rocke_value_t* grp_stride = rocke_b_mul(b, wg_M_p, wg_N_p);
-            rocke_value_t* slice_idx
-                = rocke_b_add(b, rocke_b_mul(b, grp_id, sk_p), kid);
+            rocke_value_t* slice_idx = rocke_b_add(b, rocke_b_mul(b, grp_id, sk_p), kid);
             rocke_value_t* slice_base = rocke_b_mul(b, slice_idx, grp_stride);
             rocke_value_t* elem_off
                 = rocke_b_add(b, slice_base, rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_p), c_n));
