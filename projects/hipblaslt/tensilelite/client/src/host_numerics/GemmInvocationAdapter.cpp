@@ -981,27 +981,24 @@ namespace TensileLite::Client::HostNumerics
         const ScalarType computeType = options.accumulatorType;
         if(!isZero(alpha) && a.shape()[1] != 0)
         {
-            matmulInto(a, b, d, options, backend);
+            matmulInto(a, b, d, options, outputSelection, backend);
 
             Tensor effectiveScale = alpha;
             if(scaleA)
-                effectiveScale = multiply(
-                    std::move(effectiveScale), *scaleA, computeType, computeType);
+                effectiveScale = multiply(effectiveScale, *scaleA, computeType, computeType);
             if(scaleB)
-                effectiveScale = multiply(
-                    std::move(effectiveScale), *scaleB, computeType, computeType);
+                effectiveScale = multiply(effectiveScale, *scaleB, computeType, computeType);
             if(scaleAlpha)
-                effectiveScale = multiply(
-                    std::move(effectiveScale), *scaleAlpha, computeType, computeType);
-            multiplyInto(d, std::move(effectiveScale), d, computeType, options.outputSelection);
+                effectiveScale = multiply(effectiveScale, *scaleAlpha, computeType, computeType);
+            multiplyInto(d, effectiveScale, d, computeType, outputSelection);
         }
 
         if(!isZero(beta))
         {
             const Tensor cScale = multiply(beta, scaleC, computeType, computeType);
             Tensor cTerm(computeType, d.shape());
-            multiplyInto(c, cScale, cTerm, computeType, options.outputSelection);
-            addInto(d, std::move(cTerm), d, computeType, options.outputSelection);
+            multiplyInto(c, cScale, cTerm, computeType, outputSelection);
+            addInto(d, cTerm, d, computeType, outputSelection);
         }
     }
 
@@ -1128,7 +1125,7 @@ namespace TensileLite::Client::HostNumerics
                                         ? std::optional<Tensor>(m_state->scaleB->expandDims(0))
                                         : std::nullopt;
             request.mathMode       = m_state->mathMode;
-            request.outputSelection = source.outputSelection;
+            translated.outputSelection = source.outputSelection;
 
             {
                 TranslatedGemmBatch::BoundEpilogue epilogue(
@@ -1161,7 +1158,7 @@ namespace TensileLite::Client::HostNumerics
                     = Tensor::scalar(accumulatorType, m_state->outputScale);
                 if(m_state->typeD == ScalarType::Int8)
                     epilogue.options.outputConversion = OutputConversion::SaturatingInt8;
-                epilogue.options.outputSelection = request.outputSelection;
+                epilogue.options.outputSelection = translated.outputSelection;
 
                 if(m_state->useGradient && m_state->useBias
                    && m_state->biasSource == ContractionProblemGemm::D)

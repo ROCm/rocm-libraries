@@ -9,6 +9,7 @@
 
 namespace roc::host_numerics::python_bindings {
 Tensor scalarFromPython(nanobind::handle value);
+Tensor tensorOperand(nanobind::handle value, ScalarType scalarType);
 
 void registerComparisonBindings(nanobind::module_& module);
 void registerGenerationBindings(nanobind::module_& module);

@@ -134,6 +134,7 @@ namespace TensileLite::Client::HostNumerics
         std::optional<roc::host_numerics::Tensor> scaleAlpha;
         std::optional<roc::host_numerics::Tensor> scaleA;
         std::optional<roc::host_numerics::Tensor> scaleB;
+        roc::host_numerics::OutputSelection       outputSelection;
         std::optional<BoundEpilogue>    epilogue;
         std::optional<BiasReduction>    biasReduction;
         std::vector<CopyBack>           copyBacks;

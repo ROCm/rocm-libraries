@@ -27,7 +27,8 @@ int main() {
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b));
     matmulInto(operandA, operandB, d);
     if (d.loadAs<float>({0, 0}) != 6) return 1;
-    matmulInto(operandA, operandB, d, MatmulOptions{}, GemmBackend::Blocked);
+    matmulInto(operandA, operandB, d, MatmulOptions{}, OutputSelection::all(),
+               GemmBackend::Blocked);
     if (d.loadAs<float>({0, 0}) != 6) return 1;
 
     const Tensor ownedGemm =

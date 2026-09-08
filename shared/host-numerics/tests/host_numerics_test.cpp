@@ -11,6 +11,7 @@
 #include <limits>
 #include <roc/host_numerics/validation.hpp>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -1104,6 +1105,11 @@ void testTensorOperations() {
                     2.0f * x.loadAs<float>({1, 0, 1}) - 0.5f * y.loadAs<float>({1, 0, 1}),
             "Owning tensor addition result contract mismatch.");
 
+    const Tensor operatorResult =
+        Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{1.0f, 2.0f}) * 2.0f + 1.0f;
+    require(operatorResult.loadAs<float>({0}) == 3.0f && operatorResult.loadAs<float>({1}) == 5.0f,
+            "Tensor arithmetic operators do not match the named operations.");
+
     bool rejectedBeforeAllocation = false;
     try {
         (void)multiply(x, Tensor(std::complex<double>(1.0, 1.0)), ScalarType::Float32,
@@ -1492,6 +1498,11 @@ void testGenerationAndComparison() {
     require(result.reportedMismatches.size() == 1, "Comparison did not report one mismatch.");
     require(result.reportedMismatches[0].index == 7,
             "Comparison reported the wrong mismatch index.");
+    const std::string diagnostic = formatComparisonReport(result);
+    require(diagnostic.starts_with("comparison failed: 1 of 32 compared elements mismatched") &&
+                diagnostic.find("index 7 [7]") != std::string::npos &&
+                diagnostic.find("absolute difference") != std::string::npos,
+            "Comparison diagnostic omitted its result summary or mismatch coordinates.");
 
     const std::array<double, 2> nonFiniteA{
         std::numeric_limits<double>::infinity(),

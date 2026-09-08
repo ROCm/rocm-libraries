@@ -37,6 +37,7 @@ struct GemmOptions : MatmulOptions {
     Activation activation = Activation::None;
     Tensor activationParameter0;
     Tensor activationParameter1;
+    OutputSelection outputSelection = OutputSelection::all();
 };
 
 struct GemmSupportInfo {

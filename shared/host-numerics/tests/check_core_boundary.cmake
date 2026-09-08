@@ -62,8 +62,7 @@ foreach(required_scalar_declaration
         "enum class ScalarType"
         "struct ScalarTypeInfo"
         "struct NativeScalarType"
-        "visitScalarType"
-        "class Scalar")
+        "visitScalarType")
     string(FIND "${scalar_contents}" "${required_scalar_declaration}" position)
     if(position EQUAL -1)
         message(FATAL_ERROR
@@ -75,7 +74,8 @@ foreach(forbidden_scalar_declaration
         "class Shape"
         "class Layout"
         "class TensorStorage"
-        "class Tensor {")
+        "class Tensor {"
+        "class Scalar {")
     string(FIND "${scalar_contents}" "${forbidden_scalar_declaration}" position)
     if(NOT position EQUAL -1)
         message(FATAL_ERROR
