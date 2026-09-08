@@ -32,8 +32,7 @@ void verifyKernelExtraction(const std::string& archivePath,
 {
     SCOPED_TRACE("archive=" + archivePath + " tocKey=" + tocKey + " arch=" + arch);
 
-    ASSERT_TRUE(std::filesystem::exists(archivePath))
-        << "Archive not found: " << archivePath;
+    ASSERT_TRUE(std::filesystem::exists(archivePath)) << "Archive not found: " << archivePath;
 
     kpack_archive_t archive = nullptr;
     kpack_error_t err = kpack_open(archivePath.c_str(), &archive);
@@ -42,8 +41,8 @@ void verifyKernelExtraction(const std::string& archivePath,
     void* data = nullptr;
     size_t size = 0;
     err = kpack_get_kernel(archive, tocKey.c_str(), arch.c_str(), &data, &size);
-    EXPECT_EQ(err, KPACK_SUCCESS)
-        << "kpack_get_kernel failed for tocKey='" << tocKey << "' arch='" << arch << "'";
+    EXPECT_EQ(err, KPACK_SUCCESS) << "kpack_get_kernel failed for tocKey='" << tocKey << "' arch='"
+                                  << arch << "'";
     EXPECT_NE(data, nullptr);
     EXPECT_GT(size, 0u);
 
@@ -93,14 +92,12 @@ TEST(TestAsmKpackLoading, Gfx942FwdMi308CausalHd128)
 
 TEST(TestAsmKpackLoading, Gfx942BwdHd128Odo)
 {
-    verifyKernelExtraction(
-        kpackPath("gfx942"), "fmha_v3_bwd/bwd_hd128_odo_bf16.co", "gfx942");
+    verifyKernelExtraction(kpackPath("gfx942"), "fmha_v3_bwd/bwd_hd128_odo_bf16.co", "gfx942");
 }
 
 TEST(TestAsmKpackLoading, Gfx942BwdHd64Odo)
 {
-    verifyKernelExtraction(
-        kpackPath("gfx942"), "fmha_v3_bwd/bwd_hd64_odo_bf16.co", "gfx942");
+    verifyKernelExtraction(kpackPath("gfx942"), "fmha_v3_bwd/bwd_hd64_odo_bf16.co", "gfx942");
 }
 
 // =============================================================================
@@ -109,8 +106,7 @@ TEST(TestAsmKpackLoading, Gfx942BwdHd64Odo)
 
 TEST(TestAsmKpackLoading, Gfx950FwdHd128)
 {
-    verifyKernelExtraction(
-        kpackPath("gfx950"), "fmha_v3_fwd/fwd_hd128_bf16.co", "gfx950");
+    verifyKernelExtraction(kpackPath("gfx950"), "fmha_v3_fwd/fwd_hd128_bf16.co", "gfx950");
 }
 
 // =============================================================================
@@ -119,8 +115,7 @@ TEST(TestAsmKpackLoading, Gfx950FwdHd128)
 
 TEST(TestAsmKpackLoading, Gfx950BwdHd64Odo)
 {
-    verifyKernelExtraction(
-        kpackPath("gfx950"), "fmha_v3_bwd/bwd_hd64_odo_bf16.co", "gfx950");
+    verifyKernelExtraction(kpackPath("gfx950"), "fmha_v3_bwd/bwd_hd64_odo_bf16.co", "gfx950");
 }
 
 // =============================================================================

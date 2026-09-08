@@ -49,10 +49,15 @@ public:
         }
 
         KernelData() = default;
-        KernelData(void* d, size_t s) : data(d), size(s) {}
+        KernelData(void* d, size_t s)
+            : data(d)
+            , size(s)
+        {
+        }
 
         KernelData(KernelData&& o) noexcept
-            : data(std::exchange(o.data, nullptr)), size(o.size)
+            : data(std::exchange(o.data, nullptr))
+            , size(o.size)
         {
         }
 

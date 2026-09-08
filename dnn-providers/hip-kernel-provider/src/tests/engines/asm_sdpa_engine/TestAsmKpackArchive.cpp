@@ -74,8 +74,7 @@ TEST(TestAsmKpackArchive, TocKeyNoSlashReturnsUnchanged)
 TEST(TestAsmKpackArchive, TocKeyNonGfxPrefixReturnsUnchanged)
 {
     // A path whose first component is not a gfx arch should be returned as-is.
-    EXPECT_EQ(getAsmKernelTocKey("fmha_v3_fwd/fwd_hd128_bf16.co"),
-              "fmha_v3_fwd/fwd_hd128_bf16.co");
+    EXPECT_EQ(getAsmKernelTocKey("fmha_v3_fwd/fwd_hd128_bf16.co"), "fmha_v3_fwd/fwd_hd128_bf16.co");
 }
 
 } // namespace
