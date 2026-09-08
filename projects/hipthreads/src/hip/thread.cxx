@@ -730,6 +730,25 @@ __host__ __device__ void wthread::detach() {
 #endif // !__HIP_DEVICE_COMPILE__
 }
 
+// Scheduler vcores requested per WGP (or WGP-equivalent on CDNA - see getCusPerMultiprocessor).
+// Overridable at runtime via the HIPTHREADS_VCORES_PER_WGP environment variable; defaults to
+// HIPTHREADS_DEFAULT_VCORES_PER_WGP if unset or unparseable. Process-wide, not per-device, so the
+// parse happens once ever rather than once per device.
+[[gnu::const]] static __host__ uint32_t getRequestedVcoresPerWgp() {
+    static const uint32_t value = [](){
+        const char *env = ::std::getenv("HIPTHREADS_VCORES_PER_WGP");
+        if (env != nullptr) {
+            char *end;
+            unsigned long val = ::std::strtoul(env, &end, 10);
+            if (end != env && *end == '\0' && val > 0) {
+                return static_cast<uint32_t>(val);
+            }
+        }
+        return static_cast<uint32_t>(HIPTHREADS_DEFAULT_VCORES_PER_WGP);
+    }();
+    return value;
+}
+
 // Returns how many CUs make up one HIP "multiprocessor" on device: 2 on RDNA, where
 // hipDeviceAttributeMultiprocessorCount reports WGPs, or 1 on CDNA/GCN, where it already reports
 // CUs. warpSize is the discriminator: wave32 is RDNA, wave64 is CDNA/GCN.
@@ -758,20 +777,7 @@ __host__ unsigned int wthread::hardware_concurrency() noexcept {
             }
         }
 
-        // Scheduler vcores requested per compute unit. Overridable at runtime via the
-        // HIPTHREADS_VCORES_PER_WGP environment variable; defaults to
-        // HIPTHREADS_DEFAULT_VCORES_PER_WGP if unset or unparseable.
-        static const uint32_t requestedVcoresPerWgp = [](){
-            const char *env = ::std::getenv("HIPTHREADS_VCORES_PER_WGP");
-            if (env != nullptr) {
-                char *end;
-                unsigned long val = ::std::strtoul(env, &end, 10);
-                if (end != env && *end == '\0' && val > 0) {
-                    return static_cast<uint32_t>(val);
-                }
-            }
-            return static_cast<uint32_t>(HIPTHREADS_DEFAULT_VCORES_PER_WGP);
-        }();
+        const uint32_t requestedVcoresPerWgp = getRequestedVcoresPerWgp();
 
         int multiprocessorCount = 0;
         __LIBHIPTHREADS_HIP_CHECK__(
