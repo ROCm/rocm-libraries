@@ -47,6 +47,7 @@ target_sources(stinkytofu_objs PRIVATE
     InsertDelayAluPass.cpp
     LoopRegionRemarkPass.cpp
     RemoveWaitAluPass.cpp
+    PrefetchBridgeSubstitutionPass.cpp
     InsertWaitAluPass.cpp
     EstimateAsmCyclesPass.cpp
     InsertCoexecHazardPass.cpp
