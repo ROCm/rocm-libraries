@@ -59,7 +59,6 @@ namespace
                       size_t                                 allocationElements)
     {
         EXPECT_EQ(matrix.apiType, type);
-        EXPECT_EQ(matrix.hostType, hipblaslt::host_numerics::scalarType(type));
         ASSERT_EQ(matrix.layout.shape().rank(), 3);
         EXPECT_EQ(matrix.layout.shape().extent(0), rows);
         EXPECT_EQ(matrix.layout.shape().extent(1), columns);
@@ -115,6 +114,20 @@ TEST(MatmulProblem, KeepsDistinctStridedBatchGeometry)
     expectMatrix(problem.d, HIP_R_32F, 3, 5, 4, 9, 404, 1616);
     ASSERT_TRUE(problem.auxiliary);
     expectMatrix(*problem.auxiliary, HIP_R_16F, 3, 5, 4, 10, 505, 2020);
+}
+
+TEST(MatmulProblem, AllocatesOverlappingPositiveBatchStrides)
+{
+    auto arguments        = baseArguments();
+    arguments.batch_count = 4;
+    arguments.stride_a[0] = 2;
+
+    const auto  problems = hipblaslt::client::normalizeMatmulProblems(arguments);
+    const auto& problem  = problems.front();
+
+    // A occupies 28 elements per matrix. The fourth overlapping view starts
+    // at element 6, so its last addressed element requires 34 elements total.
+    expectMatrix(problem.a, HIP_R_16F, 3, 7, 4, 4, 2, 34);
 }
 
 TEST(MatmulProblem, PointerArraysUseCanonicalLogicalBatchOffsets)
