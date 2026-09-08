@@ -150,7 +150,6 @@ private:
             return detail::GpuRMSNormFwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::RMSNormBackwardAttributes:
             return detail::GpuRMSNormBwdSignatureKey(node, tensorMap, node.compute_data_type());
-
         case NodeAttrs::SdpaAttributes:
             return detail::GpuSdpaFwdSignatureKey(node, tensorMap);
 
