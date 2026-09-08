@@ -206,7 +206,7 @@ install_packages( )
   fi
 
   # wget is needed for cmake
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.16.8); then
+  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.17.0); then
     if $update_cmake == true; then
       library_dependencies_ubuntu+=("wget")
       library_dependencies_centos_rhel+=("wget")
@@ -527,19 +527,19 @@ if [[ "${install_dependencies}" == true ]]; then
 
   install_packages
 
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.16.8); then
+  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.17.0); then
       if $update_cmake == true; then
-        CMAKE_REPO="https://github.com/Kitware/CMake/releases/download/v3.16.8/"
-        wget -nv ${CMAKE_REPO}/cmake-3.16.8.tar.gz
-        tar -xvf cmake-3.16.8.tar.gz
-        cd cmake-3.16.8
+        CMAKE_REPO="https://github.com/Kitware/CMake/releases/download/v3.17.0/"
+        wget -nv ${CMAKE_REPO}/cmake-3.17.0.tar.gz
+        tar -xvf cmake-3.17.0.tar.gz
+        cd cmake-3.17.0
         ./bootstrap --prefix=/usr --no-system-curl --parallel=16
         make -j16
         elevate_if_not_root make install
         cd ..
-        rm -rf cmake-3.16.8.tar.gz cmake-3.16.8
+        rm -rf cmake-3.17.0.tar.gz cmake-3.17.0
       else
-          echo "hipBLAS requires CMake version >= 3.16.8 and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version ${CMAKE_VERSION} will be uninstalled and CMake version 3.16.8 will be installed"
+          echo "hipBLAS requires CMake version >= 3.17.0 and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version ${CMAKE_VERSION} will be uninstalled and CMake version 3.17.0 will be installed"
           exit 2
       fi
   fi
