@@ -40,6 +40,10 @@ def _spec(idx: int) -> ElementwiseSpec:
             ElementwiseSpec(op="relu", dtype="f16", block_size=256, vec=8),
             "gfx1201",
         )
+    if idx == 8:
+        return ElementwiseSpec(op="tanh", dtype="f16", block_size=256, vec=8)
+    if idx == 9:
+        return ElementwiseSpec(op="tanh", dtype="bf16", block_size=256, vec=8)
     raise SystemExit(f"unknown config index {idx}")
 
 

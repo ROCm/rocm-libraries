@@ -40,6 +40,9 @@ from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 from .codegen_policy import codegen_policy_for_kernel
 from .ir import (
+    F32,
+    I1,
+    I32,
     KernelDef,
     Op,
     Param,
@@ -424,7 +427,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "rcp.f32": "declare float @llvm.amdgcn.rcp.f32(float)",
-    "tanh.f32": "declare float @llvm.tanh.f32(float)",
     "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
     "maxnum.f16": "declare half @llvm.maxnum.f16(half, half)",
     "maxnum.bf16": "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)",
@@ -1495,6 +1497,48 @@ class _Lowerer:
 
     def _operand_with_type(self, v: Value) -> str:
         return f"{_llvm_type(v.type)} {self._operand(v)}"
+
+    @staticmethod
+    def _composed_constant(value: int | float, ty: Type, ity: str) -> Value:
+        """Make an inline constant for a lowering-time operation expansion."""
+
+        result = Value("", ty)
+        producer = Op(
+            "arith.constant",
+            results=[result],
+            attrs={"value": value, "ity": ity},
+        )
+        result.op = producer
+        return result
+
+    def _lower_composed_op(
+        self,
+        name: str,
+        operands: List[Value],
+        result_type: Type,
+        hint: str,
+        *,
+        attrs: Optional[Dict[str, object]] = None,
+        result_name: Optional[str] = None,
+    ) -> Value:
+        """Lower one synthetic primitive while expanding a higher-level op.
+
+        The synthetic operation is not inserted into the public rocKE IR. It is
+        dispatched through the normal primitive lowering handler, so composite
+        operations do not have to duplicate LLVM spelling, intrinsic tracking,
+        or type handling.
+        """
+
+        result = Value(result_name or self._fresh(hint), result_type)
+        expanded = Op(
+            name,
+            operands=list(operands),
+            results=[result],
+            attrs=dict(attrs or {}),
+        )
+        result.op = expanded
+        self.lower_op(expanded)
+        return result
 
     def _anyptr_space(
         self, op: str, ptr: Value, allowed: Dict[int, str]
@@ -2657,10 +2701,57 @@ class _Lowerer:
     def _op_math_tanh(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
-            raise NotImplementedError("math.tanh currently supports f32")
-        self._need("tanh.f32")
-        self._current().emit(
-            f"  {op.result.name} = call float @llvm.tanh.f32(float {self._operand(v)})"
+            raise ValueError(f"math.tanh requires f32 operand, got {v.type.name}")
+
+        # OCML f32 tanh small-argument minimax polynomial for |x| < 0.625.
+        # Coefficients are in Horner power-basis order, not Taylor coefficients.
+        # Source: amd/device-libs/ocml/src/tanhF.cl.
+        f32 = lambda value: self._composed_constant(value, F32, "f32")
+        i32 = lambda value: self._composed_constant(value, I32, "i32")
+        lower = self._lower_composed_op
+
+        one = f32(1.0)
+        neg_two = f32(-2.0)
+        two_log2e = f32(2.0 * 1.4426950408889634)
+        cutoff = f32(0.625)
+        c0 = f32(float.fromhex("-0x1.758e7ap-8"))
+        c1 = f32(float.fromhex("0x1.521192p-6"))
+        c2 = f32(float.fromhex("-0x1.b8389cp-5"))
+        c3 = f32(float.fromhex("0x1.110704p-3"))
+        c4 = f32(float.fromhex("-0x1.555532p-2"))
+
+        x_bits = lower("arith.bitcast", [v], I32, "tanh.xbits")
+        sign = lower("arith.and", [x_bits, i32(-0x80000000)], I32, "tanh.sign")
+        abs_bits = lower("arith.and", [x_bits, i32(0x7FFFFFFF)], I32, "tanh.abits")
+        abs_x = lower("arith.bitcast", [abs_bits], F32, "tanh.abs")
+        y2 = lower("arith.fmul", [abs_x, abs_x], F32, "tanh.y2")
+        p0 = lower("arith.fma", [y2, c0, c1], F32, "tanh.p0")
+        p1 = lower("arith.fma", [y2, p0, c2], F32, "tanh.p1")
+        p2 = lower("arith.fma", [y2, p1, c3], F32, "tanh.p2")
+        p3 = lower("arith.fma", [y2, p2, c4], F32, "tanh.p3")
+        yp = lower("arith.fmul", [abs_x, p3], F32, "tanh.yp")
+        poly = lower("arith.fma", [y2, yp, abs_x], F32, "tanh.poly")
+        exp_scaled = lower("arith.fmul", [two_log2e, abs_x], F32, "tanh.escaled")
+        exp = lower("math.exp2", [exp_scaled], F32, "tanh.exp")
+        exp_den = lower("arith.fadd", [exp, one], F32, "tanh.eden")
+        exp_inv = lower("math.rcp_fast", [exp_den], F32, "tanh.einv")
+        exp_mag = lower("arith.fma", [neg_two, exp_inv, one], F32, "tanh.emag")
+        use_poly = lower(
+            "arith.fcmp",
+            [abs_x, cutoff],
+            I1,
+            "tanh.small",
+            attrs={"pred": "olt"},
+        )
+        mag = lower("arith.select", [use_poly, poly, exp_mag], F32, "tanh.mag")
+        mag_bits = lower("arith.bitcast", [mag], I32, "tanh.mbits")
+        signed_bits = lower("arith.or", [mag_bits, sign], I32, "tanh.sbits")
+        lower(
+            "arith.bitcast",
+            [signed_bits],
+            F32,
+            "tanh.result",
+            result_name=op.result.name,
         )
 
     # gpu
