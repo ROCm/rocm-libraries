@@ -57,6 +57,7 @@
 | `S` | the recurrent state of one head, `DV × DK` |
 | `q̂`, `k̂` | L2-normalised query/key |
 | `Γ_i` | cumulative in-chunk decay up to row `i`; `γ_C` is the whole-chunk decay |
+| `EV` | per-band value extent, `DV / value_splits` — the scan's working V rows (§5.6) |
 
 Ownership vocabulary: a **workgroup** is one thread block; a **wave** is 64 lanes; a **lane** is
 one thread. `WTK = warp_threads_k`, `WTV = wave_size / WTK`, `NW = num_warps`,
@@ -102,6 +103,9 @@ v_new = (v - S @ k̂) * β                  # 2. error-correcting delta
 out   = S @ q̂ + v_new * dot(k̂, q̂)        # 3. readout
 S     = S + outer(v_new, k̂)              # 4. rank-1 write
 ```
+
+The `q̂`/`k̂` L2-normalisation shown here is the default (`use_qk_l2norm`); the decode spec can
+disable it to consume pre-normalised inputs, a variant pinned by its own golden IR case.
 
 Three properties worth stating explicitly, because each one drives kernel structure:
 
@@ -163,7 +167,8 @@ as a second engine. The direction matters and is not symmetric — see §6.
 Reuse is not free. GDN mode contributes, **entirely within the prep kernel**:
 
 - its own gate evaluation, `-exp(A_log) * softplus(a + dt_bias)`, with a `softplus` shortcut above
-  a threshold so the intermediate `exp2` cannot overflow;
+  a threshold: past it `softplus(x) ≈ x` is used instead, so the overflowing `exp2` — still computed,
+  then selected away — is never propagated;
 - a **GQA gather** (`kv_group > 1`), so a value head reads the correct key head;
 - a **scalar gate load** — one `f32` per row, broadcast across the channel group, where KDA reads a
   per-channel vector. The gate pointer is consequently typed `f32` in GDN mode; a mismatched
@@ -172,7 +177,8 @@ Reuse is not free. GDN mode contributes, **entirely within the prep kernel**:
 - `a` uses the token-major `beta` layout `[B, T, H]`, not the per-channel `[B, T, H, D]` layout;
 - fused `q`/`k` L2-normalisation and fused `β = sigmoid(...)`, so the kernel consumes raw inputs.
 
-The spec validator enforces that `gate_kind="gdn"` implies all four fusion flags, and that
+The spec validator enforces that `gate_kind="gdn"` implies the raw-input path plus its three
+input-fusion flags (q/k L2-norm, gate, β = sigmoid), and that
 `kv_group > 1` is only valid in GDN mode. `gate_kind` and `kv_group` both participate in the kernel
 name, so the cache key stays faithful to the emitted code.
 
@@ -228,6 +234,8 @@ All tensors are contiguous row-major.
 | `A_log` | `[num_v_heads]` | `f32` | in |
 | `read_indices`, `write_indices` | `[B]` | `i32` | in |
 | `state` | `[pool, num_v_heads, head_v_dim, head_k_dim]` | `state_dtype` | in-place |
+
+The launch also passes a trailing `batch_size` `i32` scalar (not a tensor).
 
 ### 4.2 Parallel decomposition
 
@@ -297,15 +305,22 @@ One pool slot is `num_v_heads × head_v_dim × head_k_dim` elements. Indexing a 
 base pointer is advanced by a **sign-extended 64-bit byte offset**; all indices within a slot remain
 32-bit, since they are bounded by the slot stride.
 
-The kernel bounds-checks nothing on device, so the host `prepare()` validates the state shape and
-the index range (allowing the `-1` skip sentinel) against pool depth before launch. That check is a
-default-on, hot-path-disableable flag.
+The kernel bounds-checks nothing on device. The host `prepare()` therefore validates the state
+shape and the index range (allowing the `-1` skip sentinel) against pool depth — a default-on,
+hot-path-disableable check. This guard lives on the driver/`prepare()` path; as with the decay
+guard in §8, dispatch selects a *spec*, not tensors, so a caller that launches the selected spec
+without going through `prepare()` gets neither this host validation nor a device bounds-check. A
+production launch path must call `prepare()`, or replicate its shape and index-range checks,
+before launch.
 
 ### 4.6 Tile selection by batch
 
-`(num_warps, warp_threads_k, blocks_per_v_dim)` is chosen from a batch-banded table. The trend the
-table encodes: **small batch pays redundant work via `BPV` to buy occupancy; large batch drops
-`BPV` to 1 and widens the workgroup instead.**
+`(num_warps, warp_threads_k, blocks_per_v_dim)` is chosen from a batch-banded table (four bands:
+`b4`, `b32`, `b128`, `b_large`). The trend it encodes: **as batch grows, `BPV` is spent down —
+`8` at the smallest band to `1` by the `b128` band — because a larger natural grid needs less
+manufactured parallelism; only at the largest band (`b_large`), where `BPV` is already `1`, is the
+workgroup widened (to `num_warps = 8`) for throughput.** `num_warps` is therefore not monotone in
+batch — the `b128` band is the narrowest workgroup.
 
 The bands are deliberately coarse. Adjacent legal configurations sit within run-to-run variation of
 each other, so a finer table would encode noise rather than signal. The table was produced by an
@@ -349,11 +364,12 @@ system, and a triangular solve replaces `C` sequential steps.
 ### 5.2 Numerics: midpoint factoring
 
 Both `C × C` products need the ratio `Γ_i / Γ_j`, which spans the chunk's whole decay range and
-overflows `f32` if formed directly. Both are therefore built factored against the chunk's midpoint
-row:
+overflows `f32` if formed directly. Write `L_i = log Γ_i` for the cumulative **log**-decay the kernel
+actually carries (in the `log2` domain, below), so `Γ_i / Γ_j = e^(L_i − L_j)`; both products are then
+built factored against the chunk's midpoint row `ref`:
 
 ```
-Akk = (K * e^(Γ_c − Γ_ref)) (K * e^(Γ_ref − Γ_c))ᵀ
+Akk = (K * e^(L − L_ref)) (K * e^(L_ref − L))ᵀ
 ```
 
 Each factor's exponent is bounded by half the chunk range and the product reconstructs the ratio
@@ -372,13 +388,16 @@ Each block step is two halves:
 2. an **in-block substitution** that is genuinely serial, on the vector ALU, one lane per output
    column.
 
-The serial half shrinks as the *square* of the block size, so a smaller block moves more of the
-cubic work onto the matrix unit at the cost of one more block step; `solve_block` is the knob.
+The per-block serial work scales as the *square* of the block size, but there are `C / solve_block`
+blocks, so the total serial substitution work is **linear** in `solve_block` (`≈ C · solve_block / 2`):
+a smaller block moves more of the cubic work onto the matrix unit at the cost of one more block
+step; `solve_block` is the knob.
 
 Two scheduling details follow from the solve being **wave-0 only**: the LDS hand-offs inside it need
-no workgroup barrier, only explicit `lgkmcnt` waits, which is cheaper; and the *other* waves are
-idle, so they are given the `Kt` tile to build — it depends only on `k` and the decay, none of the
-solve's live tiles.
+no workgroup barrier, only explicit `lgkmcnt` waits, which is cheaper; and on the split/prep path
+(`overlap_solve`, always set for GDN) the *other*, idle waves are given the `Kt` tile to build — it
+depends only on `k` and the decay, none of the solve's live tiles. (The 256-thread fused path runs
+the solve without this overlap.)
 
 The solved block is written back transposed, in the operand order the next block's rank update
 wants.
@@ -394,6 +413,10 @@ Rᵀ  = Vᵀ − Zᵀ                   EV × C   (in register)
 O   = GQ S + Aqk Ṽ              C × EV
 Sᵀ ← Diag(dec) Sᵀ + Ṽᵀ Ktᵀ      EV × DK
 ```
+
+Here `EV = DV / value_splits` is the band's value extent (§5.6), and each line above is a value-band
+of the `DV × DK` state defined in §0; the `ᵀ` superscripts mark the transposed *operand* orientation
+that keeps every product in `A Bᵀ` form, not a `DK × DV` re-layout of `S`.
 
 Transposition is deliberate: it keeps every product in `A Bᵀ` form with the contraction on the
 fastest axis, so no operand ever needs an LDS transpose.
@@ -483,10 +506,14 @@ parallelism split. The change required is confined to the fade: `s = decay * S[r
 element-wise multiply by a per-channel vector instead of a broadcast scalar. The probe, the delta,
 the readout and the rank-1 write are untouched, as is the reduction structure.
 
-On the prefill side the traffic runs the other way and has already arrived: the fused raw-prep path,
-the GQA gather, the `value_splits` selection table and the hoisted dispatch core were added for GDN
-and now live in machinery both families share. GQA is currently gated to `gate_kind="gdn"`;
-unlocking it for KDA is a scope decision, not a rewrite.
+On the prefill side, some machinery now benefits both families and some was inherited rather than
+added for GDN. The chunkwise **raw-prep fused path** and the `value_splits` **knob**
+(`KdaChunkScanSpec.value_splits`, `_RAW_VALUE_SPLITS = (1, 2, 4, 8)`) are pre-existing KDA work that
+GDN mode reuses. What GDN added and now genuinely shares is the **hoisted dispatch core**
+(`rocke.dispatch.core`, re-exported by the KDA dispatch). The **GQA gather** and the `value_splits`
+**selection table** are GDN-only today — the gather is gated to `gate_kind="gdn"`, and KDA dispatch
+builds its scan spec without a tuned `value_splits` table. Unlocking either for KDA is a scope
+decision, not a rewrite.
 
 ---
 
