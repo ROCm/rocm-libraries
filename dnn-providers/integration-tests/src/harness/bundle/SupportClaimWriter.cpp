@@ -232,10 +232,10 @@ private:
 
 enum class WriteOutcome
 {
-    Written,
-    Unchanged,
-    OpenFailed,
-    WriteFailed,
+    WRITTEN,
+    UNCHANGED,
+    OPEN_FAILED,
+    WRITE_FAILED,
 };
 
 // The scratch file `writeIfChanged` streams into before renaming it over the
@@ -280,7 +280,7 @@ WriteOutcome writeIfChanged(const std::filesystem::path& filePath, const std::st
                                               std::istreambuf_iterator<char>());
             if(existingContent == newContent)
             {
-                return WriteOutcome::Unchanged;
+                return WriteOutcome::UNCHANGED;
             }
         }
     }
@@ -291,14 +291,14 @@ WriteOutcome writeIfChanged(const std::filesystem::path& filePath, const std::st
         std::ofstream outputFile(tempPath, std::ios::binary);
         if(!outputFile)
         {
-            return WriteOutcome::OpenFailed;
+            return WriteOutcome::OPEN_FAILED;
         }
         outputFile << newContent;
         outputFile.close();
         if(!outputFile)
         {
             std::filesystem::remove(tempPath, ec);
-            return WriteOutcome::WriteFailed;
+            return WriteOutcome::WRITE_FAILED;
         }
     }
 
@@ -306,10 +306,10 @@ WriteOutcome writeIfChanged(const std::filesystem::path& filePath, const std::st
     if(ec)
     {
         std::filesystem::remove(tempPath, ec);
-        return WriteOutcome::WriteFailed;
+        return WriteOutcome::WRITE_FAILED;
     }
 
-    return WriteOutcome::Written;
+    return WriteOutcome::WRITTEN;
 }
 
 // Groups observations by the file they land in. Keyed on the normalized path so
@@ -379,21 +379,23 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
         // Counted per outcome, so the number says what reached a file.
         switch(writeIfChanged(sidecarPath, claims.serialize(isSweep)))
         {
-        case WriteOutcome::Written:
+        case WriteOutcome::WRITTEN:
             summary.observationsApplied += sidecarObservations.size();
             ++summary.filesWritten;
             break;
-        case WriteOutcome::Unchanged:
+        case WriteOutcome::UNCHANGED:
             summary.observationsApplied += sidecarObservations.size();
             ++summary.filesUnchanged;
             break;
-        case WriteOutcome::OpenFailed:
+        case WriteOutcome::OPEN_FAILED:
             summary.errors.push_back("could not open for writing: " + sidecarPath.string());
             ++summary.filesSkipped;
             break;
-        case WriteOutcome::WriteFailed:
+        case WriteOutcome::WRITE_FAILED:
             summary.errors.push_back("write failed: " + sidecarPath.string());
             ++summary.filesSkipped;
+            break;
+        default:
             break;
         }
     }
