@@ -16,6 +16,11 @@ Both stages are submitted on the same HIP stream, so HIP's in-order
 execution guarantees Stage 2 begins only after Stage 1 has completed —
 no explicit ``hipStreamSynchronize`` is needed between them.
 
+Grouped convolutions (``groups > 1``) are fully supported.  Stage 1 uses
+grid ``z = groups * split_k`` so each (group, slice) pair gets its own
+workspace slab.  Stage 2 uses grid ``z = groups`` (``block_id_z`` = group
+index) and reduces all groups in a single launch.
+
 Usage::
 
     from dataclasses import replace
@@ -23,7 +28,6 @@ Usage::
     pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch)
 
     ws = DeviceMem(ws_nbytes)
-    runtime.memset(ws.ptr(), 0, ws_nbytes)  # optional: belt-and-suspenders; not required
 
     s1_vals = {"A": dY_ptr, "B": X_ptr, "D": dW_ptr,
                "A_bytes": dY_nb, "B_bytes": X_nb, "D_bytes": dW_nb,
@@ -31,7 +35,8 @@ Usage::
     s2_vals = {"ws_ptr": ws.ptr(), "dw_ptr": dw_ptr,
                "wg_M": spec.wg_M, "wg_N": spec.wg_N,
                "split_k": spec.split_k,
-               "ws_bytes": ws_nbytes, "dw_bytes": dw_nb}
+               "ws_bytes": ws_nbytes, "dw_bytes": dw_nb,
+               "groups": spec.problem.groups}
 
     pipeline((s1_vals, s2_vals), (s1_cfg, s2_cfg), stream=stream)
 """
@@ -43,6 +48,7 @@ from typing import Tuple
 
 from .conv_implicit_gemm_wgrad import (
     WgradConvSpec,
+    _wg_K,
     _wg_M,
     _wg_N,
     build_implicit_gemm_conv_wgrad,
@@ -145,12 +151,28 @@ def build_implicit_gemm_conv_wgrad_two_stage(
         ``hipStreamSynchronize`` is needed between them.
 
     Raises:
-        ValueError: if ``spec.split_k <= 1`` (two-stage requires split_k > 1).
+        ValueError: if ``spec.split_k <= 1`` after auto-resolution.
     """
+    # Resolve split_k=-1 (auto sentinel) before the guard so callers can pass
+    # split_k=-1 and get the heuristic value rather than a confusing rejection.
+    if spec.split_k == -1:
+        from ...helpers.split_k import select_split_k_wgrad
+
+        resolved = select_split_k_wgrad(
+            wg_M=spec.wg_M,
+            wg_N=spec.wg_N,
+            wg_K=_wg_K(spec.problem),
+            tile_m=spec.tile_m,
+            tile_n=spec.tile_n,
+            tile_k=spec.tile_k,
+            arch=arch,
+        ).split_k
+        spec = dc_replace(spec, split_k=resolved)
+
     if spec.split_k <= 1:
         raise ValueError(
-            f"build_implicit_gemm_conv_wgrad_two_stage requires split_k > 1, "
-            f"got split_k={spec.split_k}"
+            f"build_implicit_gemm_conv_wgrad_two_stage requires split_k > 1 "
+            f"(or split_k=-1 for auto-selection); got split_k={spec.split_k}"
         )
 
     # Lazy imports: keep module import-time safe for static IR tests running
@@ -170,10 +192,11 @@ def build_implicit_gemm_conv_wgrad_two_stage(
         cache_key=("conv_wgrad_two_stage_s1", s1_spec.kernel_name()),
     )
 
-    # ---- Stage 2: workspace → dW (sequential reduce) ------------------------
+    # ---- Stage 2: workspace → dW (sequential reduce, all groups in one launch) -
     s2_spec = WgradReduceSpec(
         problem=spec.problem,
         dtype_d=spec.data.dtype_d,
+        groups=spec.problem.groups,
     )
     s2_kernel = build_conv_wgrad_workspace_reduce(s2_spec, arch)
     s2_artifact = compile_kernel(s2_kernel, arch=arch, capture_ir_text=False)

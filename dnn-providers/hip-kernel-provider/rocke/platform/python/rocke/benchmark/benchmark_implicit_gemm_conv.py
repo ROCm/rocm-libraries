@@ -1516,7 +1516,7 @@ def _build_wgrad_two_stage_one(args_tuple):
     except ValueError:
         return None
 
-    s2_spec = WgradReduceSpec(problem=problem, dtype_d=dtype)
+    s2_spec = WgradReduceSpec(problem=problem, dtype_d=dtype, groups=problem.groups)
     try:
         s2_kernel = build_conv_wgrad_workspace_reduce(s2_spec, arch=arch)
     except (ValueError, Exception):
@@ -2564,7 +2564,11 @@ def _run_wgrad_sweep(
                 ws_nbytes_cur = ws_nbytes
 
             s1_grid = _grid_for_wgrad_spec(spec, resolved_split_k)
-            s2_spec = WgradReduceSpec(problem=spec.problem, dtype_d=spec.data.dtype_d)
+            s2_spec = WgradReduceSpec(
+                problem=spec.problem,
+                dtype_d=spec.data.dtype_d,
+                groups=spec.problem.groups,
+            )
             s2_grid = wgrad_reduce_grid(s2_spec)
             s2_block = (s2_spec.tile_m * s2_spec.tile_n, 1, 1)
 
@@ -2610,6 +2614,7 @@ def _run_wgrad_sweep(
                 "split_k": resolved_split_k,
                 "ws_bytes": ws_nbytes,
                 "dw_bytes": dW_t.nbytes,
+                "groups": spec.problem.groups,
             }
             s1_cfg = LaunchConfig(grid=s1_grid, block=(spec.block_size, 1, 1), stream=0)
             s2_cfg = LaunchConfig(grid=s2_grid, block=s2_block, stream=0)

@@ -150,16 +150,20 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        char** msgs = NULL;
-        int nmsg = 0;
-        rocke_verify(kernel, &msgs, &nmsg);
-        for(int i = 0; i < nmsg; i++)
+        rocke_diag_t* diags = NULL;
+        size_t ndiag = 0;
+        rocke_verify(kernel, &diags, &ndiag);
+        for(size_t i = 0; i < ndiag; i++)
         {
-            fputs(msgs[i], stdout);
-            fputc('\n', stdout);
-            free(msgs[i]);
+            char* s = rocke_diag_to_string(&diags[i]);
+            if(s)
+            {
+                fputs(s, stdout);
+                fputc('\n', stdout);
+                free(s);
+            }
         }
-        free(msgs);
+        rocke_diags_free(diags, ndiag);
     }
     else
     {

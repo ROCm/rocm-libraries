@@ -2167,8 +2167,9 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.warp_tile_n = dict_int(d, "warp_tile_n", s.warp_tile_n);
     s.warp_tile_k = dict_int(d, "warp_tile_k", s.warp_tile_k);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
-    s.split_k = dict_int(d, "split_k", s.split_k);
-    s.two_stage = dict_bool(d, "two_stage", s.two_stage);
+    s.split_k             = dict_int(d,  "split_k",             s.split_k);
+    s.two_stage           = dict_bool(d, "two_stage",           s.two_stage);
+    s.force_deterministic = dict_bool(d, "force_deterministic", s.force_deterministic);
     {
         std::string v;
         if(dict_str(d, "name", v))
@@ -2235,10 +2236,11 @@ rocke_wgrad_reduce_spec_t conv_wgrad_reduce_build_spec(const py::dict& d,
         return store.back().c_str();
     };
     rocke_wgrad_reduce_spec_t s = rocke_wgrad_reduce_spec_default();
-    s.tile_m = dict_int(d, "tile_m", s.tile_m);
-    s.tile_n = dict_int(d, "tile_n", s.tile_n);
-    s.wg_M = dict_int(d, "wg_M", s.wg_M);
-    s.wg_N = dict_int(d, "wg_N", s.wg_N);
+    s.tile_m  = dict_int(d, "tile_m",  s.tile_m);
+    s.tile_n  = dict_int(d, "tile_n",  s.tile_n);
+    s.wg_M    = dict_int(d, "wg_M",    s.wg_M);
+    s.wg_N    = dict_int(d, "wg_N",    s.wg_N);
+    s.groups  = dict_int(d, "groups",  s.groups);
     {
         std::string v;
         if(dict_str(d, "dtype_d", v))
@@ -3719,10 +3721,26 @@ PYBIND11_MODULE(rocke_engine, m)
 
     /* ---- wgrad two-stage family ---- */
     reg3("conv_wgrad", conv_wgrad_lower_llvm, conv_wgrad_serialize_ir, conv_wgrad_verify);
+    /* conv_wgrad_reduce is used by the byte-identity gate
+     * (platform/tools/check_byte_identity.py) and by external callers driving
+     * Stage 2 via the Python engine API directly.  The benchmark drives Stage 2
+     * via the Python instance layer (rocke.instances.common.conv_wgrad_workspace_reduce),
+     * not through this binding, so the registration may appear unused in that context. */
     reg3("conv_wgrad_reduce",
          conv_wgrad_reduce_lower_llvm,
          conv_wgrad_reduce_serialize_ir,
          conv_wgrad_reduce_verify);
+    m.def(
+        "conv_wgrad_workspace_bytes",
+        [](const py::dict& d) -> size_t {
+            std::deque<std::string> store;
+            rocke_implicit_gemm_conv_wgrad_spec_t s = conv_wgrad_build_spec(d, store);
+            return rocke_wgrad_conv_workspace_bytes(&s);
+        },
+        py::arg("spec"),
+        "Return workspace bytes for the two-stage deterministic wgrad path.\n"
+        "Formula: groups * split_k * wg_M * wg_N * 4 (always f32).\n"
+        "Returns 0 when two_stage=false and force_deterministic=false, or split_k <= 1.");
 
     /* ---- attention families (separate TU; shared fmha/tiled struct tags) ---- */
     register_attention(m);

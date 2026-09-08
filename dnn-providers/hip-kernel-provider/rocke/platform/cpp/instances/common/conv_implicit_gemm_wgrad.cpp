@@ -117,6 +117,26 @@ int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
     return base;
 }
 
+bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
+{
+    /* split_k <= 1: plain store, always deterministic.
+     * split_k > 1 + two_stage: workspace-reduce path, deterministic.
+     * split_k > 1 without two_stage: atomic adds, non-deterministic. */
+    return (s->split_k <= 1) || s->two_stage || s->force_deterministic;
+}
+
+size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
+{
+    if(!s->two_stage && !s->force_deterministic)
+        return 0;
+    if(s->split_k <= 1)
+        return 0;
+    int wg_M = rocke_wgrad_conv_spec_wg_M(s);
+    int wg_N = rocke_wgrad_conv_spec_wg_N(s);
+    int groups = s->problem.groups > 0 ? s->problem.groups : 1;
+    return (size_t)groups * (size_t)s->split_k * (size_t)wg_M * (size_t)wg_N * sizeof(float);
+}
+
 /* wg_K_padded = ceil(wg_K / (tile_k * split_k)) * (tile_k * split_k) */
 int rocke_wgrad_conv_spec_wg_K_padded(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 {
@@ -354,22 +374,29 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         }
     }
 
-    /* For bf16/fp16 output the default epilogue emits zero-fill packed atomics
-     * at the scattered MFMA layout.  Matches Python is_valid_wgrad_spec and
-     * validate(): epilogue='cshuffle' is required for these dtypes. */
+    /* For bf16/fp16 output with split_k atomics the default epilogue emits
+     * zero-fill packed atomics at the scattered MFMA layout; cshuffle is
+     * required.  This does NOT apply to split_k==1 (direct store, no atomics)
+     * or two_stage=true (workspace-store epilogue, also no atomics).
+     * Matches Python is_valid_wgrad_spec / validate(): _needs_atomic guard. */
+    if(sk > 1 || sk == 0)
     {
-        const char* dt = s->dtype_d ? s->dtype_d : "fp16";
-        bool is_default_epi = (s->epilogue == NULL || strcmp(s->epilogue, "default") == 0);
-        if(is_default_epi && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
+        bool effective_two_stage_v = s->two_stage || (s->force_deterministic && sk > 1);
+        if(!effective_two_stage_v)
         {
-            if(reason && reason_cap)
-                snprintf(reason,
-                         reason_cap,
-                         "split_k atomic with dtype_d=%s requires epilogue='cshuffle' "
-                         "(default emits zero-fill packed atomics with scattered MFMA "
-                         "layout; cshuffle produces contiguous pairs)",
-                         dt);
-            return false;
+            const char* dt = s->dtype_d ? s->dtype_d : "fp16";
+            bool is_default_epi = (s->epilogue == NULL || strcmp(s->epilogue, "default") == 0);
+            if(is_default_epi && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
+            {
+                if(reason && reason_cap)
+                    snprintf(reason,
+                             reason_cap,
+                             "split_k atomic with dtype_d=%s requires epilogue='cshuffle' "
+                             "(default emits zero-fill packed atomics with scattered MFMA "
+                             "layout; cshuffle produces contiguous pairs)",
+                             dt);
+                return false;
+            }
         }
     }
 
@@ -1059,12 +1086,22 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
                                                 int wg_M,
                                                 int wg_N)
 {
+    /* Mirrors Python _emit_wgrad_workspace_store_epilogue exactly.
+     * Ordering of IR operations must match Python's line-by-line. */
     const rocke_mfma_atom_t* atom = ctx->atom;
     int mfmas_m = ctx->mfmas_m;
     int mfmas_n = ctx->mfmas_n;
     int c_per_lane = ctx->c_per_lane;
 
-    /* Per-warp M/N offsets — identical to split_k epilogue */
+    /* 1. wg_M_v, wg_N_v -- Python: wg_M_v = b.const_i32(wg_M) */
+    rocke_value_t* wg_M_v = rocke_b_const_i32(b, wg_M);
+    rocke_value_t* wg_N_v = rocke_b_const_i32(b, wg_N);
+
+    /* 2. k_id = block_id_z, slice_off -- Python: k_id = b.to_sgpr_u32(b.block_id_z()) */
+    rocke_value_t* k_id = rocke_b_to_sgpr_u32(b, rocke_b_block_id_z(b));
+    rocke_value_t* slice_off = rocke_b_mul(b, k_id, rocke_b_const_i32(b, wg_M * wg_N));
+
+    /* 3. Per-warp M/N offsets -- Python: warp_m_off = b.mul(warp_m_idx, ...) */
     rocke_value_t* warp_m_off
         = rocke_b_mul(b, ctx->warp_m_idx, rocke_b_const_i32(b, mfmas_m * spec->warp_tile_m));
     rocke_value_t* warp_n_off
@@ -1072,11 +1109,12 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
     rocke_value_t* block_warp_m_off = rocke_b_add(b, ctx->block_m_off_v, warp_m_off);
     rocke_value_t* block_warp_n_off = rocke_b_add(b, ctx->block_n_off_v, warp_n_off);
 
-    /* Decode C-fragment layout — same calls as split_k epilogue */
+    /* 4. c_warp_params: compile-time lookup, no IR ops -- Python: c_warp_params(atom) */
     int m0, m_lane, m1, n_lane;
     if(rocke_b_c_warp_params(b, atom, &m0, &m_lane, &m1, &n_lane) != ROCKE_OK)
         return;
 
+    /* 5. c_dist -- Python: c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding) */
     rocke_tile_distribution_encoding_t* enc = rocke_make_c_warp_dstr_encoding(b, atom);
     if(enc == NULL)
         return;
@@ -1084,6 +1122,7 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
     if(c_dist == NULL)
         return;
 
+    /* 6. c_nlane, n_in_atom, m_blk -- Python ordering */
     rocke_value_t* c_nlane_v = rocke_b_const_i32(b, n_lane);
     rocke_value_t* n_in_atom = rocke_b_mod(b, ctx->lane, c_nlane_v);
     rocke_value_t* m_blk = rocke_b_div(b, ctx->lane, c_nlane_v);
@@ -1091,7 +1130,7 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
     rocke_value_t* const* p_arr[1] = {p_lane_subs};
     int p_counts[1] = {2};
 
-    /* Pre-compute per-slot (row, col) within the atom */
+    /* 7. Pre-compute per-slot (row, col) within the atom */
     rocke_value_t* slot_rows[ROCKE_CONV_MAX_ACCS * 4];
     rocke_value_t* slot_cols[ROCKE_CONV_MAX_ACCS * 4];
     for(int i = 0; i < c_per_lane; ++i)
@@ -1105,17 +1144,7 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
         slot_cols[i] = out_x[1];
     }
 
-    rocke_value_t* wg_M_v = rocke_b_const_i32(b, wg_M);
-    rocke_value_t* wg_N_v = rocke_b_const_i32(b, wg_N);
-
-    /* workspace slice index = blockIdx.z (always).
-     * Ungrouped:        z = k_id              -> slices 0..split_k-1
-     * Grouped+split_k:  z = group*split_k+k_id -> slices 0..groups*split_k-1
-     * Each (group, k_id) pair gets a unique z and thus a unique workspace region.
-     * Workspace total size = groups * split_k * wg_M * wg_N (f32 elements). */
-    rocke_value_t* k_id = rocke_b_to_sgpr_u32(b, rocke_b_block_id_z(b));
-    rocke_value_t* slice_off = rocke_b_mul(b, k_id, rocke_b_const_i32(b, wg_M * wg_N));
-
+    /* 8. Main mi/ni/i loop */
     int flat = 0;
     for(int mi = 0; mi < mfmas_m; ++mi)
     {
@@ -1134,7 +1163,7 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
                 rocke_value_t* c_n = rocke_b_add(b, atom_n_base, slot_cols[i]);
                 rocke_value_t* val_f32 = rocke_b_vec_extract(b, acc, i);
 
-                /* OOB guard: scf_if instead of sentinel — global_store to a
+                /* OOB guard: scf_if instead of sentinel -- global_store to a
                  * sentinel offset would compute a real address and fault. */
                 rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_v);
                 rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_v);
@@ -1152,6 +1181,8 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
         }
     }
 }
+
+
 
 // Split-K atomic epilogue for wgrad
 // ---------------------------------------------------------------------------
@@ -2123,6 +2154,13 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
                         "resolve via select_split_k_wgrad and pass the explicit degree");
         return NULL;
     }
+
+    /* force_deterministic: promote to two_stage when split_k > 1.
+     * Use a local mutable copy so we do not mutate the caller's spec. */
+    bool effective_two_stage = spec->two_stage;
+    if(spec->force_deterministic && split_k > 1)
+        effective_two_stage = true;
+
     bool is_split_k = (split_k > 1 || split_k == 0);
     bool split_k_runtime = (split_k == 0);
 
@@ -2193,7 +2231,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
 
     /* Two-stage only: workspace ptr (f32) and its byte size.
      * Only present when two_stage=true && split_k>1. */
-    bool is_two_stage = is_split_k && spec->two_stage;
+    bool is_two_stage = is_split_k && effective_two_stage;
     rocke_value_t* ws_ptr = NULL;
     if(is_two_stage)
     {

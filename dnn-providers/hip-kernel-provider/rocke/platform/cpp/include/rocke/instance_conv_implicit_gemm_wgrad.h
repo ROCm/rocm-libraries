@@ -160,8 +160,16 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * to a workspace buffer (ws_ptr / ws_bytes kernel params) instead of
      * atomic-adding into dW.  Stage 2 (conv_wgrad_workspace_reduce) then
      * reduces the workspace slices into dW in a fixed sequential order.
-     * This guarantees bit-exact, deterministic output. */
+     * This guarantees bit-exact, deterministic output.
+     * Set automatically by the builder when force_deterministic=true and
+     * split_k > 1; prefer force_deterministic over setting this directly. */
     bool two_stage; /* default false */
+
+    /* force_deterministic: semantic intent flag.  When true and split_k > 1
+     * (or split_k=-1 auto), the builder sets two_stage=true so the kernel
+     * uses the workspace-store epilogue instead of atomic adds.
+     * For split_k == 1 this flag is a no-op (output is always deterministic). */
+    bool force_deterministic; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
@@ -186,6 +194,18 @@ int rocke_wgrad_conv_spec_wg_M(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
 /* spec.wg_N: filter spatial x input channels per group (Z * Y * X * C/groups). */
 int rocke_wgrad_conv_spec_wg_N(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
+
+/* Returns true when the kernel output is guaranteed bit-exact deterministic:
+ * either split_k <= 1 (plain store, no atomics) or two_stage=true
+ * (workspace-reduce path).  false means the kernel uses atomic adds and
+ * output order is non-deterministic across runs. */
+bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
+
+/* Returns the workspace buffer size in bytes required for the two-stage
+ * deterministic wgrad path.  Formula: groups * split_k * wg_M * wg_N * 4.
+ * Returns 0 when two_stage=false or split_k <= 1 (no workspace needed).
+ * Analogous to rocke_streamk_gemm_workspace_bytes / rocke_moe_fused_workspace_bytes. */
+size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
 /* spec.wg_K: output spatial positions (N * Ho * Wo [* Do]). */
 int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s);

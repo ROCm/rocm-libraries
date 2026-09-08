@@ -17,16 +17,19 @@
  * floating-point summation order is fully determined by the memory layout.
  *
  * Kernel signature:
- *   ws_ptr  : f32 global ptr (readonly)  -- workspace [split_k * wg_M * wg_N]
- *   dw_ptr  : dtype_d global ptr (writeonly) -- weight gradient output
- *   wg_M    : i32
- *   wg_N    : i32
- *   split_k : i32
+ *   ws_ptr  : f32 global ptr (readonly)  -- workspace [groups * split_k * wg_M * wg_N]
+ *   dw_ptr  : dtype_d global ptr (writeonly) -- weight gradient output [groups * wg_M * wg_N]
+ *   wg_M    : i32  -- per-group K dimension
+ *   wg_N    : i32  -- per-group Y*X*C dimension
+ *   split_k : i32  -- K partitions per group
  *   ws_bytes: i32  -- ABI boundary; not used for bounds checking in the kernel body
  *   dw_bytes: i32  -- ABI boundary; not used for bounds checking in the kernel body
+ *   groups  : i32  -- number of convolution groups (1 for non-grouped)
  *
- * Grid: (ceil(wg_N / tile_n), ceil(wg_M / tile_m), 1)
+ * Grid: (ceil(wg_N / tile_n), ceil(wg_M / tile_m), groups)
  * Block: (tile_m * tile_n, 1, 1)
+ * block_id_z encodes the group index; each CTA reduces split_k slices for
+ * its group and writes into the corresponding per-group dW slab.
  */
 #ifndef ROCKE_INSTANCE_CONV_WGRAD_WORKSPACE_REDUCE_H
 #define ROCKE_INSTANCE_CONV_WGRAD_WORKSPACE_REDUCE_H
@@ -51,18 +54,20 @@ extern "C" {
  *   tile_m:  int = 4
  *   tile_n:  int = 64
  *   name:    str = "conv_wgrad_ws_reduce"
+ *   groups:  int = 1             -- number of convolution groups
  */
 typedef struct rocke_wgrad_reduce_spec
 {
     /* Convolution geometry (only wg_M and wg_N are needed at build time). */
-    int wg_M; /* _wg_M(problem) = K */
-    int wg_N; /* _wg_N(problem) = Y*X*C */
+    int wg_M; /* per-group _wg_M(problem) = K // groups */
+    int wg_N; /* per-group _wg_N(problem) = Y*X * (C // groups) */
     const char* problem_short; /* short string for kernel name, e.g. "N2H14W14C16_K16Y3X3" */
 
     const char* dtype_d; /* default "fp16" -- output dtype for dW */
     int tile_m; /* default 4 */
     int tile_n; /* default 64 */
     const char* name; /* default "conv_wgrad_ws_reduce" */
+    int groups; /* default 1 -- number of convolution groups; grid z = groups */
 } rocke_wgrad_reduce_spec_t;
 
 /* Default-constructed spec.  Caller must set wg_M, wg_N, problem_short. */
@@ -92,14 +97,14 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce_new(rocke_ir_builder_t* b
                                                            const rocke_wgrad_reduce_spec_t* spec,
                                                            const char* arch);
 
-/* Launch grid: (ceil(wg_N / tile_n), ceil(wg_M / tile_m), 1) */
+/* Launch grid: (ceil(wg_N / tile_n), ceil(wg_M / tile_m), groups) */
 void rocke_wgrad_reduce_grid(const rocke_wgrad_reduce_spec_t* spec,
                              int* out_gx,
                              int* out_gy,
                              int* out_gz);
 
-/* Build the kernel signature (7 entries: ws_ptr, dw_ptr, wg_M, wg_N,
- * split_k, ws_bytes, dw_bytes). arena must not be NULL. */
+/* Build the kernel signature (8 entries: ws_ptr, dw_ptr, wg_M, wg_N,
+ * split_k, ws_bytes, dw_bytes, groups). arena must not be NULL. */
 rocke_status_t rocke_wgrad_reduce_signature(rocke_arena_t* arena,
                                             const rocke_wgrad_reduce_spec_t* spec,
                                             const rocke_sig_entry_t** out_items,

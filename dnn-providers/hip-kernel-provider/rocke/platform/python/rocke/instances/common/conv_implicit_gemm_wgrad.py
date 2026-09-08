@@ -362,8 +362,17 @@ class WgradConvSpec:
     # (ws_ptr) instead of atomic-adding into dW.  The caller must launch a
     # separate Stage 2 reduce kernel (conv_wgrad_workspace_reduce) afterwards
     # on the same stream to accumulate workspace slices into dW.
-    # Workspace size: split_k * wg_M * wg_N * 4 bytes (always f32).
+    # Workspace size: groups * split_k * wg_M * wg_N * 4 bytes (always f32).
+    # Automatically set to True by the builder when force_deterministic=True
+    # and split_k > 1; callers should prefer force_deterministic over setting
+    # this directly.
     two_stage: bool = False
+    # Semantic determinism intent flag.  When True and split_k > 1 (or
+    # split_k=-1 auto), the builder forces two_stage=True so the kernel uses
+    # the workspace-store epilogue instead of atomic adds.  For split_k == 1
+    # the output is already deterministic (plain store) and this flag is a
+    # no-op.
+    force_deterministic: bool = False
 
     @property
     def block_size(self) -> int:
@@ -1013,6 +1022,13 @@ def build_implicit_gemm_conv_wgrad(
             arch=arch,
         )
         spec = _dc_replace(spec, split_k=decision.split_k)
+
+    # Promote to two-stage when the caller requested deterministic output and
+    # split_k > 1 (split_k == 1 is already deterministic; no workspace needed).
+    if spec.force_deterministic and spec.split_k > 1 and not spec.two_stage:
+        from dataclasses import replace as _dc_replace  # noqa: F811
+
+        spec = _dc_replace(spec, two_stage=True)
 
     spec.validate()
     ok, why = is_valid_wgrad_spec(spec, arch=arch)
