@@ -81,8 +81,6 @@ float invoke_batched_gemm(ck_tile::DeviceMem& a_m_k_dev_buf,
     return ave_time;
 }
 
-// Wraps a config type so it can be chosen at runtime and handed to a generic
-// lambda -- config types can't be selected directly by a runtime bool.
 template <typename T>
 struct GemmConfigTag
 {
@@ -181,26 +179,19 @@ int run_batched_gemm_example_with_layouts(int argc,
     c_m_n_dev_result.SetZero();
 
 #if defined(CK_USE_GFX1250)
-    // RCR (A RowMajor, B ColumnMajor, C RowMajor): under RCR, A/B always pack K
-    // and C always packs N, so no tensor's vector check ever depends on M -- the
-    // pre-existing kPadK/kPadN gates already cover this without needing any
-    // changes to universal_gemm_kernel.hpp. Mirrors 03_gemm/run_gemm_example.inc.
-    constexpr bool IsRcr = std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor> &&
-                          std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::ColumnMajor> &&
-                          std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>;
+
+    constexpr bool APacksK      = std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>;
+    constexpr bool BPacksN      = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
+    constexpr bool CPacksN      = std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>;
     constexpr bool ABDtypeMatch = std::is_same_v<ADataType, BDataType>;
 
-    // K % 8 != 0 (any misalignment, matches PR #11537's own K-tail scope for
-    // 03_gemm) -- forces VectorSizeA=VectorSizeB=1 (C stays natural).
     constexpr bool k_pad_fallback_eligible =
-        GemmConfig::EnableKPadFallback && IsRcr && ABDtypeMatch &&
+        GemmConfig::EnableKPadFallback && ABDtypeMatch &&
         ck_tile::numeric_traits<ADataType>::PackedSize == 1 &&
         ck_tile::numeric_traits<BDataType>::PackedSize == 1;
 
-    // This repo's addition on top of #11537: N < 8, the RCR C-side (N-packed)
-    // analogue of K-tail -- #11537 never touches C's vector size.
     constexpr bool mn_pad_fallback_eligible =
-        GemmConfig::EnableMNPadFallback && IsRcr && ABDtypeMatch &&
+        GemmConfig::EnableMNPadFallback && ABDtypeMatch &&
         ck_tile::numeric_traits<ADataType>::PackedSize == 1 &&
         ck_tile::numeric_traits<BDataType>::PackedSize == 1 &&
         ck_tile::numeric_traits<CDataType>::PackedSize == 1;
@@ -208,11 +199,10 @@ int run_batched_gemm_example_with_layouts(int argc,
     constexpr ck_tile::index_t ABVectorSize = 16 / sizeof(ADataType);
     constexpr ck_tile::index_t CVectorSize  = 16 / sizeof(CDataType);
 
-    // Two independent conditions this dispatcher must combine: K misaligned
-    // (needs scalar A/B, PR #11537) and N too small (needs scalar C, this
-    // repo's addition) -- named separately since we pick among 4 outcomes.
-    const bool needsScalarAB = k_pad_fallback_eligible && (K % ABVectorSize != 0);
-    const bool needsScalarC  = mn_pad_fallback_eligible && (N < CVectorSize);
+    const bool needsScalarAB =
+        k_pad_fallback_eligible && (((APacksK ? K : M) % ABVectorSize != 0) ||
+                                    ((BPacksN ? N : K) % ABVectorSize != 0));
+    const bool needsScalarC = mn_pad_fallback_eligible && ((CPacksN ? N : M) < CVectorSize);
 #else
     constexpr bool k_pad_fallback_eligible  = false;
     constexpr bool mn_pad_fallback_eligible = false;

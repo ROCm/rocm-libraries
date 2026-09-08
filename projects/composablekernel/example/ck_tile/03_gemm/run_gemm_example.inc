@@ -228,7 +228,7 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
                                   const BLayout b_layout                  = BLayout{},
                                   [[maybe_unused]] const CLayout c_layout = CLayout{})
 {
-    // Use GemmTypeConfig to get actual data types for tensor operations
+
     using TypeConfig   = GemmTypeConfig<ADataType_, BDataType_, CDataType_>;
     using ADataTypeBuf = typename TypeConfig::ADataType;
     using BDataTypeBuf = typename TypeConfig::BDataType;
@@ -310,7 +310,7 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
                 return ck_tile::shuffle_b_v0<GemmConfig>(b_k_n);
             }
         }();
-        // shuffled buffer B for device implementation
+
         if constexpr(std::is_same_v<BDataTypeBuf, ck_tile::pk_int4_t>)
         {
             ck_tile::permute_vectors_i4x4_b(b_shuffle_host);
@@ -354,21 +354,20 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     c_m_n_dev_result.SetZero();
 
 #if defined(CK_USE_GFX1250)
+
+    constexpr bool APacksK = std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>;
+    constexpr bool BPacksN = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
+    constexpr bool CPacksN = std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>;
+
     constexpr bool k_pad_fallback_eligible =
         GemmConfig::EnableKPadFallback && !GemmConfig::FixedVectorSize &&
         std::is_same_v<ADataTypeBuf, BDataTypeBuf> &&
-        std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor> &&
-        std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::ColumnMajor> &&
-        std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> &&
         ck_tile::numeric_traits<ADataTypeBuf>::PackedSize == 1 &&
         ck_tile::numeric_traits<BDataTypeBuf>::PackedSize == 1;
 
     constexpr bool mn_pad_fallback_eligible =
         GemmConfig::EnableMNPadFallback && !GemmConfig::FixedVectorSize &&
         std::is_same_v<ADataTypeBuf, BDataTypeBuf> &&
-        std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor> &&
-        std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::ColumnMajor> &&
-        std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> &&
         ck_tile::numeric_traits<ADataTypeBuf>::PackedSize == 1 &&
         ck_tile::numeric_traits<BDataTypeBuf>::PackedSize == 1 &&
         ck_tile::numeric_traits<CDataType>::PackedSize == 1;
@@ -380,11 +379,10 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     constexpr ck_tile::index_t ABVectorSize = 16 / sizeof(ADataTypeBuf);
     constexpr ck_tile::index_t CVectorSize  = 16 / sizeof(CDataType);
 
-    // Two independent conditions this dispatcher must combine: K misaligned
-    // (needs scalar A/B, PR #11537) and N too small (needs scalar C, this
-    // repo's addition) -- named separately since we pick among 4 outcomes.
-    const bool needsScalarAB = k_pad_fallback_eligible && (K % ABVectorSize != 0);
-    const bool needsScalarC  = mn_pad_fallback_eligible && (N < CVectorSize);
+    const bool needsScalarAB =
+        k_pad_fallback_eligible && (((APacksK ? K : M) % ABVectorSize != 0) ||
+                                    ((BPacksN ? N : K) % ABVectorSize != 0));
+    const bool needsScalarC = mn_pad_fallback_eligible && ((CPacksN ? N : M) < CVectorSize);
 
     auto invoke = [&](auto cfg_tag) {
         using Cfg = typename decltype(cfg_tag)::type;
