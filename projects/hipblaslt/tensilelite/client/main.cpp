@@ -90,6 +90,15 @@ namespace TensileLite
                         ContractionProblem*                                            problem,
                         int                                                            runIdx);
 
+        // Single-GPU A2A-GEMM shard-loop bring-up entry point. Defined in
+        // A2APrefillClient.cpp. Dispatched per problem when the a2a-prefill
+        // option is set; returns a process exit code.
+        int runA2APrefill(po::variables_map const&                                       args,
+                          std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
+                          std::shared_ptr<Hardware>                                      hardware,
+                          hip::SolutionAdapter&                                          adapter,
+                          ContractionProblem*                                            problem);
+
         __global__ void flush_icache()
         {
             asm __volatile__("s_icache_inv \n\t"
@@ -293,6 +302,8 @@ namespace TensileLite
                 ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
                 ("fused-a2a-drain-send",     po::value<int>()->default_value(0), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
                 ("fused-a2a-am",             po::value<std::vector<int>>()->default_value(std::vector<int>()), "A2A column count along FEATURE (M, index-0) for the fused GEMM.A2A run (col-major swap): the first AM feature columns PUSH all-to-all; [AM,M) stay local. Defaults to M, so every feature column goes all-to-all. Must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0, AM<=M (MT0 = solution MacroTile0). AM is a per-problem dimension: pass it once to apply to every problem, or comma-separated, one value per problem selected by --problem-start-idx/--num-problems, in that order (e.g. 2048 for the medium shape, 10240 for the full shape).")
+                ("a2a-prefill",              po::value<bool>()->default_value(false), "Run the single-GPU A2A-GEMM shard-loop bring-up arm: the host lays the W gathered shards out in B (ldb = K/W), launches the FusedA2AMode=1 kernel, and compares every output element against a shard-aware CPU reference. Skips the generic single-GPU path below.")
+                ("a2a-prefill-worlds",       po::value<std::vector<int>>()->default_value(std::vector<int>()), "World sizes to sweep in the a2a-prefill arm, one value per occurrence. Defaults to 1 and 4. Each must divide K.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
@@ -1261,6 +1272,19 @@ int main(int argc, const char* argv[])
                 {
                     int rc = runFusedA2A(
                         args, library, hardware, problem, problemIdx - firstProblemIdx);
+                    if(rc != 0)
+                    {
+                        flushTimingBuffer();
+                        return rc;
+                    }
+                    continue;
+                }
+
+                // Self-contained allocate+prefill+launch+compare on one device;
+                // skips the single-GPU path below.
+                if(args["a2a-prefill"].as<bool>())
+                {
+                    int rc = runA2APrefill(args, library, hardware, adapter, problem);
                     if(rc != 0)
                     {
                         flushTimingBuffer();
