@@ -32,6 +32,8 @@ subtrees:
 
 - caption: Reference
   entries:
+  - url: https://rocm.docs.amd.com/projects/primbench/en/latest
+    title: Benchmarking with Primbench
   - file: reference/rocThrust-data-type-support
     title: Precision support
   - file: reference/rocThrust-bitwise-repro
