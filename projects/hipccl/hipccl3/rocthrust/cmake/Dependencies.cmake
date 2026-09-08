@@ -2,7 +2,6 @@
 # Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
-include(dependencies/rocm-cmake)
 include(dependencies/monorepo)
 
 # The option of using the SQLite provided by the system, instead of downloading a copy
