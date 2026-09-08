@@ -77,11 +77,22 @@ struct HWModel {
         unsigned saluCycleMax;
     };
 
+    /// VMEM completion-counter shape.
+    struct Counters {
+        /// The legacy vmcnt is split into separate loadcnt/storecnt. When true a
+        /// buffer_store bumps STOREcnt only, so it may legally sink across an
+        /// s_wait_loadcnt (which tests LOADcnt) without perturbing that wait.
+        bool hasSplitLoadStoreCnt;
+        /// storecnt and asynccnt are independent.
+        bool hasSplitStoreCntAsyncCnt;
+    };
+
     Lds lds;
     Barrier barrier;
     Coexec coexec;
     Hazards hazards;
     DelayAlu delayAlu;
+    Counters counters;
 };
 
 /// Collapse a {major, minor, stepping} arch triple to a switchable key.

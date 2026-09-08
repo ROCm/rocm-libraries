@@ -103,6 +103,7 @@ set(rocauxiliary_test_source
   auxiliary/ormxl_unmxl_gtest.cpp
   auxiliary/ormbr_unmbr_gtest.cpp
   auxiliary/ormtr_unmtr_gtest.cpp
+  auxiliary/ormtr_unmtr_hb2st_gtest.cpp
   # bidiagonal matrices
   auxiliary/labrd_gtest.cpp
   auxiliary/bdsqr_gtest.cpp

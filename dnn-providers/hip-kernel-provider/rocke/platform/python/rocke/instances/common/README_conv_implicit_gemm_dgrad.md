@@ -42,6 +42,15 @@ The tilde decomposition partitions the filter positions `y` into `y_tilde`
 groups such that within each group the integrality constraint is always
 satisfied. Each group becomes one independent sub-GEMM.
 
+## Pipeline Variants
+
+| Pipeline | Description |
+|----------|-------------|
+| `mem` | Single-buffer LDS, synchronous loads, no scheduler hints. Default. |
+| `wavelet` | Load/math wave specialization for **gfx1250/WMMA only**. Extra `num_load_waves` waves handle all DRAM→LDS transfers while the `warp_m × warp_n` math waves run WMMA exclusively. Requires gfx1250's separate VMEM and WMMA issue slots to achieve true hardware concurrency. Incompatible with `async_dma=True` and `split_k > 1`. Single-buffer LDS shared by both roles; synchronization via a `barrier_0 / barrier_A / barrier_B` protocol. |
+
+The MFMA/CDNA pipelines (`compv3`, `compv4`) are not supported for dgrad; `is_valid_spec` rejects them.
+
 ## Kernel Architecture
 
 All convolutions — stride=1 and strided — use a **single unified tiled kernel**:

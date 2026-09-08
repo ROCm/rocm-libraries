@@ -7,6 +7,7 @@ import re
 import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 from Tensile.Components.Subtile.LogicalScheduler import (
     MFMATileRange, ReadGranularity, SchedulerConfig, MFMAPlacement,
@@ -137,7 +138,10 @@ def _make_placement(numM, numN, subIterK=0):
 @pytest.fixture(scope="module", autouse=True)
 def _init_rocisa():
     from gpu_test_helpers import init_rocisa
-    init_rocisa(target="gfx1250", wavesize=32)
+
+    with preserve_rocisa_kernel_state():
+        init_rocisa(target="gfx1250", wavesize=32)
+        yield
 
 
 # ── Tests ───────────────────────────────────────────────────────

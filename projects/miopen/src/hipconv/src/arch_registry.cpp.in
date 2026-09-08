@@ -1,0 +1,16 @@
+// Generated from arch_registry_gen.cpp.in by hipconv/CMakeLists.txt. Do not edit.
+//
+// This template names no arch codenames; the active arch list is substituted in
+// at configure time, so the generated .cpp (in the build dir, never shipped) is
+// the only file that names them. Its externs to each arch's ConvAlgorithms force
+// those objects out of the static library (no --whole-archive).
+#include "arch_registry.h"
+
+// clang-format off
+@HIPCONV_REG_DECLS@
+const hipconv::ArchEntry hipconv_arch_registry[] = {
+@HIPCONV_REG_ROWS@
+};
+// clang-format on
+const std::size_t hipconv_arch_registry_size =
+    sizeof(hipconv_arch_registry) / sizeof(hipconv_arch_registry[0]);
