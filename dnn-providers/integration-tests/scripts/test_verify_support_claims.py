@@ -293,6 +293,61 @@ class TestEnforcementLevel(unittest.TestCase):
         )
         self.assertEqual(verify_all(self.bundle_root), [])
 
+    def test_invalid_enforcement_level_in_sweep_fails(self) -> None:
+        sweep_dir = self.bundle_root / "B" / "Default"
+        _write_json(
+            sweep_dir / "sweep.json",
+            {
+                "version": 1,
+                "cases": [
+                    {
+                        "id": "c1",
+                        "values": {},
+                        "metadata": {"enforcement_level": "ultra"},
+                    }
+                ],
+            },
+        )
+        _write_json(
+            sweep_dir / "support.json",
+            {
+                "version": 1,
+                "claims": {
+                    "ENGINE": [{"cases": ["c1"], "support": {"gfx942": ["linux"]}}]
+                },
+            },
+        )
+        errors = verify_all(self.bundle_root)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("case 'c1'", errors[0])
+        self.assertIn("invalid enforcement_level", errors[0])
+
+    def test_valid_enforcement_level_in_sweep_passes(self) -> None:
+        sweep_dir = self.bundle_root / "B" / "Default"
+        _write_json(
+            sweep_dir / "sweep.json",
+            {
+                "version": 1,
+                "cases": [
+                    {
+                        "id": "c1",
+                        "values": {},
+                        "metadata": {"enforcement_level": "full"},
+                    }
+                ],
+            },
+        )
+        _write_json(
+            sweep_dir / "support.json",
+            {
+                "version": 1,
+                "claims": {
+                    "ENGINE": [{"cases": ["c1"], "support": {"gfx942": ["linux"]}}]
+                },
+            },
+        )
+        self.assertEqual(verify_all(self.bundle_root), [])
+
 
 # ---------------------------------------------------------------------------
 # Sweep case id cross-check

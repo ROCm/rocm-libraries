@@ -418,7 +418,7 @@ inline void registerBundleTests()
     // Write mode needs `graphsFound` as the denominator for what the observer
     // saw: SetUp() can skip a bundle before the observer runs, and such a graph
     // is invisible to the observation log.
-    const bool writing = TestConfig::get().writeSupportClaims() && engineUnderTest.has_value();
+    const bool writing = TestConfig::get().writeSupportClaims();
 
     auto bundles = detail::discoverAndLoadBundles(enforcing || writing);
     if(!bundles.has_value())
