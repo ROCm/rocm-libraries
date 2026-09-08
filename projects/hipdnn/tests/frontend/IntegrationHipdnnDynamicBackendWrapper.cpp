@@ -126,6 +126,8 @@ TEST(TestHipdnnDynamicBackendWrapper, MissingStatusReturningSymbolsReturnVersion
         HIPDNN_STATUS_VERSION_MISMATCH);
     EXPECT_EQ(backend.backendSetGlobalLogLevelExt(HIPDNN_SEV_OFF), HIPDNN_STATUS_VERSION_MISMATCH);
     EXPECT_EQ(backend.backendGetGlobalLogLevelExt(nullptr), HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.writeEngineRankingResultsExt(nullptr, nullptr, nullptr, 0, nullptr),
+              HIPDNN_STATUS_VERSION_MISMATCH);
 
     EXPECT_STREQ(backend.getErrorString(HIPDNN_STATUS_VERSION_MISMATCH),
                  "HIPDNN_STATUS_VERSION_MISMATCH");

@@ -51,6 +51,7 @@ from the standard library plus the packages above.
 │   ├── pr_merge_sync_patches.py        ← generate patch + push to sub-repo
 │   │
 │   ├── # TheRock / multi-arch CI
+│   ├── multi_arch_test_projects.py     ← map monorepo subtrees to multi-arch tests
 │   ├── resolve_therock_ref.py          ← pin TheRock commit for a PR/push event
 │   ├── therock_configure_ci.py         ← select build flags and tests from subtrees
 │   ├── therock_matrix.py               ← subtree → TheRock project mapping table
@@ -71,6 +72,7 @@ from the standard library plus the packages above.
 │   │
 │   └── tests/
 │       ├── fixtures/                   ← .patch files for commit-message tests
+│       ├── multi_arch_test_projects_test.py
 │       ├── resolve_therock_ref_test.py
 │       ├── test_pr_detect_changed_subtrees.py
 │       ├── test_pr_merge_sync_patches.py
@@ -91,7 +93,8 @@ from the standard library plus the packages above.
 |---|---|
 | `pr-merge-sync-patches.yml` | `pr_detect_changed_subtrees.py`, `pr_merge_sync_patches.py` |
 | `pr-merge-sync-patches-manual.yml` | `pr_detect_changed_subtrees.py`, `pr_merge_sync_patches.py` |
-| `therock-ci.yml` / `therock-multi-arch-ci.yml` | `resolve_therock_ref.py`, `therock_configure_ci.py` |
+| `therock-ci.yml` | `resolve_therock_ref.py`, `therock_configure_ci.py` |
+| `therock-multi-arch-ci.yml` | `multi_arch_test_projects.py`, `resolve_therock_ref.py`, `therock_configure_ci.py` |
 | `component-ci.yml` | `component_ci.py` |
 | `therock-ci-nightly.yml` | `check_wheel_freshness.py` |
 | `labeler.yml` / `pr-org-label.yml` | `apply-labels.py`, `collect-labels.py`, `pr_category_label.py` |

@@ -60,6 +60,7 @@
 // records (e.g. last-line-wins) is the caller's job.
 
 #include <array>
+#include <cerrno>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -74,13 +75,27 @@
 #include <vector>
 
 #if defined(_WIN32)
+// Only the macro names must not escape this header, not the lean include itself: define both
+// only if the includer has not already, and undefine only what we defined, right after
+// <windows.h>. This cannot restore min/max in a translation unit where <windows.h> was already
+// processed with NOMINMAX set elsewhere -- the undef does not re-run <windows.h>.
 #ifndef NOMINMAX
 #define NOMINMAX
+#define HIPDNN_UNDEF_NOMINMAX
 #endif
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#define HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#ifdef HIPDNN_UNDEF_NOMINMAX
+#undef NOMINMAX
+#undef HIPDNN_UNDEF_NOMINMAX
+#endif
+#ifdef HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
+#undef WIN32_LEAN_AND_MEAN
+#undef HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
+#endif
 #else
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -99,6 +114,9 @@ enum class LineStoreStatus
     LOCK_FAILED,
     IO_ERROR,
     VERSION_MISMATCH,
+    /// The shard does not exist. Only openExistingLineStore() reports this; openLineStore()
+    /// creates what is missing. An ordinary miss, not a failure.
+    NOT_FOUND,
 };
 
 namespace detail
@@ -145,9 +163,14 @@ inline LineStoreStatus acquireNativeLineStoreLock(NativeLineStoreHandle handle,
     fl.l_whence = SEEK_SET;
     fl.l_start = 0;
     fl.l_len = 0; // whole file
-    if(::fcntl(handle, F_SETLKW, &fl) == -1)
+    while(::fcntl(handle, F_SETLKW, &fl) == -1)
     {
-        return LineStoreStatus::LOCK_FAILED;
+        // A stray signal must not discard a benchmarked ranking; the write loop in
+        // appendRawLineStoreLine() and the read loop in readAllLineStoreBytes() already retry.
+        if(errno != EINTR)
+        {
+            return LineStoreStatus::LOCK_FAILED;
+        }
     }
 #endif
     return LineStoreStatus::OK;
@@ -336,7 +359,7 @@ inline NativeLineStoreHandle openLineStoreHandle(const std::filesystem::path& pa
 #if defined(_WIN32)
     return CreateFileW(path.wstring().c_str(),
                        FILE_GENERIC_READ | FILE_GENERIC_WRITE,
-                       FILE_SHARE_READ | FILE_SHARE_WRITE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                        nullptr,
                        OPEN_ALWAYS,
                        FILE_ATTRIBUTE_NORMAL,
@@ -383,10 +406,12 @@ inline LineStoreRegistryEntry* openOrFindLineStoreEntry(const std::filesystem::p
         const auto id = queryLineStoreFileId(handle);
         if(!id)
         {
-            // Nothing has locked through this descriptor, and no registered descriptor
-            // for its file exists -- the registry mutex is held and the lookup above
-            // found none -- so closing it drops no lock.
-            closeLineStoreHandle(handle);
+            // Retaining, not closing: peekLineStoreFileId() may have returned nullopt without
+            // running the lookup at all (rather than running it and finding nothing), so the
+            // file this descriptor names may already be registered and locked elsewhere. On
+            // POSIX, closing any descriptor for a file drops every fcntl lock the process holds
+            // on it, including one another thread is inside. The never-close rule the
+            // `!inserted` branch below already takes is the same trade here.
             return nullptr;
         }
 
@@ -403,18 +428,105 @@ inline LineStoreRegistryEntry* openOrFindLineStoreEntry(const std::filesystem::p
             // per transient stat failure, which is the cheaper of the two defects.
             return position->second.get();
         }
-        // Owned by the registry from here on, which never closes a descriptor. Blanked
-        // only now: emplace() can throw, and until it returns this is still the only
-        // reference to the descriptor the catch block below needs to close.
-        handle = INVALID_LINE_STORE_HANDLE;
+        // Owned by the registry from here on; the registry never closes a descriptor.
         return position->second.get();
     }
     catch(...)
     {
-        if(isValidLineStoreHandle(handle))
+        return nullptr;
+    }
+}
+
+/// Opens @p path for reading without creating it, in the same open handle used to
+/// identify it.
+///
+/// The read-only counterpart of openLineStoreHandle().
+///
+/// O_RDWR, not O_RDONLY: a shared fcntl lock needs a readable descriptor, and the
+/// registry may later hand this same descriptor to a writer for the inode. Omitting
+/// O_CREAT is the point.
+inline NativeLineStoreHandle openExistingLineStoreHandle(const std::filesystem::path& path)
+{
+#if defined(_WIN32)
+    return CreateFileW(path.wstring().c_str(),
+                       FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       nullptr,
+                       OPEN_EXISTING,
+                       FILE_ATTRIBUTE_NORMAL,
+                       nullptr);
+#else
+    return ::open(path.c_str(), O_RDWR | O_APPEND | O_CLOEXEC);
+#endif
+}
+
+/// The registry entry for an existing shard at @p path, registering the file on its first
+/// use in this process but never creating it.
+///
+/// The read-only counterpart of openOrFindLineStoreEntry(), and serialized the same way
+/// and for the same reason: identify, open and register are one critical section under
+/// the registry mutex, so two threads racing the same first use cannot both open the
+/// file. See that function for why a redundant descriptor cannot simply be closed.
+///
+/// @param[out] absent Set when the shard does not exist, distinguishing an ordinary miss
+///     from a genuine open failure. Untouched on success.
+/// @return nullptr if the file is absent, could not be opened, or could not be
+///     identified, in which case the caller must decline.
+inline LineStoreRegistryEntry* findExistingLineStoreEntry(const std::filesystem::path& path,
+                                                          bool& absent) noexcept
+{
+    NativeLineStoreHandle handle = INVALID_LINE_STORE_HANDLE;
+    try
+    {
+        const std::lock_guard<std::mutex> guard(lineStoreRegistryMutex());
+        auto& entries = lineStoreRegistry();
+
+        if(const auto known = peekLineStoreFileId(path))
         {
-            closeLineStoreHandle(handle);
+            const auto found = entries.find(*known);
+            if(found != entries.end())
+            {
+                return found->second.get();
+            }
         }
+
+        handle = openExistingLineStoreHandle(path);
+        if(!isValidLineStoreHandle(handle))
+        {
+#if defined(_WIN32)
+            absent
+                = GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND;
+#else
+            absent = errno == ENOENT;
+#endif
+            return nullptr;
+        }
+
+        const auto id = queryLineStoreFileId(handle);
+        if(!id)
+        {
+            // Retaining, not closing: see openOrFindLineStoreEntry() -- peekLineStoreFileId()
+            // may have returned nullopt without running the lookup at all, so the file this
+            // descriptor names may already be registered and locked elsewhere, and on POSIX
+            // closing any descriptor for a file drops every fcntl lock the process holds on it.
+            return nullptr;
+        }
+
+        auto entry = std::make_unique<LineStoreRegistryEntry>();
+        entry->handle = handle;
+        const auto [position, inserted] = entries.emplace(*id, std::move(entry));
+        if(!inserted)
+        {
+            // See openOrFindLineStoreEntry(): the redundant descriptor stays open
+            // deliberately, because closing it would drop locks held through the
+            // registered one.
+            return position->second.get();
+        }
+        // Owned by the registry from here on; the registry never closes a descriptor.
+        return position->second.get();
+    }
+    catch(...)
+    {
         return nullptr;
     }
 }
@@ -800,6 +912,67 @@ inline void LineStoreShard::releaseIfLocked() noexcept
         detail::releaseLineStoreLock(*_entry);
         _locked = false;
     }
+}
+
+/// Opens an existing shard at @p path without creating it, for callers that only read.
+///
+/// Prefer this to openLineStore() on any read-only path. openLineStore() is O_CREAT and
+/// stamps a version line, so a lookup that misses materializes a shard nothing has
+/// written, and the descriptor registry holds that fd for the life of the process. Where
+/// the key space is unbounded, that costs one empty file and one open descriptor per key
+/// ever looked up. Creating state belongs to the write path.
+///
+/// @return The open shard and OK; nullopt and NOT_FOUND when the shard does not exist;
+///     nullopt and a non-OK status on any other failure, including VERSION_MISMATCH.
+inline std::pair<std::optional<LineStoreShard>, LineStoreStatus>
+    openExistingLineStore(const std::filesystem::path& path, std::string_view expectedVersion)
+{
+    bool absent = false;
+    detail::LineStoreRegistryEntry* const entry = detail::findExistingLineStoreEntry(path, absent);
+    if(entry == nullptr)
+    {
+        return {std::nullopt, absent ? LineStoreStatus::NOT_FOUND : LineStoreStatus::OPEN_FAILED};
+    }
+
+    LineStoreShard shard = detail::LineStoreAccess::make();
+    detail::LineStoreAccess::setEntry(shard, entry);
+
+    // Shared, not exclusive: this call never writes, so concurrent readers need not
+    // serialize against each other.
+    if(detail::acquireLineStoreLock(*entry, false) != LineStoreStatus::OK)
+    {
+        return {std::nullopt, LineStoreStatus::LOCK_FAILED};
+    }
+    const detail::LineStoreLockScope held(*entry);
+
+    // Allocates against a shard with no size bound, so it is wrapped: an escaping
+    // bad_alloc would abandon the open with the lock still held.
+    try
+    {
+        const auto content = detail::readAllLineStoreBytes(entry->handle);
+        if(!content)
+        {
+            return {std::nullopt, LineStoreStatus::IO_ERROR};
+        }
+
+        const auto lines = detail::splitLineStoreLines(*content);
+        if(lines.empty())
+        {
+            // Present but holding no complete line: a torn first write. openLineStore()
+            // repairs it; a reader has nothing to read and must not repair anything.
+            return {std::nullopt, LineStoreStatus::NOT_FOUND};
+        }
+        if(lines.front() != expectedVersion)
+        {
+            return {std::nullopt, LineStoreStatus::VERSION_MISMATCH};
+        }
+    }
+    catch(const std::exception&)
+    {
+        return {std::nullopt, LineStoreStatus::IO_ERROR};
+    }
+
+    return {std::optional<LineStoreShard>(std::move(shard)), LineStoreStatus::OK};
 }
 
 /// Opens the shard file at @p path, creating it (and writing @p expectedVersion as its

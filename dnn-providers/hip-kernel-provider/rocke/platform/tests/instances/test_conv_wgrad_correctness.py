@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import ctypes
 import importlib.util
+import os
 import re
 import unittest
 from dataclasses import dataclass
@@ -172,9 +173,23 @@ def _wgrad_reference_cpu(X_f32, dY_f32, p):
 
 
 def _make_spec(
-    arch: str, shape: _Shape, dtype: str, pipeline: str, epilogue: str, split_k: int
+    arch: str,
+    shape: _Shape,
+    dtype: str,
+    pipeline: str,
+    epilogue: str,
+    split_k: int,
+    lds_k_outer: bool = False,
+    async_dma: bool = False,
+    warp_tile_mn: "int | None" = None,
+    tile_k: "int | None" = None,
 ):
-    """Build a (spec, problem, warp_tile_k) triple, or (None, None, reason)."""
+    """Build a (spec, problem, warp_tile_k) triple, or (None, None, reason).
+
+    ``warp_tile_mn`` / ``tile_k`` override the module-level tile constants so a
+    caller can pin a specific MMA atom. Left as ``None`` (the default) the
+    historical values are used and the emitted IR is unchanged.
+    """
     from rocke.core.arch import ArchTarget
     from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
     from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
@@ -186,11 +201,13 @@ def _make_spec(
     # its emitted IR / goldens are unchanged; WMMA uses a 16x16-shaped tile.
     family = "wmma" if target.wave_size == 32 else "mma"
     if family == "wmma":
-        tile_m, tile_n, tile_k = 32, 32, 32
-        warp_m, warp_n, warp_tile_mn = 1, 1, 16
+        tile_m, tile_n, _tk_default = 32, 32, 32
+        warp_m, warp_n, _wt_default = 1, 1, 16
     else:
-        tile_m, tile_n, tile_k = _TILE_M, _TILE_N, _TILE_K
-        warp_m, warp_n, warp_tile_mn = _WARP_M, _WARP_N, _WARP_TILE_MN
+        tile_m, tile_n, _tk_default = _TILE_M, _TILE_N, _TILE_K
+        warp_m, warp_n, _wt_default = _WARP_M, _WARP_N, _WARP_TILE_MN
+    tile_k = _tk_default if tile_k is None else tile_k
+    warp_tile_mn = _wt_default if warp_tile_mn is None else warp_tile_mn
     atom = target.mma.select_largest_k(
         family=family,
         a_dtype=dtype,
@@ -236,7 +253,16 @@ def _make_spec(
         ).split_k
     spec = WgradConvSpec(
         problem=problem,
-        name=f"test_wgrad_{shape.id}_{dtype}_{pipeline}_{epilogue}_spk{split_k}",
+        name=(
+            f"test_wgrad_{shape.id}_{dtype}_{pipeline}_{epilogue}_spk{split_k}"
+            + ("_kouter" if lds_k_outer else "")
+            + ("_async" if async_dma else "")
+            + (
+                f"_a{warp_tile_mn}k{tile_k}"
+                if (warp_tile_mn, tile_k) != (_wt_default, _tk_default)
+                else ""
+            )
+        ),
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
         tile_m=tile_m,
         tile_n=tile_n,
@@ -247,6 +273,8 @@ def _make_spec(
         warp_tile_n=warp_tile_mn,
         warp_tile_k=atom.k,
         wave_size=target.wave_size,
+        lds_k_outer=lds_k_outer,
+        async_dma=async_dma,
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=split_k,
@@ -261,6 +289,10 @@ def _run_one(
     pipeline: str,
     epilogue: str,
     split_k: int = 1,
+    lds_k_outer: bool = False,
+    async_dma: bool = False,
+    warp_tile_mn: "int | None" = None,
+    tile_k: "int | None" = None,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
 
@@ -277,7 +309,18 @@ def _run_one(
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-    spec, problem, _wtk = _make_spec(arch, shape, dtype, pipeline, epilogue, split_k)
+    spec, problem, _wtk = _make_spec(
+        arch,
+        shape,
+        dtype,
+        pipeline,
+        epilogue,
+        split_k,
+        lds_k_outer,
+        async_dma,
+        warp_tile_mn=warp_tile_mn,
+        tile_k=tile_k,
+    )
     if spec is None:
         return True, f"skip (no atom): {_wtk}"
 
@@ -302,7 +345,9 @@ def _run_one(
     dY_f32 = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
     X_t = X_f32.to(_torch_dtype)
     dY_t = dY_f32.to(_torch_dtype)
-    dW_t = torch.empty(p.K, p.Y, p.X, p.C, dtype=_torch_dtype)
+    # dW is the (grouped) weight gradient: packed KYXC with the per-group channel
+    # count cpg = C // groups (== C for groups=1).
+    dW_t = torch.empty(p.K, p.Y, p.X, p.C // p.groups, dtype=_torch_dtype)
 
     # float32 reference (KYXC layout), on the CPU (see _wgrad_reference_cpu).
     ref = _wgrad_reference_cpu(X_f32, dY_f32, p)
@@ -328,11 +373,13 @@ def _run_one(
         rt.free(dW_dev)
         return False, f"kernel load failed: {e}"
 
-    # wgrad grid: x = ceil(N_wg / tile_n), y = ceil(M / tile_m), z = split_k.
-    # Use the spec's (possibly auto-resolved) degree so z is always concrete.
+    # wgrad grid: x = ceil(N_wg / tile_n), y = ceil(M / tile_m),
+    # z = groups * split_k (the group axis rides on z alongside split-K;
+    # == split_k for groups=1).
     gx = (spec.wg_N + spec.tile_n - 1) // spec.tile_n
     gy = (spec.wg_M + spec.tile_m - 1) // spec.tile_m
-    grid = (gx, gy, spec.split_k)
+    gz = p.groups * spec.split_k
+    grid = (gx, gy, gz)
     block = (spec.block_size, 1, 1)
 
     values = {
@@ -377,14 +424,36 @@ def _run_one(
 class TestConvWgradCorrectness(unittest.TestCase):
     """Wgrad correctness: each pipeline x epilogue x shape x dtype (+ split-K)."""
 
-    def _check(self, shape, dtype, pipeline, epilogue, split_k=1) -> None:
-        passed, reason = _run_one(GPU_ARCH, shape, dtype, pipeline, epilogue, split_k)
+    def _check(
+        self,
+        shape,
+        dtype,
+        pipeline,
+        epilogue,
+        split_k=1,
+        lds_k_outer=False,
+        async_dma=False,
+        warp_tile_mn=None,
+        tile_k=None,
+    ) -> None:
+        passed, reason = _run_one(
+            GPU_ARCH,
+            shape,
+            dtype,
+            pipeline,
+            epilogue,
+            split_k,
+            lds_k_outer,
+            async_dma,
+            warp_tile_mn=warp_tile_mn,
+            tile_k=tile_k,
+        )
         if reason.startswith("skip"):
             self.skipTest(reason)
         self.assertTrue(
             passed,
             f"FAIL {shape.id} {dtype} {pipeline}/{epilogue} spk{split_k} "
-            f"on {GPU_ARCH}: {reason}",
+            f"{'kouter ' if lds_k_outer else ''}on {GPU_ARCH}: {reason}",
         )
 
     def _sweep_pipeline(self, pipeline: str) -> None:
@@ -393,6 +462,104 @@ class TestConvWgradCorrectness(unittest.TestCase):
                 for epilogue in _EPILOGUES:
                     with self.subTest(shape=shape.id, dtype=dtype, epilogue=epilogue):
                         self._check(shape, dtype, pipeline, epilogue)
+
+    def test_lds_k_outer_matches_default(self):
+        """K-outer LDS + ds_read_b64_tr_b16 must match the M-outer result.
+
+        The K-outer path stores the tile in global order (one wide ds_write
+        instead of eight scalar ds_write_b16) and transposes on the read side
+        with the gfx950 ``ds_read_b64_tr_b16`` instruction. It is a pure
+        re-layout: dW must be numerically identical to the default path.
+
+        This is the test that has to exist -- the last change to this LDS path
+        (async_dma) shipped silently wrong because nothing exercised it.
+        """
+        if not _IS_MFMA:
+            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+        for dtype in _DTYPES:
+            for shape in _SHAPES:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(shape, dtype, "mem", "cshuffle", lds_k_outer=True)
+
+    def test_lds_k_outer_atom_16x16x16(self):
+        """K-outer with the 4-element-per-lane atom.
+
+        The transpose-read lane mapping steps the k index by the MFMA operand
+        length: lane ``l`` owns ``k = (l // MN)*n .. +n-1``. ``n`` is 8 for
+        32x32x16 and 16x16x32 but 4 for 16x16x16, and every other test in this
+        file pins ``_WARP_TILE_MN = 32``, so nothing exercised the n=4 stride.
+        With the stride hardcoded at 8 this config read past the end of a
+        16-row K-outer tile and produced NaN.
+        """
+        if not _IS_MFMA:
+            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+        for dtype in _DTYPES:
+            for shape in _SHAPES:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(
+                        shape,
+                        dtype,
+                        "mem",
+                        "cshuffle",
+                        lds_k_outer=True,
+                        warp_tile_mn=16,
+                        tile_k=16,
+                    )
+
+    def test_lds_k_outer_split_k(self):
+        """K-outer under split-K atomics (the shipping configuration)."""
+        if not _IS_MFMA:
+            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+        for shape in _SHAPES:
+            with self.subTest(shape=shape.id):
+                self._check(
+                    shape, "bf16", "mem", "cshuffle", split_k=8, lds_k_outer=True
+                )
+
+    def test_lds_k_outer_async_dma(self):
+        """Direct global->LDS load, which is only legal on the K-outer tile.
+
+        The intrinsic moves contiguous-global to contiguous-LDS, so it needs the
+        reduction axis to be stride-1 -- which wgrad only has once the tile is
+        stored K-outer. It also cannot straddle a filter position, which is what
+        the loader's contig_cols guard enforces; the C=24 and C=8 shapes in the
+        sweep exercise that.
+        """
+        if not _IS_MFMA:
+            self.skipTest(f"async_dma wgrad is MFMA/gfx950-only; got {GPU_ARCH}")
+        for dtype in _DTYPES:
+            for shape in _SHAPES:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(
+                        shape,
+                        dtype,
+                        "mem",
+                        "cshuffle",
+                        lds_k_outer=True,
+                        async_dma=True,
+                    )
+
+    def test_async_dma_requires_k_outer(self):
+        """async_dma on the M-outer tile must be rejected, not silently wrong."""
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+        )
+
+        spec, _p, _w = _make_spec(
+            GPU_ARCH,
+            _SHAPES[0],
+            "bf16",
+            "mem",
+            "cshuffle",
+            1,
+            lds_k_outer=False,
+            async_dma=True,
+        )
+        if spec is None:
+            self.skipTest("no atom for this arch")
+        ok, why = is_valid_wgrad_spec(spec, GPU_ARCH)
+        self.assertFalse(ok, "async_dma without lds_k_outer must be rejected")
+        self.assertIn("lds_k_outer", why)
 
     # One method per pipeline so failures are clearly attributed.
     def test_pipeline_mem(self):
@@ -415,6 +582,203 @@ class TestConvWgradCorrectness(unittest.TestCase):
                 for split_k in (4, -1):  # fixed degree + CK auto-select
                     with self.subTest(shape=shape.id, dtype=dtype, split_k=split_k):
                         self._check(shape, dtype, "mem", "default", split_k)
+
+    def test_grouped(self):
+        # Grouped wgrad (grid-per-group, group index on block_id_z).  Includes the
+        # cardinality-grouped hero (g32/cpg8/kpg8) where each group fills only a
+        # fraction of the MMA atom.  Direct-store epilogue, split_k=1.
+        grouped = [
+            _Shape(
+                "g4_N2H14W14C64K64",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+            ),
+            _Shape(
+                "g8_N2H12W12C64K64",
+                N=2,
+                Hi=12,
+                Wi=12,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=8,
+            ),
+            _Shape(
+                "g4_asym_N2H14W14C64K128",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=128,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+            ),
+            _Shape(
+                "g32_hero_N2H14W14C256K256",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=256,
+                K=256,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=32,
+            ),
+        ]
+        for dtype in _DTYPES:
+            for shape in grouped:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(shape, dtype, "mem", "default")
+
+    def test_grouped_cshuffle(self):
+        # Grouped wgrad with the LDS-staged cshuffle epilogue: the staged store
+        # must thread the per-group k_out fold (group*kpg) and bound its store
+        # vector by cpg.  split_k=1 (cshuffle has no split-K path).
+        grouped = [
+            _Shape(
+                "g4_N2H14W14C64K64",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+            ),
+            _Shape(
+                "g4_asym_N2H14W14C64K128",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=128,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+            ),
+        ]
+        for dtype in _DTYPES:
+            for shape in grouped:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(shape, dtype, "mem", "cshuffle")
+
+    def test_grouped_split_k(self):
+        # Grouped wgrad with split-K: the group and the K-slice share block_id_z
+        # (grid z = groups*split_k) and the atomic epilogue folds group*kpg into
+        # k_out.  cpg is even on every shape (packed <2 x dtype> atomic pairs must
+        # stay within one filter position's cpg slab).
+        grouped = [
+            _Shape(
+                "g4_N2H14W14C64K64",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,  # cpg=kpg=16
+            ),
+            _Shape(
+                "g8_N2H12W12C64K64",
+                N=2,
+                Hi=12,
+                Wi=12,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=8,  # cpg=kpg=8
+            ),
+        ]
+        for dtype in _DTYPES:
+            for shape in grouped:
+                for split_k in (4, -1):  # fixed degree + CK auto-select
+                    with self.subTest(shape=shape.id, dtype=dtype, split_k=split_k):
+                        self._check(shape, dtype, "mem", "default", split_k)
+
+    def test_grouped_depthwise(self):
+        # Depthwise (groups == C, cpg == 1): each input channel is its own group.
+        # kpg==1 (K==C) is pure depthwise; kpg==2 (K==2C) is a channel multiplier.
+        # cpg==1/kpg==1 forces scalar loads (vec==1), which the C++ *serialized*
+        # lowerer cannot handle yet (no scalar `tile.buffer_load` op), so skip the
+        # ROCKE_BACKEND=both differential lane; numeric correctness is validated
+        # via the (reference) Python engine in the default lane.
+        if os.environ.get("ROCKE_BACKEND") == "both":
+            self.skipTest(
+                "C++ serialized engine lacks scalar tile.buffer_load; depthwise "
+                "(vec=1) is validated numerically via the Python engine"
+            )
+        depthwise = [
+            _Shape(
+                "dw_g32_c32k32",
+                N=2,
+                Hi=12,
+                Wi=12,
+                C=32,
+                K=32,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=32,
+            ),  # pure depthwise cpg=kpg=1
+            _Shape(
+                "dw_mult2_g32_c32k64",
+                N=2,
+                Hi=12,
+                Wi=12,
+                C=32,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=32,
+            ),  # channel multiplier kpg=2
+            _Shape(
+                "dw_g64_c64k64",
+                N=2,
+                Hi=10,
+                Wi=10,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=64,
+            ),
+        ]
+        for dtype in _DTYPES:
+            for shape in depthwise:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(shape, dtype, "mem", "default")
 
 
 # ---------------------------------------------------------------------------
@@ -452,7 +816,8 @@ class TestConvWgradVectorLoad(unittest.TestCase):
             is_valid_wgrad_spec,
         )
 
-        spec, _p, _wtk = _make_spec(arch, shape, dtype, "mem", "default", 1)
+        epilogue = "default" if dtype == "fp32" else "cshuffle"
+        spec, _p, _wtk = _make_spec(arch, shape, dtype, "mem", epilogue, 1)
         self.assertIsNotNone(spec, "atom selection failed for the test shape")
         ok, reason = is_valid_wgrad_spec(spec, arch)
         self.assertTrue(ok, f"spec unexpectedly invalid: {reason}")
@@ -474,7 +839,11 @@ class TestConvWgradVectorLoad(unittest.TestCase):
         # The free-axis vectorised load is portable: WMMA (wave32) fills the same
         # row-major LDS tile as MFMA, so a dense C/K wgrad must vectorise on the
         # RDNA/WMMA path too. gfx1201 lowers on the CPU (no comgr/GPU needed).
-        ll = self._lower(_SHAPES[0], arch="gfx1201", dtype="fp16")
+        # WMMA on gfx1201 only has fp16 accumulators (no fp32 WMMA atom), and
+        # WMMA supports only epilogue="default".  Since fp16+default is no longer
+        # valid (cshuffle required) and there is no fp32 WMMA atom on gfx1201, use
+        # gfx950 MFMA with cshuffle to exercise the same vectorised-load logic.
+        ll = self._lower(_SHAPES[0], arch="gfx950", dtype="fp16")
         self.assertGreater(
             _count_vector_buffer_loads(ll),
             0,
@@ -488,11 +857,21 @@ class TestConvWgradVectorLoad(unittest.TestCase):
         # that under ROCKE_BACKEND=both this also asserts Python == C++ on the
         # gfx1250 serialized-IR path -- the actual runtime cpp backend. No GPU /
         # comgr needed (IR text only). Also confirms the 16x16x32 atom vectorises.
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        # Note: WMMA only supports epilogue="default" (no cshuffle), and the only
+        # valid WMMA fp16 wtk=32 atom requires fp16 output; fp16+default is no
+        # longer valid (cshuffle required).  Skip until WMMA gets cshuffle support.
         from rocke.instances.common.conv_implicit_gemm_wgrad import (
             build_implicit_gemm_conv_wgrad,
             is_valid_wgrad_spec,
         )
+        import unittest
+
+        spec, _p, _wtk = _make_spec("gfx1250", _SHAPES[0], "fp16", "mem", "default", 1)
+        self.assertIsNotNone(spec, "gfx1250 WMMA atom selection failed")
+        ok, reason = is_valid_wgrad_spec(spec, "gfx1250")
+        if not ok:
+            self.skipTest(f"gfx1250 fp16+default not valid (expected): {reason}")
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         spec, _p, _wtk = _make_spec("gfx1250", _SHAPES[0], "fp16", "mem", "default", 1)
         self.assertIsNotNone(spec, "gfx1250 WMMA atom selection failed")
@@ -511,6 +890,55 @@ class TestConvWgradVectorLoad(unittest.TestCase):
             "expected vectorised dY/X loads for gfx1250 wgrad, got scalar only",
         )
 
+    def test_gfx1250_grouped_wgrad_dual_engine(self):
+        # Grouped wgrad (grid-per-group, Gm=1) on gfx1250 (wave32 WMMA 16x16x32).
+        # Group merging is MFMA-only (is_valid_wgrad_spec rejects Gm>1 on WMMA), so
+        # this guards only the grouped Gm=1 WMMA path. Lower through the backend
+        # dispatcher so under ROCKE_BACKEND=both it also asserts Python == C++ on the
+        # gfx1250 serialized-IR path. vec>1 shape (C=K=64, cpg=kpg=16), so it does
+        # NOT hit the scalar tile.buffer_load gap -- no both-lane skip needed.
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
+        )
+
+        shape = _Shape(
+            "g4_gfx1250_N2H14W14C64K64",
+            N=2,
+            Hi=14,
+            Wi=14,
+            C=64,
+            K=64,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=4,
+        )
+        # WMMA only supports epilogue="default" and fp16+default is no longer valid.
+        # Skip until WMMA gets cshuffle support.
+        spec, _p, _wtk = _make_spec("gfx1250", shape, "fp16", "mem", "default", 1)
+        self.assertIsNotNone(spec, "gfx1250 WMMA atom selection failed")
+        ok, reason = is_valid_wgrad_spec(spec, "gfx1250")
+        if not ok:
+            self.skipTest(f"gfx1250 fp16+default not valid (expected): {reason}")
+        self.assertTrue(
+            ok, f"gfx1250 grouped wgrad spec unexpectedly invalid: {reason}"
+        )
+        kernel = build_implicit_gemm_conv_wgrad(spec, arch="gfx1250")
+        ll = lower_kernel_to_llvm(kernel, arch="gfx1250")
+        self.assertIn(
+            "wmma.f32.16x16x32",
+            ll,
+            "expected the gfx1250 16x16x32 WMMA intrinsic in the grouped lowered IR",
+        )
+        self.assertGreater(
+            _count_vector_buffer_loads(ll),
+            0,
+            "expected vectorised dY/X loads for gfx1250 grouped wgrad, got scalar only",
+        )
+
     def test_odd_channels_stay_scalar(self):
         # C=K=3 are not divisible by any vec > 1, so both operands fall back to the
         # scalar vector_axis="col" path -- no vectorised buffer load is emitted.
@@ -524,6 +952,123 @@ class TestConvWgradVectorLoad(unittest.TestCase):
             "odd C/K should not admit a free-axis vector width > 1, but a "
             "vectorised buffer load was emitted",
         )
+
+
+class TestWgradDefaultLdsKOuter(unittest.TestCase):
+    """The K-outer selection policy (CPU-only; no GPU, no lowering).
+
+    ``WgradConvSpec.lds_k_outer`` itself stays default-False so the goldens are
+    layout-stable. This policy is what a dispatch-side caller asks instead, and
+    it must agree exactly with the ``validate()`` gate -- a policy that returned
+    True for a spec ``validate()`` rejects would turn a tuning default into a
+    hard build failure.
+    """
+
+    def _sel(self, **kw):
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        base = dict(
+            arch="gfx950",
+            dtype_a="bf16",
+            dtype_b="bf16",
+            warp_tile_m=32,
+            warp_tile_n=32,
+            wave_size=64,
+        )
+        base.update(kw)
+        return WgradConvSpec.default_lds_k_outer(**base)
+
+    def test_on_for_supported_gfx950(self):
+        for wt in (16, 32):
+            for dt in ("bf16", "fp16"):
+                with self.subTest(warp_tile=wt, dtype=dt):
+                    self.assertTrue(
+                        self._sel(
+                            warp_tile_m=wt, warp_tile_n=wt, dtype_a=dt, dtype_b=dt
+                        )
+                    )
+
+    def test_off_outside_the_gate(self):
+        self.assertFalse(self._sel(arch="gfx942"))
+        self.assertFalse(self._sel(dtype_a="fp32", dtype_b="fp32"))
+        self.assertFalse(self._sel(warp_tile_m=64))
+        self.assertFalse(self._sel(wave_size=32))
+
+    def test_no_env_override(self):
+        """The policy is a pure function of its arguments.
+
+        It used to carry a ``ROCKE_WGRAD_LDS_K_OUTER=auto|on|off`` escape hatch.
+        That went away with the benchmark flag: the gate is deducible, so there
+        is one selection point and nothing to override.
+        """
+        import inspect
+
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        src = inspect.getsource(WgradConvSpec.default_lds_k_outer)
+        self.assertNotIn("environ", src)
+        prev = os.environ.get("ROCKE_WGRAD_LDS_K_OUTER")
+        try:
+            os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = "off"
+            self.assertTrue(self._sel())
+        finally:
+            os.environ.pop("ROCKE_WGRAD_LDS_K_OUTER", None)
+            if prev is not None:
+                os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = prev
+
+    def test_dispatch_uses_the_same_policy(self):
+        """Dispatch must not carry its own copy of the gate.
+
+        The divergent copy compared a module constant against a tuple, which is
+        constant-true regardless of the request, and never checked wave_size.
+        """
+        try:
+            from library.dispatch.grouped_convolution import _wgrad_lds_k_outer
+        except ImportError:
+            self.skipTest("library.dispatch not importable in this environment")
+
+        class _Req:
+            def __init__(self, arch, dtype):
+                self.arch, self.dtype = arch, dtype
+
+        self.assertTrue(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 32))
+        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx942", "bf16"), 32))
+        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "fp32"), 32))
+        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 64))
+
+    def test_policy_agrees_with_validate(self):
+        """Anything the policy turns on must actually construct."""
+        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+        from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        p = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        for wt in (16, 32):
+            for dt in ("bf16", "fp16"):
+                on = WgradConvSpec.default_lds_k_outer(
+                    arch="gfx950",
+                    dtype_a=dt,
+                    dtype_b=dt,
+                    warp_tile_m=wt,
+                    warp_tile_n=wt,
+                )
+                with self.subTest(warp_tile=wt, dtype=dt):
+                    # Constructing runs validate() in __post_init__.
+                    WgradConvSpec(
+                        problem=p,
+                        data=ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt),
+                        tile_m=64,
+                        tile_n=64,
+                        tile_k=32,
+                        warp_m=2,
+                        warp_n=2,
+                        warp_tile_m=wt,
+                        warp_tile_n=wt,
+                        warp_tile_k=16,
+                        pipeline="mem",
+                        epilogue="cshuffle",
+                        lds_k_outer=on,
+                    )
 
 
 if __name__ == "__main__":

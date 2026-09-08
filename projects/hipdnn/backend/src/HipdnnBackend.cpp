@@ -12,6 +12,10 @@
 #include "descriptors/VariantDescriptor.hpp"
 #include "handle/Handle.hpp"
 #include "handle/HandleFactory.hpp"
+#include "heuristics/DeviceProperties.hpp"
+#include "heuristics/config/AutotuneCacheEnv.hpp"
+#include "heuristics/config/AutotuneCacheKey.hpp"
+#include "heuristics/config/AutotuneRankingStore.hpp"
 #include "hipdnn_backend.h"
 #include "logging/Logging.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
@@ -1006,6 +1010,138 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHand
                         info.pluginName,
                         info.pluginVersion,
                         info.apiVersion);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendWriteEngineRankingResults_ext(hipdnnHandle_t handle,
+                                               hipdnnBackendDescriptor_t graphDescriptor,
+                                               const int64_t* engineIdsInRankOrder,
+                                               size_t engineIdCount,
+                                               hipdnnAutotuneCacheWriteOutcome_ext_t* outcome)
+{
+    LOG_API_ENTRY("handle={}, graphDescriptor={}, engineIdsInRankOrder_ptr={:p}, engineIdCount={}",
+                  logPtr(handle),
+                  logPtr(graphDescriptor),
+                  static_cast<const void*>(engineIdsInRankOrder),
+                  engineIdCount);
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfNull(handle);
+
+        if(outcome != nullptr)
+        {
+            *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
+        }
+
+        // Runs before all other validation: a disabled cache must never read or write.
+        if(hipdnn_backend::heuristics::config::exactCacheDisabled())
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "hipdnnBackendWriteEngineRankingResults_ext: exact-match autotune cache "
+                "disabled via HIPDNN_DISABLE_EXACT_ENGINE_CACHE; declining write.");
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_DISABLED;
+            }
+            return;
+        }
+
+        throwIfInvalidDescriptor(graphDescriptor);
+
+        // Declines rather than failing the caller's run on any cache problem below.
+        if(!graphDescriptor->isFinalized())
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "hipdnnBackendWriteEngineRankingResults_ext: graph descriptor is not "
+                "finalized; declining write.");
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+            }
+            return;
+        }
+
+        if(engineIdsInRankOrder == nullptr || engineIdCount == 0)
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "hipdnnBackendWriteEngineRankingResults_ext: no engine ranking provided; "
+                "declining write.");
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES;
+            }
+            return;
+        }
+
+        auto graphDesc = graphDescriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+
+        try
+        {
+            const hipdnnPluginConstData_t serializedGraph = graphDesc->getSerializedGraph();
+
+            const auto devProps = hipdnn_backend::heuristics::queryDeviceProperties(handle);
+            const auto devicePropsSerialized
+                = hipdnn_backend::heuristics::serializeDeviceProperties(devProps);
+            const hipdnnPluginConstData_t devicePropsWrapper
+                = hipdnn_backend::heuristics::wrapSerializedDeviceProperties(devicePropsSerialized);
+
+            const auto cacheKey = hipdnn_backend::heuristics::config::deriveCacheKey(
+                serializedGraph, devicePropsWrapper);
+            if(!cacheKey.has_value())
+            {
+                HIPDNN_BACKEND_LOG_WARN(
+                    "hipdnnBackendWriteEngineRankingResults_ext: graph is unkeyable; "
+                    "declining write.");
+                if(outcome != nullptr)
+                {
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+                }
+                return;
+            }
+
+            const std::vector<int64_t> order(engineIdsInRankOrder,
+                                             engineIdsInRankOrder + engineIdCount);
+
+            // Report what the store actually did. The optimistic WRITTEN set at entry is a
+            // default for the paths that never reach here; a record identical to one already on
+            // disk writes nothing, and saying otherwise would make the outcome a lie precisely
+            // where a caller is relying on it to tell writes apart from no-ops.
+            const auto writeStatus = hipdnn_backend::heuristics::config::exactCacheStore().put(
+                *cacheKey, {}, order, order);
+            if(outcome != nullptr)
+            {
+                switch(writeStatus)
+                {
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::WRITTEN:
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
+                    break;
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::UNCHANGED:
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_UNCHANGED;
+                    break;
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::UNAVAILABLE:
+                    // The shard could not be opened, locked, or read. The cache is best-effort,
+                    // so this stays a success with a decline rather than an error.
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+                    break;
+                default:
+                    break;
+                }
+            }
+
+            LOG_API_SUCCESS(apiName, "wrote engine ranking with {} engines", engineIdCount);
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "hipdnnBackendWriteEngineRankingResults_ext: failed to write engine ranking "
+                "({}); declining write.",
+                e.what());
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+            }
+        }
     });
 }
 

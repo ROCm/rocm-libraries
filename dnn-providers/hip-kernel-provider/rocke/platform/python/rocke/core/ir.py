@@ -3051,7 +3051,10 @@ class IRBuilder:
             [smem, *indices],
             [VectorType(dtype, 4)],
             attrs={"rank": len(indices), "elem_type": dtype.name},
-            result_name_hint="tr16",
+            # "dtr" prefix (not "tr...digits") so the fresh-name counter can never
+            # collide with an arith.trunc result ("tr"+id): e.g. trunc id 16631
+            # and tr16 id 631 both stringify to "tr16631".
+            result_name_hint="dtr16",
         ).result
 
     def ds_read_tr16_b128(
@@ -3076,7 +3079,7 @@ class IRBuilder:
             [smem, *indices],
             [VectorType(dtype, 8)],
             attrs={"rank": len(indices), "elem_type": dtype.name},
-            result_name_hint="tr16w",
+            result_name_hint="dtr16w",
         ).result
 
     def ds_read_tr_b8(
@@ -3101,7 +3104,7 @@ class IRBuilder:
             [smem, *indices],
             [VectorType(dtype, 8)],
             attrs={"dtype": dtype.name},
-            result_name_hint="tr8",
+            result_name_hint="dtr8",
         ).result
 
     # ----- LDS pointer arithmetic (for per-wave async-LDS bases) -----
