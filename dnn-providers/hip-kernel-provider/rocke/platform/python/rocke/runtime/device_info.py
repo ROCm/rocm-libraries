@@ -18,7 +18,19 @@ from .hip_module import _get_device_asic_revision, get_device_target_id
 
 @dataclass(frozen=True)
 class RuntimeDeviceInfo:
-    """Identity of one HIP device without dispatch or compatibility policy."""
+    """Runtime identity for one HIP device.
+
+    ``target_id`` preserves the complete runtime/compiler target string,
+    including profiles and feature suffixes such as
+    ``gfx1250-strict:sramecc+:xnack-``.
+
+    ``base_arch`` is the normalized rocKE architecture used for static
+    :class:`~rocke.core.arch.ArchTarget` lookup. It intentionally omits target
+    profiles and feature suffixes.
+
+    ``asic_revision`` is the runtime-reported revision. It carries no
+    instruction-support or artifact-compatibility guarantee.
+    """
 
     target_id: str | None
     base_arch: str | None
