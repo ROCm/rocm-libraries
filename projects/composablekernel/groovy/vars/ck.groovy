@@ -1409,42 +1409,28 @@ String _dispatcherPerfCmd(String compiler, String gpuTarget, String samplingTier
                           String gemmDatatype, String gemmLayout, String multiLayout,
                           String quantDatatype, String quantLayout,
                           String problemSizes, String problemConfigs, String perOpInstances) {
-    if (gpuTarget == "gfx950") {
-        return """
+    // All operators whose CMakeLists list both gfx942 and gfx950 in DESIRED_TARGETS
+    // run on both arches. Two sets remain gfx950-only:
+    //
+    //   gemm_aquant / gemm_bquant / gemm_abquant: SUPPORTED_ARCHS = ("gfx950",) in
+    //     their Python layers. The C++ side would compile on gfx942 (standard fp8
+    //     MFMA), but the Python guards have not been lifted yet. Widening is its own
+    //     change; the gate is conservative and likely to lift soon.
+    //
+    //   mx_gemm: CMakeLists filters with `target MATCHES "^gfx950"`, so
+    //     benchmark_mx_gemm_all is never created for gfx942 and ninja would fail on
+    //     an unknown target. Also has no fp16 path (MX_GEMM_DATATYPE defaults to
+    //     fp4;fp8), hence quantDatatype below.
+    //
+    // gemm_preshuffle and contraction_multi_abd are deferred: preshuffle has no
+    // dispatcher bridge on develop; contraction_multi_abd has no Python benchmark
+    // driver. Both get lanes in the next PR once those prerequisites land.
+    def cmd = """
             cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
                 -D BUILD_CK_TILE_ENGINE="ON" \
                 -D CMAKE_CXX_COMPILER="${compiler}" \
                 -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx950" \
-                -D GEMM_AQUANT_DATATYPE="${quantDatatype}" \
-                -D GEMM_AQUANT_LAYOUT="${quantLayout}" \
-                -D GEMM_AQUANT_MAX_INSTANCES=${perOpInstances} \
-                -D GEMM_BQUANT_DATATYPE="${quantDatatype}" \
-                -D GEMM_BQUANT_LAYOUT="${quantLayout}" \
-                -D GEMM_BQUANT_MAX_INSTANCES=${perOpInstances} \
-                -D GEMM_ABQUANT_DATATYPE="${quantDatatype}" \
-                -D GEMM_ABQUANT_LAYOUT="${quantLayout}" \
-                -D GEMM_ABQUANT_MAX_INSTANCES=${perOpInstances} \
-                -D MX_GEMM_DATATYPE="${quantDatatype}" \
-                -D MX_GEMM_LAYOUT="${quantLayout}" \
-                -D MX_GEMM_MAX_INSTANCES=${perOpInstances} \
-                -D GEMM_STREAMK_DATATYPE="${gemmDatatype}" \
-                -D GEMM_STREAMK_LAYOUT="${gemmLayout}" \
-                -D GEMM_STREAMK_MAX_INSTANCES=${perOpInstances} \
-                -D TILE_ENGINE_SAMPLING_TIER=${samplingTier} .. && \
-            ninja -j\$(nproc) benchmark_gemm_aquant_all benchmark_gemm_bquant_all benchmark_gemm_abquant_all benchmark_mx_gemm_all benchmark_gemm_streamk_all && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_aquant/gemm_aquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_aquant_results.json && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_bquant/gemm_bquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_bquant_results.json && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_abquant/gemm_abquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_abquant_results.json && \
-            python3 ../tile_engine/ops/gemm/mx_gemm/mx_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json mx_gemm_results.json && \
-            python3 ../tile_engine/ops/gemm_streamk/gemm_streamk_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_streamk_results.json"""
-    }
-    return """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx942" \
+                -D GPU_TARGETS="${gpuTarget}" \
                 -D GEMM_UNIVERSAL_DATATYPE="${gemmDatatype}" \
                 -D GEMM_UNIVERSAL_LAYOUT="${gemmLayout}" \
                 -D GEMM_UNIVERSAL_MAX_INSTANCES=${perOpInstances} \
@@ -1471,9 +1457,29 @@ String _dispatcherPerfCmd(String compiler, String gpuTarget, String samplingTier
                 -D GROUPED_GEMM_ROWCOLQUANT_MAX_INSTANCES=${perOpInstances} \
                 -D GROUPED_GEMM_TENSORQUANT_DATATYPE="${quantDatatype}" \
                 -D GROUPED_GEMM_TENSORQUANT_LAYOUT="${quantLayout}" \
-                -D GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES=${perOpInstances} \
+                -D GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES=${perOpInstances}"""
+    if (gpuTarget == "gfx950") {
+        cmd += """ \
+                -D GEMM_AQUANT_DATATYPE="${quantDatatype}" \
+                -D GEMM_AQUANT_LAYOUT="${quantLayout}" \
+                -D GEMM_AQUANT_MAX_INSTANCES=${perOpInstances} \
+                -D GEMM_BQUANT_DATATYPE="${quantDatatype}" \
+                -D GEMM_BQUANT_LAYOUT="${quantLayout}" \
+                -D GEMM_BQUANT_MAX_INSTANCES=${perOpInstances} \
+                -D GEMM_ABQUANT_DATATYPE="${quantDatatype}" \
+                -D GEMM_ABQUANT_LAYOUT="${quantLayout}" \
+                -D GEMM_ABQUANT_MAX_INSTANCES=${perOpInstances} \
+                -D MX_GEMM_DATATYPE="${quantDatatype}" \
+                -D MX_GEMM_LAYOUT="${quantLayout}" \
+                -D MX_GEMM_MAX_INSTANCES=${perOpInstances}"""
+    }
+    cmd += """ \
                 -D TILE_ENGINE_SAMPLING_TIER=${samplingTier} .. && \
-            ninja -j\$(nproc) benchmark_gemm_universal_all benchmark_batched_gemm_all benchmark_batched_contraction_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all benchmark_gemm_multi_d_all benchmark_gemm_multi_abd_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all && \
+            ninja -j\$(nproc) benchmark_gemm_universal_all benchmark_batched_gemm_all benchmark_batched_contraction_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all benchmark_gemm_multi_d_all benchmark_gemm_multi_abd_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all"""
+    if (gpuTarget == "gfx950") {
+        cmd += " benchmark_gemm_aquant_all benchmark_gemm_bquant_all benchmark_gemm_abquant_all benchmark_mx_gemm_all"
+    }
+    cmd += """ && \
             python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
             python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json batched_gemm_results.json && \
             python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs ${problemConfigs} --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json && \
@@ -1483,6 +1489,14 @@ String _dispatcherPerfCmd(String compiler, String gpuTarget, String samplingTier
             python3 ../tile_engine/ops/gemm/gemm_multi_abd/gemm_multi_abd_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_multi_abd_results.json && \
             python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json && \
             python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json"""
+    if (gpuTarget == "gfx950") {
+        cmd += """ && \
+            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_aquant/gemm_aquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_aquant_results.json && \
+            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_bquant/gemm_bquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_bquant_results.json && \
+            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_abquant/gemm_abquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_abquant_results.json && \
+            python3 ../tile_engine/ops/gemm/mx_gemm/mx_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json mx_gemm_results.json"""
+    }
+    return cmd
 }
 
 // Benchmark ahead-of-time tile_engine instances at smoke coverage: one dtype,
@@ -1521,30 +1535,23 @@ def runDispatcherPerfTests(String compiler, String gpuTarget = "gfx942") {
     // with integer truncation, so a multi-combo op can floor a combo to zero
     // instances and build nothing.
     def perOpInstances = "64"
-    // gemm_aquant and gemm_bquant run on gfx950 because their tests and utils
-    // modules self-gate to it -- SUPPORTED_ARCHS = ("gfx950",) and
-    // _DEFAULT_GFX_ARCH = "gfx950" -- not because gfx942 lacks fp8. gfx942 has
-    // fp8 (FNUZ) and is in DESIRED_TARGETS; widening these ops to it means
-    // relaxing those guards first.
+    // Operator distribution across arches -- see _dispatcherPerfCmd for the
+    // per-op rationale. Summary:
     //
-    // mx_gemm is on gfx950 for a harder reason: its CMakeLists filters targets
-    // with a literal regex, target MATCHES "^gfx950", so on any other arch the
-    // benchmark_mx_gemm_all target is never created and ninja fails on an
-    // unknown target rather than skipping. It also has no fp16 path at all
-    // (MX_GEMM_DATATYPE defaults to fp4;fp8), hence quantDatatype below.
+    //   Both arches: gemm_universal, batched_gemm, batched_contraction,
+    //     gemm_streamk, grouped_gemm, gemm_multi_d, gemm_multi_abd,
+    //     grouped_gemm_rowcolquant, grouped_gemm_tensorquant.
+    //     All have gfx950 in their DESIRED_TARGETS and no Python-level arch gate.
     //
-    // gemm_streamk is built on both arches. It used to be gfx942-only here
-    // because its DESIRED_TARGETS was "gfx90a;gfx942" with a TODO for gfx950;
-    // that list now includes gfx950, but the commit that widened it flagged the
-    // CMake change as the one part it could not exercise locally and left it for
-    // CI to confirm. Building it on gfx950 here is that confirmation, and it also
-    // matches runDispatcherCorrectnessTests, which already runs stream_k on both.
-    // If the gfx950 AOT build turns out to be broken, the DESIRED_TARGETS line is
-    // revertible on its own without touching this lane.
+    //   gfx950 only: gemm_aquant, gemm_bquant, gemm_abquant, mx_gemm.
+    //     gemm_aquant/bquant/abquant: SUPPORTED_ARCHS = ("gfx950",) in the Python
+    //     layer. gfx942 has fp8 (FNUZ), but those guards haven't been lifted yet.
+    //     mx_gemm: CMakeLists filters with `target MATCHES "^gfx950"`, so the
+    //     benchmark_mx_gemm_all target is never created for gfx942; also has no
+    //     fp16 path, hence quantDatatype below.
     //
-    // Everything else -- gemm_universal, batched_gemm, batched_contraction,
-    // grouped_gemm, gemm_multi_d, gemm_multi_abd and the two grouped quant ops --
-    // is CMake-legal on both, and sits on gfx942 to keep the two stages balanced.
+    //   Deferred (next PR): gemm_preshuffle (no bridge on develop), and
+    //     contraction_multi_abd (no Python benchmark driver yet).
     def quantDatatype  = "fp8"
     def quantLayout    = "rcr"
     // Stream-K below is tile_engine/ops/gemm_streamk/ (top level), not
