@@ -443,6 +443,7 @@ class TestMain:
              patch('tensilelite.tensilelite_logic.run.load_known_bugs', return_value=frozenset()), \
              patch('tensilelite.tensilelite_logic.run._setup') as mock_setup, \
              patch('tensilelite.tensilelite_logic.run.reset_reported_failures'), \
+             patch('tensilelite.tensilelite_logic.run.check_corpus_invariants', return_value=[]), \
              patch('warnings.filterwarnings'):
             mock_args = Mock(Verbose=2, KnownBugs=None)
             mock_setup.return_value = (
