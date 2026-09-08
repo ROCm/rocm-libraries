@@ -113,7 +113,7 @@ class ConfigureCITest(unittest.TestCase):
         }
 
         mock_process = MagicMock()
-        mock_process.stdout = "projects/hipblaslt/tensilelite/Tensile/example.py"
+        mock_process.stdout = "projects/hipblaslt/tensilelite/tensilelite/example.py"
         mock_run.return_value = mock_process
 
         project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
@@ -302,7 +302,7 @@ class ConfigureCITest(unittest.TestCase):
     ):
         mock_get_modified.return_value = [
             ".github/workflows/therock-ci.yml",
-            "projects/hipblaslt/tensilelite/Tensile/example.py",
+            "projects/hipblaslt/tensilelite/tensilelite/example.py",
         ]
 
         projects, test_type = therock_configure_ci.retrieve_projects(

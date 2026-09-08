@@ -1,0 +1,116 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Unit tests for StreamK=5 hybrid mode codegen intent.
+
+These tests import TensileLite modules directly and inspect emitted rocisa
+instructions rather than matching Python source text. Signature layout
+is covered by sk_hybrid.yaml kernel tests.
+"""
+
+# Prime the component registry before StreamK imports (avoids circular import).
+from rocisa.instruction import SAndB32, SLShiftLeftB32, SLShiftRightB32, SXorB32
+
+from streamk5_test_helpers import (
+    SK5_KERNARG_ALIASES,
+    SK5_PERSISTENT_ALIASES,
+    collect_sk5_regset_aliases,
+    emit_mode_extraction_module,
+    reg_name,
+)
+
+
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.Components.StreamK import (
+    StreamK,
+    StreamKHybrid,
+    StreamKTwoTileDPFirst,
+    streamKVariantClass,
+)
+
+class TestStreamK5ValidParameters:
+    def test_streamk_enum_includes_5(self):
+        assert 5 in validParameters["StreamK"]
+        assert validParameters["StreamK"] == [0, 3, 4, 5]
+
+
+class TestStreamK5Component:
+    def test_streamk_hybrid_is_registered_variant(self):
+        assert streamKVariantClass(5) is StreamKHybrid
+        assert StreamKHybrid.kernel == {"StreamK": 5}
+
+    def test_component_dispatches_streamk_5_to_hybrid(self, mock_streamk_writer):
+        impl = StreamK.find(mock_streamk_writer(5))
+        assert isinstance(impl, StreamKHybrid)
+
+    def test_component_dispatches_streamk_3_to_static_path(self, mock_streamk_writer):
+        impl = StreamK.find(mock_streamk_writer(3))
+        assert isinstance(impl, StreamKTwoTileDPFirst)
+
+
+class TestStreamK5ModeExtraction:
+    def test_mode_extraction_shifts_bit_30(self):
+        module = emit_mode_extraction_module()
+        shift_inst = next(
+            inst
+            for inst in module.flatitems()
+            if isinstance(inst, SLShiftRightB32)
+            and reg_name(list(inst.getParams())[1]) == "sgprMagicShiftItersPerTile"
+        )
+        params = list(shift_inst.getParams())
+        assert reg_name(params[0]) == "sgprStreamKHybridMode"
+        assert params[2] == hex(30)
+
+    def test_mode_extraction_clears_bit_30_via_xor_of_extracted_mode(self):
+        """Clear MagicShift bit 30 by XOR with the extracted mode at bit 30."""
+        module = emit_mode_extraction_module()
+        xor_inst = next(
+            inst for inst in module.flatitems() if isinstance(inst, SXorB32)
+        )
+        params = list(xor_inst.getParams())
+        assert reg_name(params[0]) == "sgprMagicShiftItersPerTile"
+        assert reg_name(params[1]) == "sgprMagicShiftItersPerTile"
+        assert reg_name(params[2]) == "sgprStreamKHybridMode"
+        and_dests = [
+            reg_name(list(inst.getParams())[0])
+            for inst in module.flatitems()
+            if isinstance(inst, SAndB32)
+        ]
+        assert "sgprMagicShiftItersPerTile" not in and_dests
+
+    def test_mode_extraction_restores_hybrid_mode_to_0_1(self):
+        module = emit_mode_extraction_module()
+        lshl = next(
+            inst for inst in module.flatitems() if isinstance(inst, SLShiftLeftB32)
+        )
+        assert list(lshl.getParams())[2] == hex(30)
+        restore = [
+            inst
+            for inst in module.flatitems()
+            if isinstance(inst, SLShiftRightB32)
+            and reg_name(list(inst.getParams())[1]) == "sgprStreamKHybridMode"
+        ]
+        assert restore
+        assert list(restore[-1].getParams())[2] == hex(30)
+
+    def test_mode_extraction_does_not_use_bit_31(self):
+        module = emit_mode_extraction_module()
+        for inst in module.flatitems():
+            if isinstance(inst, SLShiftRightB32):
+                assert list(inst.getParams())[2] != hex(31)
+
+
+class TestStreamK5RegSetAliasing:
+    def test_hybrid_variant_requests_parallel_reduction_aliases(self):
+        variant = streamKVariantClass(5)()
+        assert variant.emitsParallelReductionSgprAliases is True
+
+    def test_macro_and_set_emits_sk4_to_sk3_kernarg_aliases(self):
+        aliases = collect_sk5_regset_aliases()
+        for expected in SK5_KERNARG_ALIASES:
+            assert expected in aliases
+
+    def test_macro_and_set_emits_persistent_slot_aliases(self):
+        aliases = collect_sk5_regset_aliases()
+        for expected in SK5_PERSISTENT_ALIASES:
+            assert expected in aliases
