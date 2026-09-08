@@ -116,7 +116,7 @@ namespace MatrixMultiplyTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f32_16x16x4_f32);
             }
 
-            if((isF8<TA> || isF8<TB>) && (wave_k >= 64))
+            if((isF8<TA> || isF8<TB>)&&(wave_k >= 64))
             {
                 REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4,
                                         GPUCapability::HasWMMA_f8f6f4);
