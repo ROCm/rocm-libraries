@@ -362,6 +362,12 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     if (irInst->vop3.has_value()) {
         asmInst->addModifier<VOP3PModifiers>(irInst->vop3.value());
     }
+    if (irInst->true16.has_value()) {
+        // True16 half-word select (.h / .l). The rocisa->asm path attaches the
+        // same modifier in handleVCvtTrue16Modifiers, so a bf16/f16 convert
+        // reaching the emitter renders `v36.l` on both paths.
+        asmInst->addModifier<True16Modifiers>(irInst->true16.value());
+    }
     if (irInst->memtoken.has_value()) {
         asmInst->addModifier<MemTokenData>(MemTokenData{irInst->memtoken.value()});
     }

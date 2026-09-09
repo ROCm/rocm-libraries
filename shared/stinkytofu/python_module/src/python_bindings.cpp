@@ -635,6 +635,17 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("byte_sel") = std::vector<int>{},
             "Set VOP3P (op_sel/op_sel_hi/byte_sel) modifiers")
         .def(
+            "set_true16",
+            [](LogicalInstruction& inst, int dst0, int dst1, const std::vector<int>& srcs) {
+                std::vector<HighBitSel> srcSels;
+                srcSels.reserve(srcs.size());
+                for (int s : srcs) srcSels.push_back(static_cast<HighBitSel>(s));
+                inst.true16 = True16Modifiers(static_cast<HighBitSel>(dst0),
+                                              static_cast<HighBitSel>(dst1), srcSels);
+            },
+            nb::arg("dst0") = -1, nb::arg("dst1") = -1, nb::arg("srcs") = std::vector<int>{},
+            "Set True16 half-word select modifiers (HighBitSel: -1=NONE, 0=LOW, 1=HIGH)")
+        .def(
             "set_memtoken",
             [](LogicalInstruction& inst, const std::vector<int>& tokens) {
                 inst.memtoken = tokens;
