@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights
+ * Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights
  * reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -85,30 +85,38 @@ typedef void (*hipfftCallbackStoreR)(
 typedef void (*hipfftCallbackStoreD)(
     void* dataOut, size_t offset, hipfftDoubleReal element, void* callerInfo, void* sharedPointer);
 
-/*! @brief Set a callback on a plan
+/*! @brief Set a function pointer callback on a plan (deprecated)
    *
-   * @details Set either a load or store callback to run with a plan.
-   * The type of callback is specified with the 'cbtype' parameter.
-   * An array ofcallback and callback data pointers must be given -
-   * one per device executing the plan.
+   * @details Set either a load or store callback to run with a plan,
+   * specified as a device function pointer.  The type of callback is
+   * specified with the 'cbtype' parameter.  An array of callback and
+   * callback data pointers must be given - one per device executing
+   * the plan.
+   *
+   * The specified arrays must remain valid until either the plan is
+   * destroyed or callbacks are cleared from the plan.
    *
    * @param[in] plan The FFT plan.
    * @param[in] callbacks Array of callback function pointers.
    * @param[in] cbtype Type of callback being set.
    * @param[in] callbackData Array of callback function data pointers
    */
+HIPFFT_DEPRECATED_MSG(
+    "Function pointer callbacks are deprecated; use hipfftXtSetJITCallback for JIT callbacks.")
 HIPFFT_EXPORT hipfftResult hipfftXtSetCallback(hipfftHandle         plan,
                                                void**               callbacks,
                                                hipfftXtCallbackType cbtype,
                                                void**               callbackData);
 
-/*! @brief Remove a callback from a plan
+/*! @brief Remove a function pointer callback from a plan (deprecated)
    *
-   * @details Remove a previously-set callback from a plan.
+   * @details Remove a previously-set function pointer callback from a plan.
    *
    * @param[in] plan The FFT plan.
    * @param[in] cbtype Type of callback being removed.
    */
+HIPFFT_DEPRECATED_MSG(
+    "Function pointer callbacks are deprecated; use hipfftXtSetJITCallback for JIT callbacks.")
 HIPFFT_EXPORT hipfftResult hipfftXtClearCallback(hipfftHandle plan, hipfftXtCallbackType cbtype);
 
 /*! @brief Set shared memory size for callback.
@@ -124,6 +132,79 @@ HIPFFT_EXPORT hipfftResult hipfftXtClearCallback(hipfftHandle plan, hipfftXtCall
 HIPFFT_EXPORT hipfftResult hipfftXtSetCallbackSharedSize(hipfftHandle         plan,
                                                          hipfftXtCallbackType cbtype,
                                                          size_t               sharedSize);
+
+typedef hipfftComplex (*hipfftJITCallbackLoadC)(void*              data,
+                                                unsigned long long offset,
+                                                void*              cbdata,
+                                                void*              sharedMem);
+typedef hipfftDoubleComplex (*hipfftJITCallbackLoadZ)(void*              data,
+                                                      unsigned long long offset,
+                                                      void*              cbdata,
+                                                      void*              sharedMem);
+typedef hipfftReal (*hipfftJITCallbackLoadR)(void*              data,
+                                             unsigned long long offset,
+                                             void*              cbdata,
+                                             void*              sharedMem);
+typedef hipfftDoubleReal (*hipfftJITCallbackLoadD)(void*              data,
+                                                   unsigned long long offset,
+                                                   void*              cbdata,
+                                                   void*              sharedMem);
+
+typedef void (*hipfftJITCallbackStoreC)(
+    void* data, unsigned long long offset, hipfftComplex element, void* cbdata, void* sharedMem);
+typedef void (*hipfftJITCallbackStoreZ)(void*               data,
+                                        unsigned long long  offset,
+                                        hipfftDoubleComplex element,
+                                        void*               cbdata,
+                                        void*               sharedMem);
+typedef void (*hipfftJITCallbackStoreR)(
+    void* data, unsigned long long offset, hipfftReal element, void* cbdata, void* sharedMem);
+typedef void (*hipfftJITCallbackStoreD)(
+    void* data, unsigned long long offset, hipfftDoubleReal element, void* cbdata, void* sharedMem);
+
+/*! @brief Set a JIT callback on a plan
+   *
+   * @details Set either a load or store callback to run with a plan.
+   * The type of callback is specified with the `cbtype` parameter.
+   * The callback is provided as SPIR-V on AMD platforms and as
+   * LTO-IR fatbin on CUDA platforms.
+   *
+   *  Note: JIT callbacks cannot currently be used on multi-GPU transforms.
+   *  This support will be added in a future release of hipFFT.
+   *
+   * JIT callbacks can be cleared from the plan by passing nullptr
+   * for `symbol_name` and `bitcode_data`, and 0 for
+   * `bitcode_len_bytes`.
+   *
+   * `cbdata` is an optional array of pointers of data that is passed
+   * to the callback function.  As JIT callbacks are currently only
+   * supported for single-device transforms, this array must have one
+   * pointer element in it if it is specified.  The pointer will be
+   * passed to the callback function's `cbdata` parameter when it is
+   * executed on that device.
+   *
+   * If specified, the `cbdata` array must remain valid until either
+   * the plan is destroyed or callbacks are cleared from the plan.
+   *
+   * This function must be called after the plan is allocated using
+   * ::hipfftCreate, but before the plan is initialized by any of the
+   * "MakePlan" functions.  Therefore, API functions that combine
+   * creation and initialization (::hipfftPlan1d, ::hipfftPlan2d,
+   * ::hipfftPlan3d, and ::hipfftPlanMany) cannot set a JIT callback.
+   *
+   * @param[in] plan The FFT plan.
+   * @param[in] symbol_name Name of the symbol in the compiled bitcode.
+   * @param[in] bitcode_data Pointer to bitcode data.
+   * @param[in] bitcode_len_bytes Number of bytes in the bitcode data.
+   * @param[in] cbtype Type of callback function.
+   * @param[in] cbdata Array of callback function data pointers.
+   */
+HIPFFT_EXPORT hipfftResult hipfftXtSetJITCallback(hipfftHandle         plan,
+                                                  const char*          symbol_name,
+                                                  const void*          bitcode_data,
+                                                  size_t               bitcode_len_bytes,
+                                                  hipfftXtCallbackType cbtype,
+                                                  void**               cbdata);
 
 /*! @brief Initialize a batched rank-dimensional FFT plan with
     advanced data layout and specified input, output, execution data
