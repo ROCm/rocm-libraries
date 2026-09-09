@@ -93,12 +93,6 @@ int parseArgs(int argc, char** argv, size_t* m, size_t* n, hipblaslt_initializat
     return EXIT_SUCCESS;
 }
 
-template <typename DType>
-void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
-{
-    hipblaslt::host_numerics::initialize(data, numElements, initMethod);
-}
-
 int main(int argc, char** argv)
 {
     std::size_t              m{1335};
@@ -117,9 +111,16 @@ int main(int argc, char** argv)
     float*      output{};
     auto        hipErr = hipMalloc(&input, numElements * elementNumBytes);
     hipErr             = hipMalloc(&output, numElements * elementNumBytes);
-    std::vector<float> data(numElements, 0.f);
-    initData(data.data(), numElements, init);
-    hipErr = hipMemcpyHtoD(input, data.data(), numElements * elementNumBytes);
+    using namespace roc::host_numerics;
+    const Tensor data = generate(ScalarType::Float32,
+                                 Shape{numElements},
+                                 hipblaslt::host_numerics::initializationRecipe(
+                                     ScalarType::Float32,
+                                     init,
+                                     hipblaslt::host_numerics::defaultInitializationSeed,
+                                     hipblaslt::host_numerics::TrigonometricComponent::Cosine));
+    hipErr            = hipMemcpyHtoD(
+        input, data.rawEncodedBackingStorage().data(), data.rawEncodedBackingStorage().size());
     hipStream_t stream{};
     hipErr = hipStreamCreate(&stream);
     //warmup
