@@ -1601,16 +1601,13 @@ TEST(HostNumericsCblasBridge, BuildsEmptyBatchLayoutsWithoutAddressingAnElement)
 
     const hipblaslt::client::MatmulMatrix matrix{HIP_R_32F, Layout(Shape{4, 0, 3}, {1, 4, 17}), 51};
 
-    const Layout emptyColumns
-        = hipblaslt::host_numerics::referenceBatchLayout(matrix, 4, 0, HIPBLAS_OP_N, 2, false);
+    const Layout emptyColumns = matrix.logicalBatchLayout(HIPBLAS_OP_N, 2, false);
     EXPECT_EQ(emptyColumns, Layout(Shape{4, 0}, {1, 4}, 34));
 
-    const Layout emptyRows
-        = hipblaslt::host_numerics::referenceBatchLayout(matrix, 0, 4, HIPBLAS_OP_T, 2, false);
+    const Layout emptyRows = matrix.logicalBatchLayout(HIPBLAS_OP_T, 2, false);
     EXPECT_EQ(emptyRows, Layout(Shape{0, 4}, {4, 1}, 34));
 
-    const Layout separate
-        = hipblaslt::host_numerics::referenceBatchLayout(matrix, 4, 0, HIPBLAS_OP_N, 2, true);
+    const Layout separate = matrix.logicalBatchLayout(HIPBLAS_OP_N, 2, true);
     EXPECT_EQ(separate, Layout(Shape{4, 0}, {1, 4}));
 }
 
