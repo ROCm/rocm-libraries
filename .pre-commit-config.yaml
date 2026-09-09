@@ -183,6 +183,26 @@ repos:
         files: ^projects/miopen/script/(compare_forwarding_runs|test_compare_forwarding_runs)\.py$
         pass_filenames: false
 
+      # Same reasoning as the comparator above, for the two pieces of the harness whose
+      # breakage is silent rather than loud: reports written somewhere unwritable fail every
+      # parity entry on a permission error, and a mis-derived architecture label leaves ctest
+      # selecting nothing and calling it a pass.
+      - id: miopen-forwarding-parity-runner-tests
+        name: MIOpen forwarding parity runner self-tests
+        entry: python -m pytest projects/miopen/script/test_run_forwarding_parity.py -q
+        language: python
+        additional_dependencies: ["pytest==8.4.2"]
+        files: ^projects/miopen/script/(run_forwarding_parity|test_run_forwarding_parity)\.py$
+        pass_filenames: false
+
+      - id: miopen-forwarding-parity-gpu-label-tests
+        name: MIOpen forwarding parity GPU label self-tests
+        entry: python -m pytest projects/miopen/test/gtest/test_forwarding_parity_gpu_labels.py -q
+        language: python
+        additional_dependencies: ["pytest==8.4.2"]
+        files: ^projects/miopen/test/gtest/(ForwardingParityGpuLabels\.cmake|test_forwarding_parity_gpu_labels\.py|test_categories\.yaml)$
+        pass_filenames: false
+
       - id: kpack-pin-sync
         name: rocm_kpack pin is consistent (hipDNN)
         # The pin is the kpack-ref output of .github/actions/ci-env/action.yml.

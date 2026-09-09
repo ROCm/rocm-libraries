@@ -23,6 +23,7 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -59,7 +60,8 @@ def main():
         "--filter", required=True, help="gtest filter selecting the shim surface"
     )
     parser.add_argument(
-        "--output-dir", default=".", help="where the two replay XMLs are written"
+        "--output-dir",
+        help="where the two replay XMLs are written; defaults to a temporary directory",
     )
     parser.add_argument(
         "--lib-dir",
@@ -75,8 +77,16 @@ def main():
     args = parser.parse_args()
 
     gtest = Path(args.gtest).resolve()
-    output_dir = Path(args.output_dir).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # A temporary directory rather than the working directory, because ctest runs the installed
+    # entry from inside the install tree, which on a shipping prefix is root-owned and read-only
+    # to whoever runs the tests. The XMLs feed the comparison below and nothing else, so they do
+    # not need to outlive the run; the location is printed to keep a failure diagnosable.
+    if args.output_dir:
+        output_dir = Path(args.output_dir).resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        output_dir = Path(tempfile.mkdtemp(prefix="miopen_forwarding_parity_"))
+    print(f"replay reports: {output_dir}", flush=True)
 
     lib_dirs = (
         [Path(args.lib_dir)] if args.lib_dir else sorted(SCRIPT_DIR.parent.glob("lib*"))

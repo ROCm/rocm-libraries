@@ -412,13 +412,8 @@ set(MIOPEN_FORWARDING_PARITY_LABELS "forwarding_parity;quick;standard;comprehens
 # architecture carrying that architecture's label -- exactly one of which is ever selected.
 # Read back out of the YAML rather than repeated here, so adding an exclusion set does not
 # silently drop parity coverage on that architecture.
-set(MIOPEN_FORWARDING_PARITY_GPU_LABELS "")
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" MIOPEN_EXCLUDE_GPU_KEYS
-  REGEX "^  exclude_gpu_[A-Za-z0-9]+:")
-foreach(EXCLUDE_GPU_KEY IN LISTS MIOPEN_EXCLUDE_GPU_KEYS)
-  string(REGEX REPLACE "^  exclude_gpu_([A-Za-z0-9]+):.*$" "ex_gpu_\\1" GPU_LABEL "${EXCLUDE_GPU_KEY}")
-  list(APPEND MIOPEN_FORWARDING_PARITY_GPU_LABELS "${GPU_LABEL}")
-endforeach()
+set(MIOPEN_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+include(${CMAKE_CURRENT_SOURCE_DIR}/ForwardingParityGpuLabels.cmake)
 
 if( MIOPEN_TEST_DISCRETE )
   foreach(TEST ${TESTS})
