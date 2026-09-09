@@ -232,7 +232,14 @@ The consequences:
 - **Two kernels differing only in non-knob fields are indistinguishable to the model,** so they score
   identically and the deterministic `priority`-then-`id` tie-break decides
   ([Section 5](#5-selection-flow)). The loader emits a **warning** in this case: a pack carrying kernels
-  the heuristic cannot choose between indicates either a missing feature or a redundant variant.
+  the heuristic cannot choose between indicates either a missing feature or a redundant variant. Which of
+  the three remedies applies — expose the distinguishing field as a knob, split the variants into a
+  separate pack, or drop them — is the kernel author's judgement, and this RFC sets no rule for it. The
+  considerations that bear on it: **variant explosion**, since every added knob multiplies the space the
+  generation pipeline must cover ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)); whether the
+  variants differ in **function** rather than only in performance, which argues for a separate engine
+  ([Section 3.3](#33-coupling-rules)); and whether a candidate knob **changes the meaning of other knobs**,
+  which makes the feature space conditional and is poorly modelled by a single flat ranker.
 - **Knob changes and model changes are the same event.** Adding, removing, or renaming a knob means the
   UHD's feature set changed, which means a regenerated model. The two descriptors move together and are
   version-checked together ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
@@ -650,7 +657,23 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    > scanning a directory, so discovery order varies by filesystem and would rank a package differently
    > on two machines. `priority`-then-`id` is stable across runs, load orders, and machines.
 
-7. **A failure degrades the result; it never fails the request.** Descriptor sets are drop-in data from
+7. **A kernel that will not build is skipped; a malformed descriptor is not.** Selection returns a
+   ranked catalog, and the caller walks it: if the top-ranked kernel cannot be built into a plan — its
+   code object will not load, its workspace query fails — the next candidate is tried, and so on. Ranking
+   answers *which kernel is fastest*, not *which kernel exists on this machine*, so a kernel that cannot
+   be built costs only itself while a sibling still serves the graph.
+
+   The one exception is a **malformed descriptor**, which is rethrown rather than skipped. Falling past an
+   authoring error would hide the fault and silently serve a different kernel than the one authored, so
+   the two cases are distinguished deliberately: a kernel that does not fit this machine is skipped
+   quietly, and a descriptor that is wrong is loud.
+
+   This is a build-time walk, not a runtime retry. Once a plan is built and executing, there is **no
+   fallback to the runner-up**: an execution failure surfaces to the caller rather than silently
+   re-dispatching, because a kernel that reached execution was already judged applicable, and quietly
+   substituting another would mask the applicability defect that let it through.
+
+8. **A failure degrades the result; it never fails the request.** Descriptor sets are drop-in data from
    potentially third-party authors. A malformed one must not take down the system, and must not fail
    after the engine has already claimed applicability. Each failure mode resolves to a usable answer plus
    a diagnostic:
@@ -673,6 +696,18 @@ reports the top-ranked value as the default, autotune walks the ranked list, and
 the top score as the engine's figure of merit. Whatever ranks the list — model or fallback — the order
 must be **deterministic run-to-run**, which is why every fallback path terminates in `priority` then
 stable `id` rather than an arbitrary order.
+
+**Applicability is the matcher's, not the scorer's.** A scorer expresses preference through its score and
+nothing else; there is no sentinel value meaning "never pick this." A candidate that must not run is
+excluded by a matcher before it reaches the catalog, and a candidate the model merely dislikes ranks last
+on its score, which needs no separate mechanism. Overloading the score channel with an applicability
+verdict — MIOpen's convention of a NaN score sorted last, with all-NaN an error — would put a correctness
+claim in a performance number, and would reintroduce the failure mode step 8 exists to prevent: a catalog
+that is non-empty yet has nothing selectable. The one genuinely different case, a candidate whose feature
+values fall outside what the model was trained on, is a **confidence** question rather than an
+applicability one and is handled as out-of-distribution input
+([Section 8.3](#83-out-of-distribution-inputs)). **OPEN:** whether that check is applied per candidate
+rather than per model — see [Open Question 16](#operational).
 
 The winner is a single UKD, which then dispatches through its pack's UDD
 ([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)). A UHD only ranks; it never
@@ -703,6 +738,15 @@ so matching, launch, and selection read one binding.
 Computed features are not a fourth source. Quantization, ratios, and intensity are expressions over those
 same three, written inline in the `features_signature`; there is no `$derived.*` namespace and no
 named-value block ([Section 6.4](#64-computed-features)).
+
+**Reading a value is not the same as exposing it as a knob.** One problem value can serve several
+consumers at once: a batch size is a feature the UHD ranks on (`$q.dims[0]`), a criterion a UMD gates on,
+and an argument the UDD passes to the kernel — the same bound symbol, read three times. None of that makes
+it a knob. Knobs are drawn only from **KMD fields**, the engine's kernel-variant space
+([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)), and a problem or device value is
+neither settable by a caller nor a property of a kernel. The converse also holds: the KMD carries fields
+that are not knobs — dispatch detail a UDD consumes, or values a matcher gates on — so `knobs ⊆ KMD
+fields` in one direction and `UHD features ⊄ knobs` in the other.
 
 **Dims are positional, not named.** A bound tensor exposes each dim as `$q.dims[i]` and each stride as
 `$q.strides[i]`, plus the derived facts `$q.rank`, `$q.dtype`, `$q.stride_order`, and `$q.packed`. Sizes
@@ -845,7 +889,7 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
      The tokens are whatever the registered function returns on a live graph, so the published set is
      unknown at load and this validation cannot run — for a UHD exactly as for a UMD or UDD. A stale
      reference fails at match time rather than being an error at load; for a UHD that is the
-     [Section 5](#5-selection-flow) step 7 path (model not used, error logged, `static_order`). Checks
+     [Section 5](#5-selection-flow) step 8 path (model not used, error logged, `static_order`). Checks
      2–4 still apply in full. RFC 0020 records this as a limitation of the hatch, which is why the
      declarative arm is the format's steady state.
    - **No `graph_match` at all.** The engine publishes an empty table, so a `features_signature` may
@@ -885,7 +929,7 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
 
 A failed check disables the model rather than failing the request. These run at load, so a violation
 means a mis-built or mismatched descriptor set, and the model's scores would be wrong rather than missing.
-The response is the one [Section 5](#5-selection-flow) step 7 defines: the model is not used, an error is
+The response is the one [Section 5](#5-selection-flow) step 8 defines: the model is not used, an error is
 logged, ranking falls back to `static_order`, and the engine reports an estimated throughput of 0. Because
 descriptor sets are drop-in and may be third-party, the loader handles this without taking down the
 provider and without failing after the engine has claimed applicability. The error is logged and gated in
@@ -1174,6 +1218,15 @@ conditional, matching [RFC 0017](0017_UniversalKernelDescriptor.md) (see
     training-coverage gap, not a schema break; the fix is a retrain, not a load failure.
 - **Breaking change (remove or reinterpret an existing field's values):** the retrain must land in the
   same change. A removed or reinterpreted field the model still references is caught at load.
+
+In one sentence: **a KMD change that alters the UHD's feature space or value domain forces a retrain;
+additive dispatch-only fields do not.**
+
+That is the compatibility floor, not the recommendation. An additive change can also admit **new
+candidates** or widen applicability, and a model that never saw them ranks a catalog it was not trained
+on — legal by the rule above and still worse than it should be. The guidance is therefore simpler than
+the rule: **regenerate the heuristic on any KMD change.** The rule says when a model must be replaced;
+the guidance says when it is worth replacing.
 - **Renaming a field:** treated as remove plus add — a breaking change on the old name.
 
 Three descriptors can invalidate a heuristic, not one. The KMD defines the `$kernel.*` feature space; two
@@ -1663,6 +1716,56 @@ and fields, the tool only rewrites data; it never introduces a new interface. Th
 hipDNN's public API — it adds no code to hipDNN and touches no provider internals — so it works for
 any provider's pack.
 
+### 13.1.1 What the author supplies, and when
+
+The same pipeline serves first-time generation and regeneration; what differs is how much of it has to
+re-run. The trigger determines whether the existing timings can be reused or a new sweep is required,
+which is the expensive distinction:
+
+```
+What changed?
+│
+├─ Nothing yet — first heuristic for this pack
+│     author supplies: problem corpus, a fully-exposed UED (Section 13.2),
+│                      the dim↔tile correspondences (Section 13.6)
+│     → full sweep → train → emit UHD + UED
+│
+├─ Model quality only (more data, better fit; catalog unchanged)
+│     author supplies: additional corpus
+│     → extend sweep → retrain → re-emit UHD          [timings reusable, extended]
+│
+├─ Knobs pruned (feature dropped; kernels unchanged)
+│     author supplies: nothing
+│     → refit from existing timings → re-emit UHD + UED   [no new benchmarking]
+│
+├─ Kernels removed from the pack
+│     author supplies: nothing
+│     → no model change required; scores are per-candidate, so removing
+│       candidates cannot alter the ranking of those remaining (Section 14.4)
+│
+├─ Kernels added, or applicability widened
+│     author supplies: corpus covering the new cohort
+│     → sweep the new candidates → retrain → re-emit       [new timings needed]
+│
+├─ KMD changed (any change — see Section 8.1)
+│     author supplies: corpus if the change admits new candidates
+│     → regenerate; a breaking change requires it, an additive one is advised
+│
+├─ Problem inputs or op attributes changed (new bindable fields)
+│     author supplies: updated signature intent; the tool re-derives Layer 1
+│     → re-emit signature → retrain                        [Section 13.6]
+│
+└─ Target device family widened (new arch, or a SKU at a different CU count)
+      author supplies: access to the new hardware
+      → sweep there → either a new arch-keyed entry (Section 3.1)
+        or added coverage under the existing one (Section 13.5)
+```
+
+Two properties of this table are worth stating directly, because they are what make regeneration cheap.
+**Narrowing never needs new data:** pruning knobs refits from timings already collected, and dropping
+kernels needs no refit at all. **Widening always does:** a candidate, a cohort, or a device the sweep
+never saw has no evidence behind it, and no amount of refitting manufactures any.
+
 ### 13.2 Benchmarking via hipDNN Autotune
 
 The timing substrate is hipDNN's own autotune ([RFC 0013](0013_Autotune.md)), not a bespoke sweep.
@@ -1998,6 +2101,16 @@ engine's own generator before hipDNN sees anything.
 Step 2 uses the same autotune substrate as [Section 13.2](#132-benchmarking-via-hipdnn-autotune); what
 differs is *what varies* (the variant space itself, not just the shape corpus) and *what the output
 drives* (the pack's kernel set, not a model).
+
+**Coverage is the kernel author's call, and it follows the data they chose.** Pruning an AOT set for a
+non-JIT engine narrows the engine's whole supported surface ([Section 14.1](#141-aot-selection-depends-on-whether-the-engine-can-jit)),
+so the risk is a cohort losing its only applicable kernel. This RFC sets no automatic guard for that,
+because the evidence the decision rests on is the author's: they select the problem corpus the sweep runs,
+they choose which knobs it varies, and they validate the result. What the tooling can state plainly is
+that **coverage of the emitted set scales with the size and variability of the data behind it** — a
+corpus that never exercised a cohort offers no evidence about it, and pruning against that corpus prunes
+blind. Whether a knob is removed, and what coverage is sufficient before removing it, remains the
+author's decision.
 
 ### 14.3 Knob selection: static vs. empirical
 
