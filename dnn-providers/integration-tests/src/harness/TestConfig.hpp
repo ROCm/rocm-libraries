@@ -43,14 +43,17 @@ enum class ReferenceExecutorType
 //   GOLDEN       — golden data only; SKIP if a bundle has no golden outputs
 //   GPU          — ignore golden; compare engine against the GPU reference executor
 //   CPU          — ignore golden; compare engine against the CPU reference executor
-//   GOLDEN_CHECK — no engine; compare golden data against CPU ref (data validation)
+//
+// Validating golden data against a reference is *not* a mode here: it involves no
+// engine, so it is a separate harness selected by --validate-golden-data. Folding
+// it in as a mode produced a "verification mode" that never reached an engine and
+// therefore never enforced the claims this harness exists to enforce.
 enum class VerificationMode
 {
     AUTO,
     GOLDEN,
     GPU,
     CPU,
-    GOLDEN_CHECK,
 };
 
 // Parse a verification-mode string (case-insensitive) into the enum. Throws
@@ -79,10 +82,14 @@ inline VerificationMode parseVerificationMode(std::string value)
     }
     if(value == "golden-check")
     {
-        return VerificationMode::GOLDEN_CHECK;
+        throw std::runtime_error(
+            "verification-mode 'golden-check' has been retired. Validating golden data "
+            "against a reference is no longer a mode of the engine harness -- run the "
+            "hipdnn_golden_data_tests binary instead, and unset "
+            "HIPDNN_TEST_VERIFICATION_MODE");
     }
     throw std::runtime_error("Invalid verification mode '" + value
-                             + "'; expected 'auto', 'golden', 'gpu', 'cpu', or 'golden-check'");
+                             + "'; expected 'auto', 'golden', 'gpu', or 'cpu'");
 }
 
 // Resolve verification mode: CLI value wins, then env var, then nullopt (caller
@@ -226,6 +233,14 @@ public:
         instance._currentPlatform = currentPlatform();
 
         instance._initialized = true;
+    }
+
+    // Whether initialize() has run. Every other accessor throws before that, so
+    // unit tests that drive harness code need a way to ask instead of guessing at
+    // suite ordering.
+    static bool isInitialized()
+    {
+        return get()._initialized;
     }
 
     bool hasArticlePath() const

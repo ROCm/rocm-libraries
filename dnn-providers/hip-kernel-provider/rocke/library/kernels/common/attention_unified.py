@@ -125,6 +125,18 @@ class UnifiedAttentionProblem:
     # cache; 0 means "unknown" (assume small / fast i32 path). The
     # dispatcher fills this from the K tensor when available.
     num_kv_blocks: int = 0
+    # Arch the split-KV SEGMENT CLAMP keys on, threaded from the dispatch request.
+    #
+    # This is NOT the spec's authoritative arch. The 3D spec CLASS and every other
+    # tuning field (tile_size_override, waves_per_eu, the hoist / wide-KV gates)
+    # still come from the running box via ``_resolve_attention_arch`` -- see
+    # ``builders/common/attention_spec_builder.py::_tiled_3d_spec_from_problem``.
+    # ``num_segments`` is the one field keyed here, so that an off-box
+    # tuner/benchmark passing an explicit ``num_cus`` while targeting one arch
+    # never picks up another arch's clamp. When the two sources disagree the
+    # clamp stops describing the kernel that actually gets built; unifying them
+    # is tracked separately. ``None`` => fall back to the running-box arch.
+    clamp_arch: Optional[str] = None
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -2877,28 +2889,44 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
 
 
 # Reference CU count for the split-KV segment clamp below. This is NOT the device
-# count (routing resolves that live, per AICK-1722); it is the tuned pre-bump
+# count (routing resolves that live); it is the tuned pre-bump
 # baseline -- the segment count the formula produced at the historical num_cus=120
 # -- used only as the safe ceiling so raising num_cus cannot over-split 3D shapes.
 _PRE_BUMP_CUS = 120
+
+
+def _pre_bump_segments(problem: UnifiedAttentionProblem) -> int:
+    """Segment count the split-KV formula produced at the historical
+    ``num_cus=120`` (target 480) for this shape -- the arch-independent safe
+    ceiling every arch's clamp bounds to, so raising ``num_cus`` can never
+    over-split an already-3D shape. One source of truth (gfx942 / gfx950, and
+    gfx1250 when it lands) rather than pasted per arch.
+    """
+    num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
+    min_seg = 16 if problem.block_size <= 16 else 8
+    return max(
+        min(_next_power_of_2((_PRE_BUMP_CUS * 4 + num_2d - 1) // num_2d), 128),
+        min_seg,
+    )
 
 
 def _num_segments(problem: UnifiedAttentionProblem) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
+    # Key the clamp on the arch this problem targets when the dispatcher threaded
+    # it through; fall back to the running-box arch otherwise. This keeps an
+    # off-box build targeting one arch from picking up another arch's clamp.
+    # NOTE ``clamp_arch`` governs THIS field only -- the spec class and the other
+    # tuning fields still resolve from the running box.
+    arch = problem.clamp_arch or _resolve_attention_arch()
     # Routing uses the device CU count (num_cus*4) so under-filled grids flip
     # 2D->3D; but the split-KV segment count must stay bounded, else the reduce
     # round-trip over-splits 3D shapes. The PRE-BUMP baseline (segments the same
     # formula produced at the reference num_cus=120 -> target=480) is the
     # universally-safe ceiling: clamping to it can never do worse than shipped.
-    if _resolve_attention_arch() == "gfx942" and problem.sliding_window == 0:
-        num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
-        min_seg = 16 if problem.block_size <= 16 else 8
-        pre_bump = max(
-            min(_next_power_of_2((_PRE_BUMP_CUS * 4 + num_2d - 1) // num_2d), 128),
-            min_seg,
-        )
+    if arch == "gfx942" and problem.sliding_window == 0:
+        pre_bump = _pre_bump_segments(problem)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
             if problem.max_seqlen_k <= 2048:
@@ -2923,6 +2951,36 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             # is unmeasured -> clamp to the pre-bump baseline so the routing bump can
             # never over-split prefill (identical to the shipped num_cus=120 split).
             return min(segments, pre_bump)
+    if (
+        arch == "gfx950"
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+    ):
+        # CONSERVATIVE gfx950 clamp: bound EVERY already-3D shape to the pre-bump
+        # (num_cus=120 -> target 480) baseline split, capturing the 2D->3D reroute
+        # win with zero over-split regression.
+        #
+        # For DEFAULT callers -- num_cus resolved from the device -- this is
+        # exactly the shipped split, byte-identical. A caller that ALREADY passed
+        # an explicit num_cus > 120 is the one exception: that path was previously
+        # unclamped and is now capped, so it gets a coarser split than before.
+        #
+        # ESCAPE HATCH: an explicit ``target_ctas > 0`` skips this clamp entirely
+        # (the guard above), restoring the pre-clamp split. It has to be the guard
+        # and not a bigger target: ``target_ctas`` raises the RAW split through
+        # ``_effective_target_ctas``, but ``_pre_bump_segments`` is derived from the
+        # fixed ``_PRE_BUMP_CUS`` and ignores it, so ``min(segments, pre_bump)``
+        # would cap any target straight back to the 120-baseline ceiling. That is
+        # also why the knob's contract ("replaces num_cus*4 for routing AND
+        # segmentation") only holds here if the clamp steps aside.
+        #
+        # UNLIKE the gfx942 branch above, this one has no measured carve-outs:
+        # every shape is clamped, none falls through. Carve-outs for shapes where
+        # a finer split is measured to win on gfx950 can be added here later, each
+        # gated by its own measurement -- never assumed from gfx942, whose CU
+        # count, LDS, and reduce cost all differ.
+        pre_bump = _pre_bump_segments(problem)
+        return min(segments, pre_bump)
     return segments
 
 
@@ -4055,6 +4113,32 @@ def _get_2d_launcher(
     return launcher
 
 
+def gfx942_gqa_fold_eligible(
+    head_size, num_queries_per_kv, sliding_window, dtype, block_size
+) -> bool:
+    """GQA head-fold cohort predicate -- SINGLE source of truth for the builder and
+    the launch grid (they MUST agree or the kernel and its grid disagree).
+
+    The fold packs the 4 GQA query heads that share a kv-head into the 128-row M-tile
+    (32 tokens x 4 heads) so KV is loaded once per kv-head instead of 4x (the HBM
+    traffic cut). Applies to the D128 / 4:1-GQA / sliding-window / bf16 / paged cohort
+    with block_size <= 32 (the tiled 4-warp double-buffer path).
+    """
+    return (
+        int(head_size) == 128
+        and int(num_queries_per_kv) == 4
+        and int(sliding_window or 0) > 0
+        # bf16-only is a MEASUREMENT boundary, not a structural one: the fold is a
+        # data-movement change (pack 4 heads per M-tile so KV is read once per
+        # kv-head) and the fp16 MFMA atom has the same 32x32x8 geometry, so it
+        # would very likely fold correctly. It is excluded because only bf16 has an
+        # A/B run behind it. Widening to fp16 requires a measured fp16 A/B plus a
+        # numeric-oracle case, not just deleting this clause.
+        and str(dtype) == "bf16"
+        and int(block_size) <= 32
+    )
+
+
 def _get_2d_launch_meta(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
@@ -4065,14 +4149,24 @@ def _get_2d_launch_meta(
     arch = _resolve_attention_arch()
     route = _gfx942_4warp_route(problem)
     if route is not None:
-        # 4-warp GQA paged kernel: 4 wave64/CTA own BLOCK_M q-tokens for ONE
-        # query head. grid = (num_query_heads, q-token-blocks + per-seq padding).
-        # block_q == BLOCK_M, matching the kernel's binary_search_seq_idx.
-        total_num_q_blocks = problem.total_q // route.block_m + problem.num_seqs
-        meta = _Attention2DLaunchMeta(
-            grid=(int(problem.num_query_heads), int(total_num_q_blocks), 1),
-            block=route.block_dim,
+        _fold = gfx942_gqa_fold_eligible(
+            problem.head_size,
+            problem.num_queries_per_kv,
+            problem.sliding_window,
+            problem.dtype,
+            problem.block_size,
         )
+        if _fold:
+            # GQA head-fold cohort: one CTA covers 32 q-tokens x nqpk heads for one
+            # kv-head (KV loaded once). grid.x = num_kv_heads, grid.y = 32-token blocks.
+            total_num_q_blocks = problem.total_q // 32 + problem.num_seqs
+            grid = (int(problem.num_kv_heads), int(total_num_q_blocks), 1)
+        else:
+            # 4-warp GQA paged kernel: 4 wave64/CTA own BLOCK_M q-tokens for ONE query
+            # head. grid = (num_query_heads, q-token-blocks + per-seq padding).
+            total_num_q_blocks = problem.total_q // route.block_m + problem.num_seqs
+            grid = (int(problem.num_query_heads), int(total_num_q_blocks), 1)
+        meta = _Attention2DLaunchMeta(grid=grid, block=route.block_dim)
         _2D_LAUNCH_META[meta_key] = meta
         return meta
     if _enable_gfx942_bf16_flash(problem):

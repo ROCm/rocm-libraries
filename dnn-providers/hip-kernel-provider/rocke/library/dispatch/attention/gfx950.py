@@ -27,29 +27,44 @@ from .common import (
     _selector_matches,
 )
 
-# block_n (KV tile) the dense candidate ships; 64 is the resource-efficient
-# peak (see AttentionDenseSpec.block_n).
-_DENSE_BLOCK_N = 64
+_DENSE_GEOMETRY = "default"
+_DENSE_LAYOUT = "default"
 
 
 def _dense_spec(req: OperatorRequest):
     """Build the ``AttentionDenseSpec`` for a request at its best-performing
-    config. Persistent ("auto") turns on the grid-stride ~970-TFLOPS variant once
+    config. Persistent ("auto") turns on the grid-stride fast path once
     there is enough work to fill the persistent grid (``nqb*Hq*B >= num_persistent``
-    -- the large-Sq prefill regime); ``persist_decode`` / ``lazy_rescale`` default
-    to the L2-locality hkv-major decode and always-on lazy rescale. Non-tile-
+    -- the large-Sq prefill regime). ``persist_decode="auto"`` selects the
+    balanced GQA mappings whenever their CTA-count invariants hold, hkv-major
+    where its broader balance condition holds, and qb-major otherwise. Aligned
+    persistent causal D128/BN64 shapes use the wide-DMA+IGLP path. Non-tile-
     multiple self-attention lengths use the on-chip ragged path (no host pad)."""
-    from kernels.gfx950.attention_dense import AttentionDenseSpec, _BLOCK_M
+    from kernels.common.attention_dense_spec import (
+        DENSE_TILE_GEOMETRIES,
+    )
+    from kernels.gfx950.attention_dense import (
+        GFX950_DENSE_LAYOUTS,
+        Gfx950AttentionDenseSpec,
+    )
 
     assert isinstance(req, AttentionRequest)
+    if req.arch != "gfx950":
+        raise ValueError(
+            f"gfx950 dense spec factory requires arch='gfx950', got {req.arch!r}"
+        )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     sw = int(req.sliding_window)
     use_sinks = bool(req.use_sinks)
-    bn = _DENSE_BLOCK_N
+    geometry = DENSE_TILE_GEOMETRIES[_DENSE_GEOMETRY]
+    layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
+    bm = int(geometry["block_m"])
+    bn = int(geometry["block_n"])
+    decode = req.dense_persist_decode.strip().lower()
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
-    ragged = (sq == sk) and ((sq % _BLOCK_M != 0) or (sk % bn != 0))
-    nqb = (sq + _BLOCK_M - 1) // _BLOCK_M
+    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
+    nqb = (sq + bm - 1) // bm
     work = nqb * int(req.nhead_q) * int(req.batch)
     np = int(req.dense_num_persistent)
     mode = req.dense_persistent.strip().lower()
@@ -63,7 +78,21 @@ def _dense_spec(req: OperatorRequest):
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
         )
-    return AttentionDenseSpec(
+    # Capability gate for gfx950 128-bit buffer-to-LDS slab DMA plus IGLP.
+    # Shape-specific production qualification used to restrict this to one
+    # Llama-3-8B point; retain only the implementation's actual invariants so
+    # adjacent aligned causal prefill shapes can be measured.
+    wide_lds_dma = (
+        persistent
+        and int(req.hdim_q) == 128
+        and int(req.hdim_v) == 128
+        and req.dtype.lower() in ("fp16", "bf16")
+        and int(req.mask_type) != 0
+        and sw == 0
+        and not use_sinks
+        and not ragged
+    )
+    return Gfx950AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
         seqlen_kv=sk,
@@ -72,13 +101,16 @@ def _dense_spec(req: OperatorRequest):
         head_size=int(req.hdim_q),
         causal=(int(req.mask_type) != 0),
         dtype=req.dtype.lower(),
+        block_m=bm,
         block_n=bn,
+        lds_v_row_pad=int(layout["lds_v_row_pad"]),
         persistent=persistent,
         num_persistent=np,
-        persist_decode=req.dense_persist_decode.strip().lower(),
+        persist_decode=decode,
         ragged=ragged,
         sliding_window=sw,
         use_sinks=use_sinks,
+        wide_lds_dma=wide_lds_dma,
     )
 
 
@@ -96,9 +128,12 @@ def _make_gfx950_attention_dense_candidate() -> KernelCandidate:
     ``algorithm="attention_dense"`` (or ``spec_id="gfx950_attention_dense"``), so it
     never auto-overrides the generic unified_2d path (no change to default routing).
     When selected it uses the persistent best-config from :func:`_dense_spec`
-    (grid-stride + hkv-major + lazy for large Sq); the concrete kernel_name (incl.
-    ``persist``/``hkvmaj``/``lazyrs``/``ragged``) is surfaced on the spec so the
-    launched kernel is the fast path, not the default grid. End-to-end launch is
+    (grid-stride + a balance-safe GQA-local decode + lazy rescale for large Sq,
+    plus wide DMA/IGLP on aligned causal D128/BN64 shapes); the concrete kernel
+    name (including ``gqapair``/``gqapair2``/``hkvmaj``/``wdma`` where selected)
+    is surfaced on the spec so the launched kernel is the fast path, not the
+    default grid.
+    End-to-end launch is
     ``run_attention_dense_torch(spec=dense_spec_for_request(req), ...)``.
     """
     spec_id = "gfx950_attention_dense"

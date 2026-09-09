@@ -67,7 +67,7 @@ def make_config(
 
     # Select the following type names
     # TODO: derive this from alg name maybe?
-    type_names = ["key_type", "value_type"]
+    type_names = ["key_type", "value_type", "data_type", "flag_type"]
     # Only select relevant types
     type_info = {k: type_data[k] for k in type_names if k in type_data}
     # Annotate with extra info for jinja
