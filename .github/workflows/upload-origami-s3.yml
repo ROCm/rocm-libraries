@@ -1,9 +1,6 @@
 name: Upload Origami artifacts to S3
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/upload-origami-s3.yml"
   workflow_dispatch:
     inputs:
       source_path:
