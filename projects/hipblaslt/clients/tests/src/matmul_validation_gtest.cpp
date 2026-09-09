@@ -24,12 +24,8 @@ namespace
         MatmulValidationCase       testCase;
         for(size_t batch = 0; batch < expected.size(); ++batch)
         {
-            HostComparisonRequest output;
-            output.rows = output.columns = output.leadingDimension = output.batchCount = 1;
-            output.expected = &expected[batch];
-            output.observed = &observed[batch];
-            output.type     = HIP_R_32F;
-            testCase.outputs.push_back(output);
+            testCase.outputs.emplace_back(roc::host_numerics::Tensor(expected[batch]),
+                                          roc::host_numerics::Tensor(observed[batch]));
         }
 
         double error = 0.0, absolute = 0.0, relative = 0.0, maximumUlp = 0.0, averageUlp = 0.0;
@@ -40,15 +36,10 @@ namespace
         return {error, passed};
     }
 
-    hipblaslt::host_numerics::HostComparisonRequest scalarComparison(const float* expected,
-                                                                     const float* observed)
+    hipblaslt::host_numerics::MatmulValidationCase::TensorPair scalarComparison(float expected,
+                                                                                float observed)
     {
-        hipblaslt::host_numerics::HostComparisonRequest output;
-        output.rows = output.columns = output.leadingDimension = output.batchCount = 1;
-        output.expected                                                            = expected;
-        output.observed                                                            = observed;
-        output.type                                                                = HIP_R_32F;
-        return output;
+        return {roc::host_numerics::Tensor(expected), roc::host_numerics::Tensor(observed)};
     }
 
     std::pair<double, double>
@@ -85,7 +76,7 @@ TEST(HostNumericsMatmulValidation, PointerArrayOutputsKeepCombinedAllCloseTolera
     const std::array<float, 3> observed{0.005f, 1.005f, 1.0f};
     MatmulValidationCase       testCase;
     for(size_t output = 0; output < expected.size(); ++output)
-        testCase.outputs.push_back(scalarComparison(&expected[output], &observed[output]));
+        testCase.outputs.push_back(scalarComparison(expected[output], observed[output]));
 
     const auto [absolute, relative]
         = validateAllClose(std::span<const MatmulValidationCase>(&testCase, 1));
@@ -101,11 +92,40 @@ TEST(HostNumericsMatmulValidation, GroupedCasesKeepEarlierAllCloseFailure)
     const std::array<float, 2>          observed{2.0f, 1.0f};
     std::array<MatmulValidationCase, 2> cases;
     for(size_t problem = 0; problem < cases.size(); ++problem)
-        cases[problem].outputs.push_back(scalarComparison(&expected[problem], &observed[problem]));
+        cases[problem].outputs.push_back(scalarComparison(expected[problem], observed[problem]));
 
     const auto [absolute, relative] = validateAllClose(cases);
     EXPECT_DOUBLE_EQ(absolute, 1.0);
     EXPECT_DOUBLE_EQ(relative, 1.0);
+}
+
+TEST(HostNumericsMatmulValidation, EmptyOutputsAreNoOps)
+{
+    using namespace hipblaslt::host_numerics;
+    using namespace roc::host_numerics;
+
+    MatmulValidationCase testCase;
+    testCase.outputs.emplace_back(Tensor(ScalarType::Float32, Shape{0, 3, 2}),
+                                  Tensor(ScalarType::Float32, Shape{0, 3, 2}));
+
+    double relativeFrobenius = 0.0;
+    double absolute          = 0.0;
+    double relative          = 0.0;
+    double maximumUlp        = 0.0;
+    double averageUlp        = 0.0;
+    EXPECT_TRUE(
+        validateMatmulOutputs({.compareAllClose = true,
+                               .compareNorm     = true,
+                               .searchAllClose  = true,
+                               .computeUlp      = true,
+                               .assertNorm      = true},
+                              std::span(&testCase, 1),
+                              {relativeFrobenius, absolute, relative, maximumUlp, averageUlp}));
+    EXPECT_EQ(relativeFrobenius, 0.0);
+    EXPECT_EQ(absolute, 0.0);
+    EXPECT_EQ(relative, 0.0);
+    EXPECT_EQ(maximumUlp, 0.0);
+    EXPECT_EQ(averageUlp, 0.0);
 }
 
 TEST(MatmulAlgoIndex, MixedValidityContract)
