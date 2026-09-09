@@ -93,7 +93,7 @@ jobs:
       contents: read
       id-token: write
 
-  multi_arch_ci_summary:
+  multi_arch_ci_asan_summary:
     name: Multi-Arch CI ASAN Summary
     if: always()
     needs:
