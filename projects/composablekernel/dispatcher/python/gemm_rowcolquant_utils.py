@@ -375,6 +375,9 @@ def _uses_ocp_fp8(gfx_arch: Optional[str]) -> bool:
 
     Mirrors the CK_USE_OCP_FP8 compile-time switch. Defaults to OCP when the
     arch is unknown (None) to preserve the historical gfx950 self-test default.
+
+    The gfx12 test here is deliberately FAMILY-WIDE (all gfx12xx parts use OCP)
+    and must not be narrowed to the exact gfx1250 match used for warp_tile_k.
     """
     if not gfx_arch:
         return True
@@ -519,6 +522,10 @@ def _compile_rowcolquant_kernel(
     # CMakeLists.txt definitions that are normally injected by CMake but are
     # absent in the standalone hipcc build path.
     arch_defines = []
+    # OCP fp8 encoding is a whole-gfx12-family property (gfx1200/gfx1201/gfx1250
+    # all use OCP e4m3/e5m2), so this substring test is intentional and must NOT
+    # be narrowed to an exact gfx1250 match the way _is_gfx1250 is used for
+    # warp_tile_k -- narrowing it would break fp8 on gfx1200/gfx1201.
     if "gfx12" in gfx_arch or "gfx950" in gfx_arch:
         arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
     if "gfx950" in gfx_arch:
@@ -697,11 +704,36 @@ def expand_rowcolquant_sweep(
 # =============================================================================
 
 
+def _is_gfx1250(gfx_arch):
+    """EXACT gfx1250 match, tolerant of feature suffixes (``gfx1250:xnack-``).
+
+    Deliberately exact, NOT a ``"gfx12" in gfx_arch`` family test.  This module
+    contains both kinds of gfx12 predicate and they must never be "tidied" into
+    each other:
+
+      * OCP fp8 encoding (``_uses_ocp_fp8``) and the ``-DCK_TILE_USE_OCP_FP8``
+        compile defines: family-wide ``"gfx12" in ...`` is CORRECT -- every
+        gfx12xx part uses OCP e4m3/e5m2, so narrowing those would break fp8 on
+        gfx1200/gfx1201.
+      * 8-bit ``warp_tile_k`` selection (this helper): family-wide is a BUG.
+        gfx1200/gfx1201 expose only a 16x16x16 8-bit WMMA fragment, so the K=128
+        warp tile does not exist on them; the kernel would still compile and
+        silently return garbage.
+
+    #11043 adds a shared ``normalize_gfx_arch()`` to ``codegen_common.py``; this
+    private helper should collapse onto it once that PR lands.
+    """
+    return (gfx_arch or "").split(":")[0] == "gfx1250"
+
+
 def _warp_tile_k_for(variant_key: str, gfx_arch: str) -> int:
     """Arch-derived K warp-tile, mirroring ck_tile::get_k_warp_tile<PrecType, 16>().
 
-    (tile_gemm_shape.hpp, M_Warp_Tile=16, non-WMMA path)
+    (tile_gemm_shape.hpp, M_Warp_Tile=16)
       gfx950 (CK_GFX950_SUPPORT): fp8/bf8 -> 128
+      gfx1250 (WMMA, EXACT match -- see _is_gfx1250): fp8/bf8 -> 128.  NOT the
+              whole gfx12 family: gfx1200/gfx1201 have only a 16x16x16 8-bit
+              fragment and would silently mis-execute at K=128.
       gfx942/other              : fp8/bf8 ->  32   (no 16x16x128 fp8/bf8 warp-gemm)
 
     This is a BLOCKING correctness constraint, not just a naming detail: a
@@ -710,7 +742,7 @@ def _warp_tile_k_for(variant_key: str, gfx_arch: str) -> int:
     uses 16x16x32 on gfx942 and is bit-exact there with warp_tile_k=32.
     """
     is_8bit_float = variant_key in ("fp8", "bf8")
-    if ("gfx950" in gfx_arch or "gfx12" in gfx_arch) and is_8bit_float:
+    if ("gfx950" in gfx_arch or _is_gfx1250(gfx_arch)) and is_8bit_float:
         return 128
     return 32
 
@@ -719,8 +751,8 @@ def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelCo
     """Return the default fp8 RowColQuant config (tile = 16x64x256, warp = 1x4x1).
 
     Matches GemmConfigRowColQuant<fp8_t>. WarpTileK is arch-derived via
-    get_k_warp_tile<fp8_t, M_Warp_Tile=16>(): 128 on gfx950, 32 on gfx942
-    (128 silently outputs all-zeros on gfx942).
+    get_k_warp_tile<fp8_t, M_Warp_Tile=16>(): 128 on gfx950 and gfx1250, 32 on
+    gfx942 (128 silently outputs all-zeros on gfx942).
     """
     return RowColQuantKernelConfig(
         variant_key="fp8",
@@ -740,7 +772,7 @@ def default_bf8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelCo
     """Return the default bf8 RowColQuant config (tile = 16x64x256, warp = 1x4x1).
 
     Matches GemmConfigRowColQuant<bf8_t>. WarpTileK is arch-derived via
-    get_k_warp_tile<bf8_t, M_Warp_Tile=16>(): 128 on gfx950, 32 on gfx942
+    get_k_warp_tile<bf8_t, M_Warp_Tile=16>(): 128 on gfx950 and gfx1250, 32 on gfx942
     (128 silently outputs all-zeros on gfx942).
     """
     return RowColQuantKernelConfig(

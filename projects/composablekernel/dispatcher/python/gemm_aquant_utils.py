@@ -501,6 +501,10 @@ def _compile_aquant_kernel(
     # These mirror the CMakeLists.txt definitions normally injected by CMake but
     # absent in the standalone hipcc build path.
     arch_defines = []
+    # OCP fp8 encoding is a whole-gfx12-family property (gfx1200/gfx1201/gfx1250
+    # all use OCP e4m3/e5m2), so the substring test here is intentional and must
+    # NOT be narrowed to an exact gfx1250 match the way _is_gfx1250 is used for
+    # warp_tile_k selection below -- narrowing it would break fp8 on gfx1200/1201.
     if "gfx12" in gfx_arch or "gfx950" in gfx_arch:
         arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
     if "gfx950" in gfx_arch:
@@ -682,6 +686,27 @@ def expand_aquant_sweep(
 # =============================================================================
 
 
+def _is_gfx1250(gfx_arch: Optional[str]) -> bool:
+    """EXACT gfx1250 match, tolerant of feature suffixes (``gfx1250:xnack-``).
+
+    Deliberately exact, NOT a ``"gfx12" in gfx_arch`` family test.  This file has
+    two distinct kinds of gfx12 predicate and they must never be "tidied" into
+    each other:
+
+      * OCP fp8 encoding / ``-DCK_TILE_USE_OCP_FP8`` compile defines: family-wide
+        ``"gfx12" in ...`` is CORRECT -- every gfx12xx part (gfx1200, gfx1201,
+        gfx1250) uses the OCP fp8/bf8 encodings.
+      * 8-bit ``warp_tile_k`` selection (this helper): family-wide is a BUG.
+        gfx1200/gfx1201 expose a 16x16x16 8-bit WMMA fragment, so the K=128 warp
+        tile below does not exist on them; such a kernel still compiles and
+        silently returns garbage -- the same failure mode as K=128 on gfx942.
+
+    #11043 adds a shared ``normalize_gfx_arch()`` to ``codegen_common.py``; this
+    private helper should collapse onto it once that PR lands.
+    """
+    return (gfx_arch or "").split(":")[0] == "gfx1250"
+
+
 def _warp_tile_k_for(gfx_arch: str, preshuffle_aquant: bool = False) -> int:
     """Arch-derived K warp-tile, mirroring ck_tile::get_k_warp_tile<PrecType, 16, IsFlatMM>().
 
@@ -693,8 +718,12 @@ def _warp_tile_k_for(gfx_arch: str, preshuffle_aquant: bool = False) -> int:
     pipeline (decode = IsFlatMM false, preshufflequant = IsFlatMM true):
 
       gfx950 (CK_GFX950_SUPPORT): 128   (both decode and preshufflequant)
-      gfx942/other, decode  (IsFlatMM=false): 32
-      gfx942/other, preshuf (IsFlatMM=true) : 64
+      gfx1250 (WMMA, 16x16x128 8-bit fragment): 128 (likewise IsFlatMM-independent)
+      gfx942/gfx90a/other, decode  (IsFlatMM=false): 32
+      gfx942/gfx90a/other, preshuf (IsFlatMM=true) : 64
+
+    The gfx1250 test is EXACT (see _is_gfx1250) and must not be widened to the
+    gfx12 family: gfx1200/gfx1201 have only a 16x16x16 8-bit WMMA fragment.
 
     This is a BLOCKING correctness constraint, not just a naming detail: a
     warp_tile_k=128 fp8/bf8 kernel *compiles* on gfx942 but silently produces
@@ -702,7 +731,7 @@ def _warp_tile_k_for(gfx_arch: str, preshuffle_aquant: bool = False) -> int:
     on the sibling tensor_quant/rowcolquant bridges).  Old-TE uses 16x16x32 on
     gfx942 for decode and is bit-exact there with warp_tile_k=32.
     """
-    if "gfx950" in gfx_arch or "gfx12" in gfx_arch:
+    if "gfx950" in gfx_arch or _is_gfx1250(gfx_arch):
         return 128
     # gfx942 / gfx90a / other: 8-bit-float PrecType, M_Warp_Tile=16 non-WMMA path.
     return 64 if preshuffle_aquant else 32
@@ -710,7 +739,7 @@ def _warp_tile_k_for(gfx_arch: str, preshuffle_aquant: bool = False) -> int:
 
 # =============================================================================
 # Decode family (GemmConfigQuantDecodeInterwave, tile 16x64x256, IsFlatMM=false)
-#   fp8/bf8/fp8i4/bf8i4: K_warp = 128 on gfx950, 32 on gfx942.
+#   fp8/bf8/fp8i4/bf8i4: K_warp = 128 on gfx950/gfx1250, 32 on gfx942/gfx90a.
 # =============================================================================
 
 
