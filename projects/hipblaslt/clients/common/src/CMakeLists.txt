@@ -8,7 +8,6 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/host_numerics/DataInitialization.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/host_numerics/HipblasltReferenceGemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/host_numerics/MatmulValidation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MatmulPreparation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MatmulProblem.cpp"
