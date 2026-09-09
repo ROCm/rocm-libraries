@@ -137,8 +137,9 @@ def find_constant_feature_columns(
     rocKE's attention kernels pin 8 of their 14 fields, and it can never vary among the
     candidates the model will rank -- or because the *corpus* is thin, in which case the
     column does vary in the world and dropping it yields a model that cannot generalise.
-    A CSV cannot tell the two apart, so the caller decides (see --keep-constant-features
-    in __main__.py) and this function refuses to guess.
+    A CSV cannot tell the two apart, so keeping is the default and an explicit
+    --drop-constant-features (see __main__.py) carries the decision, and the removal
+    through to the UED's knobs. This function refuses to guess.
 
     Returned in the caller's requested order so messages and the manifest read the way
     the --features list was typed.

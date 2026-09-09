@@ -3,18 +3,26 @@
 # SPDX-License-Identifier: MIT
 """Feature columns that never vary, and the two opposite reasons they are constant.
 
-A column with one value across the corpus carries no ranking signal, bloats
-features_signature, changes features_hash, and buys a feature extraction per candidate
-score at runtime (RFC 0019 §7.2). Dropping it is the default -- rocKE's attention
-kernels bake their geometry in, so 8 of 14 kernel fields are pinned by the matcher
-before ranking begins and are constant *by construction*.
+A column with one value across the corpus carries no ranking signal, and carrying it
+costs a feature extraction per candidate score at runtime (RFC 0019 §7.2). That argues
+for dropping it. But the two reasons a column is constant look identical in a CSV:
+rocKE's attention kernels bake their geometry in, so 8 of 14 kernel fields are pinned
+by the matcher and are constant *by construction* -- while a column that does vary in
+the world, sampled at one value by a thin sweep, reads exactly the same.
 
-The opposite case looks identical in a CSV: a column that does vary in the world, only
-ever sampled at one value, where dropping produces a model that cannot generalise and
-the real fix is a wider corpus. So every test here pins one of the three things the
-tool owes the caller when it cannot tell those apart -- say what it dropped, record it
-in the manifest, and let the caller override -- plus the one case where neither answer
-is acceptable and the run has to fail.
+Keeping is therefore the default. Dropping on corpus evidence makes features_signature
+-- and features_hash, the contract the runtime checks -- a function of which problems
+were swept, so one engine trained on two corpora ships two different contracts, and a
+model that cannot generalise on the axis the sweep missed.
+
+`--drop-constant-features` is the author saying they have decided the field is not
+worth varying. It is not only a signature change: promote carries it through to the
+UED's knob list, because a knob the engine advertises and no model reads is a dial
+callers can turn for nothing.
+
+So every test here pins one of the four things the tool owes the caller -- keep by
+default, surface the constants either way, honour an explicit drop end to end, and
+fail outright when nothing varies at all.
 """
 from __future__ import annotations
 
@@ -108,33 +116,40 @@ def _manifest(output_dir: Path) -> dict:
 
 
 # --------------------------------------------------------------------------------
-# Default: drop, loudly
+# Default: keep, and say so
 # --------------------------------------------------------------------------------
 
 
-def test_constant_column_is_absent_from_the_emitted_signature(tmp_path):
-    """The descriptor is the artifact that reaches the runtime. A constant column left
-    in it costs an extraction per candidate score forever, for a value the extractor
-    already knows."""
+def test_a_constant_column_stays_in_the_emitted_signature(tmp_path):
+    """The default keeps every requested column.
+
+    Constancy is measured against the corpus, and a CSV cannot tell a field the pack
+    pins from one a thin sweep failed to cover. Dropping on that evidence makes
+    features_signature -- and therefore features_hash, the contract the runtime checks
+    -- a function of which problems happened to be swept, so the same engine trained on
+    two corpora ships two different contracts.
+    """
     output_dir = tmp_path / "model"
 
     assert _train(output_dir, _one_varying_two_constant(tmp_path / "bench.csv"), THREE_FEATURES) == 0
 
-    assert _descriptor(output_dir)["features_signature"] == ["$kernel.block_size"]
+    descriptor = _descriptor(output_dir)
+    assert descriptor["features_signature"] == build_features_signature(THREE_FEATURES)
+    assert descriptor["features_hash"] == compute_features_hash(descriptor["features_signature"])
 
 
-def test_manifest_records_what_was_dropped_and_what_was_asked_for(tmp_path):
-    """Provenance: a tool that emits a different feature set than requested and does not
-    say so is the same defect class as a silently-ignored model."""
+def test_manifest_records_what_was_kept_and_what_never_varied(tmp_path):
+    """Provenance: keeping a column is not the same as the column being useful, and the
+    manifest is where that difference is recorded."""
     output_dir = tmp_path / "model"
 
     assert _train(output_dir, _one_varying_two_constant(tmp_path / "bench.csv"), THREE_FEATURES) == 0
 
     manifest = _manifest(output_dir)
     assert manifest["requested_features"] == THREE_FEATURES
-    assert manifest["features"] == ["kernel.block_size"]
-    assert manifest["dropped_constant_features"] == ["kernel.tile_m", "device.cu_count"]
-    assert manifest["keep_constant_features"] is False
+    assert manifest["features"] == THREE_FEATURES
+    assert manifest["dropped_constant_features"] == []
+    assert manifest["drop_constant_features"] is False
     # Values, not just names: "which column" without "stuck at what" does not tell the
     # reader whether the corpus or the matcher pinned it. Plain ints, because a boxed
     # numpy scalar would have raised TypeError at the manifest write.
@@ -144,7 +159,10 @@ def test_manifest_records_what_was_dropped_and_what_was_asked_for(tmp_path):
     ]
 
 
-def test_drop_is_reported_by_name_with_its_single_value(tmp_path, caplog):
+def test_constants_are_surfaced_by_name_and_value_even_when_kept(tmp_path, caplog):
+    """The kernel author has to hear it. A constant field is the one finding that costs
+    no benchmark -- only the corpus -- and it is the finding that tells them a declared
+    knob is buying nothing."""
     output_dir = tmp_path / "model"
 
     with caplog.at_level("WARNING"):
@@ -153,38 +171,39 @@ def test_drop_is_reported_by_name_with_its_single_value(tmp_path, caplog):
             == 0
         )
 
-    assert "DROPPED constant feature column kernel.tile_m: every row is 128" in caplog.text
-    assert "DROPPED constant feature column device.cu_count: every row is 304" in caplog.text
-    # The reader has to be told the other reading exists, or a thin corpus gets silently
-    # blessed as a small signature.
-    assert "--keep-constant-features" in caplog.text
+    assert "2 feature column(s) never vary" in caplog.text
+    assert "kernel.tile_m=128" in caplog.text
+    assert "device.cu_count=304" in caplog.text
+    # And the reader is pointed at the decision, not left with a bare observation.
+    assert "--drop-constant-features" in caplog.text
 
 
 def test_features_hash_is_over_the_signature_actually_emitted(tmp_path):
     """The runtime recomputes the hash from features_signature and refuses the pair when
-    the two disagree (RFC 0019 §7.3). A hash over the *requested* columns would make
-    every dropped-column model fail to load."""
+    the two disagree (RFC 0019 §7.3), so the two must agree at every setting."""
     output_dir = tmp_path / "model"
+    csv = _one_varying_two_constant(tmp_path / "bench.csv")
 
-    assert _train(output_dir, _one_varying_two_constant(tmp_path / "bench.csv"), THREE_FEATURES) == 0
-
+    assert _train(output_dir, csv, THREE_FEATURES) == 0
     descriptor = _descriptor(output_dir)
     assert descriptor["features_hash"] == compute_features_hash(descriptor["features_signature"])
-    assert descriptor["features_hash"] != compute_features_hash(
-        build_features_signature(THREE_FEATURES)
-    )
     assert _manifest(output_dir)["features_hash"] == descriptor["features_hash"]
 
+    dropped_dir = tmp_path / "dropped"
+    assert _train(dropped_dir, csv, THREE_FEATURES, "--drop-constant-features") == 0
+    dropped = _descriptor(dropped_dir)
+    assert dropped["features_hash"] == compute_features_hash(dropped["features_signature"])
+    # Different signatures must not collide, or the runtime's contract check is blind to
+    # which of the two models it was handed.
+    assert dropped["features_hash"] != descriptor["features_hash"]
+
 
 # --------------------------------------------------------------------------------
-# The override: the corpus is thin, not the world
+# The opt-in: the author has decided the field is not worth varying
 # --------------------------------------------------------------------------------
 
 
-def test_keep_constant_features_keeps_every_requested_column(tmp_path):
-    """When the caller knows the column varies in the world, the signature has to match
-    the richer corpus they will retrain on -- a dropped column would change the hash and
-    strand the descriptor against that future model."""
+def test_drop_constant_features_removes_them_from_the_signature(tmp_path):
     output_dir = tmp_path / "model"
 
     assert (
@@ -192,23 +211,20 @@ def test_keep_constant_features_keeps_every_requested_column(tmp_path):
             output_dir,
             _one_varying_two_constant(tmp_path / "bench.csv"),
             THREE_FEATURES,
-            "--keep-constant-features",
+            "--drop-constant-features",
         )
         == 0
     )
 
-    descriptor = _descriptor(output_dir)
-    assert descriptor["features_signature"] == build_features_signature(THREE_FEATURES)
-    assert descriptor["features_hash"] == compute_features_hash(descriptor["features_signature"])
+    assert _descriptor(output_dir)["features_signature"] == ["$kernel.block_size"]
 
     manifest = _manifest(output_dir)
-    assert manifest["features"] == THREE_FEATURES
-    assert manifest["dropped_constant_features"] == []
-    assert manifest["keep_constant_features"] is True
+    assert manifest["features"] == ["kernel.block_size"]
+    assert manifest["dropped_constant_features"] == ["kernel.tile_m", "device.cu_count"]
+    assert manifest["drop_constant_features"] is True
 
 
-def test_keeping_constants_is_still_reported(tmp_path, caplog):
-    """Silence would hide that the signature contains columns this model cannot use."""
+def test_the_drop_is_reported_by_name_with_its_single_value(tmp_path, caplog):
     output_dir = tmp_path / "model"
 
     with caplog.at_level("WARNING"):
@@ -217,13 +233,16 @@ def test_keeping_constants_is_still_reported(tmp_path, caplog):
                 output_dir,
                 _one_varying_two_constant(tmp_path / "bench.csv"),
                 THREE_FEATURES,
-                "--keep-constant-features",
+                "--drop-constant-features",
             )
             == 0
         )
 
-    assert "KEPT 2 constant feature column(s)" in caplog.text
-    assert "kernel.tile_m=128" in caplog.text
+    assert "DROPPING constant feature column kernel.tile_m" in caplog.text
+    assert "DROPPING constant feature column device.cu_count" in caplog.text
+    # Dropping is only half of it: the knob has to leave the engine's surface too, or
+    # the engine keeps advertising a dial its model no longer reads.
+    assert "knobs" in caplog.text
 
 
 # --------------------------------------------------------------------------------
@@ -271,7 +290,7 @@ def test_all_constant_fails_even_with_the_override(tmp_path):
             output_dir,
             _all_constant(tmp_path / "bench.csv"),
             ["kernel.tile_m", "device.cu_count"],
-            "--keep-constant-features",
+            "--drop-constant-features",
         )
         == 1
     )
@@ -306,10 +325,10 @@ def test_high_proportion_warning_stays_quiet_on_the_rocke_shape(tmp_path, caplog
     output_dir = tmp_path / "model"
 
     with caplog.at_level("WARNING"):
-        assert _train(output_dir, csv, features) == 0
+        assert _train(output_dir, csv, features, "--drop-constant-features") == 0
 
     # The eight pinned fields are still reported individually...
-    assert "DROPPED constant feature column kernel.pinned_0" in caplog.text
+    assert "DROPPING constant feature column kernel.pinned_0" in caplog.text
     # ...but 8/14 is 57%, below the threshold, so the corpus is not impugned.
     assert "thin-corpus threshold" not in caplog.text
     assert len(_descriptor(output_dir)["features_signature"]) == 6
@@ -348,9 +367,17 @@ def test_high_proportion_warning_is_silent_just_below_the_threshold(tmp_path, ca
     output_dir = tmp_path / "model"
 
     with caplog.at_level("WARNING"):
-        assert _train(output_dir, csv, ["kernel.block_size", "kernel.tile_m"]) == 0
+        assert (
+            _train(
+                output_dir,
+                csv,
+                ["kernel.block_size", "kernel.tile_m"],
+                "--drop-constant-features",
+            )
+            == 0
+        )
 
-    assert "DROPPED constant feature column kernel.tile_m" in caplog.text
+    assert "DROPPING constant feature column kernel.tile_m" in caplog.text
     assert "thin-corpus threshold" not in caplog.text
 
 

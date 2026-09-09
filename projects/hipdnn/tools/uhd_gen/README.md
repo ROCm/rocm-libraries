@@ -84,41 +84,45 @@ an unqualified descriptor loads, validates, and never once uses the model.
 
 Rename the columns in your CSV to match.
 
-### Constant feature columns are dropped, loudly
+### Constant feature columns are kept, and reported
 
 A column with one value across the whole input cannot separate one candidate from
-another. `train` detects those before fitting and drops them from
-`features_signature`, naming each one and its value:
+another. `train` detects those before fitting, names each one and its value, and
+**keeps** them:
 
 ```
-WARNING - DROPPED constant feature column kernel.tile_m: every row is 128. It cannot
-separate one candidate from another, so it is NOT in the trained features_signature
-and features_hash is over the smaller set. ...
+WARNING - 2 feature column(s) never vary in bench.csv: kernel.tile_m=128,
+device.cu_count=304. They cannot separate one candidate from another, so no tree will
+split on them.
+WARNING - KEEPING them in features_signature. Constancy is measured against this
+corpus, not the pack: a field the sweep failed to cover looks identical to one the
+kernels pin ...
 ```
 
-`features_hash` is computed over the signature that was actually trained, so the
-descriptor loads; `train_manifest.json` records `requested_features`,
-`constant_features` (with values) and `dropped_constant_features`, so the provenance
-says the emitted signature is not the one you typed.
+Keeping is the default because a CSV cannot tell two opposite situations apart. rocKE's
+attention kernels bake their geometry in, so the matcher pins 8 of their 14 fields
+before ranking begins and those 8 can never vary — dropping them is harmless. But a
+column that *does* vary in the world, sampled at one value because the corpus is thin,
+reads identically. Dropping there produces a model that cannot generalise on that axis,
+and makes `features_signature` — and `features_hash`, the contract the runtime checks —
+a function of which problems happened to be swept. The same engine trained on two
+corpora would ship two different contracts.
 
-This is the ordinary case, not an edge case: rocKE's attention kernels bake their
-geometry in, so the kernel matcher pins 8 of their 14 fields before ranking begins and
-those 8 can never vary among the candidates the model ranks.
+`train_manifest.json` records `requested_features`, `constant_features` (with values)
+and `dropped_constant_features`, so the provenance says what never varied whether or not
+it was dropped.
 
-But a CSV cannot tell that apart from the opposite situation — a column that *does*
-vary in the world, sampled at one value because the corpus is thin. Dropping there
-produces a model that cannot generalise, and the fix is a wider corpus, not a smaller
-signature. So:
-
-- pass **`--keep-constant-features`** when you know the corpus is thin. Every requested
-  column stays in the signature, so its hash matches the richer corpus you will retrain
-  on, and the run says which columns it kept and why they inform nothing today;
+- pass **`--drop-constant-features`** once you have decided the field is genuinely not
+  worth varying. This is a decision about the *engine*, not just the model: `promote`
+  removes those names from the UED's `knobs` too, because a knob the engine advertises
+  and no model reads is a dial a caller can turn for nothing. Use `uhd_gen knobs` to
+  decide — it ranks what each knob is worth against measured timings;
 - when **two thirds or more** of the requested columns are constant, `train` warns that
   the proportion looks like a thin corpus and points at the input file. The threshold
   sits above the 8-of-14 rocKE shape (57%) on purpose: a warning that fires on every
   normal run is one people learn to ignore;
 - when **every** requested column is constant, `train` fails and names each column with
-  its value. `--keep-constant-features` does not override this — it changes the
+  its value. `--drop-constant-features` does not override this — it changes the
   signature, not the fact that nothing varies. A model over zero varying features scores
   every candidate identically, and shipping one is worse than shipping none: the engine
   ranks by a model that cannot discriminate instead of falling back to its declared
@@ -142,7 +146,7 @@ signature. So:
 | `--num-boost-round` | No | Max boosting rounds (default: 500) |
 | `--early-stopping` | No | Early stopping patience (default: 50) |
 | `--keep-lgbm` | No | Keep intermediate .lgbm file |
-| `--keep-constant-features` | No | Keep feature columns that never vary in the input (default: drop them from the signature). For a thin corpus, so the signature matches the richer one you will retrain on. |
+| `--drop-constant-features` | No | Drop feature columns that never vary, and remove them from the UED's knobs at promote time (default: keep them). Pass once you have decided the field is not worth varying. |
 | `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
 | `--model-version` | No | Semantic version embedded in the model metadata |
 

@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 UHD_SUFFIX = ".uhd.json"
 UED_SUFFIX = ".ued.json"
 
+#: Feature columns are namespace-qualified; a UED names its knobs bare. Only this
+#: namespace can be a knob: `q.*` is the problem and `device.*` is the card.
+_KERNEL_PREFIX = "kernel."
+
 
 class PromoteError(Exception):
     """A refusal raised while planning, i.e. before the tree has been touched."""
@@ -50,6 +54,11 @@ class PromotePlan:
     #: (source, destination) pairs; a file already in place is not listed.
     copies: list[tuple[Path, Path]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    #: Knobs to remove from the UED because training dropped them as constant. Only
+    #: populated when the author asked for the drop: the knob list is the engine's
+    #: public surface, read by its UMDs and its callers, so a training run never
+    #: reshapes it on its own.
+    dropped_knobs: list[str] = field(default_factory=list)
 
 
 def add_promote_arguments(parser: argparse.ArgumentParser) -> None:
@@ -123,6 +132,31 @@ def build_plan(model_dir: Path, descriptor_tree: Path, engine: str | None) -> Pr
         engine_name=str(ued_document.get("name", "")),
         old_heuristic=_optional_str(ued_document.get("heuristic")),
     )
+
+    # The manifest records what training dropped. RFC 0019 §6.3: the model's axes must
+    # all be exposed knobs, and a knob no axis reads is legal but reported -- so a
+    # deliberate drop has to reach the UED, or the engine keeps advertising a dial its
+    # model no longer reads. Absent manifest is fine; older runs wrote none.
+    manifest = model_dir / "train_manifest.json"
+    if manifest.is_file():
+        try:
+            recorded = _load_json(manifest, "training manifest").get(
+                "dropped_constant_features"
+            )
+        except PromoteError:
+            recorded = None
+        exposed = ued_document.get("knobs")
+        if recorded and isinstance(exposed, list):
+            # A knob is named bare in the UED (`block_n`) and namespace-qualified in the
+            # corpus (`kernel.block_n`). Only the `kernel.*` namespace can be a knob at
+            # all: `$q.*` describes the problem and `$device.*` the card, and neither is
+            # something a caller sets.
+            dropped_knobs = [
+                name[len(_KERNEL_PREFIX):]
+                for name in recorded
+                if name.startswith(_KERNEL_PREFIX)
+            ]
+            plan.dropped_knobs = [name for name in dropped_knobs if name in exposed]
 
     destination_descriptor = destination / descriptor_path.name
     destination_artifact = destination / artifact_path.name
@@ -334,6 +368,11 @@ def _apply(plan: PromotePlan) -> None:
         shutil.copy2(source, destination)
 
     plan.ued_document["heuristic"] = plan.descriptor_id
+    if plan.dropped_knobs:
+        removed = set(plan.dropped_knobs)
+        plan.ued_document["knobs"] = [
+            knob for knob in plan.ued_document.get("knobs", []) if knob not in removed
+        ]
     with open(plan.ued_path, "w", encoding="utf-8") as handle:
         # indent=2 + trailing newline + ensure_ascii=False reproduces how every
         # descriptor in the tree is written, so the diff is the one changed line rather
@@ -349,6 +388,10 @@ def _report(plan: PromotePlan, dry_run: bool) -> None:
     print(f"  {'UED:':<16}{plan.ued_path}")
     print(f"  {'heuristic was:':<16}{plan.old_heuristic or '(none)'}")
     print(f"  {'heuristic now:':<16}{plan.descriptor_id}")
+    if plan.dropped_knobs:
+        verb = "would remove:" if dry_run else "removed knob:"
+        for knob in plan.dropped_knobs:
+            print(f"  {verb:<16}{knob} (constant; training dropped it)")
     if plan.copies:
         for source, destination in plan.copies:
             print(f"  {label:<16}{source} -> {destination}")
