@@ -50,17 +50,19 @@ bool isMsbComputableClass(const StinkyInstruction& inst) {
              inst.is(InstFlag::IF_HasSideEffect));
 }
 
-// Set offset = -msb*256 on each VGPR operand so the emitter prints byte form
-// (`v[idx + offset]` evaluates to idx ≤ 255).
+// Give each VGPR operand the offset its index calls for, so `v[idx + offset]`
+// lands in 0-255. Assigned unconditionally, bank 0 included: the offset is
+// derived from an index other passes rewrite, and skipping it there leaves a
+// register that moved down out of bank 1 holding a bias it no longer earns.
 void encodeVgprOperands(StinkyInstruction* inst) {
     auto rewrite = [](StinkyRegister& reg) {
         if (reg.dataType != StinkyRegister::Type::Register) return;
         if (reg.reg.type != RegType::V) return;
-        int msb = static_cast<int>(reg.reg.idx) / 256;
-        if (msb == 0) return;  // already byte-form; nothing to do
-        int wantOffset = -msb * 256;
-        if (reg.reg.offset == wantOffset) return;  // already encoded (rocisa path)
-        reg.reg.offset = static_cast<int16_t>(wantOffset);
+        // Nothing upstream carries the bias, so an operand arrives unbiased or
+        // already agreeing with its index because this pass ran before.
+        assert((reg.reg.offset == 0 || reg.reg.offset == getMsbOffsetForVgpr(reg)) &&
+               "VGPR offset disagrees with its index; something stored a bias upstream");
+        reg.reg.offset = static_cast<int16_t>(getMsbOffsetForVgpr(reg));
     };
     for (auto& src : const_cast<std::vector<StinkyRegister>&>(inst->getSrcRegs())) rewrite(src);
     for (auto& dst : const_cast<std::vector<StinkyRegister>&>(inst->getDestRegs())) rewrite(dst);
