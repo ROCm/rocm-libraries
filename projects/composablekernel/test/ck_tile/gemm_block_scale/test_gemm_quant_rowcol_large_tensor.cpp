@@ -291,3 +291,34 @@ TYPED_TEST(TestCkTileGemmRowColQuantCHalf4GiB, BoundaryCheck)
 {
     this->run_test_boundary_check(8192, 262144, 256, 128, {{0, 0}, {4096, 131072}, {8191, 262143}});
 }
+
+// --- Large-K RowMajor A (64-bit global load/store) -----------------------------------------
+// A RowMajor A that is large purely because of K. It rides the M base-shift path
+// (IsLargeTensorMOffsettingSupported()), which re-bases the A pointer per M-tile in 64-bit and
+// clamps the per-block M to MPerBlock; its per-M-tile A view then spans the full K extent, whose
+// far offset (MPerBlock-1)*stride_A + (K-1) = 16*K - 1 exceeds INT32_MAX. With LargeTensors=true
+// that A view is built on the 64-bit global path (kAGlobalLoad), so the far element is addressed
+// correctly instead of wrapping -- the RowMajor-A analog of the ColumnMajor / large-C 64-bit
+// cases above. M=16 (=MPerBlock) and K=2^27+256 (K_Tile-aligned) make A large via K alone;
+// hot_k=K-1 places the single non-zero A column at the far offset 16*K-1 = 2^31+4095, which only
+// row M-1=15 reaches; the spot-checked C(15, n) would be wrong under the old 32-bit wrap, so it
+// pins the 64-bit read. B (K*N*1B ~= 16 GiB) dominates the footprint, so this skips unless the
+// device has room.
+template <typename Tuple>
+class TestCkTileGemmRowColQuantLargeKRowMajorA : public TestCkTileGemmRowColQuant<Tuple>
+{
+};
+
+// clang-format off
+using RowColQuantLargeKRowMajorATypes = ::testing::Types<
+    std::tuple<RowMajor, RowMajor, RowMajor, RowMajor, FP8, FP8, float, Half, RowColQuant, GemmConfigLargeTensor, GroupSize1D_128>
+>;
+// clang-format on
+
+TYPED_TEST_SUITE(TestCkTileGemmRowColQuantLargeKRowMajorA, RowColQuantLargeKRowMajorATypes);
+
+TYPED_TEST(TestCkTileGemmRowColQuantLargeKRowMajorA, BoundaryCheck)
+{
+    this->run_test_boundary_check(
+        16, 128, (1 << 27) + 256, (1 << 27) + 255, {{0, 0}, {15, 1}, {15, 127}});
+}
