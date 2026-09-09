@@ -28,16 +28,16 @@ from multi_arch_test_projects import select_test_projects
             "hipblas,hipblaslt,rocblas,rocroller,tensilelite",
         ),
         ("shared/rocroller", "rocroller"),
-        (
-            "shared/stinkytofu",
-            "hipblas,hipblaslt,rocblas,tensilelite",
-        ),
     ],
 )
 def test_all_shared_projects_select_multi_arch_tests(
     changed_project: str, expected: str
 ) -> None:
     assert select_test_projects(changed_project) == expected
+
+
+def test_build_only_shared_project_is_forwarded_unchanged() -> None:
+    assert select_test_projects("shared/stinkytofu") == "shared/stinkytofu"
 
 
 def test_project_path_passes_through_unchanged() -> None:
@@ -47,7 +47,7 @@ def test_project_path_passes_through_unchanged() -> None:
 def test_mixed_projects_are_deduplicated_in_input_order() -> None:
     result = select_test_projects("shared/stinkytofu,shared/origami")
 
-    assert result == "hipblas,hipblaslt,rocblas,tensilelite,origami"
+    assert result == ("shared/stinkytofu,hipblas,hipblaslt,origami,rocblas,tensilelite")
 
 
 def test_empty_project_list_selects_all_tests() -> None:
