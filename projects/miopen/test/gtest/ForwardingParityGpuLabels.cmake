@@ -9,12 +9,16 @@
 # suffix (exclude_gpu_<arch>_linux) that the label it declares does not, so a label rebuilt from
 # the key would name something no runner ever selects.
 set(MIOPEN_FORWARDING_PARITY_GPU_LABELS "")
-file(STRINGS "${MIOPEN_TEST_CATEGORIES_YAML}" MIOPEN_EX_GPU_LABEL_LINES
-  REGEX "^ +- \"ex_gpu_[A-Za-z0-9_]+\"$")
-foreach(EX_GPU_LABEL_LINE IN LISTS MIOPEN_EX_GPU_LABEL_LINES)
-  string(REGEX REPLACE "^ +- \"(ex_gpu_[A-Za-z0-9_]+)\"$" "\\1" GPU_LABEL "${EX_GPU_LABEL_LINE}")
-  list(APPEND MIOPEN_FORWARDING_PARITY_GPU_LABELS "${GPU_LABEL}")
-endforeach()
-# One architecture's Windows and Linux exclusion sets declare the same label, and mirroring it
-# once per declaration would register two ctest entries under one name.
-list(REMOVE_DUPLICATES MIOPEN_FORWARDING_PARITY_GPU_LABELS)
+# A tree with no test_categories.yaml is supported and has no exclusion sets, so an empty list is
+# the right answer there. Guarded because file(STRINGS) on a missing file is fatal.
+if(EXISTS "${MIOPEN_TEST_CATEGORIES_YAML}")
+  file(STRINGS "${MIOPEN_TEST_CATEGORIES_YAML}" MIOPEN_EX_GPU_LABEL_LINES
+    REGEX "^ +- \"ex_gpu_[A-Za-z0-9_]+\"$")
+  foreach(EX_GPU_LABEL_LINE IN LISTS MIOPEN_EX_GPU_LABEL_LINES)
+    string(REGEX REPLACE "^ +- \"(ex_gpu_[A-Za-z0-9_]+)\"$" "\\1" GPU_LABEL "${EX_GPU_LABEL_LINE}")
+    list(APPEND MIOPEN_FORWARDING_PARITY_GPU_LABELS "${GPU_LABEL}")
+  endforeach()
+  # One architecture's Windows and Linux exclusion sets declare the same label, and mirroring it
+  # once per declaration would register two ctest entries under one name.
+  list(REMOVE_DUPLICATES MIOPEN_FORWARDING_PARITY_GPU_LABELS)
+endif()

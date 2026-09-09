@@ -30,6 +30,11 @@ def derive(tmp_path, yaml_text):
     """Return the labels the module derives from `yaml_text`."""
     yaml = tmp_path / "test_categories.yaml"
     yaml.write_text(yaml_text)
+    return derive_from_path(tmp_path, yaml)
+
+
+def derive_from_path(tmp_path, yaml):
+    """Return the labels the module derives from `yaml`, which need not exist."""
     # A driver rather than running the module directly, so the module stays free of
     # anything that exists only for this test.
     driver = tmp_path / "driver.cmake"
@@ -101,6 +106,11 @@ def test_label_mentioned_in_a_comment_is_not_derived(tmp_path):
         + block("exclude_gpu_gfx950", "ex_gpu_gfx950"),
     )
     assert labels == ["ex_gpu_gfx950"]
+
+
+def test_missing_yaml_yields_no_labels_rather_than_failing(tmp_path):
+    """No test_categories.yaml is supported, so it must not fail the configure."""
+    assert derive_from_path(tmp_path, tmp_path / "absent.yaml") == []
 
 
 def test_shipped_yaml_declares_a_label_for_every_exclusion_set(tmp_path):

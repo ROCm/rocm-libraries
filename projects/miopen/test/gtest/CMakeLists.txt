@@ -405,16 +405,6 @@ set(MIOPEN_FORWARDING_PARITY_TIMEOUT 3600)
 # has no parity coverage at all.
 set(MIOPEN_FORWARDING_PARITY_LABELS "forwarding_parity;quick;standard;comprehensive;full")
 
-# That architecture filter takes one of two forms: on an architecture test_categories.yaml
-# declares an exclusion set for, the runner requires `-L ^ex_gpu_<arch>$`; on any other it
-# excludes everything matching `ex_gpu`. No single entry satisfies both, so the harness is
-# registered once bare, for the architectures with no exclusion set, and once per declared
-# architecture carrying that architecture's label -- exactly one of which is ever selected.
-# Read back out of the YAML rather than repeated here, so adding an exclusion set does not
-# silently drop parity coverage on that architecture.
-set(MIOPEN_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
-include(${CMAKE_CURRENT_SOURCE_DIR}/ForwardingParityGpuLabels.cmake)
-
 if( MIOPEN_TEST_DISCRETE )
   foreach(TEST ${TESTS})
     get_filename_component(BASE_NAME ${TEST} NAME_WE)
@@ -496,9 +486,16 @@ endif()
 # carries none of them. Only the single-binary build packages a test executable and so only it
 # registers the harness mirrored here.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE AND NOT MIOPEN_NO_GPU)
-  # One bare entry plus one per declared architecture, for the reason recorded with
-  # MIOPEN_FORWARDING_PARITY_GPU_LABELS above. They are identical apart from the label and the
-  # name, so whichever the runner selects does the same work.
+  # The architecture filter takes one of two forms: on an architecture test_categories.yaml
+  # declares an exclusion set for, the runner requires `-L ^ex_gpu_<arch>$`; on any other it
+  # excludes everything matching `ex_gpu`. No single entry satisfies both. Labels are read back
+  # out of the YAML rather than repeated here, so adding an exclusion set does not silently drop
+  # parity coverage on that architecture.
+  set(MIOPEN_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+  include(${CMAKE_CURRENT_SOURCE_DIR}/ForwardingParityGpuLabels.cmake)
+
+  # One bare entry plus one per declared architecture, exactly one of which the runner ever
+  # selects. They are identical apart from the label and the name.
   set(PARITY_ENTRY_LABELS "${MIOPEN_FORWARDING_PARITY_LABELS}")
   set(PARITY_ENTRY_NAME "miopen_gtest_forwarding_parity")
   foreach(GPU_LABEL "" ${MIOPEN_FORWARDING_PARITY_GPU_LABELS})
