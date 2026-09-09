@@ -22,11 +22,29 @@ Configured in-tree (as a subdirectory of an RPP build) the suite reuses that bui
 ./rpp_tests                        # run every test
 ./rpp_tests --gtest_list_tests     # list tests without running
 ./rpp_tests --help                 # full GTest options
-ctest                              # run via CTest (each case registered individually)
+ctest -j8                          # run via CTest, one test per operator
+```
+
+CTest registers one test per GTest suite — that is, one per operator — discovered from the binary
+after each build. A failure names the operator that failed, and `--output-on-failure` prints the
+reporter's detail for it:
+
+```shell
+ctest -j8 --output-on-failure     # print the failing operator's output
+ctest -R Rotate                   # one operator (CTest test names are the GTest suite names)
+ctest -L Image_Geometric          # one category
+ctest -L voxel                    # one domain: image, misc, voxel, core
+ctest -N                          # list the registered tests
+ctest --no-label-summary          # drop the per-label timing block CTest prints after a run
+GTEST_COLOR=yes ctest ...         # keep colour; CTest captures output, so it is off by default
 ```
 
 > [!NOTE]
-> Running tests via `ctest` ensures each unit is isolated to its own process. While this increases the runtime of the test suite significantly (due to per-unit setup overhead), it is preferred for isolating segfaults/GPU crashes to a single test case, rather than taking down other unit tests with it.
+> Registering one CTest test per *case* instead is available via `cmake -DRPP_TEST_CTEST_PER_CASE=ON ..`.
+> It isolates each of the ~25000 cases in its own process, so a segfault or GPU fault takes down one
+> case rather than its whole operator suite. The isolation costs a process start plus RPP/HIP handle
+> setup per case: roughly 0.33s each, turning a ~17s run into hours. Use it when chasing a crash,
+> not routinely.
 
 ## Output
 

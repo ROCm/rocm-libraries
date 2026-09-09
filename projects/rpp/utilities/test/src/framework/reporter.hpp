@@ -40,9 +40,11 @@ SOFTWARE.
 // every failure as it happens, and a summary of the failures at the end. Skipped cases are only
 // ever counted -- the skip list itself is the record of what they are.
 //
-// Under CTest each process runs a single case (gtest_discover_tests), so a one-test run drops
-// the per-suite and summary sections and prints a single verdict line instead. That line keeps
-// GTest's "[  SKIPPED ]" spelling, which is what CTest's SKIP_REGULAR_EXPRESSION looks for.
+// Under CTest each process runs one whole suite (cmake/grouped_tests.cmake), so this is the
+// format a failing CTest test shows under --output-on-failure: the header names the filter that
+// reproduces the run, every failure is printed where it happened, and the closing report groups
+// them by suite. A suite holding a single case drops the per-suite and summary sections and
+// prints one verdict line instead.
 
 namespace rpptest {
 
@@ -97,22 +99,33 @@ inline std::string plural(std::size_t n, const std::string& noun) {
     return std::to_string(n) + " " + noun + (n == 1 ? "" : "s");
 }
 
-// Status tokens, all the same width. The spelling is GTest's own: CTest's
-// SKIP_REGULAR_EXPRESSION (set by gtest_discover_tests) matches "[  SKIPPED ]" literally, so a
-// one-case run has to print exactly that for a skip to be reported as one.
+// Status tokens, all the same width; the spelling is GTest's own.
 inline constexpr const char* kPassToken = "[  PASSED  ]";
 inline constexpr const char* kFailToken = "[  FAILED  ]";
 inline constexpr const char* kSkipToken = "[  SKIPPED ]";
+
+// Tail of the closing verdict line when the filter selected cases but every one of them was
+// skipped -- a whole operator suite on the skip list, or one that is HIP-only on a HOST build.
+// This exact phrase is what CTest's SKIP_REGULAR_EXPRESSION matches (cmake/grouped_tests.cmake).
+// The bare "[  SKIPPED ]" token above deliberately is not: it also marks individual skipped cases
+// and fully-skipped suites within a larger run, so matching on it would report a CTest test as
+// skipped whenever any one of its cases was -- hiding the failures next to it. This phrase is
+// only ever printed when nothing failed.
+inline constexpr const char* kNothingRanPhrase = "no cases ran";
 
 class ConciseReporter : public ::testing::EmptyTestEventListener {
    public:
     void OnTestProgramStart(const ::testing::UnitTest& unitTest) override {
         singleTest_ = unitTest.test_to_run_count() == 1;
         if (singleTest_) return;
+        // The filter is echoed so that a failing CTest test's captured output opens with the
+        // command that reproduces it on its own.
+        const std::string filter = GTEST_FLAG_GET(filter);
         std::printf(
-            "Running %s from %s\n",
+            "Running %s from %s%s\n",
             plural(static_cast<std::size_t>(unitTest.test_to_run_count()), "test").c_str(),
-            plural(static_cast<std::size_t>(unitTest.test_suite_to_run_count()), "suite").c_str());
+            plural(static_cast<std::size_t>(unitTest.test_suite_to_run_count()), "suite").c_str(),
+            filter == "*" ? "" : dim("  (--gtest_filter=" + filter + ")").c_str());
         std::fflush(stdout);
     }
 
@@ -164,7 +177,14 @@ class ConciseReporter : public ::testing::EmptyTestEventListener {
     }
 
     void OnTestIterationEnd(const ::testing::UnitTest& unitTest, int) override {
-        if (singleTest_) return;
+        if (singleTest_) {
+            // The per-case line already said what happened, but a suite of one whose only case
+            // was skipped still has to close with the phrase CTest classifies skips by.
+            if (totalFailed_ == 0 && totalPassed_ == 0 && totalSkipped_ > 0)
+                std::printf("%s\n", final_verdict().c_str());
+            reset();
+            return;
+        }
         print_report(unitTest);
         reset();
     }
@@ -231,8 +251,18 @@ class ConciseReporter : public ::testing::EmptyTestEventListener {
 
         print_failure_report();
 
-        std::printf("\n%s\n", (totalFailed_ > 0 ? red(kFailToken) : green(kPassToken)).c_str());
+        std::printf("\n%s\n", final_verdict().c_str());
         std::fflush(stdout);
+    }
+
+    // The closing line, which is also how CTest classifies the run: a non-zero exit code makes it
+    // a failure, and kNothingRanPhrase makes it a skip.
+    std::string final_verdict() const {
+        if (totalFailed_ > 0) return red(kFailToken);
+        if (totalPassed_ == 0 && totalSkipped_ > 0)
+            return yellow(std::string(kSkipToken) + " " + kNothingRanPhrase + " (" +
+                          plural(static_cast<std::size_t>(totalSkipped_), "case") + " skipped)");
+        return green(kPassToken);
     }
 
     void print_failure_report() const {

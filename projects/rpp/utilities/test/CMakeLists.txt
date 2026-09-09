@@ -46,6 +46,7 @@ else()
 endif()
 
 include(cmake/gtest.cmake)
+include(cmake/grouped_tests.cmake)
 
 enable_testing()
 include(GoogleTest)
@@ -73,4 +74,14 @@ if(rpp_BACKEND_TYPE STREQUAL "HIP" OR BACKEND STREQUAL "HIP")
     target_compile_definitions(rpp_tests PRIVATE RPP_TEST_HAVE_HIP=1 GPU_SUPPORT=1)
 endif()
 
-gtest_discover_tests(rpp_tests)
+# One CTest test per GTest suite (per operator) by default -- see cmake/grouped_tests.cmake for
+# why. Per-case registration stays available: it isolates every case in its own process, so a
+# segfault or GPU fault takes down one case rather than its whole operator suite, at the cost of
+# ~25000 process starts.
+option(RPP_TEST_CTEST_PER_CASE "Register one CTest test per GTest case (slow: one process each)" OFF)
+
+if(RPP_TEST_CTEST_PER_CASE)
+    gtest_discover_tests(rpp_tests)
+else()
+    rpp_discover_grouped_tests(rpp_tests)
+endif()
