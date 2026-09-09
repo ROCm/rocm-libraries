@@ -6,6 +6,7 @@
 #include "hipblaslt_datatype2string.hpp"
 #include "utility.hpp"
 
+#include <array>
 #include <stdexcept>
 
 namespace hipblaslt::client
@@ -15,6 +16,22 @@ namespace hipblaslt::client
         size_t divideRoundUp(size_t value, size_t divisor)
         {
             return value / divisor + static_cast<size_t>(value % divisor != 0);
+        }
+
+        roc::host_numerics::amd_gpu_layout::MxScaleStoragePlan mxScaleStoragePlan(
+            const MatmulMatrix&                                      matrix,
+            size_t                                                   blockAxis,
+            size_t                                                   blockSize,
+            roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout physicalLayout)
+        {
+            const size_t                blockedExtent = matrix.layout.shape()[blockAxis];
+            const size_t                freeExtent    = matrix.layout.shape()[1 - blockAxis];
+            const std::array<size_t, 2> naturalShape
+                = blockAxis == 0
+                      ? std::array<size_t, 2>{freeExtent, divideRoundUp(blockedExtent, blockSize)}
+                      : std::array<size_t, 2>{divideRoundUp(blockedExtent, blockSize), freeExtent};
+            return roc::host_numerics::amd_gpu_layout::planMxScaleStorage(
+                naturalShape, blockSize, physicalLayout);
         }
     } // namespace
 
@@ -30,15 +47,6 @@ namespace hipblaslt::client
         default:
             return false;
         }
-    }
-
-    bool usesRocrollerMxLayout()
-    {
-#ifdef HIPBLASLT_USE_ROCROLLER
-        return hipblaslt_get_arch() != 1250;
-#else
-        return false;
-#endif
     }
 
     hipblasLtOrder_t matmulOrderForDataType(hipDataType dataType)
@@ -217,18 +225,20 @@ namespace hipblaslt::client
         return parameters;
     }
 
-    MatmulPreparation prepareMatmulProblems(const Arguments&               arguments,
-                                            std::span<const MatmulProblem> matmulProblems,
-                                            hipDataType                    inputTypeA,
-                                            hipDataType                    inputTypeB,
-                                            hipDataType                    inputTypeC,
-                                            hipDataType                    outputType,
-                                            hipDataType                    computeScalarType,
-                                            hipDataType                    coefficientType,
-                                            hipDataType                    biasType,
-                                            bool                           swizzleA,
-                                            bool                           swizzleB,
-                                            bool                           useRocrollerMxLayout)
+    MatmulPreparation
+        prepareMatmulProblems(const Arguments&               arguments,
+                              std::span<const MatmulProblem> matmulProblems,
+                              hipDataType                    inputTypeA,
+                              hipDataType                    inputTypeB,
+                              hipDataType                    inputTypeC,
+                              hipDataType                    outputType,
+                              hipDataType                    computeScalarType,
+                              hipDataType                    coefficientType,
+                              hipDataType                    biasType,
+                              bool                           swizzleA,
+                              bool                           swizzleB,
+                              roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA,
+                              roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB)
     {
         MatmulPreparation preparation;
         preparation.problems.resize(matmulProblems.size());
@@ -304,34 +314,12 @@ namespace hipblaslt::client
                     preparedProblem.a.scaleElements = problem.m;
                 else if(isBlockScaling(arguments.scaleA))
                 {
-                    if(useRocrollerMxLayout)
-                    {
-                        preparedProblem.a.scaleElements = scaleBufferSize(
-                            problem.a.rows(), problem.a.columns(), arguments.scaleA);
-                    }
-                    else
-                    {
-                        const size_t scaleBlock = blockSize(arguments.scaleA);
-                        const size_t tileCount  = 128 / scaleBlock;
-                        const size_t scaleRows  = problem.operationA == HIPBLAS_OP_T
-                                                      ? divideRoundUp(problem.a.rows(), scaleBlock)
-                                                      : problem.a.rows();
-                        const size_t scaleColumns
-                            = problem.operationA == HIPBLAS_OP_T
-                                  ? problem.a.columns()
-                                  : divideRoundUp(problem.a.columns(), scaleBlock);
-                        const bool   reductionAlongRows = problem.operationA == HIPBLAS_OP_T;
-                        const size_t reductionExtent
-                            = reductionAlongRows ? scaleRows : scaleColumns;
-                        const size_t outputExtent = reductionAlongRows ? scaleColumns : scaleRows;
-                        const size_t paddedExtent
-                            = divideRoundUp(reductionAlongRows ? reductionExtent : outputExtent,
-                                            tileCount)
-                              * tileCount;
-                        preparedProblem.a.scaleElements = reductionAlongRows
-                                                              ? outputExtent * paddedExtent
-                                                              : reductionExtent * paddedExtent;
-                    }
+                    const size_t scaleBlock = blockSize(arguments.scaleA);
+                    const size_t blockAxis  = problem.operationA == HIPBLAS_OP_T ? 0 : 1;
+                    preparedProblem.a.mxScaleStorage
+                        = mxScaleStoragePlan(problem.a, blockAxis, scaleBlock, scaleLayoutA);
+                    preparedProblem.a.scaleElements
+                        = preparedProblem.a.mxScaleStorage->physicalByteCount;
                 }
 
                 if(arguments.scaleB == hipblaslt_scaling_format::Scalar)
@@ -340,34 +328,12 @@ namespace hipblaslt::client
                     preparedProblem.b.scaleElements = problem.n;
                 else if(isBlockScaling(arguments.scaleB))
                 {
-                    if(useRocrollerMxLayout)
-                    {
-                        preparedProblem.b.scaleElements = scaleBufferSize(
-                            problem.b.rows(), problem.b.columns(), arguments.scaleB);
-                    }
-                    else
-                    {
-                        const size_t scaleBlock = blockSize(arguments.scaleB);
-                        const size_t tileCount  = 128 / scaleBlock;
-                        const size_t scaleRows  = problem.operationB == HIPBLAS_OP_T
-                                                      ? problem.b.rows()
-                                                      : divideRoundUp(problem.b.rows(), scaleBlock);
-                        const size_t scaleColumns
-                            = problem.operationB == HIPBLAS_OP_T
-                                  ? divideRoundUp(problem.b.columns(), scaleBlock)
-                                  : problem.b.columns();
-                        const bool   reductionAlongRows = problem.operationB == HIPBLAS_OP_N;
-                        const size_t reductionExtent
-                            = reductionAlongRows ? scaleRows : scaleColumns;
-                        const size_t outputExtent = reductionAlongRows ? scaleColumns : scaleRows;
-                        const size_t paddedExtent
-                            = divideRoundUp(reductionAlongRows ? reductionExtent : outputExtent,
-                                            tileCount)
-                              * tileCount;
-                        preparedProblem.b.scaleElements = reductionAlongRows
-                                                              ? outputExtent * paddedExtent
-                                                              : reductionExtent * paddedExtent;
-                    }
+                    const size_t scaleBlock = blockSize(arguments.scaleB);
+                    const size_t blockAxis  = problem.operationB == HIPBLAS_OP_N ? 0 : 1;
+                    preparedProblem.b.mxScaleStorage
+                        = mxScaleStoragePlan(problem.b, blockAxis, scaleBlock, scaleLayoutB);
+                    preparedProblem.b.scaleElements
+                        = preparedProblem.b.mxScaleStorage->physicalByteCount;
                 }
 
                 if(arguments.bias_vector)

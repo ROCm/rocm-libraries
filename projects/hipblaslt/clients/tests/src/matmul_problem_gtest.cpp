@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <stdexcept>
 
 namespace
@@ -31,7 +32,13 @@ namespace
     }
 
     hipblaslt::client::MatmulPreparation
-        prepare(const Arguments& arguments, bool swizzleA = false, bool swizzleB = false)
+        prepare(const Arguments&                                         arguments,
+                bool                                                     swizzleA = false,
+                bool                                                     swizzleB = false,
+                roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA
+                = roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Natural,
+                roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB
+                = roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Natural)
     {
         const auto problems  = hipblaslt::client::normalizeMatmulProblems(arguments);
         const auto dataTypes = hipblaslt::client::resolveMatmulDataTypes(arguments);
@@ -46,7 +53,8 @@ namespace
                                                         dataTypes.biasStorage,
                                                         swizzleA,
                                                         swizzleB,
-                                                        false);
+                                                        scaleLayoutA,
+                                                        scaleLayoutB);
     }
 
     void expectMatrix(const hipblaslt::client::MatmulMatrix& matrix,
@@ -347,4 +355,33 @@ TEST(MatmulPreparation, MakesScaleAlphaVectorAUnitScalarEpilogue)
     EXPECT_EQ(preparedProblem.scaleAlphaElements, 3);
     EXPECT_EQ(preparedProblem.alpha.f32, 1.0f);
     EXPECT_TRUE(preparedProblem.epilogueEnabled);
+}
+
+TEST(MatmulPreparation, UsesPhysicalMxScaleStoragePlans)
+{
+    using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
+
+    auto arguments   = baseArguments();
+    arguments.transA = 'T';
+    arguments.transB = 'N';
+    arguments.M[0]   = 17;
+    arguments.N[0]   = 33;
+    arguments.K[0]   = 256;
+    arguments.lda[0] = 256;
+    arguments.ldb[0] = 256;
+    arguments.ldc[0] = 17;
+    arguments.ldd[0] = 17;
+    arguments.scaleA = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+    arguments.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+
+    const auto preparation = prepare(
+        arguments, false, false, MxScaleStorageLayout::Gfx950, MxScaleStorageLayout::Gfx950);
+    ASSERT_EQ(preparation.problems.size(), 1);
+    const auto& prepared = preparation.problems.front();
+    ASSERT_TRUE(prepared.a.mxScaleStorage);
+    ASSERT_TRUE(prepared.b.mxScaleStorage);
+    EXPECT_EQ(prepared.a.mxScaleStorage->naturalShape, (std::array<size_t, 2>{17, 8}));
+    EXPECT_EQ(prepared.b.mxScaleStorage->naturalShape, (std::array<size_t, 2>{33, 8}));
+    EXPECT_EQ(prepared.a.scaleElements, 256);
+    EXPECT_EQ(prepared.b.scaleElements, 512);
 }

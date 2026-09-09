@@ -126,23 +126,6 @@ inline int blockSize(hipblaslt_scaling_format s)
     }
 }
 
-// Compute scale buffer size with padding for block-scaled MX formats.
-// dataRow, dataCol are the raw data matrix dimensions (A_row/A_col or B_row/B_col).
-// Scale dimensions are padded to ensure kernels that process data in 32-element (M/N)
-// or 256-element (K) blocks always have valid scale entries:
-//   scaleRows = ceil(dataRow / blockSize) rounded up to multiple of 8
-//   scaleCols = dataCol rounded up to multiple of 32
-// When pre-swizzle is active, additional layout requirements may apply but are
-// already satisfied by the rounding above.
-inline size_t scaleBufferSize(int64_t dataRow, int64_t dataCol, hipblaslt_scaling_format s)
-{
-    auto   bs        = blockSize(s);
-    size_t scaleRows = ((dataRow + bs - 1) / bs + 7) / 8 * 8;
-    size_t scaleCols = ((dataCol + 31) / 32) * 32;
-
-    return scaleRows * scaleCols;
-}
-
 inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
                                               hipblaslt_activation_type   act)
 {

@@ -16,15 +16,31 @@ enum class MxScaleStorageLayout {
     Gfx1250,
 };
 
+// Complete storage contract for converting one natural rank-two MX scale
+// tensor to the byte layout consumed by an AMD GPU kernel.
+struct MxScaleStoragePlan {
+    MxScaleStorageLayout layout = MxScaleStorageLayout::Natural;
+    std::array<size_t, 2> naturalShape{};  // [slow, fast] dimensions.
+    size_t blockSize = 0;
+    size_t naturalByteCount = 0;
+    size_t physicalByteCount = 0;
+};
+
 // Maps an AMD GPU architecture name, including feature suffixes such as
 // "gfx950:sramecc+:xnack-", to its required physical MX scale layout.
 MxScaleStorageLayout mxScaleStorageLayoutForArchitectureName(std::string_view architectureName);
 
-// Copies a natural [slow, fast] scale tensor into the requested GPU physical
-// layout. Architecture-specific layouts add their required zero padding.
-std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(
-    const std::byte* naturalScaleStorage, size_t naturalScaleByteCount,
-    std::array<size_t, 2> slowThenFastDimensions, size_t blockSize, MxScaleStorageLayout layout);
+// Computes both natural and padded physical storage sizes. Throws
+// std::runtime_error for an unsupported block size and std::overflow_error if
+// any byte-count calculation overflows size_t.
+MxScaleStoragePlan planMxScaleStorage(std::array<size_t, 2> naturalShape, size_t blockSize,
+                                      MxScaleStorageLayout layout);
+
+// Copies natural [slow, fast] scale bytes into a plan's physical layout.
+// Throws std::invalid_argument when the source size does not match the plan.
+std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(const std::byte* naturalScaleStorage,
+                                                          size_t naturalScaleByteCount,
+                                                          const MxScaleStoragePlan& plan);
 
 namespace detail {
 

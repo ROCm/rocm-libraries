@@ -27,8 +27,9 @@ size_t runtimeSize(size_t value) {
 std::vector<std::byte> copyScaleStorage(const std::vector<uint8_t>& input,
                                         std::array<size_t, 2> dimensions, size_t blockSize,
                                         MxScaleStorageLayout layout) {
+    const MxScaleStoragePlan plan = planMxScaleStorage(dimensions, blockSize, layout);
     return copyMxScaleStorageToPhysicalLayout(reinterpret_cast<const std::byte*>(input.data()),
-                                              input.size(), dimensions, blockSize, layout);
+                                              input.size(), plan);
 }
 
 std::vector<std::byte> encodedBytes(const std::vector<uint8_t>& input) {
@@ -652,7 +653,7 @@ TEST(MxScaleStorageGFX950Test, AlignedNoExtraPadding) {
 TEST(MxScaleStorageGFX950Test, InputSizeMismatch) {
     std::vector<uint8_t> input(100);
     EXPECT_THROW(copyScaleStorage(input, {64, 16}, 32, MxScaleStorageLayout::Gfx950),
-                 std::runtime_error);
+                 std::invalid_argument);
 }
 
 TEST(MxScaleStorageGFX1250Test, ThrowsOnZeroBlock) {
@@ -674,7 +675,7 @@ TEST(MxScaleStorageGFX1250Test, ThrowsOnSizeMismatch) {
     std::vector<uint8_t> in(7);  // slow*fast = 8 expected
     EXPECT_THROW(copyScaleStorage(in, {runtimeSize(2), runtimeSize(4)}, runtimeSize(32),
                                   MxScaleStorageLayout::Gfx1250),
-                 std::runtime_error);
+                 std::invalid_argument);
 }
 
 TEST(MxScaleStorageGFX1250Test, MapsAlignedFastDim) {
@@ -748,16 +749,17 @@ TEST(MxScaleStorageGFX1250Test, MultiplesPreservePayload) {
 }
 
 TEST(MxScaleStorageLayoutTest, CopiesNaturalStorage) {
-    EXPECT_TRUE(
-        copyMxScaleStorageToPhysicalLayout(nullptr, 0, {0, 0}, 32, MxScaleStorageLayout::Natural)
-            .empty());
+    const MxScaleStoragePlan emptyPlan =
+        planMxScaleStorage({0, 0}, 32, MxScaleStorageLayout::Natural);
+    EXPECT_TRUE(copyMxScaleStorageToPhysicalLayout(nullptr, 0, emptyPlan).empty());
 
     const std::array<std::byte, 8> natural{
         std::byte{1}, std::byte{2}, std::byte{3}, std::byte{0},
         std::byte{4}, std::byte{5}, std::byte{6}, std::byte{0},
     };
-    const std::vector<std::byte> physical = copyMxScaleStorageToPhysicalLayout(
-        natural.data(), natural.size(), {2, 4}, 32, MxScaleStorageLayout::Natural);
+    const MxScaleStoragePlan plan = planMxScaleStorage({2, 4}, 32, MxScaleStorageLayout::Natural);
+    const std::vector<std::byte> physical =
+        copyMxScaleStorageToPhysicalLayout(natural.data(), natural.size(), plan);
     const std::array<uint8_t, 8> expected{1, 2, 3, 0, 4, 5, 6, 0};
 
     ASSERT_EQ(physical.size(), expected.size());
@@ -767,16 +769,32 @@ TEST(MxScaleStorageLayoutTest, CopiesNaturalStorage) {
 
 TEST(MxScaleStorageLayoutTest, RejectsInvalidNaturalStorageSize) {
     const std::array<std::byte, 7> natural{};
-    EXPECT_THROW(copyMxScaleStorageToPhysicalLayout(natural.data(), natural.size(), {2, 4}, 32,
-                                                    MxScaleStorageLayout::Natural),
+    const MxScaleStoragePlan plan = planMxScaleStorage({2, 4}, 32, MxScaleStorageLayout::Natural);
+    EXPECT_THROW(copyMxScaleStorageToPhysicalLayout(natural.data(), natural.size(), plan),
                  std::invalid_argument);
 }
 
 TEST(MxScaleStorageLayoutTest, RejectsOverflowingNaturalStorageDimensions) {
-    EXPECT_THROW(copyMxScaleStorageToPhysicalLayout(
-                     nullptr, 0, {runtimeSize(std::numeric_limits<size_t>::max()), runtimeSize(2)},
-                     32, MxScaleStorageLayout::Natural),
-                 std::overflow_error);
+    EXPECT_THROW(
+        planMxScaleStorage({runtimeSize(std::numeric_limits<size_t>::max()), runtimeSize(2)}, 32,
+                           MxScaleStorageLayout::Natural),
+        std::overflow_error);
+}
+
+TEST(MxScaleStorageLayoutTest, PlansExactPhysicalByteCounts) {
+    const MxScaleStoragePlan natural =
+        planMxScaleStorage({8, 17}, 32, MxScaleStorageLayout::Natural);
+    EXPECT_EQ(natural.naturalByteCount, 136);
+    EXPECT_EQ(natural.physicalByteCount, 136);
+
+    const MxScaleStoragePlan gfx950 = planMxScaleStorage({17, 8}, 32, MxScaleStorageLayout::Gfx950);
+    EXPECT_EQ(gfx950.naturalByteCount, 136);
+    EXPECT_EQ(gfx950.physicalByteCount, 256);
+
+    const MxScaleStoragePlan gfx1250 =
+        planMxScaleStorage({17, 8}, 32, MxScaleStorageLayout::Gfx1250);
+    EXPECT_EQ(gfx1250.naturalByteCount, 136);
+    EXPECT_EQ(gfx1250.physicalByteCount, 136);
 }
 
 TEST(MxScaleStorageLayoutTest, MapsArchitectureNames) {
