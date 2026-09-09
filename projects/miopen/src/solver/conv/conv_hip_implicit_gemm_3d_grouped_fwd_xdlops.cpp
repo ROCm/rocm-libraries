@@ -233,9 +233,15 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         std::optional<std::size_t> found_index;
         if(ctx.GetStream().GetDeviceName() == "gfx942")
         {
-            if(index == 0 && problem.GetGroupCount() == 1 &&
-               problem.GetAlphaBetaCase() == DEFAULT && problem.GetInDepth() <= 4 &&
-               problem.GetInWidth() >= 256)
+            // The shallow-wide narrowing only makes sense when AI candidate selection is
+            // compiled in to catch the released (deep/narrow) shapes. Without it those
+            // shapes would fall through to generic default init and regress, so keep the
+            // full C/K table for all shapes on non-AI builds.
+            if(index == 0 && problem.GetGroupCount() == 1 && problem.GetAlphaBetaCase() == DEFAULT
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+               && problem.GetInDepth() <= 4 && problem.GetInWidth() >= 256
+#endif
+            )
             {
                 int K = problem.GetOutChannels();
 
