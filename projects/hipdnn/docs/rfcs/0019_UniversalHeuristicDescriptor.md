@@ -204,18 +204,33 @@ the engine exposes to the user** — a *name*, nothing more.
 caller can *set*, and nobody sets the sequence length or the CU count as a way of picking a kernel. The
 rule concerns the one namespace where a feature axis and a user-settable choice are the same thing.
 
-Within that namespace the knob list becomes a **derived** artifact rather than an independent authoring
-choice: generation produces the model, and the kernel fields that model ended up using *are* the knobs.
+Within that namespace the knob list and the model's feature axes are drawn from one space, but the knob
+list is **authored**, not derived. Generation produces the model, and the kernel fields that model uses
+must all be knobs — the reverse is not required. A knob list regenerated from each training run would
+make the engine's public surface a function of whichever columns the last corpus happened to vary, so a
+UMD's binding could disappear because a sweep was narrow.
+
 The consequences:
 
-- **The settable surface is exactly the set of kernel axes that provably affect performance.** A knob
-  exists because the data showed it matters. There is no kernel field a caller can set that the
-  heuristic is blind to, and none the heuristic uses that a caller cannot reach.
-- **Load-time validation is exact and bidirectional.** Assert
-  `set(UED.knobs) == set($kernel.* fields reachable from UHD.features_signature)`. Stronger than today's
-  one-way "every knob names a KMD field" check, and it catches a UED and UHD regenerated out of step.
-  Note *reachable*: `$kernel.*` references nested inside a computed feature count too, so
-  `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}` makes `tile_m0` a knob even though the signature
+- **The settable surface covers every kernel axis the heuristic ranks on.** There is no kernel field the
+  heuristic uses that a caller cannot reach. The converse does not hold: a knob may exist that the
+  current model ignores, because `UED.knobs` is the engine's public surface — its UMDs and its callers
+  read it — and a training run must not reshape it.
+- **Load-time validation is directional.** Assert
+  `set($kernel.* fields reachable from UHD.features_signature) ⊆ set(UED.knobs)`. An axis with no knob is
+  a load error: the model would rank on something the API never lets anyone vary. A knob no axis reads
+  is a **warning**, not an error.
+
+  This was specified as equality, on the premise that the generation tool derives the knob list *from*
+  the trained feature set. It cannot. Training drops a column that carries one value, because a constant
+  cannot separate candidates — so equality made every engine declaring a constant knob unable to load its
+  own model, degrading to declared order while reporting a successful promotion. The gfx942 attention
+  engine shipped in exactly that state.
+
+  Removing a knob the data shows is worthless is the **kernel author's** decision, informed by the knob
+  report ([Section 13](#13-model-generation-pipeline)), not a side effect of retraining. Note *reachable*:
+  `$kernel.*` references nested inside a computed feature count too, so
+  `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}` makes `tile_m0` an axis even though the signature
   never names it on its own ([Section 6.2](#62-the-features_signature)).
 - **Non-knob KMD fields are dispatch-only, and invisible to selection.** `UHD features ⊆ KMD fields`
   still holds; what is new is that the *complement* has a defined role — launch geometry and workspace
@@ -724,15 +739,22 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
 2. **Signature → KMD → knobs.** Two assertions over the same set. Let `F` be the `$kernel.*` fields
    reachable from the `features_signature`, including those nested inside computed (expression) entries:
    - `F ⊆ KMD.fields` — a feature can never read a variant field the kernels don't carry.
-   - `F == set(UED.knobs)` — the exposed knobs *are* the model's feature axes
-     ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)). An inequality either way is a load
-     error: a knob the model ignores would let a caller tune something selection is blind to, and a
-     feature with no knob would hide a performance-relevant axis from the caller.
+   - `F ⊆ set(UED.knobs)` — every axis the model ranks on is a knob the engine exposes
+     ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)). A feature with no knob is a
+     load error: it hides a performance-relevant axis from the caller, who cannot vary what selection
+     depends on.
+   - A knob in `UED.knobs` that no axis in `F` reads is a **warning**. The caller can turn a dial
+     selection ignores, which is worth saying, but it is not a broken contract: `UED.knobs` is the
+     engine's public surface, read by its UMDs and its callers, and training legitimately drops a column
+     that carries one value because a constant cannot separate candidates. Requiring equality here made
+     an engine unable to load its own model for declaring a constant knob — silently, since a degraded
+     ranking is a legal one.
 
    The UED owns the KMD and the UHD, so this is an intra-engine check the pipeline enforces when it
-   emits the engine and the loader re-checks. Because the generation tool derives the knob list *from*
-   the trained feature set, the equality holds by construction — the check exists to catch a UED and UHD
-   that were regenerated out of step, or hand-edited.
+   emits the engine and the loader re-checks. The containment does *not* hold by construction: the knob
+   list is authored and the feature set is trained, so the two can disagree. The check exists to catch a
+   model ranking on an axis the engine never exposed — a UED and UHD regenerated out of step, or
+   hand-edited — and to report the benign direction rather than fail it.
 3. **Signature → model.** The UHD carries `features_hash`; the model artifact embeds the hash it was
    trained against (tree-table metadata, ONNX `metadata_props`, or a sidecar). At load, assert
    `model.trained_hash == UHD.features_hash`. This check works for every model adapter because it
