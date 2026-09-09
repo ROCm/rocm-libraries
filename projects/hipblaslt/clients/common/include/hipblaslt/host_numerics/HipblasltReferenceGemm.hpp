@@ -41,13 +41,6 @@ namespace hipblaslt::host_numerics
         std::optional<roc::host_numerics::Tensor> scaleD;
     };
 
-    roc::host_numerics::Layout referenceBatchLayout(const hipblaslt::client::MatmulMatrix& matrix,
-                                                    size_t                                 rows,
-                                                    size_t                                 columns,
-                                                    hipblasOperation_t operation,
-                                                    size_t             batch,
-                                                    bool               separateBatchStorage);
-
     void referenceMatmulGemm(const hipblaslt::client::MatmulProblem&         problem,
                              const hipblaslt::client::MatmulDataTypes&       dataTypes,
                              const hipblaslt::client::PreparedMatmulProblem& preparation,

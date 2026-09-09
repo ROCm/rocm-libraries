@@ -54,6 +54,13 @@ namespace hipblaslt::client
         {
             return static_cast<int64_t>(layout.stride(2));
         }
+
+        // Returns the logical two-dimensional matrix view for one batch.
+        // Transpose and conjugate-transpose swap the stored row/column axes;
+        // conjugation itself remains numerical policy for the matmul operation.
+        roc::host_numerics::Layout logicalBatchLayout(hipblasOperation_t operation,
+                                                      size_t             batch,
+                                                      bool separateBatchStorage) const;
     };
 
     // A checked, per-GEMM snapshot of the parallel-array fields in Arguments.
