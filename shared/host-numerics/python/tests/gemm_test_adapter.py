@@ -51,11 +51,15 @@ def _options(
     options.compute_type_b = compute_type_b
     options.pre_quantization_scales_a = [
         _broadcast_vector(scale, 1)
-        for scale in ([] if pre_quantization_scales_a is None else pre_quantization_scales_a)
+        for scale in (
+            [] if pre_quantization_scales_a is None else pre_quantization_scales_a
+        )
     ]
     options.pre_quantization_scales_b = [
         _broadcast_vector(scale, 0)
-        for scale in ([] if pre_quantization_scales_b is None else pre_quantization_scales_b)
+        for scale in (
+            [] if pre_quantization_scales_b is None else pre_quantization_scales_b
+        )
     ]
     options.block_scale_a = block_scale_a
     options.block_scale_b = block_scale_b

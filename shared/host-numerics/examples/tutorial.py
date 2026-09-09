@@ -194,7 +194,9 @@ class HostNumericsTutorial(unittest.TestCase):
         self.assertFalse(report.passed)
         self.assertEqual(report.mismatches, 1)
         self.assertTrue(
-            str(report).startswith("comparison failed: 1 of 3 compared elements mismatched")
+            str(report).startswith(
+                "comparison failed: 1 of 3 compared elements mismatched"
+            )
         )
         self.assertIn("index 1 [1]", str(report))
 
