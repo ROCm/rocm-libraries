@@ -62,9 +62,7 @@ namespace hipblaslt::host_numerics
 
         MxDataGeneration mxDataGeneration(hipblaslt_initialization initialization,
                                           ScalarType               dataType,
-                                          float                    minimum,
-                                          float                    maximum,
-                                          uint32_t                 seed)
+                                          uint64_t                 seed)
         {
             auto recipe = [&](GenerationRecipe::Component component) {
                 return GenerationRecipe::realOnly(
@@ -159,7 +157,8 @@ namespace hipblaslt::host_numerics
                 const TrigonometricComponent realComponent = role == MatrixRole::B
                                                                  ? TrigonometricComponent::Cosine
                                                                  : TrigonometricComponent::Sine;
-                return trigonometricRecipe(type, realComponent, positiveOnly);
+                return trigonometricRecipe(
+                    type, realComponent, positiveOnly, ComplexGenerationPolicy::Cartesian, seed);
             }
             case hipblaslt_initialization::hpl:
                 return hplRecipe(type, {.positiveOnly = positiveOnly, .seed = seed});
@@ -276,7 +275,7 @@ namespace hipblaslt::host_numerics
                             size_t                   blockAxis,
                             size_t                   blockSize,
                             hipblaslt_initialization initialization,
-                            uint32_t                 seed)
+                            uint64_t                 seed)
     {
         if(shape.rank() != 2)
             throw std::invalid_argument("hipBLASLt MX generation requires a rank-two shape.");
@@ -285,8 +284,7 @@ namespace hipblaslt::host_numerics
         const ScalarType hostDataType = scalarType(dataType);
         const ScalarType hostScaleType
             = scaleType == HIP_R_8F_E4M3 ? ScalarType::E4M3 : scalarType(scaleType);
-        MxDataGeneration dataGeneration
-            = mxDataGeneration(initialization, hostDataType, -1.0f, 1.0f, seed);
+        MxDataGeneration dataGeneration = mxDataGeneration(initialization, hostDataType, seed);
 
         MxGenerationOptions options;
         options.dataType         = hostDataType;
@@ -313,6 +311,115 @@ namespace hipblaslt::host_numerics
            == amd_gpu_layout::MxScaleStorageLayout::Gfx1250)
             return amd_gpu_layout::MxScaleStorageLayout::Gfx1250;
         return amd_gpu_layout::MxScaleStorageLayout::Natural;
+    }
+
+    GenerationRecipe initializationRecipe(ScalarType               type,
+                                          hipblaslt_initialization initialization,
+                                          uint64_t                 seed,
+                                          TrigonometricComponent   trigonometric)
+    {
+        switch(initialization)
+        {
+        case hipblaslt_initialization::rand_int:
+            return randomIntegerRecipe(type, {.seed = seed});
+        case hipblaslt_initialization::trig_float:
+            return trigonometricRecipe(
+                type, trigonometric, false, ComplexGenerationPolicy::Cartesian, seed);
+        case hipblaslt_initialization::hpl:
+            return hplRecipe(type, {.seed = seed});
+        case hipblaslt_initialization::uniform_low_precision:
+            return lowPrecisionRecipe(type, ComplexGenerationPolicy::Cartesian, seed);
+        case hipblaslt_initialization::special:
+            return GenerationRecipe::realOnly(
+                GenerationRecipe::constant({.value = specialInitializationAValue}), {.seed = seed});
+        case hipblaslt_initialization::zero:
+            return GenerationRecipe::realOnly(GenerationRecipe::zero(), {.seed = seed});
+        case hipblaslt_initialization::norm_dist:
+            return normalRecipe(type, ComplexGenerationPolicy::Cartesian, seed);
+        case hipblaslt_initialization::uniform_01:
+            return uniformZeroOneRecipe(type, ComplexGenerationPolicy::Cartesian, seed);
+        case hipblaslt_initialization::integer_exact:
+            return bindComponentRecipe(type,
+                                       GenerationRecipe::uniformInteger({.lower = 0, .upper = 2}),
+                                       ComplexGenerationPolicy::Cartesian,
+                                       seed);
+        case hipblaslt_initialization::inf:
+            return GenerationRecipe::realOnly(GenerationRecipe::typeInfinity(), {.seed = seed});
+        case hipblaslt_initialization::neg_zero:
+            return GenerationRecipe::realOnly(GenerationRecipe::typeNegativeZero(), {.seed = seed});
+        case hipblaslt_initialization::neg_inf:
+            return GenerationRecipe::realOnly(GenerationRecipe::typeNegativeInfinity(),
+                                              {.seed = seed});
+        case hipblaslt_initialization::nan:
+            return nanRecipe(type, ComplexGenerationPolicy::RealOnly, seed);
+        case hipblaslt_initialization::fp16_accumulator_probe:
+        case hipblaslt_initialization::norm_dist_one_special:
+            throw std::invalid_argument(
+                "Requested hipBLASLt initialization requires matrix role and layout information.");
+        }
+        throw std::invalid_argument("Unsupported hipBLASLt tensor initialization mode.");
+    }
+
+    GenerationRecipe groupedGemmInitializationRecipe(ScalarType                      type,
+                                                     hipblaslt_initialization        mode,
+                                                     initialization::OperandSequence operand,
+                                                     uint64_t                        seed)
+    {
+        switch(mode)
+        {
+        case hipblaslt_initialization::rand_int:
+        case hipblaslt_initialization::trig_float:
+        case hipblaslt_initialization::hpl:
+        case hipblaslt_initialization::uniform_low_precision:
+        case hipblaslt_initialization::special:
+        case hipblaslt_initialization::zero:
+            break;
+        default:
+            throw std::invalid_argument(
+                "Grouped GEMM does not support the requested initialization mode.");
+        }
+
+        switch(operand)
+        {
+        case initialization::OperandSequence::MatrixA:
+        case initialization::OperandSequence::MatrixB:
+        case initialization::OperandSequence::MatrixC:
+        case initialization::OperandSequence::Bias:
+            break;
+        default:
+            throw std::invalid_argument("Unsupported grouped GEMM initialization operand.");
+        }
+
+        if(mode == hipblaslt_initialization::rand_int)
+        {
+            GenerationRecipe::Component component
+                = GenerationRecipe::uniformInteger({.lower = 1, .upper = 10});
+            if(operand == initialization::OperandSequence::MatrixB)
+                component
+                    = component.withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = false});
+            return bindComponentRecipe(
+                type, std::move(component), ComplexGenerationPolicy::RealOnly, seed);
+        }
+
+        if(mode == hipblaslt_initialization::special)
+        {
+            if(operand == initialization::OperandSequence::MatrixA)
+                return GenerationRecipe::realOnly(
+                    GenerationRecipe::constant({.value = specialInitializationAValue}),
+                    {.seed = seed});
+            if(operand == initialization::OperandSequence::MatrixB)
+                return GenerationRecipe::realOnly(
+                    GenerationRecipe::constant({.value = specialInitializationBValue}),
+                    {.seed = seed});
+            return hplRecipe(type, {.seed = seed});
+        }
+
+        return initializationRecipe(type,
+                                    mode,
+                                    seed,
+                                    operand == initialization::OperandSequence::MatrixB
+                                        ? TrigonometricComponent::Cosine
+                                        : TrigonometricComponent::Sine);
     }
 
     void initializeMatrix(Tensor                         destination,

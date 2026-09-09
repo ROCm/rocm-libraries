@@ -55,18 +55,25 @@ class ExtOpAMaxUnsupportedDatatypeTest : public testing::TestWithParam<hipDataTy
 
 TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
 {
+    using namespace roc::host_numerics;
+    using namespace hipblaslt::host_numerics;
+
     uint32_t           m = GetParam();
     uint32_t           n = 16;
-    std::vector<float> input(m * n, 0.f);
     std::vector<float> output(m * n, 0.f);
-    hipblaslt::host_numerics::initialize(
-        input.data(), input.size(), hipblaslt_initialization::rand_int);
+    const Tensor       input = generate(ScalarType::Float32,
+                                  Shape{m, n},
+                                  initializationRecipe(ScalarType::Float32,
+                                                       hipblaslt_initialization::rand_int,
+                                                       defaultInitializationSeed,
+                                                       TrigonometricComponent::Cosine));
     float* gpuInput{};
     float* gpuOutput{};
 
     auto err          = hipMalloc(&gpuInput, m * n * sizeof(float));
     err               = hipMalloc(&gpuOutput, m * n * sizeof(float));
-    err               = hipMemcpyHtoD(gpuInput, input.data(), m * n * sizeof(float));
+    err               = hipMemcpyHtoD(
+        gpuInput, input.rawEncodedBackingStorage().data(), input.rawEncodedBackingStorage().size());
     auto hipblasltErr = hipblasltExtSoftmax(HIP_R_32F, m, n, 1, gpuOutput, gpuInput, nullptr);
     EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_SUCCESS);
     err = hipDeviceSynchronize();
@@ -74,15 +81,8 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     err = hipMemcpyDtoH(output.data(), gpuOutput, m * n * sizeof(float));
     ASSERT_EQ(err, hipSuccess);
 
-    using namespace roc::host_numerics;
-    using namespace hipblaslt::host_numerics;
     Tensor expected(ScalarType::Float32, Shape{m, n});
-    referenceSoftmaxInto(
-        copyTensorFromEncodedStorage(
-            input.data(), input.size(), Layout::contiguousLastDimensionFastest(Shape{m, n})),
-        expected,
-        1,
-        ScalarType::Float32);
+    referenceSoftmaxInto(input, expected, 1, ScalarType::Float32);
     const ComparisonReport comparison = compare(
         copyTensorFromEncodedStorage(
             output.data(), output.size(), Layout::contiguousLastDimensionFastest(Shape{m, n})),
@@ -96,21 +96,27 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
 
 TEST_P(ExtOpLayerNormTest, layernormSuccess)
 {
+    using namespace roc::host_numerics;
+    using namespace hipblaslt::host_numerics;
+
     uint32_t m = GetParam();
     uint32_t n = 16;
 
     std::vector<float> output(m * n, 0.f);
     std::vector<float> mean(m, 0.f);
     std::vector<float> invvar(m, 0.f);
-    std::vector<float> input(m * n, 0.f);
-    std::vector<float> gamma(n, 1.f);
-    std::vector<float> beta(n, 0.f);
-
-    hipblaslt::host_numerics::initialize(
-        input.data(), input.size(), hipblaslt_initialization::hpl);
-    hipblaslt::host_numerics::initialize(
-        gamma.data(), gamma.size(), hipblaslt_initialization::hpl);
-    hipblaslt::host_numerics::initialize(beta.data(), beta.size(), hipblaslt_initialization::hpl);
+    const auto         initialized = [](Shape shape, initialization::OperandSequence sequence) {
+        return generate(ScalarType::Float32,
+                        std::move(shape),
+                        initializationRecipe(
+                            ScalarType::Float32,
+                            hipblaslt_initialization::hpl,
+                            initialization::seedForSequence(defaultInitializationSeed, sequence),
+                            TrigonometricComponent::Cosine));
+    };
+    const Tensor input = initialized(Shape{m, n}, initialization::OperandSequence::MatrixA);
+    const Tensor gamma = initialized(Shape{n}, initialization::OperandSequence::ScaleA);
+    const Tensor beta  = initialized(Shape{n}, initialization::OperandSequence::Bias);
 
     float* gpuOutput{};
     float* gpuMean{};
@@ -126,9 +132,12 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     err      = hipMalloc(&gpuGamma, n * sizeof(float));
     err      = hipMalloc(&gpuBeta, n * sizeof(float));
 
-    err = hipMemcpyHtoD(gpuInput, input.data(), m * n * sizeof(float));
-    err = hipMemcpyHtoD(gpuGamma, gamma.data(), n * sizeof(float));
-    err = hipMemcpyHtoD(gpuBeta, beta.data(), n * sizeof(float));
+    err = hipMemcpyHtoD(
+        gpuInput, input.rawEncodedBackingStorage().data(), input.rawEncodedBackingStorage().size());
+    err = hipMemcpyHtoD(
+        gpuGamma, gamma.rawEncodedBackingStorage().data(), gamma.rawEncodedBackingStorage().size());
+    err = hipMemcpyHtoD(
+        gpuBeta, beta.rawEncodedBackingStorage().data(), beta.rawEncodedBackingStorage().size());
 
     auto hipblasltErr = hipblasltExtLayerNorm(HIP_R_32F,
                                               gpuOutput,
@@ -149,23 +158,19 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     err = hipMemcpyDtoH(mean.data(), gpuMean, m * sizeof(float));
     err = hipMemcpyDtoH(invvar.data(), gpuInvvar, m * sizeof(float));
 
-    using namespace roc::host_numerics;
-    using namespace hipblaslt::host_numerics;
     const Layout tensorLayout     = Layout::contiguousLastDimensionFastest(Shape{m, n});
     const Layout statisticsLayout = Layout::contiguousLastDimensionFastest(Shape{m});
-    const Layout affineLayout     = Layout::contiguousLastDimensionFastest(Shape{n});
 
     LayerNormOptions options;
     options.axis    = 1;
-    options.gamma   = copyTensorFromEncodedStorage(gamma.data(), gamma.size(), affineLayout);
-    options.beta    = copyTensorFromEncodedStorage(beta.data(), beta.size(), affineLayout);
+    options.gamma                    = gamma;
+    options.beta                     = beta;
     options.epsilon = 1e-5;
-    const LayerNormOutputs reference
-        = referenceLayerNorm(copyTensorFromEncodedStorage(input.data(), input.size(), tensorLayout),
-                             {.output          = ScalarType::Float32,
-                              .mean            = ScalarType::Float32,
-                              .inverseVariance = ScalarType::Float32},
-                             options);
+    const LayerNormOutputs reference = referenceLayerNorm(input,
+                                                          {.output          = ScalarType::Float32,
+                                                           .mean            = ScalarType::Float32,
+                                                           .inverseVariance = ScalarType::Float32},
+                                                          options);
 
     const ComparisonOptions comparisonOptions = nearComparisonOptions(1e-5);
     const ComparisonReport  outputComparison
@@ -214,13 +219,20 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     ASSERT_EQ(hipMalloc(&gpuInput, m * n * inNumBytes), hipSuccess);
 
     std::vector<To> cpuOutput(1, 0.f);
-    std::vector<Ti> cpuInput(m * n, 0.f);
     std::vector<To> refOutput(1, 0.f);
+    using namespace roc::host_numerics;
+    const Tensor cpuInput = generate(hipblaslt::host_numerics::scalarType<Ti>(),
+                                     Shape{numElements},
+                                     hipblaslt::host_numerics::initializationRecipe(
+                                         hipblaslt::host_numerics::scalarType<Ti>(),
+                                         hipblaslt_initialization::hpl,
+                                         hipblaslt::host_numerics::defaultInitializationSeed,
+                                         hipblaslt::host_numerics::TrigonometricComponent::Cosine));
 
-    hipblaslt::host_numerics::initialize(
-        cpuInput.data(), cpuInput.size(), hipblaslt_initialization::hpl);
-
-    ASSERT_EQ(hipMemcpyHtoD(gpuInput, cpuInput.data(), m * n * inNumBytes), hipSuccess);
+    ASSERT_EQ(hipMemcpyHtoD(gpuInput,
+                            cpuInput.rawEncodedBackingStorage().data(),
+                            cpuInput.rawEncodedBackingStorage().size()),
+              hipSuccess);
 
     hipStream_t stream{};
     ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
@@ -231,15 +243,9 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
     ASSERT_EQ(hipMemcpyDtoH(cpuOutput.data(), gpuOutput, outNumBytes), hipSuccess);
 
-    using namespace roc::host_numerics;
     Tensor referenceOutput = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
         refOutput.data(), refOutput.size(), Layout::contiguousLastDimensionFastest(Shape{}));
-    referenceMaximumAbsoluteInto(hipblaslt::host_numerics::copyTensorFromEncodedStorage(
-                                     cpuInput.data(),
-                                     cpuInput.size(),
-                                     Layout::contiguousLastDimensionFastest(Shape{numElements})),
-                                 referenceOutput,
-                                 ScalarType::Float32);
+    referenceMaximumAbsoluteInto(cpuInput, referenceOutput, ScalarType::Float32);
     hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
         refOutput.data(), refOutput.size(), referenceOutput);
 

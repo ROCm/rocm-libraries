@@ -29,7 +29,6 @@
 #include "d_vector.hpp"
 #include "device_vector.hpp"
 #include "host_vector.hpp"
-#include <hipblaslt/host_numerics/hipblaslt_init.hpp>
 #include <cstdio>
 #include <hipblaslt/hipblaslt.h>
 #include <iomanip>
@@ -460,17 +459,17 @@ inline void regular_to_banded(
         min1 = upper ? k + 1 : std::min(k + 1, n - j);
         max1 = ldab - 1;
 
-        // fill in bottom with random data to ensure we aren't using it.
+        // Fill the unused region with a nonzero sentinel to expose accidental use.
         // for !upper, fill in bottom right triangle as well.
         for(int i = min1; i <= max1; i++)
-            hipblaslt_init<T>(AB + j * ldab + i, 1, 1, 1);
+            AB[j * ldab + i] = T(1);
 
-        // for upper, fill in top left triangle with random data to ensure
+        // for upper, fill in top left triangle with the sentinel to ensure
         // we aren't using it.
         if(upper)
         {
             for(int i = 0; i < m; i++)
-                hipblaslt_init<T>(AB + j * ldab + i, 1, 1, 1);
+                AB[j * ldab + i] = T(1);
         }
     }
 }
