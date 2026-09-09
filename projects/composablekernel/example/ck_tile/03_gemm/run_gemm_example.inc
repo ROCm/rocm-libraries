@@ -349,8 +349,7 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     c_m_n_dev_buf.SetZero();
     c_m_n_dev_result.SetZero();
 
-#ifdef CK_USE_GFX1250
-    // Enable fallback: gfx1250, RCR, PackedSize=1
+    // Enable fallback: RCR, PackedSize=1
     constexpr bool k_pad_fallback_eligible =
         GemmConfig::EnableKPadFallback && !GemmConfig::FixedVectorSize &&
         std::is_same_v<ADataTypeBuf, BDataTypeBuf> &&
@@ -359,9 +358,6 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
         std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> &&
         ck_tile::numeric_traits<ADataTypeBuf>::PackedSize == 1 &&
         ck_tile::numeric_traits<BDataTypeBuf>::PackedSize == 1;
-#else
-    constexpr bool k_pad_fallback_eligible = false;
-#endif
 
     // Invoke GEMM
     auto run_invoke = [&](auto cfg_tag) {
