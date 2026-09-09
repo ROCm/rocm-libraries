@@ -35,6 +35,7 @@ import multiprocessing
 import subprocess
 import sys
 import tempfile
+import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -2184,12 +2185,26 @@ def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> 
 # / contraction expansions cannot drift. The warp-map gate deliberately stays on
 # _warp_supported_table(): its contract is byte-parity with Old-TE's own table,
 # which is a different source from arch_specs.json.
+#
+# The fallback below replaces a safety predicate with a constant-True stub, so it
+# is scoped as tightly as possible and it is loud. It catches ImportError only --
+# the one failure it exists for, codegen/ not being on the path when this module
+# is imported standalone -- and never a bug inside codegen_common itself, which
+# must surface as the exception it is rather than as silently ungated codegen.
 try:
     _codegen_dir = str(Path(__file__).resolve().parent.parent / "codegen")
     if _codegen_dir not in sys.path:
         sys.path.insert(0, _codegen_dir)
     from codegen_common import arch_config_supported as _arch_config_supported
-except Exception:  # pragma: no cover - keep expand_sweep importable standalone
+except ImportError as _exc:  # pragma: no cover - keep expand_sweep importable
+    warnings.warn(
+        "codegen_common.arch_config_supported could not be imported "
+        f"({_exc}); the arch-validity gate is DISABLED for this process and "
+        "expand_sweep may emit configurations that are invalid on the target.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+
     def _arch_config_supported(arch, **kw) -> bool:  # type: ignore[misc]
         return True
 
