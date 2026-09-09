@@ -1442,7 +1442,26 @@ def _build_tilde_dgrad(
         )
         axis_b = "col"
     elif spec.vector_size_b is not None:
-        load_vec_b = spec.vector_size_b
+        # Clamp, exactly as the K-outer branch above does. vector_size_* is a
+        # CAP, not a demand -- wgrad documents it that way and passes
+        # vector_size_c through as ``max_store_vec`` -- so an explicit width
+        # wider than the tile geometry supports must be narrowed, not obeyed.
+        # Taking it verbatim let a spec pass is_valid_dgrad_spec and then raise
+        # from CoalescedTileLoader.vecs_per_thread deep in the builder.
+        #
+        # Emission-neutral for every spec that already built: choose_vec's
+        # accepted set is a strict subset of vecs_per_thread's, and the
+        # tile_n % (warp_n * warp_tile_n) rule the validator already enforces
+        # makes the axis-divisibility condition free, so this returns exactly
+        # spec.vector_size_b wherever the verbatim path worked, and a narrower
+        # width only where it used to raise.
+        load_vec_b = CoalescedTileLoader.choose_vec(
+            tile_rows=block_n,
+            tile_cols=block_k,
+            block_size=threads,
+            max_vec=min(_def_vec_b, spec.vector_size_b),
+            vector_axis="row",
+        )
         axis_b = "row" if load_vec_b > 1 else "col"
     elif _vb > 1:
         load_vec_b = _vb
