@@ -78,6 +78,10 @@ FUSED_A2A_COUNTER3_OFFSET = _fusedA2AAlignLine(
     FUSED_A2A_COUNTER2_OFFSET + FUSED_A2A_MAX_RANKS * 4)
 FUSED_A2A_COUNTER1_OFFSET = _fusedA2AAlignLine(FUSED_A2A_COUNTER3_OFFSET + 4)
 FUSED_A2A_OUTBOUND_OFFSET = _fusedA2AAlignLine(FUSED_A2A_MAX_RANKS * 4)
+# FusedA2AMode==1 layout of the same block: the cursor region is shared, then the
+# flag block, then the election counters on the next line past the flags (a runtime
+# offset, so no constant for it here).
+FUSED_A2A_MODE1_FLAG_OFFSET = _fusedA2AAlignLine(FUSED_A2A_MAX_RANKS * CURSOR_PAIR_BYTES)
 FUSED_A2A_DRAIN_RECV = 1
 FUSED_A2A_DRAIN_SEND = 2
 

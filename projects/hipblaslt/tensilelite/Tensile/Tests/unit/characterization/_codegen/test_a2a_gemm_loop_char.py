@@ -185,6 +185,67 @@ class TestA2AGemmBatchNumbering:
         )
 
 
+class TestA2AGemmElection:
+    """The batch's single enqueuer: the wave-0 gate, the SMEM atomic, its target."""
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def _atomic(self, src):
+        import re
+
+        m = re.search(r"^s_atomic_inc [^\n]*$", src, re.M)
+        assert m, "no s_atomic_inc in the emitted kernel"
+        return m
+
+    def test_election_atomic_carries_glc(self):
+        assert " glc" in self._atomic(self._src()).group(0)
+
+    def test_wave0_gate_precedes_the_election_atomic(self):
+        import re
+
+        src = self._src()
+        head = src[: self._atomic(src).start()]
+        assert re.search(
+            r"v_readfirstlane_b32 s\d+, v\[vgprSerial\][^\n]*\n"
+            r"s_cmp_eq_u32 s\d+, 0[^\n]*\n"
+            r"s_cbranch_scc0 label_A2ASkipEnqueue",
+            head,
+        ), "no wave-0 gate ahead of the election atomic"
+
+    def test_election_target_is_the_batch_work_group_count(self):
+        import re
+
+        src = self._src()
+        m = re.search(
+            r"s_mul_i32 s(\d+), s\[sgprA2ABlockCount\], s\[sgprNumWorkGroups0\][^\n]*\n"
+            r"s_sub_u32 s\1, s\1, 1",
+            src,
+        )
+        assert m, "the election DATA is not count * F - 1"
+        assert self._atomic(src).group(0).startswith("s_atomic_inc s%s," % m.group(1))
+
+    def test_election_counters_start_past_the_line_aligned_flag_block(self):
+        import re
+
+        from Tensile.Components.Signature import (
+            FUSED_A2A_LINE_BYTES,
+            FUSED_A2A_MODE1_FLAG_OFFSET,
+        )
+
+        src = self._src()
+        mask = hex(0xFFFFFFFF & -FUSED_A2A_LINE_BYTES)
+        assert re.search(
+            r"s_and_b32 s\d+, s\d+, %s\b" % mask, src
+        ), "the flag block width is not rounded up to a line"
+        assert re.search(
+            r"^s_atomic_inc s\d+, s\[\d+:\d+\], %s\b" % hex(FUSED_A2A_MODE1_FLAG_OFFSET),
+            self._atomic(src).group(0),
+        ), "the election atomic does not sit at the flag block offset"
+
+
 class TestA2AGemmRegisterBudget:
     """The emitted kernel's SGPR high-water mark."""
 

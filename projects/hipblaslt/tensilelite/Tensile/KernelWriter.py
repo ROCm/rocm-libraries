@@ -9540,6 +9540,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("A2AKLocal", 1)
       self.defineSgpr("A2ABlockLo", 1)
       self.defineSgpr("A2ABlockCount", 1)
+      self.defineSgpr("A2ACounterPtr", 2, 2)
 
     self.defineSgpr("OrigLoopCounter", 1)
 

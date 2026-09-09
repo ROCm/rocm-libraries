@@ -50,7 +50,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   FlatLoadD16B16, FlatLoadD16HIB16, FlatStoreB128, FlatStoreB32, FlatStoreB64, \
   FlatStoreD16B16, FlatStoreD16HIB16, GlobalReadInstruction, MXMFMAInstruction, MFMAInstruction, MUBUFReadInstruction, \
   MacroInstruction, SAShiftRightI32, SAbsI32, SAddCU32, SAddI32, SAddU32, SAddU64, SAndB32, \
-  SAndB64, SAndN2B32, SAtomicDec, SBarrier, SBfmB32, SBitcmp1B32, SBranch, SCBranchSCC0, \
+  SAndB64, SAndN2B32, SAtomicDec, SAtomicInc, SBarrier, SBfmB32, SBitcmp1B32, SBranch, SCBranchSCC0, \
   SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCSelectB64, SCmpEQI32, \
   SCmpEQU32, SCmpEQU64, SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpKEQU32, \
   SCmpKGeU32, SCmpKGtU32, SCmpKLGU32, SCmpLeI32, SCmpLeU32, SCmpLgU32, SCmpLtU32, SCmpLtI32, \
@@ -7802,7 +7802,9 @@ class KernelWriterAssembly(KernelWriter):
     numCu  = self.sgprPool.checkOut(1, tag="a2aBatchSpan_numCu", preventOverflow=False)
     module.add(self.argLoader.loadKernArg(numCu, "KernArgAddress",
         sgprOffset=hex(self.states.fusedA2AKernArgBase + layout["FusedNumCu"]), dword=1))
-    module.add(SWaitCnt(kmcnt=0, comment="wait FusedNumCu for the batch span"))
+    module.add(self.argLoader.loadKernArg("A2ACounterPtr", "KernArgAddress",
+        sgprOffset=hex(self.states.fusedA2AKernArgBase + layout["counter_ptr"]), dword=2))
+    module.add(SWaitCnt(kmcnt=0, comment="wait FusedNumCu and counter_ptr"))
     tmpVgpr = self.vgprPool.checkOut(4, tag="a2aBatchSpan_divide")
     vgprRes = ContinuousRegister(idx=tmpVgpr, size=4)
     ww      = kernel["WavefrontSize"]
@@ -7839,8 +7841,69 @@ class KernelWriterAssembly(KernelWriter):
     self.vgprPool.checkIn(tmpVgpr)
     self.sgprPool.checkIn(bHi)
     self.sgprPool.checkIn(acc)
+    module.add(self.a2aElect(kernel, iB))
     self.sgprPool.checkIn(iB)
     self.sgprPool.checkIn(numCu)
+    return module
+
+  def a2aElect(self, kernel, iBSgpr):
+    """Elect one enqueuer per batch. The caller keeps iBSgpr live across the call.
+
+    Everything between the election and A2ASkipEnqueue runs on the enqueuer only.
+    """
+    from .Components.Signature import FUSED_A2A_LINE_BYTES, FUSED_A2A_MODE1_FLAG_OFFSET
+    module    = Module("a2aElect")
+    skipLabel = Label("A2ASkipEnqueue", "")
+
+    serial = self.sgprPool.checkOut(1, tag="a2aElect_serial", preventOverflow=False)
+    module.add(VReadfirstlaneB32(dst=sgpr(serial), src=vgpr("Serial"),
+                                 comment="wave 0 elects the WG's single writer"))
+    module.add(SCmpEQU32(src0=sgpr(serial), src1=0, comment="wave 0?"))
+    self.sgprPool.checkIn(serial)
+    module.add(SCBranchSCC0(labelName=skipLabel.getLabelName(),
+                            comment="non-wave-0 -> not the enqueuer"))
+
+    off = self.sgprPool.checkOut(1, tag="a2aElect_off", preventOverflow=False)
+    module.add(SSubU32(dst=sgpr(off), src0=sgpr("A2AShardCounter"), src1=1, comment="W - 1"))
+    module.add(SMulI32(dst=sgpr(off), src0=sgpr("NumWorkGroups1"), src1=sgpr(off),
+                       comment="numTokenBlocks * (W-1)"))
+    module.add(SLShiftLeftB32(dst=sgpr(off), shiftHex=2, src=sgpr(off),
+                              comment="flag block bytes = numTokenBlocks * (W-1) * 4"))
+    module.add(SAddU32(dst=sgpr(off), src0=sgpr(off), src1=FUSED_A2A_LINE_BYTES - 1,
+                       comment=f"round up to a {FUSED_A2A_LINE_BYTES}-byte line"))
+    module.add(SAndB32(dst=sgpr(off), src0=sgpr(off),
+                       src1=hex(0xFFFFFFFF & -FUSED_A2A_LINE_BYTES),
+                       comment="flag block rounded up to a line"))
+
+    slot = self.sgprPool.checkOut(1, tag="a2aElect_slot", preventOverflow=False)
+    module.add(SLShiftLeftB32(dst=sgpr(slot), shiftHex=2, src=sgpr(iBSgpr), comment="iB * 4"))
+    module.add(SAddU32(dst=sgpr(off), src0=sgpr(off), src1=sgpr(slot),
+                       comment="byte offset of counter[iB] past the flag block"))
+    self.sgprPool.checkIn(slot)
+
+    ptr = self.sgprPool.checkOutAligned(2, 2, tag="a2aElect_ptr", preventOverflow=False)
+    module.add(SAddU32(dst=sgpr(ptr), src0=sgpr("A2ACounterPtr"), src1=sgpr(off),
+                       comment="&counter[iB] lo"))
+    module.add(SAddCU32(dst=sgpr(ptr + 1), src0=sgpr("A2ACounterPtr+1"), src1=0,
+                        comment="&counter[iB] hi (carry)"))
+    self.sgprPool.checkIn(off)
+
+    data = self.sgprPool.checkOut(1, tag="a2aElect_data", preventOverflow=False)
+    module.add(SMulI32(dst=sgpr(data), src0=sgpr("A2ABlockCount"), src1=sgpr("NumWorkGroups0"),
+                       comment="count * F = the batch's work-group count"))
+    module.add(SSubU32(dst=sgpr(data), src0=sgpr(data), src1=1, comment="DATA = count * F - 1"))
+    module.add(SAtomicInc(dst=sgpr(data), base=sgpr(ptr, 2),
+                          soffset=hex(FUSED_A2A_MODE1_FLAG_OFFSET),
+                          smem=SMEMModifiers(glc=True),
+                          comment="old = atomic_inc(counter[iB]), wrap at count*F-1, return pre-op"))
+    module.add(SWaitCnt(kmcnt=0, comment="wait the election atomic return (SMEM -> lgkmcnt)"))
+    module.add(SCmpLgU32(src0=sgpr(data), src1=0, comment="old != 0?"))
+    self.sgprPool.checkIn(data)
+    self.sgprPool.checkIn(ptr)
+    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
+                            comment="lost the election -> skip the enqueue"))
+
+    module.add(skipLabel)
     return module
 
   def closeA2AShardLoop(self, kernel):
