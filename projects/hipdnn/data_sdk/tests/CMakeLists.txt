@@ -58,9 +58,8 @@ add_executable(
 # Standalone helper process for TestLineStore's two-process lock contention case (see
 # LineStoreLockHelper.cpp). Not a gtest binary and not registered via add_hipdnn_test().
 #
-# Linux-only: its sole consumer is the fork()/waitpid() test guarded by
-# `#if defined(__linux__)` in TestLineStore.cpp, so building and shipping it elsewhere
-# would install a binary nothing can invoke.
+# Portable: TestLineStore.cpp's cross-process lock tests build and run on every platform,
+# so this helper does too.
 #
 # The name ends in `_test` on purpose. TheRock packages hipDNN's test artifact by the
 # glob `bin/*hipdnn_*_test*` (ml-libs/artifact-hipdnn.toml), which requires `_test`
@@ -72,26 +71,24 @@ add_executable(
 # Only the helper's FILENAME is baked in and resolved next to the test's own executable at
 # runtime, since an absolute $<TARGET_FILE:...> path would name the build tree, which does
 # not exist once CI installs and runs the test binaries from the install prefix.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_executable(hipdnn_line_store_lock_helper_test utilities/LineStoreLockHelper.cpp)
-    target_link_libraries(hipdnn_line_store_lock_helper_test PRIVATE hipdnn_data_sdk)
-    target_compile_options(
-        hipdnn_line_store_lock_helper_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS}
-    )
-    clang_tidy_check(hipdnn_line_store_lock_helper_test)
-    set_target_properties(
-        hipdnn_line_store_lock_helper_test
-        PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
-    )
-    target_compile_definitions(
-        hipdnn_data_sdk_tests PRIVATE
-        HIPDNN_LINESTORE_LOCK_HELPER_NAME="$<TARGET_FILE_NAME:hipdnn_line_store_lock_helper_test>"
-    )
+add_executable(hipdnn_line_store_lock_helper_test utilities/LineStoreLockHelper.cpp)
+target_link_libraries(hipdnn_line_store_lock_helper_test PRIVATE hipdnn_data_sdk)
+target_compile_options(
+    hipdnn_line_store_lock_helper_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS}
+)
+clang_tidy_check(hipdnn_line_store_lock_helper_test)
+set_target_properties(
+    hipdnn_line_store_lock_helper_test
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+)
+target_compile_definitions(
+    hipdnn_data_sdk_tests PRIVATE
+    HIPDNN_LINESTORE_LOCK_HELPER_NAME="$<TARGET_FILE_NAME:hipdnn_line_store_lock_helper_test>"
+)
 
-    # The test spawns the helper, so it must exist before the test runs and ship alongside it.
-    add_dependencies(hipdnn_data_sdk_tests hipdnn_line_store_lock_helper_test)
-    install(TARGETS hipdnn_line_store_lock_helper_test RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-endif()
+# The test spawns the helper, so it must exist before the test runs and ship alongside it.
+add_dependencies(hipdnn_data_sdk_tests hipdnn_line_store_lock_helper_test)
+install(TARGETS hipdnn_line_store_lock_helper_test RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 target_compile_options(hipdnn_data_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 
