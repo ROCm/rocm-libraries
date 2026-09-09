@@ -78,6 +78,32 @@ def main():
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    lib_dirs = (
+        [Path(args.lib_dir)] if args.lib_dir else sorted(SCRIPT_DIR.parent.glob("lib*"))
+    )
+    wrapper_lib = find_library(lib_dirs, "libMIOpen")
+    private_lib = find_library(lib_dirs, "libMIOpen_private")
+    if wrapper_lib is None or private_lib is None:
+        # Both are built whenever this entry is registered, so a missing one is a
+        # packaging or layout regression rather than a configuration to skip over.
+        # Resolved before the replays so that regression is reported directly
+        # instead of as a loader error inside the first replay.
+        print(
+            "FAIL: expected libMIOpen.so and libMIOpen_private.so under "
+            f"{', '.join(str(d) for d in lib_dirs) or '<no lib directory>'}",
+            flush=True,
+        )
+        return 1
+
+    # The replays have to load the pair the ABI check inspects. An installed test
+    # binary's RUNPATH names the ROCm library directory, not the tree it was
+    # installed into, so without this an install to any other prefix silently
+    # replays some other MIOpen -- or, with no private library beside it, fails
+    # to start at all.
+    ld_path = os.pathsep.join(
+        p for p in (str(private_lib.parent), os.environ.get("LD_LIBRARY_PATH")) if p
+    )
+
     reports = []
     for mode in ("disabled", "enabled"):
         report = output_dir / f"{gtest.name}_forwarding_{mode}.xml"
@@ -85,7 +111,7 @@ def main():
         # otherwise leave the previous run's file for the comparison to read.
         report.unlink(missing_ok=True)
         reports.append(report)
-        env = dict(os.environ, MIOPEN_HIPDNN_FORWARDING=mode)
+        env = dict(os.environ, MIOPEN_HIPDNN_FORWARDING=mode, LD_LIBRARY_PATH=ld_path)
         ok = run(
             [
                 gtest,
@@ -106,21 +132,6 @@ def main():
         [args.compare, *reports, "--newer-than", gtest],
         "forwarding parity comparison",
     )
-
-    lib_dirs = (
-        [Path(args.lib_dir)] if args.lib_dir else sorted(SCRIPT_DIR.parent.glob("lib*"))
-    )
-    wrapper_lib = find_library(lib_dirs, "libMIOpen")
-    private_lib = find_library(lib_dirs, "libMIOpen_private")
-    if wrapper_lib is None or private_lib is None:
-        # Both are built whenever this entry is registered, so a missing one is a
-        # packaging or layout regression rather than a configuration to skip over.
-        print(
-            "FAIL: expected libMIOpen.so and libMIOpen_private.so under "
-            f"{', '.join(str(d) for d in lib_dirs) or '<no lib directory>'}",
-            flush=True,
-        )
-        return 1
 
     # --public-header is deliberately absent: the check it enables compares the
     # exclusion list against miopen.h, both source files, so it belongs to the

@@ -112,9 +112,11 @@ void InitConvDescriptor(OwnedConvDescriptor& conv)
 
 // Ask the library for the output shape rather than recomputing it here, so the shape is part
 // of what the two implementations must agree on.
-std::vector<std::size_t> OutputLengths(miopenConvolutionDescriptor_t conv_desc,
-                                       const tensor<float>& x,
-                                       const tensor<float>& w)
+// Takes its tensors by non-const reference because the C entry point spells its descriptor
+// parameters `const miopenTensorDescriptor_t` — a const pointer to a non-const descriptor —
+// so a descriptor reached through a const tensor does not convert.
+std::vector<std::size_t>
+OutputLengths(miopenConvolutionDescriptor_t conv_desc, tensor<float>& x, tensor<float>& w)
 {
     int out_dim_count = 0;
     std::vector<int> out_dims(4);
