@@ -350,16 +350,16 @@ identity, versioning, and the feature contract without understanding the ranking
 // tree_data — the default; a GBDT tree table, shipped as data with the engine's descriptor set
 {
   // ── universal header (every UHD, every adapter) ──────────────────────────────
-  "schema":  "hipdnn.uhd/v1",
-  "id":      "ae896b07-80cd-473c-b3f4-6a8892998519",   // GUID; referenced by the UED (one per engine)
-  "name":    "rocKE FMHA fwd selector",                // per-engine, arch-aware — not per-arch
+  "version": "1.0",                                    // major.minor; gated at load (Section 8.1)
+  "id":      "ae896b07-80cd-473c-b3f4-6a8892998519",   // GUID; referenced by a UED heuristic role
+  "name":    "rocKE FMHA fwd selector",                // arch-aware; the UED maps arches to UHDs
   "adapter": "tree_data",                              // discriminant: selects the body schema (Section 7)
 
   // ordered model inputs; order + form must match training (Section 6)
   "features_signature": [
     "$device.cu_count", "$device.lds_size",            // device props → arch-aware
     "$kernel.tile_m", "$kernel.split_k",               // KMD fields, exposed as knobs (Section 3.2)
-    "$q.dims[3]", "$q.dims[2]",              // graph node attr + tensor dim
+    "$q.dims[3]", "$q.dims[2]",                        // positional tensor dims (Section 6.1)
     {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]},     // computed inline — no $derived.* (Section 6.4)
     {"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]}    // tile quantization, also inline
   ],
@@ -390,8 +390,8 @@ Other adapters keep the same header and swap the body:
 { …, "adapter": "onnx",
   "onnx": {"artifact": "fmha_fwd/model.onnx"} }
 
-// static_order — no features, no derived, no hash, no model
-{ "schema": "hipdnn.uhd/v1", "id": "…", "name": "…", "adapter": "static_order",
+// static_order — no features, no hash, no model
+{ "version": "1.0", "id": "…", "name": "…", "adapter": "static_order",
   "static_order": {"order": ["priority", "id"]} }
 
 // custom_library — author-shipped .so behind a C ABI; features_hash advisory if it self-features
@@ -413,8 +413,8 @@ The normative header. A loader can validate every row here without instantiating
 
 | Field | Required | Type | Meaning |
 |---|---|---|---|
-| `schema` | yes | string | Schema id + major version (`hipdnn.uhd/v1`). Unknown major → reject. |
-| `id` | yes | GUID | Descriptor identity; what the UED's `heuristic` references. |
+| `version` | yes | string | `<major>.<minor>`, e.g. `1.0`. The compatibility field the accept rule gates on. A UHD carries no in-band type tag; the descriptor kind comes from the filename suffix (`<name>.uhd.json`), matching [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema). |
+| `id` | yes | GUID | Descriptor identity; what a UED heuristic role references. |
 | `name` | yes | string | Human-readable; appears in the selection trace. |
 | `adapter` | yes | enum | Ranking mechanism, and the **key of the body object** ([Section 7](#7-model-adapters)). |
 | `features_signature` | if the adapter features | ordered list | Model inputs, in training order ([Section 6.2](#62-the-features_signature)). |
@@ -434,11 +434,113 @@ Two header rules govern the split:
   provider does not implement produces a diagnosable "unsupported adapter" error rather than a parse
   failure, so a newer pack landing next to an older provider degrades predictably.
 
-**OPEN — formal schema artifact.** This section is a reference table, not a machine-checkable schema.
-Consistent with the UED RFC, the UHD ships a schema definition (FlatBuffers table or JSON Schema, matching
-whatever the descriptor family standardizes on) so
-validation is generated rather than hand-written. Header first; adapter bodies as each adapter lands.
-*(See [Open Question 13](#operational).)*
+Each `major.minor` is a standalone JSON Schema **file** in the repository; the inline copy below
+mirrors the authoritative `uhd/1.0.json`, and a CI check verifies the match. The schema targets
+**Draft 7**, matching [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema), so one
+file drives both the build-time and runtime checks.
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "uhd/1.0.json",
+  "title": "hipdnn.uhd version 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "name", "adapter"],
+  "properties": {
+    "version":  { "type": "string", "const": "1.0" },
+    "id":       { "type": "string",
+                  "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+    "name":     { "type": "string", "minLength": 1 },
+    "adapter":  { "enum": ["static_order", "native", "table", "tree_data", "onnx", "custom_library"] },
+
+    "features_signature": {
+      "description": "Ordered model inputs. A string is a $-reference; an object is an expression.",
+      "type": "array",
+      "items": { "type": ["string", "object"] },
+      "minItems": 1
+    },
+    "categorical_encoding": {
+      "description": "Per-field value->code maps for string-valued features (section 6.5).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "type": "integer" },
+        "minProperties": 1
+      }
+    },
+    "features_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]+$" },
+    "trained_against": {
+      "description": "Descriptor versions this heuristic was generated against (section 8.1).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ued": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "umd": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "kmd": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" }
+      }
+    },
+    "objective": { "enum": ["max", "min"] },
+    "score": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "units":      { "type": "string", "minLength": 1 },
+        "calibrated": { "type": "boolean" },
+        "transform":  { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "static_order":   { "type": "object", "additionalProperties": false,
+                        "properties": { "order": { "type": "array", "items": { "type": "string" } } } },
+    "native":         { "type": "object", "additionalProperties": false,
+                        "required": ["symbol"],
+                        "properties": { "symbol": { "type": "string", "minLength": 1 } } },
+    "table":          { "type": "object", "required": ["artifact"],
+                        "properties": { "artifact": { "type": "string", "minLength": 1 } } },
+    "tree_data":      { "type": "object", "required": ["artifact"],
+                        "properties": { "artifact": { "type": "string", "minLength": 1 } } },
+    "onnx":           { "type": "object", "required": ["artifact"],
+                        "properties": { "artifact": { "type": "string", "minLength": 1 } } },
+    "custom_library": { "type": "object", "required": ["library", "symbol"],
+                        "properties": { "library": { "type": "string", "minLength": 1 },
+                                        "symbol":  { "type": "string", "minLength": 1 },
+                                        "config":  { "type": "object" } } }
+  },
+
+  "allOf": [
+    { "if":   { "properties": { "adapter": { "const": "native" } } },
+      "then": { "required": ["native"] } },
+    { "if":   { "properties": { "adapter": { "const": "tree_data" } } },
+      "then": { "required": ["tree_data", "features_signature", "features_hash"] } },
+    { "if":   { "properties": { "adapter": { "const": "table" } } },
+      "then": { "required": ["table", "features_signature", "features_hash"] } },
+    { "if":   { "properties": { "adapter": { "const": "onnx" } } },
+      "then": { "required": ["onnx", "features_signature", "features_hash"] } },
+    { "if":   { "properties": { "adapter": { "const": "custom_library" } } },
+      "then": { "required": ["custom_library"] } },
+    { "if":   { "required": ["features_signature"] },
+      "then": { "required": ["features_hash"] } }
+  ]
+}
+```
+
+Two rules the schema expresses that the table states in prose. `additionalProperties: false` makes an
+unknown member a hard rejection, so a body for an adapter the descriptor does not name is an error
+rather than a silently ignored field. The `allOf` conditionals bind each `adapter` value to its own
+body and, for the model adapters, to a feature contract — a `tree_data` UHD without a
+`features_signature` and `features_hash` cannot be checked against its artifact and is rejected at
+load ([Section 6.3](#63-contract-enforcement)).
+
+**Validated against shipping descriptors.** The schema above accepts every `version: "1.0"` UHD in the
+tree — both `native` and `tree_data` adapters, with and without `categorical_encoding`. Descriptors at
+earlier versions, such as the `0.1` packaging-test fixtures with placeholder ids, are rejected by it, which
+is the accept rule working as intended rather than a gap.
+
+**OPEN — remaining schema work.** The block above covers the header and the adapter bodies as they exist
+today. Still outstanding: publishing it as the standalone per-version `uhd/1.0.json` file with the CI
+parity check RFC 0020 §4.2 describes, and extending it as each further adapter lands, so validation is
+generated rather than hand-written. *(See [Open Question 13](#operational).)*
 
 ### 4.2 Adapter Summary
 
@@ -2071,11 +2173,11 @@ dependency-gated and land only when a concrete need appears.
     hipDNN API, not resolvable inside this RFC.
     *(Impacts [Section 13.2](#132-benchmarking-via-hipdnn-autotune), [Section 15](#15-phased-delivery) phase 5.)*
 
-13. **Formal schema artifact.** [Section 4.1](#41-field-reference) is a reference table, not a
-    machine-checkable schema. Ship a real definition — FlatBuffers table or JSON Schema, matching
-    whatever the descriptor family standardizes on — so validation is generated rather than
-    hand-written, and so the header/body split is enforced mechanically. Header first; adapter bodies
-    as each adapter lands. Should align with the same decision for the UED.
+13. **Publishing the schema file.** [Section 4.1](#41-field-reference) now carries a normative Draft-7
+    block, validated against every shipping `version: "1.0"` descriptor. What remains is packaging it as
+    the standalone per-version `uhd/1.0.json` with the CI parity check
+    [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema) defines, deciding where that
+    file lives relative to the UED's, and extending it as `table`, `onnx`, and `custom_library` land.
     *(Impacts [Section 4](#4-uhd-schema).)*
 
 14. **CI validation of shipped descriptor sets.** Because a broken feature contract degrades rather
