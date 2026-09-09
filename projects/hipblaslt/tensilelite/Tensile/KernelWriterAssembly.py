@@ -7809,6 +7809,10 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["FusedA2AMode"] != 1:
       return module
     module.addComment1("A2A_TRANSITION begin")
+    endLabel = Label("A2ATransitionEnd", "")
+    module.add(SCmpEQI32(src0=sgpr("A2AShardCounter"), src1=1, comment="last shard round"))
+    module.add(SCBranchSCC1(labelName=endLabel.getLabelName(),
+                            comment="skip the next round's setup"))
     module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
                        comment="next shard"))
     for tP in (tPA, tPB):
@@ -7842,6 +7846,7 @@ class KernelWriterAssembly(KernelWriter):
                            src1=sgpr(s + 2), comment="Srd%s base += shard offset" % tc))
         module.add(SAddCU32(dst=sgpr("Srd%s+1" % tc), src0=sgpr("Srd%s+1" % tc),
                             src1=sgpr(s + 3)))
+    module.add(endLabel)
     module.addComment1("A2A_TRANSITION end")
     return module
 
