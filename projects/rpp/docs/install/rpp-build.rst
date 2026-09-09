@@ -127,7 +127,7 @@ The available CMake options are:
 * ``CMAKE_BUILD_TYPE``: Set to ``Debug`` or ``Release``. ``Release`` by default.
 * ``RPP_AUDIO_SUPPORT``: Set to ``OFF`` to disable audio augmentations. ``ON`` by
   default. Audio augmentations use an in-house FFT implementation for CPU backend
-  and rocFFT for GPU (HIP) backend.
+  and rocFFT for GPU (HIP) backend when available (otherwise the HIP backend falls back to manual DFT).
 
 .. _verify-install:
 
