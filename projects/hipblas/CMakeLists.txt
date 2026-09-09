@@ -77,9 +77,13 @@ endif( )
 # BUILD_SHARED_LIBS is a cmake built-in; we make it an explicit option such that it shows in cmake-gui
 option( BUILD_SHARED_LIBS "Build hipBLAS as a shared library" ON )
 
-# USE_CUDA: build hipBLAS for the CUDA backend using nvcc directly.
+# USE_CUDA: select the CUDA backend, invoking nvcc directly without hipcc.
+# This replaces the old hipcc-based USE_CUDA flow (which set ENV{HIP_PLATFORM}
+# for hipconfig). The previous USE_CUDA was deprecated because it depended on
+# hipcc/hipconfig; this new option drives the backend via CMake's FindCUDAToolkit
+# and nvcc directly — no hipcc or hipconfig involvement.
 # Pass -DUSE_CUDA=ON to cmake (or --cuda to rmake.py/install.sh) to enable.
-option(USE_CUDA "Build hipBLAS for the CUDA backend using nvcc directly" OFF)
+option(USE_CUDA "Build hipBLAS for the CUDA backend using nvcc directly (no hipcc)" OFF)
 
 if(USE_CUDA)
   # CUDA backend: use the CUDAToolkit module (requires nvcc on PATH or
