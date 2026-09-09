@@ -103,6 +103,42 @@ options are not automatically validated or included in artifact identity.
 
 `runtime/hip_module.py` is the matching ctypes wrapper for `libamdhip64.so` (the HIP runtime). It exposes only what the DSL needs.
 
+### Device identity and capabilities
+
+`get_device_info(device)` reads the target ID and ASIC revision from one HIP
+properties query. `infer_device_capabilities(info)` applies explicit feature
+rules to that snapshot without another HIP call:
+
+```python
+from rocke.runtime import get_device_info, infer_device_capabilities
+
+info = get_device_info(0)
+caps = infer_device_capabilities(info)
+use_tdm_multicast = caps.has_tdm_multicast is True
+```
+
+The immutable result has two fields: `has_tdm_multicast` and
+`has_fp4_wmma_32x16`. Each is `True` for supported, `False` for unsupported,
+or `None` when there is no rule for the architecture and revision. A caller
+requiring a feature should enable it only when the field is `True`.
+
+The current rules follow hipBLASLt's
+[gfx1250 revision mapping](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/hipblaslt/library/src/amd_detail/rocblaslt/src/include/rocblaslt_arch_revision.hpp#L8-L18)
+and [capability overrides](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/hipblaslt/tensilelite/Tensile/Common/Architectures.py#L85-L110):
+revision 0 disables both features; revision 1 enables them. rocKE leaves other
+revisions and architectures unknown, including when the HIP query fails.
+Revision zero is a valid value. Target suffixes do not select a revision.
+
+TDM multicast is separate from ordinary TDM loads, workgroup clusters, and
+cluster barriers. The WMMA field refers to the physical 32 by 16 FP4 instruction,
+even when operand swapping transposes the logical matrix dimensions.
+
+These are device feature rules. Compiler support still needs its own check.
+`core.arch.MemoryCapabilities` describes architecture-level memory operations;
+`dispatch.Capability` describes the problems a kernel candidate covers. This
+API does not change either, select kernels, or change generated code. CPU-only
+builders continue to use explicit target and feature choices.
+
 ### Library loading
 
 The HIP module loader follows the same `_candidate_lib_paths` order as

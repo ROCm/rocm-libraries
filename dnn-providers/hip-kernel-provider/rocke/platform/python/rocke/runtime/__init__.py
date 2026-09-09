@@ -7,9 +7,8 @@
 in-process pipeline that turns AMDGPU LLVM IR text into a running
 kernel.
 
-Layered modules (bottom-up). The first five run torch-free -- the
-hip-only core; ``torch_interop`` and ``launcher`` are the torch-aware
-edge:
+Layered modules (bottom-up). The core modules run torch-free;
+``torch_interop`` and ``launcher`` are the torch-aware edge:
 
   - ``runtime_coexistence`` : which ROCm runtime we bind to, and whose
                       (torch-bundled vs a system ROCm install). Shared
@@ -35,6 +34,9 @@ edge:
 
   - ``device_info``  : reads HIP's target ID and ASIC revision, and derives
                       target names for compilation and architecture lookup.
+
+  - ``device_capabilities`` : infers individual device features from a
+                      ``DeviceInfo`` snapshot without further HIP calls.
 
   - ``packing``     : torch-agnostic kernel-arg packing (`pack_args`,
                       `pack_args_kernelparams`) for the AMDGPU kernarg
@@ -87,6 +89,7 @@ When to drop to the lower-level APIs:
 from __future__ import annotations
 
 from .comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
+from .device_capabilities import DeviceCapabilities, infer_device_capabilities
 from .device_info import DeviceInfo, get_device_info
 from .hip_module import HipError, Runtime
 from .launcher import (
@@ -113,6 +116,7 @@ from .torch_interop import (
 __all__ = [
     "ComgrError",
     "ComgrTimings",
+    "DeviceCapabilities",
     "DeviceInfo",
     "DeviceMem",
     "HipError",
@@ -126,6 +130,7 @@ __all__ = [
     "build_hsaco_from_llvm_ir",
     "empty_workspace",
     "get_device_info",
+    "infer_device_capabilities",
     "launch_torch_kernel",
     "no_fence",
     "pack_args",
