@@ -114,13 +114,15 @@ jobs:
       # wrapper on, the parity harness has to be there.
       - name: Forwarding parity harness is registered
         run: |
-          # pipefail: without it the exit status is sed's, so a ctest that failed
-          # outright would be read as a well-formed empty result.
-          set -o pipefail
-          count=$(ctest --test-dir build -N -L forwarding_parity |
-            sed -n 's/^Total Tests: //p')
+          # Capture before parsing: piping into sed would make sed's exit status
+          # the step's, so a ctest that failed outright would be read as a
+          # well-formed empty result. An assignment from a command substitution
+          # carries that command's status, so -e stops here instead.
+          listing=$(ctest --test-dir build -N -L forwarding_parity)
+          count=$(printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p')
           echo "forwarding_parity tests registered: ${count:-<unparsed>}"
           test -n "$count" && test "$count" -gt 0 || {
             echo "expected forwarding_parity tests with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON"
+            printf '%s\n' "$listing"
             exit 1
           }

@@ -180,14 +180,16 @@ jobs:
       - name: Forwarding parity harness is absent with the wrapper off
         if: matrix.job_id == 'no-ck-build'
         run: |
-          # pipefail: without it the exit status is sed's, so a ctest that failed
-          # outright would be read as the zero count this step is asserting.
-          set -o pipefail
-          count=$(ctest --test-dir build -N -L forwarding_parity |
-            sed -n 's/^Total Tests: //p')
+          # Capture before parsing: piping into sed would make sed's exit status
+          # the step's, so a ctest that failed outright would be read as the zero
+          # count this step is asserting. An assignment from a command
+          # substitution carries that command's status, so -e stops here instead.
+          listing=$(ctest --test-dir build -N -L forwarding_parity)
+          count=$(printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p')
           echo "forwarding_parity tests registered: ${count:-<unparsed>}"
           test "$count" = "0" || {
             echo "expected no forwarding_parity tests without MIOPEN_ENABLE_HIPDNN_WRAPPER"
+            printf '%s\n' "$listing"
             exit 1
           }
 
