@@ -84,11 +84,11 @@ void tensorArithmetic() {
         Tensor::copyNativeValues<float>(Shape{2, 1}, std::array<float, 2>{1.0f, 2.0f});
     const Tensor row =
         Tensor::copyNativeValues<float>(Shape{1, 3}, std::array<float, 3>{10.0f, 20.0f, 30.0f});
-    const Tensor result = 2.0f * column + row;
-    check(result.shape() == Shape{2, 3} && result.loadAs<float>({0, 0}) == 12.0f &&
-              result.loadAs<float>({1, 2}) == 34.0f,
+    const Tensor result = 2.0f * column - 0.5f * row;
+    check(result.shape() == Shape{2, 3} && result.loadAs<float>({0, 0}) == -3.0f &&
+              result.loadAs<float>({1, 2}) == -11.0f,
           "Broadcast tensor arithmetic mismatch.");
-    check(relu(clip(result, -20.0, 20.0)).loadAs<float>({1, 2}) == 20.0f,
+    check(relu(clip(result, -20.0, 20.0)).loadAs<float>({1, 2}) == 0.0f,
           "Named activation mismatch.");
 }
 

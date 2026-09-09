@@ -1110,6 +1110,14 @@ void testTensorOperations() {
     require(operatorResult.loadAs<float>({0}) == 3.0f && operatorResult.loadAs<float>({1}) == 5.0f,
             "Tensor arithmetic operators do not match the named operations.");
 
+    const Tensor subtractionResult = 10.0f - operatorResult - 1.0f;
+    require(subtractionResult.loadAs<float>({0}) == 6.0f &&
+                subtractionResult.loadAs<float>({1}) == 4.0f,
+            "Tensor subtraction operators do not match NumPy-style arithmetic.");
+    const Tensor negated = -operatorResult;
+    require(negated.loadAs<float>({0}) == -3.0f && negated.loadAs<float>({1}) == -5.0f,
+            "Tensor unary negation mismatch.");
+
     bool rejectedBeforeAllocation = false;
     try {
         (void)multiply(x, Tensor(std::complex<double>(1.0, 1.0)), ScalarType::Float32,

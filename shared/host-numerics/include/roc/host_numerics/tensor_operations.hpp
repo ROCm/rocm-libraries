@@ -10,7 +10,7 @@
 #include <utility>
 
 namespace roc::host_numerics {
-// NumPy-style elementwise addition and multiplication. Inputs use trailing-axis
+// NumPy-style elementwise arithmetic. Inputs use trailing-axis
 // broadcasting, including rank-zero tensors. The short overloads require equal
 // input types and preserve that type; explicit overloads make mixed/storage
 // conversion semantics visible.
@@ -21,15 +21,33 @@ void addInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType 
              OutputSelection selection = OutputSelection::all());
 
 template <typename Number>
-    requires requires { nativeScalarType<std::remove_cvref_t<Number>>; }
+    requires NativeScalar<Number>
 Tensor add(const Tensor& tensor, Number value) {
     return add(tensor, Tensor::scalar(tensor.type(), std::move(value)));
 }
 
 template <typename Number>
-    requires requires { nativeScalarType<std::remove_cvref_t<Number>>; }
+    requires NativeScalar<Number>
 Tensor add(Number value, const Tensor& tensor) {
     return add(Tensor::scalar(tensor.type(), std::move(value)), tensor);
+}
+
+Tensor subtract(const Tensor& left, const Tensor& right);
+Tensor subtract(const Tensor& left, const Tensor& right, ScalarType outputType,
+                ScalarType computeType, std::optional<Layout> outputLayout = std::nullopt);
+void subtractInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
+                  OutputSelection selection = OutputSelection::all());
+
+template <typename Number>
+    requires NativeScalar<Number>
+Tensor subtract(const Tensor& tensor, Number value) {
+    return subtract(tensor, Tensor::scalar(tensor.type(), std::move(value)));
+}
+
+template <typename Number>
+    requires NativeScalar<Number>
+Tensor subtract(Number value, const Tensor& tensor) {
+    return subtract(Tensor::scalar(tensor.type(), std::move(value)), tensor);
 }
 
 Tensor multiply(const Tensor& left, const Tensor& right);
@@ -39,13 +57,13 @@ void multiplyInto(const Tensor& left, const Tensor& right, Tensor output, Scalar
                   OutputSelection selection = OutputSelection::all());
 
 template <typename Number>
-    requires requires { nativeScalarType<std::remove_cvref_t<Number>>; }
+    requires NativeScalar<Number>
 Tensor multiply(const Tensor& tensor, Number value) {
     return multiply(tensor, Tensor::scalar(tensor.type(), std::move(value)));
 }
 
 template <typename Number>
-    requires requires { nativeScalarType<std::remove_cvref_t<Number>>; }
+    requires NativeScalar<Number>
 Tensor multiply(Number value, const Tensor& tensor) {
     return multiply(Tensor::scalar(tensor.type(), std::move(value)), tensor);
 }
@@ -92,14 +110,34 @@ inline Tensor operator+(const Tensor& left, const Tensor& right) {
     return add(left, right);
 }
 
+inline Tensor operator-(const Tensor& left, const Tensor& right) {
+    return subtract(left, right);
+}
+
 template <typename Number>
-    requires requires { nativeScalarType<std::remove_cvref_t<Number>>; }
+    requires NativeScalar<Number>
+Tensor operator-(const Tensor& tensor, Number value) {
+    return subtract(tensor, std::move(value));
+}
+
+template <typename Number>
+    requires NativeScalar<Number>
+Tensor operator-(Number value, const Tensor& tensor) {
+    return subtract(std::move(value), tensor);
+}
+
+inline Tensor operator-(const Tensor& tensor) {
+    return multiply(tensor, -1);
+}
+
+template <typename Number>
+    requires NativeScalar<Number>
 Tensor operator+(const Tensor& tensor, Number value) {
     return add(tensor, std::move(value));
 }
 
 template <typename Number>
-    requires requires { nativeScalarType<std::remove_cvref_t<Number>>; }
+    requires NativeScalar<Number>
 Tensor operator+(Number value, const Tensor& tensor) {
     return add(std::move(value), tensor);
 }
@@ -109,13 +147,13 @@ inline Tensor operator*(const Tensor& left, const Tensor& right) {
 }
 
 template <typename Number>
-    requires requires { nativeScalarType<std::remove_cvref_t<Number>>; }
+    requires NativeScalar<Number>
 Tensor operator*(const Tensor& tensor, Number value) {
     return multiply(tensor, std::move(value));
 }
 
 template <typename Number>
-    requires requires { nativeScalarType<std::remove_cvref_t<Number>>; }
+    requires NativeScalar<Number>
 Tensor operator*(Number value, const Tensor& tensor) {
     return multiply(std::move(value), tensor);
 }

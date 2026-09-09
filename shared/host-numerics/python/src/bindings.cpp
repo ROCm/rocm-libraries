@@ -529,6 +529,20 @@ NB_MODULE(_roc_host_numerics, module) {
             },
             nb::is_operator())
         .def(
+            "__sub__",
+            [](const Tensor& tensor, nb::handle value) {
+                return tensor - python_bindings::tensorOperand(value, tensor.type());
+            },
+            nb::is_operator())
+        .def(
+            "__rsub__",
+            [](const Tensor& tensor, nb::handle value) {
+                return python_bindings::tensorOperand(value, tensor.type()) - tensor;
+            },
+            nb::is_operator())
+        .def(
+            "__neg__", [](const Tensor& tensor) { return -tensor; }, nb::is_operator())
+        .def(
             "__mul__",
             [](const Tensor& tensor, nb::handle value) {
                 return tensor * python_bindings::tensorOperand(value, tensor.type());

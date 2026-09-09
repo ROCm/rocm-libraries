@@ -6,6 +6,7 @@ import unittest
 import numpy as np
 
 import roc_host_numerics as hv
+from gemm_test_adapter import reference_gemm, reference_gemm_into
 
 
 def wrap_int32(value):
@@ -132,7 +133,7 @@ class GemmOracleTests(unittest.TestCase):
                     rows, columns
                 )
                 expected = np.float32(1.5) * initial
-                observed = hv.reference_gemm(
+                observed = reference_gemm(
                     hv.from_numpy(left),
                     hv.from_numpy(right),
                     hv.from_numpy(initial),
@@ -176,7 +177,7 @@ class GemmOracleTests(unittest.TestCase):
                     )
                 )
 
-                observed = hv.reference_gemm(
+                observed = reference_gemm(
                     affine_tensor(left, hv.ScalarType.Float32, [19, 1], 2),
                     affine_tensor(right, hv.ScalarType.Float32, [3, 1], 1),
                     affine_tensor(initial, hv.ScalarType.Float32, [5, 2], 1),
@@ -201,7 +202,7 @@ class GemmOracleTests(unittest.TestCase):
         )
         finite_initial = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
 
-        alpha_zero = hv.reference_gemm(
+        alpha_zero = reference_gemm(
             affine_tensor(
                 np.full((2, 3), np.nan, dtype=np.float32),
                 hv.ScalarType.Float32,
@@ -227,7 +228,7 @@ class GemmOracleTests(unittest.TestCase):
             hv.to_numpy(alpha_zero), selected_values(2.0 * finite_initial, selected)
         )
 
-        beta_zero = hv.reference_gemm(
+        beta_zero = reference_gemm(
             affine_tensor(finite_left, hv.ScalarType.Float32, [5, 1], 1),
             affine_tensor(finite_right, hv.ScalarType.Float32, [3, 1], 1),
             affine_tensor(
@@ -260,7 +261,7 @@ class GemmOracleTests(unittest.TestCase):
         self.assertTrue(any(stride < 0 for stride in left_tensor.strides))
         self.assertTrue(any(stride < 0 for stride in right_tensor.strides))
 
-        observed = hv.reference_gemm(
+        observed = reference_gemm(
             left_tensor,
             right_tensor,
             initial_tensor,
@@ -295,7 +296,7 @@ class GemmOracleTests(unittest.TestCase):
         output_layout = hv.Layout(hv.Shape([2, 2]), [7, 2], 1)
 
         output = hv.Tensor(hv.ScalarType.Int32, output_layout)
-        result = hv.reference_gemm_into(
+        result = reference_gemm_into(
             hv.from_numpy(left),
             hv.from_numpy(right),
             hv.from_numpy(initial),
@@ -371,7 +372,7 @@ class GemmOracleTests(unittest.TestCase):
         operand_a = hv.from_numpy(left, hv.ScalarType.Float4E2M1)
         operand_b = hv.from_numpy(right, hv.ScalarType.Float4E2M1)
         output = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3]))
-        result = hv.reference_gemm_into(
+        result = reference_gemm_into(
             operand_a,
             operand_b,
             hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3])),
@@ -404,7 +405,7 @@ class GemmOracleTests(unittest.TestCase):
         )
         output = hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1]))
 
-        result = hv.reference_gemm_into(
+        result = reference_gemm_into(
             hv.from_numpy(left, hv.ScalarType.Float4E2M1),
             hv.from_numpy(right, hv.ScalarType.Float4E2M1),
             hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1])),
@@ -428,7 +429,7 @@ class GemmOracleTests(unittest.TestCase):
         scale_a = np.asarray([[2.0, 3.0], [4.0, 5.0]], dtype=np.float32)
         scale_b = np.asarray([[2.0, 3.0], [4.0, 5.0]], dtype=np.float32)
 
-        only_a = hv.reference_gemm(
+        only_a = reference_gemm(
             hv.from_numpy(left),
             hv.from_numpy(right),
             hv.from_numpy(initial),
@@ -442,7 +443,7 @@ class GemmOracleTests(unittest.TestCase):
             np.asarray([[10.0, 10.0], [18.0, 18.0]], dtype=np.float32),
         )
 
-        only_b = hv.reference_gemm(
+        only_b = reference_gemm(
             hv.from_numpy(left),
             hv.from_numpy(right),
             hv.from_numpy(initial),
@@ -457,7 +458,7 @@ class GemmOracleTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "A block size requires a scale tensor"):
-            hv.reference_gemm(
+            reference_gemm(
                 hv.from_numpy(left),
                 hv.from_numpy(right),
                 hv.from_numpy(initial),
@@ -507,7 +508,7 @@ class GemmOracleTests(unittest.TestCase):
             offset=1,
         )
         output = hv.Tensor(hv.ScalarType.ComplexFloat32, output_layout)
-        result = hv.reference_gemm_into(
+        result = reference_gemm_into(
             operand_a,
             operand_b,
             initial_tensor,
@@ -608,7 +609,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
 
         wrapped = exact_int32_gemm(left, right, initial, alpha, 1, output_scale)
         np.testing.assert_array_equal(wrapped, targets)
-        observed = hv.reference_gemm(
+        observed = reference_gemm(
             hv.from_numpy(left),
             hv.from_numpy(right),
             hv.from_numpy(initial),
@@ -647,7 +648,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
         relative_tolerance = 1.0e-4
         absolute_tolerance = 1.0e-5
         full = hv.to_numpy(
-            hv.reference_gemm(
+            reference_gemm(
                 *tensors,
                 hv.ScalarType.Float32,
                 hv.ScalarType.Float32,
@@ -657,7 +658,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
             )
         )
         partial = hv.to_numpy(
-            hv.reference_gemm(
+            reference_gemm(
                 *tensors,
                 hv.ScalarType.Float32,
                 hv.ScalarType.Float32,

@@ -30,6 +30,19 @@ void addIntoBound(const Tensor& left, nb::object right, Tensor output, ScalarTyp
     addInto(left, tensorOperand(right, computeType), std::move(output), computeType);
 }
 
+Tensor subtractOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
+                     std::optional<ScalarType> computeType) {
+    if (!outputType && !computeType) return subtract(left, tensorOperand(right, left.type()));
+    const ScalarType resolvedCompute = computeType.value_or(outputType.value_or(left.type()));
+    const ScalarType resolvedOutput = outputType.value_or(resolvedCompute);
+    return subtract(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute);
+}
+
+void subtractIntoBound(const Tensor& left, nb::object right, Tensor output,
+                       ScalarType computeType) {
+    subtractInto(left, tensorOperand(right, computeType), std::move(output), computeType);
+}
+
 Tensor multiplyOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
                      std::optional<ScalarType> computeType) {
     if (!outputType && !computeType) return multiply(left, tensorOperand(right, left.type()));
@@ -229,6 +242,11 @@ void registerOperationBindings(nb::module_& module) {
     module.def("add", &addOwned, "left"_a, "right"_a, "output_type"_a = std::optional<ScalarType>{},
                "compute_type"_a = std::optional<ScalarType>{});
     module.def("add_into", &addIntoBound, "left"_a, "right"_a, "output"_a,
+               "compute_type"_a = ScalarType::Float32);
+    module.def("subtract", &subtractOwned, "left"_a, "right"_a,
+               "output_type"_a = std::optional<ScalarType>{},
+               "compute_type"_a = std::optional<ScalarType>{});
+    module.def("subtract_into", &subtractIntoBound, "left"_a, "right"_a, "output"_a,
                "compute_type"_a = ScalarType::Float32);
     module.def("multiply", &multiplyOwned, "left"_a, "right"_a,
                "output_type"_a = std::optional<ScalarType>{},
