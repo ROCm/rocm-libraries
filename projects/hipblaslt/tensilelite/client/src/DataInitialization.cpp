@@ -1865,14 +1865,16 @@ namespace TensileLite
                     if(swizzleLayout != MxScaleStorageLayout::Natural
                        && pristineScale.gpuInput.valid)
                     {
-                        auto physicalScale
-                            = roc::host_numerics::amd_gpu_layout::
-                                copyMxScaleStorageToPhysicalLayout(
-                                    canonicalScales.rawEncodedBackingStorage().data(),
-                                    canonicalScales.rawEncodedBackingStorage().size(),
-                                    {canonicalScales.shape()[0], canonicalScales.shape()[1]},
-                                    mxBlock,
-                                    swizzleLayout);
+                        const auto scalePlan
+                            = roc::host_numerics::amd_gpu_layout::planMxScaleStorage(
+                                {canonicalScales.shape()[0], canonicalScales.shape()[1]},
+                                mxBlock,
+                                swizzleLayout);
+                        auto physicalScale = roc::host_numerics::amd_gpu_layout::
+                            copyMxScaleStorageToPhysicalLayout(
+                                canonicalScales.rawEncodedBackingStorage().data(),
+                                canonicalScales.rawEncodedBackingStorage().size(),
+                                scalePlan);
                         if(b == 0)
                         {
                             gpuScaleBytesPerBatch = physicalScale.size();
