@@ -110,6 +110,10 @@ test_categories:
     test_patterns:
       - "quick_*"
       - "Smoke/*"
+      # Mirrors the quick tier: suites that carry an explicit tier prefix put
+      # their cheapest cases under "Quick/", so without this the ops that moved
+      # off "Smoke/" (layernorm) would drop out of fast feedback entirely.
+      - "Quick/*"
     exclude: *common_excludes
     labels:
       - "ffm-quick"
