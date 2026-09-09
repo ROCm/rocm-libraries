@@ -969,67 +969,6 @@ bool run_round_trip_matrix()
 }
 
 
-struct DenseFp8MassKernel
-{
-    static constexpr ck_tile::index_t kBlockSize = DenseFp8Problem::kBlockSize;
-
-    CK_TILE_DEVICE void operator()(float* output) const
-    {
-        using namespace ck_tile;
-        using PV =
-            decltype(BlockFmhaPipelineQRKSVSTdmDefaultPolicy::GetPVBlockGemm<DenseFp8Problem>());
-        using WG = typename PV::WarpGemm;
-        typename WG::AWarpTensor p;
-        typename WG::BWarpTensor ones;
-        typename WG::CWarpTensor mass;
-        const auto distribution = p.get_tile_distribution();
-        using Y = decltype(to_sequence(distribution.get_ys_to_d_descriptor().get_lengths()));
-        static_ford<Y>{}([&](auto y) {
-            constexpr auto yi     = to_array<index_t, Y::size()>(y);
-            constexpr auto offset = distribution.get_ys_to_d_descriptor().calculate_offset(yi);
-            const auto coord      = make_tensor_adaptor_coordinate(
-                distribution.get_ps_ys_to_xs_adaptor(),
-                container_concat(get_partition_index(distribution), yi));
-            const auto x = coord.get_bottom_index();
-            // Exactly representable values, different in every row/wave and scale block.
-            const float value = static_cast<float>((x[0] + 1) * (1 << get_warp_id()));
-            p.get_thread_buffer()(number<offset>{}) =
-                type_convert<fp8_t>(x[1] / 32 == 0 ? 0.0f : value);
-        });
-        set_tile(ones, type_convert<fp8_t>(1.0f));
-        clear_tile(mass);
-        WG{}(mass, p, ones, static_cast<int32_t>(0x807f7e7du), int32_t{0x7f7f7f7f});
-        auto block_c = PV::MakeCBlockTile();
-        clear_tile(block_c);
-        auto ml = block_tile_reduce<float>(
-            block_c, sequence<1>{}, [](float a, float b) { return a + b; }, 0.0f);
-        const auto row      = ml.get_tile_distribution().calculate_index()[0];
-        const auto expected = static_cast<float>((row % 16 + 1) * (1 << (row / 16)) * 112);
-        const auto tid      = get_thread_local_1d_id();
-        output[2 * tid]     = mass.get_thread_buffer()[number<0>{}];
-        output[2 * tid + 1] = expected;
-    }
-};
-
-TEST(QrTdmLdsPadding, DenseFp8MassRowMapping)
-{
-    ck_tile::DeviceMem device(128 * 2 * sizeof(float));
-    device.SetZero();
-    const ck_tile::stream_config stream{nullptr, false, 0, 0, 1};
-    const auto block_size =
-        ck_tile::is_wave32() ? DenseFp8Problem::kBlockSize / 2 : DenseFp8Problem::kBlockSize;
-    ck_tile::launch_kernel(stream,
-                           ck_tile::make_kernel(DenseFp8MassKernel{},
-                                                dim3(1),
-                                                dim3(block_size),
-                                                0,
-                                                static_cast<float*>(device.GetDeviceBuffer())));
-    std::vector<float> output(128 * 2);
-    device.FromDevice(output.data());
-    for(int tid = 0; tid < 128; ++tid)
-        EXPECT_EQ(output[2 * tid], output[2 * tid + 1]) << "thread " << tid;
-}
-
 TEST(QrTdmLdsPadding, CompileTimeConfiguration) { SUCCEED(); }
 
 TEST(QrTdmLdsPadding, DeviceRoundTrip)

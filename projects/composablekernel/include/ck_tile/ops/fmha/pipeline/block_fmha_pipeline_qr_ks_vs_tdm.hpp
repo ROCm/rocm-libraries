@@ -847,10 +847,20 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             };
 
+            // The dense fp8 path accumulates the row sum here instead of reducing P
+            // again afterwards: each add consumes exp2 while the value is still live,
+            // which is what keeps the kernel at the 192 VGPRs that hold occupancy 5.
+            auto rowsum_p = MLBlockTileType{};
+            if constexpr(kDenseFp8)
+            {
+                clear_tile(rowsum_p);
+            }
+
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
                 auto row_max         = scale_s * get_validated_m(m[i_idx]);
+                [[maybe_unused]] SMPLComputeDataType lane_sum{0};
                 sweep_tile_span(p_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
@@ -869,40 +879,30 @@ struct BlockFmhaPipelineQRKSVSTdm
                             p_compute(i_j_idx) = exp2(scale_s * s_new[i_j_idx] - row_max);
                         }
                     }
+                    if constexpr(kDenseFp8)
+                    {
+                        lane_sum += p_compute(i_j_idx);
+                    }
                 });
+                if constexpr(kDenseFp8)
+                {
+                    rowsum_p(i_idx) = lane_sum;
+                }
             });
 
-            auto rowsum_p = MLBlockTileType{};
-            if constexpr(!kDenseFp8)
+            if constexpr(kDenseFp8)
+            {
+                block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
+            }
+            else
             {
                 rowsum_p = block_tile_reduce<SMPLComputeDataType>(
                     p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
                 block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
             }
+
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
-            if constexpr(kDenseFp8)
-            {
-                // Normalize by the represented probability mass used by PV.
-                using MassWG = typename decltype(gemm_1)::WarpGemm;
-                typename MassWG::AWarpTensor mass_p;
-                typename MassWG::BWarpTensor mass_ones;
-                typename MassWG::CWarpTensor mass_tile;
-                static_assert(decltype(p_tile)::get_thread_buffer_size() ==
-                              MassWG::AWarpTensor::get_thread_buffer_size());
-                static_assert(MLBlockTileType::get_thread_buffer_size() == 1);
-                mass_p.get_thread_buffer() = p_tile.get_thread_buffer();
-                // Materialize at use to avoid holding sixteen constants across QK.
-                static_for<0, 16, 1>{}([&](auto j) {
-                    int32_t word;
-                    asm volatile("v_mov_b32 %0, 0x38383838" : "=v"(word));
-                    mass_ones.get_thread_buffer().template set_as<int32_t>(j, word);
-                });
-                clear_tile(mass_tile);
-                MassWG{}(mass_tile, mass_p, mass_ones, p_scale, int32_t{0x7f7f7f7f});
-                rowsum_p.get_thread_buffer()(number<0>{}) =
-                    mass_tile.get_thread_buffer()[number<0>{}];
-            }
 
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
