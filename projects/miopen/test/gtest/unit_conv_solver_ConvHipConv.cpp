@@ -37,7 +37,8 @@ auto GetConvSmokeTestCases(miopenDataType_t datatype, miopenTensorLayout_t layou
 const auto& GetTestParams()
 {
     static const auto params = [] {
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx950);
+        Gpu supported_gpus = Gpu::gfx950 | Gpu::gfx125X;
+	auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
         p.Tunable(5);
         return p;
     }();
