@@ -127,6 +127,15 @@ struct RegionDependencies {
     std::vector<HardSchedulingConstraint>& requestedConstraints;
 };
 
+// A Layer 2 overlap is only safe to publish after every ordering requested for
+// the pair is observed in the final scheduled instruction order. Kept separate
+// from Layer2BarrierOverlapAnalysis until that validation succeeds.
+struct Layer2BarrierOverlapCandidate {
+    std::vector<StinkyInstruction*> barriersAfter;
+    std::vector<StinkyInstruction*> barriersBefore;
+    std::vector<HardSchedulingConstraint> requiredConstraints;
+};
+
 // comparator: return true if a should come *after* b.
 struct CompareByDAGid {
     bool operator()(const DAGNode* a, const DAGNode* b) const {
@@ -184,6 +193,10 @@ class ReadyQueue {
 
     // Detached fillers to emit before the last picked node.
     virtual std::vector<StinkyInstruction*> takePendingFillerInsts() {
+        return {};
+    }
+
+    virtual std::vector<Layer2BarrierOverlapCandidate> takeLayer2BarrierOverlapCandidates() {
         return {};
     }
 

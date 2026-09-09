@@ -174,6 +174,7 @@ def build_conv_wgrad(
     epilogue="default",
     split_k=1,
     dtype_d="fp16",
+    two_stage=False,
 ):
     def _build():
         from rocke.instances.common.conv_implicit_gemm_wgrad import (
@@ -202,6 +203,7 @@ def build_conv_wgrad(
             pipeline=pipeline,
             epilogue=epilogue,
             split_k=split_k,
+            two_stage=two_stage,
         )
         return build_implicit_gemm_conv_wgrad(spec, arch=arch)
 
@@ -249,6 +251,38 @@ def build_dgrad(
             split_k=split_k,
         )
         return build_implicit_gemm_conv_dgrad(spec, arch=arch)
+
+    return _build
+
+
+def build_conv_wgrad_reduce(
+    name, arch, wg_M, wg_N, dtype_d="fp16", tile_m=4, tile_n=64
+):
+    """Build a workspace-reduce (Stage 2) kernel for the two-stage deterministic wgrad.
+
+    ``wg_M`` = K (output channels), ``wg_N`` = Y*X*C (filter spatial × input channel).
+    A minimal ConvProblem with Y=1, X=1, C=wg_N, K=wg_M is used solely to satisfy
+    WgradReduceSpec's requirement for a ConvProblem (it only reads wg_M/wg_N from it).
+    """
+
+    def _build():
+        from rocke.instances.common.conv_wgrad_workspace_reduce import (
+            WgradReduceSpec,
+            build_conv_wgrad_workspace_reduce,
+        )
+        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+
+        # WgradReduceSpec only uses p for wg_M (= K) and wg_N (= Y*X*C).
+        # Y=1, X=1 → wg_N = C = wg_N.
+        p = ConvProblem(N=1, Hi=1, Wi=1, C=wg_N, K=wg_M, Y=1, X=1)
+        spec = WgradReduceSpec(
+            problem=p,
+            dtype_d=dtype_d,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            name=name,
+        )
+        return build_conv_wgrad_workspace_reduce(spec, arch=arch)
 
     return _build
 
@@ -408,7 +442,7 @@ def build_attention_dense(arch, **over):
 
     def _build():
         from kernels.gfx950.attention_dense import (
-            AttentionDenseSpec,
+            Gfx950AttentionDenseSpec,
             build_attention_dense as _build_dense,
         )
 
@@ -423,7 +457,69 @@ def build_attention_dense(arch, **over):
             dtype="bf16",
         )
         spec.update(over)
-        return _build_dense(AttentionDenseSpec(**spec))
+        return _build_dense(Gfx950AttentionDenseSpec(**spec))
+
+    return _build
+
+
+def build_kda_chunkwise_gfx950(kind, arch, **over):
+    """gfx950 chunkwise KDA kernel from a representative spec.
+
+    ``kind`` selects one of the three emitted kernels. Spec overrides keep the
+    case table compact while covering state flags, fused preprocessing, and a
+    non-default scan partition.
+    """
+
+    def _build():
+        from kernels.gfx950.kda_chunkwise import (
+            KdaChunkFusedSpec,
+            KdaChunkPrepSpec,
+            KdaChunkScanSpec,
+            KdaTileSpec,
+            build_kda_chunk_fused,
+            build_kda_chunk_prep,
+            build_kda_chunk_scan,
+        )
+
+        if kind == "prep":
+            return build_kda_chunk_prep(KdaChunkPrepSpec(**over), arch=arch)
+        if kind == "scan":
+            scan_over = dict(over)
+            tile_over = scan_over.pop("tile", {})
+            tile = KdaTileSpec(**tile_over) if tile_over else KdaTileSpec()
+            return build_kda_chunk_scan(
+                KdaChunkScanSpec(tile=tile, **scan_over), arch=arch
+            )
+        if kind == "fused":
+            return build_kda_chunk_fused(KdaChunkFusedSpec(**over), arch=arch)
+        raise ValueError(f"unknown KDA kernel kind {kind!r}")
+
+    return _build
+
+
+def build_kda_chunkwise_gfx942(kind, arch, **over):
+    """Build one representative gfx942 chunkwise KDA kernel."""
+
+    def _build():
+        from kernels.gfx942.kda_chunkwise import (
+            KdaChunkFusedSpec,
+            KdaChunkPrepSpec,
+            KdaChunkScanSpec,
+            build_kda_chunk_fused,
+            build_kda_chunk_prep,
+            build_kda_chunk_scan,
+        )
+
+        specs = {
+            "prep": (KdaChunkPrepSpec, build_kda_chunk_prep),
+            "scan": (KdaChunkScanSpec, build_kda_chunk_scan),
+            "fused": (KdaChunkFusedSpec, build_kda_chunk_fused),
+        }
+        try:
+            spec_type, builder = specs[kind]
+        except KeyError as exc:
+            raise ValueError(f"unknown gfx942 KDA kernel kind {kind!r}") from exc
+        return builder(spec_type(**over), arch=arch)
 
     return _build
 
@@ -1497,6 +1593,89 @@ def cases():
         ),
     )
 
+    # Two-stage wgrad Stage 1: workspace-store epilogue instead of atomic-add.
+    # split_k=4, two_stage=True — exercises the _emit_wgrad_workspace_store_epilogue
+    # path.  The problem/tile params match the existing spk4 case for comparability.
+    add(
+        "conv_wgrad_two_stage",
+        "conv_wgrad_two_stage/gfx950/n1h8c16k32r3_spk4",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_twostage_spk4",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            split_k=4,
+            two_stage=True,
+        ),
+    )
+    add(
+        "conv_wgrad_two_stage",
+        "conv_wgrad_two_stage/gfx942/n1h8c16k32r3_spk4",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_twostage_spk4",
+            "gfx942",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            split_k=4,
+            two_stage=True,
+        ),
+    )
+
+    # Workspace reduce Stage 2: reads f32 partial sums written by Stage 1 and
+    # reduces along split_k, emitting the result as dtype_d.
+    # wg_M=32, wg_N=72 (3*3*8): small 3x3 filter footprint, fp16 output.
+    add(
+        "conv_wgrad_reduce",
+        "conv_wgrad_reduce/gfx950/wgM32_wgN72_fp16",
+        "gfx950",
+        build_conv_wgrad_reduce(
+            "irhash_wgrad_reduce_950_m32n72_fp16",
+            "gfx950",
+            wg_M=32,
+            wg_N=72,
+            dtype_d="fp16",
+        ),
+    )
+    # wg_M=64, wg_N=576 (3*3*64): larger filter footprint, bf16 output.
+    add(
+        "conv_wgrad_reduce",
+        "conv_wgrad_reduce/gfx950/wgM64_wgN576_bf16",
+        "gfx950",
+        build_conv_wgrad_reduce(
+            "irhash_wgrad_reduce_950_m64n576_bf16",
+            "gfx950",
+            wg_M=64,
+            wg_N=576,
+            dtype_d="bf16",
+        ),
+    )
+    add(
+        "conv_wgrad_reduce",
+        "conv_wgrad_reduce/gfx942/wgM32_wgN72_fp16",
+        "gfx942",
+        build_conv_wgrad_reduce(
+            "irhash_wgrad_reduce_942_m32n72_fp16",
+            "gfx942",
+            wg_M=32,
+            wg_N=72,
+            dtype_d="fp16",
+        ),
+    )
+
     # MoE: sorting phases and fused-MoE streaming phases.
     for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
         add(
@@ -1934,6 +2113,18 @@ def cases():
             "persist_swa_w128_sq512",
             {"persistent": True, "num_persistent": 256, "sliding_window": 128},
         ),
+        (
+            "persist_wdma_gqapair_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "num_query_heads": 32,
+                "num_kv_heads": 8,
+                "persistent": True,
+                "num_persistent": 16,
+                "persist_decode": "gqa_pair",
+                "wide_lds_dma": True,
+            },
+        ),
         # D=64 packed-row DMA loader (2 rows/instr, unpadded LDS) on the persistent
         # builder -- locks the head_size=64 fix (fp16_h64 above only exercises the
         # default builder).
@@ -2053,6 +2244,67 @@ def cases():
             "irhash_grouped_gemm_950", "gfx950", 8192, 1024, 512, 64
         ),
     )
+
+    # Chunkwise KDA: each emitted kernel plus the ABI/resource-sensitive
+    # variants that change preprocessing, state pointers, or scan geometry.
+    for _case_id, _kind, _over in (
+        ("prep_default", "prep", {}),
+        (
+            "prep_raw",
+            "prep",
+            {
+                "raw_inputs": True,
+                "fuse_qk_l2norm": True,
+                "fuse_gate": True,
+                "fuse_beta_sigmoid": True,
+                "has_dt_bias": True,
+            },
+        ),
+        ("scan_default", "scan", {}),
+        (
+            "scan_h0_noht",
+            "scan",
+            {"has_initial_state": True, "store_final_state": False},
+        ),
+        ("scan_vs4", "scan", {"tile": {"block_size": 64}, "value_splits": 4}),
+        ("fused_default", "fused", {}),
+        (
+            "fused_h0_noht",
+            "fused",
+            {"has_initial_state": True, "store_final_state": False},
+        ),
+    ):
+        add(
+            "kda_chunkwise",
+            f"kda_chunkwise/gfx950/{_case_id}",
+            "gfx950",
+            build_kda_chunkwise_gfx950(_kind, "gfx950", **_over),
+        )
+
+    # gfx942 KDA: all three emitted kernels, state-sensitive ABI variants, and
+    # DK64 fused coverage for the guarded partial Kt pass.
+    for _case_id, _kind, _over in (
+        ("prep_default", "prep", {}),
+        ("scan_default", "scan", {}),
+        (
+            "scan_h0_noht",
+            "scan",
+            {"has_initial_state": True, "store_final_state": False},
+        ),
+        ("fused_default", "fused", {}),
+        ("fused_dk64", "fused", {"head_k": 64}),
+        (
+            "fused_h0_noht",
+            "fused",
+            {"has_initial_state": True, "store_final_state": False},
+        ),
+    ):
+        add(
+            "kda_chunkwise",
+            f"kda_chunkwise/gfx942/{_case_id}",
+            "gfx942",
+            build_kda_chunkwise_gfx942(_kind, "gfx942", **_over),
+        )
     return out
 
 
