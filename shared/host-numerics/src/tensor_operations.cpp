@@ -51,6 +51,22 @@ void addInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType 
                std::move(selection));
 }
 
+Tensor subtract(const Tensor& left, const Tensor& right) {
+    return binarySameType(detail::BinaryOperation::Subtract, left, right);
+}
+
+Tensor subtract(const Tensor& left, const Tensor& right, ScalarType outputType,
+                ScalarType computeType, std::optional<Layout> outputLayout) {
+    return binary(detail::BinaryOperation::Subtract, left, right, outputType, computeType,
+                  std::move(outputLayout));
+}
+
+void subtractInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
+                  OutputSelection selection) {
+    binaryInto(detail::BinaryOperation::Subtract, left, right, std::move(output), computeType,
+               std::move(selection));
+}
+
 Tensor multiply(const Tensor& left, const Tensor& right) {
     return binarySameType(detail::BinaryOperation::Multiply, left, right);
 }

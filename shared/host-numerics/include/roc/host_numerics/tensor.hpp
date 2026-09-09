@@ -379,7 +379,7 @@ inline bool byteRangesOverlap(std::span<const std::byte> left, std::span<const s
 class Tensor {
    public:
     template <typename Source>
-        requires requires { nativeScalarType<std::remove_cvref_t<Source>>; }
+        requires NativeScalar<Source>
     Tensor(Source value) : Tensor(nativeScalarType<std::remove_cvref_t<Source>>, Shape{}) {
         detail::encodeScalar(m_type, rawEncodedBackingStorage(), 0, std::move(value));
     }
@@ -408,7 +408,7 @@ class Tensor {
     }
 
     template <typename Source>
-        requires requires { nativeScalarType<std::remove_cvref_t<Source>>; }
+        requires NativeScalar<Source>
     static Tensor scalar(ScalarType type, Source value) {
         Tensor result(type, Shape{});
         detail::encodeScalar(type, result.rawEncodedBackingStorage(), 0, std::move(value));
