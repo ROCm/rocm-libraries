@@ -52,7 +52,6 @@
 #include <hipblaslt/host_numerics/HipblasltReferenceGemm.hpp>
 #include <hipblaslt/host_numerics/MatmulValidation.hpp>
 #include <hipblaslt/host_numerics/Reduction.hpp>
-#include <hipblaslt/host_numerics/hipblaslt_init.hpp>
 #include <hipblaslt/host_numerics/near.hpp>
 #include <iomanip>
 #include <limits>
@@ -1115,27 +1114,58 @@ void testing_matmul_with_bias(const Arguments&                                  
             = arg.initialization == hipblaslt_initialization::norm_dist_one_special
                   ? hipblaslt::host_numerics::oneSpecialInitializationSeed
                   : hipblaslt::host_numerics::defaultInitializationSeed;
+        const auto initializationSeed
+            = [&](hipblaslt::host_numerics::initialization::OperandSequence sequence,
+                  size_t                                                    batch = 0,
+                  uint64_t baseSeed = hipblaslt::host_numerics::defaultInitializationSeed) {
+                  const uint64_t sequencesPerBatch = static_cast<uint64_t>(
+                      hipblaslt::host_numerics::initialization::OperandSequence::Count);
+                  const uint64_t batchesPerProblem
+                      = static_cast<uint64_t>(std::max(problem.batchCount, 1));
+                  const uint64_t sequenceIndex
+                      = (static_cast<uint64_t>(i) * batchesPerProblem + batch) * sequencesPerBatch
+                        + static_cast<uint64_t>(sequence);
+                  return hipblaslt::host_numerics::initialization::seedForSequence(baseSeed,
+                                                                                   sequenceIndex);
+              };
         const auto matrixSeed = [&](hipblaslt::host_numerics::MatrixRole role, size_t batch = 0) {
-            constexpr uint64_t matrixRoles = 3;
-            const uint64_t     roleIndex   = [&] {
+            const auto sequence = [&] {
                 switch(role)
                 {
                 case hipblaslt::host_numerics::MatrixRole::A:
-                    return uint64_t{0};
+                    return hipblaslt::host_numerics::initialization::OperandSequence::MatrixA;
                 case hipblaslt::host_numerics::MatrixRole::B:
-                    return uint64_t{1};
+                    return hipblaslt::host_numerics::initialization::OperandSequence::MatrixB;
                 case hipblaslt::host_numerics::MatrixRole::C:
-                    return uint64_t{2};
+                    return hipblaslt::host_numerics::initialization::OperandSequence::MatrixC;
                 }
                 throw std::invalid_argument("Unsupported hipBLASLt matrix role.");
             }();
-            const uint64_t batchesPerProblem
-                = static_cast<uint64_t>(std::max(problem.batchCount, 1));
-            const uint64_t sequence
-                = (static_cast<uint64_t>(i) * batchesPerProblem + batch) * matrixRoles + roleIndex;
-            return hipblaslt::host_numerics::initialization::seedForSequence(initializationBaseSeed,
-                                                                             sequence);
+            return initializationSeed(sequence, batch, initializationBaseSeed);
         };
+
+        const auto initializeHostTensor = [&](HipHostBuffer&                              buffer,
+                                              hipDataType                                 type,
+                                              const roc::host_numerics::Layout&           layout,
+                                              const roc::host_numerics::GenerationRecipe& recipe) {
+            auto tensor = buffer.tensor(hipblaslt::host_numerics::scalarType(type), layout);
+            std::ranges::fill(tensor.rawEncodedBackingStorage(), std::byte{0});
+            roc::host_numerics::generate(tensor, recipe);
+        };
+        const auto randomInitializationRecipe
+            = [&](hipDataType                                               type,
+                  hipblaslt::host_numerics::initialization::OperandSequence sequence,
+                  bool                                                      small = false) {
+                  const auto scalar = hipblaslt::host_numerics::scalarType(type);
+                  const auto seed   = initializationSeed(sequence);
+                  return small ? hipblaslt::host_numerics::randomIntegerRecipe(
+                                     scalar,
+                                     {.small = true,
+                                      .complexPolicy
+                                      = hipblaslt::host_numerics::ComplexGenerationPolicy::RealOnly,
+                                      .seed = seed})
+                               : hipblaslt::host_numerics::realOnlyRandomRecipe(scalar, seed);
+              };
 
         const auto initializeHostMatrix = [&](HipHostBuffer&                         buffer,
                                               const hipblaslt::client::MatmulMatrix& matrix,
@@ -1184,7 +1214,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                   size_t                                                   blockRows,
                   size_t                                                   blockColumns,
                   roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayout,
-                  uint32_t                                                 seed) {
+                  uint64_t                                                 seed) {
                   if(blockRows == 0 || blockColumns == 0
                      || blockColumns > std::numeric_limits<size_t>::max() / blockRows)
                       throw std::invalid_argument("Invalid hipBLASLt MX scale block dimensions.");
@@ -1278,8 +1308,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scaleA_row,
                     scaleA_col,
                     scaleLayoutA,
-                    static_cast<uint32_t>(matrixSeed(hipblaslt::host_numerics::MatrixRole::A,
-                                                     static_cast<size_t>(b))));
+                    matrixSeed(hipblaslt::host_numerics::MatrixRole::A,
+                               static_cast<size_t>(b)));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -1371,8 +1401,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scaleB_row,
                     scaleB_col,
                     scaleLayoutB,
-                    static_cast<uint32_t>(matrixSeed(hipblaslt::host_numerics::MatrixRole::B,
-                                                     static_cast<size_t>(b))));
+                    matrixSeed(hipblaslt::host_numerics::MatrixRole::B,
+                               static_cast<size_t>(b)));
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
@@ -1487,100 +1517,140 @@ void testing_matmul_with_bias(const Arguments&                                  
             if(arg.gradient && arg.use_e)
             {
                 const auto& auxiliary = *problem.auxiliary;
-                hipblaslt_init(hE[i].buf(),
-                               problem.m,
-                               problem.n,
-                               auxiliary.leadingDimension(),
-                               Taux,
-                               auxiliary.batchStride(),
-                               problem.batchCount);
+                initializeHostTensor(
+                    hE[i],
+                    Taux,
+                    auxiliary.layout,
+                    randomInitializationRecipe(
+                        Taux,
+                        hipblaslt::host_numerics::initialization::OperandSequence::Auxiliary));
             }
 
             if(arg.bias_vector)
             {
                 // Filling up unique bias values for each batch in Strided Batch
                 if(arg.bias_stride > 0)
-                    hipblaslt_init(hBias[i].buf(),
-                                   arg.bias_stride,
-                                   1,
-                                   arg.bias_stride,
-                                   Tbias,
-                                   arg.bias_stride,
-                                   problem.batchCount);
+                    initializeHostTensor(
+                        hBias[i],
+                        Tbias,
+                        roc::host_numerics::Layout(
+                            roc::host_numerics::Shape{static_cast<size_t>(arg.bias_stride),
+                                                      1,
+                                                      static_cast<size_t>(problem.batchCount)},
+                            {1, arg.bias_stride, arg.bias_stride}),
+                        randomInitializationRecipe(
+                            Tbias,
+                            hipblaslt::host_numerics::initialization::OperandSequence::Bias));
                 else
-                    hipblaslt_init(hBias[i].buf(),
-                                   preparedProblem.biasElements,
-                                   1,
-                                   preparedProblem.biasElements,
-                                   Tbias);
+                    initializeHostTensor(
+                        hBias[i],
+                        Tbias,
+                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                            roc::host_numerics::Shape{preparedProblem.biasElements}),
+                        randomInitializationRecipe(
+                            Tbias,
+                            hipblaslt::host_numerics::initialization::OperandSequence::Bias));
             }
 
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
                || arg.scaleA == hipblaslt_scaling_format::Vector)
             {
                 if(arg.norm_check)
-                    hipblaslt_init_small(hScaleA[i].buf(),
-                                         preparedProblem.a.scaleElements,
-                                         1,
-                                         preparedProblem.a.scaleElements,
-                                         Talpha);
+                    initializeHostTensor(
+                        hScaleA[i],
+                        Talpha,
+                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                            roc::host_numerics::Shape{preparedProblem.a.scaleElements}),
+                        randomInitializationRecipe(
+                            Talpha,
+                            hipblaslt::host_numerics::initialization::OperandSequence::ScaleA,
+                            true));
                 else
-                    hipblaslt_init(hScaleA[i].buf(),
-                                   preparedProblem.a.scaleElements,
-                                   1,
-                                   preparedProblem.a.scaleElements,
-                                   Talpha);
+                    initializeHostTensor(
+                        hScaleA[i],
+                        Talpha,
+                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                            roc::host_numerics::Shape{preparedProblem.a.scaleElements}),
+                        randomInitializationRecipe(
+                            Talpha,
+                            hipblaslt::host_numerics::initialization::OperandSequence::ScaleA));
             }
 
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
                || arg.scaleB == hipblaslt_scaling_format::Vector)
             {
                 if(arg.norm_check)
-                    hipblaslt_init_small(hScaleB[i].buf(),
-                                         preparedProblem.b.scaleElements,
-                                         1,
-                                         preparedProblem.b.scaleElements,
-                                         Talpha);
+                    initializeHostTensor(
+                        hScaleB[i],
+                        Talpha,
+                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                            roc::host_numerics::Shape{preparedProblem.b.scaleElements}),
+                        randomInitializationRecipe(
+                            Talpha,
+                            hipblaslt::host_numerics::initialization::OperandSequence::ScaleB,
+                            true));
                 else
-                    hipblaslt_init(hScaleB[i].buf(),
-                                   preparedProblem.b.scaleElements,
-                                   1,
-                                   preparedProblem.b.scaleElements,
-                                   Talpha);
+                    initializeHostTensor(
+                        hScaleB[i],
+                        Talpha,
+                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                            roc::host_numerics::Shape{preparedProblem.b.scaleElements}),
+                        randomInitializationRecipe(
+                            Talpha,
+                            hipblaslt::host_numerics::initialization::OperandSequence::ScaleB));
             }
 
             if(arg.scaleC)
             {
-                if(TiC == HIP_R_8F_E4M3_FNUZ || TiC == HIP_R_8F_E5M2_FNUZ)
-                {
-                    hipblaslt_init_small(hScaleC[i].buf(), 1, 1, 1, Talpha);
-                }
-                else
-                {
-                    hipblaslt_init(hScaleC[i].buf(), 1, 1, 1, Talpha);
-                }
+                const bool small = TiC == HIP_R_8F_E4M3_FNUZ || TiC == HIP_R_8F_E5M2_FNUZ;
+                initializeHostTensor(
+                    hScaleC[i],
+                    Talpha,
+                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
+                    randomInitializationRecipe(
+                        Talpha,
+                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleC,
+                        small));
             }
 
             if(arg.scaleD)
             {
-                if(To == HIP_R_8F_E4M3_FNUZ || To == HIP_R_8F_E5M2_FNUZ)
-                {
-                    hipblaslt_init_small(hScaleD[i].buf(), 1, 1, 1, Talpha);
-                }
-                else
-                {
-                    hipblaslt_init(hScaleD[i].buf(), 1, 1, 1, Talpha);
-                }
+                const bool small = To == HIP_R_8F_E4M3_FNUZ || To == HIP_R_8F_E5M2_FNUZ;
+                initializeHostTensor(
+                    hScaleD[i],
+                    Talpha,
+                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
+                    randomInitializationRecipe(
+                        Talpha,
+                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleD,
+                        small));
             }
 
             if(arg.amaxD)
-                hipblaslt_init_zero(hAmaxD_gold[i].buf(), 1, 1, 1, Talpha);
+                initializeHostTensor(
+                    hAmaxD_gold[i],
+                    Talpha,
+                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
+                    roc::host_numerics::GenerationRecipe::realOnly(
+                        roc::host_numerics::GenerationRecipe::zero()));
 
             if(arg.scaleE)
-                hipblaslt_init(hScaleE[i].buf(), 1, 1, 1, Talpha);
+                initializeHostTensor(
+                    hScaleE[i],
+                    Talpha,
+                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
+                    randomInitializationRecipe(
+                        Talpha, hipblaslt::host_numerics::initialization::OperandSequence::ScaleE));
 
             if(arg.scaleAlpha_vector)
-                hipblaslt_init(hScaleAlphaVec[i].buf(), problem.m, 1, problem.m, Talpha);
+                initializeHostTensor(
+                    hScaleAlphaVec[i],
+                    Talpha,
+                    roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                        {static_cast<size_t>(problem.m)}),
+                    randomInitializationRecipe(
+                        Talpha,
+                        hipblaslt::host_numerics::initialization::OperandSequence::AlphaVector));
 
             if(arg.gradient && arg.use_e)
             {
@@ -1880,57 +1950,53 @@ void testing_matmul_with_bias(const Arguments&                                  
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
             {
-                if(arg.norm_check)
-                    hipblaslt_init_small(hScaleA[i].buf(),
-                                         preparedProblem.a.scaleElements,
-                                         1,
-                                         preparedProblem.a.scaleElements,
-                                         Talpha);
-                else
-                    hipblaslt_init(hScaleA[i].buf(),
-                                   preparedProblem.a.scaleElements,
-                                   1,
-                                   preparedProblem.a.scaleElements,
-                                   Talpha);
+                initializeHostTensor(
+                    hScaleA[i],
+                    Talpha,
+                    roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                        {preparedProblem.a.scaleElements}),
+                    randomInitializationRecipe(
+                        Talpha,
+                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleA,
+                        arg.norm_check));
             }
 
             if(arg.scaleB == hipblaslt_scaling_format::Scalar)
             {
-                if(arg.norm_check)
-                    hipblaslt_init_small(hScaleB[i].buf(),
-                                         preparedProblem.b.scaleElements,
-                                         1,
-                                         preparedProblem.b.scaleElements,
-                                         Talpha);
-                else
-                    hipblaslt_init(hScaleB[i].buf(),
-                                   preparedProblem.b.scaleElements,
-                                   1,
-                                   preparedProblem.b.scaleElements,
-                                   Talpha);
+                initializeHostTensor(
+                    hScaleB[i],
+                    Talpha,
+                    roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                        {preparedProblem.b.scaleElements}),
+                    randomInitializationRecipe(
+                        Talpha,
+                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleB,
+                        arg.norm_check));
             }
             if(arg.scaleC)
             {
-                if(TiC == HIP_R_8F_E4M3_FNUZ || TiC == HIP_R_8F_E5M2_FNUZ)
-                {
-                    hipblaslt_init_small(hScaleC[i].buf(), 1, 1, 1, Talpha);
-                }
-                else
-                {
-                    hipblaslt_init(hScaleC[i].buf(), 1, 1, 1, Talpha);
-                }
+                const bool small = TiC == HIP_R_8F_E4M3_FNUZ || TiC == HIP_R_8F_E5M2_FNUZ;
+                initializeHostTensor(
+                    hScaleC[i],
+                    Talpha,
+                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
+                    randomInitializationRecipe(
+                        Talpha,
+                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleC,
+                        small));
             }
 
             if(arg.scaleD)
             {
-                if(To == HIP_R_8F_E4M3_FNUZ || To == HIP_R_8F_E5M2_FNUZ)
-                {
-                    hipblaslt_init_small(hScaleD[i].buf(), 1, 1, 1, Talpha);
-                }
-                else
-                {
-                    hipblaslt_init(hScaleD[i].buf(), 1, 1, 1, Talpha);
-                }
+                const bool small = To == HIP_R_8F_E4M3_FNUZ || To == HIP_R_8F_E5M2_FNUZ;
+                initializeHostTensor(
+                    hScaleD[i],
+                    Talpha,
+                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
+                    randomInitializationRecipe(
+                        Talpha,
+                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleD,
+                        small));
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
             {

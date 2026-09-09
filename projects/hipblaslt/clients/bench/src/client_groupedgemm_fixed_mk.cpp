@@ -32,7 +32,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/host_numerics/GroupedGemmDataInitialization.hpp>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
 #include <hipblaslt/host_numerics/Types.hpp>
 #include <hipblaslt_arguments.hpp>
 #include <iostream>
@@ -541,9 +541,12 @@ int test_hipblaslt(hipDataType                 in_datatype,
         size_bias(gemm_count);
     std::vector<void*> da(gemm_count), db(gemm_count), dc(gemm_count), dd(gemm_count),
         d_bias(gemm_count);
-    std::vector<std::vector<Tin>>   ha(gemm_count), hb(gemm_count);
-    std::vector<std::vector<Tout>>  hc(gemm_count), hd(gemm_count), hd_gold(gemm_count);
-    std::vector<std::vector<float>> h_bias(gemm_count);
+    std::vector<roc::host_numerics::Tensor> ha, hb, hc, h_bias;
+    std::vector<std::vector<Tout>>          hd(gemm_count), hd_gold(gemm_count);
+    ha.reserve(gemm_count);
+    hb.reserve(gemm_count);
+    hc.reserve(gemm_count);
+    h_bias.reserve(gemm_count);
 
     hipblasLtHandle_t handle;
     CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
@@ -605,30 +608,53 @@ int test_hipblaslt(hipDataType                 in_datatype,
             size_b1[i]    = ldb[i] * k[i];
         }
 
-        size_a[i]    = size_a1[i] + stride_a[i] * (batch_count[i] - 1);
-        size_b[i]    = size_b1[i] + stride_b[i] * (batch_count[i] - 1);
-        size_c[i]    = size_c1[i] + stride_c[i] * (batch_count[i] - 1);
-        size_d[i]    = size_d1[i] + stride_d[i] * (batch_count[i] - 1);
+        size_a[i]    = batch_count[i] == 0 ? 0 : size_a1[i] + stride_a[i] * (batch_count[i] - 1);
+        size_b[i]    = batch_count[i] == 0 ? 0 : size_b1[i] + stride_b[i] * (batch_count[i] - 1);
+        size_c[i]    = batch_count[i] == 0 ? 0 : size_c1[i] + stride_c[i] * (batch_count[i] - 1);
+        size_d[i]    = batch_count[i] == 0 ? 0 : size_d1[i] + stride_d[i] * (batch_count[i] - 1);
         size_bias[i] = enable_bias[i] ? m[i] : 0;
 
         // Naming: da is in GPU (device) memory. ha is in CPU (host) memory
-        ha[i].resize(size_a[i]);
-        hb[i].resize(size_b[i]);
-        hc[i].resize(size_c[i]);
         hd[i].resize(size_d[i]);
         hd_gold[i].resize(size_d[i]);
-        h_bias[i].resize(size_bias[i]);
 
-        // initial data on host
-        hipblaslt::host_numerics::initializeGroupedGemm(ha[i],
-                                                          size_a[i],
-                                                          hb[i],
-                                                          size_b[i],
-                                                          hc[i],
-                                                          size_c[i],
-                                                          h_bias[i],
-                                                          size_bias[i],
-                                                          initialization);
+        using namespace roc::host_numerics;
+        using namespace hipblaslt::host_numerics;
+        const auto allocatedTensor = [](ScalarType type, size_t elements, Layout layout) {
+            return Tensor(type, Shape{elements}).shareStorageWithLayout(std::move(layout));
+        };
+        ha.emplace_back(allocatedTensor(scalarType<Tin>(),
+                                        size_a[i],
+                                        Layout(Shape{static_cast<size_t>(m[i]),
+                                                     static_cast<size_t>(k[i]),
+                                                     static_cast<size_t>(batch_count[i])},
+                                               {a_stride_1[i], a_stride_2[i], stride_a[i]})));
+        hb.emplace_back(allocatedTensor(scalarType<Tin>(),
+                                        size_b[i],
+                                        Layout(Shape{static_cast<size_t>(k[i]),
+                                                     static_cast<size_t>(n[i]),
+                                                     static_cast<size_t>(batch_count[i])},
+                                               {b_stride_1[i], b_stride_2[i], stride_b[i]})));
+        hc.emplace_back(allocatedTensor(scalarType<Tout>(),
+                                        size_c[i],
+                                        Layout(Shape{static_cast<size_t>(m[i]),
+                                                     static_cast<size_t>(n[i]),
+                                                     static_cast<size_t>(batch_count[i])},
+                                               {1, ldc[i], stride_c[i]})));
+        h_bias.emplace_back(ScalarType::Float32, Shape{static_cast<size_t>(size_bias[i])});
+
+        const uint64_t seed = defaultInitializationSeed
+                              + static_cast<uint64_t>(i)
+                                    * static_cast<uint64_t>(initialization::OperandSequence::Count);
+        const auto recipe = [&](ScalarType type, initialization::OperandSequence sequence) {
+            const uint64_t operandSeed = initialization::seedForSequence(seed, sequence);
+            return groupedGemmInitializationRecipe(type, initialization, sequence, operandSeed);
+        };
+        generate(ha.back(), recipe(ha.back().type(), initialization::OperandSequence::MatrixA));
+        generate(hb.back(), recipe(hb.back().type(), initialization::OperandSequence::MatrixB));
+        generate(hc.back(), recipe(hc.back().type(), initialization::OperandSequence::MatrixC));
+        generate(h_bias.back(),
+                 recipe(h_bias.back().type(), initialization::OperandSequence::Bias));
 
         CHECK_HIP_ERROR(hipMalloc(&da[i], size_a[i] * sizeof(Tin)));
         CHECK_HIP_ERROR(hipMalloc(&db[i], size_b[i] * sizeof(Tin)));
@@ -638,15 +664,23 @@ int test_hipblaslt(hipDataType                 in_datatype,
             CHECK_HIP_ERROR(hipMalloc(&d_bias[i], size_bias[i] * sizeof(float)));
 
         // copy matrices from host to device
-        CHECK_HIP_ERROR(
-            hipMemcpy(da[i], ha[i].data(), sizeof(Tin) * size_a[i], hipMemcpyHostToDevice));
-        CHECK_HIP_ERROR(
-            hipMemcpy(db[i], hb[i].data(), sizeof(Tin) * size_b[i], hipMemcpyHostToDevice));
-        CHECK_HIP_ERROR(
-            hipMemcpy(dc[i], hc[i].data(), sizeof(Tout) * size_c[i], hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(da[i],
+                                  ha[i].rawEncodedBackingStorage().data(),
+                                  ha[i].rawEncodedBackingStorage().size(),
+                                  hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(db[i],
+                                  hb[i].rawEncodedBackingStorage().data(),
+                                  hb[i].rawEncodedBackingStorage().size(),
+                                  hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(dc[i],
+                                  hc[i].rawEncodedBackingStorage().data(),
+                                  hc[i].rawEncodedBackingStorage().size(),
+                                  hipMemcpyHostToDevice));
         if(enable_bias[i])
-            CHECK_HIP_ERROR(hipMemcpy(
-                d_bias[i], h_bias[i].data(), sizeof(float) * size_bias[i], hipMemcpyHostToDevice));
+            CHECK_HIP_ERROR(hipMemcpy(d_bias[i],
+                                      h_bias[i].rawEncodedBackingStorage().data(),
+                                      h_bias[i].rawEncodedBackingStorage().size(),
+                                      hipMemcpyHostToDevice));
     }
 
     // Set User Preference attributes
@@ -873,15 +907,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
                 // copy output from device to CPU
                 CHECK_HIP_ERROR(hipMemcpy(
                     hd[i].data(), dd[i], sizeof(Tout) * size_c[i], hipMemcpyDeviceToHost));
-                auto*  a_ptr = &ha[i][0];
-                auto*  b_ptr = &hb[i][0];
-                auto*  c_ptr = &hc[i][0];
-                auto*  d_ptr = &hd_gold[i][0];
-                float* bias_ptr;
-                if(enable_bias[i])
-                    bias_ptr = &h_bias[i][0];
-                else
-                    bias_ptr = nullptr;
+                auto* d_ptr = &hd_gold[i][0];
 
                 bool passed = true;
                 for(int i3 = 0; i3 < batch_count[i]; i3++)
@@ -898,29 +924,22 @@ int test_hipblaslt(hipDataType                 in_datatype,
                                + (columns - 1) * size_t(std::abs(columnStride));
                     };
 
-                    const size_t aElements
-                        = storageElements(size_t(m[i]), size_t(k[i]), a_stride_1[i], a_stride_2[i]);
-                    const size_t bElements
-                        = storageElements(size_t(k[i]), size_t(n[i]), b_stride_1[i], b_stride_2[i]);
-                    const size_t cElements = storageElements(size_t(m[i]), size_t(n[i]), 1, ldc[i]);
                     const size_t dElements = storageElements(size_t(m[i]), size_t(n[i]), 1, ldd[i]);
 
                     auto referenceOutput = copyTensorFromEncodedStorage(
                         d_ptr + i3 * stride_d[i],
                         dElements,
                         Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]}));
-                    Tensor a = copyTensorFromEncodedStorage(
-                        a_ptr + i3 * stride_a[i],
-                        aElements,
-                        Layout(Shape{size_t(m[i]), size_t(k[i])}, {a_stride_1[i], a_stride_2[i]}));
-                    Tensor b = copyTensorFromEncodedStorage(
-                        b_ptr + i3 * stride_b[i],
-                        bElements,
-                        Layout(Shape{size_t(k[i]), size_t(n[i])}, {b_stride_1[i], b_stride_2[i]}));
-                    Tensor c = copyTensorFromEncodedStorage(
-                        c_ptr + i3 * stride_c[i],
-                        cElements,
-                        Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]}));
+                    Tensor a
+                        = ha[i].shareStorageWithLayout(Layout(Shape{size_t(m[i]), size_t(k[i])},
+                                                              {a_stride_1[i], a_stride_2[i]},
+                                                              i3 * stride_a[i]));
+                    Tensor b
+                        = hb[i].shareStorageWithLayout(Layout(Shape{size_t(k[i]), size_t(n[i])},
+                                                              {b_stride_1[i], b_stride_2[i]},
+                                                              i3 * stride_b[i]));
+                    Tensor c = hc[i].shareStorageWithLayout(
+                        Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]}, i3 * stride_c[i]));
                     const Tensor product = matmul(a, b, ScalarType::Float32);
                     const Tensor combined
                         = product * static_cast<float>(alpha[i])
@@ -928,12 +947,8 @@ int test_hipblaslt(hipDataType                 in_datatype,
 
                     EpilogueOptions options;
                     options.activation = toHostNumericsActivation(actType[i]);
-                    if(bias_ptr)
-                        options.bias
-                            = Tensor::copyNativeStorage<float>(
-                                  Layout::contiguousLastDimensionFastest(Shape{size_t(m[i])}),
-                                  std::span<const float>(bias_ptr, size_t(m[i])))
-                                  .expandDims(1);
+                    if(enable_bias[i])
+                        options.bias = h_bias[i].expandDims(1);
                     referenceEpilogueInto(combined, {.output = referenceOutput}, options);
                     copyTensorEncodedBackingStorageToBuffer(
                         d_ptr + i3 * stride_d[i], dElements, referenceOutput);

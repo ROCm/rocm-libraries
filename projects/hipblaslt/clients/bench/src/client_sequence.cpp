@@ -23,6 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
@@ -203,24 +204,19 @@ int32_t type2Size(hipDataType type)
 
 void initData(hipDataType type, void* data, int m, int n, int lda, int stride, int batch_count)
 {
-    switch(type)
-    {
-    case hipDataType::HIP_R_8F_E4M3_FNUZ:
-        hipblaslt::host_numerics::initializeCosineMatrix(
-            static_cast<hipblaslt_f8_fnuz*>(data), m, n, lda, stride, batch_count);
-        break;
-    case hipDataType::HIP_R_8F_E4M3:
-        hipblaslt::host_numerics::initializeCosineMatrix(
-            static_cast<hipblaslt_f8*>(data), m, n, lda, stride, batch_count);
-        break;
-    case hipDataType::HIP_R_16F:
-        hipblaslt::host_numerics::initializeCosineMatrix(
-            static_cast<hipblasLtHalf*>(data), m, n, lda, stride, batch_count);
-        break;
-    default:
-        exit(1);
-    }
-    return;
+    using namespace roc::host_numerics;
+    const auto   scalar = hipblaslt::host_numerics::scalarType(type);
+    const Layout layout(
+        Shape{static_cast<size_t>(m), static_cast<size_t>(n), static_cast<size_t>(batch_count)},
+        {1, lda, stride});
+    const Tensor generated = generate(
+        scalar,
+        layout,
+        GenerationRecipe::realOnly(GenerationRecipe::cosine(),
+                                   {.seed = hipblaslt::host_numerics::defaultInitializationSeed}));
+    const auto storage = generated.rawEncodedBackingStorage();
+    if(!storage.empty())
+        std::memcpy(data, storage.data(), storage.size());
 }
 
 void initAndCopy(

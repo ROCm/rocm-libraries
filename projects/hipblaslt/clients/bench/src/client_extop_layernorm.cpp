@@ -121,12 +121,6 @@ void reportComparison(const char* title, const roc::host_numerics::ComparisonRep
     }
 }
 
-template <typename DType>
-void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
-{
-    hipblaslt::host_numerics::initialize(data, numElements, initMethod);
-}
-
 int main(int argc, char** argv)
 {
     std::size_t              m{1};
@@ -163,23 +157,34 @@ int main(int argc, char** argv)
     std::vector<float> cpuOutput(numElements, 0.f);
     std::vector<float> cpuMean(m, 0.f);
     std::vector<float> cpuInvvar(m, 0.f);
-    std::vector<float> cpuInput(numElements, 0.f);
-    std::vector<float> cpuGamma(affine ? n : 0, 1.f);
-    std::vector<float> cpuBeta(affine ? n : 0, 0.f);
+    using namespace roc::host_numerics;
+    using namespace hipblaslt::host_numerics;
+    const auto generated = [&](size_t elements, initialization::OperandSequence sequence) {
+        return generate(ScalarType::Float32,
+                        Shape{elements},
+                        initializationRecipe(
+                            ScalarType::Float32,
+                            init,
+                            initialization::seedForSequence(defaultInitializationSeed, sequence),
+                            TrigonometricComponent::Cosine));
+    };
+    const Tensor cpuInput = generated(numElements, initialization::OperandSequence::MatrixA);
+    const Tensor cpuGamma = affine ? generated(n, initialization::OperandSequence::ScaleA)
+                                   : Tensor(ScalarType::Float32, Shape{0});
+    const Tensor cpuBeta  = affine ? generated(n, initialization::OperandSequence::Bias)
+                                   : Tensor(ScalarType::Float32, Shape{0});
 
-    initData(cpuInput.data(), cpuInput.size(), init);
-
+    hipErr = hipMemcpyHtoD(gpuInput,
+                           cpuInput.rawEncodedBackingStorage().data(),
+                           cpuInput.rawEncodedBackingStorage().size());
     if(affine)
     {
-        initData(cpuGamma.data(), cpuGamma.size(), init);
-        initData(cpuBeta.data(), cpuBeta.size(), init);
-    }
-
-    hipErr = hipMemcpyHtoD(gpuInput, cpuInput.data(), numElements * elementNumBytes);
-    if(affine)
-    {
-        hipErr = hipMemcpyHtoD(gpuGamma, cpuGamma.data(), n * elementNumBytes);
-        hipErr = hipMemcpyHtoD(gpuBeta, cpuBeta.data(), n * elementNumBytes);
+        hipErr = hipMemcpyHtoD(gpuGamma,
+                               cpuGamma.rawEncodedBackingStorage().data(),
+                               cpuGamma.rawEncodedBackingStorage().size());
+        hipErr = hipMemcpyHtoD(gpuBeta,
+                               cpuBeta.rawEncodedBackingStorage().data(),
+                               cpuBeta.rawEncodedBackingStorage().size());
     }
 
     hipStream_t stream{};
@@ -192,8 +197,6 @@ int main(int argc, char** argv)
     hipErr = hipMemcpyDtoH(cpuMean.data(), gpuMean, m * elementNumBytes);
     hipErr = hipMemcpyDtoH(cpuInvvar.data(), gpuInvvar, m * elementNumBytes);
 
-    using namespace roc::host_numerics;
-    using namespace hipblaslt::host_numerics;
     const Layout tensorLayout     = Layout::contiguousLastDimensionFastest(Shape{m, n});
     const Layout statisticsLayout = Layout::contiguousLastDimensionFastest(Shape{m});
 
@@ -202,17 +205,15 @@ int main(int argc, char** argv)
     options.epsilon = 1e-5;
     if(affine)
     {
-        const Layout affineLayout = Layout::contiguousLastDimensionFastest(Shape{n});
-        options.gamma
-            = copyTensorFromEncodedStorage(cpuGamma.data(), cpuGamma.size(), affineLayout);
-        options.beta = copyTensorFromEncodedStorage(cpuBeta.data(), cpuBeta.size(), affineLayout);
+        options.gamma = cpuGamma;
+        options.beta  = cpuBeta;
     }
-    const LayerNormOutputs reference = referenceLayerNorm(
-        copyTensorFromEncodedStorage(cpuInput.data(), cpuInput.size(), tensorLayout),
-        {.output          = ScalarType::Float32,
-         .mean            = ScalarType::Float32,
-         .inverseVariance = ScalarType::Float32},
-        options);
+    const LayerNormOutputs reference
+        = referenceLayerNorm(cpuInput.shareStorageWithLayout(tensorLayout),
+                             {.output          = ScalarType::Float32,
+                              .mean            = ScalarType::Float32,
+                              .inverseVariance = ScalarType::Float32},
+                             options);
 
     const ComparisonOptions comparisonOptions = nearComparisonOptions(1e-5);
     reportComparison(
