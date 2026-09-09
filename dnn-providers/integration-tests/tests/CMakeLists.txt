@@ -21,6 +21,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/VariantPackBuilder.cpp
     ../src/harness/input-init/FillInputs.cpp
     TestBundleMetadata.cpp
+    TestScratchDirectory.cpp
     TestSupportClaims.cpp
     TestGraphDescription.cpp
     TestNodeTypeToString.cpp

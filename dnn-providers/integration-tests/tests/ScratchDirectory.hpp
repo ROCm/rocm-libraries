@@ -54,19 +54,29 @@ inline int currentProcessId()
 /// than adopted, and the returned object still owns exactly what it created.
 inline hipdnn_test_sdk::utilities::ScopedDirectory makeDir(std::string_view prefix)
 {
-    static std::atomic<uint64_t> s_counter{0};
-    const auto base = std::filesystem::temp_directory_path();
-    const auto seed
+    // Drawn once for the process rather than per call, so the counter alone separates two
+    // claims. A seed redrawn each time would leave the next name unpredictable from
+    // outside, and walking past a taken name is then a property nothing can observe.
+    static const uint64_t s_seed
         = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())
           ^ (static_cast<uint64_t>(currentProcessId()) << 32U);
+    static std::atomic<uint64_t> s_counter{0};
+    const auto base = std::filesystem::temp_directory_path();
 
     for(int attempt = 0; attempt < 64; ++attempt)
     {
         const auto candidate
-            = base / (std::string(prefix) + std::to_string(seed + s_counter.fetch_add(1)));
+            = base / (std::string(prefix) + std::to_string(s_seed + s_counter.fetch_add(1)));
         try
         {
             return {candidate};
+        }
+        // filesystem_error derives from runtime_error, so it has to be caught first: an
+        // unwritable temp directory fails identically 64 times and must not be reported as
+        // name exhaustion.
+        catch(const std::filesystem::filesystem_error&)
+        {
+            throw;
         }
         catch(const std::runtime_error&)
         {
