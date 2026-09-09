@@ -105,9 +105,9 @@ options are not automatically validated or included in artifact identity.
 
 ### Device identity and capabilities
 
-`get_device_info(device)` reads a HIP properties snapshot with the target ID,
-ASIC revision, and cluster-launch flag. `infer_device_capabilities(info)` combines
-runtime feature reports and explicit rules without another HIP call:
+`get_device_info(device)` reads the target ID, ASIC revision, and cluster-launch
+flag in one HIP query. `infer_device_capabilities(info)` reads that snapshot
+and applies the capability rules:
 
 ```python
 from rocke.runtime import DeviceCapability, get_device_info, infer_device_capabilities
@@ -117,10 +117,10 @@ caps = infer_device_capabilities(info)
 use_tdm_multicast = caps.support(DeviceCapability.TDM_MULTICAST) is True
 ```
 
-`DeviceCapabilities` owns an immutable mapping of named features to boolean
-values. `support(capability)` returns `True` for supported, `False` for
-unsupported, or `None` when no fact covers the feature. A caller requiring a
-feature should enable it only when the result is `True`.
+`DeviceCapabilities` stores a copy of the feature results in an immutable
+mapping. `support(capability)` returns `True` for supported, `False` for
+unsupported, or `None` for unknown support. Use `is True` when selecting a
+feature, as shown above.
 
 | Capability | Source of support information |
 | --- | --- |
@@ -129,44 +129,45 @@ feature should enable it only when the result is `True`.
 | `MX_WMMA_FP4_32X16` | gfx1250: `False` at revision 0, `True` at revision 1. |
 | `MX_BLOCK16_CONVERSION` | gfx1250: `False` at revision 0, `True` at revision 1. |
 
-Current HIP [sets `clusterLaunch` from the device's maximum cluster size](https://github.com/ROCm/rocm-systems/blob/6f0fc55e9fcfd0ab110e519e2a1d8caf812f257a/projects/clr/hipamd/src/hip_device.cpp#L804-L807).
-This describes runtime launch support. An architecture rule cannot override a
-runtime `False`, and a failed properties query leaves this feature unknown.
-The flag can be read even when the target name or ASIC revision is unknown.
+HIP [reports cluster-launch support when the device's maximum cluster size exceeds one](https://github.com/ROCm/rocm-systems/blob/6f0fc55e9fcfd0ab110e519e2a1d8caf812f257a/projects/clr/hipamd/src/hip_device.cpp#L804-L807).
+The stored `clusterLaunch` flag determines this result for every architecture.
+It remains usable when the target name or ASIC revision is unknown. A failed
+properties query produces `None` for this capability.
 
 The multicast and WMMA rules follow hipBLASLt's
 [gfx1250 revision mapping](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/hipblaslt/library/src/amd_detail/rocblaslt/src/include/rocblaslt_arch_revision.hpp#L8-L18)
 and [capability overrides](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/hipblaslt/tensilelite/Tensile/Common/Architectures.py#L85-L110):
-revision 0 disables both features; revision 1 enables them. Other revisions and
-architectures have no rules for these two features. Revision zero is a valid
-value. Target suffixes do not select a revision.
+the result is `False` for revision 0 and `True` for revision 1. Other revisions
+and architectures return `None` for these features. The lookup uses
+`info.base_arch` and `info.asic_revision`, including zero as a valid revision.
 
 The block16 conversion rule follows CK's
 [FP4 tests](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/composablekernel/test/data_type/test_mx_fp4_pk4scale.cpp#L198-L204)
 and [FP8/BF8 tests](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/composablekernel/test/ck_tile/data_type/test_mx_scale.cpp#L146-L175),
-which exclude gfx1250 revision 0 from packed-scale conversions in block16 mode.
-These modes share a scale across 16 elements: scale selectors 4-7 for FP4 and
-8-11 for FP8/BF8. rocKE admits revision 1 explicitly and leaves unlisted
-revisions unknown. This rule does not imply support for every block-scaled
-matrix instruction.
+which identify block16 conversion as unsupported on gfx1250 revision 0.
+These conversion modes share a scale across 16 elements: scale selectors 4-7
+for FP4 and 8-11 for FP8/BF8. rocKE reports `False` for revision 0, `True` for
+revision 1, and `None` for unlisted revisions.
 
-TDM multicast is separate from ordinary TDM loads, workgroup clusters, and
-cluster barriers. The WMMA capability refers to the physical 32 by 16 FP4 instruction,
-even when operand swapping transposes the logical matrix dimensions.
+Each capability describes a specific operation. TDM multicast distributes a
+TDM load across a workgroup cluster. The WMMA capability describes a physical
+32 by 16 FP4 instruction; operand swapping determines its logical matrix
+dimensions. The block16 capability describes the packed-scale conversions
+listed above. TDM loads, cluster barriers, and other matrix instructions have
+their own support requirements.
 
-To add a capability, add a `DeviceCapability` member and its source of facts.
-For architecture rules, `_CAPABILITY_POLICIES` maps each base architecture to
-common facts and overrides for exact ASIC revisions. An override can enable or
-disable a feature. Missing or unlisted revisions retain only the common facts;
-larger revision numbers do not automatically inherit support. Put a fact in
-the common map only when there is evidence for using it without knowing the
-revision. Runtime-reported features are resolved separately from these rules.
+To add a capability, add a `DeviceCapability` member and document its source.
+Use a HIP property when the runtime reports the feature. Architecture rules
+live in `_CAPABILITY_POLICIES`, keyed by base architecture. Each policy has
+common values and overrides for exact ASIC revisions. Overrides can set either
+`True` or `False`. A missing or unlisted revision uses the common values.
+Common values need source evidence that applies when the revision is unknown.
 
-Compiler support still needs its own check.
-`core.arch.MemoryCapabilities` describes architecture-level memory operations;
-`dispatch.Capability` describes the problems a kernel candidate covers. This
-API does not change either, select kernels, or change generated code. CPU-only
-builders continue to use explicit target and feature choices.
+Runtime callers can combine these device reports with compiler checks and
+kernel selection. In the neighboring code, `core.arch.MemoryCapabilities`
+describes architecture-level memory operations, and `dispatch.Capability`
+describes the problems a kernel candidate covers. CPU-only builders use explicit
+target and feature choices to produce reproducible code.
 
 ### Library loading
 

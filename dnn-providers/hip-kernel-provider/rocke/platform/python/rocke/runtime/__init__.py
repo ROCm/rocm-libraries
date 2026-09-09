@@ -7,8 +7,8 @@
 in-process pipeline that turns AMDGPU LLVM IR text into a running
 kernel.
 
-Layered modules (bottom-up). The core modules run torch-free;
-``torch_interop`` and ``launcher`` are the torch-aware edge:
+Layered modules (bottom-up). The core modules use Python and NumPy;
+``torch_interop`` and ``launcher`` add support for torch tensors:
 
   - ``runtime_coexistence`` : which ROCm runtime we bind to, and whose
                       (torch-bundled vs a system ROCm install). Shared
@@ -36,8 +36,8 @@ Layered modules (bottom-up). The core modules run torch-free;
                       target names for compilation and architecture lookup.
                       Also exposes HIP's cluster-launch flag.
 
-  - ``device_capabilities`` : infers individual device features from a
-                      ``DeviceInfo`` snapshot without further HIP calls.
+  - ``device_capabilities`` : derives feature support from a ``DeviceInfo``
+                      snapshot using HIP reports and architecture rules.
 
   - ``packing``     : torch-agnostic kernel-arg packing (`pack_args`,
                       `pack_args_kernelparams`) for the AMDGPU kernarg

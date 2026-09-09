@@ -21,7 +21,7 @@ class DeviceInfo:
 
     Stores a private copy of the HIP properties result. ``target_id``,
     ``asic_revision``, ``cluster_launch``, ``base_arch``, and ``compiler_target``
-    are read-only properties. Later queries do not change this snapshot.
+    are read-only properties. Each instance keeps its copy of the HIP result.
 
     ``base_arch`` is derived by
     :func:`~rocke.core.arch.base_arch_from_target_id`. rocKE uses this name
@@ -63,10 +63,11 @@ class DeviceInfo:
 
     @property
     def cluster_launch(self) -> bool | None:
-        """HIP-reported cluster-launch support, or ``None`` if no properties.
+        """Cluster-launch support reported in this HIP properties snapshot.
 
-        A false value describes this runtime's report, not whether the silicon
-        has cluster hardware. Reading this flag makes no additional HIP call.
+        Returns ``True`` when HIP reports support and ``False`` when HIP reports
+        it as unsupported. Returns ``None`` when properties are unavailable.
+        The value comes from the stored ``clusterLaunch`` field.
         """
         if self._properties is None:
             return None
@@ -107,9 +108,10 @@ def get_device_info(device: int = 0) -> DeviceInfo:
     """Read device identity and feature flags for a HIP device ordinal.
 
     Each call reads fresh properties with one ``hipGetDevicePropertiesR0600``
-    call. Reading properties on the returned object makes no further HIP calls.
-    A failed query returns ``None`` for the exposed properties.
-    An empty target string leaves only the target names unavailable.
+    call. The returned object's properties read that stored result.
+    A failed query produces ``None`` for the exposed properties. An empty target
+    string produces ``None`` for the target names. ASIC revision and cluster-launch
+    support are read from their own fields.
     """
 
     return DeviceInfo(_device_props(device))

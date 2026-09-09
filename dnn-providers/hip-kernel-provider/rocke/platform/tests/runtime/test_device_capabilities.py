@@ -85,7 +85,7 @@ def test_common_facts_revision_overrides_and_hip_authority(
         cluster_launch
     )
     assert caps.support(DeviceCapability.MX_BLOCK16_CONVERSION) is None
-    # Applying overrides must not change the common policy for the next device.
+    # Common facts remain available for subsequent device queries.
     assert policy.common[DeviceCapability.TDM_MULTICAST] is True
 
 

@@ -1,10 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Device feature rules applied to a HIP properties snapshot.
+"""Device capability reports derived from a HIP properties snapshot.
 
-Instruction features come from architecture and revision rules. Launch support
-comes from HIP. Compiler support and kernel eligibility need separate checks.
+HIP supplies cluster-launch support. Architecture and ASIC revision rules
+describe instruction features. Runtime callers can use these reports when
+choosing features for a device.
 """
 
 from __future__ import annotations
@@ -20,9 +21,10 @@ from .device_info import DeviceInfo
 class DeviceCapability(Enum):
     """Individual features recognized by rocKE.
 
-    TDM multicast is separate from TDM loads, clusters, and cluster barriers.
-    FP4 WMMA dimensions refer to the physical instruction, independently of
-    logical dimensions after operand swapping. MX block16 conversion refers to
+    Cluster launch describes HIP support for launching workgroups in a cluster.
+    TDM multicast describes distributing a TDM load across a workgroup cluster.
+    FP4 WMMA dimensions identify the physical instruction; operand swapping
+    determines the logical matrix dimensions. MX block16 conversion describes
     packed-scale conversion modes that share a scale across 16 elements.
     """
 
@@ -34,10 +36,10 @@ class DeviceCapability(Enum):
 
 @dataclass(frozen=True)
 class DeviceCapabilities:
-    """Immutable feature facts, with absent entries representing unknown support.
+    """Support for named device features, stored in an immutable mapping.
 
-    Owns a copy of the supplied mapping. Entries must use ``DeviceCapability``
-    keys and boolean values; omit a feature when its support is unknown.
+    Copies the supplied mapping. Each entry pairs a ``DeviceCapability`` key
+    with a boolean value. Omitted entries represent unknown support.
     """
 
     _support: Mapping[DeviceCapability, bool] = field(default_factory=dict)
@@ -54,10 +56,11 @@ class DeviceCapabilities:
         object.__setattr__(self, "_support", MappingProxyType(values))
 
     def support(self, capability: DeviceCapability) -> bool | None:
-        """Return True, False, or None when support is unknown.
+        """Return support for a ``DeviceCapability`` member.
 
-        Callers requiring a feature should check ``is True``. Passing a value
-        other than a ``DeviceCapability`` raises ``TypeError``.
+        ``True`` means supported, ``False`` means unsupported, and ``None`` means
+        unknown. Use ``is True`` to select a feature with reported support.
+        Invalid argument types raise ``TypeError``.
         """
         if not isinstance(capability, DeviceCapability):
             raise TypeError("capability must be a DeviceCapability")
@@ -66,7 +69,7 @@ class DeviceCapabilities:
 
 @dataclass(frozen=True)
 class _ArchitecturePolicy:
-    """Facts independent of revision, plus overrides for exact revisions."""
+    """Architecture defaults and overrides for exact ASIC revisions."""
 
     common: Mapping[DeviceCapability, bool] = field(default_factory=dict)
     by_revision: Mapping[int, Mapping[DeviceCapability, bool]] = field(
@@ -74,7 +77,7 @@ class _ArchitecturePolicy:
     )
 
 
-# Follows hipBLASLt's multicast/WMMA rules and CK's block16 conversion gate.
+# Follows hipBLASLt's multicast/WMMA rules and CK's block16 conversion rules.
 # Source links and scope are in dsl_docs/runtime/comgr_and_hipmodule.md.
 _CAPABILITY_POLICIES = {
     "gfx1250": _ArchitecturePolicy(
@@ -97,17 +100,18 @@ _CAPABILITY_POLICIES = {
 def infer_device_capabilities(info: DeviceInfo) -> DeviceCapabilities:
     """Combine HIP feature reports with architecture and ASIC revision rules.
 
-    Makes no HIP calls and does not modify ``info``. Unknown revisions retain
-    architecture-common facts but receive no revision overrides. HIP alone
-    supplies cluster-launch support, even when the architecture is unlisted.
-    Any feature without an applicable fact remains unknown.
+    Reads the supplied snapshot and applies the architecture's common rules,
+    followed by overrides for an exact revision match. Missing or unlisted
+    revisions use the common rules. HIP's flag supplies cluster-launch support
+    for every architecture. Features with no applicable rule or runtime report
+    have unknown support.
     """
     policy = _CAPABILITY_POLICIES.get(info.base_arch)
     values = dict(policy.common) if policy is not None else {}
     if policy is not None and info.asic_revision is not None:
         values.update(policy.by_revision.get(info.asic_revision, {}))
 
-    # An architecture rule must not enable a launch that HIP does not report.
+    # HIP's report determines cluster-launch support for this runtime.
     values.pop(DeviceCapability.WORKGROUP_CLUSTER_LAUNCH, None)
     if info.cluster_launch is not None:
         values[DeviceCapability.WORKGROUP_CLUSTER_LAUNCH] = info.cluster_launch
