@@ -1291,6 +1291,11 @@ struct tilde_dy_ctx_t
     rocke_value_t* c_Wo;
     rocke_value_t* c_K; // K_conv — innermost divisor in k_dg decomposition
     rocke_value_t* c0;
+    /* Pointwise (Y=X=1, stride 1, pad 0, ungrouped) fast path -- mirrors the
+     * Python dy_descriptor. dg_M is N*Ho*Wo, materialised inside the descriptor
+     * at the same point Python creates it so the IR order matches. */
+    bool is_pointwise;
+    int dg_M;
 };
 
 static rocke_value_t* _tilde_dy_descriptor(rocke_ir_builder_t* b_,
@@ -1302,6 +1307,21 @@ static rocke_value_t* _tilde_dy_descriptor(rocke_ir_builder_t* b_,
     tilde_dy_ctx_t* ctx = (tilde_dy_ctx_t*)user;
     rocke_value_t* m_sub = rocke_b_add(b_, ctx->block_m_off, row);
     rocke_value_t* k_sub = rocke_b_add(b_, ctx->k_off, col);
+
+    // Pointwise (Y=X=1, stride 1, pad 0, ungrouped) fast path. The tilde
+    // decomposition is the identity here, so the offset reduces exactly to
+    // m_sub*K + k_sub. Mirrors Python dy_descriptor.
+    if(ctx->is_pointwise)
+    {
+        rocke_value_t* pw_off = rocke_b_add(b_, rocke_b_mul(b_, m_sub, ctx->c_K), k_sub);
+        if(out_valid)
+        {
+            rocke_value_t* m_ok = rocke_b_cmp_lt(b_, m_sub, rocke_b_const_i32(b_, ctx->dg_M));
+            rocke_value_t* k_ok = rocke_b_cmp_lt(b_, k_sub, ctx->c_K);
+            *out_valid = rocke_b_land(b_, m_ok, k_ok);
+        }
+        return pw_off;
+    }
 
     // k_out innermost (CK-compatible): k_sub = ydot*xdot_slice*K + xdot*K + k_out
     // Consecutive k_sub → consecutive k_out → contiguous in dY (NHWK, last dim K).
@@ -1357,6 +1377,8 @@ struct tilde_w_ctx_t
     rocke_value_t* c_K;
     rocke_value_t* c_C;
     rocke_value_t* c0;
+    /* Pointwise fast path -- mirrors the Python w_descriptor. */
+    bool is_pointwise;
 };
 
 static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
@@ -1368,6 +1390,20 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
     tilde_w_ctx_t* ctx = (tilde_w_ctx_t*)user;
     rocke_value_t* c_val = rocke_b_add(b_, ctx->block_n_off, row);
     rocke_value_t* k_sub = rocke_b_add(b_, ctx->k_off, col);
+
+    // Pointwise fast path: Y == X == 1 means KYXC is just [K, cpg], so the
+    // offset is k_sub*C + c_val. Must stay in lockstep with the dy fast path.
+    if(ctx->is_pointwise)
+    {
+        rocke_value_t* pw_off = rocke_b_add(b_, rocke_b_mul(b_, k_sub, ctx->c_C), c_val);
+        if(out_valid)
+        {
+            rocke_value_t* k_ok = rocke_b_cmp_lt(b_, k_sub, ctx->c_K);
+            rocke_value_t* c_ok = rocke_b_cmp_lt(b_, c_val, ctx->c_C);
+            *out_valid = rocke_b_land(b_, k_ok, c_ok);
+        }
+        return pw_off;
+    }
 
     // Same k_out-innermost decomposition as _tilde_dy_descriptor (must match).
     // c (row axis) is stride-1 in KYXC; vectorised loads along c use vector_axis_row=true.
@@ -2115,6 +2151,8 @@ static rocke_kernel_def_t*
     dy_tctx.c_Wo = c_Wo;
     dy_tctx.c_K = c_K;
     dy_tctx.c0 = c0;
+    dy_tctx.is_pointwise = rocke_conv_problem_is_pointwise(p) && p->groups <= 1;
+    dy_tctx.dg_M = p->N * rocke_conv_problem_ho(p) * rocke_conv_problem_wo(p);
 
     tilde_w_ctx_t w_tctx;
     w_tctx.block_n_off = block_n_off_v;
@@ -2129,6 +2167,7 @@ static rocke_kernel_def_t*
     w_tctx.c_K = c_K;
     w_tctx.c_C = c_C;
     w_tctx.c0 = c0;
+    w_tctx.is_pointwise = rocke_conv_problem_is_pointwise(p) && p->groups <= 1;
 
     // ---- schedule ----
     rocke_schedule_policy_t schedule = rocke_schedule_policy_for_pipeline(b, spec->pipeline);

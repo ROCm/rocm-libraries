@@ -1489,6 +1489,21 @@ def _build_tilde_dgrad(
         m_sub = b_.add(block_m_off_v, row)
         k_sub = b_.add(k_off_capture[0], col)
 
+        # Pointwise (Y=X=1, stride 1, pad 0, ungrouped) fast path. The tilde
+        # decomposition is the identity here -- h_tilde_slice == Ho,
+        # w_tilde_slice == Wo, y_dot_slice == x_dot_slice == 1, gemm_k == kpg --
+        # so (n*Ho+ho)*Wo*K + wo*K + k_out reduces exactly to m_sub*K + k_sub.
+        # Forward and wgrad both already special-case this; dgrad did not, and
+        # the generic form costs a runtime divide plus a tautological bounds
+        # predicate INSIDE the K-loop.
+        if p.is_pointwise and not grouped:
+            off = b_.add(b_.mul(m_sub, c_K), k_sub)
+            ok = b_.land(
+                b_.cmp_lt(m_sub, b_.const_i32(p.N * p.Ho * p.Wo)),
+                b_.cmp_lt(k_sub, c_K),
+            )
+            return off, ok
+
         # Decompose k_sub → (ydot, xdot, k_out)  [k_out innermost, CK-compatible]
         # k_sub = ydot * xdot_slice * kpg + xdot * kpg + k_out.  The reduction is
         # per-group, so the decode divisor is kpg (== K when ungrouped) and k_out
@@ -1535,6 +1550,14 @@ def _build_tilde_dgrad(
         """B (W, KYXC) offset: (c_local, k_sub_local) → element offset."""
         c_val = b_.add(block_n_off_v, row)
         k_sub = b_.add(k_off_capture[0], col)
+
+        # Pointwise fast path: Y == X == 1 means y == x == 0, so KYXC is just
+        # [K, cpg] and the offset is k_sub*C + c_val. Must stay in lockstep with
+        # the dy_descriptor fast path above.
+        if p.is_pointwise and not grouped:
+            off = b_.add(b_.mul(k_sub, c_C), c_val)
+            ok = b_.land(b_.cmp_lt(k_sub, c_K), b_.cmp_lt(c_val, c_C))
+            return off, ok
 
         # Same k_out-innermost decomposition as dy_descriptor (must match).
         # c (row axis) is stride-1 in KYXC; vectorised loads along c use
